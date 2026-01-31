@@ -3,16 +3,11 @@ import { log, warn, error } from "./log.js";
 
 const TAG = "openclaw";
 
-export interface OpenClawResponse {
-  text: string;
-  priority: Priority;
-}
-
 type FeedCallback = (text: string, priority: Priority) => void;
 
 /**
- * Client for the OpenClaw gateway REST API.
- * Sends messages to Sinain's session and polls for responses.
+ * Client for the SinainHUD relay server.
+ * Polls for new feed messages pushed by Sinain.
  */
 export class OpenClawClient {
   private gatewayUrl: string;
@@ -20,7 +15,7 @@ export class OpenClawClient {
   private sessionKey: string;
   private onFeed: FeedCallback | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private lastSeenId: string | null = null;
+  private lastSeenId: number = 0;
   private connected: boolean = false;
 
   constructor(config: BridgeConfig) {
@@ -34,46 +29,17 @@ export class OpenClawClient {
     this.onFeed = cb;
   }
 
-  /** Send a message to Sinain's session via the gateway */
+  /** Send a message to Sinain (not used in relay mode — Sinain pushes to us) */
   async sendMessage(text: string): Promise<boolean> {
-    const payload = `[HUD] ${text}`;
-    const url = `${this.gatewayUrl}/api/sessions/${encodeURIComponent(this.sessionKey)}/messages`;
-
-    log(TAG, `→ sending: ${payload.slice(0, 80)}${payload.length > 80 ? "..." : ""}`);
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-        },
-        body: JSON.stringify({ message: payload }),
-        signal: AbortSignal.timeout(15_000),
-      });
-
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        warn(TAG, `send failed: ${res.status} ${res.statusText} — ${body.slice(0, 200)}`);
-        return false;
-      }
-
-      log(TAG, `← sent OK (${res.status})`);
-      this.connected = true;
-      return true;
-    } catch (err) {
-      error(TAG, `send error:`, err instanceof Error ? err.message : err);
-      this.connected = false;
-      return false;
-    }
+    log(TAG, `note: sendMessage called but relay is push-only. text: ${text.slice(0, 80)}`);
+    return true;
   }
 
-  /** Start polling for new responses from Sinain */
+  /** Start polling the relay for new feed messages */
   startPolling(intervalMs: number = 3000): void {
     if (this.pollTimer) return;
-    log(TAG, `polling every ${intervalMs}ms`);
+    log(TAG, `polling relay at ${this.gatewayUrl}/feed every ${intervalMs}ms`);
     this.pollTimer = setInterval(() => this.poll(), intervalMs);
-    // Initial poll
     this.poll();
   }
 
@@ -86,90 +52,58 @@ export class OpenClawClient {
     }
   }
 
-  /** Check connection health */
   get isConnected(): boolean {
     return this.connected;
   }
 
-  /** Single poll cycle: fetch new messages from the session */
+  /** Poll the relay for new messages */
   private async poll(): Promise<void> {
-    const url = new URL(
-      `${this.gatewayUrl}/api/sessions/${encodeURIComponent(this.sessionKey)}/messages`
-    );
-    if (this.lastSeenId) {
-      url.searchParams.set("after", this.lastSeenId);
-    }
-    url.searchParams.set("limit", "10");
+    const url = `${this.gatewayUrl}/feed?after=${this.lastSeenId}`;
 
     try {
-      const res = await fetch(url.toString(), {
+      const res = await fetch(url, {
         method: "GET",
-        headers: {
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-        },
         signal: AbortSignal.timeout(10_000),
       });
 
       if (!res.ok) {
-        // 404 = session doesn't exist yet, that's fine
-        if (res.status !== 404) {
+        if (this.connected) {
           warn(TAG, `poll: ${res.status} ${res.statusText}`);
         }
-        this.connected = res.status !== 401 && res.status !== 403;
+        this.connected = false;
         return;
       }
 
+      if (!this.connected) {
+        log(TAG, "relay connected");
+      }
       this.connected = true;
-      const data = await res.json() as any;
-      const messages: any[] = Array.isArray(data) ? data : data?.messages ?? [];
+
+      const data = (await res.json()) as {
+        messages: Array<{ id: number; text: string; priority: Priority; ts: number }>;
+      };
+      const messages = data.messages ?? [];
 
       for (const msg of messages) {
-        // Skip messages we sent (they start with [HUD])
-        const text: string = msg.text ?? msg.message ?? msg.content ?? "";
-        if (text.startsWith("[HUD]")) continue;
+        if (msg.id > this.lastSeenId) {
+          this.lastSeenId = msg.id;
+        }
 
-        // Track last seen
-        if (msg.id) this.lastSeenId = msg.id;
-
-        // Determine priority from message content
-        const priority = this.detectPriority(text);
-
-        log(TAG, `← response (${priority}): ${text.slice(0, 100)}${text.length > 100 ? "..." : ""}`);
+        log(
+          TAG,
+          `← feed #${msg.id} (${msg.priority}): ${msg.text.slice(0, 100)}${msg.text.length > 100 ? "..." : ""}`
+        );
 
         if (this.onFeed) {
-          this.onFeed(text, priority);
+          this.onFeed(msg.text, msg.priority);
         }
       }
     } catch (err) {
-      // Network errors during polling are expected when gateway is down
       if (this.connected) {
         warn(TAG, `poll error:`, err instanceof Error ? err.message : err);
         this.connected = false;
       }
     }
-  }
-
-  /** Heuristic priority detection from response text */
-  private detectPriority(text: string): Priority {
-    const lower = text.toLowerCase();
-    if (
-      lower.includes("urgent") ||
-      lower.includes("immediately") ||
-      lower.includes("critical") ||
-      lower.includes("⚠️") ||
-      lower.includes("🚨")
-    ) {
-      return "urgent";
-    }
-    if (
-      lower.includes("important") ||
-      lower.includes("note:") ||
-      lower.includes("warning") ||
-      lower.includes("heads up")
-    ) {
-      return "high";
-    }
-    return "normal";
   }
 
   /** Graceful shutdown */
