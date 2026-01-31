@@ -39,11 +39,14 @@ def load_config(path: str | None = None) -> dict:
     """Load config from JSON file, merge with defaults."""
     config = json.loads(json.dumps(DEFAULTS))  # deep copy
     if path and os.path.exists(path):
-        with open(path) as f:
-            user = json.load(f)
-        for section, values in user.items():
-            if section in config and isinstance(values, dict):
-                config[section].update(values)
-            else:
-                config[section] = values
+        try:
+            with open(path) as f:
+                user = json.load(f)
+            for section, values in user.items():
+                if section in config and isinstance(values, dict):
+                    config[section].update(values)
+                else:
+                    config[section] = values
+        except (json.JSONDecodeError, ValueError):
+            pass  # use defaults
     return config

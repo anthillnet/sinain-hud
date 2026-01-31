@@ -91,6 +91,7 @@ class WebSocketService extends ChangeNotifier {
       switch (type) {
         case 'feed':
           final item = FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
+          _log('FEED: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
           if (!_audioFeedEnabled && item.text.startsWith('[📝]')) break;
           if (!_screenFeedEnabled && item.text.startsWith('[👁]')) break;
           _feedController.add(item);
