@@ -58,6 +58,10 @@ void main() async {
         wsService.toggleAudioFeed();
       case 'onScrollFeed':
         wsService.scrollFeed(call.arguments as String);
+      case 'onToggleScreen':
+        wsService.sendCommand('toggle_screen');
+      case 'onToggleScreenFeed':
+        wsService.toggleScreenFeed();
     }
   });
 

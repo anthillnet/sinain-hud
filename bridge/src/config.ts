@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig, TriggerConfig } from "./types.js";
+import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig, TriggerConfig, SenseConfig } from "./types.js";
 
 const CONFIG_PATH = resolve(process.cwd(), "config.json");
 const ENV_PATH = resolve(process.cwd(), ".env");
@@ -85,6 +85,14 @@ function loadTranscriptionConfig(): TranscriptionConfig {
   };
 }
 
+function loadSenseConfig(): SenseConfig {
+  const env = process.env;
+  return {
+    enabled: env.SENSE_ENABLED === "true",
+    pollIntervalMs: Number(env.SENSE_POLL_INTERVAL_MS) || 5000,
+  };
+}
+
 export function loadConfig(): BridgeConfig {
   const file = loadFileConfig();
   const env = process.env;
@@ -104,6 +112,7 @@ export function loadConfig(): BridgeConfig {
     audioAltDevice: env.AUDIO_ALT_DEVICE ?? "BlackHole 2ch",
     transcriptionConfig: loadTranscriptionConfig(),
     triggerConfig: loadTriggerConfig(),
+    senseConfig: loadSenseConfig(),
   };
 
   return config;

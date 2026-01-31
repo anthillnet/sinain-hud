@@ -58,6 +58,17 @@ class StatusBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          // Screen indicator
+          Icon(
+            ws.screenState == 'active'
+                ? Icons.visibility
+                : Icons.visibility_off,
+            size: 10,
+            color: ws.screenState == 'active'
+                ? const Color(0xFF00FF88)
+                : Colors.white.withValues(alpha: 0.3),
+          ),
+          const SizedBox(width: 6),
           // Audio indicator
           Icon(
             ws.audioState == 'active'

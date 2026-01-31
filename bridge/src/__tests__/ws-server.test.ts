@@ -36,6 +36,10 @@ const testConfig: BridgeConfig = {
     model: "google/gemini-2.5-flash",
     apiKey: "",
   },
+  senseConfig: {
+    enabled: false,
+    pollIntervalMs: 5000,
+  },
 };
 
 describe("WsServer", () => {

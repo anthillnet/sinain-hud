@@ -137,6 +137,10 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 8, keyCode: UInt32(kVK_UpArrow), modifiers: UInt32(cmdKey | shiftKey))
         // ID 9: Cmd+Shift+Down → scroll feed down
         registerHotKey(id: 9, keyCode: UInt32(kVK_DownArrow), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 10: Cmd+Shift+S → toggle screen capture pipeline
+        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 11: Cmd+Shift+V → toggle screen feed on HUD
+        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -226,6 +230,12 @@ class AppDelegate: FlutterAppDelegate {
 
         case 9: // Cmd+Shift+Down → scroll feed down
             hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
+
+        case 10: // Cmd+Shift+S → toggle screen capture pipeline
+            hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
+
+        case 11: // Cmd+Shift+V → toggle screen feed on HUD
+            hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
 
         default:
             break

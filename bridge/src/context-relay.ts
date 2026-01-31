@@ -24,6 +24,7 @@ export class ContextRelay {
   private pendingTimer: ReturnType<typeof setTimeout> | null = null;
   private recentHashes: Set<string> = new Set();
   private hashCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private screenContext: string = "";
 
   constructor(
     contextManager: ContextManager,
@@ -39,6 +40,13 @@ export class ContextRelay {
     this.hashCleanupTimer = setInterval(() => {
       this.recentHashes.clear();
     }, 120_000);
+  }
+
+  /**
+   * Set screen context from sense poller (active app, etc.)
+   */
+  setScreenContext(ctx: string): void {
+    this.screenContext = ctx;
   }
 
   /**
@@ -150,11 +158,15 @@ export class ContextRelay {
     triggerSummary: string
   ): string {
     const entryCount = this.contextManager.size;
-    return [
+    const parts = [
       `[${trigger}] (${priority}) ${triggerSummary}`,
-      `Context (${entryCount} entries):`,
-      summary,
-    ].join("\n");
+    ];
+    if (this.screenContext) {
+      parts.push(`Screen: ${this.screenContext}`);
+    }
+    parts.push(`Context (${entryCount} entries):`);
+    parts.push(summary);
+    return parts.join("\n");
   }
 
   /** Simple string hash for dedup */

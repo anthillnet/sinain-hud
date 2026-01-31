@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { WsServer } from "./ws-server.js";
 import { OpenClawClient } from "./openclaw-client.js";
@@ -5,6 +6,7 @@ import { ContextManager } from "./context-manager.js";
 import { ContextRelay } from "./context-relay.js";
 import { AudioPipeline } from "./audio-pipeline.js";
 import { TranscriptionService } from "./transcription.js";
+import { SensePoller } from "./sense-poller.js";
 import { log, warn, error } from "./log.js";
 
 const TAG = "bridge";
@@ -20,6 +22,7 @@ async function main() {
   log(TAG, `relay interval: ${config.relayMinIntervalMs}ms`);
   log(TAG, `audio: device=${config.audioConfig.device} cmd=${config.audioConfig.captureCommand} chunk=${config.audioConfig.chunkDurationMs}ms`);
   log(TAG, `transcription: backend=${config.transcriptionConfig.backend} model=${config.transcriptionConfig.geminiModel}`);
+  log(TAG, `sense: enabled=${config.senseConfig.enabled} poll=${config.senseConfig.pollIntervalMs}ms`);
 
   if (!config.openclawToken) {
     warn(TAG, "OPENCLAW_TOKEN not set — gateway auth will be skipped");
@@ -33,6 +36,23 @@ async function main() {
   const openclawClient = new OpenClawClient(config);
   const contextRelay = new ContextRelay(contextManager, openclawClient, config);
   const wsServer = new WsServer(config);
+
+  // ── Sense (screen capture) poller ──
+  const sensePoller = new SensePoller(config.openclawGatewayUrl);
+  let screenActive = false;
+  const SENSE_CONTROL_FILE = "/tmp/sinain-sense-control.json";
+
+  sensePoller.on("sense", (event) => {
+    wsServer.updateState({ screen: "active" });
+    if (event.type === "text" && event.ocr) {
+      wsServer.broadcast(`[👁] text: ${event.ocr.slice(0, 80)}`, "normal");
+    }
+  });
+
+  sensePoller.on("app_change", (app: string) => {
+    contextRelay.setScreenContext(`Active app: ${app}`);
+    wsServer.broadcast(`[👁] App: ${app}`, "normal");
+  });
 
   // ── Audio pipeline ──
   const audioPipeline = new AudioPipeline(config.audioConfig);
@@ -96,6 +116,22 @@ async function main() {
             audioPipeline.start();
             log(TAG, "audio toggled ON via overlay command");
           }
+        } else if (msg.action === "toggle_screen") {
+          if (screenActive) {
+            sensePoller.stopPolling();
+            try { writeFileSync(SENSE_CONTROL_FILE, JSON.stringify({ enabled: false })); } catch {}
+            wsServer.updateState({ screen: "off" });
+            wsServer.broadcast("Screen capture stopped", "normal");
+            screenActive = false;
+            log(TAG, "screen capture toggled OFF");
+          } else {
+            sensePoller.startPolling(config.senseConfig.pollIntervalMs);
+            try { writeFileSync(SENSE_CONTROL_FILE, JSON.stringify({ enabled: true })); } catch {}
+            wsServer.updateState({ screen: "active" });
+            wsServer.broadcast("Screen capture started", "normal");
+            screenActive = true;
+            log(TAG, "screen capture toggled ON");
+          }
         } else if (msg.action === "switch_device") {
           const current = audioPipeline.getDevice();
           const alt = config.audioAltDevice;
@@ -135,11 +171,21 @@ async function main() {
   log(TAG, `  overlay:  ws://127.0.0.1:${config.wsPort}`);
   log(TAG, `  gateway:  ${config.openclawGatewayUrl}`);
   log(TAG, `  audio:    ${config.audioConfig.autoStart ? "active" : "standby"}`);
+  log(TAG, `  sense:    ${config.senseConfig.enabled ? "enabled" : "standby"}`);
+
+  // Auto-start sense polling if configured
+  if (config.senseConfig.enabled) {
+    log(TAG, "auto-starting sense poller...");
+    sensePoller.startPolling(config.senseConfig.pollIntervalMs);
+    screenActive = true;
+    try { writeFileSync(SENSE_CONTROL_FILE, JSON.stringify({ enabled: true })); } catch {}
+  }
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
     audioPipeline.stop();
+    sensePoller.destroy();
     transcription.destroy();
     contextRelay.destroy();
     openclawClient.destroy();

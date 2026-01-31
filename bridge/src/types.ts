@@ -109,6 +109,13 @@ export interface TriggerResult {
   summary: string;
 }
 
+// ── Sense (screen capture) types ──
+
+export interface SenseConfig {
+  enabled: boolean;
+  pollIntervalMs: number;
+}
+
 // ── Bridge config ──
 
 export interface BridgeConfig {
@@ -121,6 +128,7 @@ export interface BridgeConfig {
   audioAltDevice: string;
   transcriptionConfig: TranscriptionConfig;
   triggerConfig: TriggerConfig;
+  senseConfig: SenseConfig;
 }
 
 export interface BridgeState {

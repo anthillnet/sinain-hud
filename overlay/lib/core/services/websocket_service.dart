@@ -15,7 +15,9 @@ class WebSocketService extends ChangeNotifier {
   int _retryCount = 0;
   Timer? _reconnectTimer;
   String _audioState = 'muted';
+  String _screenState = 'off';
   bool _audioFeedEnabled = true;
+  bool _screenFeedEnabled = true;
 
   final _feedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
@@ -26,11 +28,19 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get scrollStream => _scrollController.stream;
   bool get connected => _connected;
   String get audioState => _audioState;
+  String get screenState => _screenState;
   bool get audioFeedEnabled => _audioFeedEnabled;
+  bool get screenFeedEnabled => _screenFeedEnabled;
 
   void toggleAudioFeed() {
     _audioFeedEnabled = !_audioFeedEnabled;
     _log('Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}');
+    notifyListeners();
+  }
+
+  void toggleScreenFeed() {
+    _screenFeedEnabled = !_screenFeedEnabled;
+    _log('Screen feed ${_screenFeedEnabled ? "enabled" : "disabled"}');
     notifyListeners();
   }
 
@@ -82,6 +92,7 @@ class WebSocketService extends ChangeNotifier {
         case 'feed':
           final item = FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
           if (!_audioFeedEnabled && item.text.startsWith('[📝]')) break;
+          if (!_screenFeedEnabled && item.text.startsWith('[👁]')) break;
           _feedController.add(item);
           break;
         case 'status':
@@ -89,6 +100,11 @@ class WebSocketService extends ChangeNotifier {
           final audio = statusData['audio'] as String?;
           if (audio != null && audio != _audioState) {
             _audioState = audio;
+            notifyListeners();
+          }
+          final screen = statusData['screen'] as String?;
+          if (screen != null && screen != _screenState) {
+            _screenState = screen;
             notifyListeners();
           }
           _statusController.add(statusData);
