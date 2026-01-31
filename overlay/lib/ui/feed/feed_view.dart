@@ -13,22 +13,26 @@ class FeedView extends StatefulWidget {
 
 class _FeedViewState extends State<FeedView> {
   static const _maxItems = 50;
+  static const _scrollStep = 80.0;
   final List<FeedItem> _items = [];
   final ScrollController _scrollController = ScrollController();
   StreamSubscription<FeedItem>? _feedSub;
+  StreamSubscription<String>? _scrollSub;
   Timer? _fadeTimer;
+  bool _autoScroll = true;
 
   @override
   void initState() {
     super.initState();
-    // Start fade timer — every 30s, reduce opacity of old items
     _fadeTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fadeOldItems());
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _feedSub ??= context.read<WebSocketService>().feedStream.listen(_onFeedItem);
+    final ws = context.read<WebSocketService>();
+    _feedSub ??= ws.feedStream.listen(_onFeedItem);
+    _scrollSub ??= ws.scrollStream.listen(_onScrollCommand);
   }
 
   void _onFeedItem(FeedItem item) {
@@ -38,16 +42,40 @@ class _FeedViewState extends State<FeedView> {
         _items.removeRange(0, _items.length - _maxItems);
       }
     });
-    // Auto-scroll to bottom
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+    if (_autoScroll) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      });
+    }
+  }
+
+  void _onScrollCommand(String direction) {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    switch (direction) {
+      case 'up':
+        _autoScroll = false;
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
+          (pos.pixels - _scrollStep).clamp(0.0, pos.maxScrollExtent),
+          duration: const Duration(milliseconds: 100),
           curve: Curves.easeOut,
         );
-      }
-    });
+      case 'down':
+        final target = (pos.pixels + _scrollStep).clamp(0.0, pos.maxScrollExtent);
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
+        // Re-enable auto-scroll when reaching bottom
+        if (target >= pos.maxScrollExtent - 20) {
+          _autoScroll = true;
+        }
+      case 'bottom':
+        _autoScroll = true;
+        _scrollController.jumpTo(pos.maxScrollExtent);
+    }
   }
 
   void _fadeOldItems() {
@@ -81,6 +109,7 @@ class _FeedViewState extends State<FeedView> {
   @override
   void dispose() {
     _feedSub?.cancel();
+    _scrollSub?.cancel();
     _fadeTimer?.cancel();
     _scrollController.dispose();
     super.dispose();

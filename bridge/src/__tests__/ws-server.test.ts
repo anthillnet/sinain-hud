@@ -18,6 +18,7 @@ const testConfig: BridgeConfig = {
     vadThreshold: 0.01,
     captureCommand: "sox",
     autoStart: false,
+    gainDb: 0,
   },
   audioAltDevice: "BlackHole 2ch",
   transcriptionConfig: {

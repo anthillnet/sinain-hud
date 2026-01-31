@@ -19,9 +19,11 @@ class WebSocketService extends ChangeNotifier {
 
   final _feedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
+  final _scrollController = StreamController<String>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
+  Stream<String> get scrollStream => _scrollController.stream;
   bool get connected => _connected;
   String get audioState => _audioState;
   bool get audioFeedEnabled => _audioFeedEnabled;
@@ -30,6 +32,10 @@ class WebSocketService extends ChangeNotifier {
     _audioFeedEnabled = !_audioFeedEnabled;
     _log('Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}');
     notifyListeners();
+  }
+
+  void scrollFeed(String direction) {
+    _scrollController.add(direction);
   }
 
   WebSocketService({this.url = 'ws://localhost:9500'});
@@ -162,6 +168,7 @@ class WebSocketService extends ChangeNotifier {
     disconnect();
     _feedController.close();
     _statusController.close();
+    _scrollController.close();
     super.dispose();
   }
 

@@ -64,6 +64,7 @@ export interface AudioPipelineConfig {
   vadThreshold: number;
   captureCommand: "sox" | "ffmpeg";
   autoStart: boolean;
+  gainDb: number;
 }
 
 export interface TranscriptionConfig {

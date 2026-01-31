@@ -50,9 +50,10 @@ function loadAudioConfig(): AudioPipelineConfig {
     channels: 1,
     chunkDurationMs: Number(env.AUDIO_CHUNK_MS) || 10000,
     vadEnabled: env.AUDIO_VAD_ENABLED !== "false",
-    vadThreshold: Number(env.AUDIO_VAD_THRESHOLD) || 0.01,
+    vadThreshold: Number(env.AUDIO_VAD_THRESHOLD) || 0.003,
     captureCommand: (env.AUDIO_CAPTURE_CMD === "ffmpeg" ? "ffmpeg" : "sox") as "sox" | "ffmpeg",
     autoStart: env.AUDIO_AUTO_START === "true",
+    gainDb: Number(env.AUDIO_GAIN_DB) || 20,
   };
 }
 

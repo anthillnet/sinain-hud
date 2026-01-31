@@ -133,6 +133,10 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 6, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
         // ID 7: Cmd+Shift+A → toggle audio feed on HUD
         registerHotKey(id: 7, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 8: Cmd+Shift+Up → scroll feed up
+        registerHotKey(id: 8, keyCode: UInt32(kVK_UpArrow), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 9: Cmd+Shift+Down → scroll feed down
+        registerHotKey(id: 9, keyCode: UInt32(kVK_DownArrow), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -216,6 +220,12 @@ class AppDelegate: FlutterAppDelegate {
 
         case 7: // Cmd+Shift+A → toggle audio feed on HUD
             hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
+
+        case 8: // Cmd+Shift+Up → scroll feed up
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "up")
+
+        case 9: // Cmd+Shift+Down → scroll feed down
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
 
         default:
             break

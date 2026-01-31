@@ -38,6 +38,11 @@ macos/Runner/
   - `⌘⇧C` — Toggle click-through
   - `⌘⇧M` — Cycle display mode
   - `⌘⇧H` — Panic hide (instant stealth)
+  - `⌘⇧T` — Toggle audio capture
+  - `⌘⇧D` — Switch audio device
+  - `⌘⇧A` — Toggle audio feed on HUD
+  - `⌘⇧↑` — Scroll feed up
+  - `⌘⇧↓` — Scroll feed down
 - **WebSocket bridge** — Connects to `ws://localhost:9500` with auto-reconnect
 - **LSUIElement** — Hidden from Dock and Cmd+Tab
 

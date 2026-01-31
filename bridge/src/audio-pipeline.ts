@@ -190,6 +190,11 @@ export class AudioPipeline extends EventEmitter {
       "-",               // output to stdout
     ];
 
+    // Add gain effect if configured (amplifies weak BlackHole signals)
+    if (this.config.gainDb > 0) {
+      args.push("gain", String(this.config.gainDb));
+    }
+
     const env: Record<string, string> = { ...process.env } as Record<string, string>;
     if (this.config.device !== "default") {
       env["AUDIODEV"] = this.config.device;

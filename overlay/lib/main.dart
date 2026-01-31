@@ -56,6 +56,8 @@ void main() async {
         wsService.sendCommand('switch_device');
       case 'onToggleAudioFeed':
         wsService.toggleAudioFeed();
+      case 'onScrollFeed':
+        wsService.scrollFeed(call.arguments as String);
     }
   });
 
