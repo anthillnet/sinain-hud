@@ -168,6 +168,7 @@ export class WsServer {
     switch (msg.type) {
       case "pong":
         (ws as any).__alive = true;
+        log(TAG, "← app-level pong received");
         return;
       case "message":
         log(TAG, `← user message: ${msg.text.slice(0, 100)}`);
@@ -246,8 +247,8 @@ export class WsServer {
     this.heartbeatTimer = setInterval(() => {
       for (const ws of this.clients) {
         if ((ws as any).__alive === false) {
-          log(TAG, "client failed heartbeat, terminating");
-          ws.terminate();
+          log(TAG, "client failed heartbeat — closing (was silent for 2 cycles)");
+          ws.close(4000, "heartbeat timeout");
           this.clients.delete(ws);
           if (this.clients.size === 0) {
             this.updateConnection("disconnected");
@@ -257,8 +258,8 @@ export class WsServer {
         (ws as any).__alive = false;
         ws.ping();
 
-        // Also send app-level ping
-        this.sendTo(ws, { type: "ping", ts: Date.now() });
+        // Also send app-level ping (Flutter may not auto-handle protocol pings)
+        this.sendTo(ws, { type: "ping", ts: Date.now() } as any);
       }
     }, HEARTBEAT_INTERVAL_MS);
   }

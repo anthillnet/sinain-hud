@@ -33,15 +33,25 @@ class WebSocketService extends ChangeNotifier {
     try {
       final uri = Uri.parse(url);
       _channel = WebSocketChannel.connect(uri);
+
+      // Wait for the connection to actually be ready
+      _channel!.ready.then((_) {
+        _connected = true;
+        _retryCount = 0;
+        notifyListeners();
+        _log('Connected to $url');
+      }).catchError((e) {
+        _log('Connection handshake failed: $e');
+        _connected = false;
+        notifyListeners();
+        _scheduleReconnect();
+      });
+
       _subscription = _channel!.stream.listen(
         _onMessage,
         onError: _onError,
         onDone: _onDone,
       );
-      _connected = true;
-      _retryCount = 0;
-      notifyListeners();
-      _log('Connected to $url');
     } catch (e) {
       _log('Connection failed: $e');
       _scheduleReconnect();
@@ -59,6 +69,10 @@ class WebSocketService extends ChangeNotifier {
           break;
         case 'status':
           _statusController.add(json['data'] as Map<String, dynamic>? ?? json);
+          break;
+        case 'ping':
+          // Respond to app-level ping with pong
+          send({'type': 'pong', 'ts': DateTime.now().millisecondsSinceEpoch});
           break;
         default:
           // Treat unknown messages as feed items with text
