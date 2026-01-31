@@ -20,10 +20,12 @@ class WebSocketService extends ChangeNotifier {
   bool _screenFeedEnabled = true;
 
   final _feedController = StreamController<FeedItem>.broadcast();
+  final _agentFeedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
   final _scrollController = StreamController<String>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
+  Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<String> get scrollStream => _scrollController.stream;
   bool get connected => _connected;
@@ -35,12 +37,20 @@ class WebSocketService extends ChangeNotifier {
   void toggleAudioFeed() {
     _audioFeedEnabled = !_audioFeedEnabled;
     _log('Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}');
+    _feedController.add(FeedItem(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      text: 'Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}',
+    ));
     notifyListeners();
   }
 
   void toggleScreenFeed() {
     _screenFeedEnabled = !_screenFeedEnabled;
     _log('Screen feed ${_screenFeedEnabled ? "enabled" : "disabled"}');
+    _feedController.add(FeedItem(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      text: 'Screen feed ${_screenFeedEnabled ? "enabled" : "disabled"}',
+    ));
     notifyListeners();
   }
 
@@ -91,10 +101,14 @@ class WebSocketService extends ChangeNotifier {
       switch (type) {
         case 'feed':
           final item = FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
-          _log('FEED: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
+          _log('FEED [${item.channel.name}]: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
           if (!_audioFeedEnabled && item.text.startsWith('[📝]')) break;
           if (!_screenFeedEnabled && item.text.startsWith('[👁]')) break;
-          _feedController.add(item);
+          if (item.channel == FeedChannel.agent) {
+            _agentFeedController.add(item);
+          } else {
+            _feedController.add(item);
+          }
           break;
         case 'status':
           final statusData = json['data'] as Map<String, dynamic>? ?? json;
@@ -184,6 +198,7 @@ class WebSocketService extends ChangeNotifier {
     _disposed = true;
     disconnect();
     _feedController.close();
+    _agentFeedController.close();
     _statusController.close();
     _scrollController.close();
     super.dispose();

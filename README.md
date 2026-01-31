@@ -77,6 +77,9 @@ Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behav
 | `Cmd+Shift+T` | Toggle audio capture (start/stop transcription) |
 | `Cmd+Shift+D` | Switch audio device (primary ↔ alt) |
 | `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
+| `Cmd+Shift+S` | Toggle screen capture pipeline |
+| `Cmd+Shift+V` | Toggle screen feed on HUD (show/hide sense items) |
+| `Cmd+Shift+E` | Cycle HUD tab (Stream ↔ Agent) |
 | `Cmd+Shift+Up` | Scroll feed up (pauses auto-scroll) |
 | `Cmd+Shift+Down` | Scroll feed down (resumes auto-scroll at bottom) |
 

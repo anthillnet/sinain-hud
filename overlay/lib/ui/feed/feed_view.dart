@@ -5,7 +5,14 @@ import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
 
 class FeedView extends StatefulWidget {
-  const FeedView({super.key});
+  final FeedChannel channel;
+  final String emptyLabel;
+
+  const FeedView({
+    super.key,
+    this.channel = FeedChannel.stream,
+    this.emptyLabel = 'awaiting feed…',
+  });
 
   @override
   State<FeedView> createState() => _FeedViewState();
@@ -31,7 +38,10 @@ class _FeedViewState extends State<FeedView> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final ws = context.read<WebSocketService>();
-    _feedSub ??= ws.feedStream.listen(_onFeedItem);
+    _feedSub ??= (widget.channel == FeedChannel.agent
+            ? ws.agentFeedStream
+            : ws.feedStream)
+        .listen(_onFeedItem);
     _scrollSub ??= ws.scrollStream.listen(_onScrollCommand);
   }
 
@@ -120,7 +130,7 @@ class _FeedViewState extends State<FeedView> {
     if (_items.isEmpty) {
       return Center(
         child: Text(
-          'awaiting feed…',
+          widget.emptyLabel,
           style: TextStyle(
             fontFamily: 'JetBrainsMono',
             fontSize: 11,

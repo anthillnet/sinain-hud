@@ -1,6 +1,7 @@
 // ── Wire protocol types ──
 
 export type Priority = "normal" | "high" | "urgent";
+export type FeedChannel = "stream" | "agent";
 
 /** Bridge → Overlay: feed item */
 export interface FeedMessage {
@@ -8,6 +9,7 @@ export interface FeedMessage {
   text: string;
   priority: Priority;
   ts: number;
+  channel: FeedChannel;
 }
 
 /** Bridge → Overlay: status update */

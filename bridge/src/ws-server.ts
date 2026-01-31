@@ -7,6 +7,7 @@ import type {
   FeedMessage,
   StatusMessage,
   Priority,
+  FeedChannel,
 } from "./types.js";
 import { log, warn, error } from "./log.js";
 
@@ -114,12 +115,13 @@ export class WsServer {
   }
 
   /** Send a feed message to all connected overlays */
-  broadcast(text: string, priority: Priority = "normal"): void {
+  broadcast(text: string, priority: Priority = "normal", channel: FeedChannel = "stream"): void {
     const msg: FeedMessage = {
       type: "feed",
       text,
       priority,
       ts: Date.now(),
+      channel,
     };
     // Buffer for replay to late-joining clients
     this.replayBuffer.push(msg);

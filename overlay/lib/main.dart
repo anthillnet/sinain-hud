@@ -62,6 +62,8 @@ void main() async {
         wsService.sendCommand('toggle_screen');
       case 'onToggleScreenFeed':
         wsService.toggleScreenFeed();
+      case 'onCycleTab':
+        settingsService.cycleTab();
     }
   });
 

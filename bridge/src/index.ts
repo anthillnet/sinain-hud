@@ -129,9 +129,9 @@ async function main() {
     wsServer.broadcast(`[📝] ${result.text}`, "normal");
   });
 
-  // ── Wire: OpenClaw responses → overlay feed ──
+  // ── Wire: OpenClaw responses → overlay feed (agent channel) ──
   openclawClient.onFeedItem((text, priority) => {
-    wsServer.broadcast(text, priority);
+    wsServer.broadcast(text, priority, "agent");
   });
 
   // ── Wire: overlay messages → OpenClaw ──
@@ -153,9 +153,11 @@ async function main() {
         if (msg.action === "toggle_audio") {
           if (audioPipeline.isRunning()) {
             audioPipeline.stop();
+            wsServer.broadcast("Audio capture stopped", "normal");
             log(TAG, "audio toggled OFF via overlay command");
           } else {
             audioPipeline.start();
+            wsServer.broadcast("Audio capture started", "normal");
             log(TAG, "audio toggled ON via overlay command");
           }
         } else if (msg.action === "toggle_screen") {

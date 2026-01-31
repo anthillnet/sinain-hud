@@ -57,6 +57,34 @@ class StatusBar extends StatelessWidget {
               letterSpacing: 1.2,
             ),
           ),
+          const SizedBox(width: 8),
+          // Tab indicator
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2),
+              color: settings.activeTab == HudTab.agent
+                  ? const Color(0xFF00FF88).withValues(alpha: 0.12)
+                  : Colors.transparent,
+              border: Border.all(
+                color: settings.activeTab == HudTab.agent
+                    ? const Color(0xFF00FF88).withValues(alpha: 0.4)
+                    : Colors.white.withValues(alpha: 0.15),
+                width: 0.5,
+              ),
+            ),
+            child: Text(
+              settings.activeTab == HudTab.agent ? 'AGT' : 'STR',
+              style: TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 8,
+                color: settings.activeTab == HudTab.agent
+                    ? const Color(0xFF00FF88).withValues(alpha: 0.8)
+                    : Colors.white.withValues(alpha: 0.4),
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
           const Spacer(),
           // Screen indicator
           Icon(
