@@ -88,7 +88,7 @@ class _AlertCardState extends State<AlertCard> with SingleTickerProviderStateMix
       onTap: _dismiss,
       child: Center(
         child: AnimatedBuilder(
-          animation: _glowController,
+          listenable: _glowController,
           builder: (context, child) {
             final glowIntensity = 0.3 + (_glowController.value * 0.4);
             return Container(

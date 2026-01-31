@@ -5,7 +5,7 @@ import FlutterMacOS
 /// Provides privacy mode, click-through, always-on-top, transparency, and show/hide.
 class WindowControlPlugin: NSObject, FlutterPlugin {
     static let channelName = "sinain_hud/window"
-    
+
     static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: channelName,
@@ -14,7 +14,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         let instance = WindowControlPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
-    
+
     func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let window = NSApplication.shared.windows.first else {
             result(FlutterError(code: "NO_WINDOW",
@@ -22,9 +22,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                               details: nil))
             return
         }
-        
+
         let args = call.arguments as? [String: Any]
-        
+
         switch call.method {
         case "setPrivacyMode":
             let enabled = args?["enabled"] as? Bool ?? true
@@ -32,17 +32,17 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 window.sharingType = enabled ? .none : .readOnly
             }
             result(nil)
-            
+
         case "setClickThrough":
             let enabled = args?["enabled"] as? Bool ?? true
             window.ignoresMouseEvents = enabled
             result(nil)
-            
+
         case "setAlwaysOnTop":
             let enabled = args?["enabled"] as? Bool ?? true
             window.level = enabled ? .floating : .normal
             result(nil)
-            
+
         case "setTransparent":
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -53,15 +53,15 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 contentView.layer?.backgroundColor = CGColor.clear
             }
             result(nil)
-            
+
         case "hideWindow":
             window.orderOut(nil)
             result(nil)
-            
+
         case "showWindow":
             window.orderFront(nil)
             result(nil)
-            
+
         default:
             result(FlutterMethodNotImplemented)
         }

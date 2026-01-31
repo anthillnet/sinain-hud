@@ -3,6 +3,27 @@ import { resolve } from "node:path";
 import type { BridgeConfig } from "./types.js";
 
 const CONFIG_PATH = resolve(process.cwd(), "config.json");
+const ENV_PATH = resolve(process.cwd(), ".env");
+
+function loadDotEnv(): void {
+  if (!existsSync(ENV_PATH)) return;
+  try {
+    const raw = readFileSync(ENV_PATH, "utf-8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      const value = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+      if (!(key in process.env)) {
+        process.env[key] = value;
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+loadDotEnv();
 
 function loadFileConfig(): Partial<BridgeConfig> {
   if (!existsSync(CONFIG_PATH)) return {};
