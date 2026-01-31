@@ -11,18 +11,21 @@ export interface SenseEventMeta {
   meta: {
     ssim: number;
     app: string;
+    windowTitle?: string;
     screen: number;
   };
 }
 
 /**
  * Polls /sense?meta_only=true for screen capture events.
- * Emits 'sense' for each new event and 'app_change' on app switches.
+ * Emits 'sense' for each new event, 'app_change' on app switches,
+ * and 'window_change' on window title changes.
  */
 export class SensePoller extends EventEmitter {
   private lastSeenId = 0;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private currentApp = "";
+  private currentWindow = "";
 
   constructor(private relayUrl: string) {
     super();
@@ -66,6 +69,13 @@ export class SensePoller extends EventEmitter {
           if (prev) {
             this.emit("app_change", event.meta.app);
           }
+        }
+
+        // Detect window title change
+        const winTitle = event.meta?.windowTitle || "";
+        if (winTitle && winTitle !== this.currentWindow) {
+          this.currentWindow = winTitle;
+          this.emit("window_change", event.meta.app, winTitle);
         }
 
         this.emit("sense", event);

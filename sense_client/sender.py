@@ -27,6 +27,7 @@ class SenseSender:
             "meta": {
                 "ssim": event.meta.ssim,
                 "app": event.meta.app,
+                "windowTitle": event.meta.window_title,
                 "screen": event.meta.screen,
             },
         }
