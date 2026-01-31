@@ -8,7 +8,7 @@ import time
 from .capture import ScreenCapture
 from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
-from .ocr import LocalOCR, OCRResult
+from .ocr import OCRResult, create_ocr
 from .gate import DecisionGate
 from .sender import SenseSender, package_full_frame, package_roi, package_diff
 from .app_detector import AppDetector
@@ -52,16 +52,12 @@ def main():
     extractor = ROIExtractor(
         padding=config["detection"]["roiPadding"],
     )
-    ocr = LocalOCR(
-        lang=config["ocr"]["lang"],
-        psm=config["ocr"]["psm"],
-        min_confidence=config["ocr"]["minConfidence"],
-        enabled=config["ocr"]["enabled"],
-    )
+    ocr = create_ocr(config)
     gate = DecisionGate(
         min_ocr_chars=config["gate"]["minOcrChars"],
         major_change_threshold=config["gate"]["majorChangeThreshold"],
         cooldown_ms=config["gate"]["cooldownMs"],
+        context_cooldown_ms=config["gate"].get("contextCooldownMs", 10000),
     )
     sender = SenseSender(
         url=config["relay"]["url"],
@@ -73,6 +69,7 @@ def main():
     log("sense_client started")
     log(f"  relay: {config['relay']['url']}")
     log(f"  fps: {config['capture']['fps']}, scale: {config['capture']['scale']}")
+    log(f"  ocr backend: {config['ocr'].get('backend', 'auto')}")
     log(f"  control: {args.control}")
 
     for frame, ts in capture.capture_loop():
@@ -81,12 +78,12 @@ def main():
             time.sleep(1)
             continue
 
-        # 1. Check app change
-        app_changed, app_name = app_detector.detect_change()
+        # 1. Check app/window change
+        app_changed, window_changed, app_name, window_title = app_detector.detect_change()
 
         # 2. Detect frame change
         change = detector.detect(frame)
-        if change is None and not app_changed:
+        if change is None and not app_changed and not window_changed:
             continue
 
         # 3. Extract ROIs
@@ -104,12 +101,14 @@ def main():
             change=change,
             ocr=ocr_result,
             app_changed=app_changed,
+            window_changed=window_changed,
         )
         if event is None:
             continue
 
         # 6. Package and send
         event.meta.app = app_name
+        event.meta.window_title = window_title
         event.meta.screen = config["capture"]["target"]
 
         if event.type == "context":
@@ -123,7 +122,10 @@ def main():
         ok = sender.send(event)
         if ok:
             ssim = f"{change.ssim_score:.3f}" if change else "n/a"
-            log(f"-> {event.type} sent (app={app_name}, ssim={ssim})")
+            ctx = f"app={app_name}"
+            if window_title:
+                ctx += f", win={window_title[:40]}"
+            log(f"-> {event.type} sent ({ctx}, ssim={ssim})")
         else:
             log(f"-> {event.type} FAILED to send")
 

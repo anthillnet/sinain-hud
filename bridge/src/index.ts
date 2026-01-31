@@ -42,16 +42,49 @@ async function main() {
   let screenActive = false;
   const SENSE_CONTROL_FILE = "/tmp/sinain-sense-control.json";
 
+  // ── Sense event formatting helpers ──
+  const APP_SHORT_NAMES: Record<string, string> = {
+    "IntelliJ IDEA": "IDEA",
+    "IntelliJ IDEA Ultimate": "IDEA",
+    "Google Chrome": "Chrome",
+    "Microsoft Edge": "Edge",
+    "Visual Studio Code": "Code",
+    "Code - Insiders": "Code",
+    "Sublime Text": "Sublime",
+    "iTerm2": "iTerm",
+    "Terminal": "Term",
+    "Firefox": "Firefox",
+    "Safari": "Safari",
+    "Slack": "Slack",
+    "Telegram": "TG",
+    "WebStorm": "WS",
+    "PyCharm": "PyCharm",
+    "DataGrip": "DG",
+    "Finder": "Finder",
+  };
+  function shortAppName(app: string): string {
+    return APP_SHORT_NAMES[app] || app;
+  }
+
   sensePoller.on("sense", (event) => {
     wsServer.updateState({ screen: "active" });
-    if (event.type === "text" && event.ocr) {
-      wsServer.broadcast(`[👁] text: ${event.ocr.slice(0, 80)}`, "normal");
+    if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
+      const app = shortAppName(event.meta?.app || "");
+      const text = event.ocr.slice(0, 80).trim();
+      const prefix = app ? `${app}: ` : "";
+      wsServer.broadcast(`[👁] ${prefix}${text}`, "normal");
     }
+    // Don't broadcast visual events — reserved for future VLM agent
   });
 
   sensePoller.on("app_change", (app: string) => {
     contextRelay.setScreenContext(`Active app: ${app}`);
-    wsServer.broadcast(`[👁] App: ${app}`, "normal");
+    wsServer.broadcast(`[👁] → ${shortAppName(app)}`, "normal");
+  });
+
+  sensePoller.on("window_change", (app: string, windowTitle: string) => {
+    const short = shortAppName(app);
+    wsServer.broadcast(`[👁] ${short} — ${windowTitle.slice(0, 60)}`, "normal");
   });
 
   // ── Audio pipeline ──
