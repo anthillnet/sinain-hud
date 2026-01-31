@@ -7,6 +7,7 @@ import type {
   FeedMessage,
   StatusMessage,
   Priority,
+  FeedChannel,
 } from "./types.js";
 import { log, warn, error } from "./log.js";
 
@@ -31,6 +32,8 @@ export class WsServer {
     screen: "active",
     connection: "disconnected",
   };
+  private replayBuffer: FeedMessage[] = [];
+  private static readonly MAX_REPLAY = 20;
 
   constructor(config: BridgeConfig) {
     this.port = config.wsPort;
@@ -74,6 +77,14 @@ export class WsServer {
           connection: this.state.connection,
         });
 
+        // Replay recent feed messages so the client doesn't miss anything
+        for (const msg of this.replayBuffer) {
+          this.sendTo(ws, msg);
+        }
+        if (this.replayBuffer.length > 0) {
+          log(TAG, `replayed ${this.replayBuffer.length} buffered messages to new client`);
+        }
+
         ws.on("message", (raw) => {
           try {
             const data = JSON.parse(raw.toString()) as InboundMessage;
@@ -104,13 +115,19 @@ export class WsServer {
   }
 
   /** Send a feed message to all connected overlays */
-  broadcast(text: string, priority: Priority = "normal"): void {
+  broadcast(text: string, priority: Priority = "normal", channel: FeedChannel = "stream"): void {
     const msg: FeedMessage = {
       type: "feed",
       text,
       priority,
       ts: Date.now(),
+      channel,
     };
+    // Buffer for replay to late-joining clients
+    this.replayBuffer.push(msg);
+    if (this.replayBuffer.length > WsServer.MAX_REPLAY) {
+      this.replayBuffer.shift();
+    }
     this.broadcastMessage(msg);
   }
 
@@ -214,6 +231,9 @@ export class WsServer {
           screen: this.state.screen === "active" ? "off" : "active",
         });
         log(TAG, `screen toggled → ${this.state.screen}`);
+        break;
+      case "switch_device":
+        log(TAG, "switch_device command received");
         break;
       default:
         log(TAG, `unhandled command: ${action}`);

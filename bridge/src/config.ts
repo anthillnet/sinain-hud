@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig } from "./types.js";
+import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig, TriggerConfig, SenseConfig } from "./types.js";
 
 const CONFIG_PATH = resolve(process.cwd(), "config.json");
 const ENV_PATH = resolve(process.cwd(), ".env");
@@ -50,9 +50,19 @@ function loadAudioConfig(): AudioPipelineConfig {
     channels: 1,
     chunkDurationMs: Number(env.AUDIO_CHUNK_MS) || 10000,
     vadEnabled: env.AUDIO_VAD_ENABLED !== "false",
-    vadThreshold: Number(env.AUDIO_VAD_THRESHOLD) || 0.01,
+    vadThreshold: Number(env.AUDIO_VAD_THRESHOLD) || 0.003,
     captureCommand: (env.AUDIO_CAPTURE_CMD === "ffmpeg" ? "ffmpeg" : "sox") as "sox" | "ffmpeg",
     autoStart: env.AUDIO_AUTO_START === "true",
+    gainDb: Number(env.AUDIO_GAIN_DB) || 20,
+  };
+}
+
+function loadTriggerConfig(): TriggerConfig {
+  const env = process.env;
+  return {
+    enabled: env.TRIGGER_ENABLED === "true",
+    model: env.TRIGGER_MODEL ?? "google/gemini-2.5-flash",
+    apiKey: env.OPENROUTER_API_KEY ?? "",
   };
 }
 
@@ -75,6 +85,14 @@ function loadTranscriptionConfig(): TranscriptionConfig {
   };
 }
 
+function loadSenseConfig(): SenseConfig {
+  const env = process.env;
+  return {
+    enabled: env.SENSE_ENABLED === "true",
+    pollIntervalMs: Number(env.SENSE_POLL_INTERVAL_MS) || 5000,
+  };
+}
+
 export function loadConfig(): BridgeConfig {
   const file = loadFileConfig();
   const env = process.env;
@@ -91,7 +109,10 @@ export function loadConfig(): BridgeConfig {
     relayMinIntervalMs:
       Number(env.RELAY_MIN_INTERVAL_MS) || file.relayMinIntervalMs || 30_000,
     audioConfig: loadAudioConfig(),
+    audioAltDevice: env.AUDIO_ALT_DEVICE ?? "BlackHole 2ch",
     transcriptionConfig: loadTranscriptionConfig(),
+    triggerConfig: loadTriggerConfig(),
+    senseConfig: loadSenseConfig(),
   };
 
   return config;

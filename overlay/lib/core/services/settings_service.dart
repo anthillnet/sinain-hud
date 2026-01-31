@@ -5,6 +5,7 @@ import '../models/hud_settings.dart';
 /// Persists HUD settings using shared_preferences.
 class SettingsService extends ChangeNotifier {
   static const _keyDisplayMode = 'display_mode';
+  static const _keyActiveTab = 'active_tab';
   static const _keyClickThrough = 'click_through';
   static const _keyPrivacyMode = 'privacy_mode';
   static const _keyWsUrl = 'ws_url';
@@ -18,6 +19,7 @@ class SettingsService extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     _settings = HudSettings(
       displayMode: _loadDisplayMode(),
+      activeTab: _loadActiveTab(),
       clickThrough: _prefs.getBool(_keyClickThrough) ?? true,
       privacyMode: _prefs.getBool(_keyPrivacyMode) ?? true,
       wsUrl: _prefs.getString(_keyWsUrl) ?? 'ws://localhost:9500',
@@ -33,6 +35,14 @@ class SettingsService extends ChangeNotifier {
     );
   }
 
+  HudTab _loadActiveTab() {
+    final val = _prefs.getString(_keyActiveTab);
+    return HudTab.values.firstWhere(
+      (t) => t.name == val,
+      orElse: () => HudTab.stream,
+    );
+  }
+
   Future<void> setDisplayMode(DisplayMode mode) async {
     _settings.displayMode = mode;
     await _prefs.setString(_keyDisplayMode, mode.name);
@@ -41,6 +51,16 @@ class SettingsService extends ChangeNotifier {
 
   Future<void> cycleDisplayMode() async {
     await setDisplayMode(_settings.nextDisplayMode);
+  }
+
+  Future<void> setActiveTab(HudTab tab) async {
+    _settings.activeTab = tab;
+    await _prefs.setString(_keyActiveTab, tab.name);
+    notifyListeners();
+  }
+
+  Future<void> cycleTab() async {
+    await setActiveTab(_settings.nextTab);
   }
 
   Future<void> setClickThrough(bool value) async {

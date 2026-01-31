@@ -72,8 +72,16 @@ Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behav
 |---|---|
 | `Cmd+Shift+Space` | Toggle overlay visibility |
 | `Cmd+Shift+C` | Toggle click-through mode |
-| `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal) |
-| `Cmd+Shift+H` | Panic hide — instant |
+| `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
+| `Cmd+Shift+H` | Panic hide — instant stealth + click-through + privacy |
+| `Cmd+Shift+T` | Toggle audio capture (start/stop transcription) |
+| `Cmd+Shift+D` | Switch audio device (primary ↔ alt) |
+| `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
+| `Cmd+Shift+S` | Toggle screen capture pipeline |
+| `Cmd+Shift+V` | Toggle screen feed on HUD (show/hide sense items) |
+| `Cmd+Shift+E` | Cycle HUD tab (Stream ↔ Agent) |
+| `Cmd+Shift+Up` | Scroll feed up (pauses auto-scroll) |
+| `Cmd+Shift+Down` | Scroll feed down (resumes auto-scroll at bottom) |
 
 ## Display Modes
 
@@ -93,6 +101,14 @@ Bridge service reads from environment or `config.json`:
 | `OPENCLAW_SESSION_KEY` | — | Target session |
 | `WS_PORT` | `9500` | WebSocket port for overlay |
 | `RELAY_MIN_INTERVAL_MS` | `30000` | Min time between escalations |
+| `AUDIO_DEVICE` | `default` | Audio capture device (e.g. `BlackHole 2ch`) |
+| `AUDIO_ALT_DEVICE` | `BlackHole 2ch` | Alt device for `Cmd+Shift+D` switch |
+| `AUDIO_GAIN_DB` | `20` | Gain applied to capture (dB, helps with BlackHole) |
+| `AUDIO_VAD_THRESHOLD` | `0.003` | RMS energy threshold for voice detection |
+| `AUDIO_CHUNK_MS` | `10000` | Audio chunk duration before transcription |
+| `AUDIO_CAPTURE_CMD` | `sox` | Capture backend (`sox` or `ffmpeg`) |
+| `OPENROUTER_API_KEY` | — | OpenRouter API key for transcription + triggers |
+| `TRIGGER_ENABLED` | `false` | Enable Gemini Flash trigger classification |
 
 ## Privacy
 
@@ -104,7 +120,7 @@ Bridge service reads from environment or `config.json`:
 ## Roadmap
 
 - [x] Phase 1: Overlay + Bridge MVP
-- [ ] Phase 2: Audio pipeline (live transcription → context)
+- [x] Phase 2: Audio pipeline (live transcription → context)
 - [ ] Phase 3: Screen capture pipeline
 - [ ] Phase 4: Polish (diarization, smart batching, themes)
 

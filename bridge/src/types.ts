@@ -1,6 +1,7 @@
 // ── Wire protocol types ──
 
 export type Priority = "normal" | "high" | "urgent";
+export type FeedChannel = "stream" | "agent";
 
 /** Bridge → Overlay: feed item */
 export interface FeedMessage {
@@ -8,6 +9,7 @@ export interface FeedMessage {
   text: string;
   priority: Priority;
   ts: number;
+  channel: FeedChannel;
 }
 
 /** Bridge → Overlay: status update */
@@ -64,6 +66,7 @@ export interface AudioPipelineConfig {
   vadThreshold: number;
   captureCommand: "sox" | "ffmpeg";
   autoStart: boolean;
+  gainDb: number;
 }
 
 export interface TranscriptionConfig {
@@ -93,6 +96,28 @@ export interface TranscriptResult {
   ts: number;
 }
 
+// ── Trigger engine types ──
+
+export interface TriggerConfig {
+  enabled: boolean;
+  model: string;
+  apiKey: string;
+}
+
+export interface TriggerResult {
+  shouldEscalate: boolean;
+  trigger: string;
+  priority: Priority;
+  summary: string;
+}
+
+// ── Sense (screen capture) types ──
+
+export interface SenseConfig {
+  enabled: boolean;
+  pollIntervalMs: number;
+}
+
 // ── Bridge config ──
 
 export interface BridgeConfig {
@@ -102,7 +127,10 @@ export interface BridgeConfig {
   wsPort: number;
   relayMinIntervalMs: number;
   audioConfig: AudioPipelineConfig;
+  audioAltDevice: string;
   transcriptionConfig: TranscriptionConfig;
+  triggerConfig: TriggerConfig;
+  senseConfig: SenseConfig;
 }
 
 export interface BridgeState {

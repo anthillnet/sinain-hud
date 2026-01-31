@@ -1,6 +1,7 @@
-import type { BridgeConfig } from "./types.js";
+import type { BridgeConfig, Priority } from "./types.js";
 import { ContextManager } from "./context-manager.js";
 import { OpenClawClient } from "./openclaw-client.js";
+import { TriggerEngine } from "./trigger-engine.js";
 import { log, warn } from "./log.js";
 
 const TAG = "relay";
@@ -17,11 +18,13 @@ const TRANSCRIPT_SOURCES = new Set(["aws", "gemini", "openrouter", "whisper"]);
 export class ContextRelay {
   private contextManager: ContextManager;
   private openclawClient: OpenClawClient;
+  private triggerEngine: TriggerEngine;
   private minIntervalMs: number;
   private lastEscalationTs: number = 0;
   private pendingTimer: ReturnType<typeof setTimeout> | null = null;
   private recentHashes: Set<string> = new Set();
   private hashCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private screenContext: string = "";
 
   constructor(
     contextManager: ContextManager,
@@ -30,6 +33,7 @@ export class ContextRelay {
   ) {
     this.contextManager = contextManager;
     this.openclawClient = openclawClient;
+    this.triggerEngine = new TriggerEngine(config.triggerConfig);
     this.minIntervalMs = config.relayMinIntervalMs;
 
     // Clean up dedup hashes every 2 minutes
@@ -39,11 +43,24 @@ export class ContextRelay {
   }
 
   /**
+   * Set screen context from sense poller (active app, etc.)
+   */
+  setScreenContext(ctx: string): void {
+    this.screenContext = ctx;
+  }
+
+  /**
    * Ingest a transcript chunk. Deduplicates and schedules relay.
    */
   ingest(text: string, source: string = "transcript"): boolean {
     const trimmed = text.trim();
     if (!trimmed) return false;
+
+    // Noise filter: skip filler words, "can you hear me", etc.
+    if (this.triggerEngine.isNoise(trimmed)) {
+      log(TAG, `noise filtered: "${trimmed.slice(0, 40)}"`);
+      return false;
+    }
 
     // Dedup: hash the normalized text
     const hash = this.simpleHash(trimmed.toLowerCase());
@@ -108,28 +125,48 @@ export class ContextRelay {
       return false;
     }
 
-    const contextPackage = this.formatContextPackage(summary);
-    log(TAG, `escalating context (${contextPackage.length} chars)`);
+    // Run trigger classification
+    const triggerResult = await this.triggerEngine.classify(summary);
+    if (!triggerResult.shouldEscalate) {
+      log(TAG, `trigger skipped escalation: ${triggerResult.trigger} — ${triggerResult.summary}`);
+      return false;
+    }
 
-    const success = await this.openclawClient.sendMessage(contextPackage);
+    const contextPackage = this.formatContextPackage(
+      summary,
+      triggerResult.trigger,
+      triggerResult.priority,
+      triggerResult.summary
+    );
+    log(TAG, `escalating context [${triggerResult.trigger}/${triggerResult.priority}] (${contextPackage.length} chars)`);
+
+    const success = await this.openclawClient.sendMessage(contextPackage, triggerResult.priority);
     if (success) {
       this.lastEscalationTs = Date.now();
+      log(TAG, `✓ escalation delivered to relay`);
     } else {
-      warn(TAG, "escalation failed, will retry next interval");
+      warn(TAG, "✘ escalation failed — POST to relay returned error, will retry next interval");
     }
     return success;
   }
 
-  /**
-   * Format a context package for Sinain.
-   * Future: use LLM to summarize and filter.
-   */
-  private formatContextPackage(summary: string): string {
+  /** Format a structured context package for Sinain. */
+  private formatContextPackage(
+    summary: string,
+    trigger: string,
+    priority: Priority,
+    triggerSummary: string
+  ): string {
     const entryCount = this.contextManager.size;
-    return [
-      `Context update (${entryCount} entries):`,
-      summary,
-    ].join("\n");
+    const parts = [
+      `[${trigger}] (${priority}) ${triggerSummary}`,
+    ];
+    if (this.screenContext) {
+      parts.push(`Screen: ${this.screenContext}`);
+    }
+    parts.push(`Context (${entryCount} entries):`);
+    parts.push(summary);
+    return parts.join("\n");
   }
 
   /** Simple string hash for dedup */

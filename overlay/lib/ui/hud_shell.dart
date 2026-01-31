@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/models/feed_item.dart';
 import '../core/models/hud_settings.dart';
 import '../core/services/settings_service.dart';
 import 'alert/alert_card.dart';
@@ -30,17 +31,29 @@ class HudShell extends StatelessWidget {
           const StatusBar(),
           // Main content area
           Expanded(
-            child: _buildContent(settings.displayMode),
+            child: _buildContent(settings),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildContent(DisplayMode mode) {
-    switch (mode) {
+  Widget _buildContent(HudSettings settings) {
+    switch (settings.displayMode) {
       case DisplayMode.feed:
-        return const FeedView();
+        return IndexedStack(
+          index: settings.activeTab == HudTab.agent ? 1 : 0,
+          children: const [
+            FeedView(
+              channel: FeedChannel.stream,
+              emptyLabel: 'awaiting feed…',
+            ),
+            FeedView(
+              channel: FeedChannel.agent,
+              emptyLabel: 'awaiting sinain…',
+            ),
+          ],
+        );
       case DisplayMode.alert:
         return const AlertCard();
       case DisplayMode.minimal:

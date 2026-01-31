@@ -29,10 +29,27 @@ export class OpenClawClient {
     this.onFeed = cb;
   }
 
-  /** Send a message to Sinain (not used in relay mode — Sinain pushes to us) */
-  async sendMessage(text: string): Promise<boolean> {
-    log(TAG, `note: sendMessage called but relay is push-only. text: ${text.slice(0, 80)}`);
-    return true;
+  /** Send a message to Sinain via the relay's POST /feed endpoint */
+  async sendMessage(text: string, priority: Priority = "normal"): Promise<boolean> {
+    const url = `${this.gatewayUrl}/feed`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, priority }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        warn(TAG, `✘ POST /feed failed: ${res.status} ${res.statusText}`);
+        return false;
+      }
+      const body = (await res.json()) as { ok?: boolean; id?: number };
+      log(TAG, `→ feed posted #${body.id ?? "?"} (${priority}): ${text.slice(0, 80)}${text.length > 80 ? "..." : ""}`);
+      return true;
+    } catch (err) {
+      warn(TAG, `POST /feed error:`, err instanceof Error ? err.message : err);
+      return false;
+    }
   }
 
   /** Start polling the relay for new feed messages */

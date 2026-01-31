@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/constants.dart';
+import 'core/models/hud_settings.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
@@ -21,6 +23,49 @@ void main() async {
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
   await windowService.setClickThrough(true);
+
+  // Listen for hotkey events from native side
+  const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
+  hotkeyChannel.setMethodCallHandler((call) async {
+    switch (call.method) {
+      case 'onToggleVisibility':
+        // Visibility is handled natively via orderFront/orderOut.
+        // Sync the display mode so the UI can reflect it.
+        final visible = call.arguments as bool;
+        if (!visible) {
+          await settingsService.setDisplayMode(DisplayMode.hidden);
+        } else if (settingsService.settings.displayMode == DisplayMode.hidden) {
+          await settingsService.setDisplayMode(DisplayMode.feed);
+        }
+      case 'onToggleClickThrough':
+        await settingsService.toggleClickThrough();
+      case 'onCycleMode':
+        final modeName = call.arguments as String;
+        final mode = DisplayMode.values.firstWhere(
+          (m) => m.name == modeName,
+          orElse: () => DisplayMode.feed,
+        );
+        await settingsService.setDisplayMode(mode);
+      case 'onPanicHide':
+        await settingsService.setDisplayMode(DisplayMode.hidden);
+        await settingsService.setClickThrough(true);
+        await settingsService.setPrivacyMode(true);
+      case 'onToggleAudio':
+        wsService.sendCommand('toggle_audio');
+      case 'onSwitchAudioDevice':
+        wsService.sendCommand('switch_device');
+      case 'onToggleAudioFeed':
+        wsService.toggleAudioFeed();
+      case 'onScrollFeed':
+        wsService.scrollFeed(call.arguments as String);
+      case 'onToggleScreen':
+        wsService.sendCommand('toggle_screen');
+      case 'onToggleScreenFeed':
+        wsService.toggleScreenFeed();
+      case 'onCycleTab':
+        settingsService.cycleTab();
+    }
+  });
 
   // Connect WebSocket
   wsService.connect();

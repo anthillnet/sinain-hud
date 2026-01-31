@@ -45,13 +45,13 @@ describe("OpenClawClient", () => {
   });
 
   it("polls and receives feed messages", async () => {
-    const config: BridgeConfig = {
+    const config = {
       openclawGatewayUrl: `http://127.0.0.1:${port}`,
       openclawToken: "",
       openclawSessionKey: "",
       wsPort: 9500,
       relayMinIntervalMs: 30000,
-    };
+    } as BridgeConfig;
 
     const client = new OpenClawClient(config);
     const received: string[] = [];
@@ -72,13 +72,13 @@ describe("OpenClawClient", () => {
   });
 
   it("tracks lastSeenId and doesn't re-deliver", async () => {
-    const config: BridgeConfig = {
+    const config = {
       openclawGatewayUrl: `http://127.0.0.1:${port}`,
       openclawToken: "",
       openclawSessionKey: "",
       wsPort: 9500,
       relayMinIntervalMs: 30000,
-    };
+    } as BridgeConfig;
 
     const client = new OpenClawClient(config);
     const received: string[] = [];
@@ -105,13 +105,13 @@ describe("OpenClawClient", () => {
   });
 
   it("handles connection failure gracefully", async () => {
-    const config: BridgeConfig = {
+    const config = {
       openclawGatewayUrl: "http://127.0.0.1:1", // unreachable
       openclawToken: "",
       openclawSessionKey: "",
       wsPort: 9500,
       relayMinIntervalMs: 30000,
-    };
+    } as BridgeConfig;
 
     const client = new OpenClawClient(config);
     client.startPolling(100);

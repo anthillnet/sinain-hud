@@ -15,7 +15,7 @@ class AppDelegate: FlutterAppDelegate {
     private var hotkeyChannel: FlutterMethodChannel?
 
     override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        return false
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
@@ -127,6 +127,22 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(cmdKey | shiftKey))
         // ID 4: Cmd+Shift+H → panic hide
         registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 5: Cmd+Shift+T → toggle audio capture
+        registerHotKey(id: 5, keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 6: Cmd+Shift+D → switch audio device
+        registerHotKey(id: 6, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 7: Cmd+Shift+A → toggle audio feed on HUD
+        registerHotKey(id: 7, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 8: Cmd+Shift+Up → scroll feed up
+        registerHotKey(id: 8, keyCode: UInt32(kVK_UpArrow), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 9: Cmd+Shift+Down → scroll feed down
+        registerHotKey(id: 9, keyCode: UInt32(kVK_DownArrow), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 10: Cmd+Shift+S → toggle screen capture pipeline
+        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 11: Cmd+Shift+V → toggle screen feed on HUD
+        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 12: Cmd+Shift+E → cycle HUD tab (Stream / Agent)
+        registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -201,6 +217,30 @@ class AppDelegate: FlutterAppDelegate {
                 window.sharingType = .none
             }
             hotkeyChannel?.invokeMethod("onPanicHide", arguments: nil)
+
+        case 5: // Cmd+Shift+T → toggle audio capture
+            hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
+
+        case 6: // Cmd+Shift+D → switch audio device
+            hotkeyChannel?.invokeMethod("onSwitchAudioDevice", arguments: nil)
+
+        case 7: // Cmd+Shift+A → toggle audio feed on HUD
+            hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
+
+        case 8: // Cmd+Shift+Up → scroll feed up
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "up")
+
+        case 9: // Cmd+Shift+Down → scroll feed down
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
+
+        case 10: // Cmd+Shift+S → toggle screen capture pipeline
+            hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
+
+        case 11: // Cmd+Shift+V → toggle screen feed on HUD
+            hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
+
+        case 12: // Cmd+Shift+E → cycle HUD tab (Stream / Agent)
+            hotkeyChannel?.invokeMethod("onCycleTab", arguments: nil)
 
         default:
             break
