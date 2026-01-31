@@ -1,0 +1,21 @@
+{
+  "name": "sinain-hud-bridge",
+  "version": "0.1.0",
+  "description": "Bridge service connecting SinainHUD overlay to OpenClaw",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.7",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
