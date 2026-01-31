@@ -15,6 +15,7 @@ class WebSocketService extends ChangeNotifier {
   int _retryCount = 0;
   Timer? _reconnectTimer;
   String _audioState = 'muted';
+  bool _audioFeedEnabled = true;
 
   final _feedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
@@ -23,6 +24,13 @@ class WebSocketService extends ChangeNotifier {
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   bool get connected => _connected;
   String get audioState => _audioState;
+  bool get audioFeedEnabled => _audioFeedEnabled;
+
+  void toggleAudioFeed() {
+    _audioFeedEnabled = !_audioFeedEnabled;
+    _log('Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}');
+    notifyListeners();
+  }
 
   WebSocketService({this.url = 'ws://localhost:9500'});
 
@@ -67,6 +75,7 @@ class WebSocketService extends ChangeNotifier {
       switch (type) {
         case 'feed':
           final item = FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
+          if (!_audioFeedEnabled && item.text.startsWith('[📝]')) break;
           _feedController.add(item);
           break;
         case 'status':

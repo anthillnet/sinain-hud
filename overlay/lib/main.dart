@@ -54,6 +54,8 @@ void main() async {
         wsService.sendCommand('toggle_audio');
       case 'onSwitchAudioDevice':
         wsService.sendCommand('switch_device');
+      case 'onToggleAudioFeed':
+        wsService.toggleAudioFeed();
     }
   });
 
