@@ -159,11 +159,21 @@ System Audio (BlackHole) + Mic
 - **System audio** (via BlackHole loopback): What others say (calls, meetings)
 - Both captured simultaneously, tagged by source
 
-**Transcription approach:**
-- Use existing `audio-transcriber` skill as base
-- Stream chunks to OpenRouter audio-capable LLM
-- Maintain rolling transcript window (last ~5 min)
+**Transcription approach (cloud — default):**
+- AWS Transcribe streaming for instant word-by-word (~500ms latency)
+- Gemini refinement pass on accumulated text (higher accuracy)
+- Hybrid mode: AWS gives speed, Gemini gives quality
+- Rolling transcript window (last ~5 min)
 - VAD (Voice Activity Detection) to avoid sending silence
+
+**Transcription approach (local — optional):**
+- whisper.cpp with CoreML/Metal acceleration
+- Models: small (500MB, ~0.5-1s/chunk) or medium (1.5GB, ~1-2s/chunk)
+- Run as server (persistent RAM) or CLI per chunk (no persistent cost)
+- 100% on-device — no audio leaves the Mac
+- Pair with Gemini refine every 30s for best quality at low cost
+- Install: `brew install whisper-cpp` + download model
+- Best for: sensitive meetings, offline use, zero API cost
 
 **Context sent to Sinain:**
 ```jsonc
