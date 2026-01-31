@@ -131,6 +131,8 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 5, keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey))
         // ID 6: Cmd+Shift+D → switch audio device
         registerHotKey(id: 6, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 7: Cmd+Shift+A → toggle audio feed on HUD
+        registerHotKey(id: 7, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -211,6 +213,9 @@ class AppDelegate: FlutterAppDelegate {
 
         case 6: // Cmd+Shift+D → switch audio device
             hotkeyChannel?.invokeMethod("onSwitchAudioDevice", arguments: nil)
+
+        case 7: // Cmd+Shift+A → toggle audio feed on HUD
+            hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
 
         default:
             break
