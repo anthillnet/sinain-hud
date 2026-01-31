@@ -72,6 +72,7 @@ export class AudioPipeline extends EventEmitter {
   private accumulatedBytes: number = 0;
   private chunkTimer: ReturnType<typeof setInterval> | null = null;
   private running: boolean = false;
+  private silentChunks: number = 0;
 
   constructor(config: AudioPipelineConfig) {
     super();
@@ -158,6 +159,24 @@ export class AudioPipeline extends EventEmitter {
   /** Check if the pipeline is currently capturing audio. */
   isRunning(): boolean {
     return this.running;
+  }
+
+  /** Get the current capture device name. */
+  getDevice(): string {
+    return this.config.device;
+  }
+
+  /** Switch to a different audio device. Stops, reconfigures, and restarts if running. */
+  switchDevice(device: string): void {
+    const wasRunning = this.running;
+    if (wasRunning) {
+      this.stop();
+    }
+    this.config = { ...this.config, device };
+    log(TAG, `device switched to: ${device}`);
+    if (wasRunning) {
+      this.start();
+    }
   }
 
   // ── Private: sox capture ──
@@ -292,8 +311,17 @@ export class AudioPipeline extends EventEmitter {
 
     // VAD: skip silent chunks
     if (this.config.vadEnabled && energy < this.config.vadThreshold) {
-      log(TAG, `VAD: skipping silent chunk (energy=${energy.toFixed(4)} < threshold=${this.config.vadThreshold})`);
+      this.silentChunks++;
+      if (this.silentChunks === 1 || this.silentChunks % 6 === 0) {
+        log(TAG, `VAD: silent (energy=${energy.toFixed(4)} < ${this.config.vadThreshold}), ${this.silentChunks} silent chunk(s) so far`);
+      }
       return;
+    }
+
+    // Log when speech resumes after silence
+    if (this.silentChunks > 0) {
+      log(TAG, `VAD: speech detected after ${this.silentChunks} silent chunk(s) (energy=${energy.toFixed(4)})`);
+      this.silentChunks = 0;
     }
 
     // Create WAV header and prepend to PCM data

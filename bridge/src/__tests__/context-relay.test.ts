@@ -21,6 +21,32 @@ const testConfig: BridgeConfig = {
   openclawSessionKey: "test",
   wsPort: 9500,
   relayMinIntervalMs: 100, // short for testing
+  audioConfig: {
+    device: "default",
+    sampleRate: 16000,
+    channels: 1,
+    chunkDurationMs: 10000,
+    vadEnabled: true,
+    vadThreshold: 0.01,
+    captureCommand: "sox",
+    autoStart: false,
+  },
+  audioAltDevice: "BlackHole 2ch",
+  transcriptionConfig: {
+    backend: "openrouter",
+    awsRegion: "eu-west-1",
+    awsAccessKeyId: "",
+    awsSecretAccessKey: "",
+    openrouterApiKey: "",
+    geminiModel: "google/gemini-2.5-flash",
+    refineIntervalMs: 30000,
+    language: "en-US",
+  },
+  triggerConfig: {
+    enabled: false,
+    model: "google/gemini-2.5-flash",
+    apiKey: "",
+  },
 };
 
 describe("ContextRelay", () => {
@@ -39,20 +65,20 @@ describe("ContextRelay", () => {
   });
 
   it("ingests text and stores in context manager", () => {
-    relay.ingest("hello", "mic");
+    relay.ingest("the meeting starts at noon tomorrow", "mic");
     expect(cm.size).toBe(1);
   });
 
   it("deduplicates identical text", () => {
-    relay.ingest("hello", "mic");
-    const accepted = relay.ingest("hello", "mic");
+    relay.ingest("the meeting starts at noon tomorrow", "mic");
+    const accepted = relay.ingest("the meeting starts at noon tomorrow", "mic");
     expect(accepted).toBe(false);
     expect(cm.size).toBe(1);
   });
 
   it("accepts different text", () => {
-    relay.ingest("hello", "mic");
-    relay.ingest("world", "mic");
+    relay.ingest("the meeting starts at noon tomorrow", "mic");
+    relay.ingest("we should discuss the budget next", "mic");
     expect(cm.size).toBe(2);
   });
 

@@ -14,6 +14,7 @@ class WebSocketService extends ChangeNotifier {
   bool _disposed = false;
   int _retryCount = 0;
   Timer? _reconnectTimer;
+  String _audioState = 'muted';
 
   final _feedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
@@ -21,6 +22,7 @@ class WebSocketService extends ChangeNotifier {
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   bool get connected => _connected;
+  String get audioState => _audioState;
 
   WebSocketService({this.url = 'ws://localhost:9500'});
 
@@ -68,7 +70,13 @@ class WebSocketService extends ChangeNotifier {
           _feedController.add(item);
           break;
         case 'status':
-          _statusController.add(json['data'] as Map<String, dynamic>? ?? json);
+          final statusData = json['data'] as Map<String, dynamic>? ?? json;
+          final audio = statusData['audio'] as String?;
+          if (audio != null && audio != _audioState) {
+            _audioState = audio;
+            notifyListeners();
+          }
+          _statusController.add(statusData);
           break;
         case 'ping':
           // Respond to app-level ping with pong
@@ -126,7 +134,7 @@ class WebSocketService extends ChangeNotifier {
   void sendCommand(String command, [Map<String, dynamic>? params]) {
     send({
       'type': 'command',
-      'command': command,
+      'action': command,
       if (params != null) ...params,
     });
   }

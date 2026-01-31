@@ -93,6 +93,21 @@ export interface TranscriptResult {
   ts: number;
 }
 
+// ── Trigger engine types ──
+
+export interface TriggerConfig {
+  enabled: boolean;
+  model: string;
+  apiKey: string;
+}
+
+export interface TriggerResult {
+  shouldEscalate: boolean;
+  trigger: string;
+  priority: Priority;
+  summary: string;
+}
+
 // ── Bridge config ──
 
 export interface BridgeConfig {
@@ -102,7 +117,9 @@ export interface BridgeConfig {
   wsPort: number;
   relayMinIntervalMs: number;
   audioConfig: AudioPipelineConfig;
+  audioAltDevice: string;
   transcriptionConfig: TranscriptionConfig;
+  triggerConfig: TriggerConfig;
 }
 
 export interface BridgeState {

@@ -88,7 +88,6 @@ async function main() {
         break;
       }
       case "command": {
-        // Handle audio toggle command
         if (msg.action === "toggle_audio") {
           if (audioPipeline.isRunning()) {
             audioPipeline.stop();
@@ -97,8 +96,16 @@ async function main() {
             audioPipeline.start();
             log(TAG, "audio toggled ON via overlay command");
           }
+        } else if (msg.action === "switch_device") {
+          const current = audioPipeline.getDevice();
+          const alt = config.audioAltDevice;
+          const next = current === config.audioConfig.device
+            ? alt
+            : config.audioConfig.device;
+          audioPipeline.switchDevice(next);
+          wsServer.broadcast(`Audio device → ${next}`, "normal");
+          log(TAG, `audio device switched: ${current} → ${next}`);
         }
-        // Other commands are handled by WsServer internally (state updates).
         log(TAG, `command processed: ${msg.action}`);
         break;
       }

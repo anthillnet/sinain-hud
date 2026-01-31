@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig } from "./types.js";
+import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig, TriggerConfig } from "./types.js";
 
 const CONFIG_PATH = resolve(process.cwd(), "config.json");
 const ENV_PATH = resolve(process.cwd(), ".env");
@@ -56,6 +56,15 @@ function loadAudioConfig(): AudioPipelineConfig {
   };
 }
 
+function loadTriggerConfig(): TriggerConfig {
+  const env = process.env;
+  return {
+    enabled: env.TRIGGER_ENABLED === "true",
+    model: env.TRIGGER_MODEL ?? "google/gemini-2.5-flash",
+    apiKey: env.OPENROUTER_API_KEY ?? "",
+  };
+}
+
 function loadTranscriptionConfig(): TranscriptionConfig {
   const env = process.env;
   const backend = env.TRANSCRIPTION_BACKEND;
@@ -91,7 +100,9 @@ export function loadConfig(): BridgeConfig {
     relayMinIntervalMs:
       Number(env.RELAY_MIN_INTERVAL_MS) || file.relayMinIntervalMs || 30_000,
     audioConfig: loadAudioConfig(),
+    audioAltDevice: env.AUDIO_ALT_DEVICE ?? "BlackHole 2ch",
     transcriptionConfig: loadTranscriptionConfig(),
+    triggerConfig: loadTriggerConfig(),
   };
 
   return config;

@@ -15,7 +15,7 @@ class AppDelegate: FlutterAppDelegate {
     private var hotkeyChannel: FlutterMethodChannel?
 
     override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        return false
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
@@ -127,6 +127,10 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(cmdKey | shiftKey))
         // ID 4: Cmd+Shift+H → panic hide
         registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 5: Cmd+Shift+T → toggle audio capture
+        registerHotKey(id: 5, keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 6: Cmd+Shift+D → switch audio device
+        registerHotKey(id: 6, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -201,6 +205,12 @@ class AppDelegate: FlutterAppDelegate {
                 window.sharingType = .none
             }
             hotkeyChannel?.invokeMethod("onPanicHide", arguments: nil)
+
+        case 5: // Cmd+Shift+T → toggle audio capture
+            hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
+
+        case 6: // Cmd+Shift+D → switch audio device
+            hotkeyChannel?.invokeMethod("onSwitchAudioDevice", arguments: nil)
 
         default:
             break

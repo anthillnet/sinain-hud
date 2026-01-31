@@ -60,9 +60,13 @@ class StatusBar extends StatelessWidget {
           const Spacer(),
           // Audio indicator
           Icon(
-            Icons.volume_up_rounded,
+            ws.audioState == 'active'
+                ? Icons.volume_up_rounded
+                : Icons.volume_off_rounded,
             size: 10,
-            color: Colors.white.withValues(alpha: 0.3),
+            color: ws.audioState == 'active'
+                ? const Color(0xFF00FF88)
+                : Colors.white.withValues(alpha: 0.3),
           ),
           const SizedBox(width: 8),
           // Mode label

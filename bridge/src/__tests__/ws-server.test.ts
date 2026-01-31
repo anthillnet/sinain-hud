@@ -9,6 +9,32 @@ const testConfig: BridgeConfig = {
   openclawSessionKey: "test",
   wsPort: 0, // random port
   relayMinIntervalMs: 30000,
+  audioConfig: {
+    device: "default",
+    sampleRate: 16000,
+    channels: 1,
+    chunkDurationMs: 10000,
+    vadEnabled: true,
+    vadThreshold: 0.01,
+    captureCommand: "sox",
+    autoStart: false,
+  },
+  audioAltDevice: "BlackHole 2ch",
+  transcriptionConfig: {
+    backend: "openrouter",
+    awsRegion: "eu-west-1",
+    awsAccessKeyId: "",
+    awsSecretAccessKey: "",
+    openrouterApiKey: "",
+    geminiModel: "google/gemini-2.5-flash",
+    refineIntervalMs: 30000,
+    language: "en-US",
+  },
+  triggerConfig: {
+    enabled: false,
+    model: "google/gemini-2.5-flash",
+    apiKey: "",
+  },
 };
 
 describe("WsServer", () => {
