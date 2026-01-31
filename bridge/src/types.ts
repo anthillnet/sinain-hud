@@ -53,12 +53,56 @@ export interface TranscriptEntry {
   ts: number;
 }
 
+// ── Audio pipeline types ──
+
+export interface AudioPipelineConfig {
+  device: string;
+  sampleRate: number;
+  channels: number;
+  chunkDurationMs: number;
+  vadEnabled: boolean;
+  vadThreshold: number;
+  captureCommand: "sox" | "ffmpeg";
+  autoStart: boolean;
+}
+
+export interface TranscriptionConfig {
+  backend: "aws-gemini" | "openrouter" | "whisper";
+  awsRegion: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  openrouterApiKey: string;
+  geminiModel: string;
+  refineIntervalMs: number;
+  language: string;
+}
+
+export interface AudioChunk {
+  buffer: Buffer;
+  source: string;
+  ts: number;
+  durationMs: number;
+  energy: number;
+}
+
+export interface TranscriptResult {
+  text: string;
+  source: "aws" | "gemini" | "openrouter" | "whisper";
+  refined: boolean;
+  confidence: number;
+  ts: number;
+}
+
+// ── Bridge config ──
+
 export interface BridgeConfig {
   openclawGatewayUrl: string;
   openclawToken: string;
   openclawSessionKey: string;
   wsPort: number;
   relayMinIntervalMs: number;
+  audioConfig: AudioPipelineConfig;
+  transcriptionConfig: TranscriptionConfig;
 }
 
 export interface BridgeState {

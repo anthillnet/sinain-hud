@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { BridgeConfig } from "./types.js";
+import type { BridgeConfig, AudioPipelineConfig, TranscriptionConfig } from "./types.js";
 
 const CONFIG_PATH = resolve(process.cwd(), "config.json");
 const ENV_PATH = resolve(process.cwd(), ".env");
@@ -42,6 +42,39 @@ function loadFileConfig(): Partial<BridgeConfig> {
   }
 }
 
+function loadAudioConfig(): AudioPipelineConfig {
+  const env = process.env;
+  return {
+    device: env.AUDIO_DEVICE ?? "default",
+    sampleRate: Number(env.AUDIO_SAMPLE_RATE) || 16000,
+    channels: 1,
+    chunkDurationMs: Number(env.AUDIO_CHUNK_MS) || 10000,
+    vadEnabled: env.AUDIO_VAD_ENABLED !== "false",
+    vadThreshold: Number(env.AUDIO_VAD_THRESHOLD) || 0.01,
+    captureCommand: (env.AUDIO_CAPTURE_CMD === "ffmpeg" ? "ffmpeg" : "sox") as "sox" | "ffmpeg",
+    autoStart: env.AUDIO_AUTO_START === "true",
+  };
+}
+
+function loadTranscriptionConfig(): TranscriptionConfig {
+  const env = process.env;
+  const backend = env.TRANSCRIPTION_BACKEND;
+  let resolvedBackend: TranscriptionConfig["backend"] = "openrouter";
+  if (backend === "aws-gemini" || backend === "whisper") {
+    resolvedBackend = backend;
+  }
+  return {
+    backend: resolvedBackend,
+    awsRegion: env.AWS_REGION ?? "eu-west-1",
+    awsAccessKeyId: env.AWS_ACCESS_KEY_ID ?? "",
+    awsSecretAccessKey: env.AWS_SECRET_ACCESS_KEY ?? "",
+    openrouterApiKey: env.OPENROUTER_API_KEY ?? "",
+    geminiModel: env.GEMINI_MODEL ?? "google/gemini-2.5-flash",
+    refineIntervalMs: Number(env.REFINE_INTERVAL_MS) || 30000,
+    language: env.TRANSCRIPTION_LANGUAGE ?? "en-US",
+  };
+}
+
 export function loadConfig(): BridgeConfig {
   const file = loadFileConfig();
   const env = process.env;
@@ -57,6 +90,8 @@ export function loadConfig(): BridgeConfig {
       Number(env.WS_PORT) || file.wsPort || 9500,
     relayMinIntervalMs:
       Number(env.RELAY_MIN_INTERVAL_MS) || file.relayMinIntervalMs || 30_000,
+    audioConfig: loadAudioConfig(),
+    transcriptionConfig: loadTranscriptionConfig(),
   };
 
   return config;
