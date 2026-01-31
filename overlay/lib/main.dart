@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'core/constants.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
@@ -48,10 +49,12 @@ class SinainHudApp extends StatelessWidget {
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.transparent,
         canvasColor: Colors.transparent,
-        fontFamily: 'JetBrainsMono',
+        fontFamily: HudConstants.monoFont,
+        fontFamilyFallback: HudConstants.monoFontFallbacks,
         textTheme: const TextTheme(
           bodyMedium: TextStyle(
-            fontFamily: 'JetBrainsMono',
+            fontFamily: HudConstants.monoFont,
+            fontFamilyFallback: HudConstants.monoFontFallbacks,
             fontSize: 12,
             color: Colors.white,
           ),
