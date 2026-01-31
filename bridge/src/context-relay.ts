@@ -5,6 +5,8 @@ import { log, warn } from "./log.js";
 
 const TAG = "relay";
 
+const TRANSCRIPT_SOURCES = new Set(["aws", "gemini", "openrouter", "whisper"]);
+
 /**
  * Context Relay: receives transcript chunks, deduplicates,
  * batches, and forwards to Sinain via OpenClaw at controlled intervals.
@@ -50,6 +52,11 @@ export class ContextRelay {
       return false;
     }
     this.recentHashes.add(hash);
+
+    // Log transcript-specific ingestion
+    if (TRANSCRIPT_SOURCES.has(source)) {
+      log(TAG, `📝 transcript ingested [${source}]: "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`);
+    }
 
     // Store in context manager
     this.contextManager.add(trimmed, source);
