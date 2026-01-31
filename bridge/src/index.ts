@@ -46,6 +46,7 @@ async function main() {
   const APP_SHORT_NAMES: Record<string, string> = {
     "IntelliJ IDEA": "IDEA",
     "IntelliJ IDEA Ultimate": "IDEA",
+    "idea": "IDEA",
     "Google Chrome": "Chrome",
     "Microsoft Edge": "Edge",
     "Visual Studio Code": "Code",
@@ -63,14 +64,22 @@ async function main() {
     "Finder": "Finder",
   };
   function shortAppName(app: string): string {
-    return APP_SHORT_NAMES[app] || app;
+    // Try exact match first, then case-insensitive
+    if (APP_SHORT_NAMES[app]) return APP_SHORT_NAMES[app];
+    const lower = app.toLowerCase();
+    for (const [key, value] of Object.entries(APP_SHORT_NAMES)) {
+      if (key.toLowerCase() === lower) return value;
+    }
+    return app;
   }
 
   sensePoller.on("sense", (event) => {
     wsServer.updateState({ screen: "active" });
     if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
       const app = shortAppName(event.meta?.app || "");
-      const text = event.ocr.slice(0, 80).trim();
+      // Take first meaningful line only, skip multiline OCR noise
+      const firstLine = event.ocr.split("\n").find((l: string) => l.trim().length > 5)?.trim() || event.ocr.split("\n")[0].trim();
+      const text = firstLine.slice(0, 80);
       const prefix = app ? `${app}: ` : "";
       wsServer.broadcast(`[👁] ${prefix}${text}`, "normal");
     }
