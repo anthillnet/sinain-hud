@@ -1,4 +1,7 @@
 import http from 'http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 // ── Server epoch — lets clients detect relay restarts ──
 const serverEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -54,6 +57,36 @@ const agentConfig = {
 
 let agentDebounceTimer = null;
 let agentMaxIntervalTimer = null;
+
+// ── SITUATION.md + OpenClaw escalation ──
+
+const situationConfig = {
+  enabled: env('SITUATION_MD_ENABLED', 'true') === 'true',
+  workspaceDir: env('OPENCLAW_WORKSPACE_DIR', '').replace(/^~/, os.homedir())
+                || path.join(os.homedir(), '.openclaw', 'workspace'),
+};
+
+const openclawConfig = {
+  gatewayWsUrl: env('OPENCLAW_GATEWAY_WS_URL', 'ws://localhost:18789'),
+  hookUrl: env('OPENCLAW_HOOK_URL', 'http://localhost:18789/hooks/agent'),
+  hookToken: env('OPENCLAW_HOOK_TOKEN', ''),
+  escalationMode: env('ESCALATION_MODE', 'selective'), // 'focus' | 'selective' | 'off'
+  escalationCooldownMs: intEnv('ESCALATION_COOLDOWN_MS', 30000),
+};
+
+const escalationStats = {
+  totalEscalations: 0,
+  totalResponses: 0,
+  totalErrors: 0,
+  lastEscalationTs: 0,
+  lastResponseTs: 0,
+};
+
+let openclawWs = null;
+let openclawRpcId = 1;
+const openclawPending = new Map();
+let openclawReconnectTimer = null;
+let lastEscalatedDigest = '';
 
 function env(key, fallback) {
   return process.env[key] || fallback;
@@ -243,6 +276,334 @@ Rules:
 - Include specific filenames, URLs, error messages, UI text from OCR in digest.
 - Do NOT suggest actions in digest — just describe the situation factually.
 - CRITICAL: Output ONLY the JSON object, nothing else.`;
+}
+
+// ── SITUATION.md Writer ──
+
+function writeSituationMd(contextWindow, digest, entry) {
+  if (!situationConfig.enabled) return;
+
+  const dir = situationConfig.workspaceDir;
+  const filePath = path.join(dir, 'SITUATION.md');
+  const tmpPath = filePath + '.tmp';
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code !== 'EEXIST') {
+      console.error('[situation] mkdir failed:', err.message);
+      return;
+    }
+  }
+
+  const now = new Date();
+  const lines = [];
+
+  lines.push('# Situation');
+  lines.push('');
+  lines.push(`> Auto-updated by sinain-hud relay at ${now.toISOString()}`);
+  lines.push(`> Tick #${entry.id} | Latency: ${entry.latencyMs}ms | Model: ${entry.model}`);
+  lines.push('');
+
+  lines.push('## Digest');
+  lines.push('');
+  lines.push(digest);
+  lines.push('');
+
+  const currentApp = normalizeAppName(contextWindow.currentApp);
+  lines.push('## Active Application');
+  lines.push('');
+  lines.push(currentApp);
+  lines.push('');
+
+  if (contextWindow.appHistory.length > 0) {
+    lines.push('## App History');
+    lines.push('');
+    const appChain = contextWindow.appHistory
+      .map(a => normalizeAppName(a.app))
+      .join(' -> ');
+    lines.push(appChain);
+    lines.push('');
+  }
+
+  if (contextWindow.screen.length > 0) {
+    lines.push('## Screen (OCR)');
+    lines.push('');
+    for (const e of contextWindow.screen) {
+      const app = normalizeAppName(e.app);
+      const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
+      const ocr = e.ocr ? e.ocr.replace(/\n/g, ' ').slice(0, 500) : '(no text)';
+      lines.push(`- [${ago}s ago] [${app}] ${ocr}`);
+    }
+    lines.push('');
+  }
+
+  if (contextWindow.audio.length > 0) {
+    lines.push('## Audio Transcripts');
+    lines.push('');
+    for (const e of contextWindow.audio) {
+      const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
+      lines.push(`- [${ago}s ago] ${e.text.slice(0, 500)}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## Metadata');
+  lines.push('');
+  lines.push(`- Screen events in window: ${contextWindow.screenCount}`);
+  lines.push(`- Audio events in window: ${contextWindow.audioCount}`);
+  lines.push(`- Context window: ${Math.round(contextWindow.windowMs / 1000)}s`);
+  lines.push(`- Parsed OK: ${entry.parsedOk}`);
+  lines.push('');
+
+  const content = lines.join('\n');
+
+  try {
+    fs.writeFileSync(tmpPath, content, 'utf-8');
+    fs.renameSync(tmpPath, filePath);
+    if (agentConfig.logVerbose) {
+      console.log(`[situation] wrote ${content.length} chars to ${filePath}`);
+    }
+  } catch (err) {
+    console.error('[situation] write failed:', err.message);
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+}
+
+// ── OpenClaw Gateway WebSocket Client ──
+
+function connectOpenClawGateway() {
+  if (openclawConfig.escalationMode === 'off') return;
+  if (!openclawConfig.hookToken && !openclawConfig.hookUrl) return;
+  if (openclawWs) return;
+
+  try {
+    const wsUrl = openclawConfig.gatewayWsUrl;
+    openclawWs = new WebSocket(wsUrl);
+
+    openclawWs.onopen = () => {
+      console.log(`[openclaw] gateway connected: ${wsUrl}`);
+      // Authenticate if token provided
+      if (openclawConfig.hookToken) {
+        openclawWs.send(JSON.stringify({
+          type: 'auth',
+          token: openclawConfig.hookToken,
+        }));
+      }
+    };
+
+    openclawWs.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'res' && msg.id && openclawPending.has(msg.id)) {
+          const { resolve, timeout } = openclawPending.get(msg.id);
+          clearTimeout(timeout);
+          openclawPending.delete(msg.id);
+          resolve(msg);
+        }
+      } catch {}
+    };
+
+    openclawWs.onclose = () => {
+      console.log('[openclaw] gateway disconnected');
+      openclawWs = null;
+      // Reconnect after 10s
+      if (openclawConfig.escalationMode !== 'off') {
+        if (openclawReconnectTimer) clearTimeout(openclawReconnectTimer);
+        openclawReconnectTimer = setTimeout(connectOpenClawGateway, 10000);
+      }
+    };
+
+    openclawWs.onerror = (err) => {
+      console.error('[openclaw] ws error:', err.message || 'connection failed');
+      if (openclawWs) {
+        try { openclawWs.close(); } catch {}
+        openclawWs = null;
+      }
+    };
+  } catch (err) {
+    console.error('[openclaw] connect failed:', err.message);
+    openclawWs = null;
+  }
+}
+
+function sendGatewayRpc(method, params, timeoutMs = 90000) {
+  return new Promise((resolve, reject) => {
+    if (!openclawWs || openclawWs.readyState !== WebSocket.OPEN) {
+      reject(new Error('gateway not connected'));
+      return;
+    }
+
+    const id = String(openclawRpcId++);
+    const timeout = setTimeout(() => {
+      openclawPending.delete(id);
+      reject(new Error(`rpc timeout: ${method}`));
+    }, timeoutMs);
+
+    openclawPending.set(id, { resolve, reject, timeout });
+
+    openclawWs.send(JSON.stringify({
+      type: 'req',
+      method,
+      id,
+      params,
+    }));
+  });
+}
+
+function disconnectOpenClawGateway() {
+  if (openclawReconnectTimer) { clearTimeout(openclawReconnectTimer); openclawReconnectTimer = null; }
+  if (openclawWs) { try { openclawWs.close(); } catch {} openclawWs = null; }
+  for (const [id, { reject, timeout }] of openclawPending) {
+    clearTimeout(timeout);
+    reject(new Error('disconnected'));
+  }
+  openclawPending.clear();
+}
+
+// ── Escalation Logic ──
+
+function shouldEscalate(digest, hud, contextWindow) {
+  if (openclawConfig.escalationMode === 'off') return false;
+
+  // Cooldown check
+  const now = Date.now();
+  if (now - escalationStats.lastEscalationTs < openclawConfig.escalationCooldownMs) return false;
+
+  // Don't escalate idle
+  if (hud === 'Idle' || hud === '\u2014') return false;
+
+  // Don't re-escalate identical digests
+  if (digest === lastEscalatedDigest) return false;
+
+  if (openclawConfig.escalationMode === 'focus') {
+    // Focus mode: escalate every meaningful change
+    return true;
+  }
+
+  // Selective mode: score-based escalation
+  const digestLower = digest.toLowerCase();
+  let score = 0;
+
+  // Error indicators (+3)
+  const errorPatterns = ['error', 'failed', 'failure', 'exception', 'crash', 'traceback',
+    'typeerror', 'referenceerror', 'syntaxerror', 'cannot read', 'undefined is not',
+    'exit code', 'segfault', 'panic', 'fatal'];
+  for (const p of errorPatterns) {
+    if (digestLower.includes(p)) { score += 3; break; }
+  }
+
+  // Question/help indicators in audio (+2)
+  const questionPatterns = ['how do i', 'how to', 'what if', 'why is', 'help me',
+    'not working', 'stuck', 'confused', 'any ideas', 'suggestions'];
+  for (const e of contextWindow.audio) {
+    const text = (e.text || '').toLowerCase();
+    for (const p of questionPatterns) {
+      if (text.includes(p)) { score += 2; break; }
+    }
+  }
+
+  // Complex code indicators (+1)
+  const complexPatterns = ['todo', 'fixme', 'hack', 'workaround', 'deprecated'];
+  for (const p of complexPatterns) {
+    if (digestLower.includes(p)) { score += 1; break; }
+  }
+
+  // Significant app switches in context (+1)
+  if (contextWindow.appHistory.length >= 4) score += 1;
+
+  return score >= 3;
+}
+
+async function escalateToOpenClaw(digest, contextWindow, entry) {
+  if (!openclawConfig.hookUrl && !openclawWs) return;
+
+  const message = `[sinain-hud situational context]
+
+The user is currently active. Here is what I observe:
+
+**Current app:** ${normalizeAppName(contextWindow.currentApp)}
+**Digest:** ${digest}
+
+Please read SITUATION.md in your workspace for full screen/audio context.
+Based on the situation, proactively help the user:
+- If there's an error: investigate and suggest a fix
+- If they seem stuck: offer guidance
+- If they're coding: provide relevant insights
+- Keep your response concise and actionable
+
+Respond naturally — this will appear on the user's HUD overlay.`;
+
+  // Step 1: Trigger agent via HTTP hooks
+  let runId = null;
+  try {
+    const hookResp = await fetch(openclawConfig.hookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(openclawConfig.hookToken ? { 'Authorization': `Bearer ${openclawConfig.hookToken}` } : {}),
+      },
+      body: JSON.stringify({
+        message,
+        name: 'sinain-hud',
+        wakeMode: 'now',
+        deliver: false,
+      }),
+    });
+
+    if (!hookResp.ok) {
+      const body = await hookResp.text().catch(() => '');
+      console.error(`[openclaw] hook failed: HTTP ${hookResp.status} ${body.slice(0, 200)}`);
+      escalationStats.totalErrors++;
+      return;
+    }
+
+    const hookData = await hookResp.json();
+    runId = hookData.runId;
+    escalationStats.totalEscalations++;
+    escalationStats.lastEscalationTs = Date.now();
+    lastEscalatedDigest = digest;
+    console.log(`[openclaw] escalated → runId=${runId}`);
+  } catch (err) {
+    console.error('[openclaw] hook error:', err.message);
+    escalationStats.totalErrors++;
+    return;
+  }
+
+  // Step 2: Wait for result via WebSocket agent.wait
+  if (!runId || !openclawWs || openclawWs.readyState !== WebSocket.OPEN) {
+    console.log('[openclaw] no ws connection — fire-and-forget escalation');
+    return;
+  }
+
+  try {
+    const result = await sendGatewayRpc('agent.wait', {
+      runId,
+      timeoutMs: 60000,
+    }, 65000);
+
+    if (result.ok && result.result) {
+      const output = result.result.output || result.result.text || '';
+      if (output.trim()) {
+        // Push OpenClaw response to feed → overlay
+        const msg = {
+          id: nextId++,
+          text: `[\ud83e\udd16] ${output.trim().slice(0, 2000)}`,
+          priority: 'high',
+          ts: Date.now(),
+          source: 'openclaw',
+        };
+        messages.push(msg);
+        if (messages.length > 100) messages.splice(0, messages.length - 100);
+        feedVersion++;
+        escalationStats.totalResponses++;
+        escalationStats.lastResponseTs = Date.now();
+        console.log(`[openclaw] response pushed to feed: "${output.slice(0, 80)}..."`);
+      }
+    }
+  } catch (err) {
+    console.log(`[openclaw] agent.wait failed: ${err.message} (response may still arrive)`);
+  }
 }
 
 // ── LLM Call ──
@@ -435,6 +796,16 @@ async function agentTick() {
       latencyMs,
     };
 
+    // Write SITUATION.md for OpenClaw bootstrap
+    writeSituationMd(contextWindow, digest, entry);
+
+    // Escalate to OpenClaw if warranted
+    if (shouldEscalate(digest, hud, contextWindow)) {
+      escalateToOpenClaw(digest, contextWindow, entry).catch(err => {
+        console.error('[openclaw] escalation error:', err.message);
+      });
+    }
+
     if (agentConfig.logVerbose) {
       console.log(`[agent] digest: "${digest.slice(0, 100)}..."`);
     }
@@ -611,6 +982,16 @@ const server = http.createServer(async (req, res) => {
       if (updates.debounceMs !== undefined) agentConfig.debounceMs = Math.max(1000, parseInt(updates.debounceMs));
       if (updates.maxIntervalMs !== undefined) agentConfig.maxIntervalMs = Math.max(5000, parseInt(updates.maxIntervalMs));
       if (updates.fallbackModels !== undefined) agentConfig.fallbackModels = Array.isArray(updates.fallbackModels) ? updates.fallbackModels : [];
+      if (updates.escalationMode !== undefined) {
+        const mode = String(updates.escalationMode);
+        if (['focus', 'selective', 'off'].includes(mode)) {
+          openclawConfig.escalationMode = mode;
+          if (mode !== 'off' && !openclawWs) connectOpenClawGateway();
+          if (mode === 'off') disconnectOpenClawGateway();
+          console.log(`[openclaw] escalation mode: ${mode}`);
+        }
+      }
+      if (updates.escalationCooldownMs !== undefined) openclawConfig.escalationCooldownMs = Math.max(5000, parseInt(updates.escalationCooldownMs));
 
       // Restart or stop loop based on enabled state
       if (agentConfig.enabled && agentConfig.openrouterApiKey) {
@@ -658,6 +1039,20 @@ const server = http.createServer(async (req, res) => {
         debounceMs: agentConfig.debounceMs,
         fallbackModels: agentConfig.fallbackModels,
       },
+      escalation: {
+        mode: openclawConfig.escalationMode,
+        gatewayConnected: !!(openclawWs && openclawWs.readyState === WebSocket.OPEN),
+        cooldownMs: openclawConfig.escalationCooldownMs,
+        totalEscalations: escalationStats.totalEscalations,
+        totalResponses: escalationStats.totalResponses,
+        totalErrors: escalationStats.totalErrors,
+        lastEscalationTs: escalationStats.lastEscalationTs || null,
+        lastResponseTs: escalationStats.lastResponseTs || null,
+      },
+      situation: {
+        enabled: situationConfig.enabled,
+        workspaceDir: situationConfig.workspaceDir,
+      },
     }));
     return;
   }
@@ -677,5 +1072,14 @@ server.listen(18791, '0.0.0.0', () => {
     agentConfig.enabled = false;
   } else {
     console.log('[agent] disabled (set AGENT_ENABLED=true and OPENROUTER_API_KEY to enable)');
+  }
+
+  // Connect to OpenClaw gateway for escalation
+  if (openclawConfig.escalationMode !== 'off') {
+    console.log(`[openclaw] escalation mode: ${openclawConfig.escalationMode}`);
+    console.log(`[situation] writing to: ${situationConfig.workspaceDir}/SITUATION.md (enabled=${situationConfig.enabled})`);
+    connectOpenClawGateway();
+  } else {
+    console.log('[openclaw] escalation disabled');
   }
 });
