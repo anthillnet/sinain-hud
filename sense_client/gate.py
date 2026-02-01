@@ -33,13 +33,16 @@ class DecisionGate:
     def __init__(self, min_ocr_chars: int = 20,
                  major_change_threshold: float = 0.85,
                  cooldown_ms: int = 5000,
+                 adaptive_cooldown_ms: int = 2000,
                  context_cooldown_ms: int = 10000):
         self.min_ocr_chars = min_ocr_chars
         self.major_change_threshold = major_change_threshold
         self.cooldown_ms = cooldown_ms
+        self.adaptive_cooldown_ms = adaptive_cooldown_ms
         self.context_cooldown_ms = context_cooldown_ms
         self.last_send_ts: float = 0
         self.last_context_ts: float = 0
+        self.last_app_change_ts: float = 0
         # Fuzzy dedup: ring buffer of last 5 OCR texts
         self._recent_texts: deque[str] = deque(maxlen=5)
 
@@ -74,13 +77,16 @@ class DecisionGate:
 
         # Context events (app/window change) bypass normal cooldown
         if app_changed or window_changed:
+            self.last_app_change_ts = now
             if now - self.last_context_ts >= self.context_cooldown_ms:
                 self.last_context_ts = now
                 self.last_send_ts = now
                 return SenseEvent(type="context", ts=now)
 
-        # Normal cooldown check
-        if now - self.last_send_ts < self.cooldown_ms:
+        # Adaptive cooldown: 2s after recent app switch, 5s otherwise
+        recent_app_change = (now - self.last_app_change_ts) < 10000
+        effective_cooldown = self.adaptive_cooldown_ms if recent_app_change else self.cooldown_ms
+        if now - self.last_send_ts < effective_cooldown:
             return None
 
         if change is None:

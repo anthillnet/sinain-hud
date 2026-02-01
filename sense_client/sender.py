@@ -2,6 +2,7 @@
 
 import base64
 import io
+import time
 
 import requests
 from PIL import Image
@@ -17,6 +18,8 @@ class SenseSender:
         self.url = url.rstrip("/")
         self.max_image_kb = max_image_kb
         self.send_thumbnails = send_thumbnails
+        self._latencies: list[float] = []
+        self._last_stats_ts: float = time.time()
 
     def send(self, event: SenseEvent) -> bool:
         """POST /sense with JSON payload. Returns True on success."""
@@ -37,15 +40,33 @@ class SenseSender:
             payload["diff"] = event.diff
 
         try:
+            start = time.time()
             resp = requests.post(
                 f"{self.url}/sense",
                 json=payload,
                 timeout=5,
             )
+            elapsed_ms = (time.time() - start) * 1000
+            self._latencies.append(elapsed_ms)
+            self._maybe_log_stats()
             return resp.status_code == 200
         except Exception as e:
             print(f"[sender] error: {e}")
             return False
+
+    def _maybe_log_stats(self):
+        """Log P50/P95 send latencies every 60s."""
+        now = time.time()
+        if now - self._last_stats_ts < 60:
+            return
+        if not self._latencies:
+            return
+        sorted_lat = sorted(self._latencies)
+        p50 = sorted_lat[len(sorted_lat) // 2]
+        p95 = sorted_lat[int(len(sorted_lat) * 0.95)]
+        print(f"[sender] relay latency: p50={p50:.0f}ms p95={p95:.0f}ms (n={len(sorted_lat)})")
+        self._latencies.clear()
+        self._last_stats_ts = now
 
 
 def encode_image(img: Image.Image, max_kb: int, max_px: int = 0) -> str:

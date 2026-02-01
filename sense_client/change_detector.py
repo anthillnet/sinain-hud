@@ -23,6 +23,10 @@ class ChangeDetector:
         self.min_area = min_area
         self.prev_frame: np.ndarray | None = None
 
+    def set_threshold(self, threshold: float) -> None:
+        """Dynamically adjust the SSIM change threshold."""
+        self.threshold = threshold
+
     def detect(self, frame: Image.Image) -> ChangeResult | None:
         """Compare frame to previous. Returns ChangeResult if significant."""
         gray = np.array(frame.convert("L"))

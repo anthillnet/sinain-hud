@@ -28,6 +28,7 @@ DEFAULTS = {
         "minOcrChars": 20,
         "majorChangeThreshold": 0.85,
         "cooldownMs": 5000,
+        "adaptiveCooldownMs": 2000,
         "contextCooldownMs": 10000,
     },
     "relay": {
