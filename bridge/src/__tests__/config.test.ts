@@ -21,7 +21,7 @@ describe("loadConfig", () => {
   it("returns defaults when no env vars set", () => {
     const config = loadConfig();
     expect(config.wsPort).toBe(9500);
-    expect(config.relayMinIntervalMs).toBe(30_000);
+    expect(config.relayMinIntervalMs).toBe(10_000);
     expect(config.openclawGatewayUrl).toBe("http://localhost:3000");
   });
 

@@ -48,7 +48,7 @@ function loadAudioConfig(): AudioPipelineConfig {
     device: env.AUDIO_DEVICE ?? "default",
     sampleRate: Number(env.AUDIO_SAMPLE_RATE) || 16000,
     channels: 1,
-    chunkDurationMs: Number(env.AUDIO_CHUNK_MS) || 10000,
+    chunkDurationMs: Number(env.AUDIO_CHUNK_MS) || 5000,
     vadEnabled: env.AUDIO_VAD_ENABLED !== "false",
     vadThreshold: Number(env.AUDIO_VAD_THRESHOLD) || 0.003,
     captureCommand: (env.AUDIO_CAPTURE_CMD === "ffmpeg" ? "ffmpeg" : "sox") as "sox" | "ffmpeg",
@@ -107,7 +107,7 @@ export function loadConfig(): BridgeConfig {
     wsPort:
       Number(env.WS_PORT) || file.wsPort || 9500,
     relayMinIntervalMs:
-      Number(env.RELAY_MIN_INTERVAL_MS) || file.relayMinIntervalMs || 30_000,
+      Number(env.RELAY_MIN_INTERVAL_MS) || file.relayMinIntervalMs || 10_000,
     audioConfig: loadAudioConfig(),
     audioAltDevice: env.AUDIO_ALT_DEVICE ?? "BlackHole 2ch",
     transcriptionConfig: loadTranscriptionConfig(),
