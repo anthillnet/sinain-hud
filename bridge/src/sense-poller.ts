@@ -23,6 +23,7 @@ export interface SenseEventMeta {
  */
 export class SensePoller extends EventEmitter {
   private lastSeenId = 0;
+  private lastEpoch = "";
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private currentApp = "";
   private currentWindow = "";
@@ -56,7 +57,17 @@ export class SensePoller extends EventEmitter {
       const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (!resp.ok) return;
 
-      const data = (await resp.json()) as { events: SenseEventMeta[] };
+      const data = (await resp.json()) as { events: SenseEventMeta[]; epoch?: string };
+
+      // Detect relay restart via epoch change
+      if (data.epoch && this.lastEpoch && data.epoch !== this.lastEpoch) {
+        log(TAG, `relay epoch changed (${this.lastEpoch} → ${data.epoch}) — resetting cursor from ${this.lastSeenId}`);
+        this.lastSeenId = 0;
+      }
+      if (data.epoch) {
+        this.lastEpoch = data.epoch;
+      }
+
       if (!data.events?.length) return;
 
       for (const event of data.events) {
