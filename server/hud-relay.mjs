@@ -555,7 +555,10 @@ function shouldEscalate(digest, hud, contextWindow) {
 }
 
 async function escalateToOpenClaw(digest, contextWindow, entry) {
-  if (!openclawConfig.hookUrl && !openclawWs) return;
+  if (!openclawConfig.hookUrl && !openclawWs) {
+    console.log('[openclaw] escalation skipped: no hookUrl and no WS connection');
+    return;
+  }
 
   // Build inline context (same structure as SITUATION.md)
   const currentApp = normalizeAppName(contextWindow.currentApp);
@@ -643,7 +646,8 @@ Respond naturally — this will appear on the user's HUD overlay.`;
     }, 65000);
 
     if (result.ok && result.result) {
-      const output = result.result.output || result.result.text || '';
+      const r = result.result;
+      const output = (typeof r === 'string' ? r : r.output || r.text || r.response || r.content || '').toString();
       if (output.trim()) {
         // Push OpenClaw response to feed → overlay
         const msg = {
@@ -659,7 +663,11 @@ Respond naturally — this will appear on the user's HUD overlay.`;
         escalationStats.totalResponses++;
         escalationStats.lastResponseTs = Date.now();
         console.log(`[openclaw] response pushed to feed: "${output.slice(0, 80)}..."`);
+      } else {
+        console.log(`[openclaw] agent.wait returned empty output. Keys: ${JSON.stringify(Object.keys(r || {}))}`);
       }
+    } else if (!result.ok) {
+      console.log(`[openclaw] agent.wait returned error: ${JSON.stringify(result.error || result)}`);
     }
   } catch (err) {
     console.log(`[openclaw] agent.wait failed: ${err.message} (response may still arrive)`);
@@ -727,7 +735,7 @@ async function callAgentWithModel(prompt, model) {
     }
 
     try {
-      const jsonStr = raw.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+      const jsonStr = raw.replace(/^```\w*\s*\n?/, '').replace(/\n?\s*```\s*$/, '').trim();
       const parsed = JSON.parse(jsonStr);
       agentStats.parseSuccesses++;
       return {
@@ -740,6 +748,26 @@ async function callAgentWithModel(prompt, model) {
         parsedOk: true,
       };
     } catch {
+      // Second-chance: try extracting an embedded JSON object from raw text
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.hud) {
+            agentStats.parseSuccesses++;
+            return {
+              hud: parsed.hud,
+              digest: parsed.digest || '—',
+              latencyMs,
+              tokensIn: data.usage?.prompt_tokens || 0,
+              tokensOut: data.usage?.completion_tokens || 0,
+              model,
+              parsedOk: true,
+            };
+          }
+        } catch {}
+      }
+      // Final fallback
       agentStats.parseFailures++;
       console.log(`[agent] JSON parse failed (model=${model}), raw: "${raw.slice(0, 120)}"`);
       return {

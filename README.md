@@ -11,30 +11,42 @@ An always-on-top transparent overlay that displays real-time AI advice while you
 **Components:**
 - **overlay/** — Flutter + Swift macOS app (the HUD you see)
 - **bridge/** — Node.js service (connects overlay ↔ OpenClaw)
+- **server/** — HUD relay agent with screen/audio context, digest generation, and OpenClaw escalation
 - **extension/** — OpenClaw skill (Sinain's HUD behavior)
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────┐
-│                  macOS Host                     │
-│                                                 │
-│  ┌────────────┐     ┌───────────────────────┐  │
-│  │ SinainHUD  │◄═══►│    Bridge Service     │  │
-│  │ (Overlay)  │ WS  │    localhost:9500      │  │
-│  └────────────┘     │                       │  │
-│                     │  ┌─────────────────┐  │  │
-│                     │  │  Context Relay   │  │  │
-│                     │  │  Filter/Compress │  │  │
-│                     │  └────────┬────────┘  │  │
-│                     └───────────┼───────────┘  │
-│                                 │               │
-└─────────────────────────────────┼───────────────┘
-                                  │ HTTPS
-                        ┌─────────▼────────┐
-                        │  OpenClaw (Sinain)│
-                        └──────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                       macOS Host                          │
+│                                                           │
+│  ┌────────────┐     ┌──────────────────────────────────┐ │
+│  │ SinainHUD  │◄═══►│       Bridge / Relay Agent       │ │
+│  │ (Overlay)  │ WS  │       localhost:9500             │ │
+│  └────────────┘     │                                  │ │
+│                     │  ┌──────────┐  ┌──────────────┐  │ │
+│                     │  │ Screen + │  │ Relay Agent   │  │ │
+│                     │  │ Audio    │  │ (digest,      │  │ │
+│                     │  │ Capture  │  │  escalation)  │  │ │
+│                     │  └────┬─────┘  └──────┬───────┘  │ │
+│                     └───────┼───────────────┼──────────┘ │
+│                             │               │             │
+│                             │          writeSituationMd() │
+│                             │               ▼             │
+│                             │    ~/.openclaw/workspace/   │
+│                             │       SITUATION.md          │
+└─────────────────────────────┼─────────────────────────────┘
+                              │ escalateToOpenClaw()
+                   ┌──────────┼──────────┐
+                   │  HTTP    │    WS    │
+                   ▼          ▼          │
+          ┌────────────────────────┐     │
+          │  OpenClaw Gateway      │     │
+          │  (hooks + agent.wait)  │◄────┘
+          └────────────────────────┘
 ```
+
+The relay agent runs a periodic tick loop: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline.
 
 ## Quick Start
 
@@ -110,6 +122,19 @@ Bridge service reads from environment or `config.json`:
 | `OPENROUTER_API_KEY` | — | OpenRouter API key for transcription + triggers |
 | `TRIGGER_ENABLED` | `false` | Enable Gemini Flash trigger classification |
 
+Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENCLAW_GATEWAY_WS_URL` | `ws://localhost:18789` | OpenClaw gateway WebSocket |
+| `OPENCLAW_GATEWAY_TOKEN` | — | Token for gateway WS auth |
+| `OPENCLAW_HOOK_URL` | `http://localhost:18789/hooks/agent` | OpenClaw HTTP hooks endpoint |
+| `OPENCLAW_HOOK_TOKEN` | — | Token for HTTP hook auth |
+| `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` |
+| `ESCALATION_COOLDOWN_MS` | `30000` | Min ms between escalations |
+| `SITUATION_MD_ENABLED` | `true` | Write SITUATION.md each tick |
+| `OPENCLAW_WORKSPACE_DIR` | `~/.openclaw/workspace` | Directory for SITUATION.md |
+
 ## Privacy
 
 - Overlay is **invisible** to screen sharing, recording, and screenshots
@@ -121,8 +146,9 @@ Bridge service reads from environment or `config.json`:
 
 - [x] Phase 1: Overlay + Bridge MVP
 - [x] Phase 2: Audio pipeline (live transcription → context)
-- [ ] Phase 3: Screen capture pipeline
+- [x] Phase 3: Screen capture pipeline (OCR → context window)
 - [ ] Phase 4: Polish (diarization, smart batching, themes)
+- [x] Phase 5: OpenClaw escalation (SITUATION.md + hooks + agent.wait)
 
 ## License
 
