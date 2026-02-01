@@ -68,8 +68,9 @@ const situationConfig = {
 
 const openclawConfig = {
   gatewayWsUrl: env('OPENCLAW_GATEWAY_WS_URL', 'ws://localhost:18789'),
+  gatewayToken: env('OPENCLAW_GATEWAY_TOKEN', ''),  // WS auth (gateway.auth.token)
   hookUrl: env('OPENCLAW_HOOK_URL', 'http://localhost:18789/hooks/agent'),
-  hookToken: env('OPENCLAW_HOOK_TOKEN', ''),
+  hookToken: env('OPENCLAW_HOOK_TOKEN', ''),         // HTTP hooks auth (hooks.token)
   escalationMode: env('ESCALATION_MODE', 'selective'), // 'focus' | 'selective' | 'off'
   escalationCooldownMs: intEnv('ESCALATION_COOLDOWN_MS', 30000),
 };
@@ -372,29 +373,65 @@ function writeSituationMd(contextWindow, digest, entry) {
 
 // ── OpenClaw Gateway WebSocket Client ──
 
+let openclawAuthenticated = false;
+
 function connectOpenClawGateway() {
   if (openclawConfig.escalationMode === 'off') return;
-  if (!openclawConfig.hookToken && !openclawConfig.hookUrl) return;
+  if (!openclawConfig.gatewayToken && !openclawConfig.hookUrl) return;
   if (openclawWs) return;
 
   try {
     const wsUrl = openclawConfig.gatewayWsUrl;
     openclawWs = new WebSocket(wsUrl);
+    openclawAuthenticated = false;
 
     openclawWs.onopen = () => {
-      console.log(`[openclaw] gateway connected: ${wsUrl}`);
-      // Authenticate if token provided
-      if (openclawConfig.hookToken) {
-        openclawWs.send(JSON.stringify({
-          type: 'auth',
-          token: openclawConfig.hookToken,
-        }));
-      }
+      console.log(`[openclaw] ws connected: ${wsUrl} (awaiting challenge)`);
     };
 
     openclawWs.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
+        const msg = JSON.parse(typeof event.data === 'string' ? event.data : String(event.data));
+
+        // Handle connect.challenge — respond with connect request
+        if (msg.type === 'event' && msg.event === 'connect.challenge') {
+          const nonce = msg.payload?.nonce;
+          console.log(`[openclaw] received challenge, authenticating...`);
+          openclawWs.send(JSON.stringify({
+            type: 'req',
+            id: 'connect-1',
+            method: 'connect',
+            params: {
+              minProtocol: 3,
+              maxProtocol: 3,
+              client: {
+                id: 'gateway-client',
+                displayName: 'Sinain HUD Relay',
+                version: '1.0.0',
+                platform: process.platform,
+                mode: 'backend',
+              },
+              auth: {
+                token: openclawConfig.gatewayToken,
+              },
+            },
+          }));
+          return;
+        }
+
+        // Handle connect response
+        if (msg.type === 'res' && msg.id === 'connect-1') {
+          if (msg.ok) {
+            openclawAuthenticated = true;
+            console.log('[openclaw] gateway authenticated');
+          } else {
+            console.error('[openclaw] auth failed:', msg.error || msg.payload?.error || 'unknown');
+            openclawWs.close();
+          }
+          return;
+        }
+
+        // Handle RPC responses
         if (msg.type === 'res' && msg.id && openclawPending.has(msg.id)) {
           const { resolve, timeout } = openclawPending.get(msg.id);
           clearTimeout(timeout);
@@ -407,6 +444,7 @@ function connectOpenClawGateway() {
     openclawWs.onclose = () => {
       console.log('[openclaw] gateway disconnected');
       openclawWs = null;
+      openclawAuthenticated = false;
       // Reconnect after 10s
       if (openclawConfig.escalationMode !== 'off') {
         if (openclawReconnectTimer) clearTimeout(openclawReconnectTimer);
@@ -429,8 +467,8 @@ function connectOpenClawGateway() {
 
 function sendGatewayRpc(method, params, timeoutMs = 90000) {
   return new Promise((resolve, reject) => {
-    if (!openclawWs || openclawWs.readyState !== WebSocket.OPEN) {
-      reject(new Error('gateway not connected'));
+    if (!openclawWs || openclawWs.readyState !== WebSocket.OPEN || !openclawAuthenticated) {
+      reject(new Error('gateway not connected or not authenticated'));
       return;
     }
 
@@ -454,6 +492,7 @@ function sendGatewayRpc(method, params, timeoutMs = 90000) {
 function disconnectOpenClawGateway() {
   if (openclawReconnectTimer) { clearTimeout(openclawReconnectTimer); openclawReconnectTimer = null; }
   if (openclawWs) { try { openclawWs.close(); } catch {} openclawWs = null; }
+  openclawAuthenticated = false;
   for (const [id, { reject, timeout }] of openclawPending) {
     clearTimeout(timeout);
     reject(new Error('disconnected'));
@@ -592,7 +631,7 @@ Respond naturally — this will appear on the user's HUD overlay.`;
   }
 
   // Step 2: Wait for result via WebSocket agent.wait
-  if (!runId || !openclawWs || openclawWs.readyState !== WebSocket.OPEN) {
+  if (!runId || !openclawWs || openclawWs.readyState !== WebSocket.OPEN || !openclawAuthenticated) {
     console.log('[openclaw] no ws connection — fire-and-forget escalation');
     return;
   }
