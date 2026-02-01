@@ -23,6 +23,12 @@ export class TranscriptionService extends EventEmitter {
   private partialAccumulator: string[] = [];
   private refineTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Latency tracking
+  private latencies: number[] = [];
+  private latencyStatsTimer: ReturnType<typeof setInterval> | null = null;
+  private totalAudioDurationMs: number = 0;
+  private totalTokensConsumed: number = 0;
+
   constructor(config: TranscriptionConfig) {
     super();
     this.config = config;
@@ -44,6 +50,11 @@ export class TranscriptionService extends EventEmitter {
     }
 
     log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
+
+    // Log transcription stats every 60s
+    this.latencyStatsTimer = setInterval(() => {
+      this.logStats();
+    }, 60_000);
   }
 
   /**
@@ -88,9 +99,38 @@ export class TranscriptionService extends EventEmitter {
       clearInterval(this.refineTimer);
       this.refineTimer = null;
     }
+    if (this.latencyStatsTimer) {
+      clearInterval(this.latencyStatsTimer);
+      this.latencyStatsTimer = null;
+    }
+    // Log final stats before destroying
+    this.logStats();
     this.partialAccumulator = [];
     this.removeAllListeners();
     log(TAG, "destroyed");
+  }
+
+  /** Log P50/P95 transcription latency and cost stats */
+  private logStats(): void {
+    if (this.latencies.length === 0) return;
+
+    const sorted = [...this.latencies].sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length / 2)];
+    const p95 = sorted[Math.floor(sorted.length * 0.95)];
+    const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+
+    log(TAG, `latency stats (n=${sorted.length}): p50=${Math.round(p50)}ms p95=${Math.round(p95)}ms avg=${Math.round(avg)}ms`);
+
+    // Cost per audio-minute estimate (Gemini Flash pricing: ~$0.075/1M input tokens)
+    if (this.totalAudioDurationMs > 0) {
+      const audioMinutes = this.totalAudioDurationMs / 60_000;
+      const costPerMToken = 0.075; // $/1M tokens for gemini-2.5-flash input
+      const estimatedCost = (this.totalTokensConsumed / 1_000_000) * costPerMToken;
+      const costPerMinute = audioMinutes > 0 ? estimatedCost / audioMinutes : 0;
+      log(TAG, `cost stats: ${this.totalTokensConsumed} tokens, ${audioMinutes.toFixed(1)} audio-min, ~$${estimatedCost.toFixed(6)} total, ~$${costPerMinute.toFixed(6)}/audio-min`);
+    }
+
+    this.latencies = [];
   }
 
   // ── OpenRouter backend (MVP) ──
@@ -157,12 +197,21 @@ export class TranscriptionService extends EventEmitter {
       const text = data.choices?.[0]?.message?.content?.trim();
       const elapsed = Date.now() - startTs;
 
+      this.latencies.push(elapsed);
+      this.totalAudioDurationMs += chunk.durationMs;
+
       if (!text) {
         warn(TAG, `OpenRouter returned empty transcript (${elapsed}ms)`);
         return;
       }
 
       log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
+
+      // Track tokens for cost estimation
+      const usage = (data as any).usage;
+      if (usage) {
+        this.totalTokensConsumed += (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+      }
 
       const result: TranscriptResult = {
         text,

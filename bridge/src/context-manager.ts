@@ -2,11 +2,11 @@ import type { TranscriptEntry } from "./types.js";
 import { log } from "./log.js";
 
 const TAG = "ctx-mgr";
-const WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 
 /**
  * Rolling window of recent context.
- * Keeps transcript entries from the last 5 minutes.
+ * Keeps transcript entries from the last 2 minutes.
  */
 export class ContextManager {
   private entries: TranscriptEntry[] = [];
