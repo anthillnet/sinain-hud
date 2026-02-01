@@ -72,6 +72,11 @@ def main():
     log(f"  ocr backend: {config['ocr'].get('backend', 'auto')}")
     log(f"  control: {args.control}")
 
+    events_sent = 0
+    events_failed = 0
+    events_gated = 0
+    last_stats = time.time()
+
     for frame, ts in capture.capture_loop():
         # Check control file (pause/resume)
         if not is_enabled(args.control):
@@ -104,6 +109,7 @@ def main():
             window_changed=window_changed,
         )
         if event is None:
+            events_gated += 1
             continue
 
         # 6. Package and send
@@ -121,13 +127,22 @@ def main():
 
         ok = sender.send(event)
         if ok:
+            events_sent += 1
             ssim = f"{change.ssim_score:.3f}" if change else "n/a"
             ctx = f"app={app_name}"
             if window_title:
                 ctx += f", win={window_title[:40]}"
             log(f"-> {event.type} sent ({ctx}, ssim={ssim})")
         else:
+            events_failed += 1
             log(f"-> {event.type} FAILED to send")
+
+        # Periodic pipeline stats
+        now = time.time()
+        if now - last_stats >= 60:
+            log(f"stats: captures={capture.stats_ok}ok/{capture.stats_fail}fail"
+                f" events={events_sent}sent/{events_failed}fail/{events_gated}gated")
+            last_stats = now
 
 
 if __name__ == "__main__":

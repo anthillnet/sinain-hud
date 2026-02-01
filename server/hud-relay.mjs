@@ -15,24 +15,26 @@ const agentBuffer = [];
 const MAX_AGENT_RESULTS = 50;
 let agentNextId = 1;
 let agentTimer = null;
-let lastPushedAnalysis = '';
+let lastPushedHud = '';
 let lastTickFeedLen = 0;
 let lastTickSenseLen = 0;
+let latestDigest = null;
 
 const agentStats = {
   totalCalls: 0,
   totalTokensIn: 0,
   totalTokensOut: 0,
   lastAnalysisTs: 0,
+  idleSkips: 0,
 };
 
 const agentConfig = {
   enabled: env('AGENT_ENABLED', 'false') === 'true',
-  intervalMs: intEnv('AGENT_INTERVAL_MS', 10000),
+  intervalMs: intEnv('AGENT_INTERVAL_MS', 30000),
   model: env('AGENT_MODEL', 'google/gemini-2.5-flash-lite'),
   openrouterApiKey: env('OPENROUTER_API_KEY', ''),
   maxAgeMs: intEnv('AGENT_MAX_AGE_MS', 120000),
-  maxTokens: intEnv('AGENT_MAX_TOKENS', 100),
+  maxTokens: intEnv('AGENT_MAX_TOKENS', 200),
   temperature: parseFloat(env('AGENT_TEMPERATURE', '0.3')),
   pushToFeed: env('AGENT_PUSH_TO_FEED', 'true') === 'true',
   logVerbose: env('AGENT_LOG_VERBOSE', 'false') === 'true',
@@ -77,6 +79,30 @@ function stripImageData(event) {
     delete stripped.diff.data;
   }
   return stripped;
+}
+
+// ── App name normalization ──
+
+const APP_NAMES = {
+  'idea': 'IntelliJ IDEA',
+  'code': 'VS Code',
+  'code - insiders': 'VS Code Insiders',
+  'webstorm': 'WebStorm',
+  'pycharm': 'PyCharm',
+  'datagrip': 'DataGrip',
+  'google chrome': 'Chrome',
+  'firefox': 'Firefox',
+  'safari': 'Safari',
+  'telegram lite': 'Telegram',
+  'telegram': 'Telegram',
+  'iterm2': 'iTerm',
+  'terminal': 'Terminal',
+  'finder': 'Finder',
+  'audio midi setup': 'Audio MIDI Setup',
+};
+
+function normalizeAppName(app) {
+  return APP_NAMES[app.toLowerCase()] || app;
 }
 
 // ── Context Window ──
@@ -125,8 +151,19 @@ function buildContextWindow(maxAgeMs) {
     }
   }
 
+  // Track app switch timeline
+  const appHistory = [];
+  let lastApp = '';
+  for (const e of screenEvents) {
+    if (e.app !== lastApp) {
+      appHistory.push({ app: e.app, ts: e.ts });
+      lastApp = e.app;
+    }
+  }
+
   return {
     currentApp,
+    appHistory,
     audio: audioEvents.slice(-5),
     screen: dedupedScreen.slice(-10),
     audioCount: audioEvents.length,
@@ -135,37 +172,55 @@ function buildContextWindow(maxAgeMs) {
   };
 }
 
+// ── LLM Prompt ──
+
+function buildPrompt(ctx) {
+  const screenLines = ctx.screen
+    .map(e => {
+      const app = normalizeAppName(e.app);
+      const ocr = e.ocr ? e.ocr.replace(/\n/g, ' ').slice(0, 200) : '(no text)';
+      return `[${app}] ${ocr}`;
+    })
+    .join('\n');
+
+  const audioLines = ctx.audio
+    .map(e => e.text.slice(0, 300))
+    .join('\n');
+
+  const appSwitches = ctx.appHistory
+    .map(a => normalizeAppName(a.app))
+    .join(' → ');
+
+  return `You are an AI monitoring a user's screen and audio in real-time.
+You produce TWO outputs as JSON.
+
+Active app: ${normalizeAppName(ctx.currentApp)}
+App history: ${appSwitches || '(none)'}
+
+Screen (OCR text, newest last):
+${screenLines || '(no screen data)'}
+
+Audio transcript (newest last):
+${audioLines || '(silence)'}
+
+Respond with ONLY valid JSON, no markdown:
+{
+  "hud": "<max 15 words: what user is doing NOW. Terse. No filler.>",
+  "digest": "<3-5 sentences: detailed description of user activity, what's on screen, what was said, what they might need help with. Include specifics from OCR text. Mention errors, questions, or tasks if visible.>"
+}
+
+Rules:
+- "hud" is for a minimal overlay display. Example: "Editing hud-relay.mjs in IDEA"
+- "digest" is for an AI assistant to understand the full situation and offer help.
+- If nothing is happening, hud="Idle" and digest explains what was last seen.
+- Include specific filenames, URLs, error messages, UI text from OCR in digest.
+- Do NOT suggest actions in digest — just describe the situation factually.`;
+}
+
 // ── LLM Call ──
 
 async function callAgent(contextWindow) {
-  const screenLines = contextWindow.screen
-    .map(e => `[${e.app}] ${e.ocr.slice(0, 120)}`)
-    .join('\n');
-
-  const audioLines = contextWindow.audio
-    .map(e => e.text.slice(0, 200))
-    .join('\n');
-
-  const prompt = `You are Sinain, an AI monitoring a user's screen and audio in real-time.
-
-Active app: ${contextWindow.currentApp}
-
-Screen activity (OCR, newest last):
-${screenLines || '(no screen data)'}
-
-Audio (transcript, newest last):
-${audioLines || '(silence)'}
-
-Task: In 1-2 SHORT sentences:
-1. What is the user doing right now?
-2. One specific, actionable suggestion if you can help. If nothing useful, say "—".
-
-Rules:
-- Be terse. Max 30 words total.
-- No filler. Just state it.
-- If screen shows code errors, suggest a fix.
-- If audio is a lecture, note the topic.
-- If nothing interesting, respond with just "—".`;
+  const prompt = buildPrompt(contextWindow);
 
   if (agentConfig.logVerbose) {
     console.log('[agent] prompt:', prompt);
@@ -188,15 +243,33 @@ Rules:
 
   const data = await response.json();
   const latencyMs = Date.now() - start;
-  const tokensIn = data.usage?.prompt_tokens || 0;
-  const tokensOut = data.usage?.completion_tokens || 0;
-  const analysis = data.choices?.[0]?.message?.content?.trim() || '—';
+  const raw = data.choices?.[0]?.message?.content?.trim() || '';
 
   if (agentConfig.logVerbose) {
     console.log('[agent] response:', JSON.stringify(data, null, 2));
   }
 
-  return { analysis, latencyMs, tokensIn, tokensOut };
+  // Parse JSON response (handle markdown wrapping)
+  try {
+    const jsonStr = raw.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+    const parsed = JSON.parse(jsonStr);
+    return {
+      hud: parsed.hud || '—',
+      digest: parsed.digest || '—',
+      latencyMs,
+      tokensIn: data.usage?.prompt_tokens || 0,
+      tokensOut: data.usage?.completion_tokens || 0,
+    };
+  } catch {
+    // Fallback: treat entire response as hud line
+    return {
+      hud: raw.slice(0, 80) || '—',
+      digest: raw || '—',
+      latencyMs,
+      tokensIn: data.usage?.prompt_tokens || 0,
+      tokensOut: data.usage?.completion_tokens || 0,
+    };
+  }
 }
 
 // ── Agent Tick ──
@@ -207,6 +280,7 @@ async function agentTick() {
 
   // Idle suppression: skip if no new events since last tick
   if (messages.length === lastTickFeedLen && senseBuffer.length === lastTickSenseLen) {
+    agentStats.idleSkips++;
     if (agentConfig.logVerbose) console.log('[agent] idle — skipping tick');
     return;
   }
@@ -217,12 +291,13 @@ async function agentTick() {
 
   // Skip if both buffers empty in window
   if (contextWindow.audioCount === 0 && contextWindow.screenCount === 0) {
+    agentStats.idleSkips++;
     if (agentConfig.logVerbose) console.log('[agent] empty context — skipping');
     return;
   }
 
   try {
-    const { analysis, latencyMs, tokensIn, tokensOut } = await callAgent(contextWindow);
+    const { hud, digest, latencyMs, tokensIn, tokensOut } = await callAgent(contextWindow);
 
     // Update stats
     agentStats.totalCalls++;
@@ -230,44 +305,57 @@ async function agentTick() {
     agentStats.totalTokensOut += tokensOut;
     agentStats.lastAnalysisTs = Date.now();
 
-    const pushed = agentConfig.pushToFeed
-      && analysis !== '—'
-      && analysis !== lastPushedAnalysis;
-
     // Store result
-    const result = {
+    const entry = {
       id: agentNextId++,
       ts: Date.now(),
-      analysis,
+      hud,
+      digest,
       context: {
         currentApp: contextWindow.currentApp,
+        appHistory: contextWindow.appHistory.map(a => a.app),
         audioCount: contextWindow.audioCount,
         screenCount: contextWindow.screenCount,
       },
-      pushed,
+      pushed: false,
       model: agentConfig.model,
       latencyMs,
       tokensIn,
       tokensOut,
     };
-    agentBuffer.push(result);
+    agentBuffer.push(entry);
     if (agentBuffer.length > MAX_AGENT_RESULTS) agentBuffer.shift();
 
-    console.log(`[agent] #${result.id} (${latencyMs}ms, ${tokensIn}+${tokensOut}tok): ${analysis.slice(0, 80)}`);
+    console.log(`[agent] #${entry.id} (${latencyMs}ms, ${tokensIn}+${tokensOut}tok) hud="${hud}"`);
 
-    // Auto-push to feed
-    if (pushed) {
+    // Auto-push HUD line to feed (suppress "—" and "Idle")
+    if (agentConfig.pushToFeed && hud !== '—' && hud !== 'Idle' && hud !== lastPushedHud) {
       const msg = {
         id: nextId++,
-        text: `[🧠] ${analysis}`,
+        text: `[🧠] ${hud}`,
         priority: 'normal',
         ts: Date.now(),
         source: 'agent',
       };
       messages.push(msg);
       if (messages.length > 100) messages.splice(0, messages.length - 100);
-      lastPushedAnalysis = analysis;
-      console.log(`[agent] → pushed to feed #${msg.id}`);
+      lastPushedHud = hud;
+      entry.pushed = true;
+      console.log(`[agent] → HUD: ${hud}`);
+    }
+
+    // Store digest for Sinain
+    latestDigest = {
+      id: entry.id,
+      ts: entry.ts,
+      digest,
+      currentApp: contextWindow.currentApp,
+      appHistory: contextWindow.appHistory,
+      latencyMs,
+    };
+
+    if (agentConfig.logVerbose) {
+      console.log(`[agent] digest: "${digest.slice(0, 100)}..."`);
     }
   } catch (err) {
     console.error('[agent] tick error:', err.message || err);
@@ -376,6 +464,11 @@ const server = http.createServer(async (req, res) => {
 
   // --- /agent endpoints ---
 
+  if (req.method === 'GET' && req.url === '/agent/digest') {
+    res.end(JSON.stringify({ ok: true, digest: latestDigest }));
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/agent/last') {
     const last = agentBuffer[agentBuffer.length - 1] || null;
     res.end(JSON.stringify({ ok: true, result: last }));
@@ -446,10 +539,12 @@ const server = http.createServer(async (req, res) => {
       agent: {
         enabled: agentConfig.enabled,
         lastAnalysis: agentStats.lastAnalysisTs || null,
+        lastDigest: latestDigest?.digest?.slice(0, 200) || null,
         totalCalls: agentStats.totalCalls,
         totalTokens: { in: agentStats.totalTokensIn, out: agentStats.totalTokensOut },
         estimatedCost: Math.round(estimatedCost * 1000000) / 1000000,
         model: agentConfig.model,
+        idleSkips: agentStats.idleSkips,
       },
     }));
     return;
