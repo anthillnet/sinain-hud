@@ -46,10 +46,8 @@ void main() async {
           orElse: () => DisplayMode.feed,
         );
         await settingsService.setDisplayMode(mode);
-      case 'onPanicHide':
-        await settingsService.setDisplayMode(DisplayMode.hidden);
-        await settingsService.setClickThrough(true);
-        await settingsService.setPrivacyMode(true);
+      case 'onQuit':
+        wsService.disconnect();
       case 'onToggleAudio':
         wsService.sendCommand('toggle_audio');
       case 'onSwitchAudioDevice':

@@ -125,7 +125,7 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 2, keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey | shiftKey))
         // ID 3: Cmd+Shift+M → cycle display mode
         registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 4: Cmd+Shift+H → panic hide
+        // ID 4: Cmd+Shift+H → quit overlay
         registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey))
         // ID 5: Cmd+Shift+T → toggle audio capture
         registerHotKey(id: 5, keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey))
@@ -146,7 +146,7 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
-        var hotKeyID = EventHotKeyID(signature: OSType(0x5348_5544), id: id) // 'SHUD'
+        let hotKeyID = EventHotKeyID(signature: OSType(0x5348_5544), id: id) // 'SHUD'
         var hotKeyRef: EventHotKeyRef?
 
         let status = RegisterEventHotKey(
@@ -208,15 +208,11 @@ class AppDelegate: FlutterAppDelegate {
             currentModeIndex = (currentModeIndex + 1) % modeNames.count
             hotkeyChannel?.invokeMethod("onCycleMode", arguments: modeNames[currentModeIndex])
 
-        case 4: // Cmd+Shift+H → panic hide
-            isVisible = false
-            window.orderOut(nil)
-            window.ignoresMouseEvents = true
-            isClickThrough = true
-            if #available(macOS 12.0, *) {
-                window.sharingType = .none
+        case 4: // Cmd+Shift+H → quit overlay
+            hotkeyChannel?.invokeMethod("onQuit", arguments: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                exit(0)
             }
-            hotkeyChannel?.invokeMethod("onPanicHide", arguments: nil)
 
         case 5: // Cmd+Shift+T → toggle audio capture
             hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
