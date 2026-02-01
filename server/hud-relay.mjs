@@ -518,19 +518,40 @@ function shouldEscalate(digest, hud, contextWindow) {
 async function escalateToOpenClaw(digest, contextWindow, entry) {
   if (!openclawConfig.hookUrl && !openclawWs) return;
 
-  const message = `[sinain-hud situational context]
+  // Build inline context (same structure as SITUATION.md)
+  const currentApp = normalizeAppName(contextWindow.currentApp);
+  const parts = [];
+  parts.push(`**Digest:** ${digest}`);
+  parts.push(`**Current app:** ${currentApp}`);
+  if (contextWindow.appHistory.length > 0) {
+    parts.push(`**App history:** ${contextWindow.appHistory.map(a => normalizeAppName(a.app)).join(' → ')}`);
+  }
+  if (contextWindow.screen.length > 0) {
+    parts.push('**Screen (OCR):**');
+    for (const e of contextWindow.screen.slice(0, 10)) {
+      const app = normalizeAppName(e.app);
+      const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
+      const ocr = e.ocr ? e.ocr.replace(/\n/g, ' ').slice(0, 400) : '(no text)';
+      parts.push(`- [${ago}s ago] [${app}] ${ocr}`);
+    }
+  }
+  if (contextWindow.audio.length > 0) {
+    parts.push('**Audio transcripts:**');
+    for (const e of contextWindow.audio.slice(0, 5)) {
+      const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
+      parts.push(`- [${ago}s ago] ${e.text.slice(0, 400)}`);
+    }
+  }
 
-The user is currently active. Here is what I observe:
+  const message = `[sinain-hud live context — tick #${entry.id}]
 
-**Current app:** ${normalizeAppName(contextWindow.currentApp)}
-**Digest:** ${digest}
+${parts.join('\n')}
 
-Please read SITUATION.md in your workspace for full screen/audio context.
-Based on the situation, proactively help the user:
+Based on the above, proactively help the user:
 - If there's an error: investigate and suggest a fix
 - If they seem stuck: offer guidance
 - If they're coding: provide relevant insights
-- Keep your response concise and actionable
+- Keep your response concise and actionable (1-3 sentences)
 
 Respond naturally — this will appear on the user's HUD overlay.`;
 
