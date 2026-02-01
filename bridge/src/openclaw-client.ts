@@ -16,6 +16,7 @@ export class OpenClawClient {
   private onFeed: FeedCallback | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private lastSeenId: number = 0;
+  private lastEpoch: string = "";
   private connected: boolean = false;
 
   constructor(config: BridgeConfig) {
@@ -98,7 +99,18 @@ export class OpenClawClient {
 
       const data = (await res.json()) as {
         messages: Array<{ id: number; text: string; priority: Priority; ts: number }>;
+        epoch?: string;
       };
+
+      // Detect relay restart via epoch change
+      if (data.epoch && this.lastEpoch && data.epoch !== this.lastEpoch) {
+        log(TAG, `relay epoch changed (${this.lastEpoch} → ${data.epoch}) — resetting cursor from ${this.lastSeenId}`);
+        this.lastSeenId = 0;
+      }
+      if (data.epoch) {
+        this.lastEpoch = data.epoch;
+      }
+
       const messages = data.messages ?? [];
 
       for (const msg of messages) {
