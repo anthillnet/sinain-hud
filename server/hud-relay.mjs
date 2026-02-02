@@ -716,12 +716,22 @@ async function escalateToOpenClaw(digest, contextWindow, entry) {
           console.log(`[openclaw] agent result has no payloads. Keys: ${JSON.stringify(Object.keys(p.result || {}))}`);
         }
       } else if (!result.ok) {
-        console.log(`[openclaw] agent RPC error: ${JSON.stringify(result.error || result.payload)}`);
+        const errDetail = JSON.stringify(result.error || result.payload);
+        console.log(`[openclaw] agent RPC error: ${errDetail}`);
+        // Push error to feed for remote debugging
+        const errMsg = { id: nextId++, text: `[🤖 err] ${errDetail.slice(0, 500)}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
+        messages.push(errMsg);
+        if (messages.length > 100) messages.splice(0, messages.length - 100);
+        feedVersion++;
         escalationStats.totalErrors++;
       }
       return; // WS path succeeded (even if output was empty), don't fall through
     } catch (err) {
       console.log(`[openclaw] agent RPC failed: ${err.message} — falling back to HTTP`);
+      const errMsg = { id: nextId++, text: `[🤖 err] RPC exception: ${err.message}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
+      messages.push(errMsg);
+      if (messages.length > 100) messages.splice(0, messages.length - 100);
+      feedVersion++;
       // Fall through to HTTP fallback
     }
   }
