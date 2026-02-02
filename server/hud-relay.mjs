@@ -2,6 +2,32 @@ import http from 'http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+// ── Load .env (project root) — does NOT override existing env vars ──
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const envPath = path.resolve(__dirname, '..', '.env');
+try {
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    // Strip surrounding quotes
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (!process.env[key]) {
+      process.env[key] = val;
+    }
+  }
+  console.log(`[env] loaded ${envPath}`);
+} catch (err) {
+  if (err.code !== 'ENOENT') console.warn(`[env] failed to read ${envPath}:`, err.message);
+}
 
 // ── Server epoch — lets clients detect relay restarts ──
 const serverEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
