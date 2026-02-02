@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+I#!/usr/bin/env bash
 set -euo pipefail
 
 # ── SinainHUD — Launch All Services ──────────────────────────────────────────

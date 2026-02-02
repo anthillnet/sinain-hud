@@ -432,19 +432,33 @@ function connectOpenClawGateway() {
         }
 
         // Handle RPC responses
-        if (msg.type === 'res' && msg.id && openclawPending.has(msg.id)) {
-          const { resolve, timeout } = openclawPending.get(msg.id);
-          clearTimeout(timeout);
-          openclawPending.delete(msg.id);
-          resolve(msg);
+        const msgId = msg.id != null ? String(msg.id) : null;
+        if (msg.type === 'res' && msgId && openclawPending.has(msgId)) {
+          const pending = openclawPending.get(msgId);
+          // Skip intermediate "accepted" frame when expecting a final frame
+          if (pending.expectFinal && msg.payload?.status === 'accepted') {
+            console.log(`[openclaw] rpc ${msgId}: accepted (waiting for final)`);
+            return;
+          }
+          clearTimeout(pending.timeout);
+          openclawPending.delete(msgId);
+          pending.resolve(msg);
         }
-      } catch {}
+      } catch (err) {
+        console.error('[openclaw] ws message handler error:', err);
+      }
     };
 
     openclawWs.onclose = () => {
       console.log('[openclaw] gateway disconnected');
       openclawWs = null;
       openclawAuthenticated = false;
+      // Reject all orphaned pending RPCs so they fail fast instead of hanging
+      for (const [id, pending] of openclawPending) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('gateway disconnected'));
+      }
+      openclawPending.clear();
       // Reconnect after 10s
       if (openclawConfig.escalationMode !== 'off') {
         if (openclawReconnectTimer) clearTimeout(openclawReconnectTimer);
@@ -465,7 +479,7 @@ function connectOpenClawGateway() {
   }
 }
 
-function sendGatewayRpc(method, params, timeoutMs = 90000) {
+function sendGatewayRpc(method, params, timeoutMs = 90000, opts = {}) {
   return new Promise((resolve, reject) => {
     if (!openclawWs || openclawWs.readyState !== WebSocket.OPEN || !openclawAuthenticated) {
       reject(new Error('gateway not connected or not authenticated'));
@@ -478,7 +492,10 @@ function sendGatewayRpc(method, params, timeoutMs = 90000) {
       reject(new Error(`rpc timeout: ${method}`));
     }, timeoutMs);
 
-    openclawPending.set(id, { resolve, reject, timeout });
+    openclawPending.set(id, {
+      resolve, reject, timeout,
+      expectFinal: !!opts.expectFinal,
+    });
 
     openclawWs.send(JSON.stringify({
       type: 'req',
@@ -554,13 +571,7 @@ function shouldEscalate(digest, hud, contextWindow) {
   return score >= 3;
 }
 
-async function escalateToOpenClaw(digest, contextWindow, entry) {
-  if (!openclawConfig.hookUrl && !openclawWs) {
-    console.log('[openclaw] escalation skipped: no hookUrl and no WS connection');
-    return;
-  }
-
-  // Build inline context (same structure as SITUATION.md)
+function buildEscalationMessage(digest, contextWindow, entry) {
   const currentApp = normalizeAppName(contextWindow.currentApp);
   const parts = [];
   parts.push(`**Digest:** ${digest}`);
@@ -585,7 +596,7 @@ async function escalateToOpenClaw(digest, contextWindow, entry) {
     }
   }
 
-  const message = `[sinain-hud live context — tick #${entry.id}]
+  return `[sinain-hud live context — tick #${entry.id}]
 
 ${parts.join('\n')}
 
@@ -596,9 +607,9 @@ Based on the above, proactively help the user:
 - Keep your response concise and actionable (1-3 sentences)
 
 Respond naturally — this will appear on the user's HUD overlay.`;
+}
 
-  // Step 1: Trigger agent via HTTP hooks
-  let runId = null;
+async function escalateViaHttp(message) {
   try {
     const hookResp = await fetch(openclawConfig.hookUrl, {
       method: 'POST',
@@ -616,61 +627,91 @@ Respond naturally — this will appear on the user's HUD overlay.`;
 
     if (!hookResp.ok) {
       const body = await hookResp.text().catch(() => '');
-      console.error(`[openclaw] hook failed: HTTP ${hookResp.status} ${body.slice(0, 200)}`);
-      escalationStats.totalErrors++;
-      return;
+      console.error(`[openclaw] HTTP hook failed: ${hookResp.status} ${body.slice(0, 200)}`);
+      return false;
     }
+    console.log('[openclaw] escalated via HTTP (fire-and-forget)');
+    return true;
+  } catch (err) {
+    console.error('[openclaw] HTTP hook error:', err.message);
+    return false;
+  }
+}
 
-    const hookData = await hookResp.json();
-    runId = hookData.runId;
+function pushAgentResponse(output) {
+  const msg = {
+    id: nextId++,
+    text: `[🤖] ${output.trim().slice(0, 2000)}`,
+    priority: 'high',
+    ts: Date.now(),
+    source: 'openclaw',
+  };
+  messages.push(msg);
+  if (messages.length > 100) messages.splice(0, messages.length - 100);
+  feedVersion++;
+  escalationStats.totalResponses++;
+  escalationStats.lastResponseTs = Date.now();
+  console.log(`[openclaw] response pushed to feed: "${output.slice(0, 80)}..."`);
+}
+
+async function escalateToOpenClaw(digest, contextWindow, entry) {
+  if (!openclawConfig.hookUrl && !openclawWs) {
+    console.log('[openclaw] escalation skipped: no hookUrl and no WS connection');
+    return;
+  }
+
+  const message = buildEscalationMessage(digest, contextWindow, entry);
+  const idemKey = `hud-${entry.id}-${Date.now()}`;
+
+  // Primary path: WS `agent` RPC (returns full output via two-frame protocol)
+  if (openclawWs && openclawWs.readyState === WebSocket.OPEN && openclawAuthenticated) {
+    try {
+      const result = await sendGatewayRpc('agent', {
+        message,
+        idempotencyKey: idemKey,
+        deliver: false,
+      }, 120000, { expectFinal: true });
+
+      escalationStats.totalEscalations++;
+      escalationStats.lastEscalationTs = Date.now();
+      lastEscalatedDigest = digest;
+
+      if (result.ok && result.payload) {
+        const p = result.payload;
+        console.log(`[openclaw] escalated via WS agent RPC → runId=${p.runId}, status=${p.status}`);
+
+        // Extract text from payload.result.payloads[].text
+        const payloads = p.result?.payloads;
+        if (Array.isArray(payloads) && payloads.length > 0) {
+          const output = payloads.map(pl => pl.text || '').join('\n').trim();
+          if (output) {
+            pushAgentResponse(output);
+          } else {
+            console.log('[openclaw] agent returned empty text in payloads');
+          }
+        } else {
+          console.log(`[openclaw] agent result has no payloads. Keys: ${JSON.stringify(Object.keys(p.result || {}))}`);
+        }
+      } else if (!result.ok) {
+        console.log(`[openclaw] agent RPC error: ${JSON.stringify(result.error || result.payload)}`);
+        escalationStats.totalErrors++;
+      }
+      return; // WS path succeeded (even if output was empty), don't fall through
+    } catch (err) {
+      console.log(`[openclaw] agent RPC failed: ${err.message} — falling back to HTTP`);
+      // Fall through to HTTP fallback
+    }
+  }
+
+  // Fallback path: HTTP POST (fire-and-forget, no response capture)
+  if (openclawConfig.hookUrl) {
     escalationStats.totalEscalations++;
     escalationStats.lastEscalationTs = Date.now();
     lastEscalatedDigest = digest;
-    console.log(`[openclaw] escalated → runId=${runId}`);
-  } catch (err) {
-    console.error('[openclaw] hook error:', err.message);
-    escalationStats.totalErrors++;
-    return;
-  }
-
-  // Step 2: Wait for result via WebSocket agent.wait
-  if (!runId || !openclawWs || openclawWs.readyState !== WebSocket.OPEN || !openclawAuthenticated) {
-    console.log('[openclaw] no ws connection — fire-and-forget escalation');
-    return;
-  }
-
-  try {
-    const result = await sendGatewayRpc('agent.wait', {
-      runId,
-      timeoutMs: 60000,
-    }, 65000);
-
-    if (result.ok && result.result) {
-      const r = result.result;
-      const output = (typeof r === 'string' ? r : r.output || r.text || r.response || r.content || '').toString();
-      if (output.trim()) {
-        // Push OpenClaw response to feed → overlay
-        const msg = {
-          id: nextId++,
-          text: `[\ud83e\udd16] ${output.trim().slice(0, 2000)}`,
-          priority: 'high',
-          ts: Date.now(),
-          source: 'openclaw',
-        };
-        messages.push(msg);
-        if (messages.length > 100) messages.splice(0, messages.length - 100);
-        feedVersion++;
-        escalationStats.totalResponses++;
-        escalationStats.lastResponseTs = Date.now();
-        console.log(`[openclaw] response pushed to feed: "${output.slice(0, 80)}..."`);
-      } else {
-        console.log(`[openclaw] agent.wait returned empty output. Keys: ${JSON.stringify(Object.keys(r || {}))}`);
-      }
-    } else if (!result.ok) {
-      console.log(`[openclaw] agent.wait returned error: ${JSON.stringify(result.error || result)}`);
-    }
-  } catch (err) {
-    console.log(`[openclaw] agent.wait failed: ${err.message} (response may still arrive)`);
+    const ok = await escalateViaHttp(message);
+    if (!ok) escalationStats.totalErrors++;
+  } else {
+    console.log('[openclaw] no WS and no hookUrl — escalation skipped');
   }
 }
 
