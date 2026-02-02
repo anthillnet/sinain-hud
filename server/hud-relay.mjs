@@ -116,7 +116,6 @@ let openclawRpcId = 1;
 const openclawPending = new Map();
 let openclawReconnectTimer = null;
 let lastEscalatedDigest = '';
-let firstEscalationStructureDumped = false;
 
 function env(key, fallback) {
   return process.env[key] || fallback;
@@ -725,16 +724,6 @@ async function _doEscalate(message, idemKey) {
       if (result.ok && result.payload) {
         const p = result.payload;
         console.log(`[openclaw] escalated via WS agent RPC → runId=${p.runId}, status=${p.status}`);
-
-        // Dump full structure once (ever) for remote diagnostics
-        if (!firstEscalationStructureDumped) {
-          firstEscalationStructureDumped = true;
-          const structDump = JSON.stringify(p, null, 2).slice(0, 800);
-          const dbgMsg = { id: nextId++, text: `[🤖 dbg] first RPC result structure:\n${structDump}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
-          messages.push(dbgMsg);
-          if (messages.length > 100) messages.splice(0, messages.length - 100);
-          feedVersion++;
-        }
 
         // Extract text from payload.result.payloads[].text
         const payloads = p.result?.payloads;
