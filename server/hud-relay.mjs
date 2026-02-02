@@ -97,6 +97,7 @@ const openclawConfig = {
   gatewayToken: env('OPENCLAW_GATEWAY_TOKEN', ''),  // WS auth (gateway.auth.token)
   hookUrl: env('OPENCLAW_HOOK_URL', 'http://localhost:18789/hooks/agent'),
   hookToken: env('OPENCLAW_HOOK_TOKEN', ''),         // HTTP hooks auth (hooks.token)
+  sessionKey: env('OPENCLAW_SESSION_KEY', 'agent:main:main'), // agent session to escalate to
   escalationMode: env('ESCALATION_MODE', 'selective'), // 'focus' | 'selective' | 'off'
   escalationCooldownMs: intEnv('ESCALATION_COOLDOWN_MS', 30000),
 };
@@ -643,6 +644,7 @@ async function escalateViaHttp(message) {
       body: JSON.stringify({
         message,
         name: 'sinain-hud',
+        sessionKey: openclawConfig.sessionKey,
         wakeMode: 'now',
         deliver: false,
       }),
@@ -692,6 +694,7 @@ async function escalateToOpenClaw(digest, contextWindow, entry) {
       const result = await sendGatewayRpc('agent', {
         message,
         idempotencyKey: idemKey,
+        sessionKey: openclawConfig.sessionKey,
         deliver: false,
       }, 120000, { expectFinal: true });
 
