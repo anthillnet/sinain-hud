@@ -493,11 +493,8 @@ function connectOpenClawGateway() {
     };
 
     openclawWs.onerror = (err) => {
+      // Only log — cleanup and reconnect are handled exclusively by onclose
       console.error('[openclaw] ws error:', err.message || 'connection failed');
-      if (openclawWs) {
-        try { openclawWs.close(); } catch {}
-        openclawWs = null;
-      }
     };
   } catch (err) {
     console.error('[openclaw] connect failed:', err.message);
