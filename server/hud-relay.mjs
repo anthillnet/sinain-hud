@@ -679,15 +679,28 @@ function pushAgentResponse(output) {
   console.log(`[openclaw] response pushed to feed: "${output.slice(0, 80)}..."`);
 }
 
-async function escalateToOpenClaw(digest, contextWindow, entry) {
+function escalateToOpenClaw(digest, contextWindow, entry) {
   if (!openclawConfig.hookUrl && !openclawWs) {
     console.log('[openclaw] escalation skipped: no hookUrl and no WS connection');
     return;
   }
 
+  // Mark cooldown immediately so agentTick() isn't blocked and future ticks
+  // don't re-escalate while we're waiting for the agent response
+  escalationStats.totalEscalations++;
+  escalationStats.lastEscalationTs = Date.now();
+  lastEscalatedDigest = digest;
+
   const message = buildEscalationMessage(digest, contextWindow, entry);
   const idemKey = `hud-${entry.id}-${Date.now()}`;
 
+  // Fire and handle asynchronously — don't block the agent tick loop
+  _doEscalate(message, idemKey).catch(err => {
+    console.error('[openclaw] escalation error:', err.message);
+  });
+}
+
+async function _doEscalate(message, idemKey) {
   // Primary path: WS `agent` RPC (returns full output via two-frame protocol)
   if (openclawWs && openclawWs.readyState === WebSocket.OPEN && openclawAuthenticated) {
     try {
@@ -697,10 +710,6 @@ async function escalateToOpenClaw(digest, contextWindow, entry) {
         sessionKey: openclawConfig.sessionKey,
         deliver: false,
       }, 120000, { expectFinal: true });
-
-      escalationStats.totalEscalations++;
-      escalationStats.lastEscalationTs = Date.now();
-      lastEscalatedDigest = digest;
 
       if (result.ok && result.payload) {
         const p = result.payload;
@@ -728,7 +737,7 @@ async function escalateToOpenClaw(digest, contextWindow, entry) {
         feedVersion++;
         escalationStats.totalErrors++;
       }
-      return; // WS path succeeded (even if output was empty), don't fall through
+      return; // WS path completed, don't fall through
     } catch (err) {
       console.log(`[openclaw] agent RPC failed: ${err.message} — falling back to HTTP`);
       const errMsg = { id: nextId++, text: `[🤖 err] RPC exception: ${err.message}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
@@ -741,9 +750,6 @@ async function escalateToOpenClaw(digest, contextWindow, entry) {
 
   // Fallback path: HTTP POST (fire-and-forget, no response capture)
   if (openclawConfig.hookUrl) {
-    escalationStats.totalEscalations++;
-    escalationStats.lastEscalationTs = Date.now();
-    lastEscalatedDigest = digest;
     const ok = await escalateViaHttp(message);
     if (!ok) escalationStats.totalErrors++;
   } else {
@@ -966,9 +972,7 @@ async function agentTick() {
 
     // Escalate to OpenClaw if warranted
     if (shouldEscalate(digest, hud, contextWindow)) {
-      escalateToOpenClaw(digest, contextWindow, entry).catch(err => {
-        console.error('[openclaw] escalation error:', err.message);
-      });
+      escalateToOpenClaw(digest, contextWindow, entry);
     }
 
     if (agentConfig.logVerbose) {
