@@ -622,15 +622,24 @@ function buildEscalationMessage(digest, contextWindow, entry) {
     }
   }
 
+  const instructions = openclawConfig.escalationMode === 'focus'
+    ? `Based on the above, always provide a brief response for the user's HUD:
+- If there's an error: investigate and suggest a fix
+- If they seem stuck: offer guidance
+- If they're coding: provide relevant insights
+- Otherwise: briefly note what the user is doing and any observations
+- Keep your response concise (1-3 sentences)`
+    : `Based on the above, proactively help the user:
+- If there's an error: investigate and suggest a fix
+- If they seem stuck: offer guidance
+- If they're coding: provide relevant insights
+- Keep your response concise and actionable (1-3 sentences)`;
+
   return `[sinain-hud live context — tick #${entry.id}]
 
 ${parts.join('\n')}
 
-Based on the above, proactively help the user:
-- If there's an error: investigate and suggest a fix
-- If they seem stuck: offer guidance
-- If they're coding: provide relevant insights
-- Keep your response concise and actionable (1-3 sentences)
+${instructions}
 
 Respond naturally — this will appear on the user's HUD overlay.`;
 }
