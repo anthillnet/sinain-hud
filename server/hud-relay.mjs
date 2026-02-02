@@ -106,6 +106,7 @@ const escalationStats = {
   totalEscalations: 0,
   totalResponses: 0,
   totalErrors: 0,
+  totalNoReply: 0,
   lastEscalationTs: 0,
   lastResponseTs: 0,
 };
@@ -115,6 +116,7 @@ let openclawRpcId = 1;
 const openclawPending = new Map();
 let openclawReconnectTimer = null;
 let lastEscalatedDigest = '';
+let firstEscalationStructureDumped = false;
 
 function env(key, fallback) {
   return process.env[key] || fallback;
@@ -715,8 +717,9 @@ async function _doEscalate(message, idemKey) {
         const p = result.payload;
         console.log(`[openclaw] escalated via WS agent RPC → runId=${p.runId}, status=${p.status}`);
 
-        // Log the full result structure on first success for remote diagnostics
-        if (escalationStats.totalResponses === 0 && escalationStats.totalErrors === 0) {
+        // Dump full structure once (ever) for remote diagnostics
+        if (!firstEscalationStructureDumped) {
+          firstEscalationStructureDumped = true;
           const structDump = JSON.stringify(p, null, 2).slice(0, 800);
           const dbgMsg = { id: nextId++, text: `[🤖 dbg] first RPC result structure:\n${structDump}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
           messages.push(dbgMsg);
@@ -731,21 +734,15 @@ async function _doEscalate(message, idemKey) {
           if (output) {
             pushAgentResponse(output);
           } else {
+            // Payloads exist but all text empty (unexpected)
+            escalationStats.totalNoReply++;
             const sampleKeys = payloads.map(pl => Object.keys(pl)).slice(0, 3);
-            const dbgMsg = { id: nextId++, text: `[🤖 dbg] empty text in ${payloads.length} payloads, keys: ${JSON.stringify(sampleKeys)}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
-            messages.push(dbgMsg);
-            if (messages.length > 100) messages.splice(0, messages.length - 100);
-            feedVersion++;
-            console.log('[openclaw] agent returned empty text in payloads');
+            console.log(`[openclaw] empty text in ${payloads.length} payloads, keys: ${JSON.stringify(sampleKeys)}`);
           }
         } else {
-          const resultKeys = Object.keys(p.result || {});
-          const topKeys = Object.keys(p);
-          const dbgMsg = { id: nextId++, text: `[🤖 dbg] no payloads — result keys: ${JSON.stringify(resultKeys)}, top keys: ${JSON.stringify(topKeys)}`, priority: 'low', ts: Date.now(), source: 'openclaw' };
-          messages.push(dbgMsg);
-          if (messages.length > 100) messages.splice(0, messages.length - 100);
-          feedVersion++;
-          console.log(`[openclaw] agent result has no payloads. Keys: ${JSON.stringify(resultKeys)}`);
+          // Empty payloads = agent said NO_REPLY (expected for non-actionable context)
+          escalationStats.totalNoReply++;
+          console.log(`[openclaw] agent returned no payloads (NO_REPLY)`);
         }
       } else if (!result.ok) {
         const errDetail = JSON.stringify(result.error || result.payload);
@@ -1237,6 +1234,7 @@ const server = http.createServer(async (req, res) => {
         totalEscalations: escalationStats.totalEscalations,
         totalResponses: escalationStats.totalResponses,
         totalErrors: escalationStats.totalErrors,
+        totalNoReply: escalationStats.totalNoReply,
         lastEscalationTs: escalationStats.lastEscalationTs || null,
         lastResponseTs: escalationStats.lastResponseTs || null,
       },
