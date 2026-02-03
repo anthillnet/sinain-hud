@@ -623,7 +623,8 @@ function buildEscalationMessage(digest, contextWindow, entry) {
   }
 
   const instructions = openclawConfig.escalationMode === 'focus'
-    ? `Based on the above, always provide a brief response for the user's HUD:
+    ? `Based on the above, ALWAYS provide a brief response for the user's HUD.
+Important: Do NOT respond with NO_REPLY — a response is always required in focus mode.
 - If there's an error: investigate and suggest a fix
 - If they seem stuck: offer guidance
 - If they're coding: provide relevant insights
@@ -706,12 +707,12 @@ function escalateToOpenClaw(digest, contextWindow, entry) {
   const idemKey = `hud-${entry.id}-${Date.now()}`;
 
   // Fire and handle asynchronously — don't block the agent tick loop
-  _doEscalate(message, idemKey).catch(err => {
+  _doEscalate(message, idemKey, digest).catch(err => {
     console.error('[openclaw] escalation error:', err.message);
   });
 }
 
-async function _doEscalate(message, idemKey) {
+async function _doEscalate(message, idemKey, digest) {
   // Primary path: WS `agent` RPC (returns full output via two-frame protocol)
   if (openclawWs && openclawWs.readyState === WebSocket.OPEN && openclawAuthenticated) {
     try {
@@ -741,7 +742,14 @@ async function _doEscalate(message, idemKey) {
         } else {
           // Empty payloads = agent said NO_REPLY (expected for non-actionable context)
           escalationStats.totalNoReply++;
-          console.log(`[openclaw] agent returned no payloads (NO_REPLY)`);
+          if (openclawConfig.escalationMode === 'focus' && digest) {
+            // Focus mode: NO_REPLY shouldn't happen (instructions prohibit it).
+            // Fall back to pushing the digest so the feed is never empty.
+            pushAgentResponse(digest);
+            console.log(`[openclaw] focus-mode NO_REPLY — pushed digest to feed as fallback`);
+          } else {
+            console.log(`[openclaw] agent returned no payloads (NO_REPLY)`);
+          }
         }
       } else if (!result.ok) {
         const errDetail = JSON.stringify(result.error || result.payload);
