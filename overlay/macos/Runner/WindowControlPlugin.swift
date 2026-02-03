@@ -62,6 +62,22 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.orderFront(nil)
             result(nil)
 
+        case "setPosition":
+            let top = args?["top"] as? Bool ?? false
+            let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+            let windowWidth: CGFloat = 640
+            let windowHeight: CGFloat = 440
+            let margin: CGFloat = 16
+            let windowX = screenFrame.maxX - windowWidth - margin
+            let windowY = top
+                ? screenFrame.maxY - windowHeight - margin
+                : screenFrame.minY + margin
+            window.setFrame(
+                NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight),
+                display: true
+            )
+            result(nil)
+
         default:
             result(FlutterMethodNotImplemented)
         }

@@ -8,6 +8,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyActiveTab = 'active_tab';
   static const _keyClickThrough = 'click_through';
   static const _keyPrivacyMode = 'privacy_mode';
+  static const _keyTopPosition = 'top_position';
   static const _keyWsUrl = 'ws_url';
 
   late SharedPreferences _prefs;
@@ -22,6 +23,7 @@ class SettingsService extends ChangeNotifier {
       activeTab: _loadActiveTab(),
       clickThrough: _prefs.getBool(_keyClickThrough) ?? true,
       privacyMode: _prefs.getBool(_keyPrivacyMode) ?? true,
+      topPosition: _prefs.getBool(_keyTopPosition) ?? false,
       wsUrl: _prefs.getString(_keyWsUrl) ?? 'ws://localhost:9500',
     );
     notifyListeners();
@@ -77,6 +79,16 @@ class SettingsService extends ChangeNotifier {
     _settings.privacyMode = value;
     await _prefs.setBool(_keyPrivacyMode, value);
     notifyListeners();
+  }
+
+  Future<void> setTopPosition(bool value) async {
+    _settings.topPosition = value;
+    await _prefs.setBool(_keyTopPosition, value);
+    notifyListeners();
+  }
+
+  Future<void> toggleTopPosition() async {
+    await setTopPosition(!_settings.topPosition);
   }
 
   Future<void> setWsUrl(String url) async {

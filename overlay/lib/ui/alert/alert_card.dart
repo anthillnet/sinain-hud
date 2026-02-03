@@ -94,7 +94,7 @@ class _AlertCardState extends State<AlertCard> with SingleTickerProviderStateMix
             return Container(
               margin: const EdgeInsets.all(16),
               padding: const EdgeInsets.all(20),
-              constraints: const BoxConstraints(maxWidth: 280),
+              constraints: const BoxConstraints(maxWidth: 560),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(4),

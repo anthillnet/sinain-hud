@@ -52,6 +52,14 @@ class WindowService {
     }
   }
 
+  Future<void> setPosition({required bool top}) async {
+    try {
+      await _channel.invokeMethod('setPosition', {'top': top});
+    } catch (e) {
+      _log('setPosition failed: $e');
+    }
+  }
+
   void _log(String msg) {
     // ignore: avoid_print
     print('[WindowService] $msg');

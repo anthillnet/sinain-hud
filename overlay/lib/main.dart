@@ -23,6 +23,7 @@ void main() async {
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
   await windowService.setClickThrough(true);
+  await windowService.setPosition(top: settingsService.settings.topPosition);
 
   // Listen for hotkey events from native side
   const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
@@ -62,6 +63,9 @@ void main() async {
         wsService.toggleScreenFeed();
       case 'onCycleTab':
         settingsService.cycleTab();
+      case 'onTogglePosition':
+        final top = call.arguments as bool;
+        await settingsService.setTopPosition(top);
     }
   });
 

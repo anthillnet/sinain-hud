@@ -8,6 +8,7 @@ class AppDelegate: FlutterAppDelegate {
     // Track state for hotkey toggles
     private var isVisible = true
     private var isClickThrough = true
+    private var isTopPosition = false
     private var currentModeIndex = 0
     private let modeNames = ["feed", "alert", "minimal", "hidden"]
 
@@ -71,10 +72,10 @@ class AppDelegate: FlutterAppDelegate {
             window.sharingType = .none
         }
 
-        // Position: 320x220 at bottom-right corner
+        // Position: 640x440 at bottom-right corner
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        let windowWidth: CGFloat = 320
-        let windowHeight: CGFloat = 220
+        let windowWidth: CGFloat = 640
+        let windowHeight: CGFloat = 440
         let margin: CGFloat = 16
 
         let windowX = screenFrame.maxX - windowWidth - margin
@@ -143,6 +144,8 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
         // ID 12: Cmd+Shift+E → cycle HUD tab (Stream / Agent)
         registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 13: Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
+        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -237,6 +240,22 @@ class AppDelegate: FlutterAppDelegate {
 
         case 12: // Cmd+Shift+E → cycle HUD tab (Stream / Agent)
             hotkeyChannel?.invokeMethod("onCycleTab", arguments: nil)
+
+        case 13: // Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
+            isTopPosition.toggle()
+            let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+            let windowWidth: CGFloat = 640
+            let windowHeight: CGFloat = 440
+            let margin: CGFloat = 16
+            let windowX = screenFrame.maxX - windowWidth - margin
+            let windowY = isTopPosition
+                ? screenFrame.maxY - windowHeight - margin
+                : screenFrame.minY + margin
+            window.setFrame(
+                NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight),
+                display: true
+            )
+            hotkeyChannel?.invokeMethod("onTogglePosition", arguments: isTopPosition)
 
         default:
             break

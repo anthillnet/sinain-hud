@@ -7,6 +7,7 @@ class HudSettings {
   HudTab activeTab;
   bool clickThrough;
   bool privacyMode;
+  bool topPosition;
   String wsUrl;
 
   HudSettings({
@@ -14,6 +15,7 @@ class HudSettings {
     this.activeTab = HudTab.stream,
     this.clickThrough = true,
     this.privacyMode = true,
+    this.topPosition = false,
     this.wsUrl = 'ws://localhost:9500',
   });
 
@@ -34,6 +36,7 @@ class HudSettings {
     HudTab? activeTab,
     bool? clickThrough,
     bool? privacyMode,
+    bool? topPosition,
     String? wsUrl,
   }) {
     return HudSettings(
@@ -41,6 +44,7 @@ class HudSettings {
       activeTab: activeTab ?? this.activeTab,
       clickThrough: clickThrough ?? this.clickThrough,
       privacyMode: privacyMode ?? this.privacyMode,
+      topPosition: topPosition ?? this.topPosition,
       wsUrl: wsUrl ?? this.wsUrl,
     );
   }

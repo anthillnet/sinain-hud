@@ -45,7 +45,7 @@ ${audioLines || "(silence)"}
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation.
 Your entire response must be parseable by JSON.parse().
 
-{"hud":"<max 15 words: what user is doing NOW>","digest":"<3-5 sentences: detailed activity description>"}
+{"hud":"<max 30 words: what user is doing NOW>","digest":"<3-5 sentences: detailed activity description>"}
 
 Rules:
 - "hud" is for a minimal overlay display. Example: "Editing hud-relay.mjs in IDEA"
@@ -150,7 +150,7 @@ async function callModel(
       // Final fallback: use raw text
       log(TAG, `JSON parse failed (model=${model}), raw: "${raw.slice(0, 120)}"`);
       return {
-        hud: raw.slice(0, 80) || "\u2014",
+        hud: raw.slice(0, 160) || "\u2014",
         digest: raw || "\u2014",
         latencyMs,
         tokensIn: data.usage?.prompt_tokens || 0,
