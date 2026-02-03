@@ -13,7 +13,7 @@ from .gate import SenseEvent
 class SenseSender:
     """POSTs sense events to the relay server."""
 
-    def __init__(self, url: str = "http://54.228.25.196:18791",
+    def __init__(self, url: str = "http://localhost:9500",
                  max_image_kb: int = 500, send_thumbnails: bool = True):
         self.url = url.rstrip("/")
         self.max_image_kb = max_image_kb

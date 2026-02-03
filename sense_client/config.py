@@ -32,7 +32,7 @@ DEFAULTS = {
         "contextCooldownMs": 10000,
     },
     "relay": {
-        "url": "http://54.228.25.196:18791",
+        "url": "http://localhost:9500",
         "sendThumbnails": True,
         "maxImageKB": 500,
     },

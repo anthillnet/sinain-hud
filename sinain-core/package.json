@@ -1,0 +1,22 @@
+{
+  "name": "sinain-core",
+  "version": "1.0.0",
+  "description": "Unified HUD-sense-audio-bridge-relay — replaces relay + bridge with a single process",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "eval": "tsx eval/harness.ts --scenarios eval/scenarios/ --runs 3 --report eval/reports/",
+    "eval:quick": "tsx eval/harness.ts --scenarios eval/scenarios/ --runs 1 --fast --report /dev/stdout"
+  },
+  "dependencies": {
+    "@aws-sdk/client-transcribe-streaming": "^3.980.0",
+    "@types/node": "^22.19.7",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.0"
+  }
+}

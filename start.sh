@@ -1,7 +1,11 @@
-I#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # ── SinainHUD — Launch All Services ──────────────────────────────────────────
+# After the sinain-core redesign, only 3 processes:
+#   1. sinain-core (Node.js) — HTTP + WS on :9500
+#   2. sense_client (Python) — optional
+#   3. overlay (Flutter) — optional
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/sinain-pids.txt"
@@ -57,12 +61,13 @@ kill_stale() {
     killed=true
   fi
 
-  # Kill previous bridge tsx watch / node child processes
+  # Kill previous sinain-core / bridge / relay processes
+  if pkill -f "tsx.*src/index.ts" 2>/dev/null; then
+    killed=true
+  fi
   if pkill -f "tsx watch src/index.ts" 2>/dev/null; then
     killed=true
   fi
-
-  # Kill previous relay
   if pkill -f "node.*hud-relay.mjs" 2>/dev/null; then
     killed=true
   fi
@@ -76,13 +81,8 @@ kill_stale() {
     killed=true
   fi
 
-  # Kill anything on our ports
+  # Kill anything on our port (single port now)
   local pid
-  pid=$(lsof -i :18791 -sTCP:LISTEN -t 2>/dev/null || true)
-  if [ -n "$pid" ]; then
-    kill "$pid" 2>/dev/null || true
-    killed=true
-  fi
   pid=$(lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null || true)
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
@@ -102,11 +102,8 @@ kill_stale() {
 
   if $killed; then
     sleep 2
-    # Force kill anything that didn't exit gracefully
     pkill -9 -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
-    pkill -9 -f "tsx watch src/index.ts" 2>/dev/null || true
-    pkill -9 -f "node.*hud-relay.mjs" 2>/dev/null || true
-    lsof -i :18791 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+    pkill -9 -f "tsx.*src/index.ts" 2>/dev/null || true
     lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
     sleep 1
     warn "killed stale processes from previous run"
@@ -121,7 +118,6 @@ cleanup() {
   echo ""
   log "Shutting down services..."
 
-  # Kill the overlay app binary directly (flutter run only kills its wrapper)
   pkill -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
 
   if [ ${#PIDS[@]} -gt 0 ]; then
@@ -138,12 +134,9 @@ cleanup() {
     done
   fi
 
-  # Final sweep — kill anything still on our ports or by name
-  lsof -i :18791 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
   lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
   pkill -f "python3 -m sense_client" 2>/dev/null || true
-  pkill -f "tsx watch src/index.ts" 2>/dev/null || true
-  pkill -f "node.*hud-relay.mjs" 2>/dev/null || true
+  pkill -f "tsx.*src/index.ts" 2>/dev/null || true
 
   rm -f "$PID_FILE"
   log "All services stopped."
@@ -173,84 +166,46 @@ else
   SKIP_OVERLAY=true
 fi
 
-# Check bridge/node_modules
-if [ ! -d "$SCRIPT_DIR/bridge/node_modules" ]; then
-  warn "bridge/node_modules missing"
-  log "Running npm install in bridge/..."
-  (cd "$SCRIPT_DIR/bridge" && npm install)
-  ok "bridge dependencies installed"
+# Check sinain-core/node_modules
+if [ ! -d "$SCRIPT_DIR/sinain-core/node_modules" ]; then
+  warn "sinain-core/node_modules missing"
+  log "Running npm install in sinain-core/..."
+  (cd "$SCRIPT_DIR/sinain-core" && npm install)
+  ok "sinain-core dependencies installed"
 else
-  ok "bridge/node_modules present"
+  ok "sinain-core/node_modules present"
 fi
 
-# Check bridge/.env
-if [ ! -f "$SCRIPT_DIR/bridge/.env" ]; then
-  warn "bridge/.env not found — bridge may use defaults"
-else
-  ok "bridge/.env present"
-fi
-
-# Check ports (after kill_stale, these should be free)
-if lsof -i :18791 -sTCP:LISTEN >/dev/null 2>&1; then
-  fail "Port 18791 still in use after cleanup"
-fi
-ok "port 18791 free"
-
+# Check port
 if lsof -i :9500 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Port 9500 still in use after cleanup"
 fi
 ok "port 9500 free"
 
-# Ensure sense_client control file is enabled
-if [ -f /tmp/sinain-sense-control.json ]; then
-  echo '{"enabled":true}' > /tmp/sinain-sense-control.json
-fi
-
 echo ""
 
-# ── 2. Start hud-relay ──────────────────────────────────────────────────────
-log "Starting hud-relay..."
-node "$SCRIPT_DIR/server/hud-relay.mjs" 2>&1 | sed -u "s/^/$(printf "${CYAN}[relay]${RESET}   ")/" &
-RELAY_PID=$!
-PIDS+=("$RELAY_PID")
+# ── 2. Start sinain-core ──────────────────────────────────────────────────
+log "Starting sinain-core..."
+(cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | sed -u "s/^/$(printf "${CYAN}[core]${RESET}    ")/" &
+CORE_PID=$!
+PIDS+=("$CORE_PID")
 
-# ── 3. Health-check relay ────────────────────────────────────────────────────
-RELAY_OK=false
-for i in $(seq 1 10); do
-  if curl -sf http://localhost:18791/health >/dev/null 2>&1; then
-    RELAY_OK=true
-    break
-  fi
-  sleep 1
-done
-if $RELAY_OK; then
-  ok "hud-relay healthy on :18791"
-else
-  fail "hud-relay did not become healthy after 10s"
-fi
-
-# ── 4. Start bridge ─────────────────────────────────────────────────────────
-log "Starting bridge..."
-(cd "$SCRIPT_DIR/bridge" && npm run dev 2>&1) | sed -u "s/^/$(printf "${GREEN}[bridge]${RESET}  ")/" &
-BRIDGE_PID=$!
-PIDS+=("$BRIDGE_PID")
-
-# ── 5. Health-check bridge ──────────────────────────────────────────────────
-BRIDGE_OK=false
+# ── 3. Health-check sinain-core ────────────────────────────────────────────
+CORE_OK=false
 for i in $(seq 1 15); do
-  if nc -z localhost 9500 2>/dev/null; then
-    BRIDGE_OK=true
+  if curl -sf http://localhost:9500/health >/dev/null 2>&1; then
+    CORE_OK=true
     break
   fi
   sleep 1
 done
-if $BRIDGE_OK; then
-  ok "bridge ready on :9500"
+if $CORE_OK; then
+  ok "sinain-core healthy on :9500"
 else
-  fail "bridge did not start on :9500 after 15s"
+  fail "sinain-core did not become healthy after 15s"
 fi
 
-# ── 6. Start sense_client ───────────────────────────────────────────────────
+# ── 4. Start sense_client ───────────────────────────────────────────────────
 SENSE_PID=""
 if $SKIP_SENSE; then
   warn "sense_client skipped"
@@ -268,7 +223,7 @@ else
   fi
 fi
 
-# ── 7. Start overlay ────────────────────────────────────────────────────────
+# ── 5. Start overlay ────────────────────────────────────────────────────────
 OVERLAY_PID=""
 if $SKIP_OVERLAY; then
   warn "overlay skipped"
@@ -286,23 +241,19 @@ else
   fi
 fi
 
-# ── 8. Write PID file ───────────────────────────────────────────────────────
+# ── 6. Write PID file ───────────────────────────────────────────────────────
 {
-  echo "relay=$RELAY_PID"
-  echo "bridge=$BRIDGE_PID"
+  echo "core=$CORE_PID"
   [ -n "$SENSE_PID" ]   && echo "sense=$SENSE_PID"
   [ -n "$OVERLAY_PID" ] && echo "overlay=$OVERLAY_PID"
 } > "$PID_FILE"
 
-# ── 9. Status banner ────────────────────────────────────────────────────────
+# ── 7. Status banner ────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}── SinainHUD ──────────────────────────${RESET}"
+echo -e "${BOLD}── SinainHUD (sinain-core) ────────────${RESET}"
 
-# relay
-echo -e "  ${CYAN}relay${RESET}    :18791  ${GREEN}✓${RESET}  (healthy)"
-
-# bridge
-echo -e "  ${GREEN}bridge${RESET}   :9500   ${GREEN}✓${RESET}  (ws ready)"
+# core
+echo -e "  ${CYAN}core${RESET}     :9500   ${GREEN}✓${RESET}  (http+ws)"
 
 # sense
 if [ -n "$SENSE_PID" ]; then
@@ -327,5 +278,5 @@ echo -e "  Press ${BOLD}Ctrl+C${RESET} to stop all services"
 echo -e "${BOLD}───────────────────────────────────────${RESET}"
 echo ""
 
-# ── 10. Wait for all children ────────────────────────────────────────────────
+# ── 8. Wait for all children ────────────────────────────────────────────────
 wait
