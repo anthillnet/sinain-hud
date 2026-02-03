@@ -16,14 +16,14 @@ Important: Do NOT respond with NO_REPLY \u2014 a response is always required in 
 - If they seem stuck: offer guidance
 - If they're coding: provide relevant insights
 - Otherwise: briefly note what the user is doing and any observations
-- Keep your response concise (1-3 sentences)`;
+- Keep your response concise (2-5 sentences)`;
   }
 
   return `Based on the above, proactively help the user:
 - If there's an error: investigate and suggest a fix
 - If they seem stuck: offer guidance
 - If they're coding: provide relevant insights
-- Keep your response concise and actionable (1-3 sentences)`;
+- Keep your response concise and actionable (2-5 sentences)`;
 }
 
 /**
