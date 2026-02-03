@@ -554,13 +554,14 @@ function shouldEscalate(digest, hud, contextWindow) {
   // Don't escalate idle
   if (hud === 'Idle' || hud === '\u2014') return false;
 
-  // Don't re-escalate identical digests
-  if (digest === lastEscalatedDigest) return false;
-
   if (openclawConfig.escalationMode === 'focus') {
-    // Focus mode: escalate every meaningful change
+    // Focus mode: escalate every cooldown-spaced tick even if digest unchanged.
+    // OpenClaw will NO_REPLY when it has nothing to add.
     return true;
   }
+
+  // Selective mode: deduplicate identical digests
+  if (digest === lastEscalatedDigest) return false;
 
   // Selective mode: score-based escalation
   const digestLower = digest.toLowerCase();
@@ -955,8 +956,9 @@ async function agentTick() {
 
     console.log(`[agent] #${entry.id} (${latencyMs}ms, ${tokensIn}+${tokensOut}tok, model=${usedModel}) hud="${hud}"`);
 
-    // Auto-push HUD line to feed (suppress "—" and "Idle")
-    if (agentConfig.pushToFeed && hud !== '—' && hud !== 'Idle' && hud !== lastPushedHud) {
+    // Auto-push HUD line to feed (suppress "—", "Idle", and all in focus mode)
+    if (agentConfig.pushToFeed && openclawConfig.escalationMode !== 'focus'
+        && hud !== '—' && hud !== 'Idle' && hud !== lastPushedHud) {
       const msg = {
         id: nextId++,
         text: `[🧠] ${hud}`,
