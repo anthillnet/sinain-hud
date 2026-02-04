@@ -259,4 +259,5 @@ export interface CoreConfig {
   situationMdPath: string;
   traceEnabled: boolean;
   traceDir: string;
+  actionsOutputDir: string;
 }

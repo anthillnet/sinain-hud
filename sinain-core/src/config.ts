@@ -135,5 +135,6 @@ export function loadConfig(): CoreConfig {
     situationMdPath,
     traceEnabled: boolEnv("TRACE_ENABLED", true),
     traceDir: resolvePath(env("TRACE_DIR", "~/.sinain-core/traces")),
+    actionsOutputDir: resolvePath(env("ACTIONS_OUTPUT_DIR", "~/.sinain-core/actions")),
   };
 }

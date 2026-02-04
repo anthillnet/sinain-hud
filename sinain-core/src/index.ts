@@ -10,6 +10,7 @@ import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
+import { ActionRunner } from "./actions/runner.js";
 import { createAppServer } from "./server.js";
 import type { SenseEvent, EscalationMode } from "./types.js";
 import { log, warn, error } from "./log.js";
@@ -29,6 +30,7 @@ async function main() {
   log(TAG, `openclaw: ws=${config.openclawConfig.gatewayWsUrl} http=${config.openclawConfig.hookUrl}`);
   log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);
+  log(TAG, `actions: outputDir=${config.actionsOutputDir}`);
 
   // ── Initialize core buffers (single source of truth) ──
   const feedBuffer = new FeedBuffer(100);
@@ -49,6 +51,12 @@ async function main() {
     openclawConfig: config.openclawConfig,
   });
 
+  // ── Initialize action runner ──
+  const actionRunner = new ActionRunner({
+    wsHandler,
+    outputDir: config.actionsOutputDir,
+  });
+
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
     feedBuffer,
@@ -57,6 +65,7 @@ async function main() {
     escalationMode: config.escalationConfig.mode,
     situationMdPath: config.situationMdPath,
     onAnalysis: (entry, contextWindow) => {
+      actionRunner.onAgentTick(entry, contextWindow);
       escalator.onAgentAnalysis(entry, contextWindow);
     },
     onHudUpdate: (text) => {
@@ -103,10 +112,11 @@ async function main() {
     wsHandler.updateState({ audio: "muted" });
   });
 
-  // Wire: transcripts → feed buffer + overlay + agent trigger
+  // Wire: transcripts → feed buffer + overlay + agent trigger + actions
   transcription.on("transcript", (result) => {
-    feedBuffer.push(`[\ud83d\udcdd] ${result.text}`, "normal", "audio", "stream");
+    const item = feedBuffer.push(`[\ud83d\udcdd] ${result.text}`, "normal", "audio", "stream");
     wsHandler.broadcast(`[\ud83d\udcdd] ${result.text}`, "normal");
+    actionRunner.onFeedItem(item);
     agentLoop.onNewContext(); // Trigger debounced analysis
   });
 
@@ -123,6 +133,9 @@ async function main() {
     onSenseEvent: (event: SenseEvent) => {
       screenActive = true;
       wsHandler.updateState({ screen: "active" });
+
+      // Route to actions
+      actionRunner.onSenseEvent(event);
 
       // Broadcast app/window changes to overlay
       if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
@@ -180,6 +193,7 @@ async function main() {
     wsHandler,
     audioPipeline,
     config,
+    actionRunner,
     onUserMessage: async (text) => {
       await escalator.sendDirect(text);
     },
@@ -221,6 +235,7 @@ async function main() {
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
+    await actionRunner.destroy();
     agentLoop.stop();
     audioPipeline.stop();
     transcription.destroy();

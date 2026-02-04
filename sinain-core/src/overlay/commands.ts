@@ -2,6 +2,7 @@ import type { InboundMessage } from "../types.js";
 import type { WsHandler } from "./ws-handler.js";
 import type { AudioPipeline } from "../audio/pipeline.js";
 import type { CoreConfig } from "../types.js";
+import type { ActionRunner } from "../actions/runner.js";
 import { WebSocket } from "ws";
 import { log } from "../log.js";
 
@@ -14,6 +15,7 @@ export interface CommandDeps {
   onUserMessage: (text: string) => Promise<void>;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
+  actionRunner?: ActionRunner;
 }
 
 /**
@@ -26,6 +28,11 @@ export function setupCommands(deps: CommandDeps): void {
   wsHandler.onIncoming(async (msg: InboundMessage, _client: WebSocket) => {
     switch (msg.type) {
       case "message": {
+        // Try slash commands first (actions framework)
+        if (deps.actionRunner?.handleSlashCommand(msg.text)) {
+          log(TAG, `handled action command: ${msg.text}`);
+          break;
+        }
         log(TAG, `routing user message to OpenClaw`);
         try {
           await deps.onUserMessage(msg.text);
