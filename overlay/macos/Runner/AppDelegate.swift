@@ -72,17 +72,13 @@ class AppDelegate: FlutterAppDelegate {
             window.sharingType = .none
         }
 
-        // Position: 640x440 at bottom-right corner
-        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        let windowWidth: CGFloat = 640
-        let windowHeight: CGFloat = 440
-        let margin: CGFloat = 16
-
-        let windowX = screenFrame.maxX - windowWidth - margin
-        let windowY = screenFrame.minY + margin  // Bottom of visible area
+        // Position at bottom-right corner
+        let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+        let windowX = screenFrame.maxX - HUDConfig.windowWidth - HUDConfig.margin
+        let windowY = screenFrame.minY + HUDConfig.margin
 
         window.setFrame(
-            NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight),
+            NSRect(x: windowX, y: windowY, width: HUDConfig.windowWidth, height: HUDConfig.windowHeight),
             display: true
         )
 
@@ -243,16 +239,13 @@ class AppDelegate: FlutterAppDelegate {
 
         case 13: // Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
             isTopPosition.toggle()
-            let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-            let windowWidth: CGFloat = 640
-            let windowHeight: CGFloat = 440
-            let margin: CGFloat = 16
-            let windowX = screenFrame.maxX - windowWidth - margin
+            let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            let windowX = screenFrame.maxX - HUDConfig.windowWidth - HUDConfig.margin
             let windowY = isTopPosition
-                ? screenFrame.maxY - windowHeight - margin
-                : screenFrame.minY + margin
+                ? screenFrame.maxY - HUDConfig.windowHeight - HUDConfig.margin
+                : screenFrame.minY + HUDConfig.margin
             window.setFrame(
-                NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight),
+                NSRect(x: windowX, y: windowY, width: HUDConfig.windowWidth, height: HUDConfig.windowHeight),
                 display: true
             )
             hotkeyChannel?.invokeMethod("onTogglePosition", arguments: isTopPosition)
