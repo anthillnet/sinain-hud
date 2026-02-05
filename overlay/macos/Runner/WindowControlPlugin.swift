@@ -64,16 +64,13 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         case "setPosition":
             let top = args?["top"] as? Bool ?? false
-            let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-            let windowWidth: CGFloat = 640
-            let windowHeight: CGFloat = 440
-            let margin: CGFloat = 16
-            let windowX = screenFrame.maxX - windowWidth - margin
+            let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            let windowX = screenFrame.maxX - HUDConfig.windowWidth - HUDConfig.margin
             let windowY = top
-                ? screenFrame.maxY - windowHeight - margin
-                : screenFrame.minY + margin
+                ? screenFrame.maxY - HUDConfig.windowHeight - HUDConfig.margin
+                : screenFrame.minY + HUDConfig.margin
             window.setFrame(
-                NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight),
+                NSRect(x: windowX, y: windowY, width: HUDConfig.windowWidth, height: HUDConfig.windowHeight),
                 display: true
             )
             result(nil)
