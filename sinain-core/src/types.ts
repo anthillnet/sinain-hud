@@ -117,6 +117,28 @@ export interface TranscriptResult {
   ts: number;
 }
 
+// ── Recorder types ──
+
+export interface RecordCommand {
+  command: "start" | "stop";
+  label?: string;
+}
+
+export interface RecorderStatus {
+  recording: boolean;
+  label: string | null;
+  startedAt: number | null;
+  segments: number;
+  durationMs: number;
+}
+
+export interface StopResult {
+  title: string;
+  transcript: string;
+  segments: number;
+  durationS: number;
+}
+
 // ── Agent types ──
 
 export type EscalationMode = "off" | "selective" | "focus" | "rich";
@@ -139,6 +161,8 @@ export interface AgentConfig {
 export interface AgentResult {
   hud: string;
   digest: string;
+  record?: RecordCommand;
+  task?: string;
   latencyMs: number;
   tokensIn: number;
   tokensOut: number;

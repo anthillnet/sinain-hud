@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-from .capture import ScreenCapture
+from .capture import ScreenCapture, create_capture
 from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
 from .ocr import OCRResult, create_ocr
@@ -40,7 +40,7 @@ def main():
 
     config = load_config(args.config)
 
-    capture = ScreenCapture(
+    capture = create_capture(
         mode=config["capture"]["mode"],
         target=config["capture"]["target"],
         fps=config["capture"]["fps"],

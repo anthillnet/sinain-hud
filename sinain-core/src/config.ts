@@ -116,7 +116,7 @@ export function loadConfig(): CoreConfig {
     gatewayToken: env("OPENCLAW_WS_TOKEN", env("OPENCLAW_GATEWAY_TOKEN", "")),
     hookUrl: env("OPENCLAW_HTTP_URL", env("OPENCLAW_HOOK_URL", "http://localhost:18789/hooks/agent")),
     hookToken: env("OPENCLAW_HTTP_TOKEN", env("OPENCLAW_HOOK_TOKEN", "")),
-    sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:main"),
+    sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:sinain"),
   };
 
   const situationDir = env("OPENCLAW_WORKSPACE_DIR", "~/.openclaw/workspace");

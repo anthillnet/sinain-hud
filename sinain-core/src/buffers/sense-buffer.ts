@@ -11,7 +11,7 @@ export class SenseBuffer {
   private _version = 0;
   private maxSize: number;
 
-  constructor(maxSize = 30) {
+  constructor(maxSize = 60) {
     this.maxSize = maxSize;
   }
 

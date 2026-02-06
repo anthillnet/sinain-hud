@@ -5,6 +5,7 @@ import { OpenClawClient } from "./openclaw-client.js";
 import { ContextManager } from "./context-manager.js";
 import { ContextRelay } from "./context-relay.js";
 import { AudioPipeline } from "./audio-pipeline.js";
+import { IpcAudioCapture } from "./ipc-audio-capture.js";
 import { TranscriptionService } from "./transcription.js";
 import { SensePoller } from "./sense-poller.js";
 import { log, warn, error } from "./log.js";
@@ -97,7 +98,9 @@ async function main() {
   });
 
   // ── Audio pipeline ──
-  const audioPipeline = new AudioPipeline(config.audioConfig);
+  const audioPipeline = (process.env.AUDIO_CAPTURE_MODE === "sox")
+    ? new AudioPipeline(config.audioConfig)
+    : new IpcAudioCapture();
   const transcription = new TranscriptionService(config.transcriptionConfig);
 
   // Wire: audio chunks → transcription

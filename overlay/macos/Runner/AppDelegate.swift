@@ -15,8 +15,26 @@ class AppDelegate: FlutterAppDelegate {
     // Flutter method channel for sending hotkey events to Dart
     private var hotkeyChannel: FlutterMethodChannel?
 
+    // ScreenCaptureKit engine (macOS 14+ only) — shared singleton
+    @available(macOS 14.0, *)
+    private var captureEngine: CaptureEngine { CaptureEngine.shared }
+
     override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
+    }
+
+    override func applicationWillTerminate(_ notification: Notification) {
+        // Clean shutdown: release SCStream so CoreMediaIO handles are freed immediately
+        if #available(macOS 14.0, *) {
+            captureEngine.stopCapture()
+        }
+        // Unregister all hotkeys
+        for ref in hotKeyRefs {
+            if let ref = ref {
+                UnregisterEventHotKey(ref)
+            }
+        }
+        hotKeyRefs.removeAll()
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,6 +42,12 @@ class AppDelegate: FlutterAppDelegate {
         let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
         let registrar = controller.registrar(forPlugin: "WindowControlPlugin")
         WindowControlPlugin.register(with: registrar)
+
+        // Register screen capture plugin (macOS 14+)
+        if #available(macOS 14.0, *) {
+            let scRegistrar = controller.registrar(forPlugin: "ScreenCapturePlugin")
+            ScreenCapturePlugin.register(with: scRegistrar)
+        }
 
         // Set up hotkey channel
         hotkeyChannel = FlutterMethodChannel(
@@ -210,10 +234,10 @@ class AppDelegate: FlutterAppDelegate {
         case 4: // Cmd+Shift+H → quit overlay
             hotkeyChannel?.invokeMethod("onQuit", arguments: nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                exit(0)
+                NSApp.terminate(nil)
             }
 
-        case 5: // Cmd+Shift+T → toggle audio capture
+        case 5: // Cmd+Shift+T → toggle audio capture (routed to bridge via Flutter→WebSocket)
             hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
 
         case 6: // Cmd+Shift+D → switch audio device
@@ -229,6 +253,13 @@ class AppDelegate: FlutterAppDelegate {
             hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
 
         case 10: // Cmd+Shift+S → toggle screen capture pipeline
+            if #available(macOS 14.0, *) {
+                if captureEngine.isCapturing {
+                    captureEngine.stopCapture()
+                } else {
+                    captureEngine.showPicker()
+                }
+            }
             hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
 
         case 11: // Cmd+Shift+V → toggle screen feed on HUD

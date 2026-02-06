@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
-import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness } from "../types.js";
+import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus } from "../types.js";
 import { buildContextWindow } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
@@ -21,6 +21,8 @@ export interface AgentLoopDeps {
   onHudUpdate: (text: string) => void;
   /** Optional: tracer to record spans. */
   onTraceStart?: (tickId: number) => TraceContext | null;
+  /** Optional: get current recorder status for prompt injection. */
+  getRecorderStatus?: () => RecorderStatus | null;
 }
 
 export interface TraceContext {
@@ -243,7 +245,8 @@ export class AgentLoop extends EventEmitter {
       traceCtx?.endSpan({ richness, screenEvents: contextWindow.screenCount, audioEntries: contextWindow.audioCount });
 
       traceCtx?.startSpan("llm-call");
-      const result = await analyzeContext(contextWindow, this.deps.agentConfig);
+      const recorderStatus = this.deps.getRecorderStatus?.() ?? null;
+      const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus);
       traceCtx?.endSpan({ model: result.model, tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs });
 
       const { hud, digest, latencyMs, tokensIn, tokensOut, model: usedModel, parsedOk } = result;

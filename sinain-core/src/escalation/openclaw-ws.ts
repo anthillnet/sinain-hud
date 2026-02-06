@@ -173,7 +173,8 @@ export class OpenClawWsClient extends EventEmitter {
     }
   }
 
-  private sendRpc(
+  /** Send a generic RPC call. Returns the response. */
+  sendRpc(
     method: string,
     params: Record<string, unknown>,
     timeoutMs = 90000,

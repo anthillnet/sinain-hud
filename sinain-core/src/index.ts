@@ -8,10 +8,11 @@ import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
+import { Recorder } from "./recorder.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
 import { createAppServer } from "./server.js";
-import type { SenseEvent, EscalationMode } from "./types.js";
+import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
 import { log, warn, error } from "./log.js";
 
 const TAG = "core";
@@ -41,6 +42,9 @@ async function main() {
   const tracer = config.traceEnabled ? new Tracer() : null;
   const traceStore = config.traceEnabled ? new TraceStore(config.traceDir) : null;
 
+  // ── Initialize recorder ──
+  const recorder = new Recorder();
+
   // ── Initialize escalation ──
   const escalator = new Escalator({
     feedBuffer,
@@ -56,7 +60,39 @@ async function main() {
     agentConfig: config.agentConfig,
     escalationMode: config.escalationConfig.mode,
     situationMdPath: config.situationMdPath,
+    getRecorderStatus: () => recorder.getStatus(),
     onAnalysis: (entry, contextWindow) => {
+      // Handle recorder commands
+      const stopResult = recorder.handleCommand(entry.record);
+
+      // Dispatch task via subagent spawn
+      if (entry.task || stopResult) {
+        let task: string;
+        let label: string | undefined;
+
+        if (stopResult && stopResult.segments > 0 && entry.task) {
+          // Recording stopped with explicit task instruction
+          task = `${entry.task}\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
+          label = stopResult.title;
+        } else if (stopResult && stopResult.segments > 0) {
+          // Recording stopped without explicit task — default to cleanup/summarize
+          task = `Clean up and summarize this recording transcript:\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
+          label = stopResult.title;
+        } else if (entry.task) {
+          // Standalone task without recording
+          task = entry.task;
+        } else {
+          task = "";
+        }
+
+        if (task) {
+          escalator.dispatchSpawnTask(task, label).catch(err => {
+            error(TAG, "spawn task dispatch error:", err);
+          });
+        }
+      }
+
+      // Escalation continues as normal
       escalator.onAgentAnalysis(entry, contextWindow);
     },
     onHudUpdate: (text) => {
@@ -103,10 +139,11 @@ async function main() {
     wsHandler.updateState({ audio: "muted" });
   });
 
-  // Wire: transcripts → feed buffer + overlay + agent trigger
+  // Wire: transcripts → feed buffer + overlay + agent trigger + recorder
   transcription.on("transcript", (result) => {
-    feedBuffer.push(`[\ud83d\udcdd] ${result.text}`, "normal", "audio", "stream");
+    const item = feedBuffer.push(`[\ud83d\udcdd] ${result.text}`, "normal", "audio", "stream");
     wsHandler.broadcast(`[\ud83d\udcdd] ${result.text}`, "normal");
+    recorder.onFeedItem(item); // Collect for recording if active
     agentLoop.onNewContext(); // Trigger debounced analysis
   });
 
@@ -123,6 +160,9 @@ async function main() {
     onSenseEvent: (event: SenseEvent) => {
       screenActive = true;
       wsHandler.updateState({ screen: "active" });
+
+      // Track app context for recorder
+      recorder.onSenseEvent(event);
 
       // Broadcast app/window changes to overlay
       if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
@@ -221,6 +261,7 @@ async function main() {
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
+    recorder.forceStop(); // Stop any active recording
     agentLoop.stop();
     audioPipeline.stop();
     transcription.destroy();

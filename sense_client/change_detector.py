@@ -42,10 +42,14 @@ class ChangeDetector:
         score, diff_map = structural_similarity(
             self.prev_frame, gray, full=True
         )
-        self.prev_frame = gray
 
         if score >= self.threshold:
             return None
+
+        # Keyframe update: only advance prev_frame when change IS detected.
+        # This lets diffs accumulate against the last accepted keyframe,
+        # which is essential at high FPS where consecutive frames differ by <1%.
+        self.prev_frame = gray
 
         # Convert diff map to binary mask
         diff_binary = ((1.0 - diff_map) * 255).astype(np.uint8)

@@ -1,14 +1,26 @@
-import type { AgentConfig, AgentResult, ContextWindow } from "../types.js";
+import type { AgentConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
 import { log, error } from "../log.js";
 
 const TAG = "agent";
 
 /**
+ * Build recorder status section for the prompt.
+ */
+function buildRecorderSection(status: RecorderStatus | null): string {
+  if (!status) return "";
+  if (!status.recording) return "\nRecorder: idle (not recording)";
+
+  const label = status.label ? ` "${status.label}"` : "";
+  const durationSec = Math.round(status.durationMs / 1000);
+  return `\nRecorder: RECORDING${label} (${durationSec}s, ${status.segments} segments)`;
+}
+
+/**
  * Build the LLM prompt from a context window.
  * Ported from relay's buildPrompt() — same prompt structure for consistency.
  */
-function buildPrompt(ctx: ContextWindow): string {
+function buildPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null): string {
   const now = Date.now();
   const screenLines = ctx.screen
     .map(e => {
@@ -30,11 +42,13 @@ function buildPrompt(ctx: ContextWindow): string {
     .map(a => normalizeAppName(a.app))
     .join(" \u2192 ");
 
+  const recorderSection = buildRecorderSection(recorderStatus);
+
   return `You are an AI monitoring a user's screen and audio in real-time.
-You produce TWO outputs as JSON.
+You produce outputs as JSON.
 
 Active app: ${normalizeAppName(ctx.currentApp)}
-App history: ${appSwitches || "(none)"}
+App history: ${appSwitches || "(none)"}${recorderSection}
 
 Screen (OCR text, newest first):
 ${screenLines || "(no screen data)"}
@@ -45,7 +59,29 @@ ${audioLines || "(silence)"}
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation.
 Your entire response must be parseable by JSON.parse().
 
-{"hud":"<max 30 words: what user is doing NOW>","digest":"<3-5 sentences: detailed activity description>"}
+{"hud":"...","digest":"...","record":{"command":"start"|"stop","label":"..."},"task":"..."}
+
+Output fields:
+- "hud" (required): max 30 words describing what user is doing NOW
+- "digest" (required): 3-5 sentences with detailed activity description
+- "record" (optional): control recording — {"command":"start","label":"Meeting name"} or {"command":"stop"}
+- "task" (optional): natural language instruction to spawn a background task
+
+When to use "record":
+- START when user begins a meeting, call, lecture, YouTube video, or important audio content
+- STOP when the content ends or user navigates away
+- Provide descriptive labels like "Team standup", "Client call", "YouTube: [video title from OCR]"
+- For YouTube/video content: extract video title from screen OCR for the label
+
+When to use "task":
+- User explicitly asks for research, lookup, or action
+- Something needs external search or processing that isn't a real-time response
+- Example: "Search for React 19 migration guide", "Find docs for this API"
+
+When to spawn "task" for video content:
+- If user watches a YouTube video for 2+ minutes AND no task has been spawned for this video yet, spawn: "Summarize YouTube video: [title or URL from OCR]"
+- ONLY spawn ONCE per video - do not repeat spawn for the same video in subsequent ticks
+- Extract video title or URL from screen OCR to include in the task
 
 Rules:
 - "hud" is for a minimal overlay display. Example: "Editing hud-relay.mjs in IDEA"
@@ -53,7 +89,29 @@ Rules:
 - If nothing is happening, hud="Idle" and digest explains what was last seen.
 - Include specific filenames, URLs, error messages, UI text from OCR in digest.
 - Do NOT suggest actions in digest — just describe the situation factually.
+- Only include "record" or "task" when genuinely appropriate — most responses won't have them.
 - CRITICAL: Output ONLY the JSON object, nothing else.`;
+}
+
+/**
+ * Parse record command from LLM response.
+ */
+function parseRecord(parsed: any): RecordCommand | undefined {
+  if (!parsed.record || typeof parsed.record !== "object") return undefined;
+  const cmd = parsed.record.command;
+  if (cmd !== "start" && cmd !== "stop") return undefined;
+  return {
+    command: cmd,
+    label: typeof parsed.record.label === "string" ? parsed.record.label : undefined,
+  };
+}
+
+/**
+ * Parse task from LLM response.
+ */
+function parseTask(parsed: any): string | undefined {
+  if (typeof parsed.task !== "string" || !parsed.task.trim()) return undefined;
+  return parsed.task.trim();
 }
 
 /**
@@ -63,8 +121,9 @@ Rules:
 export async function analyzeContext(
   contextWindow: ContextWindow,
   config: AgentConfig,
+  recorderStatus: RecorderStatus | null = null,
 ): Promise<AgentResult> {
-  const prompt = buildPrompt(contextWindow);
+  const prompt = buildPrompt(contextWindow, recorderStatus);
   const models = [config.model, ...config.fallbackModels];
   let lastError: Error | null = null;
 
@@ -121,6 +180,8 @@ async function callModel(
       return {
         hud: parsed.hud || "\u2014",
         digest: parsed.digest || "\u2014",
+        record: parseRecord(parsed),
+        task: parseTask(parsed),
         latencyMs,
         tokensIn: data.usage?.prompt_tokens || 0,
         tokensOut: data.usage?.completion_tokens || 0,
@@ -137,6 +198,8 @@ async function callModel(
             return {
               hud: parsed.hud,
               digest: parsed.digest || "\u2014",
+              record: parseRecord(parsed),
+              task: parseTask(parsed),
               latencyMs,
               tokensIn: data.usage?.prompt_tokens || 0,
               tokensOut: data.usage?.completion_tokens || 0,
