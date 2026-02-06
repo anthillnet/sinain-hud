@@ -8,10 +8,97 @@ function hasErrorPattern(text: string): boolean {
   return ERROR_PATTERN.test(text);
 }
 
-function getInstructions(mode: EscalationMode): string {
+// ── Coding Context Detection ──
+
+const CODE_EDITORS = [
+  "intellij", "idea", "webstorm", "pycharm", "phpstorm", "rider", "goland",
+  "vscode", "visual studio code", "cursor", "sublime", "atom", "vim", "nvim",
+  "emacs", "xcode", "android studio", "eclipse", "netbeans"
+];
+
+const CODE_PLATFORMS = [
+  "leetcode", "hackerrank", "codeforces", "codewars", "codechef",
+  "topcoder", "exercism", "codesignal", "codility", "interviewbit",
+  "algoexpert", "neetcode", "coderpad", "hackerearth", "kattis"
+];
+
+const CODE_SIGNALS = [
+  // OCR signals that suggest coding context
+  "function", "class ", "def ", "const ", "let ", "var ",
+  "import ", "from ", "require(", "export ", "interface ",
+  "public ", "private ", "return ", "if (", "for (", "while (",
+  "error:", "exception", "traceback", "compile", "runtime",
+  "test", "assert", "expect(", "describe(", "it(",
+  // Problem indicators
+  "input:", "output:", "example", "constraints:", "time limit",
+  "expected", "given", "return the", "find the", "implement"
+];
+
+export interface CodingContextResult {
+  coding: boolean;
+  needsSolution: boolean;
+}
+
+/**
+ * Detect if the user is in a coding context and whether they need a solution.
+ */
+export function isCodingContext(context: ContextWindow): CodingContextResult {
+  const app = context.currentApp.toLowerCase();
+  const recentOcr = context.screen.slice(0, 3).map(s => s.ocr.toLowerCase()).join(" ");
+
+  // In a code editor?
+  const inEditor = CODE_EDITORS.some(e => app.includes(e));
+
+  // On a coding platform?
+  const onPlatform = CODE_PLATFORMS.some(p => app.includes(p) || recentOcr.includes(p));
+
+  // Has code signals in OCR?
+  const codeSignalCount = CODE_SIGNALS.filter(s => recentOcr.includes(s)).length;
+  const hasCodeSignals = codeSignalCount >= 3;
+
+  // Problem indicators (suggests user needs a solution, not just coding)
+  const problemIndicators = ["input:", "output:", "example", "expected", "given", "constraints"];
+  const hasProblemSignals = problemIndicators.filter(p => recentOcr.includes(p)).length >= 2;
+
+  return {
+    coding: inEditor || onPlatform || hasCodeSignals,
+    needsSolution: onPlatform || hasProblemSignals  // Likely a challenge/problem
+  };
+}
+
+function getInstructions(mode: EscalationMode, context: ContextWindow): string {
+  const { coding, needsSolution } = isCodingContext(context);
+
+  if (needsSolution) {
+    // Coding challenge/problem - be very action-oriented
+    return `The user is working on a coding problem. Be PROACTIVE and SOLVE IT:
+
+1. Provide a solution approach and working code based on what you can see
+2. Include time/space complexity
+3. If the problem isn't fully visible, provide the best solution you can based on available context
+   - Make reasonable assumptions and state them briefly
+   - A partial solution is better than no solution
+
+Do NOT just describe what the user is doing - GIVE THEM THE ANSWER.
+Response should be actionable: working code with brief explanation.`;
+  }
+
+  if (coding) {
+    // General coding (IDE work, debugging) - offer assistance
+    return `The user is writing code. Be helpful and proactive:
+
+- If there's an error: investigate and suggest a fix with code
+- If they seem stuck: offer specific guidance or code snippets
+- If you see an opportunity to help: share relevant insights
+
+Keep responses focused and include code when helpful.
+(2-6 sentences + code if applicable)`;
+  }
+
+  // Non-coding context - existing behavior
   if (mode === "focus" || mode === "rich") {
     return `Based on the above, ALWAYS provide a brief response for the user's HUD.
-Important: Do NOT respond with NO_REPLY \u2014 a response is always required in focus mode.
+Important: Do NOT respond with NO_REPLY — a response is always required in focus mode.
 - If there's an error: investigate and suggest a fix
 - If they seem stuck: offer guidance
 - If they're coding: provide relevant insights
@@ -45,7 +132,7 @@ export function buildEscalationMessage(
   const sections: string[] = [];
 
   // Header with tick metadata
-  sections.push(`[sinain-hud live context \u2014 tick #${entry.id}]`);
+  sections.push(`[sinain-hud live context — tick #${entry.id}]`);
 
   // Digest (always full)
   sections.push(`## Digest\n${digest}`);
@@ -54,7 +141,7 @@ export function buildEscalationMessage(
   const currentApp = normalizeAppName(context.currentApp);
   sections.push(`## Active Context\nApp: ${currentApp}`);
   if (context.appHistory.length > 0) {
-    sections.push(`App history: ${context.appHistory.map(a => normalizeAppName(a.app)).join(" \u2192 ")}`);
+    sections.push(`App history: ${context.appHistory.map(a => normalizeAppName(a.app)).join(" → ")}`);
   }
 
   // Errors — extracted from OCR, full stack traces in rich mode
@@ -85,10 +172,10 @@ export function buildEscalationMessage(
     }
   }
 
-  // Mode-specific instructions
-  sections.push(getInstructions(mode));
+  // Mode-specific instructions (now context-aware)
+  sections.push(getInstructions(mode, context));
 
-  sections.push("Respond naturally \u2014 this will appear on the user's HUD overlay.");
+  sections.push("Respond naturally — this will appear on the user's HUD overlay.");
 
   return sections.join("\n\n");
 }
