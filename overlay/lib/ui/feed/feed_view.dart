@@ -94,9 +94,10 @@ class _FeedViewState extends State<FeedView> {
     setState(() {
       for (final item in _items) {
         final age = now.difference(item.timestamp).inSeconds;
-        if (age > 120) {
+        // Slow fade: 5x longer thresholds (was 120/60, now 600/300)
+        if (age > 600) {
           item.opacity = (item.opacity - 0.15).clamp(0.15, 1.0);
-        } else if (age > 60) {
+        } else if (age > 300) {
           item.opacity = (item.opacity - 0.05).clamp(0.3, 1.0);
         }
       }
