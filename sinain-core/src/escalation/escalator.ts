@@ -3,7 +3,7 @@ import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { WsHandler } from "../overlay/ws-handler.js";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { shouldEscalate } from "./scorer.js";
-import { buildEscalationMessage } from "./message-builder.js";
+import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "escalation";
@@ -37,6 +37,9 @@ export class Escalator {
     label?: string;
     startedAt: number;
   }>();
+
+  // Store context from last escalation for response handling
+  private lastEscalationContext: ContextWindow | null = null;
 
   private stats = {
     totalEscalations: 0,
@@ -108,6 +111,9 @@ export class Escalator {
     const idemKey = `hud-${entry.id}-${Date.now()}`;
 
     log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}])`);
+
+    // Store context for response handling
+    this.lastEscalationContext = contextWindow;
 
     // Fire async — don't block the agent tick loop
     this.doEscalate(message, idemKey, entry.digest).catch(err => {
@@ -347,7 +353,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
           if (Array.isArray(payloads) && payloads.length > 0) {
             const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
             if (output) {
-              this.pushResponse(output);
+              this.pushResponse(output, this.lastEscalationContext);
             } else {
               this.stats.totalNoReply++;
               log(TAG, `empty text in ${payloads.length} payloads`);
@@ -356,8 +362,8 @@ Use sessions_spawn with the task above. The subagent will process and announce t
             // No payloads = agent said NO_REPLY
             this.stats.totalNoReply++;
             if ((this.deps.escalationConfig.mode === "focus" || this.deps.escalationConfig.mode === "rich") && digest) {
-              this.pushResponse(digest);
-              log(TAG, "focus-mode NO_REPLY \u2014 pushed digest as fallback");
+              this.pushResponse(digest, this.lastEscalationContext);
+              log(TAG, "focus-mode NO_REPLY — pushed digest as fallback");
             } else {
               log(TAG, "agent returned no payloads (NO_REPLY)");
             }
@@ -416,13 +422,17 @@ Use sessions_spawn with the task above. The subagent will process and announce t
     }
   }
 
-  private pushResponse(output: string): void {
-    const text = `[\ud83e\udd16] ${output.trim().slice(0, 2000)}`;
+  private pushResponse(output: string, context?: ContextWindow | null): void {
+    // Allow longer responses for coding contexts
+    const { coding } = context ? isCodingContext(context) : { coding: false };
+    const maxLen = coding ? 4000 : 2000;
+
+    const text = `[🤖] ${output.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
     this.deps.wsHandler.broadcast(text, "high", "agent");
     this.stats.totalResponses++;
     this.stats.lastResponseTs = Date.now();
-    log(TAG, `response pushed: "${output.slice(0, 80)}..."`);
+    log(TAG, `response pushed (coding=${coding}, maxLen=${maxLen}): "${output.slice(0, 80)}..."`);
   }
 
   private pushError(detail: string): void {

@@ -83,6 +83,15 @@ When to spawn "task" for video content:
 - ONLY spawn ONCE per video - do not repeat spawn for the same video in subsequent ticks
 - Extract video title or URL from screen OCR to include in the task
 
+When to spawn "task" for coding problems:
+- If user is actively working on a coding problem/challenge for 1+ minutes:
+  - Spawn: "Solve coding problem: [problem description/title from OCR]"
+- This includes LeetCode, HackerRank, interviews, coding assessments, or any visible coding challenge
+- Look for problem signals: "Input:", "Output:", "Example", "Constraints:", problem titles, test cases
+- Include as much context as possible from the screen OCR (problem description, examples, constraints)
+- ONLY spawn ONCE per distinct problem - do not repeat for the same problem
+- The spawned task should provide a complete solution with code and explanation
+
 Rules:
 - "hud" is for a minimal overlay display. Example: "Editing hud-relay.mjs in IDEA"
 - "digest" is for an AI assistant to understand the full situation and offer help.
