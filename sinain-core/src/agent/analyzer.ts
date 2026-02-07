@@ -4,6 +4,11 @@ import { log, error } from "../log.js";
 
 const TAG = "agent";
 
+/** Message part for multimodal API calls. */
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail: "low" } };
+
 /**
  * Build recorder status section for the prompt.
  */
@@ -17,44 +22,12 @@ function buildRecorderSection(status: RecorderStatus | null): string {
 }
 
 /**
- * Build the LLM prompt from a context window.
- * Ported from relay's buildPrompt() — same prompt structure for consistency.
+ * Build the static system prompt (cacheable across calls).
+ * Contains rules, output format, and behavioral instructions.
  */
-function buildPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null): string {
-  const now = Date.now();
-  const screenLines = ctx.screen
-    .map(e => {
-      const app = normalizeAppName(e.meta.app);
-      const ago = Math.round((now - (e.ts || now)) / 1000);
-      const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
-      return `[${ago}s ago] [${app}] ${ocr}`;
-    })
-    .join("\n");
-
-  const audioLines = ctx.audio
-    .map(e => {
-      const ago = Math.round((now - (e.ts || now)) / 1000);
-      return `[${ago}s ago] ${e.text.slice(0, ctx.preset.maxTranscriptChars)}`;
-    })
-    .join("\n");
-
-  const appSwitches = ctx.appHistory
-    .map(a => normalizeAppName(a.app))
-    .join(" \u2192 ");
-
-  const recorderSection = buildRecorderSection(recorderStatus);
-
+function buildSystemPrompt(): string {
   return `You are an AI monitoring a user's screen and audio in real-time.
 You produce outputs as JSON.
-
-Active app: ${normalizeAppName(ctx.currentApp)}
-App history: ${appSwitches || "(none)"}${recorderSection}
-
-Screen (OCR text, newest first):
-${screenLines || "(no screen data)"}
-
-Audio transcript (newest first):
-${audioLines || "(silence)"}
 
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation.
 Your entire response must be parseable by JSON.parse().
@@ -103,6 +76,47 @@ Rules:
 }
 
 /**
+ * Build the dynamic user prompt (changes every tick).
+ * Contains the current context data: screen OCR, audio transcripts, app state.
+ */
+function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null): string {
+  const now = Date.now();
+  const screenLines = ctx.screen
+    .map(e => {
+      const app = normalizeAppName(e.meta.app);
+      const ago = Math.round((now - (e.ts || now)) / 1000);
+      const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
+      return `[${ago}s ago] [${app}] ${ocr}`;
+    })
+    .join("\n");
+
+  const audioLines = ctx.audio
+    .map(e => {
+      const ago = Math.round((now - (e.ts || now)) / 1000);
+      return `[${ago}s ago] ${e.text.slice(0, ctx.preset.maxTranscriptChars)}`;
+    })
+    .join("\n");
+
+  const appSwitches = ctx.appHistory
+    .map(a => normalizeAppName(a.app))
+    .join(" \u2192 ");
+
+  const recorderSection = buildRecorderSection(recorderStatus);
+
+  const hasImages = ctx.images && ctx.images.length > 0;
+  const imageNote = hasImages ? `\n\nScreen screenshots (${ctx.images!.length}) are attached below.` : "";
+
+  return `Active app: ${normalizeAppName(ctx.currentApp)}
+App history: ${appSwitches || "(none)"}${recorderSection}
+
+Screen (OCR text, newest first):
+${screenLines || "(no screen data)"}
+
+Audio transcript (newest first):
+${audioLines || "(silence)"}${imageNote}`;
+}
+
+/**
  * Parse record command from LLM response.
  */
 function parseRecord(parsed: any): RecordCommand | undefined {
@@ -126,19 +140,32 @@ function parseTask(parsed: any): string | undefined {
 /**
  * Call the LLM (OpenRouter) to analyze the context window.
  * Supports model chain: primary + fallbacks.
+ * When images are present, auto-upgrades to the vision model.
  */
 export async function analyzeContext(
   contextWindow: ContextWindow,
   config: AgentConfig,
   recorderStatus: RecorderStatus | null = null,
 ): Promise<AgentResult> {
-  const prompt = buildPrompt(contextWindow, recorderStatus);
+  const systemPrompt = buildSystemPrompt();
+  const userPrompt = buildUserPrompt(contextWindow, recorderStatus);
+  const images = contextWindow.images || [];
+
   const models = [config.model, ...config.fallbackModels];
+
+  // Auto-upgrade: use vision model when images are present
+  if (images.length > 0 && config.visionModel) {
+    // Insert vision model at the front if not already there
+    if (!models.includes(config.visionModel)) {
+      models.unshift(config.visionModel);
+    }
+  }
+
   let lastError: Error | null = null;
 
   for (const model of models) {
     try {
-      return await callModel(prompt, model, config);
+      return await callModel(systemPrompt, userPrompt, images, model, config);
     } catch (err: any) {
       lastError = err;
       log(TAG, `model ${model} failed: ${err.message || err}, trying next...`);
@@ -149,7 +176,9 @@ export async function analyzeContext(
 }
 
 async function callModel(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
+  images: ContextWindow["images"],
   model: string,
   config: AgentConfig,
 ): Promise<AgentResult> {
@@ -158,6 +187,26 @@ async function callModel(
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
+    // Build user message content: text + optional images
+    let userContent: string | ContentPart[];
+    if (images && images.length > 0) {
+      const parts: ContentPart[] = [{ type: "text", text: userPrompt }];
+      for (const img of images) {
+        parts.push({
+          type: "image_url",
+          image_url: {
+            url: `data:image/jpeg;base64,${img.data}`,
+            detail: "low",
+          },
+        });
+      }
+      userContent = parts;
+    } else {
+      userContent = userPrompt;
+    }
+
+    const imageCount = images?.length || 0;
+
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -166,7 +215,10 @@ async function callModel(
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
         max_tokens: config.maxTokens,
         temperature: config.temperature,
       }),
@@ -181,6 +233,10 @@ async function callModel(
     const data = await response.json() as any;
     const latencyMs = Date.now() - start;
     const raw = data.choices?.[0]?.message?.content?.trim() || "";
+
+    if (imageCount > 0) {
+      log(TAG, `multimodal call: model=${model}, images=${imageCount}`);
+    }
 
     // Parse JSON response — try direct parse, then extract embedded JSON, then fallback
     try {

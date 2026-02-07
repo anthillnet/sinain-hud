@@ -186,6 +186,9 @@ Use sessions_spawn with the task above. The subagent will process and announce t
           message, idemKey, this.deps.openclawConfig.sessionKey,
         );
 
+        // Debug: log the raw response structure
+        log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
+
         const spawnInfo = this.extractSpawnInfo(result);
         if (spawnInfo) {
           this.pendingSpawnTasks.set(spawnInfo.runId, {
@@ -212,38 +215,70 @@ Use sessions_spawn with the task above. The subagent will process and announce t
 
   /** Extract spawn info (runId, childSessionKey) from agent RPC response. */
   private extractSpawnInfo(result: any): { runId: string; childSessionKey: string } | null {
-    if (!result?.ok || !result?.payload) return null;
+    if (!result?.ok || !result?.payload) {
+      log(TAG, `extractSpawnInfo: no ok/payload in result`);
+      return null;
+    }
 
     // The agent's response contains tool results with spawn info
     const payloads = result.payload.result?.payloads;
+    log(TAG, `extractSpawnInfo: payloads count=${payloads?.length}, first text=${payloads?.[0]?.text?.slice(0, 200)}`);
+
     if (!Array.isArray(payloads)) return null;
 
     for (const pl of payloads) {
-      // Check text for JSON with runId/childSessionKey
-      if (typeof pl.text === "string") {
-        const match = pl.text.match(/\{[^{}]*"runId"[^{}]*"childSessionKey"[^{}]*\}/);
-        if (match) {
-          try {
-            const parsed = JSON.parse(match[0]);
-            if (parsed.runId && parsed.childSessionKey) {
-              return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
-            }
-          } catch { /* ignore */ }
-        }
-        // Also try the other order: childSessionKey first
-        const matchAlt = pl.text.match(/\{[^{}]*"childSessionKey"[^{}]*"runId"[^{}]*\}/);
-        if (matchAlt) {
-          try {
-            const parsed = JSON.parse(matchAlt[0]);
-            if (parsed.runId && parsed.childSessionKey) {
-              return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
-            }
-          } catch { /* ignore */ }
-        }
+      if (typeof pl.text !== "string") continue;
+
+      // Strategy 1: Find all JSON-like objects and try to parse each
+      // This handles nested JSON that the old regex couldn't match
+      const jsonMatches = this.findJsonObjects(pl.text);
+      for (const jsonStr of jsonMatches) {
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.runId && parsed.childSessionKey) {
+            return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
+          }
+        } catch { /* skip malformed JSON */ }
       }
+
+      // Strategy 2: Try parsing the entire text as JSON
+      try {
+        const parsed = JSON.parse(pl.text);
+        if (parsed.runId && parsed.childSessionKey) {
+          return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
+        }
+      } catch { /* skip */ }
     }
 
     return null;
+  }
+
+  /** Find JSON objects in text, handling nested braces properly. */
+  private findJsonObjects(text: string): string[] {
+    const results: string[] = [];
+    let i = 0;
+
+    while (i < text.length) {
+      if (text[i] === "{") {
+        let depth = 1;
+        let start = i;
+        i++;
+
+        while (i < text.length && depth > 0) {
+          if (text[i] === "{") depth++;
+          else if (text[i] === "}") depth--;
+          i++;
+        }
+
+        if (depth === 0) {
+          results.push(text.slice(start, i));
+        }
+      } else {
+        i++;
+      }
+    }
+
+    return results;
   }
 
   /** Poll for task completion and push result to HUD. */
@@ -275,8 +310,15 @@ Use sessions_spawn with the task above. The subagent will process and announce t
           timeoutMs: pollIntervalMs,
         }, pollIntervalMs + 2000);
 
-        if (waitResult?.ok && (waitResult.payload?.status === "ok" || waitResult.payload?.status === "completed")) {
-          log(TAG, `spawn-task completed: runId=${runId}`);
+        // Debug: log the poll result
+        log(TAG, `poll result: status=${waitResult?.payload?.status}, ok=${waitResult?.ok}`);
+
+        // Accept multiple completion statuses
+        const completedStatuses = ["ok", "completed", "done", "finished", "success"];
+        const status = waitResult?.payload?.status;
+
+        if (waitResult?.ok && completedStatuses.includes(status)) {
+          log(TAG, `spawn-task completed: runId=${runId}, status=${status}`);
 
           // Fetch the result from chat history
           const historyResult = await this.wsClient.sendRpc("chat.history", {
@@ -317,8 +359,32 @@ Use sessions_spawn with the task above. The subagent will process and announce t
 
   /** Extract the latest assistant reply from chat history. */
   private extractLatestAssistantReply(historyResult: any): string | null {
-    const messages = historyResult?.payload?.messages || historyResult?.messages;
-    if (!Array.isArray(messages)) return null;
+    // Try multiple paths to find messages (different API response formats)
+    const messages = historyResult?.payload?.messages
+      || historyResult?.messages
+      || historyResult?.payload?.result?.messages
+      || historyResult?.result?.messages;
+
+    // Debug: log what we found
+    log(TAG, `extractLatestAssistantReply: messages=${Array.isArray(messages) ? messages.length : "none"}`);
+
+    if (!Array.isArray(messages)) {
+      // Maybe it's a direct text response
+      if (typeof historyResult?.payload?.text === "string") {
+        log(TAG, `extractLatestAssistantReply: found payload.text`);
+        return historyResult.payload.text;
+      }
+      if (typeof historyResult?.text === "string") {
+        log(TAG, `extractLatestAssistantReply: found text`);
+        return historyResult.text;
+      }
+      if (typeof historyResult?.payload?.result?.text === "string") {
+        log(TAG, `extractLatestAssistantReply: found payload.result.text`);
+        return historyResult.payload.result.text;
+      }
+      log(TAG, `extractLatestAssistantReply: no messages array found, historyResult keys=${Object.keys(historyResult || {}).join(",")}`);
+      return null;
+    }
 
     // Find the last assistant message
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -332,6 +398,8 @@ Use sessions_spawn with the task above. The subagent will process and announce t
         }
       }
     }
+
+    log(TAG, `extractLatestAssistantReply: no assistant message found in ${messages.length} messages`);
     return null;
   }
 

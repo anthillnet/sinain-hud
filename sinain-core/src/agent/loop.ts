@@ -289,7 +289,8 @@ export class AgentLoop extends EventEmitter {
       this.agentBuffer.push(entry);
       if (this.agentBuffer.length > 50) this.agentBuffer.shift();
 
-      log(TAG, `#${entry.id} (${latencyMs}ms, ${tokensIn}+${tokensOut}tok, model=${usedModel}) hud="${hud}"`);
+      const imageCount = contextWindow.images?.length || 0;
+      log(TAG, `#${entry.id} (${latencyMs}ms, ${tokensIn}in+${tokensOut}out tok, model=${usedModel}, richness=${richness}, images=${imageCount}) hud="${hud}"`);
 
       // Push HUD line to feed (suppress "—", "Idle", and all in focus mode)
       if (this.deps.agentConfig.pushToFeed &&

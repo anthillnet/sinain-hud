@@ -10,9 +10,9 @@ import type { ContextWindow, ContextRichness, RichnessPreset } from "../types.js
  * rich:     Full context. Maximum detail for thorough agent analysis.
  */
 export const RICHNESS_PRESETS: Record<ContextRichness, RichnessPreset> = {
-  lean:     { maxScreenEvents: 10, maxAudioEntries: 5,  maxOcrChars: 400,  maxTranscriptChars: 400  },
-  standard: { maxScreenEvents: 20, maxAudioEntries: 10, maxOcrChars: 1000, maxTranscriptChars: 800  },
-  rich:     { maxScreenEvents: 50, maxAudioEntries: 30, maxOcrChars: 4000, maxTranscriptChars: 2000 },
+  lean:     { maxScreenEvents: 10, maxAudioEntries: 5,  maxOcrChars: 400,  maxTranscriptChars: 400,  maxImages: 0 },
+  standard: { maxScreenEvents: 20, maxAudioEntries: 10, maxOcrChars: 1000, maxTranscriptChars: 800,  maxImages: 1 },
+  rich:     { maxScreenEvents: 50, maxAudioEntries: 30, maxOcrChars: 4000, maxTranscriptChars: 2000, maxImages: 2 },
 } as const;
 
 /** App name normalization map (consistent display names). */
@@ -114,9 +114,19 @@ export function buildContextWindow(
     screenEvents[screenEvents.length - 1]?.ts || 0
   );
 
+  // Extract recent images for multimodal vision
+  const images = preset.maxImages > 0
+    ? senseBuffer.recentImages(preset.maxImages).map(e => ({
+        data: e.imageData!,
+        app: e.meta.app || "unknown",
+        ts: e.ts,
+      }))
+    : undefined;
+
   return {
     audio: audioItems,
     screen: sortedScreen,
+    images,
     currentApp,
     appHistory,
     audioCount: audioItems.length,

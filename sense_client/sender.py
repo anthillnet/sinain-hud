@@ -95,23 +95,21 @@ def encode_image(img: Image.Image, max_kb: int, max_px: int = 0) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def package_full_frame(frame: Image.Image, max_px: int = 720) -> dict:
-    """Package a full frame for context events."""
+def package_full_frame(frame: Image.Image, max_px: int = 384) -> dict:
+    """Package a full frame as a small thumbnail for context events."""
     return {
-        "data": encode_image(frame, max_kb=800, max_px=max_px),
+        "data": encode_image(frame, max_kb=200, max_px=max_px),
         "bbox": [0, 0, frame.width, frame.height],
-        "thumb": False,
+        "thumb": True,
     }
 
 
-def package_roi(roi, thumb: bool = False) -> dict:
-    """Package an ROI for text/visual events."""
-    max_kb = 100 if thumb else 500
-    max_px = 480 if thumb else 0
+def package_roi(roi, thumb: bool = True) -> dict:
+    """Package an ROI as a small thumbnail for text/visual events."""
     return {
-        "data": encode_image(roi.image, max_kb=max_kb, max_px=max_px),
+        "data": encode_image(roi.image, max_kb=60, max_px=384),
         "bbox": list(roi.bbox),
-        "thumb": thumb,
+        "thumb": True,
     }
 
 

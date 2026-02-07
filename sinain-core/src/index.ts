@@ -13,6 +13,7 @@ import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
 import { createAppServer } from "./server.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
+import { isDuplicateTranscript } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
 
 const TAG = "core";
@@ -140,7 +141,19 @@ async function main() {
   });
 
   // Wire: transcripts → feed buffer + overlay + agent trigger + recorder
+  // Dedup state: track last 3 transcripts to filter near-duplicates
+  const recentTranscripts: string[] = [];
+
   transcription.on("transcript", (result) => {
+    // Skip near-duplicate transcripts (repetitive audio/music/TV)
+    if (isDuplicateTranscript(result.text, recentTranscripts)) {
+      log(TAG, `transcript deduped: "${result.text.slice(0, 60)}..."`);
+      return;
+    }
+    // Track recent transcripts (ring buffer of 3)
+    recentTranscripts.push(result.text.trim());
+    if (recentTranscripts.length > 3) recentTranscripts.shift();
+
     const item = feedBuffer.push(`[\ud83d\udcdd] ${result.text}`, "normal", "audio", "stream");
     wsHandler.broadcast(`[\ud83d\udcdd] ${result.text}`, "normal");
     recorder.onFeedItem(item); // Collect for recording if active
