@@ -11,7 +11,7 @@ from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
 from .ocr import OCRResult, create_ocr
 from .gate import DecisionGate
-from .sender import SenseSender, package_full_frame, package_roi, package_diff
+from .sender import SenseSender, package_full_frame, package_roi
 from .app_detector import AppDetector
 from .config import load_config
 
@@ -142,14 +142,15 @@ def main():
         event.meta.window_title = window_title
         event.meta.screen = config["capture"]["target"]
 
+        # Send small thumbnail for ALL event types (agent uses vision)
         if event.type == "context":
-            event.roi = package_full_frame(frame, max_px=720)
-        elif event.type == "visual" and rois:
-            event.roi = package_roi(rois[0], thumb=False)
-        # text-only events: skip image encoding, send OCR text only
-
-        if change and change.diff_image and event.type == "visual":
-            event.diff = package_diff(change.diff_image)
+            event.roi = package_full_frame(frame)
+        elif rois:
+            event.roi = package_roi(rois[0])
+        else:
+            # Fallback: send full frame thumbnail for text-only events
+            event.roi = package_full_frame(frame)
+        # Diff images removed — agent doesn't use binary diff masks
 
         ok = sender.send(event)
         if ok:

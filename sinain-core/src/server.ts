@@ -73,10 +73,16 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "missing type or ts" }));
           return;
         }
+        // Extract image data from ROI if present
+        const imageData = data.roi?.data || undefined;
+        const imageBbox = data.roi?.bbox || undefined;
+
         const event = senseBuffer.push({
           type: data.type,
           ts: data.ts,
           ocr: data.ocr || "",
+          imageData,
+          imageBbox,
           meta: {
             ssim: data.meta?.ssim ?? 0,
             app: data.meta?.app || "unknown",

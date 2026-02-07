@@ -2,17 +2,22 @@ import type { SenseEvent } from "../types.js";
 
 /**
  * Ring buffer for screen capture events from sense_client.
- * Stores OCR text, app context, SSIM scores.
+ * Stores OCR text, app context, SSIM scores, and recent images.
  * Single source of truth — replaces relay's senseBuffer + bridge's SensePoller.
+ *
+ * Image memory management: only the N most recent events retain imageData.
+ * Older events have their imageData stripped to prevent unbounded memory growth.
  */
 export class SenseBuffer {
   private events: SenseEvent[] = [];
   private nextId = 1;
   private _version = 0;
   private maxSize: number;
+  private maxImagesKept: number;
 
-  constructor(maxSize = 60) {
+  constructor(maxSize = 60, maxImagesKept = 5) {
     this.maxSize = maxSize;
+    this.maxImagesKept = maxImagesKept;
   }
 
   /** Push a new sense event (auto-assigns id and receivedAt). */
@@ -26,6 +31,8 @@ export class SenseBuffer {
     if (this.events.length > this.maxSize) {
       this.events.shift();
     }
+    // Strip imageData from older events to manage memory
+    this.trimImages();
     this._version++;
     return event;
   }
@@ -36,6 +43,7 @@ export class SenseBuffer {
     if (metaOnly) {
       results = results.map(e => {
         const stripped = { ...e } as any;
+        delete stripped.imageData;
         if (stripped.roi) {
           stripped.roi = { ...stripped.roi };
           delete stripped.roi.data;
@@ -53,6 +61,17 @@ export class SenseBuffer {
   /** Query events within a time window (by receivedAt). */
   queryByTime(since: number): SenseEvent[] {
     return this.events.filter(e => e.receivedAt >= since);
+  }
+
+  /** Get recent events that have imageData, newest first. */
+  recentImages(count: number): SenseEvent[] {
+    const withImages: SenseEvent[] = [];
+    for (let i = this.events.length - 1; i >= 0 && withImages.length < count; i--) {
+      if (this.events[i].imageData) {
+        withImages.push(this.events[i]);
+      }
+    }
+    return withImages;
   }
 
   /** Get the most recent app name, or 'unknown'. */
@@ -89,5 +108,19 @@ export class SenseBuffer {
   /** Monotonically increasing version — bumps on every push. */
   get version(): number {
     return this._version;
+  }
+
+  /** Strip imageData from events beyond the most recent maxImagesKept. */
+  private trimImages(): void {
+    let imagesFound = 0;
+    for (let i = this.events.length - 1; i >= 0; i--) {
+      if (this.events[i].imageData) {
+        imagesFound++;
+        if (imagesFound > this.maxImagesKept) {
+          delete this.events[i].imageData;
+          delete this.events[i].imageBbox;
+        }
+      }
+    }
   }
 }

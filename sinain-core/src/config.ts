@@ -93,6 +93,8 @@ export function loadConfig(): CoreConfig {
   const agentConfig: AgentConfig = {
     enabled: boolEnv("AGENT_ENABLED", true),
     model: env("AGENT_MODEL", "google/gemini-2.5-flash-lite"),
+    visionModel: env("AGENT_VISION_MODEL", "google/gemini-2.5-flash"),
+    visionEnabled: boolEnv("AGENT_VISION_ENABLED", true),
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
     maxTokens: intEnv("AGENT_MAX_TOKENS", 300),
     temperature: floatEnv("AGENT_TEMPERATURE", 0.3),

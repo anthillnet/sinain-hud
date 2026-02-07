@@ -65,6 +65,8 @@ export interface SenseEvent {
   type: "text" | "visual" | "context";
   ts: number;
   ocr: string;
+  imageData?: string;   // base64 JPEG thumbnail (stripped from older events)
+  imageBbox?: number[]; // [x, y, w, h] of the captured region
   meta: {
     ssim: number;
     app: string;
@@ -147,6 +149,8 @@ export type ContextRichness = "lean" | "standard" | "rich";
 export interface AgentConfig {
   enabled: boolean;
   model: string;
+  visionModel: string;
+  visionEnabled: boolean;
   openrouterApiKey: string;
   maxTokens: number;
   temperature: number;
@@ -190,11 +194,13 @@ export interface RichnessPreset {
   maxAudioEntries: number;
   maxOcrChars: number;
   maxTranscriptChars: number;
+  maxImages: number;
 }
 
 export interface ContextWindow {
   audio: FeedItem[];
   screen: SenseEvent[];
+  images?: { data: string; app: string; ts: number }[];
   currentApp: string;
   appHistory: { app: string; ts: number }[];
   audioCount: number;
