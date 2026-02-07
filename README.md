@@ -10,8 +10,8 @@ An always-on-top transparent overlay that displays real-time AI advice while you
 
 **Components:**
 - **overlay/** — Flutter + Swift macOS app (the HUD you see)
-- **bridge/** — Node.js service (connects overlay ↔ OpenClaw)
-- **server/** — HUD relay agent with screen/audio context, digest generation, and OpenClaw escalation
+- **sinain-core/** — Node.js service (agent loop, audio pipeline, screen context, WebSocket server)
+- **sense_client/** — Python screen capture pipeline
 - **extension/** — OpenClaw skill (Sinain's HUD behavior)
 
 ## Architecture
@@ -21,15 +21,16 @@ An always-on-top transparent overlay that displays real-time AI advice while you
 │                       macOS Host                          │
 │                                                           │
 │  ┌────────────┐     ┌──────────────────────────────────┐ │
-│  │ SinainHUD  │◄═══►│       Bridge / Relay Agent       │ │
-│  │ (Overlay)  │ WS  │       localhost:9500             │ │
+│  │ SinainHUD  │◄═══►│         sinain-core              │ │
+│  │ (Overlay)  │ WS  │         localhost:9500           │ │
 │  └────────────┘     │                                  │ │
 │                     │  ┌──────────┐  ┌──────────────┐  │ │
-│                     │  │ Screen + │  │ Relay Agent   │  │ │
-│                     │  │ Audio    │  │ (digest,      │  │ │
-│                     │  │ Capture  │  │  escalation)  │  │ │
-│                     │  └────┬─────┘  └──────┬───────┘  │ │
-│                     └───────┼───────────────┼──────────┘ │
+│                     │  │ Audio    │  │ Agent Loop   │  │ │
+│                     │  │ Pipeline │  │ (digest,     │  │ │
+│  ┌────────────┐     │  └────┬─────┘  │  escalation) │  │ │
+│  │sense_client│────►│       │        └──────┬───────┘  │ │
+│  │(screen cap)│POST │       │               │          │ │
+│  └────────────┘     └───────┼───────────────┼──────────┘ │
 │                             │               │             │
 │                             │          writeSituationMd() │
 │                             │               ▼             │
@@ -46,20 +47,20 @@ An always-on-top transparent overlay that displays real-time AI advice while you
           └────────────────────────┘
 ```
 
-The relay agent runs a periodic tick loop: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline.
+The agent loop runs a periodic tick: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline.
 
 ## Quick Start
 
 ### Prerequisites
 - macOS 11.0+ (Big Sur or later)
 - Flutter 3.10+ (`brew install flutter`)
-- Node.js 18+ (`brew install node`)
+- Node.js 22+ (`brew install node`)
 - An OpenClaw instance with Sinain running
 
-### 1. Bridge Service
+### 1. sinain-core Service
 
 ```bash
-cd bridge
+cd sinain-core
 npm install
 cp .env.example .env
 # Edit .env with your OpenClaw gateway URL and token
@@ -104,7 +105,7 @@ Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behav
 
 ## Configuration
 
-Bridge service reads from environment or `config.json`:
+sinain-core reads from environment or `.env`:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -138,7 +139,7 @@ Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
 ## Privacy
 
 - Overlay is **invisible** to screen sharing, recording, and screenshots
-- All traffic stays on localhost (bridge ↔ overlay)
+- All traffic stays on localhost (sinain-core ↔ overlay)
 - Audio is transcribed in memory, never stored to disk
 - Panic hide (`Cmd+Shift+H`) instantly clears everything
 
