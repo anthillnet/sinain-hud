@@ -61,14 +61,11 @@ kill_stale() {
     killed=true
   fi
 
-  # Kill previous sinain-core / bridge / relay processes
+  # Kill previous sinain-core processes
   if pkill -f "tsx.*src/index.ts" 2>/dev/null; then
     killed=true
   fi
   if pkill -f "tsx watch src/index.ts" 2>/dev/null; then
-    killed=true
-  fi
-  if pkill -f "node.*hud-relay.mjs" 2>/dev/null; then
     killed=true
   fi
 
