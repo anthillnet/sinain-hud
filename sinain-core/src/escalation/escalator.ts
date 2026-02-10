@@ -1,6 +1,7 @@
-import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem } from "../types.js";
+import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, SpawnTaskMessage, SpawnTaskStatus } from "../types.js";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { WsHandler } from "../overlay/ws-handler.js";
+import type { Profiler } from "../profiler.js";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { shouldEscalate } from "./scorer.js";
 import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
@@ -13,6 +14,7 @@ export interface EscalatorDeps {
   wsHandler: WsHandler;
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
+  profiler?: Profiler;
 }
 
 /**
@@ -36,7 +38,13 @@ export class Escalator {
     childSessionKey: string;
     label?: string;
     startedAt: number;
+    pollingEmitted: boolean;
   }>();
+
+  // Cap concurrent polling loops to limit RPC load
+  private static readonly MAX_CONCURRENT_POLLS = 5;
+  private activePolls = 0;
+  private pollQueue: string[] = [];
 
   // Store context from last escalation for response handling
   private lastEscalationContext: ContextWindow | null = null;
@@ -49,6 +57,8 @@ export class Escalator {
     lastEscalationTs: 0,
     lastResponseTs: 0,
   };
+
+  private outboundBytes = 0;
 
   constructor(private deps: EscalatorDeps) {
     this.wsClient = new OpenClawWsClient(deps.openclawConfig);
@@ -98,6 +108,7 @@ export class Escalator {
 
     // Mark cooldown immediately
     this.stats.totalEscalations++;
+    this.deps.profiler?.gauge("escalation.totalEscalations", this.stats.totalEscalations);
     this.lastEscalationTs = Date.now();
     this.stats.lastEscalationTs = Date.now();
     this.lastEscalatedDigest = entry.digest;
@@ -141,6 +152,7 @@ export class Escalator {
       mode: this.deps.escalationConfig.mode,
       gatewayConnected: this.wsClient.isConnected,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
+      pendingSpawnTasks: this.pendingSpawnTasks.size,
       ...this.stats,
     };
   }
@@ -167,6 +179,8 @@ export class Escalator {
     this.lastSpawnTs = now;
     // --- End deduplication check ---
 
+    const taskId = `spawn-${Date.now()}`;
+    const startedAt = Date.now();
     const labelStr = label ? ` (label: "${label}")` : "";
     const message = `[sinain-core:spawn-task]${labelStr}
 
@@ -177,40 +191,51 @@ ${task}
 Use sessions_spawn with the task above. The subagent will process and announce the result.`;
 
     const idemKey = `spawn-task-${Date.now()}`;
+    this.outboundBytes += Buffer.byteLength(message);
+    this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
     log(TAG, `dispatching spawn-task${labelStr}: "${task.slice(0, 80)}..."`);
 
-    // Send RPC and extract spawn info from response
-    if (this.wsClient.isConnected) {
-      try {
-        const result = await this.wsClient.sendAgentRpc(
-          message, idemKey, this.deps.openclawConfig.sessionKey,
-        );
+    // ★ Broadcast "spawned" BEFORE the RPC — TSK tab shows ··· immediately
+    this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
 
-        // Debug: log the raw response structure
-        log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
-
-        const spawnInfo = this.extractSpawnInfo(result);
-        if (spawnInfo) {
-          this.pendingSpawnTasks.set(spawnInfo.runId, {
-            ...spawnInfo,
-            label,
-            startedAt: Date.now(),
-          });
-          log(TAG, `spawn-task tracked: runId=${spawnInfo.runId}, childSessionKey=${spawnInfo.childSessionKey}`);
-
-          // Start async polling for this task
-          this.pollTaskCompletion(spawnInfo.runId);
-        } else {
-          log(TAG, "spawn-task: could not extract runId/childSessionKey from response");
-        }
-        return;
-      } catch (err: any) {
-        error(TAG, `spawn-task failed: ${err.message}`);
-      }
+    if (!this.wsClient.isConnected) {
+      this.broadcastTaskEvent(taskId, "failed", label, startedAt);
+      await this.doEscalate(message, idemKey, "");  // HTTP fallback
+      return;
     }
 
-    // Fallback to regular escalation (HTTP)
-    await this.doEscalate(message, idemKey, "");
+    try {
+      const result = await this.wsClient.sendAgentRpc(
+        message, idemKey, this.deps.openclawConfig.sessionKey,
+      );
+
+      // Debug: log the raw response structure
+      log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
+
+      const spawnInfo = this.extractSpawnInfo(result);
+      if (spawnInfo) {
+        this.pendingSpawnTasks.set(taskId, {
+          ...spawnInfo,
+          label,
+          startedAt,
+          pollingEmitted: false,
+        });
+        this.deps.profiler?.gauge("escalation.pendingSpawns", this.pendingSpawnTasks.size);
+        log(TAG, `spawn-task tracked: taskId=${taskId}, runId=${spawnInfo.runId}, childSessionKey=${spawnInfo.childSessionKey}`);
+
+        // Start async polling for this task
+        this.pollTaskCompletion(taskId);
+      } else {
+        // Extraction failed — agent processed it but we can't track the child
+        log(TAG, "spawn-task: could not extract runId/childSessionKey from response");
+        const inlineResult = this.extractInlineResult(result);
+        this.broadcastTaskEvent(taskId, "completed", label, startedAt,
+          inlineResult || "task dispatched (untracked)");
+      }
+    } catch (err: any) {
+      error(TAG, `spawn-task failed: ${err.message}`);
+      this.broadcastTaskEvent(taskId, "failed", label, startedAt);
+    }
   }
 
   /** Extract spawn info (runId, childSessionKey) from agent RPC response. */
@@ -220,34 +245,49 @@ Use sessions_spawn with the task above. The subagent will process and announce t
       return null;
     }
 
-    // The agent's response contains tool results with spawn info
-    const payloads = result.payload.result?.payloads;
+    const p = result.payload;
+
+    // Strategy 1: Direct fields on payload (if gateway returns them at top level)
+    if (p.childSessionKey && p.runId) {
+      log(TAG, `extractSpawnInfo: found direct fields on payload`);
+      return { runId: p.runId, childSessionKey: p.childSessionKey };
+    }
+
+    // Strategy 2: Look in result.payloads text (JSON parsing)
+    const payloads = p.result?.payloads;
     log(TAG, `extractSpawnInfo: payloads count=${payloads?.length}, first text=${payloads?.[0]?.text?.slice(0, 200)}`);
 
-    if (!Array.isArray(payloads)) return null;
+    if (Array.isArray(payloads)) {
+      for (const pl of payloads) {
+        if (typeof pl.text !== "string") continue;
 
-    for (const pl of payloads) {
-      if (typeof pl.text !== "string") continue;
+        // Find all JSON-like objects and try to parse each
+        for (const jsonStr of this.findJsonObjects(pl.text)) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.runId && parsed.childSessionKey) {
+              return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
+            }
+          } catch { /* skip malformed JSON */ }
+        }
 
-      // Strategy 1: Find all JSON-like objects and try to parse each
-      // This handles nested JSON that the old regex couldn't match
-      const jsonMatches = this.findJsonObjects(pl.text);
-      for (const jsonStr of jsonMatches) {
+        // Try parsing the entire text as JSON
         try {
-          const parsed = JSON.parse(jsonStr);
+          const parsed = JSON.parse(pl.text);
           if (parsed.runId && parsed.childSessionKey) {
             return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
           }
-        } catch { /* skip malformed JSON */ }
+        } catch { /* skip */ }
       }
 
-      // Strategy 2: Try parsing the entire text as JSON
-      try {
-        const parsed = JSON.parse(pl.text);
-        if (parsed.runId && parsed.childSessionKey) {
-          return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
-        }
-      } catch { /* skip */ }
+      // Strategy 3: UUID pattern matching in text as last resort
+      const allText = payloads.map((pl: any) => pl.text || "").join("\n");
+      const runIdMatch = allText.match(/runId["\s:]+([a-f0-9-]{36})/i);
+      const sessionMatch = allText.match(/childSessionKey["\s:]+([a-zA-Z0-9_-]+)/i);
+      if (runIdMatch && sessionMatch) {
+        log(TAG, `extractSpawnInfo: found via regex pattern matching`);
+        return { runId: runIdMatch[1], childSessionKey: sessionMatch[1] };
+      }
     }
 
     return null;
@@ -281,10 +321,35 @@ Use sessions_spawn with the task above. The subagent will process and announce t
     return results;
   }
 
+  /** Extract inline text from payloads as a fallback result preview. */
+  private extractInlineResult(result: any): string | null {
+    const payloads = result?.payload?.result?.payloads;
+    if (!Array.isArray(payloads)) return null;
+    for (const pl of payloads) {
+      if (typeof pl.text === "string" && pl.text.trim()) {
+        return pl.text.trim().slice(0, 200);
+      }
+    }
+    return null;
+  }
+
   /** Poll for task completion and push result to HUD. */
-  private async pollTaskCompletion(runId: string): Promise<void> {
-    const task = this.pendingSpawnTasks.get(runId);
-    if (!task) return;
+  private async pollTaskCompletion(taskId: string): Promise<void> {
+    // Enforce concurrency cap — queue excess tasks
+    if (this.activePolls >= Escalator.MAX_CONCURRENT_POLLS) {
+      log(TAG, `poll queued (${this.activePolls} active): taskId=${taskId}`);
+      this.pollQueue.push(taskId);
+      return;
+    }
+
+    this.activePolls++;
+    this.deps.profiler?.gauge("escalation.activePolls", this.activePolls);
+
+    const task = this.pendingSpawnTasks.get(taskId);
+    if (!task) {
+      this.finishPoll();
+      return;
+    }
 
     const maxWaitMs = 5 * 60 * 1000; // 5 minutes
     const pollIntervalMs = 5000; // 5 seconds
@@ -292,8 +357,10 @@ Use sessions_spawn with the task above. The subagent will process and announce t
     const poll = async (): Promise<void> => {
       const elapsed = Date.now() - task.startedAt;
       if (elapsed > maxWaitMs) {
-        log(TAG, `spawn-task timeout: runId=${runId}`);
-        this.pendingSpawnTasks.delete(runId);
+        log(TAG, `spawn-task timeout: taskId=${taskId}`);
+        this.broadcastTaskEvent(taskId, "timeout", task.label, task.startedAt);
+        this.pendingSpawnTasks.delete(taskId);
+        this.finishPoll();
         return;
       }
 
@@ -306,19 +373,19 @@ Use sessions_spawn with the task above. The subagent will process and announce t
       try {
         // Wait for completion (short timeout to poll periodically)
         const waitResult = await this.wsClient.sendRpc("agent.wait", {
-          runId,
+          runId: task.runId,
           timeoutMs: pollIntervalMs,
         }, pollIntervalMs + 2000);
 
         // Debug: log the poll result
-        log(TAG, `poll result: status=${waitResult?.payload?.status}, ok=${waitResult?.ok}`);
+        log(TAG, `poll result: taskId=${taskId}, status=${waitResult?.payload?.status}, ok=${waitResult?.ok}`);
 
         // Accept multiple completion statuses
         const completedStatuses = ["ok", "completed", "done", "finished", "success"];
         const status = waitResult?.payload?.status;
 
         if (waitResult?.ok && completedStatuses.includes(status)) {
-          log(TAG, `spawn-task completed: runId=${runId}, status=${status}`);
+          log(TAG, `spawn-task completed: taskId=${taskId}, status=${status}`);
 
           // Fetch the result from chat history
           const historyResult = await this.wsClient.sendRpc("chat.history", {
@@ -331,23 +398,31 @@ Use sessions_spawn with the task above. The subagent will process and announce t
             const labelDisplay = task.label || "Background task";
             this.pushResponse(`${labelDisplay}:\n${resultText}`);
           } else {
-            log(TAG, `spawn-task completed but no result text: runId=${runId}`);
+            log(TAG, `spawn-task completed but no result text: taskId=${taskId}`);
           }
 
-          this.pendingSpawnTasks.delete(runId);
+          this.broadcastTaskEvent(taskId, "completed", task.label, task.startedAt, resultText ?? undefined);
+          this.pendingSpawnTasks.delete(taskId);
+          this.finishPoll();
           return;
         }
 
         if (waitResult?.payload?.status === "error" || waitResult?.payload?.status === "failed") {
-          log(TAG, `spawn-task failed: runId=${runId}, error=${waitResult?.payload?.error || "unknown"}`);
-          this.pendingSpawnTasks.delete(runId);
+          log(TAG, `spawn-task failed: taskId=${taskId}, error=${waitResult?.payload?.error || "unknown"}`);
+          this.broadcastTaskEvent(taskId, "failed", task.label, task.startedAt);
+          this.pendingSpawnTasks.delete(taskId);
+          this.finishPoll();
           return;
         }
 
-        // Status is "timeout" or still running - poll again
+        // Status is "timeout" or still running — emit polling once
+        if (!task.pollingEmitted) {
+          task.pollingEmitted = true;
+          this.broadcastTaskEvent(taskId, "polling", task.label, task.startedAt);
+        }
         setTimeout(() => poll(), 1000);
       } catch (err: any) {
-        warn(TAG, `poll error for runId=${runId}: ${err.message}`);
+        warn(TAG, `poll error for taskId=${taskId}: ${err.message}`);
         // Retry on transient errors
         setTimeout(() => poll(), pollIntervalMs);
       }
@@ -355,6 +430,21 @@ Use sessions_spawn with the task above. The subagent will process and announce t
 
     // Start polling
     poll();
+  }
+
+  /** Decrement active polls and drain the queue. */
+  private finishPoll(): void {
+    this.activePolls--;
+    this.deps.profiler?.gauge("escalation.activePolls", this.activePolls);
+    this.deps.profiler?.gauge("escalation.pendingSpawns", this.pendingSpawnTasks.size);
+    // Drain queued tasks
+    while (this.pollQueue.length > 0 && this.activePolls < Escalator.MAX_CONCURRENT_POLLS) {
+      const nextId = this.pollQueue.shift()!;
+      if (this.pendingSpawnTasks.has(nextId)) {
+        log(TAG, `poll dequeued: taskId=${nextId}`);
+        this.pollTaskCompletion(nextId);
+      }
+    }
   }
 
   /** Extract the latest assistant reply from chat history. */
@@ -405,13 +495,39 @@ Use sessions_spawn with the task above. The subagent will process and announce t
 
   // ── Private ──
 
+  private broadcastTaskEvent(
+    taskId: string,
+    status: SpawnTaskStatus,
+    label?: string,
+    startedAt?: number,
+    resultPreview?: string,
+  ): void {
+    const now = Date.now();
+    const isTerminal = status === "completed" || status === "failed" || status === "timeout";
+    const msg: SpawnTaskMessage = {
+      type: "spawn_task",
+      taskId,
+      label: label || "Background task",
+      status,
+      startedAt: startedAt || now,
+      ...(isTerminal ? { completedAt: now } : {}),
+      ...(resultPreview ? { resultPreview: resultPreview.slice(0, 200) } : {}),
+    };
+    log(TAG, `broadcast spawn_task: taskId=${taskId}, status=${status}, clients=${this.deps.wsHandler.clientCount}`);
+    this.deps.wsHandler.broadcastRaw(msg);
+  }
+
   private async doEscalate(message: string, idemKey: string, digest: string): Promise<void> {
     // Primary: WS RPC
     if (this.wsClient.isConnected) {
       try {
+        this.outboundBytes += Buffer.byteLength(message);
+        this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
+        const rpcStart = Date.now();
         const result = await this.wsClient.sendAgentRpc(
           message, idemKey, this.deps.openclawConfig.sessionKey,
         );
+        this.deps.profiler?.timerRecord("escalation.rpc", Date.now() - rpcStart);
 
         if (result.ok && result.payload) {
           const p = result.payload;
@@ -424,11 +540,13 @@ Use sessions_spawn with the task above. The subagent will process and announce t
               this.pushResponse(output, this.lastEscalationContext);
             } else {
               this.stats.totalNoReply++;
+              this.deps.profiler?.gauge("escalation.totalNoReply", this.stats.totalNoReply);
               log(TAG, `empty text in ${payloads.length} payloads`);
             }
           } else {
             // No payloads = agent said NO_REPLY
             this.stats.totalNoReply++;
+            this.deps.profiler?.gauge("escalation.totalNoReply", this.stats.totalNoReply);
             if ((this.deps.escalationConfig.mode === "focus" || this.deps.escalationConfig.mode === "rich") && digest) {
               this.pushResponse(digest, this.lastEscalationContext);
               log(TAG, "focus-mode NO_REPLY — pushed digest as fallback");
@@ -441,6 +559,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
           log(TAG, `agent RPC error: ${errDetail}`);
           this.pushError(errDetail);
           this.stats.totalErrors++;
+          this.deps.profiler?.gauge("escalation.errors", this.stats.totalErrors);
         }
         return;
       } catch (err: any) {
@@ -452,13 +571,18 @@ Use sessions_spawn with the task above. The subagent will process and announce t
     // Fallback: HTTP POST (fire-and-forget)
     if (this.deps.openclawConfig.hookUrl) {
       const ok = await this.escalateViaHttp(message);
-      if (!ok) this.stats.totalErrors++;
+      if (!ok) {
+        this.stats.totalErrors++;
+        this.deps.profiler?.gauge("escalation.errors", this.stats.totalErrors);
+      }
     } else {
       log(TAG, "no WS and no hookUrl \u2014 escalation skipped");
     }
   }
 
   private async escalateViaHttp(message: string): Promise<boolean> {
+    this.outboundBytes += Buffer.byteLength(message);
+    this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
     try {
       const resp = await fetch(this.deps.openclawConfig.hookUrl, {
         method: "POST",
@@ -499,6 +623,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
     this.deps.wsHandler.broadcast(text, "high", "agent");
     this.stats.totalResponses++;
+    this.deps.profiler?.gauge("escalation.totalResponses", this.stats.totalResponses);
     this.stats.lastResponseTs = Date.now();
     log(TAG, `response pushed (coding=${coding}, maxLen=${maxLen}): "${output.slice(0, 80)}..."`);
   }

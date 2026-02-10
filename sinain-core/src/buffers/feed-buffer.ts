@@ -9,6 +9,7 @@ export class FeedBuffer {
   private nextId = 1;
   private _version = 0;
   private maxSize: number;
+  private _hwm = 0;
 
   constructor(maxSize = 100) {
     this.maxSize = maxSize;
@@ -25,11 +26,17 @@ export class FeedBuffer {
       channel,
     };
     this.items.push(item);
+    if (this.items.length > this._hwm) this._hwm = this.items.length;
     if (this.items.length > this.maxSize) {
       this.items.shift();
     }
     this._version++;
     return item;
+  }
+
+  /** High-water mark: max number of items ever held simultaneously. */
+  get hwm(): number {
+    return this._hwm;
   }
 
   /** Query items with id > after. Excludes [PERIODIC] items from overlay responses. */

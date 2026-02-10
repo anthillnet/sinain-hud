@@ -6,6 +6,7 @@ import '../core/services/settings_service.dart';
 import 'alert/alert_card.dart';
 import 'feed/feed_view.dart';
 import 'status/status_bar.dart';
+import 'tasks/tasks_view.dart';
 import 'ticker/ticker_view.dart';
 
 class HudShell extends StatelessWidget {
@@ -42,7 +43,7 @@ class HudShell extends StatelessWidget {
     switch (settings.displayMode) {
       case DisplayMode.feed:
         return IndexedStack(
-          index: settings.activeTab == HudTab.agent ? 1 : 0,
+          index: settings.activeTab.index,
           children: const [
             FeedView(
               channel: FeedChannel.stream,
@@ -52,6 +53,7 @@ class HudShell extends StatelessWidget {
               channel: FeedChannel.agent,
               emptyLabel: 'awaiting sinain…',
             ),
+            TasksView(),
           ],
         );
       case DisplayMode.alert:

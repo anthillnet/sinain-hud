@@ -63,24 +63,18 @@ class StatusBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(2),
-              color: settings.activeTab == HudTab.agent
-                  ? const Color(0xFF00FF88).withValues(alpha: 0.12)
-                  : Colors.transparent,
+              color: _tabBg(settings.activeTab),
               border: Border.all(
-                color: settings.activeTab == HudTab.agent
-                    ? const Color(0xFF00FF88).withValues(alpha: 0.4)
-                    : Colors.white.withValues(alpha: 0.15),
+                color: _tabColor(settings.activeTab).withValues(alpha: 0.4),
                 width: 0.5,
               ),
             ),
             child: Text(
-              settings.activeTab == HudTab.agent ? 'AGT' : 'STR',
+              _tabLabel(settings.activeTab),
               style: TextStyle(
                 fontFamily: 'JetBrainsMono',
                 fontSize: 8,
-                color: settings.activeTab == HudTab.agent
-                    ? const Color(0xFF00FF88).withValues(alpha: 0.8)
-                    : Colors.white.withValues(alpha: 0.4),
+                color: _tabColor(settings.activeTab),
                 letterSpacing: 1.5,
               ),
             ),
@@ -132,4 +126,22 @@ class StatusBar extends StatelessWidget {
       ),
     );
   }
+
+  String _tabLabel(HudTab tab) => switch (tab) {
+    HudTab.stream => 'STR',
+    HudTab.agent  => 'AGT',
+    HudTab.tasks  => 'TSK',
+  };
+
+  Color _tabColor(HudTab tab) => switch (tab) {
+    HudTab.stream => Colors.white.withValues(alpha: 0.4),
+    HudTab.agent  => const Color(0xFF00FF88).withValues(alpha: 0.8),
+    HudTab.tasks  => const Color(0xFF88CCFF).withValues(alpha: 0.8),
+  };
+
+  Color _tabBg(HudTab tab) => switch (tab) {
+    HudTab.stream => Colors.transparent,
+    HudTab.agent  => const Color(0xFF00FF88).withValues(alpha: 0.12),
+    HudTab.tasks  => const Color(0xFF88CCFF).withValues(alpha: 0.12),
+  };
 }

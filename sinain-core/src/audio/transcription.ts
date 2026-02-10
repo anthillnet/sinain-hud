@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { TranscriptionConfig, AudioChunk, TranscriptResult } from "../types.js";
+import type { Profiler } from "../profiler.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "transcribe";
@@ -22,9 +23,16 @@ export class TranscriptionService extends EventEmitter {
   private refineTimer: ReturnType<typeof setInterval> | null = null;
 
   private latencies: number[] = [];
+  private cumulativeLatencies: number[] = [];
   private latencyStatsTimer: ReturnType<typeof setInterval> | null = null;
   private totalAudioDurationMs: number = 0;
   private totalTokensConsumed: number = 0;
+  private profiler: Profiler | null = null;
+  private errorCount: number = 0;
+  private dropCount: number = 0;
+  private totalCalls: number = 0;
+
+  setProfiler(p: Profiler): void { this.profiler = p; }
 
   constructor(config: TranscriptionConfig) {
     super();
@@ -52,13 +60,17 @@ export class TranscriptionService extends EventEmitter {
 
   async processChunk(chunk: AudioChunk): Promise<void> {
     if (this.destroyed) return;
+    this.totalCalls++;
 
     if (this.pendingRequests >= this.MAX_CONCURRENT) {
+      this.dropCount++;
+      this.profiler?.gauge("transcription.drops", this.dropCount);
       warn(TAG, `dropping chunk: ${this.pendingRequests} requests already pending`);
       return;
     }
 
     this.pendingRequests++;
+    this.profiler?.gauge("transcription.pending", this.pendingRequests);
     try {
       switch (this.config.backend) {
         case "openrouter":
@@ -73,9 +85,12 @@ export class TranscriptionService extends EventEmitter {
           break;
       }
     } catch (err) {
+      this.errorCount++;
+      this.profiler?.gauge("transcription.errors", this.errorCount);
       error(TAG, "transcription failed:", err instanceof Error ? err.message : err);
     } finally {
       this.pendingRequests--;
+      this.profiler?.gauge("transcription.pending", this.pendingRequests);
     }
   }
 
@@ -112,8 +127,33 @@ export class TranscriptionService extends EventEmitter {
 
   // ── OpenRouter backend ──
 
+  /** Get cumulative profiling stats for /health. */
+  getProfilingStats(): Record<string, unknown> {
+    const sorted = [...this.cumulativeLatencies].sort((a, b) => a - b);
+    const n = sorted.length;
+    const p50 = n > 0 ? sorted[Math.floor(n / 2)] : 0;
+    const p95 = n > 0 ? sorted[Math.floor(n * 0.95)] : 0;
+    const avg = n > 0 ? sorted.reduce((a, b) => a + b, 0) / n : 0;
+    const audioMinutes = this.totalAudioDurationMs / 60_000;
+    const costPerMToken = 0.075;
+    const estimatedCost = (this.totalTokensConsumed / 1_000_000) * costPerMToken;
+
+    return {
+      calls: this.totalCalls,
+      p50Ms: Math.round(p50),
+      p95Ms: Math.round(p95),
+      avgMs: Math.round(avg),
+      totalAudioMinutes: Math.round(audioMinutes * 10) / 10,
+      estimatedCost: Math.round(estimatedCost * 1_000_000) / 1_000_000,
+      errors: this.errorCount,
+      drops: this.dropCount,
+    };
+  }
+
   private async transcribeViaOpenRouter(chunk: AudioChunk): Promise<void> {
     if (!this.config.openrouterApiKey) {
+      this.errorCount++;
+      this.profiler?.gauge("transcription.errors", this.errorCount);
       error(TAG, "OpenRouter API key not configured");
       return;
     }
@@ -147,6 +187,8 @@ export class TranscriptionService extends EventEmitter {
       });
 
       if (!response.ok) {
+        this.errorCount++;
+        this.profiler?.gauge("transcription.errors", this.errorCount);
         const body = await response.text().catch(() => "(no body)");
         error(TAG, `OpenRouter error ${response.status}: ${body.slice(0, 300)}`);
         return;
@@ -161,6 +203,9 @@ export class TranscriptionService extends EventEmitter {
       const elapsed = Date.now() - startTs;
 
       this.latencies.push(elapsed);
+      this.cumulativeLatencies.push(elapsed);
+      if (this.cumulativeLatencies.length > 1_000) this.cumulativeLatencies.shift();
+      this.profiler?.timerRecord("transcription.call", elapsed);
       this.totalAudioDurationMs += chunk.durationMs;
 
       if (!text) {
@@ -185,6 +230,8 @@ export class TranscriptionService extends EventEmitter {
       this.emit("transcript", result);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
+        this.errorCount++;
+        this.profiler?.gauge("transcription.errors", this.errorCount);
         warn(TAG, "OpenRouter request timed out (30s)");
       } else {
         throw err;

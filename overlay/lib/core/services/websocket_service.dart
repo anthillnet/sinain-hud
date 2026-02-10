@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/feed_item.dart';
+import '../models/spawn_task.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
 class WebSocketService extends ChangeNotifier {
@@ -14,6 +16,8 @@ class WebSocketService extends ChangeNotifier {
   bool _disposed = false;
   int _retryCount = 0;
   Timer? _reconnectTimer;
+  Timer? _profilingTimer;
+  final DateTime _startTime = DateTime.now();
   String _audioState = 'muted';
   String _screenState = 'off';
   bool _audioFeedEnabled = true;
@@ -23,11 +27,13 @@ class WebSocketService extends ChangeNotifier {
   final _agentFeedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
   final _scrollController = StreamController<String>.broadcast();
+  final _spawnTaskController = StreamController<SpawnTask>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<String> get scrollStream => _scrollController.stream;
+  Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
   bool get connected => _connected;
   String get audioState => _audioState;
   String get screenState => _screenState;
@@ -76,6 +82,19 @@ class WebSocketService extends ChangeNotifier {
         _retryCount = 0;
         notifyListeners();
         _log('Connected to $url');
+
+        // Start periodic profiling reports
+        _profilingTimer?.cancel();
+        _profilingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+          if (_connected) {
+            send({
+              'type': 'profiling',
+              'rssMb': (ProcessInfo.currentRss / 1048576).round(),
+              'uptimeS': DateTime.now().difference(_startTime).inSeconds,
+              'ts': DateTime.now().millisecondsSinceEpoch,
+            });
+          }
+        });
       }).catchError((e) {
         _log('Connection handshake failed: $e');
         _connected = false;
@@ -123,6 +142,11 @@ class WebSocketService extends ChangeNotifier {
             notifyListeners();
           }
           _statusController.add(statusData);
+          break;
+        case 'spawn_task':
+          final task = SpawnTask.fromJson(json);
+          _log('SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
+          _spawnTaskController.add(task);
           break;
         case 'ping':
           // Respond to app-level ping with pong
@@ -186,6 +210,8 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void disconnect() {
+    _profilingTimer?.cancel();
+    _profilingTimer = null;
     _reconnectTimer?.cancel();
     _subscription?.cancel();
     _channel?.sink.close();
@@ -201,6 +227,7 @@ class WebSocketService extends ChangeNotifier {
     _agentFeedController.close();
     _statusController.close();
     _scrollController.close();
+    _spawnTaskController.close();
     super.dispose();
   }
 

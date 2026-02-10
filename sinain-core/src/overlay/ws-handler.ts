@@ -6,6 +6,7 @@ import type {
   InboundMessage,
   FeedMessage,
   StatusMessage,
+  SpawnTaskMessage,
   Priority,
   FeedChannel,
 } from "../types.js";
@@ -14,8 +15,10 @@ import { log, warn } from "../log.js";
 const TAG = "ws";
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const MAX_REPLAY = 20;
+const SPAWN_TASK_TTL_MS = 120_000; // prune terminal tasks after 120s
 
 type MessageHandler = (msg: InboundMessage, client: WebSocket) => void;
+type ProfilingHandler = (msg: any) => void;
 
 /**
  * WebSocket handler for overlay connections.
@@ -26,12 +29,14 @@ export class WsHandler {
   private clients: Set<WebSocket> = new Set();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private onMessage: MessageHandler | null = null;
+  private onProfilingCb: ProfilingHandler | null = null;
   private state: BridgeState = {
     audio: "muted",
     screen: "off",
     connection: "disconnected",
   };
   private replayBuffer: FeedMessage[] = [];
+  private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
 
   constructor() {
     this.startHeartbeat();
@@ -40,6 +45,11 @@ export class WsHandler {
   /** Register handler for incoming overlay messages. */
   onIncoming(handler: MessageHandler): void {
     this.onMessage = handler;
+  }
+
+  /** Register handler for profiling messages from overlay. */
+  onProfiling(handler: ProfilingHandler): void {
+    this.onProfilingCb = handler;
   }
 
   /** Handle a new WS connection (called from server.ts wss.on('connection')). */
@@ -67,6 +77,15 @@ export class WsHandler {
       log(TAG, `replayed ${this.replayBuffer.length} buffered messages to new client`);
     }
 
+    // Replay spawn task state for late-joining clients
+    this.pruneSpawnTasks();
+    for (const msg of this.spawnTaskBuffer.values()) {
+      this.sendTo(ws, msg);
+    }
+    if (this.spawnTaskBuffer.size > 0) {
+      log(TAG, `replayed ${this.spawnTaskBuffer.size} spawn tasks to new client`);
+    }
+
     ws.on("message", (raw) => {
       try {
         const data = JSON.parse(raw.toString()) as InboundMessage;
@@ -83,6 +102,7 @@ export class WsHandler {
     ws.on("close", (code, reason) => {
       log(TAG, `client disconnected: ${code} ${reason?.toString() ?? ""}`);
       this.clients.delete(ws);
+      ws.removeAllListeners();
       if (this.clients.size === 0) {
         this.updateConnection("disconnected");
       }
@@ -91,6 +111,7 @@ export class WsHandler {
     ws.on("error", (err) => {
       warn(TAG, "client error:", err.message);
       this.clients.delete(ws);
+      ws.removeAllListeners();
     });
   }
 
@@ -118,6 +139,17 @@ export class WsHandler {
       screen: this.state.screen,
       connection: this.state.connection,
     };
+    this.broadcastMessage(msg);
+  }
+
+  /** Broadcast any outbound message (used by escalator for spawn_task events). */
+  broadcastRaw(msg: OutboundMessage): void {
+    if (msg.type === "spawn_task") {
+      const taskMsg = msg as SpawnTaskMessage;
+      this.spawnTaskBuffer.set(taskMsg.taskId, taskMsg);
+      this.pruneSpawnTasks();
+      log(TAG, `spawn_task buffered: taskId=${taskMsg.taskId}, status=${taskMsg.status}, buffer=${this.spawnTaskBuffer.size}, clients=${this.clients.size}`);
+    }
     this.broadcastMessage(msg);
   }
 
@@ -159,6 +191,9 @@ export class WsHandler {
       case "command":
         log(TAG, `\u2190 command: ${msg.action}`);
         break;
+      case "profiling":
+        if (this.onProfilingCb) this.onProfilingCb(msg);
+        return;
       default:
         warn(TAG, `unknown message type: ${(msg as any).type}`);
         return;
@@ -179,6 +214,16 @@ export class WsHandler {
     for (const ws of this.clients) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
+      }
+    }
+  }
+
+  private pruneSpawnTasks(): void {
+    const now = Date.now();
+    const terminal = new Set(["completed", "failed", "timeout"]);
+    for (const [id, msg] of this.spawnTaskBuffer) {
+      if (terminal.has(msg.status) && msg.completedAt && now - msg.completedAt > SPAWN_TASK_TTL_MS) {
+        this.spawnTaskBuffer.delete(id);
       }
     }
   }

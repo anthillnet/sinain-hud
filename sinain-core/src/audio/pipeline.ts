@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { AudioPipelineConfig, AudioChunk } from "../types.js";
+import type { Profiler } from "../profiler.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "audio";
@@ -66,6 +67,11 @@ export class AudioPipeline extends EventEmitter {
   private chunkTimer: ReturnType<typeof setInterval> | null = null;
   private running: boolean = false;
   private silentChunks: number = 0;
+  private speechChunks: number = 0;
+  private errorCount: number = 0;
+  private profiler: Profiler | null = null;
+
+  setProfiler(p: Profiler): void { this.profiler = p; }
 
   constructor(config: AudioPipelineConfig) {
     super();
@@ -228,6 +234,7 @@ export class AudioPipeline extends EventEmitter {
 
       this.accumulator.push(data);
       this.accumulatedBytes += data.length;
+      this.profiler?.gauge("audio.accumulatorKb", Math.round(this.accumulatedBytes / 1024));
     });
 
     proc.stderr?.on("data", (data: Buffer) => {
@@ -239,6 +246,8 @@ export class AudioPipeline extends EventEmitter {
 
     proc.on("error", (err) => {
       error(TAG, `${name} process error:`, err.message);
+      this.errorCount++;
+      this.profiler?.gauge("audio.errors", this.errorCount);
       this.emit("error", new Error(`${name} process error: ${err.message}`));
       if (this.running) this.stop();
     });
@@ -246,6 +255,8 @@ export class AudioPipeline extends EventEmitter {
     proc.on("exit", (code, signal) => {
       log(TAG, `${name} exited: code=${code} signal=${signal}`);
       if (this.running && code !== 0) {
+        this.errorCount++;
+        this.profiler?.gauge("audio.errors", this.errorCount);
         warn(TAG, `${name} exited unexpectedly, stopping pipeline`);
         this.stop();
       }
@@ -269,9 +280,11 @@ export class AudioPipeline extends EventEmitter {
     if (alignedPcm.length === 0) return;
 
     const energy = calculateRmsEnergy(alignedPcm);
+    this.profiler?.gauge("audio.lastChunkKb", Math.round(alignedPcm.length / 1024));
 
     if (this.config.vadEnabled && energy < this.config.vadThreshold) {
       this.silentChunks++;
+      this.profiler?.gauge("audio.silentChunks", this.silentChunks);
       if (this.silentChunks === 1 || this.silentChunks % 6 === 0) {
         log(TAG, `VAD: silent (energy=${energy.toFixed(4)} < ${this.config.vadThreshold}), ${this.silentChunks} silent chunk(s)`);
       }
@@ -282,6 +295,9 @@ export class AudioPipeline extends EventEmitter {
       log(TAG, `VAD: speech detected after ${this.silentChunks} silent chunk(s) (energy=${energy.toFixed(4)})`);
       this.silentChunks = 0;
     }
+
+    this.speechChunks++;
+    this.profiler?.gauge("audio.speechChunks", this.speechChunks);
 
     const wavHeader = createWavHeader(alignedPcm.length, this.config.sampleRate, this.config.channels, 16);
     const wavBuffer = Buffer.concat([wavHeader, alignedPcm]);

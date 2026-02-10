@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocketServer } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
+import type { Profiler } from "./profiler.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -17,8 +18,10 @@ export interface ServerDeps {
   feedBuffer: FeedBuffer;
   senseBuffer: SenseBuffer;
   wsHandler: WsHandler;
+  profiler?: Profiler;
   onSenseEvent: (event: SenseEvent) => void;
   onFeedPost: (text: string, priority: string) => void;
+  onSenseProfile: (snapshot: any) => void;
   getHealthPayload: () => Record<string, unknown>;
   getAgentDigest: () => unknown;
   getAgentHistory: (limit: number) => unknown[];
@@ -48,6 +51,7 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
 
 export function createAppServer(deps: ServerDeps) {
   const { config, feedBuffer, senseBuffer, wsHandler } = deps;
+  let senseInBytes = 0;
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -67,6 +71,8 @@ export function createAppServer(deps: ServerDeps) {
       // ── /sense ──
       if (req.method === "POST" && url.pathname === "/sense") {
         const body = await readBody(req, MAX_SENSE_BODY);
+        senseInBytes += Buffer.byteLength(body);
+        deps.profiler?.gauge("network.senseInBytes", senseInBytes);
         const data = JSON.parse(body);
         if (!data.type || data.ts === undefined) {
           res.writeHead(400);
@@ -155,6 +161,14 @@ export function createAppServer(deps: ServerDeps) {
         const after = parseInt(url.searchParams.get("after") || "0");
         const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 500);
         res.end(JSON.stringify({ traces: deps.getTraces(after, limit) }));
+        return;
+      }
+
+      // ── /profiling/sense ──
+      if (req.method === "POST" && url.pathname === "/profiling/sense") {
+        const body = await readBody(req, 4096);
+        deps.onSenseProfile(JSON.parse(body));
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
 

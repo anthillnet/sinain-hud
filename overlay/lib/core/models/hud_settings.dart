@@ -1,6 +1,6 @@
 enum DisplayMode { feed, alert, minimal, hidden }
 
-enum HudTab { stream, agent }
+enum HudTab { stream, agent, tasks }
 
 class HudSettings {
   DisplayMode displayMode;

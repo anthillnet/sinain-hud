@@ -82,12 +82,28 @@ def encode_image(img: Image.Image, max_kb: int, max_px: int = 0) -> str:
     if img.mode == "RGBA":
         img = img.convert("RGB")
 
-    for quality in (85, 70, 50, 30):
+    # Try high quality first — often fits
+    max_bytes = max_kb * 1024
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    if buf.tell() <= max_bytes:
+        return base64.b64encode(buf.getvalue()).decode()
+
+    # Binary search for the highest quality that fits
+    lo, hi = 20, 80
+    best_buf = None
+    while lo <= hi:
+        mid = (lo + hi) // 2
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality)
-        if buf.tell() <= max_kb * 1024:
-            return base64.b64encode(buf.getvalue()).decode()
-        buf.close()
+        img.save(buf, format="JPEG", quality=mid)
+        if buf.tell() <= max_bytes:
+            best_buf = buf
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    if best_buf is not None:
+        return base64.b64encode(best_buf.getvalue()).decode()
 
     # Last resort: return at lowest quality
     buf = io.BytesIO()

@@ -12,6 +12,7 @@ import { Recorder } from "./recorder.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
 import { createAppServer } from "./server.js";
+import { Profiler } from "./profiler.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
 import { isDuplicateTranscript } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
@@ -46,12 +47,16 @@ async function main() {
   // ── Initialize recorder ──
   const recorder = new Recorder();
 
+  // ── Initialize profiler ──
+  const profiler = new Profiler();
+
   // ── Initialize escalation ──
   const escalator = new Escalator({
     feedBuffer,
     wsHandler,
     escalationConfig: config.escalationConfig,
     openclawConfig: config.openclawConfig,
+    profiler,
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -62,6 +67,7 @@ async function main() {
     escalationMode: config.escalationConfig.mode,
     situationMdPath: config.situationMdPath,
     getRecorderStatus: () => recorder.getStatus(),
+    profiler,
     onAnalysis: (entry, contextWindow) => {
       // Handle recorder commands
       const stopResult = recorder.handleCommand(entry.record);
@@ -117,6 +123,8 @@ async function main() {
   // ── Initialize audio pipeline ──
   const audioPipeline = new AudioPipeline(config.audioConfig);
   const transcription = new TranscriptionService(config.transcriptionConfig);
+  audioPipeline.setProfiler(profiler);
+  transcription.setProfiler(profiler);
 
   // Wire: audio chunks → transcription
   audioPipeline.on("chunk", (chunk) => {
@@ -169,6 +177,7 @@ async function main() {
     feedBuffer,
     senseBuffer,
     wsHandler,
+    profiler,
 
     onSenseEvent: (event: SenseEvent) => {
       screenActive = true;
@@ -197,11 +206,15 @@ async function main() {
       log(TAG, `[feed] #${item.id}: ${text.slice(0, 80)}`);
     },
 
+    onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
+
     getHealthPayload: () => ({
       agent: agentLoop.getStats(),
       escalation: escalator.getStats(),
+      transcription: transcription.getProfilingStats(),
       situation: { path: config.situationMdPath },
       traces: tracer ? tracer.getMetricsSummary() : null,
+      profiling: profiler.getSnapshot(),
     }),
 
     getAgentDigest: () => agentLoop.getDigest(),
@@ -228,6 +241,11 @@ async function main() {
     getTraces: (after, limit) => tracer ? tracer.getTraces(after, limit) : [],
   });
 
+  // ── Wire overlay profiling ──
+  wsHandler.onProfiling((msg) => {
+    profiler.reportOverlay({ rssMb: msg.rssMb, uptimeS: msg.uptimeS, ts: msg.ts });
+  });
+
   // ── Wire overlay commands ──
   setupCommands({
     wsHandler,
@@ -250,6 +268,17 @@ async function main() {
     error(TAG, "failed to start server:", err);
     process.exit(1);
   }
+
+  // Start profiler
+  profiler.start();
+  // Periodically sample buffer gauges
+  const bufferGaugeTimer = setInterval(() => {
+    profiler.gauge("buffer.feed", feedBuffer.size);
+    profiler.gauge("buffer.sense", senseBuffer.size);
+    profiler.gauge("buffer.feed.hwm", feedBuffer.hwm);
+    profiler.gauge("buffer.sense.hwm", senseBuffer.hwm);
+    profiler.gauge("ws.clients", wsHandler.clientCount);
+  }, 10_000);
 
   // Start escalation WS connection
   escalator.start();
@@ -274,6 +303,8 @@ async function main() {
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
+    clearInterval(bufferGaugeTimer);
+    profiler.stop();
     recorder.forceStop(); // Stop any active recording
     agentLoop.stop();
     audioPipeline.stop();

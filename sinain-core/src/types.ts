@@ -26,6 +26,19 @@ export interface PingMessage {
   ts: number;
 }
 
+/** sinain-core → Overlay: spawn task lifecycle update */
+export type SpawnTaskStatus = "spawned" | "polling" | "completed" | "failed" | "timeout";
+
+export interface SpawnTaskMessage {
+  type: "spawn_task";
+  taskId: string;
+  label: string;
+  status: SpawnTaskStatus;
+  startedAt: number;
+  completedAt?: number;
+  resultPreview?: string;
+}
+
 /** Overlay → sinain-core: user typed a message */
 export interface UserMessage {
   type: "message";
@@ -44,8 +57,16 @@ export interface PongMessage {
   ts: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage;
+/** Overlay → sinain-core: process profiling metrics */
+export interface ProfilingMessage {
+  type: "profiling";
+  rssMb: number;
+  uptimeS: number;
+  ts: number;
+}
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage;
 
 // ── Feed buffer types ──
 

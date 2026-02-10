@@ -4,7 +4,10 @@ import argparse
 import concurrent.futures
 import json
 import os
+import resource
 import time
+
+import requests as _requests
 
 from .capture import ScreenCapture, create_capture
 from .change_detector import ChangeDetector
@@ -67,6 +70,7 @@ def main():
         send_thumbnails=config["relay"]["sendThumbnails"],
     )
     app_detector = AppDetector()
+    ocr_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     # Adaptive SSIM threshold state
     ssim_stable_threshold = config["detection"]["ssimThreshold"]  # 0.92
@@ -82,8 +86,13 @@ def main():
     events_sent = 0
     events_failed = 0
     events_gated = 0
+    ocr_errors = 0
     last_stats = time.time()
+    start_time = time.time()
     event_latencies: list[float] = []
+    detect_times: list[float] = []
+    ocr_times: list[float] = []
+    send_times: list[float] = []
 
     for frame, ts in capture.capture_loop():
         # Check control file (pause/resume)
@@ -105,7 +114,10 @@ def main():
             log(f"SSIM threshold restored to {ssim_stable_threshold} (stable)")
 
         # 2. Detect frame change
+        t0 = time.time()
         change = detector.detect(frame)
+        detect_times.append((time.time() - t0) * 1000)
+        if len(detect_times) > 500: detect_times.clear()
         if change is None and not app_changed and not window_changed:
             continue
 
@@ -115,16 +127,22 @@ def main():
             rois = extractor.extract(frame, change.contours)
 
         # 4. OCR on ROIs (parallel if multiple)
+        t0 = time.time()
         ocr_result = OCRResult(text="", confidence=0, word_count=0)
-        if rois:
-            if len(rois) == 1:
-                ocr_result = ocr.extract(rois[0].image)
-            else:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(rois), 4)) as pool:
-                    futures = [pool.submit(ocr.extract, roi.image) for roi in rois]
+        try:
+            if rois:
+                if len(rois) == 1:
+                    ocr_result = ocr.extract(rois[0].image)
+                else:
+                    futures = [ocr_pool.submit(ocr.extract, roi.image) for roi in rois]
                     results = [f.result() for f in concurrent.futures.as_completed(futures)]
-                best = max(results, key=lambda r: len(r.text))
-                ocr_result = best
+                    best = max(results, key=lambda r: len(r.text))
+                    ocr_result = best
+        except Exception as e:
+            ocr_errors += 1
+            log(f"OCR error: {e}")
+        ocr_times.append((time.time() - t0) * 1000)
+        if len(ocr_times) > 500: ocr_times.clear()
 
         # 5. Decision gate
         event = gate.classify(
@@ -152,11 +170,15 @@ def main():
             event.roi = package_full_frame(frame)
         # Diff images removed — agent doesn't use binary diff masks
 
+        t0 = time.time()
         ok = sender.send(event)
+        send_times.append((time.time() - t0) * 1000)
+        if len(send_times) > 500: send_times.clear()
         if ok:
             events_sent += 1
             send_latency = time.time() * 1000 - event.ts
             event_latencies.append(send_latency)
+            if len(event_latencies) > 500: event_latencies.clear()
             ssim = f"{change.ssim_score:.3f}" if change else "n/a"
             ctx = f"app={app_name}"
             if window_title:
@@ -176,9 +198,45 @@ def main():
                 p95 = sorted_lat[int(len(sorted_lat) * 0.95)]
                 latency_info = f" latency_p50={p50:.0f}ms p95={p95:.0f}ms"
                 event_latencies.clear()
+
+            avg_detect = sum(detect_times) / len(detect_times) if detect_times else 0
+            avg_ocr = sum(ocr_times) / len(ocr_times) if ocr_times else 0
+            avg_send = sum(send_times) / len(send_times) if send_times else 0
+
             log(f"stats: captures={capture.stats_ok}ok/{capture.stats_fail}fail"
                 f" events={events_sent}sent/{events_failed}fail/{events_gated}gated"
-                f"{latency_info}")
+                f"{latency_info}"
+                f" detect={avg_detect:.1f}ms ocr={avg_ocr:.1f}ms send={avg_send:.1f}ms")
+
+            # POST profiling snapshot to sinain-core
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            snapshot = {
+                "rssMb": round(usage.ru_maxrss / 1048576, 1),
+                "uptimeS": round(now - start_time),
+                "ts": int(now * 1000),
+                "extra": {
+                    "capturesOk": capture.stats_ok,
+                    "capturesFail": capture.stats_fail,
+                    "eventsSent": events_sent,
+                    "eventsFailed": events_failed,
+                    "eventsGated": events_gated,
+                    "ocrErrors": ocr_errors,
+                    "detectAvgMs": round(avg_detect, 1),
+                    "ocrAvgMs": round(avg_ocr, 1),
+                    "sendAvgMs": round(avg_send, 1),
+                },
+            }
+            try:
+                _requests.post(
+                    f"{config['relay']['url']}/profiling/sense",
+                    json=snapshot, timeout=2,
+                )
+            except Exception:
+                pass
+
+            detect_times.clear()
+            ocr_times.clear()
+            send_times.clear()
             last_stats = now
 
 

@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus } from "../types.js";
+import type { Profiler } from "../profiler.js";
 import { buildContextWindow } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
@@ -23,6 +24,8 @@ export interface AgentLoopDeps {
   onTraceStart?: (tickId: number) => TraceContext | null;
   /** Optional: get current recorder status for prompt injection. */
   getRecorderStatus?: () => RecorderStatus | null;
+  /** Optional: profiler for metrics collection. */
+  profiler?: Profiler;
 }
 
 export interface TraceContext {
@@ -227,9 +230,11 @@ export class AgentLoop extends EventEmitter {
     this.lastTickSenseVersion = senseBuffer.version;
 
     const richness = modeToRichness(this.deps.escalationMode);
+    const ctxStart = Date.now();
     const contextWindow = buildContextWindow(
       feedBuffer, senseBuffer, richness, this.deps.agentConfig.maxAgeMs,
     );
+    this.deps.profiler?.timerRecord("agent.contextBuild", Date.now() - ctxStart);
 
     // Skip if both buffers empty in window
     if (contextWindow.audioCount === 0 && contextWindow.screenCount === 0) {
@@ -247,6 +252,7 @@ export class AgentLoop extends EventEmitter {
       traceCtx?.startSpan("llm-call");
       const recorderStatus = this.deps.getRecorderStatus?.() ?? null;
       const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus);
+      this.deps.profiler?.timerRecord("agent.llmCall", result.latencyMs);
       traceCtx?.endSpan({ model: result.model, tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs });
 
       const { hud, digest, latencyMs, tokensIn, tokensOut, model: usedModel, parsedOk } = result;
@@ -269,8 +275,11 @@ export class AgentLoop extends EventEmitter {
       this.stats.totalTokensIn += tokensIn;
       this.stats.totalTokensOut += tokensOut;
       this.stats.lastAnalysisTs = Date.now();
+      this.deps.profiler?.gauge("agent.totalCalls", this.stats.totalCalls);
       if (parsedOk) this.stats.parseSuccesses++;
       else this.stats.parseFailures++;
+      this.deps.profiler?.gauge("agent.parseSuccesses", this.stats.parseSuccesses);
+      this.deps.profiler?.gauge("agent.parseFailures", this.stats.parseFailures);
 
       // Build entry
       const entry: AgentEntry = {

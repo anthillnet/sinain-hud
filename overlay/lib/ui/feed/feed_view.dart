@@ -91,19 +91,21 @@ class _FeedViewState extends State<FeedView> {
   void _fadeOldItems() {
     if (!mounted) return;
     final now = DateTime.now();
-    setState(() {
-      for (final item in _items) {
-        final age = now.difference(item.timestamp).inSeconds;
-        // Slow fade: 5x longer thresholds (was 120/60, now 600/300)
-        if (age > 600) {
-          item.opacity = (item.opacity - 0.15).clamp(0.15, 1.0);
-        } else if (age > 300) {
-          item.opacity = (item.opacity - 0.05).clamp(0.3, 1.0);
-        }
+    bool changed = false;
+    for (final item in _items) {
+      final age = now.difference(item.timestamp).inSeconds;
+      final prevOpacity = item.opacity;
+      if (age > 600) {
+        item.opacity = (item.opacity - 0.15).clamp(0.15, 1.0);
+      } else if (age > 300) {
+        item.opacity = (item.opacity - 0.05).clamp(0.3, 1.0);
       }
-      // Prune fully faded
-      _items.removeWhere((i) => i.opacity <= 0.15 && _items.length > 10);
-    });
+      if (item.opacity != prevOpacity) changed = true;
+    }
+    final countBefore = _items.length;
+    _items.removeWhere((i) => i.opacity <= 0.15 && _items.length > 10);
+    if (_items.length != countBefore) changed = true;
+    if (changed) setState(() {});
   }
 
   Color _priorityColor(FeedPriority priority) {

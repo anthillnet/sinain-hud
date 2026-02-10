@@ -14,6 +14,7 @@ export class SenseBuffer {
   private _version = 0;
   private maxSize: number;
   private maxImagesKept: number;
+  private _hwm = 0;
 
   constructor(maxSize = 60, maxImagesKept = 5) {
     this.maxSize = maxSize;
@@ -28,6 +29,7 @@ export class SenseBuffer {
       receivedAt: Date.now(),
     };
     this.events.push(event);
+    if (this.events.length > this._hwm) this._hwm = this.events.length;
     if (this.events.length > this.maxSize) {
       this.events.shift();
     }
@@ -35,6 +37,11 @@ export class SenseBuffer {
     this.trimImages();
     this._version++;
     return event;
+  }
+
+  /** High-water mark: max number of events ever held simultaneously. */
+  get hwm(): number {
+    return this._hwm;
   }
 
   /** Query events with id > after. Optionally strip image data. */
