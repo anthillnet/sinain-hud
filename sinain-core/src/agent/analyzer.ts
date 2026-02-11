@@ -55,8 +55,8 @@ Your entire response must be parseable by JSON.parse().
 {"hud":"...","digest":"...","record":{"command":"start"|"stop","label":"..."},"task":"..."}
 
 Output fields:
-- "hud" (required): max 30 words describing what user is doing NOW
-- "digest" (required): 3-5 sentences with detailed activity description
+- "hud" (required): max 60 words describing what user is doing NOW
+- "digest" (required): 5-8 sentences with detailed activity description
 - "record" (optional): control recording — {"command":"start","label":"Meeting name"} or {"command":"stop"}
 - "task" (optional): natural language instruction to spawn a background task
 

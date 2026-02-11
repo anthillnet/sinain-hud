@@ -2,8 +2,10 @@ import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedI
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { WsHandler } from "../overlay/ws-handler.js";
 import type { Profiler } from "../profiler.js";
+import type { FeedbackStore } from "../learning/feedback-store.js";
+import type { SignalCollector } from "../learning/signal-collector.js";
 import { OpenClawWsClient } from "./openclaw-ws.js";
-import { shouldEscalate } from "./scorer.js";
+import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
@@ -16,6 +18,8 @@ export interface EscalatorDeps {
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
   profiler?: Profiler;
+  feedbackStore?: FeedbackStore;
+  signalCollector?: SignalCollector;
 }
 
 /**
@@ -59,6 +63,11 @@ export class Escalator {
     this.wsClient = new OpenClawWsClient(deps.openclawConfig);
     // Load pending tasks from disk (crash recovery)
     this.pendingSpawnTasks = loadPendingTasks();
+  }
+
+  /** Late-bind the signal collector (created after AgentLoop). */
+  setSignalCollector(sc: SignalCollector): void {
+    this.deps.signalCollector = sc;
   }
 
   /** Start the WS connection to OpenClaw. */
@@ -110,11 +119,16 @@ export class Escalator {
     this.stats.lastEscalationTs = Date.now();
     this.lastEscalatedDigest = entry.digest;
 
+    // Fetch recent feedback for inline context (non-blocking, defaults to empty)
+    const recentFeedback = this.deps.feedbackStore?.queryRecent(5) ?? [];
+
     const message = buildEscalationMessage(
       entry.digest,
       contextWindow,
       entry,
       this.deps.escalationConfig.mode,
+      undefined,
+      recentFeedback,
     );
     const idemKey = `hud-${entry.id}-${Date.now()}`;
 
@@ -124,7 +138,14 @@ export class Escalator {
     this.lastEscalationContext = contextWindow;
 
     // Fire async — don't block the agent tick loop
-    this.doEscalate(message, idemKey, entry.digest).catch(err => {
+    this.doEscalate(message, idemKey, entry.digest, {
+      tickId: entry.id,
+      hud: entry.hud,
+      currentApp: contextWindow.currentApp,
+      escalationScore: score.total,
+      escalationReasons: score.reasons,
+      codingContext: isCodingContext(contextWindow).coding,
+    }).catch(err => {
       error(TAG, "escalation error:", err.message);
     });
   }
@@ -141,6 +162,62 @@ export class Escalator {
       }
     }
     await this.escalateViaHttp(text);
+  }
+
+  /**
+   * Send a periodic feedback summary to the OpenClaw agent.
+   * Called on a timer from index.ts when learning is enabled.
+   * Returns true if the summary was sent successfully.
+   */
+  async sendFeedbackSummary(): Promise<boolean> {
+    if (!this.deps.feedbackStore) return false;
+    if (!this.wsClient.isConnected) return false;
+
+    const stats = this.deps.feedbackStore.getStats();
+    const totalRecords = stats.totalRecords as number;
+    if (totalRecords < 3) return false;
+
+    const recent = this.deps.feedbackStore.queryRecent(5);
+    const withSignals = recent.filter(r => r.signals.compositeScore !== 0 || r.signals.errorCleared !== null);
+    if (withSignals.length === 0) return false;
+
+    // Format compact summary
+    const topTags = (stats.topTags as [string, number][] || [])
+      .slice(0, 5)
+      .map(([tag, count]) => `${tag} (${count})`)
+      .join(", ");
+
+    const recentLines = withSignals.slice(0, 5).map(r => {
+      const ok = r.signals.compositeScore >= 0.2;
+      const icon = ok ? "✓" : "✗";
+      const score = r.signals.compositeScore.toFixed(2);
+      const tags = r.tags.slice(0, 3).join(", ");
+      const details: string[] = [];
+      if (r.signals.errorCleared === true) details.push("error cleared");
+      if (r.signals.errorCleared === false) details.push("error persisted");
+      if (r.signals.noReEscalation === true) details.push("no re-escalation");
+      if (r.signals.noReEscalation === false) details.push("re-escalated");
+      if (r.signals.quickAppSwitch === true) details.push("quick switch");
+      return `  ${icon} ${score} [${tags}]${details.length > 0 ? " — " + details.join(", ") : ""}`;
+    });
+
+    const message = `[sinain-core:feedback-summary]
+
+Escalations: ${totalRecords} | Avg score: ${stats.avgCompositeScore ?? "n/a"} | Avg latency: ${stats.avgLatencyMs ?? "n/a"}ms
+Top tags: ${topTags || "none"}
+
+Recent (last ${withSignals.length}):
+${recentLines.join("\n")}`;
+
+    const idemKey = `feedback-summary-${Date.now()}`;
+    try {
+      await this.wsClient.sendAgentRpc(message, idemKey, this.deps.openclawConfig.sessionKey);
+      log(TAG, `feedback summary sent (${totalRecords} records, ${withSignals.length} with signals)`);
+      return true;
+    } catch (err: any) {
+      warn(TAG, `feedback summary send failed: ${err.message}`);
+      return false;
+    }
   }
 
   /** Get stats for /health. */
@@ -518,7 +595,19 @@ Use sessions_spawn with the task above. The subagent will process and announce t
     this.deps.wsHandler.broadcastRaw(msg);
   }
 
-  private async doEscalate(message: string, idemKey: string, digest: string): Promise<void> {
+  private async doEscalate(
+    message: string,
+    idemKey: string,
+    digest: string,
+    feedbackCtx?: {
+      tickId: number;
+      hud: string;
+      currentApp: string;
+      escalationScore: number;
+      escalationReasons: string[];
+      codingContext: boolean;
+    },
+  ): Promise<void> {
     // Primary: WS RPC
     if (this.wsClient.isConnected) {
       try {
@@ -528,15 +617,18 @@ Use sessions_spawn with the task above. The subagent will process and announce t
         const result = await this.wsClient.sendAgentRpc(
           message, idemKey, this.deps.openclawConfig.sessionKey,
         );
-        this.deps.profiler?.timerRecord("escalation.rpc", Date.now() - rpcStart);
+        const rpcLatencyMs = Date.now() - rpcStart;
+        this.deps.profiler?.timerRecord("escalation.rpc", rpcLatencyMs);
 
         if (result.ok && result.payload) {
           const p = result.payload;
           log(TAG, `WS RPC ok \u2192 runId=${p.runId}, status=${p.status}`);
 
           const payloads = p.result?.payloads;
+          let responseText = "";
           if (Array.isArray(payloads) && payloads.length > 0) {
             const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
+            responseText = output;
             if (output) {
               this.pushResponse(output, this.lastEscalationContext);
             } else {
@@ -550,11 +642,15 @@ Use sessions_spawn with the task above. The subagent will process and announce t
             this.deps.profiler?.gauge("escalation.totalNoReply", this.stats.totalNoReply);
             if ((this.deps.escalationConfig.mode === "focus" || this.deps.escalationConfig.mode === "rich") && digest) {
               this.pushResponse(digest, this.lastEscalationContext);
+              responseText = digest;
               log(TAG, "focus-mode NO_REPLY — pushed digest as fallback");
             } else {
               log(TAG, "agent returned no payloads (NO_REPLY)");
             }
           }
+
+          // ── Record feedback (async, non-blocking) ──
+          this.recordFeedback(feedbackCtx, digest, message, responseText, rpcLatencyMs);
         } else if (!result.ok) {
           const errDetail = JSON.stringify(result.error || result.payload);
           log(TAG, `agent RPC error: ${errDetail}`);
@@ -618,7 +714,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
   private pushResponse(output: string, context?: ContextWindow | null): void {
     // Allow longer responses for coding contexts
     const { coding } = context ? isCodingContext(context) : { coding: false };
-    const maxLen = coding ? 4000 : 2000;
+    const maxLen = coding ? 4000 : 3000;
 
     const text = `[🤖] ${output.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
@@ -632,5 +728,34 @@ Use sessions_spawn with the task above. The subagent will process and announce t
   private pushError(detail: string): void {
     const text = `[\ud83e\udd16 err] ${detail.slice(0, 500)}`;
     this.deps.feedBuffer.push(text, "normal", "openclaw", "stream");
+  }
+
+  /** Record a feedback entry after successful escalation. Safe — never throws. */
+  private recordFeedback(
+    ctx: { tickId: number; hud: string; currentApp: string; escalationScore: number; escalationReasons: string[]; codingContext: boolean } | undefined,
+    digest: string,
+    escalationMessage: string,
+    openclawResponse: string,
+    responseLatencyMs: number,
+  ): void {
+    if (!ctx || !this.deps.feedbackStore || !this.deps.signalCollector) return;
+    try {
+      const record = this.deps.feedbackStore.createRecord({
+        tickId: ctx.tickId,
+        digest,
+        hud: ctx.hud,
+        currentApp: ctx.currentApp,
+        escalationScore: ctx.escalationScore,
+        escalationReasons: ctx.escalationReasons,
+        codingContext: ctx.codingContext,
+        escalationMessage,
+        openclawResponse,
+        responseLatencyMs,
+      });
+      this.deps.feedbackStore.append(record);
+      this.deps.signalCollector.schedule(record);
+    } catch (err: any) {
+      warn(TAG, `feedback record failed: ${err.message}`);
+    }
   }
 }

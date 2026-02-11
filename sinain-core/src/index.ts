@@ -11,6 +11,8 @@ import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
+import { FeedbackStore } from "./learning/feedback-store.js";
+import { SignalCollector } from "./learning/signal-collector.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
@@ -32,6 +34,7 @@ async function main() {
   log(TAG, `openclaw: ws=${config.openclawConfig.gatewayWsUrl} http=${config.openclawConfig.hookUrl}`);
   log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);
+  log(TAG, `learning: enabled=${config.learningConfig.enabled} dir=${config.learningConfig.feedbackDir}`);
 
   // ── Initialize core buffers (single source of truth) ──
   const feedBuffer = new FeedBuffer(100);
@@ -50,6 +53,11 @@ async function main() {
   // ── Initialize profiler ──
   const profiler = new Profiler();
 
+  // ── Initialize learning subsystem ──
+  const feedbackStore = config.learningConfig.enabled
+    ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
+    : null;
+
   // ── Initialize escalation ──
   const escalator = new Escalator({
     feedBuffer,
@@ -57,6 +65,7 @@ async function main() {
     escalationConfig: config.escalationConfig,
     openclawConfig: config.openclawConfig,
     profiler,
+    feedbackStore: feedbackStore ?? undefined,
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -120,6 +129,14 @@ async function main() {
     } : undefined,
   });
 
+  // ── Wire learning signal collector (needs agentLoop) ──
+  const signalCollector = feedbackStore
+    ? new SignalCollector(feedbackStore, agentLoop, senseBuffer)
+    : null;
+  if (signalCollector) {
+    escalator.setSignalCollector(signalCollector);
+  }
+
   // ── Initialize audio pipeline ──
   const audioPipeline = new AudioPipeline(config.audioConfig);
   const transcription = new TranscriptionService(config.transcriptionConfig);
@@ -178,6 +195,7 @@ async function main() {
     senseBuffer,
     wsHandler,
     profiler,
+    feedbackStore: feedbackStore ?? undefined,
 
     onSenseEvent: (event: SenseEvent) => {
       screenActive = true;
@@ -283,6 +301,15 @@ async function main() {
   // Start escalation WS connection
   escalator.start();
 
+  // Start periodic feedback summary (every 30 minutes, offset from startup)
+  const feedbackSummaryTimer = config.learningConfig.enabled
+    ? setInterval(() => {
+        escalator.sendFeedbackSummary().catch(err => {
+          warn(TAG, "feedback summary error:", err);
+        });
+      }, 30 * 60 * 1000)
+    : null;
+
   // Start agent loop
   agentLoop.start();
 
@@ -304,12 +331,15 @@ async function main() {
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
     clearInterval(bufferGaugeTimer);
+    if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
     profiler.stop();
     recorder.forceStop(); // Stop any active recording
     agentLoop.stop();
     audioPipeline.stop();
     transcription.destroy();
     escalator.stop();
+    signalCollector?.destroy();
+    feedbackStore?.destroy();
     traceStore?.destroy();
     await server.destroy();
     log(TAG, "goodbye");

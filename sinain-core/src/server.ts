@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { WebSocketServer, WebSocket } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
 import type { Profiler } from "./profiler.js";
+import type { FeedbackStore } from "./learning/feedback-store.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer, type SemanticSenseEvent, type TextDelta } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -20,7 +21,7 @@ export interface ServerDeps {
   wsHandler: WsHandler;
   profiler?: Profiler;
   onSenseEvent: (event: SenseEvent) => void;
-  onSenseDelta: (data: { app: string; activity: string; changes: TextDelta[]; priority?: string; ts: number }) => void;
+  onSenseDelta?: (data: { app: string; activity: string; changes: TextDelta[]; priority?: string; ts: number }) => void;
   onFeedPost: (text: string, priority: string) => void;
   onSenseProfile: (snapshot: any) => void;
   getHealthPayload: () => Record<string, unknown>;
@@ -30,6 +31,7 @@ export interface ServerDeps {
   getAgentConfig: () => unknown;
   updateAgentConfig: (updates: Record<string, unknown>) => unknown;
   getTraces: (after: number, limit: number) => unknown[];
+  feedbackStore?: FeedbackStore;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -213,6 +215,29 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
+      // ── /learning/feedback ──
+      if (req.method === "GET" && url.pathname === "/learning/feedback") {
+        if (!deps.feedbackStore) {
+          res.end(JSON.stringify({ ok: false, error: "learning disabled" }));
+          return;
+        }
+        const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 100);
+        const records = deps.feedbackStore.queryRecent(limit);
+        res.end(JSON.stringify({ ok: true, records, count: records.length }));
+        return;
+      }
+
+      // ── /learning/stats ──
+      if (req.method === "GET" && url.pathname === "/learning/stats") {
+        if (!deps.feedbackStore) {
+          res.end(JSON.stringify({ ok: false, error: "learning disabled" }));
+          return;
+        }
+        const stats = deps.feedbackStore.getStats();
+        res.end(JSON.stringify({ ok: true, ...stats }));
+        return;
+      }
+
       // ── /health ──
       if (req.method === "GET" && url.pathname === "/health") {
         res.end(JSON.stringify({
@@ -265,7 +290,7 @@ export function createAppServer(deps: ServerDeps) {
 
             // Trigger immediate context update for urgent priority
             if (msg.priority === "urgent") {
-              deps.onSenseDelta(msg);
+              deps.onSenseDelta?.(msg);
             }
 
             // Send ack with backpressure signal
