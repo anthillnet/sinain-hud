@@ -136,7 +136,7 @@ All configuration is via environment variables (or `.env` file). Variables are g
 | `OPENCLAW_WS_TOKEN` | *(empty)* | Gateway auth token — 48-char hex (alias: `OPENCLAW_GATEWAY_TOKEN`) |
 | `OPENCLAW_HTTP_URL` | `http://localhost:18789/hooks/agent` | HTTP hook endpoint (alias: `OPENCLAW_HOOK_URL`) |
 | `OPENCLAW_HTTP_TOKEN` | *(empty)* | HTTP hook token (alias: `OPENCLAW_HOOK_TOKEN`) |
-| `OPENCLAW_SESSION_KEY` | `agent:main:main` | Session key for RPC calls |
+| `OPENCLAW_SESSION_KEY` | `agent:main:sinain` | Session key for RPC calls — **must** be `agent:main:sinain` (see [Session Key](#session-key)) |
 
 ### Tracing
 
@@ -432,6 +432,70 @@ The token regenerates on every `openclaw onboard`. After deploying a new cloud i
 **HTTP hooks token:**
 Only needed if hooks are explicitly configured on the gateway (`hooks.token` in gateway config). If not configured, leave `OPENCLAW_HTTP_TOKEN` empty — the WS path is primary.
 
+### Session Key
+
+`OPENCLAW_SESSION_KEY` controls which OpenClaw session receives sinain-core's escalation messages. This **must** be `agent:main:sinain`.
+
+**Why it matters:**
+- The OpenClaw heartbeat queries `sessions_history({sessionKey: "agent:main:sinain"})` to read sinain context
+- If the session key is wrong (e.g. `agent:main:main`), escalations land in the main agent's own session instead of a separate sinain session
+- The heartbeat finds no sinain session → skips ambient intelligence → **no subagent spawning for research/analysis**
+- HUD escalation responses still work (the main agent processes them), masking the underlying problem
+
+**Symptoms of wrong session key:**
+- No proactive research subagents spawned during heartbeats
+- `sessions_history({sessionKey: "agent:main:sinain"})` returns empty
+- No `agent:main:sinain` entry in the sessions registry on the server
+
+**Verify the session exists on the server:**
+```bash
+ssh root@<server> "docker compose exec openclaw-gateway node -e \"
+  const d = JSON.parse(require('fs').readFileSync(
+    '/home/node/.openclaw/agents/main/sessions/sessions.json','utf8'));
+  console.log(Object.keys(d).filter(k => k.includes('sinain')));
+\""
+```
+
 ### Circuit Breaker & Reconnection
 
 If the token is wrong or the gateway is unreachable, the WS client retries with exponential backoff (1 s → 60 s max). The circuit breaker trips after **5 consecutive failures** and resets after **5 minutes**. Fix the token, restart sinain-core, and it auto-recovers.
+
+## Troubleshooting
+
+### sinain session not found / no subagent spawning
+
+**Check 1 — Session key:** Verify `.env` has `OPENCLAW_SESSION_KEY=agent:main:sinain` (not `agent:main:main`). The code default is correct but `.env` overrides it.
+
+**Check 2 — Gateway connection:** Look for `token_mismatch` in gateway logs:
+```bash
+ssh root@<server> "cd /opt/openclaw && docker compose logs --tail=100 2>&1 | grep token_mismatch"
+```
+If present, the `OPENCLAW_WS_TOKEN` doesn't match the server's `gateway.auth.token` in `openclaw.json`. Re-read the token (see [Getting Your OpenClaw Token](#getting-your-openclaw-token)).
+
+**Check 3 — Cross-session visibility:** The server's `openclaw.json` needs `sessionToolsVisibility: "all"` under `agents.defaults.sandbox`. Without this, the main agent's heartbeat cannot read the sinain session:
+```json
+{
+  "agents": {
+    "defaults": {
+      "sandbox": {
+        "sessionToolsVisibility": "all"
+      }
+    }
+  }
+}
+```
+
+**Check 4 — Session history API params:** The `sessions_history` tool accepts `sessionKey`, `limit`, and `includeTools` only. Common mistakes:
+- `session: "sinain"` → wrong param name, use `sessionKey`
+- `"sinain"` → wrong value, use full key `"agent:main:sinain"`
+- `since: "30m"` → does not exist, remove it
+
+### token_mismatch reconnection storm
+
+274+ `unauthorized` log lines per minute from sinain-core's IP means the gateway token doesn't match. The WS client retries every ~1 second.
+
+1. Read the server token: `cat /mnt/openclaw-state/openclaw.json | jq '.gateway.auth.token'`
+2. Update `OPENCLAW_WS_TOKEN` in sinain-core's `.env`
+3. Restart sinain-core (`kill` the tsx watch child process or Ctrl-C the terminal)
+
+> **Note:** After server redeployment or `openclaw onboard`, the gateway token regenerates. Always re-check after infrastructure changes.
