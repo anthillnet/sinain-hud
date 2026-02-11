@@ -290,7 +290,7 @@ sense_client/
     "majorChangeThreshold": 0.85
   },
   "relay": {
-    "url": "http://54.228.25.196:18791",
+    "url": "http://85.214.180.247:18791",
     "sendThumbnails": true,
     "maxImageKB": 500
   }

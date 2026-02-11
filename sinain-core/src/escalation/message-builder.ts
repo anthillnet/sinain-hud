@@ -1,4 +1,4 @@
-import type { ContextWindow, AgentEntry, EscalationMode } from "../types.js";
+import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord } from "../types.js";
 import { normalizeAppName } from "../agent/context-window.js";
 
 /** Regex patterns for detecting errors in OCR text. */
@@ -92,7 +92,7 @@ Response should be actionable: working code with brief explanation.`;
 - If you see an opportunity to help: share relevant insights
 
 Keep responses focused and include code when helpful.
-(2-6 sentences + code if applicable)`;
+(5-10 sentences + code if applicable). Be thorough.`;
   }
 
   // Non-coding context - existing behavior
@@ -103,7 +103,7 @@ Important: Do NOT respond with NO_REPLY — a response is always required in foc
 - If they seem stuck: offer guidance
 - If they're coding: provide relevant insights
 - Otherwise: briefly note what the user is doing and any observations
-- Keep your response concise (2-5 sentences)`;
+- Provide a detailed, helpful response (5-10 sentences). Include specific observations from screen/audio context.`;
   }
 
   return `Based on the above, proactively help the user:
@@ -134,6 +134,7 @@ export function buildEscalationMessage(
   entry: AgentEntry,
   mode: EscalationMode,
   escalationReason?: string,
+  recentFeedback?: FeedbackRecord[],
 ): string {
   const sections: string[] = [];
 
@@ -241,7 +242,42 @@ export function buildEscalationMessage(
   // Mode-specific instructions (now context-aware)
   sections.push(getInstructions(mode, context));
 
+  // Append inline feedback summary if available
+  if (recentFeedback && recentFeedback.length > 0) {
+    sections.push(formatInlineFeedback(recentFeedback));
+  }
+
   sections.push("Respond naturally — this will appear on the user's HUD overlay.");
 
   return sections.join("\n\n");
+}
+
+/**
+ * Format a compact inline feedback section for escalation messages.
+ * Shows recent performance so the agent can calibrate its response style.
+ */
+function formatInlineFeedback(records: FeedbackRecord[]): string {
+  const withSignals = records.filter(r => r.signals.compositeScore !== 0 || r.signals.errorCleared !== null);
+  if (withSignals.length === 0) return "";
+
+  const scores = withSignals.map(r => r.signals.compositeScore);
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+  const errorsCleared = withSignals.filter(r => r.signals.errorCleared === true).length;
+  const errorsTotal = withSignals.filter(r => r.signals.errorCleared !== null).length;
+  const reEscalated = withSignals.filter(r => r.signals.noReEscalation === false).length;
+
+  const recentParts = withSignals.slice(0, 5).map(r => {
+    const ok = r.signals.compositeScore >= 0.2;
+    const icon = ok ? "✓" : "✗";
+    const score = r.signals.compositeScore.toFixed(1);
+    const tags = r.tags.filter(t => !t.startsWith("app:")).slice(0, 2).join(", ");
+    return `${icon} ${score} (${tags || "general"})`;
+  });
+
+  const parts = [`Score: ${avg.toFixed(2)} avg`];
+  if (errorsTotal > 0) parts.push(`Errors cleared: ${errorsCleared}/${errorsTotal}`);
+  parts.push(`Re-escalated: ${reEscalated}/${withSignals.length}`);
+
+  return `## Recent Feedback (last ${withSignals.length} escalations)\n${parts.join(" | ")}\nRecent: ${recentParts.join(" | ")}`;
 }

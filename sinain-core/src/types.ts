@@ -299,6 +299,42 @@ export interface BridgeState {
   connection: "connected" | "disconnected" | "connecting";
 }
 
+// ── Learning / feedback types ──
+
+export interface FeedbackSignals {
+  errorCleared: boolean | null;
+  noReEscalation: boolean | null;
+  dwellTimeMs: number | null;
+  quickAppSwitch: boolean | null;
+  compositeScore: number;           // -1.0 to 1.0
+}
+
+export interface FeedbackRecord {
+  id: string;                        // UUID
+  ts: number;
+  tickId: number;
+  // Input
+  digest: string;
+  hud: string;
+  currentApp: string;
+  escalationScore: number;
+  escalationReasons: string[];
+  codingContext: boolean;
+  // Output
+  escalationMessage: string;         // trimmed to 2KB
+  openclawResponse: string;          // trimmed to 2KB
+  responseLatencyMs: number;
+  // Feedback signals (filled async)
+  signals: FeedbackSignals;
+  tags: string[];
+}
+
+export interface LearningConfig {
+  enabled: boolean;
+  feedbackDir: string;
+  retentionDays: number;
+}
+
 // ── Full core config ──
 
 export interface CoreConfig {
@@ -312,4 +348,5 @@ export interface CoreConfig {
   situationMdPath: string;
   traceEnabled: boolean;
   traceDir: string;
+  learningConfig: LearningConfig;
 }
