@@ -105,6 +105,7 @@ export function loadConfig(): CoreConfig {
     maxAgeMs: intEnv("AGENT_MAX_AGE_MS", 120000),
     fallbackModels: env("AGENT_FALLBACK_MODELS", "google/gemini-2.5-flash,anthropic/claude-3.5-haiku")
       .split(",").map(s => s.trim()).filter(Boolean),
+    historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
   };
 
   const escalationMode = env("ESCALATION_MODE", "selective") as EscalationMode;

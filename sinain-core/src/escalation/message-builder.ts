@@ -122,12 +122,18 @@ Important: Do NOT respond with NO_REPLY — a response is always required in foc
  *   rich:              ~111 KB / ~28,000 tokens
  *
  * All fit within the 256 KB HTTP hooks limit and 200K+ model context.
+ *
+ * In selective mode, sections are prioritized by relevance:
+ * - Error escalations prioritize error sections
+ * - Question escalations prioritize audio sections
+ * - App context is always included
  */
 export function buildEscalationMessage(
   digest: string,
   context: ContextWindow,
   entry: AgentEntry,
   mode: EscalationMode,
+  escalationReason?: string,
 ): string {
   const sections: string[] = [];
 
@@ -137,7 +143,7 @@ export function buildEscalationMessage(
   // Digest (always full)
   sections.push(`## Digest\n${digest}`);
 
-  // Active context
+  // Active context (always included)
   const currentApp = normalizeAppName(context.currentApp);
   sections.push(`## Active Context\nApp: ${currentApp}`);
   if (context.appHistory.length > 0) {
@@ -146,29 +152,89 @@ export function buildEscalationMessage(
 
   // Errors — extracted from OCR, full stack traces in rich mode
   const errors = context.screen.filter(e => hasErrorPattern(e.ocr));
-  if (errors.length > 0) {
-    sections.push("## Errors (high priority)");
-    for (const e of errors) {
-      sections.push(`\`\`\`\n${e.ocr.slice(0, context.preset.maxOcrChars)}\n\`\`\``);
-    }
-  }
+  const hasErrors = errors.length > 0;
+  const hasQuestion = escalationReason?.startsWith("question:");
 
-  // Screen OCR
-  if (context.screen.length > 0) {
-    sections.push("## Screen (recent OCR)");
-    for (const e of context.screen) {
-      const ago = Math.round((Date.now() - e.ts) / 1000);
-      const app = normalizeAppName(e.meta.app);
-      sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+  // In selective mode, prioritize sections based on escalation reason
+  // In focus/rich modes, include everything
+  if (mode === "selective") {
+    // Error-triggered: prioritize errors, then screen
+    if (hasErrors) {
+      sections.push("## Errors (high priority)");
+      for (const e of errors) {
+        sections.push(`\`\`\`\n${e.ocr.slice(0, context.preset.maxOcrChars)}\n\`\`\``);
+      }
+      // Include screen context (reduced)
+      if (context.screen.length > 0) {
+        sections.push("## Screen (recent OCR)");
+        for (const e of context.screen.slice(0, 5)) { // Limit in selective mode
+          const ago = Math.round((Date.now() - e.ts) / 1000);
+          const app = normalizeAppName(e.meta.app);
+          sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+        }
+      }
     }
-  }
+    // Question-triggered: prioritize audio, then screen
+    else if (hasQuestion) {
+      if (context.audio.length > 0) {
+        sections.push("## Audio (recent transcripts)");
+        for (const e of context.audio) {
+          const ago = Math.round((Date.now() - e.ts) / 1000);
+          sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+        }
+      }
+      // Include screen context (reduced)
+      if (context.screen.length > 0) {
+        sections.push("## Screen (recent OCR)");
+        for (const e of context.screen.slice(0, 5)) {
+          const ago = Math.round((Date.now() - e.ts) / 1000);
+          const app = normalizeAppName(e.meta.app);
+          sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+        }
+      }
+    }
+    // Other triggers: balanced sections
+    else {
+      if (context.screen.length > 0) {
+        sections.push("## Screen (recent OCR)");
+        for (const e of context.screen) {
+          const ago = Math.round((Date.now() - e.ts) / 1000);
+          const app = normalizeAppName(e.meta.app);
+          sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+        }
+      }
+      if (context.audio.length > 0) {
+        sections.push("## Audio (recent transcripts)");
+        for (const e of context.audio) {
+          const ago = Math.round((Date.now() - e.ts) / 1000);
+          sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+        }
+      }
+    }
+  } else {
+    // Focus/rich mode: include all sections
+    if (hasErrors) {
+      sections.push("## Errors (high priority)");
+      for (const e of errors) {
+        sections.push(`\`\`\`\n${e.ocr.slice(0, context.preset.maxOcrChars)}\n\`\`\``);
+      }
+    }
 
-  // Audio transcripts
-  if (context.audio.length > 0) {
-    sections.push("## Audio (recent transcripts)");
-    for (const e of context.audio) {
-      const ago = Math.round((Date.now() - e.ts) / 1000);
-      sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+    if (context.screen.length > 0) {
+      sections.push("## Screen (recent OCR)");
+      for (const e of context.screen) {
+        const ago = Math.round((Date.now() - e.ts) / 1000);
+        const app = normalizeAppName(e.meta.app);
+        sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+      }
+    }
+
+    if (context.audio.length > 0) {
+      sections.push("## Audio (recent transcripts)");
+      for (const e of context.audio) {
+        const ago = Math.round((Date.now() - e.ts) / 1000);
+        sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+      }
     }
   }
 

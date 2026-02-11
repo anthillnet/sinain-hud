@@ -4,6 +4,26 @@ import { log, error } from "../log.js";
 
 const TAG = "agent";
 
+/**
+ * Model-specific timeouts in milliseconds.
+ * Only increases timeouts for slow models to avoid false timeouts.
+ * Default 15s is kept for fast models.
+ */
+const MODEL_TIMEOUTS: Record<string, number> = {
+  'google/gemini-2.5-flash-lite': 15000,
+  'google/gemini-2.5-flash': 15000,
+  'google/gemini-2.0-flash': 15000,
+  'anthropic/claude-3-opus': 60000,
+  'anthropic/claude-3.5-sonnet': 30000,
+  'anthropic/claude-3-haiku': 15000,
+  'default': 15000,
+};
+
+/** Get timeout for a specific model. */
+function getModelTimeout(model: string): number {
+  return MODEL_TIMEOUTS[model] ?? MODEL_TIMEOUTS['default'];
+}
+
 /** Message part for multimodal API calls. */
 type ContentPart =
   | { type: "text"; text: string }
@@ -22,11 +42,11 @@ function buildRecorderSection(status: RecorderStatus | null): string {
 }
 
 /**
- * Build the static system prompt (cacheable across calls).
+ * Static system prompt (cached as module constant).
  * Contains rules, output format, and behavioral instructions.
+ * Previously allocated ~3KB per tick; now zero-allocation.
  */
-function buildSystemPrompt(): string {
-  return `You are an AI monitoring a user's screen and audio in real-time.
+const SYSTEM_PROMPT = `You are an AI monitoring a user's screen and audio in real-time.
 You produce outputs as JSON.
 
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation.
@@ -73,7 +93,6 @@ Rules:
 - Do NOT suggest actions in digest — just describe the situation factually.
 - Only include "record" or "task" when genuinely appropriate — most responses won't have them.
 - CRITICAL: Output ONLY the JSON object, nothing else.`;
-}
 
 /**
  * Build the dynamic user prompt (changes every tick).
@@ -147,7 +166,6 @@ export async function analyzeContext(
   config: AgentConfig,
   recorderStatus: RecorderStatus | null = null,
 ): Promise<AgentResult> {
-  const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(contextWindow, recorderStatus);
   const images = contextWindow.images || [];
 
@@ -165,7 +183,7 @@ export async function analyzeContext(
 
   for (const model of models) {
     try {
-      return await callModel(systemPrompt, userPrompt, images, model, config);
+      return await callModel(SYSTEM_PROMPT, userPrompt, images, model, config);
     } catch (err: any) {
       lastError = err;
       log(TAG, `model ${model} failed: ${err.message || err}, trying next...`);
@@ -184,7 +202,8 @@ async function callModel(
 ): Promise<AgentResult> {
   const start = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeoutMs = getModelTimeout(model);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     // Build user message content: text + optional images

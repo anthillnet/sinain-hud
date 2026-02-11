@@ -59,11 +59,19 @@ function calculateRmsEnergy(pcmData: Buffer): number {
  *
  * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'error' (Error)
  */
+/**
+ * Pre-allocated buffer size for audio accumulation.
+ * 320KB is sufficient for 5s of 16-bit mono audio at 16kHz (160KB)
+ * with 2x headroom for stereo or higher sample rates.
+ */
+const PREALLOC_BUFFER_SIZE = 320 * 1024;
+
 export class AudioPipeline extends EventEmitter {
   private config: AudioPipelineConfig;
   private process: ChildProcess | null = null;
-  private accumulator: Buffer[] = [];
-  private accumulatedBytes: number = 0;
+  // Pre-allocated buffer to reduce GC pressure (vs Buffer.concat per chunk)
+  private preallocBuffer: Buffer = Buffer.allocUnsafe(PREALLOC_BUFFER_SIZE);
+  private bufferWriteOffset: number = 0;
   private chunkTimer: ReturnType<typeof setInterval> | null = null;
   private running: boolean = false;
   private silentChunks: number = 0;
@@ -128,12 +136,11 @@ export class AudioPipeline extends EventEmitter {
       this.process = null;
     }
 
-    if (this.accumulatedBytes > 0) {
+    if (this.bufferWriteOffset > 0) {
       this.emitChunk();
     }
 
-    this.accumulator = [];
-    this.accumulatedBytes = 0;
+    this.bufferWriteOffset = 0;
     this.emit("stopped");
     log(TAG, "capture stopped");
   }
@@ -225,16 +232,13 @@ export class AudioPipeline extends EventEmitter {
           headerSkipped = true;
           headerBuf = Buffer.alloc(0);
           if (remaining.length > 0) {
-            this.accumulator.push(remaining);
-            this.accumulatedBytes += remaining.length;
+            this.writeToBuffer(remaining);
           }
         }
         return;
       }
 
-      this.accumulator.push(data);
-      this.accumulatedBytes += data.length;
-      this.profiler?.gauge("audio.accumulatorKb", Math.round(this.accumulatedBytes / 1024));
+      this.writeToBuffer(data);
     });
 
     proc.stderr?.on("data", (data: Buffer) => {
@@ -263,19 +267,39 @@ export class AudioPipeline extends EventEmitter {
     });
   }
 
+  // ── Buffer management ──
+
+  /**
+   * Write data to pre-allocated buffer.
+   * Falls back to growing buffer if needed (rare case for very long audio).
+   */
+  private writeToBuffer(data: Buffer): void {
+    // Check if we need to grow the buffer (rare case)
+    if (this.bufferWriteOffset + data.length > this.preallocBuffer.length) {
+      // Grow to 2x current size
+      const newSize = Math.max(this.preallocBuffer.length * 2, this.bufferWriteOffset + data.length);
+      const newBuffer = Buffer.allocUnsafe(newSize);
+      this.preallocBuffer.copy(newBuffer, 0, 0, this.bufferWriteOffset);
+      this.preallocBuffer = newBuffer;
+    }
+
+    data.copy(this.preallocBuffer, this.bufferWriteOffset);
+    this.bufferWriteOffset += data.length;
+    this.profiler?.gauge("audio.accumulatorKb", Math.round(this.bufferWriteOffset / 1024));
+  }
+
   // ── Chunk emission ──
 
   private emitChunk(): void {
-    if (this.accumulatedBytes === 0) return;
+    if (this.bufferWriteOffset === 0) return;
 
-    const pcmData = Buffer.concat(this.accumulator, this.accumulatedBytes);
-    this.accumulator = [];
-    this.accumulatedBytes = 0;
+    // Extract PCM data from pre-allocated buffer (no concat allocation)
+    const pcmData = this.preallocBuffer.subarray(0, this.bufferWriteOffset);
+    this.bufferWriteOffset = 0;
 
     const alignedLength = pcmData.length - (pcmData.length % 2);
-    const alignedPcm = alignedLength < pcmData.length
-      ? pcmData.subarray(0, alignedLength)
-      : pcmData;
+    // Copy aligned portion to new buffer since we'll reuse preallocBuffer
+    const alignedPcm = Buffer.from(pcmData.subarray(0, alignedLength));
 
     if (alignedPcm.length === 0) return;
 

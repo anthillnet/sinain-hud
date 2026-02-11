@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
 import type { Profiler } from "./profiler.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
-import { SenseBuffer } from "./buffers/sense-buffer.js";
+import { SenseBuffer, type SemanticSenseEvent, type TextDelta } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
 import { log, error } from "./log.js";
 
@@ -20,6 +20,7 @@ export interface ServerDeps {
   wsHandler: WsHandler;
   profiler?: Profiler;
   onSenseEvent: (event: SenseEvent) => void;
+  onSenseDelta: (data: { app: string; activity: string; changes: TextDelta[]; priority?: string; ts: number }) => void;
   onFeedPost: (text: string, priority: string) => void;
   onSenseProfile: (snapshot: any) => void;
   getHealthPayload: () => Record<string, unknown>;
@@ -96,9 +97,14 @@ export function createAppServer(deps: ServerDeps) {
             screen: data.meta?.screen ?? 0,
           },
         });
-        log(TAG, `[sense] #${event.id} (${event.type}): app=${event.meta.app} ssim=${event.meta.ssim?.toFixed(3)}`);
-        deps.onSenseEvent(event);
-        res.end(JSON.stringify({ ok: true, id: event.id }));
+        if (event) {
+          log(TAG, `[sense] #${event.id} (${event.type}): app=${event.meta.app} ssim=${event.meta.ssim?.toFixed(3)}`);
+          deps.onSenseEvent(event);
+          res.end(JSON.stringify({ ok: true, id: event.id }));
+        } else {
+          // Event was deduplicated
+          res.end(JSON.stringify({ ok: true, deduplicated: true }));
+        }
         return;
       }
 
@@ -107,6 +113,41 @@ export function createAppServer(deps: ServerDeps) {
         const metaOnly = url.searchParams.get("meta_only") === "true";
         const events = senseBuffer.query(after, metaOnly);
         res.end(JSON.stringify({ events, epoch: serverEpoch }));
+        return;
+      }
+
+      // ── /sense/context (structured semantic context) ──
+      if (req.method === "GET" && url.pathname === "/sense/context") {
+        const limit = Math.min(parseInt(url.searchParams.get("limit") || "10"), 50);
+        const includeDeltas = url.searchParams.get("include_deltas") === "true";
+        const includeSummary = url.searchParams.get("include_summary") !== "false";
+        const context = senseBuffer.getStructuredContext({
+          limit,
+          includeDeltas,
+          includeSummary,
+        });
+        res.end(JSON.stringify({ ok: true, context, epoch: serverEpoch }));
+        return;
+      }
+
+      // ── /sense/activity (activity breakdown) ──
+      if (req.method === "GET" && url.pathname === "/sense/activity") {
+        const since = parseInt(url.searchParams.get("since") || "0");
+        const breakdown = senseBuffer.getActivityBreakdown(since);
+        res.end(JSON.stringify({
+          ok: true,
+          activity: senseBuffer.latestActivity(),
+          breakdown,
+          epoch: serverEpoch,
+        }));
+        return;
+      }
+
+      // ── /sense/deltas (accumulated deltas) ──
+      if (req.method === "GET" && url.pathname === "/sense/deltas") {
+        const flush = url.searchParams.get("flush") === "true";
+        const deltas = senseBuffer.getAccumulatedDeltas(flush);
+        res.end(JSON.stringify({ ok: true, deltas, count: deltas.length }));
         return;
       }
 
@@ -196,7 +237,96 @@ export function createAppServer(deps: ServerDeps) {
 
   // Attach WS server on the same HTTP server
   const wss = new WebSocketServer({ server: httpServer });
-  wss.on("connection", (ws, req) => wsHandler.handleConnection(ws, req));
+  wss.on("connection", (ws, req) => {
+    const pathname = new URL(req.url || "/", `http://localhost:${config.port}`).pathname;
+
+    // Sense WebSocket endpoint for low-latency event streaming
+    if (pathname === "/sense/ws") {
+      log(TAG, "[sense/ws] client connected");
+
+      // Backpressure tracking
+      let pendingAcks = 0;
+      const MAX_PENDING = 5;
+
+      ws.on("message", (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+
+          // Handle different message types
+          if (msg.type === "delta") {
+            // Delta-only update (new semantic format)
+            senseBuffer.pushDelta({
+              app: msg.app || "unknown",
+              activity: msg.activity || "unknown",
+              changes: msg.changes || [],
+              priority: msg.priority,
+              ts: msg.ts || Date.now(),
+            });
+
+            // Trigger immediate context update for urgent priority
+            if (msg.priority === "urgent") {
+              deps.onSenseDelta(msg);
+            }
+
+            // Send ack with backpressure signal
+            pendingAcks++;
+            const backpressure = pendingAcks > MAX_PENDING ? 100 : 0;
+            ws.send(JSON.stringify({ type: "ack", backpressure }));
+            pendingAcks = Math.max(0, pendingAcks - 1);
+
+          } else {
+            // Full event (backwards compatible)
+            const imageData = msg.roi?.data || undefined;
+            const imageBbox = msg.roi?.bbox || undefined;
+
+            const event = senseBuffer.push({
+              type: msg.type,
+              ts: msg.ts,
+              ocr: msg.ocr || "",
+              imageData,
+              imageBbox,
+              meta: {
+                ssim: msg.meta?.ssim ?? 0,
+                app: msg.meta?.app || "unknown",
+                windowTitle: msg.meta?.windowTitle,
+                screen: msg.meta?.screen ?? 0,
+              },
+              semantic: msg.semantic,
+              priority: msg.priority,
+            });
+
+            if (event) {
+              deps.onSenseEvent(event);
+
+              // Send ack with event ID
+              pendingAcks++;
+              const backpressure = pendingAcks > MAX_PENDING ? 100 : 0;
+              ws.send(JSON.stringify({ type: "ack", id: event.id, backpressure }));
+              pendingAcks = Math.max(0, pendingAcks - 1);
+            } else {
+              // Deduplicated
+              ws.send(JSON.stringify({ type: "ack", deduplicated: true }));
+            }
+          }
+        } catch (err: any) {
+          ws.send(JSON.stringify({ type: "error", message: err.message }));
+        }
+      });
+
+      ws.on("close", () => {
+        log(TAG, "[sense/ws] client disconnected");
+      });
+
+      ws.on("error", (err) => {
+        error(TAG, `[sense/ws] error: ${err.message}`);
+      });
+
+      return;
+    }
+
+    // Default: overlay WebSocket handler
+    wsHandler.handleConnection(ws, req);
+  });
 
   return {
     httpServer,

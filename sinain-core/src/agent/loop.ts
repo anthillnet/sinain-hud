@@ -6,6 +6,7 @@ import type { Profiler } from "../profiler.js";
 import { buildContextWindow } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
+import { calculateEscalationScore } from "../escalation/scorer.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "agent";
@@ -229,18 +230,22 @@ export class AgentLoop extends EventEmitter {
     this.lastTickFeedVersion = feedBuffer.version;
     this.lastTickSenseVersion = senseBuffer.version;
 
+    // Quick idle check BEFORE building context (saves ~20% context builds during idle)
+    const cutoff = Date.now() - this.deps.agentConfig.maxAgeMs;
+    const feedAudioCount = feedBuffer.queryBySource("audio", cutoff).length;
+    const screenCount = senseBuffer.queryByTime(cutoff).length;
+    if (feedAudioCount === 0 && screenCount === 0) {
+      this.stats.idleSkips++;
+      this.deps.profiler?.gauge("agent.idleSkips", this.stats.idleSkips);
+      return;
+    }
+
     const richness = modeToRichness(this.deps.escalationMode);
     const ctxStart = Date.now();
     const contextWindow = buildContextWindow(
       feedBuffer, senseBuffer, richness, this.deps.agentConfig.maxAgeMs,
     );
     this.deps.profiler?.timerRecord("agent.contextBuild", Date.now() - ctxStart);
-
-    // Skip if both buffers empty in window
-    if (contextWindow.audioCount === 0 && contextWindow.screenCount === 0) {
-      this.stats.idleSkips++;
-      return;
-    }
 
     this.running = true;
     const traceCtx = this.deps.onTraceStart?.(this.agentNextId) ?? null;
@@ -296,7 +301,8 @@ export class AgentLoop extends EventEmitter {
         },
       };
       this.agentBuffer.push(entry);
-      if (this.agentBuffer.length > 50) this.agentBuffer.shift();
+      const historyLimit = this.deps.agentConfig.historyLimit || 50;
+      if (this.agentBuffer.length > historyLimit) this.agentBuffer.shift();
 
       const imageCount = contextWindow.images?.length || 0;
       log(TAG, `#${entry.id} (${latencyMs}ms, ${tokensIn}in+${tokensOut}out tok, model=${usedModel}, richness=${richness}, images=${imageCount}) hud="${hud}"`);
@@ -314,8 +320,11 @@ export class AgentLoop extends EventEmitter {
       // Store digest
       this.latestDigest = entry;
 
-      // Write SITUATION.md
-      writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry);
+      // Calculate escalation score for both SITUATION.md and escalation check
+      const escalationScore = calculateEscalationScore(digest, contextWindow);
+
+      // Write SITUATION.md (enhanced with escalation context and recorder status)
+      writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
 
       // Notify for escalation check
       traceCtx?.startSpan("escalation-check");
