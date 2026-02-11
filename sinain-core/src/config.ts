@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -73,7 +73,7 @@ export function loadConfig(): CoreConfig {
     channels: 1,
     chunkDurationMs: intEnv("AUDIO_CHUNK_MS", 5000),
     vadEnabled: boolEnv("AUDIO_VAD_ENABLED", true),
-    vadThreshold: floatEnv("AUDIO_VAD_THRESHOLD", 0.003),
+    vadThreshold: floatEnv("AUDIO_VAD_THRESHOLD", 0.001),
     captureCommand: env("AUDIO_CAPTURE_CMD", "sox") as "sox" | "ffmpeg",
     autoStart: boolEnv("AUDIO_AUTO_START", true),
     gainDb: intEnv("AUDIO_GAIN_DB", 20),
@@ -96,7 +96,7 @@ export function loadConfig(): CoreConfig {
     visionModel: env("AGENT_VISION_MODEL", "google/gemini-2.5-flash"),
     visionEnabled: boolEnv("AGENT_VISION_ENABLED", true),
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
-    maxTokens: intEnv("AGENT_MAX_TOKENS", 300),
+    maxTokens: intEnv("AGENT_MAX_TOKENS", 800),
     temperature: floatEnv("AGENT_TEMPERATURE", 0.3),
     pushToFeed: boolEnv("AGENT_PUSH_TO_FEED", true),
     debounceMs: intEnv("AGENT_DEBOUNCE_MS", 3000),
@@ -108,7 +108,7 @@ export function loadConfig(): CoreConfig {
     historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
   };
 
-  const escalationMode = env("ESCALATION_MODE", "selective") as EscalationMode;
+  const escalationMode = env("ESCALATION_MODE", "rich") as EscalationMode;
   const escalationConfig: EscalationConfig = {
     mode: escalationMode,
     cooldownMs: intEnv("ESCALATION_COOLDOWN_MS", 30000),
@@ -127,6 +127,12 @@ export function loadConfig(): CoreConfig {
     env("SITUATION_MD_PATH", `${situationDir}/SITUATION.md`)
   );
 
+  const learningConfig: LearningConfig = {
+    enabled: boolEnv("LEARNING_ENABLED", true),
+    feedbackDir: resolvePath(env("FEEDBACK_DIR", "~/.sinain-core/feedback")),
+    retentionDays: intEnv("FEEDBACK_RETENTION_DAYS", 30),
+  };
+
   return {
     port: intEnv("PORT", 9500),
     audioConfig,
@@ -138,5 +144,6 @@ export function loadConfig(): CoreConfig {
     situationMdPath,
     traceEnabled: boolEnv("TRACE_ENABLED", true),
     traceDir: resolvePath(env("TRACE_DIR", "~/.sinain-core/traces")),
+    learningConfig,
   };
 }

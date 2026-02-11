@@ -15,9 +15,6 @@ DEFAULTS = {
         "minArea": 100,
         "roiPadding": 20,
         "cooldownMs": 5000,
-        # New: pHash fast gate settings
-        "phashThreshold": 5,  # Hamming distance threshold (0-64)
-        "useFastGate": True,
     },
     "ocr": {
         "enabled": True,
@@ -26,9 +23,6 @@ DEFAULTS = {
         "lang": "eng",
         "psm": 11,
         "minConfidence": 50,
-        # New: caching settings
-        "cacheSize": 1000,
-        "cacheMethod": "content",  # "content" (perceptual) or "pixel" (exact)
     },
     "gate": {
         "minOcrChars": 20,
@@ -41,29 +35,6 @@ DEFAULTS = {
         "url": "http://localhost:9500",
         "sendThumbnails": True,
         "maxImageKB": 500,
-        # New: WebSocket settings
-        "useWebSocket": True,
-        "wsReconnectDelay": 2.0,
-        "maxQueueSize": 100,
-    },
-    # New: region tracking settings
-    "regions": {
-        "gridSize": 16,
-        "stabilityThresholdS": 30.0,
-        "stabilityMinSamples": 5,
-    },
-    # New: text detection settings
-    "textDetection": {
-        "enabled": True,
-        "threshold": 0.4,
-        "minSize": [32, 16],
-    },
-    # New: semantic layer settings
-    "semantic": {
-        "enabled": True,
-        "maxHistory": 30,
-        "contextLines": 1,
-        "maxDeltasPerEvent": 5,
     },
 }
 
@@ -83,8 +54,3 @@ def load_config(path: str | None = None) -> dict:
         except (json.JSONDecodeError, ValueError):
             pass  # use defaults
     return config
-
-
-def get_default_config() -> dict:
-    """Get a copy of the default configuration."""
-    return json.loads(json.dumps(DEFAULTS))

@@ -251,7 +251,7 @@ class DecisionGate:
 class SenseSender:
     """POSTs sense events to the relay server."""
 
-    def __init__(self, relay_url="http://54.228.25.196:18791",
+    def __init__(self, relay_url="http://85.214.180.247:18791",
                  max_image_kb=500, send_thumbnails=True):
         self.relay_url = relay_url
         self.max_image_kb = max_image_kb
@@ -404,7 +404,7 @@ def main(config_path: str):
         "cooldownMs": 2000
     },
     "relay": {
-        "url": "http://54.228.25.196:18791",
+        "url": "http://85.214.180.247:18791",
         "sendThumbnails": true,
         "maxImageKB": 500
     }
@@ -857,7 +857,7 @@ The bridge can spawn this as a child process, or it can run independently.
 | `ocr.minConfidence` | `30` | Min word confidence |
 | `gate.minOcrChars` | `10` | Min chars for text event |
 | `gate.majorChangeThreshold` | `0.85` | SSIM below = major change |
-| `relay.url` | `http://54.228.25.196:18791` | Relay server URL |
+| `relay.url` | `http://85.214.180.247:18791` | Relay server URL |
 | `relay.sendThumbnails` | `true` | Include ROI thumbs in text events |
 | `relay.maxImageKB` | `500` | Max image size |
 

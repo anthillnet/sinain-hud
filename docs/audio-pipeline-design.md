@@ -34,7 +34,7 @@ Capture system audio + mic on Mac, transcribe via AWS+Gemini hybrid, feed throug
 │                             │ POST /feed          │
 └─────────────────────────────┼─────────────────────┘
                               ▼
-                    HUD Relay (54.228.25.196:18791)
+                    HUD Relay (85.214.180.247:18791)
                               │
                               ▼
                     Sinain processes → pushes advice back
@@ -174,7 +174,7 @@ OPENROUTER_API_KEY=...
 GEMINI_MODEL=google/gemini-2.5-flash
 
 # Context Relay
-RELAY_URL=http://54.228.25.196:18791
+RELAY_URL=http://85.214.180.247:18791
 RELAY_MIN_INTERVAL_MS=30000
 RELAY_CONTEXT_WINDOW_MS=300000   # 5 min rolling window
 ```
