@@ -5,6 +5,7 @@ import type { Profiler } from "../profiler.js";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { shouldEscalate } from "./scorer.js";
 import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
+import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "escalation";
@@ -32,14 +33,8 @@ export class Escalator {
   private lastSpawnTs = 0;
   private static readonly SPAWN_COOLDOWN_MS = 60_000; // 60 seconds between duplicate spawns
 
-  // Track pending spawn tasks for result fetching
-  private pendingSpawnTasks = new Map<string, {
-    runId: string;
-    childSessionKey: string;
-    label?: string;
-    startedAt: number;
-    pollingEmitted: boolean;
-  }>();
+  // Track pending spawn tasks for result fetching (persisted to disk)
+  private pendingSpawnTasks: Map<string, PendingTaskEntry>;
 
   // Cap concurrent polling loops to limit RPC load
   private static readonly MAX_CONCURRENT_POLLS = 5;
@@ -62,6 +57,8 @@ export class Escalator {
 
   constructor(private deps: EscalatorDeps) {
     this.wsClient = new OpenClawWsClient(deps.openclawConfig);
+    // Load pending tasks from disk (crash recovery)
+    this.pendingSpawnTasks = loadPendingTasks();
   }
 
   /** Start the WS connection to OpenClaw. */
@@ -220,6 +217,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
           startedAt,
           pollingEmitted: false,
         });
+        savePendingTasks(this.pendingSpawnTasks);
         this.deps.profiler?.gauge("escalation.pendingSpawns", this.pendingSpawnTasks.size);
         log(TAG, `spawn-task tracked: taskId=${taskId}, runId=${spawnInfo.runId}, childSessionKey=${spawnInfo.childSessionKey}`);
 
@@ -360,6 +358,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
         log(TAG, `spawn-task timeout: taskId=${taskId}`);
         this.broadcastTaskEvent(taskId, "timeout", task.label, task.startedAt);
         this.pendingSpawnTasks.delete(taskId);
+        savePendingTasks(this.pendingSpawnTasks);
         this.finishPoll();
         return;
       }
@@ -403,6 +402,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
 
           this.broadcastTaskEvent(taskId, "completed", task.label, task.startedAt, resultText ?? undefined);
           this.pendingSpawnTasks.delete(taskId);
+          savePendingTasks(this.pendingSpawnTasks);
           this.finishPoll();
           return;
         }
@@ -411,6 +411,7 @@ Use sessions_spawn with the task above. The subagent will process and announce t
           log(TAG, `spawn-task failed: taskId=${taskId}, error=${waitResult?.payload?.error || "unknown"}`);
           this.broadcastTaskEvent(taskId, "failed", task.label, task.startedAt);
           this.pendingSpawnTasks.delete(taskId);
+          savePendingTasks(this.pendingSpawnTasks);
           this.finishPoll();
           return;
         }

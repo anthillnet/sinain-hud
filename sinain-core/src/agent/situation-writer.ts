@@ -1,20 +1,50 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ContextWindow, AgentEntry } from "../types.js";
+import type { ContextWindow, AgentEntry, RecorderStatus } from "../types.js";
+import type { EscalationScore } from "../escalation/scorer.js";
 import { normalizeAppName } from "./context-window.js";
 import { log, error } from "../log.js";
 
 const TAG = "situation";
 
 /**
+ * Error stack trace patterns for extraction.
+ */
+const ERROR_STACK_PATTERNS = [
+  /Error:.*\n(\s+at\s+.*\n)+/g,      // JavaScript stack traces
+  /Traceback.*:\n(\s+File.*\n)+/gi,  // Python tracebacks
+  /panic:.*\n(\s+goroutine.*\n)?/g,  // Go panics
+  /Exception.*:\n(\s+at\s+.*\n)+/g,  // Java exceptions
+];
+
+/**
+ * Extract error stack traces from text.
+ */
+function extractErrors(text: string): string[] {
+  const errors: string[] = [];
+  for (const pattern of ERROR_STACK_PATTERNS) {
+    const matches = text.match(pattern);
+    if (matches) errors.push(...matches.map(m => m.slice(0, 500)));
+  }
+  return errors;
+}
+
+/**
  * Atomically write SITUATION.md for OpenClaw bootstrap.
  * Ported from relay's writeSituationMd() — uses write-then-rename for atomicity.
+ *
+ * Enhanced with:
+ * - Escalation context (score and reasons)
+ * - Detected errors section
+ * - Active recording status
  */
 export function writeSituationMd(
   situationMdPath: string,
   contextWindow: ContextWindow,
   digest: string,
   entry: AgentEntry,
+  escalationScore?: EscalationScore,
+  recorderStatus?: RecorderStatus | null,
 ): void {
   const dir = path.dirname(situationMdPath);
   const tmpPath = situationMdPath + ".tmp";
@@ -77,6 +107,45 @@ export function writeSituationMd(
       const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
       lines.push(`- [${ago}s ago] ${e.text.slice(0, 500)}`);
     }
+    lines.push("");
+  }
+
+  // Enhanced: Escalation context for richer understanding
+  if (escalationScore && escalationScore.total > 0) {
+    lines.push("## Escalation Context");
+    lines.push("");
+    lines.push(`- Score: ${escalationScore.total}`);
+    lines.push(`- Reasons: ${escalationScore.reasons.join(", ") || "none"}`);
+    lines.push("");
+  }
+
+  // Enhanced: Detected errors section
+  const allText = [
+    digest,
+    ...contextWindow.screen.map(e => e.ocr || ""),
+    ...contextWindow.audio.map(e => e.text || ""),
+  ].join("\n");
+  const detectedErrors = extractErrors(allText);
+  if (detectedErrors.length > 0) {
+    lines.push("## Detected Errors");
+    lines.push("");
+    for (const err of detectedErrors.slice(0, 3)) {
+      lines.push("```");
+      lines.push(err.trim());
+      lines.push("```");
+      lines.push("");
+    }
+  }
+
+  // Enhanced: Active recording status
+  if (recorderStatus?.recording) {
+    lines.push("## Active Recording");
+    lines.push("");
+    const label = recorderStatus.label || "Unnamed recording";
+    const durationSec = Math.round(recorderStatus.durationMs / 1000);
+    lines.push(`- Label: ${label}`);
+    lines.push(`- Duration: ${durationSec}s`);
+    lines.push(`- Segments: ${recorderStatus.segments}`);
     lines.push("");
   }
 

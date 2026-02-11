@@ -181,6 +181,8 @@ export interface AgentConfig {
   cooldownMs: number;
   maxAgeMs: number;
   fallbackModels: string[];
+  /** Maximum entries to keep in agent history buffer (default: 50) */
+  historyLimit: number;
 }
 
 export interface AgentResult {

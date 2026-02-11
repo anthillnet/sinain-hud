@@ -3,6 +3,14 @@ import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { ContextWindow, ContextRichness, RichnessPreset } from "../types.js";
 
 /**
+ * Track recently sent image hashes to avoid sending duplicates to vision model.
+ * Uses simple content hash: length + first 1000 chars.
+ */
+const recentlySentImageHashes = new Set<string>();
+const MAX_IMAGE_HASH_CACHE = 20;
+let imageHashCacheOrder: string[] = [];
+
+/**
  * Richness presets — control how much context goes into agent analysis and escalation.
  *
  * lean:     For selective mode. Minimal context, fast + cheap.
@@ -114,14 +122,40 @@ export function buildContextWindow(
     screenEvents[screenEvents.length - 1]?.ts || 0
   );
 
-  // Extract recent images for multimodal vision
-  const images = preset.maxImages > 0
-    ? senseBuffer.recentImages(preset.maxImages).map(e => ({
-        data: e.imageData!,
+  // Extract recent images for multimodal vision (with content-based deduplication)
+  let images: { data: string; app: string; ts: number }[] | undefined;
+  if (preset.maxImages > 0) {
+    const rawImages = senseBuffer.recentImages(preset.maxImages);
+    images = [];
+
+    for (const e of rawImages) {
+      if (!e.imageData) continue;
+
+      // Simple content hash: length + first 1000 chars
+      const hash = `${e.imageData.length}:${e.imageData.slice(0, 1000)}`;
+
+      // Skip if recently sent to vision model (avoid duplicate API calls)
+      if (recentlySentImageHashes.has(hash)) {
+        continue;
+      }
+
+      // Track this hash (LRU eviction)
+      recentlySentImageHashes.add(hash);
+      imageHashCacheOrder.push(hash);
+      while (imageHashCacheOrder.length > MAX_IMAGE_HASH_CACHE) {
+        const oldest = imageHashCacheOrder.shift()!;
+        recentlySentImageHashes.delete(oldest);
+      }
+
+      images.push({
+        data: e.imageData,
         app: e.meta.app || "unknown",
         ts: e.ts,
-      }))
-    : undefined;
+      });
+    }
+
+    if (images.length === 0) images = undefined;
+  }
 
   return {
     audio: audioItems,

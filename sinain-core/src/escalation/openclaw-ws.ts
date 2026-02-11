@@ -229,13 +229,16 @@ export class OpenClawWsClient extends EventEmitter {
     this.consecutiveFailures++;
     if (this.consecutiveFailures >= OpenClawWsClient.CIRCUIT_THRESHOLD && !this.circuitOpen) {
       this.circuitOpen = true;
-      warn(TAG, `circuit breaker opened after ${this.consecutiveFailures} failures \u2014 pausing for 5 min`);
+      // Add 0-30s random jitter to prevent thundering herd on service recovery
+      const jitterMs = Math.floor(Math.random() * 30000);
+      const resetDelayMs = OpenClawWsClient.CIRCUIT_RESET_MS + jitterMs;
+      warn(TAG, `circuit breaker opened after ${this.consecutiveFailures} failures \u2014 pausing for ${Math.round(resetDelayMs / 1000)}s`);
       this.circuitResetTimer = setTimeout(() => {
         this.circuitOpen = false;
         this.consecutiveFailures = 0;
         log(TAG, "circuit breaker reset \u2014 resuming");
         this.connect();
-      }, OpenClawWsClient.CIRCUIT_RESET_MS);
+      }, resetDelayMs);
     }
   }
 }
