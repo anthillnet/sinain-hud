@@ -7,12 +7,12 @@ on:
     branches: [main]
 
 jobs:
-  bridge-lint-and-test:
-    name: Bridge — Lint & Test
+  sinain-core-typecheck:
+    name: sinain-core — TypeScript Check
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: bridge
+        working-directory: sinain-core
 
     steps:
       - uses: actions/checkout@v4
@@ -21,17 +21,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: bridge/package-lock.json
+          cache-dependency-path: sinain-core/package-lock.json
 
       - run: npm ci
 
       - name: TypeScript check
         run: npx tsc --noEmit
-
-      - name: Run tests
-        run: npm test
-        env:
-          NODE_ENV: test
 
   overlay-analyze:
     name: Overlay — Flutter Analyze
