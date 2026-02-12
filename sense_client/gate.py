@@ -45,9 +45,24 @@ class DecisionGate:
         self.last_app_change_ts: float = 0
         # Fuzzy dedup: ring buffer of last 5 OCR texts
         self._recent_texts: deque[str] = deque(maxlen=5)
+        self._last_sent_text: str = ""
+
+    def is_ready(self, app_changed: bool, window_changed: bool) -> bool:
+        """Time-based readiness check without consuming OCR output.
+
+        Used by backpressure scheduling to decide whether to run OCR at all.
+        """
+        if app_changed or window_changed:
+            return True
+        now = time.time() * 1000
+        recent = (now - self.last_app_change_ts) < 10000
+        cooldown = self.adaptive_cooldown_ms if recent else self.cooldown_ms
+        return now - self.last_send_ts >= cooldown
 
     def _is_duplicate(self, text: str) -> bool:
         """Check if text is too similar to any recently sent text."""
+        if text == self._last_sent_text:
+            return True
         for prev in self._recent_texts:
             ratio = difflib.SequenceMatcher(None, prev, text).ratio()
             if ratio > 0.7:
@@ -99,6 +114,7 @@ class DecisionGate:
             if not self._ocr_quality_ok(ocr.text):
                 return None
             self._recent_texts.append(ocr.text)
+            self._last_sent_text = ocr.text
             self.last_send_ts = now
             return SenseEvent(type="text", ts=now, ocr=ocr.text,
                               meta=SenseMeta(ssim=change.ssim_score))

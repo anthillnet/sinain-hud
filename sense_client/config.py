@@ -36,6 +36,12 @@ DEFAULTS = {
         "sendThumbnails": True,
         "maxImageKB": 500,
     },
+    "optimization": {
+        "backpressure": False,
+        "textDedup": False,
+        "visionRegionOfInterest": False,
+        "shadowValidation": False,
+    },
 }
 
 
