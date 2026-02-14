@@ -192,9 +192,12 @@ export class AudioPipeline extends EventEmitter {
   // ── ffmpeg capture ──
 
   private startFfmpeg(): void {
+    // Use "none:<device>" to explicitly skip video device enumeration.
+    // Without "none", AVFoundation may initialise CoreMediaIO (camera stack),
+    // which prevents other apps (e.g. Google Meet) from acquiring the camera.
     const deviceInput = this.config.device === "default"
-      ? ":0"
-      : `:${this.config.device}`;
+      ? "none:0"
+      : `none:${this.config.device}`;
 
     const args = [
       "-f", "avfoundation",
