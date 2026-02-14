@@ -4,6 +4,7 @@ import type { WsHandler } from "../overlay/ws-handler.js";
 import type { Profiler } from "../profiler.js";
 import type { FeedbackStore } from "../learning/feedback-store.js";
 import type { SignalCollector } from "../learning/signal-collector.js";
+import { randomUUID, createHash } from "node:crypto";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
@@ -33,7 +34,7 @@ export class Escalator {
   private lastEscalatedDigest = "";
 
   // Spawn deduplication state
-  private lastSpawnedTask = "";
+  private lastSpawnFingerprint = "";
   private lastSpawnTs = 0;
   private static readonly SPAWN_COOLDOWN_MS = 60_000; // 60 seconds between duplicate spawns
 
@@ -232,183 +233,148 @@ ${recentLines.join("\n")}`;
   }
 
   /**
-   * Dispatch a task to be handled by a spawned subagent.
-   * This sends a specially-formatted message that the main agent recognizes
-   * and spawns a subagent to process.
+   * Dispatch a task to a spawned subagent via direct child session addressing.
+   * Creates a unique child session key and sends the task directly to the gateway
+   * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
   async dispatchSpawnTask(task: string, label?: string): Promise<void> {
-    // --- Deduplication check ---
-    const normalizedTask = task.toLowerCase().trim();
+    // --- Fingerprint dedup — hash the task content ---
+    const fingerprint = createHash("sha256").update(task.trim()).digest("hex").slice(0, 16);
     const now = Date.now();
 
-    // Skip if same task within cooldown
-    if (normalizedTask === this.lastSpawnedTask &&
+    if (fingerprint === this.lastSpawnFingerprint &&
         now - this.lastSpawnTs < Escalator.SPAWN_COOLDOWN_MS) {
-      log(TAG, `spawn-task skipped (duplicate within cooldown): "${task.slice(0, 50)}..."`);
+      log(TAG, `spawn-task skipped (duplicate fingerprint ${fingerprint})`);
       return;
     }
 
-    // Update dedup state
-    this.lastSpawnedTask = normalizedTask;
+    this.lastSpawnFingerprint = fingerprint;
     this.lastSpawnTs = now;
-    // --- End deduplication check ---
 
     const taskId = `spawn-${Date.now()}`;
     const startedAt = Date.now();
     const labelStr = label ? ` (label: "${label}")` : "";
-    const message = `[sinain-core:spawn-task]${labelStr}
-
-Please spawn a subagent to handle this task:
-
-${task}
-
-Use sessions_spawn with the task above. The subagent will process and announce the result.`;
-
     const idemKey = `spawn-task-${Date.now()}`;
-    this.outboundBytes += Buffer.byteLength(message);
+
+    // Generate a unique child session key — bypasses the main agent entirely
+    const childSessionKey = `agent:main:subagent:${randomUUID()}`;
+    const mainSessionKey = this.deps.openclawConfig.sessionKey;
+
+    this.outboundBytes += Buffer.byteLength(task);
     this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
-    log(TAG, `dispatching spawn-task${labelStr}: "${task.slice(0, 80)}..."`);
+    log(TAG, `dispatching spawn-task${labelStr} → child=${childSessionKey}: "${task.slice(0, 80)}..."`);
 
     // ★ Broadcast "spawned" BEFORE the RPC — TSK tab shows ··· immediately
     this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
 
     if (!this.wsClient.isConnected) {
       this.broadcastTaskEvent(taskId, "failed", label, startedAt);
-      await this.doEscalate(message, idemKey, "");  // HTTP fallback
+      // HTTP fallback — wrap task for the main agent
+      const fallbackMsg = `[sinain-core:spawn-task]${labelStr}\n\n${task}`;
+      await this.doEscalate(fallbackMsg, idemKey, "");
       return;
     }
 
     try {
-      const result = await this.wsClient.sendAgentRpc(
-        message, idemKey, this.deps.openclawConfig.sessionKey,
-      );
+      // Send directly to a new child session via the gateway agent RPC
+      const result = await this.wsClient.sendRpc("agent", {
+        message: task,
+        sessionKey: childSessionKey,
+        lane: "subagent",
+        extraSystemPrompt: this.buildChildSystemPrompt(task, label),
+        deliver: false,
+        spawnedBy: mainSessionKey,
+        idempotencyKey: idemKey,
+        label: label || undefined,
+      }, 120_000, { expectFinal: true });
 
-      // Debug: log the raw response structure
       log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
 
-      const spawnInfo = this.extractSpawnInfo(result);
-      if (spawnInfo) {
-        this.pendingSpawnTasks.set(taskId, {
-          ...spawnInfo,
-          label,
-          startedAt,
-          pollingEmitted: false,
-        });
-        savePendingTasks(this.pendingSpawnTasks);
-        this.deps.profiler?.gauge("escalation.pendingSpawns", this.pendingSpawnTasks.size);
-        log(TAG, `spawn-task tracked: taskId=${taskId}, runId=${spawnInfo.runId}, childSessionKey=${spawnInfo.childSessionKey}`);
+      // Extract result — child agent actually ran the task and returned content
+      const payloads = result?.payload?.result?.payloads;
+      const runId = result?.payload?.runId || taskId;
 
-        // Start async polling for this task
-        this.pollTaskCompletion(taskId);
+      if (Array.isArray(payloads) && payloads.length > 0) {
+        const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
+        if (output) {
+          this.pushResponse(`${label || "Background task"}:\n${output}`);
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt, output);
+        } else {
+          log(TAG, `spawn-task: ${payloads.length} payloads but empty text, trying chat.history`);
+          const historyText = await this.fetchChildResult(childSessionKey);
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt,
+            historyText || "task completed (no output)");
+          if (historyText) {
+            this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+          }
+        }
       } else {
-        // Extraction failed — agent processed it but we can't track the child
-        log(TAG, "spawn-task: could not extract runId/childSessionKey from response");
-        const inlineResult = this.extractInlineResult(result);
-        this.broadcastTaskEvent(taskId, "completed", label, startedAt,
-          inlineResult || "task dispatched (untracked)");
+        // No payloads — fallback: fetch from chat.history on child session
+        log(TAG, `spawn-task: no payloads, fetching chat.history for child=${childSessionKey}`);
+        const historyText = await this.fetchChildResult(childSessionKey);
+        if (historyText) {
+          this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt, historyText);
+        } else {
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt,
+            "task completed (no output captured)");
+        }
       }
+
+      // Persist for crash recovery (no polling needed — result already in hand)
+      this.pendingSpawnTasks.set(taskId, {
+        runId,
+        childSessionKey,
+        label,
+        startedAt,
+        pollingEmitted: false,
+      });
+      savePendingTasks(this.pendingSpawnTasks);
+
+      // Clean up immediately since we already have the result
+      this.pendingSpawnTasks.delete(taskId);
+      savePendingTasks(this.pendingSpawnTasks);
     } catch (err: any) {
       error(TAG, `spawn-task failed: ${err.message}`);
       this.broadcastTaskEvent(taskId, "failed", label, startedAt);
     }
   }
 
-  /** Extract spawn info (runId, childSessionKey) from agent RPC response. */
-  private extractSpawnInfo(result: any): { runId: string; childSessionKey: string } | null {
-    if (!result?.ok || !result?.payload) {
-      log(TAG, `extractSpawnInfo: no ok/payload in result`);
+  /** Build a focused system prompt for the child subagent. */
+  private buildChildSystemPrompt(task: string, label?: string): string {
+    return [
+      "# Subagent Context",
+      "",
+      "You are a **subagent** spawned for a specific task.",
+      "",
+      "## Your Role",
+      `- Task: ${task.replace(/\s+/g, " ").trim().slice(0, 500)}`,
+      "- Complete this task. That's your entire purpose.",
+      "",
+      "## Rules",
+      "1. Stay focused — do your assigned task, nothing else",
+      "2. Your final message will be reported to the requester",
+      "3. Be concise but informative",
+      "",
+      label ? `Label: ${label}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
+  /** Fetch the latest assistant reply from a child session's chat history. */
+  private async fetchChildResult(childSessionKey: string): Promise<string | null> {
+    try {
+      const historyResult = await this.wsClient.sendRpc("chat.history", {
+        sessionKey: childSessionKey,
+        limit: 10,
+      }, 10_000);
+      return this.extractLatestAssistantReply(historyResult);
+    } catch (err: any) {
+      warn(TAG, `chat.history fetch failed for ${childSessionKey}: ${err.message}`);
       return null;
     }
-
-    const p = result.payload;
-
-    // Strategy 1: Direct fields on payload (if gateway returns them at top level)
-    if (p.childSessionKey && p.runId) {
-      log(TAG, `extractSpawnInfo: found direct fields on payload`);
-      return { runId: p.runId, childSessionKey: p.childSessionKey };
-    }
-
-    // Strategy 2: Look in result.payloads text (JSON parsing)
-    const payloads = p.result?.payloads;
-    log(TAG, `extractSpawnInfo: payloads count=${payloads?.length}, first text=${payloads?.[0]?.text?.slice(0, 200)}`);
-
-    if (Array.isArray(payloads)) {
-      for (const pl of payloads) {
-        if (typeof pl.text !== "string") continue;
-
-        // Find all JSON-like objects and try to parse each
-        for (const jsonStr of this.findJsonObjects(pl.text)) {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.runId && parsed.childSessionKey) {
-              return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
-            }
-          } catch { /* skip malformed JSON */ }
-        }
-
-        // Try parsing the entire text as JSON
-        try {
-          const parsed = JSON.parse(pl.text);
-          if (parsed.runId && parsed.childSessionKey) {
-            return { runId: parsed.runId, childSessionKey: parsed.childSessionKey };
-          }
-        } catch { /* skip */ }
-      }
-
-      // Strategy 3: UUID pattern matching in text as last resort
-      const allText = payloads.map((pl: any) => pl.text || "").join("\n");
-      const runIdMatch = allText.match(/runId["\s:]+([a-f0-9-]{36})/i);
-      const sessionMatch = allText.match(/childSessionKey["\s:]+([a-zA-Z0-9_-]+)/i);
-      if (runIdMatch && sessionMatch) {
-        log(TAG, `extractSpawnInfo: found via regex pattern matching`);
-        return { runId: runIdMatch[1], childSessionKey: sessionMatch[1] };
-      }
-    }
-
-    return null;
   }
 
-  /** Find JSON objects in text, handling nested braces properly. */
-  private findJsonObjects(text: string): string[] {
-    const results: string[] = [];
-    let i = 0;
-
-    while (i < text.length) {
-      if (text[i] === "{") {
-        let depth = 1;
-        let start = i;
-        i++;
-
-        while (i < text.length && depth > 0) {
-          if (text[i] === "{") depth++;
-          else if (text[i] === "}") depth--;
-          i++;
-        }
-
-        if (depth === 0) {
-          results.push(text.slice(start, i));
-        }
-      } else {
-        i++;
-      }
-    }
-
-    return results;
-  }
-
-  /** Extract inline text from payloads as a fallback result preview. */
-  private extractInlineResult(result: any): string | null {
-    const payloads = result?.payload?.result?.payloads;
-    if (!Array.isArray(payloads)) return null;
-    for (const pl of payloads) {
-      if (typeof pl.text === "string" && pl.text.trim()) {
-        return pl.text.trim().slice(0, 200);
-      }
-    }
-    return null;
-  }
-
-  /** Poll for task completion and push result to HUD. */
+  /** Poll for task completion and push result to HUD (preserved for crash recovery). */
   private async pollTaskCompletion(taskId: string): Promise<void> {
     // Enforce concurrency cap — queue excess tasks
     if (this.activePolls >= Escalator.MAX_CONCURRENT_POLLS) {
