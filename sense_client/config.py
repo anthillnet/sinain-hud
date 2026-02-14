@@ -7,7 +7,7 @@ DEFAULTS = {
     "capture": {
         "mode": "screen",
         "target": 0,
-        "fps": 0.2,
+        "fps": 2.0,
         "scale": 0.5,
     },
     "detection": {
