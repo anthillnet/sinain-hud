@@ -97,14 +97,9 @@ All configuration is via environment variables (or `.env` file). Variables are g
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TRANSCRIPTION_BACKEND` | `openrouter` | Backend: `openrouter`, `aws-gemini`, or `whisper` |
 | `TRANSCRIPTION_MODEL` | `google/gemini-2.5-flash` | Model for audio-to-text |
 | `OPENROUTER_API_KEY` | *(empty)* | **Required** — OpenRouter API key |
-| `REFINE_INTERVAL_MS` | `30000` | Refinement interval for AWS+Gemini hybrid |
 | `TRANSCRIPTION_LANGUAGE` | `en-US` | Language code |
-| `AWS_REGION` | `eu-west-1` | AWS region (only for `aws-gemini` backend) |
-| `AWS_ACCESS_KEY_ID` | *(empty)* | AWS credentials (only for `aws-gemini`) |
-| `AWS_SECRET_ACCESS_KEY` | *(empty)* | AWS credentials (only for `aws-gemini`) |
 
 ### Agent
 
@@ -367,7 +362,7 @@ sinain-core/src/
 │   └── situation-writer.ts   — SITUATION.md file writer
 ├── audio/
 │   ├── pipeline.ts           — sox/ffmpeg audio capture + VAD
-│   └── transcription.ts      — audio-to-text (OpenRouter/AWS/Whisper)
+│   └── transcription.ts      — audio-to-text (OpenRouter)
 ├── buffers/
 │   ├── feed-buffer.ts        — ring buffer for feed items (100)
 │   └── sense-buffer.ts       — ring buffer for screen events (30)

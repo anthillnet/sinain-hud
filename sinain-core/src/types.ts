@@ -122,19 +122,14 @@ export interface AudioChunk {
 // ── Transcription types ──
 
 export interface TranscriptionConfig {
-  backend: "aws-gemini" | "openrouter" | "whisper";
-  awsRegion: string;
-  awsAccessKeyId: string;
-  awsSecretAccessKey: string;
   openrouterApiKey: string;
   geminiModel: string;
-  refineIntervalMs: number;
   language: string;
 }
 
 export interface TranscriptResult {
   text: string;
-  source: "aws" | "gemini" | "openrouter" | "whisper";
+  source: "openrouter" | "whisper";
   refined: boolean;
   confidence: number;
   ts: number;

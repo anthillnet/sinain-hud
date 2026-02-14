@@ -6,10 +6,7 @@ import { log, warn, error } from "../log.js";
 const TAG = "transcribe";
 
 /**
- * Transcription service — sends audio chunks to LLM for transcription.
- *
- * Primary: OpenRouter (Gemini) — send whole WAV chunk.
- * Fallback: AWS Transcribe Streaming + Gemini refinement hybrid.
+ * Transcription service — sends audio chunks to OpenRouter (Gemini) for transcription.
  *
  * Events: 'transcript' (TranscriptResult)
  */
@@ -18,9 +15,6 @@ export class TranscriptionService extends EventEmitter {
   private destroyed: boolean = false;
   private pendingRequests: number = 0;
   private readonly MAX_CONCURRENT = 3;
-
-  private partialAccumulator: string[] = [];
-  private refineTimer: ReturnType<typeof setInterval> | null = null;
 
   private latencies: number[] = [];
   private cumulativeLatencies: number[] = [];
@@ -38,22 +32,11 @@ export class TranscriptionService extends EventEmitter {
     super();
     this.config = config;
 
-    if (config.backend === "openrouter" && !config.openrouterApiKey) {
+    if (!config.openrouterApiKey) {
       warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
     }
 
-    if (config.backend === "aws-gemini") {
-      if (!config.awsAccessKeyId || !config.awsSecretAccessKey) {
-        warn(TAG, "AWS credentials not set \u2014 falling back to OpenRouter");
-      }
-      this.refineTimer = setInterval(() => {
-        this.refinePartials().catch((err) => {
-          warn(TAG, "refinement error:", err instanceof Error ? err.message : err);
-        });
-      }, config.refineIntervalMs);
-    }
-
-    log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
+    log(TAG, `initialized: model=${config.geminiModel} language=${config.language}`);
 
     this.latencyStatsTimer = setInterval(() => this.logStats(), 60_000);
   }
@@ -72,18 +55,7 @@ export class TranscriptionService extends EventEmitter {
     this.pendingRequests++;
     this.profiler?.gauge("transcription.pending", this.pendingRequests);
     try {
-      switch (this.config.backend) {
-        case "openrouter":
-          await this.transcribeViaOpenRouter(chunk);
-          break;
-        case "aws-gemini":
-          await this.transcribeViaAwsGemini(chunk);
-          break;
-        case "whisper":
-          warn(TAG, "whisper backend not yet implemented, falling back to openrouter");
-          await this.transcribeViaOpenRouter(chunk);
-          break;
-      }
+      await this.transcribeViaOpenRouter(chunk);
     } catch (err) {
       this.errorCount++;
       this.profiler?.gauge("transcription.errors", this.errorCount);
@@ -96,10 +68,8 @@ export class TranscriptionService extends EventEmitter {
 
   destroy(): void {
     this.destroyed = true;
-    if (this.refineTimer) { clearInterval(this.refineTimer); this.refineTimer = null; }
     if (this.latencyStatsTimer) { clearInterval(this.latencyStatsTimer); this.latencyStatsTimer = null; }
     this.logStats();
-    this.partialAccumulator = [];
     this.removeAllListeners();
     log(TAG, "destroyed");
   }
@@ -241,135 +211,4 @@ export class TranscriptionService extends EventEmitter {
     }
   }
 
-  // ── AWS + Gemini hybrid ──
-
-  private async transcribeViaAwsGemini(chunk: AudioChunk): Promise<void> {
-    if (!this.config.awsAccessKeyId || !this.config.awsSecretAccessKey) {
-      log(TAG, "AWS credentials not set, falling back to OpenRouter");
-      await this.transcribeViaOpenRouter(chunk);
-      return;
-    }
-
-    try {
-      const { TranscribeStreamingClient, StartStreamTranscriptionCommand } =
-        await import("@aws-sdk/client-transcribe-streaming");
-
-      const client = new TranscribeStreamingClient({
-        region: this.config.awsRegion,
-        credentials: {
-          accessKeyId: this.config.awsAccessKeyId,
-          secretAccessKey: this.config.awsSecretAccessKey,
-        },
-      });
-
-      async function* audioStream() {
-        const pcmData = chunk.buffer.subarray(44);
-        const FRAME_SIZE = 4096;
-        for (let offset = 0; offset < pcmData.length; offset += FRAME_SIZE) {
-          const end = Math.min(offset + FRAME_SIZE, pcmData.length);
-          yield { AudioEvent: { AudioChunk: pcmData.subarray(offset, end) } };
-        }
-      }
-
-      const command = new StartStreamTranscriptionCommand({
-        LanguageCode: this.config.language.replace("-", "-") as "en-US",
-        MediaEncoding: "pcm",
-        MediaSampleRateHertz: 16000,
-        AudioStream: audioStream(),
-      });
-
-      const response = await client.send(command);
-      const resultStream = response.TranscriptResultStream;
-
-      if (resultStream) {
-        for await (const event of resultStream) {
-          if (event.TranscriptEvent?.Transcript?.Results) {
-            for (const result of event.TranscriptEvent.Transcript.Results) {
-              if (!result.IsPartial && result.Alternatives?.[0]?.Transcript) {
-                const text = result.Alternatives[0].Transcript;
-                log(TAG, `AWS final: "${text.slice(0, 100)}"`);
-                this.partialAccumulator.push(text);
-
-                const awsResult: TranscriptResult = {
-                  text,
-                  source: "aws",
-                  refined: false,
-                  confidence: result.Alternatives[0].Items?.[0]?.Confidence ?? 0.9,
-                  ts: Date.now(),
-                };
-                this.emit("transcript", awsResult);
-              }
-            }
-          }
-        }
-      }
-    } catch (err) {
-      error(TAG, "AWS Transcribe error:", err instanceof Error ? err.message : err);
-      log(TAG, "falling back to OpenRouter");
-      await this.transcribeViaOpenRouter(chunk);
-    }
-  }
-
-  private async refinePartials(): Promise<void> {
-    if (this.partialAccumulator.length === 0) return;
-    if (!this.config.openrouterApiKey) return;
-
-    const rawText = this.partialAccumulator.join(" ");
-    this.partialAccumulator = [];
-
-    log(TAG, `refining ${rawText.length} chars via Gemini`);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
-
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.config.openrouterApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.config.geminiModel,
-          messages: [{
-            role: "user",
-            content: `Clean up this raw transcript. Fix grammar, remove filler words, preserve meaning. Output only the cleaned text.\n\n${rawText}`,
-          }],
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        warn(TAG, `Gemini refinement error: ${response.status}`);
-        return;
-      }
-
-      const data = await response.json() as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-
-      const refined = data.choices?.[0]?.message?.content?.trim();
-      if (!refined) return;
-
-      log(TAG, `refined transcript: "${refined.slice(0, 100)}"`);
-
-      const result: TranscriptResult = {
-        text: refined,
-        source: "gemini",
-        refined: true,
-        confidence: 0.9,
-        ts: Date.now(),
-      };
-
-      this.emit("transcript", result);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        warn(TAG, "Gemini refinement timed out");
-      } else {
-        warn(TAG, "Gemini refinement failed:", err instanceof Error ? err.message : err);
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
 }
