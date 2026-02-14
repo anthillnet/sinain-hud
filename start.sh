@@ -56,8 +56,11 @@ kill_stale() {
     killed=true
   fi
 
-  # Kill previous sense_client instances
+  # Kill previous sense_client instances (match both python3 and framework Python)
   if pkill -f "python3 -m sense_client" 2>/dev/null; then
+    killed=true
+  fi
+  if pkill -f "Python -m sense_client" 2>/dev/null; then
     killed=true
   fi
 
@@ -133,6 +136,7 @@ cleanup() {
 
   lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
   pkill -f "python3 -m sense_client" 2>/dev/null || true
+  pkill -f "Python -m sense_client" 2>/dev/null || true
   pkill -f "tsx.*src/index.ts" 2>/dev/null || true
 
   rm -f "$PID_FILE"

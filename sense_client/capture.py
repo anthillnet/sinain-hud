@@ -1,17 +1,21 @@
-"""Screen capture using macOS screencapture CLI or ScreenCaptureKit IPC."""
+"""Screen capture using macOS CoreGraphics (Quartz) or ScreenCaptureKit IPC."""
 
 import json
 import os
-import subprocess
-import tempfile
 import time
 from typing import Generator
 
+import Quartz
 from PIL import Image
 
 
 class ScreenCapture:
-    """Captures screen frames at configurable rate."""
+    """Captures screen frames via CGDisplayCreateImage (CoreGraphics/IOSurface).
+
+    Uses Quartz CGDisplayCreateImage instead of the screencapture CLI.
+    This avoids CoreMediaIO/ScreenCaptureKit, which blocks camera access
+    for other apps (e.g. Google Meet) on macOS 14+.
+    """
 
     def __init__(self, mode: str = "screen", target: int = 0,
                  fps: float = 1, scale: float = 0.5):
@@ -23,37 +27,44 @@ class ScreenCapture:
         self.stats_fail = 0
         self._last_stats_time = time.time()
         self._stats_interval = 60  # log stats every 60s
+        self._display_id = Quartz.CGMainDisplayID()
 
     def capture_frame(self) -> tuple[Image.Image, float]:
         """Returns (PIL Image, timestamp).
-        Uses macOS screencapture -x -C -t png to a temp file.
+        Uses CGDisplayCreateImage for zero-subprocess, camera-safe capture.
         Downscales by self.scale factor before returning.
         """
         ts = time.time()
-        fd, tmp = tempfile.mkstemp(suffix=".png")
-        os.close(fd)
+        cg_image = Quartz.CGDisplayCreateImage(self._display_id)
+        if cg_image is None:
+            self.stats_fail += 1
+            raise RuntimeError("CGDisplayCreateImage returned None")
+
         try:
-            result = subprocess.run(
-                ["screencapture", "-x", "-C", "-t", "png", tmp],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode != 0:
-                stderr = result.stderr.strip()
-                self.stats_fail += 1
-                raise RuntimeError(f"screencapture exit {result.returncode}: {stderr}")
-            if not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
-                self.stats_fail += 1
-                raise RuntimeError("screencapture produced empty file")
-            img = Image.open(tmp)
-            if self.scale != 1.0:
-                new_w = int(img.width * self.scale)
-                new_h = int(img.height * self.scale)
-                img = img.resize((new_w, new_h), Image.LANCZOS)
-            self.stats_ok += 1
-            return img, ts
+            width = Quartz.CGImageGetWidth(cg_image)
+            height = Quartz.CGImageGetHeight(cg_image)
+            bytes_per_row = Quartz.CGImageGetBytesPerRow(cg_image)
+
+            # Get raw pixel data from CGImage
+            data_provider = Quartz.CGImageGetDataProvider(cg_image)
+            raw_data = Quartz.CGDataProviderCopyData(data_provider)
         finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
+            # Explicitly release CGImage and its IOSurface handle immediately.
+            # At continuous capture rates, unreleased handles cause GPU/camera
+            # contention because the camera shares IOSurface infrastructure.
+            del cg_image
+
+        # CGDisplayCreateImage returns BGRA (premultiplied alpha, 32Little)
+        img = Image.frombytes("RGBA", (width, height), raw_data,
+                              "raw", "BGRA", bytes_per_row, 1)
+
+        if self.scale != 1.0:
+            new_w = int(width * self.scale)
+            new_h = int(height * self.scale)
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+
+        self.stats_ok += 1
+        return img, ts
 
     def capture_loop(self) -> Generator[tuple[Image.Image, float], None, None]:
         """Yields frames at self.fps rate."""
@@ -179,5 +190,5 @@ def create_capture(mode: str = "screen", target: int = 0,
     if ScreenKitCapture.is_available():
         print("[capture] Using ScreenCaptureKit (overlay IPC)")
         return ScreenKitCapture(fps=fps, scale=1.0)  # overlay writes at half-res already
-    print("[capture] Using screencapture CLI")
+    print("[capture] Using CoreGraphics (CGDisplayCreateImage)")
     return ScreenCapture(mode=mode, target=target, fps=fps, scale=scale)
