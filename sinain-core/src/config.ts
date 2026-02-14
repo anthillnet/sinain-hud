@@ -80,13 +80,8 @@ export function loadConfig(): CoreConfig {
   };
 
   const transcriptionConfig: TranscriptionConfig = {
-    backend: (env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"]),
-    awsRegion: env("AWS_REGION", "eu-west-1"),
-    awsAccessKeyId: env("AWS_ACCESS_KEY_ID", ""),
-    awsSecretAccessKey: env("AWS_SECRET_ACCESS_KEY", ""),
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
-    refineIntervalMs: intEnv("REFINE_INTERVAL_MS", 30000),
     language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
   };
 
