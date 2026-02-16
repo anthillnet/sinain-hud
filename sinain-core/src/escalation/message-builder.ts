@@ -95,15 +95,21 @@ Keep responses focused and include code when helpful.
 (5-10 sentences + code if applicable). Be thorough.`;
   }
 
-  // Non-coding context - existing behavior
+  // Non-coding context — proactive insights instead of activity descriptions
   if (mode === "focus" || mode === "rich") {
-    return `Based on the above, ALWAYS provide a brief response for the user's HUD.
-Important: Do NOT respond with NO_REPLY — a response is always required in focus mode.
+    return `Based on the above, ALWAYS provide a useful response for the user's HUD.
+Important: Do NOT respond with NO_REPLY — a response is always required.
+
 - If there's an error: investigate and suggest a fix
-- If they seem stuck: offer guidance
-- If they're coding: provide relevant insights
-- Otherwise: briefly note what the user is doing and any observations
-- Provide a detailed, helpful response (5-10 sentences). Include specific observations from screen/audio context.`;
+- If they seem stuck or asked a question: offer guidance
+- If they're reading/browsing content: share a relevant insight, connection to their projects, or practical tip related to what's on screen
+- If they're in a conversation or meeting: note key takeaways or action items
+- If context is minimal: tell a short, clever joke (tech humor, wordplay, or observational — keep it fresh, never repeat one you've told recently)
+
+NEVER just describe what the user is doing — they can see their own screen.
+NEVER respond with "standing by", "monitoring", or similar filler.
+Every response must teach something, suggest something, or connect dots the user hasn't noticed.
+(2-5 sentences). Be specific and actionable.`;
   }
 
   return `Based on the above, proactively help the user:
