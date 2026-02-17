@@ -30,8 +30,11 @@ export interface EscalatorDeps {
  */
 export class Escalator {
   private wsClient: OpenClawWsClient;
-  private lastEscalationTs = 0;
+  private lastEscalationTs = Date.now();
   private lastEscalatedDigest = "";
+
+  // Prevent concurrent escalation RPCs (only 1 in-flight at a time)
+  private escalationInFlight = false;
 
   // Spawn deduplication state
   private lastSpawnFingerprint = "";
@@ -86,12 +89,17 @@ export class Escalator {
 
   /** Update escalation mode at runtime. */
   setMode(mode: EscalatorDeps["escalationConfig"]["mode"]): void {
+    const wasOff = this.deps.escalationConfig.mode === "off";
     this.deps.escalationConfig.mode = mode;
     if (mode !== "off" && !this.wsClient.isConnected) {
       this.wsClient.connect();
     }
     if (mode === "off") {
       this.wsClient.disconnect();
+    }
+    // Reset stale timer when transitioning from "off" to active (prevents immediate stale)
+    if (wasOff && mode !== "off") {
+      this.lastEscalationTs = Date.now();
     }
     log(TAG, `mode changed to: ${mode}`);
   }
@@ -101,7 +109,7 @@ export class Escalator {
    * Decides whether to escalate and handles delivery.
    */
   onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): void {
-    const { escalate, score } = shouldEscalate(
+    const { escalate, score, stale } = shouldEscalate(
       entry.digest,
       entry.hud,
       contextWindow,
@@ -109,6 +117,7 @@ export class Escalator {
       this.lastEscalationTs,
       this.deps.escalationConfig.cooldownMs,
       this.lastEscalatedDigest,
+      this.deps.escalationConfig.staleMs,
     );
 
     if (!escalate) return;
@@ -123,20 +132,28 @@ export class Escalator {
     // Fetch recent feedback for inline context (non-blocking, defaults to empty)
     const recentFeedback = this.deps.feedbackStore?.queryRecent(5) ?? [];
 
+    const escalationReason = stale ? "stale" : undefined;
     const message = buildEscalationMessage(
       entry.digest,
       contextWindow,
       entry,
       this.deps.escalationConfig.mode,
-      undefined,
+      escalationReason,
       recentFeedback,
     );
     const idemKey = `hud-${entry.id}-${Date.now()}`;
 
-    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}])`);
+    const staleTag = stale ? ", STALE" : "";
+    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag})`);
 
     // Store context for response handling
     this.lastEscalationContext = contextWindow;
+
+    // Skip if an escalation RPC is already in-flight (prevents pile-up)
+    if (this.escalationInFlight) {
+      log(TAG, `skipping escalation tick #${entry.id} — RPC in-flight`);
+      return;
+    }
 
     // Fire async — don't block the agent tick loop
     this.doEscalate(message, idemKey, entry.digest, {
@@ -227,6 +244,7 @@ ${recentLines.join("\n")}`;
       mode: this.deps.escalationConfig.mode,
       gatewayConnected: this.wsClient.isConnected,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
+      staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
       ...this.stats,
     };
@@ -574,8 +592,10 @@ ${recentLines.join("\n")}`;
       codingContext: boolean;
     },
   ): Promise<void> {
-    // Primary: WS RPC
-    if (this.wsClient.isConnected) {
+    this.escalationInFlight = true;
+    try {
+      // Primary: WS RPC
+      if (this.wsClient.isConnected) {
       try {
         this.outboundBytes += Buffer.byteLength(message);
         this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
@@ -640,6 +660,9 @@ ${recentLines.join("\n")}`;
       }
     } else {
       log(TAG, "no WS and no hookUrl \u2014 escalation skipped");
+    }
+    } finally {
+      this.escalationInFlight = false;
     }
   }
 
