@@ -107,6 +107,7 @@ export function loadConfig(): CoreConfig {
   const escalationConfig: EscalationConfig = {
     mode: escalationMode,
     cooldownMs: intEnv("ESCALATION_COOLDOWN_MS", 30000),
+    staleMs: intEnv("ESCALATION_STALE_MS", 90000),
   };
 
   const openclawConfig: OpenClawConfig = {

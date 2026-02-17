@@ -233,6 +233,7 @@ export interface ContextWindow {
 export interface EscalationConfig {
   mode: EscalationMode;
   cooldownMs: number;
+  staleMs: number;  // force escalation after this many ms of silence (0 = disabled)
 }
 
 export interface OpenClawConfig {

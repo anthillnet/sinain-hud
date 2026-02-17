@@ -128,7 +128,7 @@ export function calculateEscalationScore(
 }
 
 /**
- * Decide whether to escalate based on mode, score, cooldown, and dedup.
+ * Decide whether to escalate based on mode, score, cooldown, dedup, and stale timer.
  */
 export function shouldEscalate(
   digest: string,
@@ -138,23 +138,29 @@ export function shouldEscalate(
   lastEscalationTs: number,
   cooldownMs: number,
   lastEscalatedDigest: string,
-): { escalate: boolean; score: EscalationScore } {
+  staleMs: number = 0,
+): { escalate: boolean; score: EscalationScore; stale: boolean } {
   const score = calculateEscalationScore(digest, contextWindow);
 
-  if (mode === "off") return { escalate: false, score };
+  if (mode === "off") return { escalate: false, score, stale: false };
 
   // Cooldown check
-  if (Date.now() - lastEscalationTs < cooldownMs) return { escalate: false, score };
+  if (Date.now() - lastEscalationTs < cooldownMs) return { escalate: false, score, stale: false };
+
+  // Stale override: force escalation after prolonged silence (even when idle)
+  if (staleMs > 0 && Date.now() - lastEscalationTs > staleMs) {
+    return { escalate: true, score, stale: true };
+  }
 
   // Don't escalate idle
-  if (hud === "Idle" || hud === "\u2014") return { escalate: false, score };
+  if (hud === "Idle" || hud === "\u2014") return { escalate: false, score, stale: false };
 
   // Focus mode: always escalate (even if digest unchanged)
-  if (mode === "focus" || mode === "rich") return { escalate: true, score };
+  if (mode === "focus" || mode === "rich") return { escalate: true, score, stale: false };
 
   // Selective mode: dedup identical digests
-  if (digest === lastEscalatedDigest) return { escalate: false, score };
+  if (digest === lastEscalatedDigest) return { escalate: false, score, stale: false };
 
   // Selective mode: score-based
-  return { escalate: score.total >= ESCALATION_THRESHOLD, score };
+  return { escalate: score.total >= ESCALATION_THRESHOLD, score, stale: false };
 }

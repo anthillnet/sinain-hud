@@ -32,11 +32,12 @@ export class OpenClawWsClient extends EventEmitter {
   private reconnectDelay = 1000;
   private maxReconnectDelay = 60000;
 
-  // Circuit breaker
-  private consecutiveFailures = 0;
+  // Circuit breaker (time-window based)
+  private recentFailures: number[] = [];  // timestamps of recent failures
   private circuitOpen = false;
   private circuitResetTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly CIRCUIT_THRESHOLD = 5;
+  private static readonly CIRCUIT_WINDOW_MS = 2 * 60 * 1000; // 2-minute sliding window
   private static readonly CIRCUIT_RESET_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(private config: OpenClawConfig) {
@@ -60,7 +61,6 @@ export class OpenClawWsClient extends EventEmitter {
       this.ws.on("open", () => {
         log(TAG, `ws connected: ${wsUrl} (awaiting challenge)`);
         this.reconnectDelay = 1000; // Reset backoff on successful connect
-        this.consecutiveFailures = 0;
       });
 
       this.ws.on("message", (raw) => {
@@ -98,7 +98,7 @@ export class OpenClawWsClient extends EventEmitter {
       idempotencyKey: idemKey,
       sessionKey,
       deliver: false,
-    }, 120000, { expectFinal: true });
+    }, 60000, { expectFinal: true });
   }
 
   /** Check if connected and authenticated. */
@@ -194,7 +194,7 @@ export class OpenClawWsClient extends EventEmitter {
       }, timeoutMs);
 
       this.pending.set(id, {
-        resolve: (value) => { this.consecutiveFailures = 0; resolve(value); },
+        resolve,
         reject: (reason) => { this.onRpcFailure(); reject(reason); },
         timeout,
         expectFinal: !!opts.expectFinal,
@@ -226,17 +226,27 @@ export class OpenClawWsClient extends EventEmitter {
   }
 
   private onRpcFailure(): void {
-    this.consecutiveFailures++;
-    if (this.consecutiveFailures >= OpenClawWsClient.CIRCUIT_THRESHOLD && !this.circuitOpen) {
+    const now = Date.now();
+    this.recentFailures.push(now);
+
+    // Trim entries outside the sliding window
+    const cutoff = now - OpenClawWsClient.CIRCUIT_WINDOW_MS;
+    this.recentFailures = this.recentFailures.filter(ts => ts > cutoff);
+
+    if (this.recentFailures.length >= 3) {
+      warn(TAG, `${this.recentFailures.length} RPC failures in last ${OpenClawWsClient.CIRCUIT_WINDOW_MS / 1000}s (threshold: ${OpenClawWsClient.CIRCUIT_THRESHOLD})`);
+    }
+
+    if (this.recentFailures.length >= OpenClawWsClient.CIRCUIT_THRESHOLD && !this.circuitOpen) {
       this.circuitOpen = true;
       // Add 0-30s random jitter to prevent thundering herd on service recovery
       const jitterMs = Math.floor(Math.random() * 30000);
       const resetDelayMs = OpenClawWsClient.CIRCUIT_RESET_MS + jitterMs;
-      warn(TAG, `circuit breaker opened after ${this.consecutiveFailures} failures \u2014 pausing for ${Math.round(resetDelayMs / 1000)}s`);
+      warn(TAG, `circuit breaker opened after ${this.recentFailures.length} failures in window — pausing for ${Math.round(resetDelayMs / 1000)}s`);
       this.circuitResetTimer = setTimeout(() => {
         this.circuitOpen = false;
-        this.consecutiveFailures = 0;
-        log(TAG, "circuit breaker reset \u2014 resuming");
+        this.recentFailures = [];
+        log(TAG, "circuit breaker reset — resuming");
         this.connect();
       }, resetDelayMs);
     }
