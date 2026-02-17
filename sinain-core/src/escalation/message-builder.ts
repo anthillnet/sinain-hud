@@ -248,6 +248,17 @@ export function buildEscalationMessage(
   // Mode-specific instructions (now context-aware)
   sections.push(getInstructions(mode, context));
 
+  // Stale escalation hint — forces a proactive response after prolonged silence
+  if (escalationReason === "stale") {
+    sections.push(`## Note: Stale Escalation
+No escalation has happened recently. The user's screen feed is still active but
+the local analyzer reported idle/no-change. Provide a PROACTIVE response:
+- Share a relevant insight, tip, or connection to what the user was working on earlier
+- If context is minimal, tell a short clever joke (tech humor, wordplay — keep it fresh)
+- Do NOT describe the idle state or say "standing by"
+- Do NOT respond with NO_REPLY — a response is always required for stale escalations`);
+  }
+
   // Append inline feedback summary if available
   if (recentFeedback && recentFeedback.length > 0) {
     sections.push(formatInlineFeedback(recentFeedback));

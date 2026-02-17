@@ -30,7 +30,7 @@ async function main() {
   log(TAG, `audio: device=${config.audioConfig.device} cmd=${config.audioConfig.captureCommand} chunk=${config.audioConfig.chunkDurationMs}ms`);
   log(TAG, `transcription: model=${config.transcriptionConfig.geminiModel}`);
   log(TAG, `agent: model=${config.agentConfig.model} debounce=${config.agentConfig.debounceMs}ms max=${config.agentConfig.maxIntervalMs}ms`);
-  log(TAG, `escalation: mode=${config.escalationConfig.mode} cooldown=${config.escalationConfig.cooldownMs}ms`);
+  log(TAG, `escalation: mode=${config.escalationConfig.mode} cooldown=${config.escalationConfig.cooldownMs}ms stale=${config.escalationConfig.staleMs}ms`);
   log(TAG, `openclaw: ws=${config.openclawConfig.gatewayWsUrl} http=${config.openclawConfig.hookUrl}`);
   log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);
@@ -251,6 +251,9 @@ async function main() {
       }
       if (updates.escalationCooldownMs !== undefined) {
         config.escalationConfig.cooldownMs = Math.max(5000, parseInt(String(updates.escalationCooldownMs)));
+      }
+      if (updates.escalationStaleMs !== undefined) {
+        config.escalationConfig.staleMs = Math.max(0, parseInt(String(updates.escalationStaleMs)));
       }
       agentLoop.updateConfig(updates);
       return agentLoop.getConfig();
