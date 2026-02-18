@@ -20,7 +20,7 @@ This ensures the playbook, all archived versions, and decision logs survive rede
 
 Quick scan of current user state. Respond to what's happening NOW.
 
-**1. Observe** — Use the session history already fetched in Phase 3 Step 1 (the `limit: 50` call covers Phase 2's needs). Examine the 10 most recent entries for Phase 2 signals. If Phase 3 Step 1 hasn't run yet this tick, move the `sessions_history` call to the START of the tick as a shared data fetch.
+**1. Observe** — Use the Pass 1 session history already fetched in Phase 3 Step 1 (the `limit: 50, includeTools: false` call covers Phase 2's needs). Examine the 10 most recent entries for Phase 2 signals. If Phase 3 Step 1 hasn't run yet this tick, move the Pass 1 `sessions_history` call to the START of the tick as a shared data fetch. Only trigger Pass 2 (with tool details) if Phase 2 finds a signal worth acting on.
 - What app, what content, what errors, what audio
 - Is the user stuck? (same error repeated, searching the same thing)
 
@@ -48,12 +48,23 @@ Quick scan of current user state. Respond to what's happening NOW.
 
 Close the feedback loop by maintaining an evolving playbook.
 
-### Step 1: Gather context
+### Step 1: Gather context (2-pass progressive disclosure)
 
-**Always collect (every tick):**
-1. `sessions_history({sessionKey: "agent:main:sinain", limit: 50, includeTools: true})` — recent session data
+**Always collect (every tick) — Pass 1 (lightweight scan):**
+1. `sessions_history({sessionKey: "agent:main:sinain", limit: 50, includeTools: false})` — message summaries only, NO tool details
 2. Read `memory/sinain-playbook.md` — current patterns
 3. Read recent `memory/playbook-logs/*.jsonl` — prior decisions, what was suggested/skipped
+
+**Scan Pass 1 results for relevance signals:**
+- Error messages, re-escalations, feedback summaries
+- Spawn-task requests and completions
+- New topics, app changes, audio mentions
+- Any `[sinain-core:feedback-summary]` or `[sinain-core:spawn-task]` tags
+
+**Pass 2 (targeted drill-down) — only if Pass 1 found signals:**
+- `sessions_history({sessionKey: "agent:main:sinain", limit: 10, includeTools: true})` — full tool details for the most recent active window
+- Only run this pass if Pass 1 found errors, spawn results, feedback, or topics worth investigating
+- On idle ticks with no signals, skip Pass 2 entirely — the savings are 3-5x in token usage
 
 **If active (fresh session data available):**
 Scan the full window — topics, tools, errors, resolutions, app patterns, audio themes, feedback summaries.

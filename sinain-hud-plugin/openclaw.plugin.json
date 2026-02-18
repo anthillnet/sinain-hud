@@ -1,0 +1,62 @@
+{
+  "id": "sinain-hud",
+  "name": "SinainHUD Integration",
+  "description": "OpenClaw plugin for sinain-hud: auto-deploys HEARTBEAT/SKILL files, tracks tool usage patterns, generates structured session summaries, and manages workspace lifecycle.",
+  "version": "1.0.0",
+  "skills": [],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "heartbeatPath": {
+        "type": "string",
+        "description": "Local path to HEARTBEAT.md source file"
+      },
+      "skillPath": {
+        "type": "string",
+        "description": "Local path to SKILL.md source file"
+      },
+      "sessionKey": {
+        "type": "string",
+        "description": "Session key for the sinain agent"
+      },
+      "observationFeed": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string",
+            "enum": ["telegram", "discord", "slack"]
+          },
+          "targetId": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "heartbeatPath": {
+      "label": "HEARTBEAT.md Path",
+      "placeholder": "/path/to/HEARTBEAT.md",
+      "help": "Source path for auto-deploying HEARTBEAT.md to workspace"
+    },
+    "skillPath": {
+      "label": "SKILL.md Path",
+      "placeholder": "/path/to/SKILL.md",
+      "help": "Source path for auto-deploying SKILL.md to workspace"
+    },
+    "sessionKey": {
+      "label": "Session Key",
+      "placeholder": "agent:main:sinain",
+      "help": "OpenClaw session key for the sinain agent"
+    },
+    "observationFeed.enabled": {
+      "label": "Observation Feed",
+      "help": "Stream structured observations to a messaging channel"
+    }
+  }
+}
