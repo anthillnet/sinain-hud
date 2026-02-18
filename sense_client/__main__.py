@@ -13,10 +13,11 @@ from .capture import ScreenCapture, create_capture
 from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
 from .ocr import OCRResult, create_ocr
-from .gate import DecisionGate
+from .gate import DecisionGate, SenseObservation
 from .sender import SenseSender, package_full_frame, package_roi
 from .app_detector import AppDetector
 from .config import load_config
+from .privacy import apply_privacy
 
 CONTROL_FILE = "/tmp/sinain-sense-control.json"
 
@@ -202,6 +203,14 @@ def main():
         if use_backpressure:
             pending_frame = pending_rois = pending_change = None
 
+        # 5b. Privacy filter — strip <private> tags and redact secrets
+        if ocr_result.text:
+            ocr_result = OCRResult(
+                text=apply_privacy(ocr_result.text),
+                confidence=ocr_result.confidence,
+                word_count=ocr_result.word_count,
+            )
+
         # 6. Decision gate
         event = gate.classify(
             change=use_change,
@@ -217,6 +226,25 @@ def main():
         event.meta.app = app_name
         event.meta.window_title = window_title
         event.meta.screen = config["capture"]["target"]
+
+        # 7b. Auto-populate structured observation from available context
+        facts = []
+        if app_name:
+            facts.append(f"app: {app_name}")
+        if window_title:
+            facts.append(f"window: {window_title}")
+        if use_change and use_change.ssim_score:
+            facts.append(f"ssim: {use_change.ssim_score:.3f}")
+        if ocr_result.text:
+            # Extract first meaningful line as subtitle
+            first_line = ocr_result.text.split("\n")[0][:120]
+            facts.append(f"ocr: {first_line}")
+
+        title = f"{event.type} in {app_name}" if app_name else f"{event.type} event"
+        subtitle = window_title[:80] if window_title else ""
+        event.observation = SenseObservation(
+            title=title, subtitle=subtitle, facts=facts,
+        )
 
         # Send small thumbnail for ALL event types (agent uses vision)
         if event.type == "context":

@@ -38,6 +38,14 @@ class SenseSender:
             payload["roi"] = event.roi
         if event.diff:
             payload["diff"] = event.diff
+        if event.observation and event.observation.title:
+            payload["observation"] = {
+                "title": event.observation.title,
+                "subtitle": event.observation.subtitle,
+                "facts": event.observation.facts,
+                "narrative": event.observation.narrative,
+                "concepts": event.observation.concepts,
+            }
 
         try:
             start = time.time()

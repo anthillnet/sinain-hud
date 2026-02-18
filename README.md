@@ -11,40 +11,53 @@ An always-on-top transparent overlay that displays real-time AI advice while you
 **Components:**
 - **overlay/** — Flutter + Swift macOS app (the HUD you see)
 - **sinain-core/** — Node.js service (agent loop, audio pipeline, screen context, WebSocket server)
-- **sense_client/** — Python screen capture pipeline
-- **extension/** — OpenClaw skill (Sinain's HUD behavior)
+- **sense_client/** — Python screen capture + privacy pipeline
+- **sinain-hud-plugin/** — OpenClaw plugin (lifecycle hooks, auto-deploy, session summaries)
+- **skills/sinain-hud/** — Skill definition (HEARTBEAT.md, SKILL.md)
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                       macOS Host                          │
-│                                                           │
-│  ┌────────────┐     ┌──────────────────────────────────┐ │
-│  │ SinainHUD  │◄═══►│         sinain-core              │ │
-│  │ (Overlay)  │ WS  │         localhost:9500           │ │
-│  └────────────┘     │                                  │ │
-│                     │  ┌──────────┐  ┌──────────────┐  │ │
-│                     │  │ Audio    │  │ Agent Loop   │  │ │
-│                     │  │ Pipeline │  │ (digest,     │  │ │
-│  ┌────────────┐     │  └────┬─────┘  │  escalation) │  │ │
-│  │sense_client│────►│       │        └──────┬───────┘  │ │
-│  │(screen cap)│POST │       │               │          │ │
-│  └────────────┘     └───────┼───────────────┼──────────┘ │
-│                             │               │             │
-│                             │          writeSituationMd() │
-│                             │               ▼             │
-│                             │    ~/.openclaw/workspace/   │
-│                             │       SITUATION.md          │
-└─────────────────────────────┼─────────────────────────────┘
-                              │ escalateToOpenClaw()
-                   ┌──────────┼──────────┐
-                   │  HTTP    │    WS    │
-                   ▼          ▼          │
-          ┌────────────────────────┐     │
-          │  OpenClaw Gateway      │     │
-          │  (hooks + agent.wait)  │◄────┘
-          └────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        macOS Host                            │
+│                                                              │
+│  ┌────────────┐      ┌──────────────────────────────────┐   │
+│  │ SinainHUD  │◄════►│         sinain-core              │   │
+│  │ (Overlay)  │ WS   │         localhost:9500           │   │
+│  └────────────┘      │                                  │   │
+│                      │  ┌──────────┐  ┌──────────────┐  │   │
+│                      │  │ Audio    │  │ Agent Loop   │  │   │
+│                      │  │ Pipeline │  │ (digest,     │  │   │
+│  ┌────────────┐      │  └────┬─────┘  │  escalation) │  │   │
+│  │sense_client│─────►│       │        └──────┬───────┘  │   │
+│  │(capture +  │ POST │       │               │          │   │
+│  │ privacy)   │      └───────┼───────────────┼──────────┘   │
+│  └────────────┘              │               │               │
+│   <private> strip            │          writeSituationMd()   │
+│   + auto-redact              │               ▼               │
+│                              │    ~/.openclaw/workspace/     │
+│                              │       SITUATION.md            │
+└──────────────────────────────┼───────────────────────────────┘
+                               │ escalateToOpenClaw()
+                    ┌──────────┼──────────┐
+                    │  HTTP    │    WS    │
+                    ▼          ▼          │
+           ┌───────────────────────────┐  │
+           │   OpenClaw Gateway        │  │
+           │   (hooks + agent.wait)    │◄─┘
+           │                           │
+           │  ┌──────────────────────┐ │
+           │  │  sinain-hud plugin   │ │    ┌──────────┐
+           │  │  (auto-deploy,       │ │    │ Telegram │
+           │  │   privacy strip,     │ │    │          │
+           │  │   session summaries) │ │    └────▲─────┘
+           │  └──────────────────────┘ │         │
+           │  ┌──────────────────────┐ │         │ SSE
+           │  │  claude-mem plugin   │─┼─────────┘
+           │  │  (memory, vectors,   │ │  observation
+           │  │   observation feed)  │ │  feed
+           │  └──────────────────────┘ │
+           └───────────────────────────┘
 ```
 
 The agent loop runs a periodic tick: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline.
@@ -142,6 +155,9 @@ Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
 - All traffic stays on localhost (sinain-core ↔ overlay)
 - Audio is transcribed in memory, never stored to disk
 - Panic hide (`Cmd+Shift+H`) instantly clears everything
+- **`<private>` tags**: wrap any on-screen text in `<private>...</private>` — sense_client strips it before sending to sinain-core
+- **Auto-redaction**: credit cards, API keys, bearer tokens, AWS keys, and passwords are automatically redacted from OCR text
+- **Server-side stripping**: the sinain-hud plugin strips any remaining `<private>` tags from tool results before they're persisted to session history
 
 ## Roadmap
 
@@ -150,6 +166,7 @@ Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
 - [x] Phase 3: Screen capture pipeline (OCR → context window)
 - [ ] Phase 4: Polish (diarization, smart batching, themes)
 - [x] Phase 5: OpenClaw escalation (SITUATION.md + hooks + agent.wait)
+- [x] Phase 6: Plugin architecture + persistent memory (sinain-hud plugin, claude-mem, observation feed, privacy pipeline)
 
 ## License
 
