@@ -1,0 +1,16 @@
+[Unit]
+Description=Sinain Wearable HUD
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/sinain-hud/sinain-wearable-hud
+ExecStart=/home/pi/sinain-hud/sinain-wearable-hud/.venv/bin/python3 -m sinain_wearable_hud.main -c /home/pi/sinain-hud/sinain-wearable-hud/config.yaml
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
