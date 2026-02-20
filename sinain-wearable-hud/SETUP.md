@@ -76,7 +76,7 @@ sudo reboot
 After reboot, SSH back in:
 ```bash
 ls /dev/spidev*              # Should show /dev/spidev0.0
-libcamera-hello --list-cameras   # Should list Camera Module 3
+rpicam-hello --list-cameras  # Should list Camera Module 3 (imx708)
 ```
 
 **Verify:** SPI device exists AND camera is detected.
@@ -163,10 +163,10 @@ bash install.sh
 
 Takes ~10-15 min on Pi Zero 2W (apt + pip).
 
-> **OOM tip:** If pip runs out of memory, add swap first:
+> **OOM tip:** Trixie uses zram swap by default (~426MB). If pip still OOMs, add a swap file:
 > ```bash
-> sudo sed -i 's/CONF_SWAPSIZE=100/CONF_SWAPSIZE=512/' /etc/dphys-swapfile
-> sudo dphys-swapfile setup && sudo dphys-swapfile swapon
+> sudo fallocate -l 512M /swapfile && sudo chmod 600 /swapfile
+> sudo mkswap /swapfile && sudo swapon /swapfile
 > ```
 
 **Verify:** "Setup complete!" message.
@@ -185,10 +185,10 @@ from PIL import Image, ImageDraw
 
 serial = spi(port=0, device=0, gpio_DC=25, gpio_RST=27)
 device = ssd1327(serial, width=128, height=128)
-img = Image.new('L', (128, 128), 0)
+img = Image.new('RGB', (128, 128), (0, 0, 0))
 draw = ImageDraw.Draw(img)
-draw.text((10, 50), 'SinainHUD', fill=255)
-draw.ellipse([118, 3, 124, 9], fill=255)
+draw.text((10, 50), 'SinainHUD', fill=(255, 255, 255))
+draw.ellipse([118, 3, 124, 9], fill=(255, 255, 255))
 device.display(img)
 print('OLED test OK — you should see white text')
 "
@@ -201,8 +201,8 @@ print('OLED test OK — you should see white text')
 ## Step 8: Test Camera Module 3
 
 ```bash
-# Quick capture test
-libcamera-still -o /tmp/test.jpg --width 1280 --height 720 -t 2000
+# Quick capture test (Trixie uses rpicam-* commands, not libcamera-*)
+rpicam-still -o /tmp/test.jpg --width 1280 --height 720 -t 2000
 ls -la /tmp/test.jpg   # Should be ~100-400KB JPEG
 
 # Python test
@@ -246,6 +246,12 @@ python3 -m sinain_wearable_hud.main -c config.yaml -v
 
 On Mac browser: `http://sinain-wearable.local:8080`
 
+> **Port 8080 blocked?** Some routers block non-standard ports between WiFi clients. Use an SSH tunnel instead:
+> ```bash
+> ssh -f -N -L 8080:localhost:8080 pi@sinain-wearable.local
+> # Then open http://localhost:8080
+> ```
+
 **Verify:** OLED shows status, browser mirrors it, logs show frame classifications.
 
 ---
@@ -269,9 +275,12 @@ The service is already enabled (from install.sh), so it will auto-start on boot.
 | Can't ping `sinain-wearable.local` | Check WiFi creds in Imager settings. Find IP via router DHCP list. |
 | No `/dev/spidev*` | `sudo raspi-config nonint do_spi 0 && sudo reboot` |
 | OLED blank | Verify wiring (esp RST=Pin 13/GPIO 27). Check VCC on Pin 1. |
-| `libcamera-hello` shows no cameras | Re-seat CSI cable, check latch is closed. `sudo raspi-config nonint do_camera 0 && sudo reboot` |
-| `pip install` OOM on Pi Zero | Add swap (see Step 6 tip above) |
+| `rpicam-hello` shows no cameras | Re-seat CSI cable, check latch is closed. `sudo raspi-config nonint do_camera 0 && sudo reboot` |
+| `pip install` OOM on Pi Zero | Trixie uses zram; add swap file if needed (see Step 6 tip) |
 | HTTP POST 401 to gateway | Wrong gateway token in config.yaml |
+| Root partition only 2GB on 128GB card | Run `sudo raspi-config nonint do_expand_rootfs && sudo reboot` |
+| `No module named 'pkg_resources'` | `pip install 'setuptools<82'` — Python 3.13/setuptools 82 removed it |
+| Port 8080 unreachable from Mac | Router may block inter-client traffic; use SSH tunnel (see Step 10) |
 | Camera RGBA (4 channels) | picamera2 may return XRGB — code uses `format: "RGB888"` to force 3-channel |
 | `ModuleNotFoundError: picamera2` | Venv needs `--system-site-packages` (install.sh does this). Or: `pip install picamera2` inside venv. |
 | OLED garbled/wrong colors | Confirm OLED is SSD1327 (not SSD1306). Check `driver: "ssd1327"` in config.yaml. |
