@@ -1,0 +1,71 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #000;
+    color: #00ff88;
+    font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+    font-size: 14px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+#hud {
+    width: 384px;   /* 3x OLED resolution for readability */
+    height: 384px;
+    border: 1px solid #333;
+    padding: 8px;
+    position: relative;
+    image-rendering: pixelated;
+}
+
+#status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 10px;
+    color: #666;
+}
+
+#status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #444;
+    transition: background 0.3s;
+}
+
+#status-dot.connected { background: #00ff88; }
+#status-dot.listening { background: #00ccff; }
+#status-dot.thinking  { background: #ffcc00; }
+#status-dot.error     { background: #ff3333; }
+#status-dot.idle      { background: #444444; }
+
+#content {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.4;
+    font-size: 16px;
+}
+
+/* Priority colors (browser keeps green theme; OLED uses greyscale) */
+#content.normal { color: #00ff88; }
+#content.high   { color: #aaaaaa; }
+#content.urgent { color: #ff3333; }
+
+/* Urgent blink animation */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
+}
+
+#content.urgent {
+    animation: pulse 1s ease-in-out infinite;
+}
