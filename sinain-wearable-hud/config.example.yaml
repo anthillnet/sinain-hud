@@ -1,7 +1,7 @@
 gateway:
-  url: "http://85.214.180.247:18789"
+  ws_url: "ws://85.214.180.247:18789"
   token: "${OPENCLAW_TOKEN}"
-  session: "sinain"
+  session_key: "agent:main:sinain"
 
 camera:
   enabled: true
@@ -31,6 +31,7 @@ audio:
 display:
   mode: "oled"
   oled:
+    mode: "response"     # "response" shows agent replies, "debug" shows camera stats
     driver: "ssd1327"
     width: 128
     height: 128
@@ -44,6 +45,16 @@ display:
     enabled: true
     port: 8080
     host: "0.0.0.0"
+
+ocr:
+  enabled: true
+  lang: "eng"                # Tesseract language (eng, deu, etc.)
+  timeout_s: 10              # max seconds per OCR call
+  preprocess: true           # adaptive threshold for variable lighting
+
+observation:
+  max_entries: 20            # rolling history buffer size
+  max_age_s: 300             # prune entries older than 5 minutes
 
 logging:
   level: "INFO"

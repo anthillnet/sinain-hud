@@ -34,6 +34,7 @@ class RoomFrame:
     text_hint_count: int = 0
     width: int = 0
     height: int = 0
+    ocr_text: str = ""  # extracted text from Tesseract (empty if OCR skipped)
 
 
 @dataclass
@@ -51,6 +52,9 @@ class DisplayState:
     text: str = ""
     priority: Priority = Priority.NORMAL
     status: str = "idle"            # idle, listening, thinking, connected
+    gateway_status: str = "disconnected"  # disconnected, connected, error
+    response_text: str = ""         # latest agent response
+    debug_text: str = ""            # camera classification / debug info
     last_update: float = field(default_factory=time.time)
 
     def update(self, text: str, priority: Priority = Priority.NORMAL,
@@ -61,10 +65,23 @@ class DisplayState:
             self.status = status
         self.last_update = time.time()
 
+    def set_response(self, text: str) -> None:
+        """Update the latest agent response text."""
+        self.response_text = text
+        self.last_update = time.time()
+
+    def set_debug(self, text: str) -> None:
+        """Update the debug/camera info text."""
+        self.debug_text = text
+        self.last_update = time.time()
+
     def to_dict(self) -> dict:
         return {
             "text": self.text,
             "priority": self.priority.value,
             "status": self.status,
+            "gateway_status": self.gateway_status,
+            "response_text": self.response_text,
+            "debug_text": self.debug_text,
             "last_update": self.last_update,
         }
