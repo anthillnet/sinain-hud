@@ -9,9 +9,9 @@ _ENV_PATTERN = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
 
 DEFAULTS = {
     "gateway": {
-        "url": "http://85.214.180.247:18789",
+        "ws_url": "ws://85.214.180.247:18789",
         "token": "",
-        "session": "sinain",
+        "session_key": "agent:main:sinain",
     },
     "camera": {
         "enabled": True,
@@ -55,6 +55,16 @@ DEFAULTS = {
             "port": 8080,
             "host": "0.0.0.0",
         },
+    },
+    "ocr": {
+        "enabled": True,
+        "lang": "eng",
+        "timeout_s": 10,
+        "preprocess": True,
+    },
+    "observation": {
+        "max_entries": 20,
+        "max_age_s": 300,
     },
     "logging": {
         "level": "INFO",
