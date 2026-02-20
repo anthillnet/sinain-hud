@@ -15,12 +15,20 @@ sudo apt update
 sudo apt install -y \
     python3-pip python3-venv python3-dev \
     python3-picamera2 \
-    libcamera-apps \
+    rpicam-apps-core \
     libopencv-dev python3-opencv \
     portaudio19-dev \
     libjpeg-dev libfreetype6-dev \
     fonts-dejavu-core \
     git
+
+# --- Expand root filesystem if needed ---
+ROOT_SIZE=$(df --output=size / | tail -1 | tr -d ' ')
+if [ "$ROOT_SIZE" -lt 10000000 ]; then
+    echo "[1.5/6] Expanding root filesystem..."
+    sudo raspi-config nonint do_expand_rootfs
+    echo "Filesystem expansion scheduled — will take effect after reboot"
+fi
 
 # --- Enable SPI (non-interactive) ---
 echo "[2/6] Enabling SPI interface..."
