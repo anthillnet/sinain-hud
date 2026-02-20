@@ -5,67 +5,191 @@
 }
 
 body {
-    background: #000;
-    color: #00ff88;
-    font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-    font-size: 14px;
+    background: #0a0a0a;
+    color: #c8c8c8;
+    font-family: 'SF Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
+    font-size: 13px;
     display: flex;
-    justify-content: center;
-    align-items: center;
+    flex-direction: column;
     min-height: 100vh;
-    overflow: hidden;
 }
 
-#hud {
-    width: 384px;   /* 3x OLED resolution for readability */
-    height: 384px;
-    border: 1px solid #333;
-    padding: 8px;
-    position: relative;
-    image-rendering: pixelated;
-}
+/* ── Top bar ─────────────────────────────────── */
 
-#status-bar {
+#top-bar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
-    font-size: 10px;
-    color: #666;
+    gap: 12px;
+    padding: 8px 16px;
+    background: #111;
+    border-bottom: 1px solid #222;
+    flex-shrink: 0;
 }
+
+#top-bar .title {
+    font-weight: 600;
+    color: #00ff88;
+    font-size: 14px;
+}
+
+.badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.badge.disconnected { background: #331111; color: #ff4444; }
+.badge.connected    { background: #113311; color: #44ff88; }
+.badge.error        { background: #332211; color: #ff8844; }
 
 #status-dot {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: #444;
+    margin-left: auto;
     transition: background 0.3s;
 }
 
 #status-dot.connected { background: #00ff88; }
 #status-dot.listening { background: #00ccff; }
-#status-dot.thinking  { background: #ffcc00; }
+#status-dot.thinking  { background: #ffcc00; animation: pulse 1.5s ease-in-out infinite; }
 #status-dot.error     { background: #ff3333; }
 #status-dot.idle      { background: #444444; }
 
-#content {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    line-height: 1.4;
-    font-size: 16px;
+/* ── 3-panel layout ──────────────────────────── */
+
+#panels {
+    display: flex;
+    flex: 1;
+    gap: 1px;
+    background: #222;
+    overflow: hidden;
 }
 
-/* Priority colors (browser keeps green theme; OLED uses greyscale) */
-#content.normal { color: #00ff88; }
-#content.high   { color: #aaaaaa; }
-#content.urgent { color: #ff3333; }
+.panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #0a0a0a;
+    min-width: 0;
+    overflow: hidden;
+}
 
-/* Urgent blink animation */
+.panel h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid #1a1a1a;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.panel pre {
+    flex: 1;
+    padding: 10px 12px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #aaa;
+}
+
+/* Panel-specific colors */
+
+#panel-observation h2 { color: #888; border-bottom-color: #1a2a1a; }
+#panel-observation pre { color: #88cc88; }
+
+#panel-ocr h2 { color: #888; border-bottom-color: #1a1a2a; }
+#panel-ocr pre { color: #88aaff; }
+
+#panel-response h2 { color: #888; border-bottom-color: #2a2a1a; }
+#panel-response pre { color: #ffcc88; }
+
+/* OLED mirror (small) inside response panel */
+
+#oled-mirror {
+    margin: 8px 12px;
+    padding: 8px;
+    background: #000;
+    border: 1px solid #222;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.3;
+    color: #00ff88;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: 60px;
+    max-height: 120px;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+/* Latency badge */
+
+.latency {
+    font-size: 10px;
+    color: #555;
+    font-weight: normal;
+}
+
+/* ── Bottom bar ──────────────────────────────── */
+
+#bottom-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 16px;
+    background: #111;
+    border-top: 1px solid #222;
+    font-size: 10px;
+    color: #444;
+    flex-shrink: 0;
+}
+
+/* ── Empty state ─────────────────────────────── */
+
+.panel pre:empty::after {
+    content: "Waiting for data...";
+    color: #333;
+    font-style: italic;
+}
+
+/* ── Scrollbar styling ───────────────────────── */
+
+.panel pre::-webkit-scrollbar {
+    width: 4px;
+}
+
+.panel pre::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.panel pre::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 2px;
+}
+
+/* ── Animations ──────────────────────────────── */
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.3; }
 }
 
-#content.urgent {
-    animation: pulse 1s ease-in-out infinite;
+/* ── Responsive: stack on narrow screens ─────── */
+
+@media (max-width: 900px) {
+    #panels {
+        flex-direction: column;
+    }
+    .panel {
+        min-height: 200px;
+    }
 }

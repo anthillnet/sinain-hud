@@ -75,6 +75,22 @@ class DisplayState:
         self.debug_text = text
         self.last_update = time.time()
 
+    # Pipeline debug streams (for debug server)
+    ocr_text: str = ""              # latest OCR output from OpenRouter
+    observation_sent: str = ""      # latest observation message sent to agent
+    last_ocr_ms: float = 0.0       # OCR latency in ms
+
+    def set_ocr(self, text: str, latency_ms: float) -> None:
+        """Update the latest OCR result."""
+        self.ocr_text = text
+        self.last_ocr_ms = latency_ms
+        self.last_update = time.time()
+
+    def set_observation(self, text: str) -> None:
+        """Update the latest observation message sent to agent."""
+        self.observation_sent = text
+        self.last_update = time.time()
+
     def to_dict(self) -> dict:
         return {
             "text": self.text,
@@ -83,5 +99,8 @@ class DisplayState:
             "gateway_status": self.gateway_status,
             "response_text": self.response_text,
             "debug_text": self.debug_text,
+            "ocr_text": self.ocr_text,
+            "observation_sent": self.observation_sent,
+            "last_ocr_ms": self.last_ocr_ms,
             "last_update": self.last_update,
         }

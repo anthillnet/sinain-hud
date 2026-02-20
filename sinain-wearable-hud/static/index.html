@@ -7,13 +7,33 @@
     <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-    <div id="hud">
-        <div id="status-bar">
-            <span id="status-label">sinain-wearable-hud</span>
-            <span id="status-dot"></span>
-        </div>
-        <div id="content"></div>
+    <header id="top-bar">
+        <span class="title">sinain-wearable-hud</span>
+        <span id="gateway-status" class="badge disconnected">disconnected</span>
+        <span id="status-dot"></span>
+    </header>
+
+    <div id="panels">
+        <section class="panel" id="panel-observation">
+            <h2>Observation Sent</h2>
+            <pre id="observation-text"></pre>
+        </section>
+        <section class="panel" id="panel-ocr">
+            <h2>OCR Text <span id="ocr-latency" class="latency"></span></h2>
+            <pre id="ocr-text"></pre>
+        </section>
+        <section class="panel" id="panel-response">
+            <h2>Agent Response</h2>
+            <div id="oled-mirror"></div>
+            <pre id="response-text"></pre>
+        </section>
     </div>
+
+    <footer id="bottom-bar">
+        <span id="debug-info"></span>
+        <span id="timestamp"></span>
+    </footer>
+
     <script src="hud.js"></script>
 </body>
 </html>
