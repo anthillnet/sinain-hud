@@ -34,7 +34,8 @@ class RoomFrame:
     text_hint_count: int = 0
     width: int = 0
     height: int = 0
-    ocr_text: str = ""  # extracted text from Tesseract (empty if OCR skipped)
+    description: str = ""  # scene description from vision model
+    ocr_text: str = ""     # extracted text from vision model
 
 
 @dataclass
@@ -76,9 +77,10 @@ class DisplayState:
         self.last_update = time.time()
 
     # Pipeline debug streams (for debug server)
-    ocr_text: str = ""              # latest OCR output from OpenRouter
+    scene_description: str = ""     # latest scene description from vision model
+    ocr_text: str = ""              # latest OCR text from vision model
     observation_sent: str = ""      # latest observation message sent to agent
-    last_ocr_ms: float = 0.0       # OCR latency in ms
+    last_ocr_ms: float = 0.0       # vision latency in ms
 
     def set_ocr(self, text: str, latency_ms: float) -> None:
         """Update the latest OCR result."""
@@ -99,6 +101,7 @@ class DisplayState:
             "gateway_status": self.gateway_status,
             "response_text": self.response_text,
             "debug_text": self.debug_text,
+            "scene_description": self.scene_description,
             "ocr_text": self.ocr_text,
             "observation_sent": self.observation_sent,
             "last_ocr_ms": self.last_ocr_ms,

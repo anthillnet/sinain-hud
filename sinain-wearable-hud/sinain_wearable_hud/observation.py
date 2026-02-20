@@ -20,6 +20,7 @@ class _Entry:
     classification: FrameClass
     ssim: float
     motion_pct: float
+    description: str = ""
     ocr_text: str = ""
     is_audio: bool = False
     audio_label: str = ""
@@ -44,6 +45,7 @@ class ObservationBuffer:
             classification=frame.classification,
             ssim=frame.ssim,
             motion_pct=frame.motion_pct,
+            description=frame.description,
             ocr_text=frame.ocr_text,
         ))
 
@@ -89,8 +91,8 @@ def _has_error_pattern(text: str) -> bool:
     return any(p in text for p in _ERROR_PATTERNS)
 
 
-def _get_instructions(classification: FrameClass, ocr_text: str,
-                      has_audio: bool) -> str:
+def _get_instructions(classification: FrameClass, description: str,
+                      ocr_text: str, has_audio: bool) -> str:
     """Context-aware instructions — adapted from message-builder.ts."""
     if ocr_text and _has_error_pattern(ocr_text):
         return "Identify the error and suggest a fix."
@@ -98,6 +100,10 @@ def _get_instructions(classification: FrameClass, ocr_text: str,
         return "Provide insight, translation, or context about what the user is reading."
     if has_audio:
         return "Respond to the question or note the key points."
+    # Use description for smarter instruction selection
+    desc_lower = description.lower()
+    if any(kw in desc_lower for kw in ("screen", "monitor", "code", "terminal", "laptop", "editor")):
+        return "Provide insight about what's on screen."
     if classification in (FrameClass.SCENE, FrameClass.MOTION):
         return "Proactive observation about the new setting."
     return "Brief proactive tip. Never say 'standing by'."
@@ -106,14 +112,13 @@ def _get_instructions(classification: FrameClass, ocr_text: str,
 def build_observation_message(frame: RoomFrame, buffer: ObservationBuffer) -> str:
     """Build a structured observation message for the agent RPC.
 
-    Produces a markdown message with:
-    - Current observation metadata + OCR text
-    - Recent scene history with timestamps
-    - Pattern summary
+    Produces a description-led markdown message with:
+    - What the vision model sees (scene description)
+    - Visible text (if any)
+    - Recent context with human-readable descriptions
     - Context-aware instructions for the agent
     """
     now = time.time()
-    size_kb = len(frame.jpeg_bytes) // 1024
     recent = buffer.recent
 
     parts: list[str] = []
@@ -122,75 +127,48 @@ def build_observation_message(frame: RoomFrame, buffer: ObservationBuffer) -> st
     parts.append(f"[sinain-wearable live context — tick #{buffer.tick}]")
     parts.append("")
 
-    # Current observation
-    parts.append("## Current Observation")
-    parts.append(
-        f"Scene: **{frame.classification.value}**"
-        f" | ssim={frame.ssim:.2f} motion={frame.motion_pct:.0f}%"
-        f" text_hints={frame.text_hint_count}"
-        f" | {size_kb}KB {frame.width}x{frame.height}"
-    )
+    # What I See — primary content from vision model
+    parts.append("## What I See")
+    if frame.description:
+        parts.append(frame.description)
+    else:
+        parts.append(f"[{frame.classification.value} frame — no description available]")
 
-    # OCR text block
+    # Visible Text — only if non-empty
     if frame.ocr_text:
         parts.append("")
-        parts.append("### OCR Text (from camera)")
+        parts.append("### Visible Text")
         parts.append("```")
-        # Limit to first 500 chars to stay within RPC message budget
         ocr_display = frame.ocr_text[:500]
         if len(frame.ocr_text) > 500:
             ocr_display += "\n[...truncated]"
         parts.append(ocr_display)
         parts.append("```")
 
-    # Recent history
-    # Show up to 8 most recent entries (excluding the current frame which was just added)
+    # Recent Context — human-readable history using descriptions
     history_entries = recent[:-1] if len(recent) > 1 else []
-    history_entries = history_entries[-8:]  # last 8
+    history_entries = history_entries[-8:]
 
     if history_entries:
         parts.append("")
-        parts.append("## Recent Scene History")
+        parts.append("## Recent Context")
         for entry in reversed(history_entries):
             age = int(now - entry.timestamp)
             if entry.is_audio:
-                parts.append(f"- [{age}s ago] audio: {entry.audio_label}")
-            else:
-                line = f"- [{age}s ago] **{entry.classification.value}** ssim={entry.ssim:.2f} motion={entry.motion_pct:.0f}%"
+                parts.append(f"- [{age}s ago] Audio: {entry.audio_label}")
+            elif entry.description:
+                line = f"- [{age}s ago] {entry.description}"
                 if entry.ocr_text:
-                    # Show first 60 chars of OCR as a hint
                     snippet = entry.ocr_text[:60].replace("\n", " ")
                     line += f' — "{snippet}"'
                 parts.append(line)
-
-    # Pattern summary
-    last_10 = recent[-10:] if len(recent) >= 2 else []
-    if last_10:
-        scene_changes = sum(
-            1 for e in last_10
-            if e.classification in (FrameClass.SCENE, FrameClass.MOTION)
-            and not e.is_audio
-        )
-        text_detections = sum(
-            1 for e in last_10
-            if e.classification == FrameClass.TEXT and not e.is_audio
-        )
-        audio_events = sum(1 for e in last_10 if e.is_audio)
-
-        summary_parts = []
-        if scene_changes:
-            summary_parts.append(f"{scene_changes} scene changes")
-        if text_detections:
-            summary_parts.append(f"{text_detections} text detections")
-        if audio_events:
-            summary_parts.append(f"{audio_events} audio events")
-        if summary_parts:
-            parts.append("")
-            parts.append(f"Pattern (last {len(last_10)}): {', '.join(summary_parts)}")
+            else:
+                parts.append(f"- [{age}s ago] [{entry.classification.value} frame]")
 
     # Instructions
     has_audio = any(e.is_audio for e in recent[-5:])
-    instruction = _get_instructions(frame.classification, frame.ocr_text, has_audio)
+    instruction = _get_instructions(
+        frame.classification, frame.description, frame.ocr_text, has_audio)
 
     parts.append("")
     parts.append("## Instructions")
