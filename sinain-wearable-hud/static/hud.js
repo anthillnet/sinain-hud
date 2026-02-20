@@ -2,7 +2,7 @@
     "use strict";
 
     const observationEl = document.getElementById("observation-text");
-    const ocrEl = document.getElementById("ocr-text");
+    const visionEl = document.getElementById("vision-text");
     const responseEl = document.getElementById("response-text");
     const oledEl = document.getElementById("oled-mirror");
     const dotEl = document.getElementById("status-dot");
@@ -58,9 +58,19 @@
             observationEl.scrollTop = observationEl.scrollHeight;
         }
 
-        // Panel 2: OCR text from OpenRouter
-        if (state.ocr_text) {
-            ocrEl.textContent = state.ocr_text;
+        // Panel 2: Vision — scene description + OCR text
+        {
+            let content = "";
+            if (state.scene_description) {
+                content += "── Scene ──\n" + state.scene_description;
+            }
+            if (state.ocr_text) {
+                if (content) content += "\n\n";
+                content += "── Text ──\n" + state.ocr_text;
+            }
+            if (content) {
+                visionEl.textContent = content;
+            }
         }
         if (state.last_ocr_ms > 0) {
             ocrLatencyEl.textContent = `(${(state.last_ocr_ms / 1000).toFixed(1)}s)`;

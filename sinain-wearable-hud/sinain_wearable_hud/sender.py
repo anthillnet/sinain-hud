@@ -66,9 +66,11 @@ class Sender:
                     f" | {size_kb}KB {frame.width}x{frame.height}"
                 )
 
-            # Update debug display with observation + OCR streams
+            # Update debug display with observation + vision streams
             if self._display_state is not None:
                 self._display_state.set_observation(message)
+                if frame.description:
+                    self._display_state.scene_description = frame.description
                 if frame.ocr_text:
                     self._display_state.set_ocr(frame.ocr_text, 0.0)
 

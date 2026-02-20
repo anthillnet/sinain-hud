@@ -198,10 +198,10 @@ class CameraCapture:
                 self._maybe_log_stats()
                 continue
 
-            # Run OCR on full-res frame before encoding (which may downscale)
-            ocr_text = ""
+            # Run vision analysis on full-res frame before encoding (which may downscale)
+            description, ocr_text = "", ""
             if self._ocr_engine:
-                ocr_text = await self._ocr_engine.extract(frame)
+                description, ocr_text = await self._ocr_engine.extract(frame)
 
             jpeg_bytes, w, h = self._encode_frame(frame, classification)
             room_frame = RoomFrame(
@@ -212,6 +212,7 @@ class CameraCapture:
                 text_hint_count=meta.get("text_hint_count", 0),
                 width=w,
                 height=h,
+                description=description,
                 ocr_text=ocr_text,
             )
 
