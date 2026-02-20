@@ -125,6 +125,9 @@ class OLEDDisplay:
     def _push_to_device(self, img: Image.Image) -> None:
         """Push rendered image to physical OLED if available."""
         if self.device is not None:
+            # luma.oled SSD1327 expects RGB; convert from greyscale "L"
+            if img.mode != self.device.mode:
+                img = img.convert(self.device.mode)
             self.device.display(img)
 
     async def run(self, stop_event: asyncio.Event) -> None:
