@@ -11,6 +11,7 @@ import sys
 from .audio import AudioCapture
 from .camera import CameraCapture
 from .config import load_config
+from .eval_log import EvalLogger
 from .display import OLEDDisplay
 from .display_server import DisplayServer
 from .gateway import OpenClawGateway
@@ -66,8 +67,9 @@ async def run(config: dict) -> None:
     )
     ocr_engine = OCREngine(config)
     observation_buffer = ObservationBuffer(config)
+    eval_logger = EvalLogger(config)
     sender = Sender(config, gateway, observation_buffer=observation_buffer,
-                    display_state=display_state)
+                    display_state=display_state, eval_logger=eval_logger)
     oled = OLEDDisplay(config.get("display", {}), display_state)
 
     async def on_frame(frame: RoomFrame) -> None:
@@ -132,6 +134,7 @@ async def run(config: dict) -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
     await ocr_engine.shutdown()
     await gateway.close()
+    eval_logger.close()
     log.info("Shutdown complete")
 
 
