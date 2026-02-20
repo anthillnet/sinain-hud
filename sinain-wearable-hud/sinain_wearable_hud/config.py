@@ -66,6 +66,10 @@ DEFAULTS = {
         "max_entries": 20,
         "max_age_s": 300,
     },
+    "eval": {
+        "enabled": True,
+        "log_dir": "/tmp/sinain-eval",
+    },
     "logging": {
         "level": "INFO",
     },
