@@ -66,7 +66,8 @@ async def run(config: dict) -> None:
     )
     ocr_engine = OCREngine(config)
     observation_buffer = ObservationBuffer(config)
-    sender = Sender(config, gateway, observation_buffer=observation_buffer)
+    sender = Sender(config, gateway, observation_buffer=observation_buffer,
+                    display_state=display_state)
     oled = OLEDDisplay(config.get("display", {}), display_state)
 
     async def on_frame(frame: RoomFrame) -> None:
