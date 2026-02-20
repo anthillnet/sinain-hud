@@ -58,9 +58,9 @@ DEFAULTS = {
     },
     "ocr": {
         "enabled": True,
-        "lang": "eng",
-        "timeout_s": 10,
-        "preprocess": True,
+        "api_key": "",
+        "model": "google/gemini-2.5-flash",
+        "timeout_s": 15,
     },
     "observation": {
         "max_entries": 20,

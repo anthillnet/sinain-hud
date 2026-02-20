@@ -17,7 +17,6 @@ sudo apt install -y \
     python3-picamera2 \
     rpicam-apps-core \
     libopencv-dev python3-opencv \
-    tesseract-ocr tesseract-ocr-eng \
     portaudio19-dev \
     libjpeg-dev libfreetype6-dev \
     fonts-dejavu-core \

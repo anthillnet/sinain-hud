@@ -48,9 +48,9 @@ display:
 
 ocr:
   enabled: true
-  lang: "eng"                # Tesseract language (eng, deu, etc.)
-  timeout_s: 10              # max seconds per OCR call
-  preprocess: true           # adaptive threshold for variable lighting
+  api_key: "${OPENROUTER_API_KEY}"  # OpenRouter API key for vision OCR
+  model: "google/gemini-2.5-flash"  # fast vision model for text extraction
+  timeout_s: 15                     # max seconds per API call
 
 observation:
   max_entries: 20            # rolling history buffer size

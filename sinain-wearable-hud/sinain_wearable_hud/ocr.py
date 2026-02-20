@@ -1,71 +1,96 @@
-"""Tesseract OCR wrapper with async thread-pool execution.
+"""Server-side OCR via OpenRouter vision API.
 
-Gracefully degrades to no-op if pytesseract or the tesseract binary is missing.
-Uses a single-worker ThreadPoolExecutor to prevent saturating the Pi Zero CPU.
+Sends camera frames as base64 JPEG to a fast vision model (Gemini Flash)
+for text extraction. Falls back to no-op if API key is missing.
+
+This replaces the original local Tesseract approach which was too slow
+on Pi Zero 2W (~20s per 1280x720 frame).
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 
+import aiohttp
 import cv2
 import numpy as np
 
 log = logging.getLogger(__name__)
 
-# Graceful import — OCR is optional
-_TESSERACT_AVAILABLE = False
-_TESSERACT_VERSION = ""
-try:
-    import pytesseract
-    _TESSERACT_VERSION = pytesseract.get_tesseract_version().public
-    _TESSERACT_AVAILABLE = True
-    log.info("Tesseract OCR available: %s", _TESSERACT_VERSION)
-except ImportError:
-    log.warning("pytesseract not installed — OCR disabled")
-except Exception as e:
-    log.warning("Tesseract binary not found (%s) — OCR disabled", e)
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+_OCR_PROMPT = (
+    "Extract all visible text from this image exactly as it appears. "
+    "Preserve line breaks and layout. Output only the extracted text, "
+    "nothing else. If no text is visible, respond with an empty string."
+)
 
 
 class OCREngine:
-    """Async Tesseract OCR with preprocessing and timeout guard."""
+    """Async OCR via OpenRouter vision API."""
 
     def __init__(self, config: dict):
         ocr_cfg = config.get("ocr", {})
-        self.enabled = ocr_cfg.get("enabled", True) and _TESSERACT_AVAILABLE
-        self.lang = ocr_cfg.get("lang", "eng")
-        self.timeout_s = ocr_cfg.get("timeout_s", 10)
-        self.preprocess = ocr_cfg.get("preprocess", True)
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ocr")
+        self.enabled = ocr_cfg.get("enabled", True)
+        self.api_key = ocr_cfg.get("api_key", "")
+        self.model = ocr_cfg.get("model", "google/gemini-2.5-flash")
+        self.timeout_s = ocr_cfg.get("timeout_s", 15)
+        self._session: aiohttp.ClientSession | None = None
         self._total_calls = 0
         self._total_chars = 0
 
-        if self.enabled:
-            log.info("OCR engine ready (lang=%s, timeout=%ds, preprocess=%s)",
-                     self.lang, self.timeout_s, self.preprocess)
+        if not self.api_key:
+            self.enabled = False
+            log.info("OCR engine inactive (no api_key configured)")
+        elif self.enabled:
+            log.info("OCR engine ready (model=%s, timeout=%ds)",
+                     self.model, self.timeout_s)
         else:
-            reason = "disabled in config" if _TESSERACT_AVAILABLE else "tesseract unavailable"
-            log.info("OCR engine inactive (%s)", reason)
+            log.info("OCR engine disabled in config")
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            # Use certifi CA bundle if available (fixes macOS SSL issues)
+            connector = None
+            try:
+                import certifi
+                import ssl
+                ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+            except ImportError:
+                pass  # system certs work fine on Linux/Pi
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        return self._session
 
     async def extract(self, frame: np.ndarray) -> str:
-        """Extract text from a BGR frame. Returns empty string on failure/timeout."""
+        """Extract text from a BGR frame via vision API.
+
+        Returns empty string on failure/timeout/disabled.
+        """
         if not self.enabled:
             return ""
 
-        loop = asyncio.get_event_loop()
+        t0 = time.monotonic()
         try:
             text = await asyncio.wait_for(
-                loop.run_in_executor(self._pool, self._extract_sync, frame),
+                self._call_vision(frame),
                 timeout=self.timeout_s,
             )
+            elapsed = time.monotonic() - t0
             self._total_calls += 1
             self._total_chars += len(text)
             if text:
-                log.debug("OCR extracted %d chars in call #%d",
-                          len(text), self._total_calls)
+                log.info("OCR extracted %d chars in %.1fs (via %s)",
+                         len(text), elapsed, self.model)
             return text
         except asyncio.TimeoutError:
             log.warning("OCR timed out after %ds", self.timeout_s)
@@ -74,48 +99,57 @@ class OCREngine:
             log.warning("OCR error: %s", e)
             return ""
 
-    def _extract_sync(self, frame: np.ndarray) -> str:
-        """Synchronous OCR — runs in thread pool."""
-        t0 = time.monotonic()
-
-        # Downscale large frames — 1280x720 takes 20s+ on Pi Zero,
-        # 640x360 is ~4x faster and still plenty for text recognition
+    async def _call_vision(self, frame: np.ndarray) -> str:
+        """Send frame to OpenRouter vision API and return extracted text."""
+        # Downscale to save bandwidth + API cost (detail: "low" anyway)
         h, w = frame.shape[:2]
         if w > 800:
             scale = 640 / w
             frame = cv2.resize(frame, (640, int(h * scale)),
                                interpolation=cv2.INTER_AREA)
 
-        if self.preprocess:
-            frame = self._preprocess(frame)
+        # Encode to JPEG
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        b64 = base64.b64encode(buf.tobytes()).decode("ascii")
 
-        # --psm 6: assume uniform block of text
-        # --oem 3: best available OCR engine mode
-        custom_config = f"--psm 6 --oem 3 -l {self.lang}"
-        text = pytesseract.image_to_string(frame, config=custom_config)
-        text = text.strip()
+        payload = {
+            "model": self.model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _OCR_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64}",
+                            "detail": "low",
+                        },
+                    },
+                ],
+            }],
+            "max_tokens": 500,
+            "temperature": 0,
+        }
 
-        elapsed = time.monotonic() - t0
-        if text:
-            log.info("OCR extracted %d chars in %.1fs", len(text), elapsed)
+        session = self._get_session()
+        async with session.post(_OPENROUTER_URL, json=payload) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                log.warning("OCR API error %d: %s", resp.status, body[:200])
+                return ""
+            data = await resp.json()
+
+        text = (data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip())
         return text
 
-    def _preprocess(self, frame: np.ndarray) -> np.ndarray:
-        """Adaptive threshold preprocessing for variable lighting."""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # Adaptive threshold handles mixed indoor/outdoor lighting
-        processed = cv2.adaptiveThreshold(
-            gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            blockSize=11,
-            C=2,
-        )
-        return processed
-
-    def shutdown(self) -> None:
-        """Clean up the thread pool."""
-        self._pool.shutdown(wait=False)
+    async def shutdown(self) -> None:
+        """Close the HTTP session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
         if self._total_calls > 0:
             log.info("OCR shutdown: %d calls, %d total chars extracted",
                      self._total_calls, self._total_chars)
