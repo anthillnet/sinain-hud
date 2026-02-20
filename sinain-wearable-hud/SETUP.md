@@ -1,6 +1,48 @@
-# Sinain Wearable HUD — Hardware Setup Guide
+# Sinain Wearable HUD — Setup & Architecture Guide
 
-Complete step-by-step guide for assembling and configuring the wearable HUD on a Raspberry Pi Zero 2W with SSD1327 OLED and Pi Camera Module 3.
+Complete guide for assembling, configuring, and understanding the wearable HUD pipeline on a Raspberry Pi Zero 2W with SSD1327 OLED and Pi Camera Module 3.
+
+## Architecture Overview
+
+```
+┌──────────────┐    ┌────────────┐    ┌─────────────────┐    ┌───────────────┐
+│  Pi Camera   │───▶│ Scene Gate │───▶│ OCR (OpenRouter) │───▶│  Observation   │
+│  Module 3    │    │ classify   │    │ Gemini Flash     │    │  Builder       │
+│  1280x720    │    │ DROP/SCENE │    │ vision API       │    │  markdown msg  │
+│  @ 10fps     │    │ /TEXT/etc  │    │ ~1-2s latency    │    │                │
+└──────────────┘    └────────────┘    └─────────────────┘    └───────┬───────┘
+                                                                     │
+                    ┌────────────┐    ┌─────────────────┐    ┌───────▼───────┐
+                    │  SSD1327   │◀───│  DisplayState   │◀───│   Gateway     │
+                    │  128x128   │    │  (shared state) │    │  OpenClaw WS  │
+                    │  OLED      │    │                 │    │  agent RPC    │
+                    └────────────┘    └────────┬────────┘    └───────────────┘
+                                               │
+                                      ┌────────▼────────┐
+                                      │  Debug Server   │
+                                      │  :8080 WebSocket│
+                                      │  3-panel UI     │
+                                      └─────────────────┘
+```
+
+### Pipeline Flow
+
+1. **Camera Capture** (`camera.py`): Pi Camera Module 3 captures 1280x720 BGR frames at 10fps in a dedicated thread.
+2. **Scene Gate** (`scene_gate.py`): Classifies each frame — DROP (static/blurry), AMBIENT (30s heartbeat), SCENE (new scene), TEXT (text regions), MOTION (movement). Most frames are dropped.
+3. **OCR** (`ocr.py`): Non-dropped frames are sent to OpenRouter's Gemini Flash vision API for text extraction. Frames are downscaled to 640px and JPEG-encoded before upload. ~1-2s latency.
+4. **Observation Builder** (`observation.py`): Combines frame metadata, OCR text, and rolling history (last 20 observations, 5min window) into a structured markdown message with context-aware instructions.
+5. **Gateway** (`gateway.py`): Sends the observation message to the OpenClaw agent via WebSocket RPC. The agent responds with a concise text suitable for the 128x128 OLED.
+6. **Display** (`display.py`): Agent response is rendered on the physical SSD1327 OLED (~18 chars wide, 8 lines).
+7. **Debug Server** (`display_server.py`): Broadcasts all pipeline state via WebSocket to a browser-based 3-panel debug UI at `:8080`.
+
+### Key Design Decisions
+
+- **Server-side OCR**: Tesseract runs ~20s per frame on Pi Zero 2W. OpenRouter Gemini Flash does it in ~1-2s via API.
+- **Text-only RPC**: The agent RPC `message` field is text-only (no images). OCR bridges the visual gap.
+- **In-flight guard**: Only one agent RPC at a time. Frames arriving while an RPC is pending are skipped.
+- **Circuit breaker**: 5 consecutive RPC failures within 120s opens the circuit for 300s.
+
+---
 
 ## Hardware Required
 
@@ -225,14 +267,23 @@ cam.stop()
 
 ---
 
-## Step 9: Configure Gateway Token
+## Step 9: Configure Gateway Token + OCR API Key
 
 ```bash
 cd ~/sinain-hud/sinain-wearable-hud
 nano config.yaml
 ```
 
-Set `gateway.token` to your 48-char hex token from the OpenClaw server's `/opt/openclaw/openclaw.json` (`gateway.auth.token` field).
+Set the following keys:
+
+| Key | Source | Description |
+|-----|--------|-------------|
+| `gateway.token` | OpenClaw server `/opt/openclaw/openclaw.json` → `gateway.auth.token` | 48-char hex token for WebSocket auth |
+| `gateway.ws_url` | Your OpenClaw server | WebSocket URL, e.g. `ws://85.214.180.247:18789` |
+| `gateway.session_key` | Your agent session | e.g. `agent:main:sinain` |
+| `ocr.api_key` | [OpenRouter](https://openrouter.ai/keys) | API key for vision OCR (starts with `sk-or-v1-`) |
+
+The OCR engine uses OpenRouter's Gemini Flash model (`google/gemini-2.5-flash`) for server-side text extraction from camera frames. Without an API key, OCR is silently disabled and the agent gets observation messages without extracted text.
 
 ---
 
@@ -244,15 +295,35 @@ source .venv/bin/activate
 python3 -m sinain_wearable_hud.main -c config.yaml -v
 ```
 
-On Mac browser: `http://sinain-wearable.local:8080`
+### Debug Interface (3-panel view)
 
-> **Port 8080 blocked?** Some routers block non-standard ports between WiFi clients. Use an SSH tunnel instead:
-> ```bash
-> ssh -f -N -L 8080:localhost:8080 pi@sinain-wearable.local
-> # Then open http://localhost:8080
-> ```
+The debug server at `:8080` shows a 3-panel live view of the entire pipeline:
 
-**Verify:** OLED shows status, browser mirrors it, logs show frame classifications.
+| Panel | Color | Content |
+|-------|-------|---------|
+| **Observation Sent** (left) | Green | Full structured markdown message sent to the agent via RPC |
+| **OCR Text** (center) | Blue | Raw text extracted from camera frames by OpenRouter Gemini Flash |
+| **Agent Response** (right) | Amber | Agent's reply + small OLED mirror showing what's on the physical display |
+
+The bottom bar shows camera classification debug info and timestamps.
+
+**Access from Mac:**
+
+```bash
+# Option 1: Direct (if port 8080 is reachable)
+open http://sinain-wearable.local:8080
+
+# Option 2: SSH tunnel (recommended — works through firewalls/VLANs)
+ssh -f -N -L 8080:localhost:8080 pi@sinain-wearable.local
+open http://localhost:8080
+```
+
+> **Port 8080 blocked?** Most home routers block inter-client traffic on non-standard ports. The SSH tunnel forwards the Pi's port through the already-working SSH connection. The `-f -N` flags run it in the background with no shell.
+
+**Verify:** OLED shows agent response, browser shows all 3 pipeline streams, logs show:
+- `OCR engine ready (model=google/gemini-2.5-flash)`
+- `OCR extracted N chars in X.Xs`
+- `[sender] p50=NNNNms ok=N fail=0`
 
 ---
 
@@ -265,6 +336,37 @@ journalctl -u sinain-wearable-hud -f
 ```
 
 The service is already enabled (from install.sh), so it will auto-start on boot.
+
+---
+
+## File Map
+
+```
+sinain-wearable-hud/
+├── config.example.yaml          # Template config (copy to config.yaml)
+├── install.sh                   # One-shot Pi setup script
+├── requirements.txt             # Python dependencies
+├── SETUP.md                     # This file
+├── sinain_wearable_hud/
+│   ├── main.py                  # Async orchestrator — wires all components
+│   ├── camera.py                # Pi Camera capture → scene gate → OCR → sender
+│   ├── scene_gate.py            # Frame classifier (DROP/SCENE/TEXT/MOTION/AMBIENT)
+│   ├── ocr.py                   # OpenRouter vision API OCR (Gemini Flash)
+│   ├── observation.py           # Rolling history buffer + markdown message builder
+│   ├── sender.py                # Agent RPC sender with in-flight guard + stats
+│   ├── gateway.py               # OpenClaw WebSocket client (auth, RPC, reconnect)
+│   ├── audio.py                 # Microphone capture + VAD
+│   ├── display.py               # SSD1327 OLED rendering
+│   ├── display_server.py        # HTTP/WebSocket debug server (:8080)
+│   ├── protocol.py              # Dataclasses: RoomFrame, DisplayState, enums
+│   └── config.py                # Config loader with defaults
+├── static/
+│   ├── index.html               # 3-panel debug UI
+│   ├── hud.css                  # Debug UI styles (dark theme, 3-column layout)
+│   └── hud.js                   # WebSocket client for live state updates
+└── systemd/
+    └── sinain-wearable-hud.service  # Systemd unit file
+```
 
 ---
 
@@ -281,6 +383,11 @@ The service is already enabled (from install.sh), so it will auto-start on boot.
 | Root partition only 2GB on 128GB card | Run `sudo raspi-config nonint do_expand_rootfs && sudo reboot` |
 | `No module named 'pkg_resources'` | `pip install 'setuptools<82'` — Python 3.13/setuptools 82 removed it |
 | Port 8080 unreachable from Mac | Router may block inter-client traffic; use SSH tunnel (see Step 10) |
+| OCR always returns empty | Check `ocr.api_key` in config.yaml. Logs should show `OCR engine ready`. |
+| OCR timeout (>15s) | OpenRouter may be slow; increase `ocr.timeout_s` or check API key quota. |
+| Agent gets only motion info | Verify OCR is running: logs should show `OCR extracted N chars`. Scene gate may drop frames; static scenes only trigger AMBIENT every 30s. |
+| Debug UI panels empty | Open browser dev tools → Network → WS. Check that WebSocket connects to `/ws` and receives JSON with `observation_sent`, `ocr_text`, `response_text` fields. |
+| `SSLCertVerificationError` on macOS | Install certifi: `pip install certifi`. The OCR engine uses it for CA certs on macOS. |
 | Camera RGBA (4 channels) | picamera2 may return XRGB — code uses `format: "RGB888"` to force 3-channel |
 | `ModuleNotFoundError: picamera2` | Venv needs `--system-site-packages` (install.sh does this). Or: `pip install picamera2` inside venv. |
 | OLED garbled/wrong colors | Confirm OLED is SSD1327 (not SSD1306). Check `driver: "ssd1327"` in config.yaml. |
