@@ -129,7 +129,7 @@ async def run(config: dict) -> None:
         if not task.done():
             task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
-    ocr_engine.shutdown()
+    await ocr_engine.shutdown()
     await gateway.close()
     log.info("Shutdown complete")
 

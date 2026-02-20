@@ -7,7 +7,7 @@ pyyaml>=6.0
 sounddevice>=0.4
 webrtcvad>=2.0.10
 aiohttp-cors>=0.7
-pytesseract>=0.3.10
+certifi>=2023.7  # CA bundle for macOS; Linux uses system certs
 setuptools<82  # pkg_resources needed by webrtcvad; removed in setuptools 82+
 # picamera2 is installed via apt (python3-picamera2), not pip
 # accessible in venv via --system-site-packages
