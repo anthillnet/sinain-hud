@@ -20,6 +20,7 @@ from queue import Empty, Full, Queue
 import cv2
 import numpy as np
 
+from .ocr import OCREngine
 from .protocol import FrameClass, RoomFrame
 from .scene_gate import SceneGate
 
@@ -29,11 +30,13 @@ log = logging.getLogger(__name__)
 class CameraCapture:
     """Camera capture with scene-gated frame selection."""
 
-    def __init__(self, config: dict, send_callback=None):
+    def __init__(self, config: dict, send_callback=None,
+                 ocr_engine: OCREngine | None = None):
         """
         Args:
             config: Full config dict (camera section will be extracted).
             send_callback: async callable(RoomFrame) to dispatch accepted frames.
+            ocr_engine: Optional OCR engine for text extraction.
         """
         cam = config.get("camera", {})
         self.backend = cam.get("backend", "picamera2")
@@ -43,6 +46,7 @@ class CameraCapture:
         self.quality_text = cam.get("jpeg_quality_text", 70)
         self.quality_default = cam.get("jpeg_quality_default", 50)
         self.send_callback = send_callback
+        self._ocr_engine = ocr_engine
 
         self._gate = SceneGate(config)
         self._frame_queue: Queue[np.ndarray] = Queue(maxsize=3)
@@ -194,6 +198,11 @@ class CameraCapture:
                 self._maybe_log_stats()
                 continue
 
+            # Run OCR on full-res frame before encoding (which may downscale)
+            ocr_text = ""
+            if self._ocr_engine and classification in (FrameClass.TEXT, FrameClass.SCENE):
+                ocr_text = await self._ocr_engine.extract(frame)
+
             jpeg_bytes, w, h = self._encode_frame(frame, classification)
             room_frame = RoomFrame(
                 jpeg_bytes=jpeg_bytes,
@@ -203,6 +212,7 @@ class CameraCapture:
                 text_hint_count=meta.get("text_hint_count", 0),
                 width=w,
                 height=h,
+                ocr_text=ocr_text,
             )
 
             log.debug("[%s] ssim=%.2f motion=%.1f%% text=%d size=%dKB",

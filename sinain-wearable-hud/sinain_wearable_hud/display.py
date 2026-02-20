@@ -38,6 +38,10 @@ class OLEDDisplay:
     Falls back to a virtual framebuffer (PIL Image) when luma.oled is not
     available (e.g., running on Mac for development). The virtual framebuffer
     is accessible via `last_frame` for the debug server.
+
+    Modes:
+    - "response": shows the latest agent response text (default)
+    - "debug": shows camera classification, ssim, motion %, send status
     """
 
     def __init__(self, config: dict, display_state: DisplayState):
@@ -46,6 +50,7 @@ class OLEDDisplay:
         self.width = self.config.get("width", 128)
         self.height = self.config.get("height", 128)
         self.font_size = self.config.get("font_size", 10)
+        self.mode = self.config.get("mode", "response")  # "response" or "debug"
         self.device = None
         self.last_frame: Image.Image | None = None
         self._last_rendered = ""
@@ -87,14 +92,26 @@ class OLEDDisplay:
             log.warning("OLED unavailable (%s), using virtual framebuffer", e)
             self.device = None
 
+    def _get_display_text(self) -> str:
+        """Pick the text to display based on the current mode."""
+        if self.mode == "debug":
+            return self.state.debug_text or self.state.text
+        # Response mode: show agent response, fall back to generic text
+        return self.state.response_text or self.state.text
+
     def render(self) -> Image.Image:
         """Render current display state to a PIL Image (greyscale)."""
         img = Image.new("L", (self.width, self.height), 0)
         draw = ImageDraw.Draw(img)
         font = self._load_font()
 
-        # Status dot (top-right corner, 6px diameter)
-        dot_intensity = _STATUS_COLORS.get(self.state.status, 68)
+        # Gateway status dot (top-right corner, 6px diameter)
+        # Use gateway_status for the dot in response mode, regular status in debug
+        if self.mode == "response":
+            gw_dot = {"connected": 255, "disconnected": 68, "error": 170}
+            dot_intensity = gw_dot.get(self.state.gateway_status, 68)
+        else:
+            dot_intensity = _STATUS_COLORS.get(self.state.status, 68)
         draw.ellipse([self.width - 9, 3, self.width - 3, 9],
                      fill=dot_intensity)
 
@@ -107,10 +124,11 @@ class OLEDDisplay:
             if not self._blink_on:
                 text_intensity = _URGENT_DIM
 
-        if self.state.text:
+        display_text = self._get_display_text()
+        if display_text:
             # Word-wrap to fit width (~18 chars at font_size 10)
             chars_per_line = max(1, (self.width - 4) // (self.font_size * 6 // 10))
-            lines = textwrap.wrap(self.state.text, width=chars_per_line)
+            lines = textwrap.wrap(display_text, width=chars_per_line)
             max_lines = (self.height - 14) // (self.font_size + 2)
             lines = lines[:max_lines]
 
@@ -133,11 +151,16 @@ class OLEDDisplay:
     async def run(self, stop_event: asyncio.Event) -> None:
         """Display loop: re-render on state changes, ~10 FPS max."""
         self.setup()
-        log.info("Display loop started (mode=%s)", "oled" if self.device else "virtual")
+        log.info("Display loop started (hw=%s, content_mode=%s)",
+                 "oled" if self.device else "virtual", self.mode)
 
         while not stop_event.is_set():
-            # Build a state fingerprint to detect changes
-            fingerprint = f"{self.state.text}|{self.state.priority}|{self.state.status}"
+            # Build a state fingerprint that covers all fields the render depends on
+            display_text = self._get_display_text()
+            fingerprint = (
+                f"{display_text}|{self.state.priority}"
+                f"|{self.state.status}|{self.state.gateway_status}"
+            )
             needs_render = (fingerprint != self._last_rendered
                            or self.state.priority == Priority.URGENT)
 
