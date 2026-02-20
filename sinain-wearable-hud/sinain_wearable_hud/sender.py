@@ -10,6 +10,7 @@ import logging
 import time
 import uuid
 
+from .eval_log import EvalLogger
 from .gateway import OpenClawGateway
 from .observation import ObservationBuffer, build_observation_message
 from .protocol import AudioChunk, DisplayState, RoomFrame
@@ -28,10 +29,12 @@ class Sender:
 
     def __init__(self, config: dict, gateway: OpenClawGateway,
                  observation_buffer: ObservationBuffer | None = None,
-                 display_state: DisplayState | None = None):
+                 display_state: DisplayState | None = None,
+                 eval_logger: EvalLogger | None = None):
         self.gateway = gateway
         self._buffer = observation_buffer
         self._display_state = display_state
+        self._eval_logger = eval_logger
         self._in_flight = False
         self._latencies: list[float] = []
         self._last_stats_ts = time.time()
@@ -82,6 +85,7 @@ class Sender:
 
             if resp and resp.get("ok"):
                 self._sends_ok += 1
+                self._log_eval(frame, message, resp, elapsed_ms)
                 return True
             else:
                 self._sends_failed += 1
@@ -134,6 +138,25 @@ class Sender:
         """Record an audio transcript in the observation buffer."""
         if self._buffer is not None:
             self._buffer.add_audio(text, duration_s)
+
+    def _log_eval(self, frame: RoomFrame, observation: str,
+                  resp: dict, rpc_latency_ms: float) -> None:
+        """Write a JSONL eval record for this pipeline cycle."""
+        if self._eval_logger is None:
+            return
+        payloads = resp.get("payload", {}).get("result", {}).get("payloads", [])
+        texts = [p["text"] for p in payloads if "text" in p]
+        response_text = "\n".join(texts)
+        self._eval_logger.log_cycle(
+            tick=self._buffer.tick if self._buffer else 0,
+            classification=frame.classification.value,
+            description=frame.description,
+            ocr_text=frame.ocr_text,
+            observation_sent=observation,
+            agent_response=response_text,
+            vision_latency_ms=0.0,  # not tracked at sender level
+            rpc_latency_ms=rpc_latency_ms,
+        )
 
     def _maybe_log_stats(self) -> None:
         now = time.time()
