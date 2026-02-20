@@ -78,6 +78,14 @@ class OCREngine:
         """Synchronous OCR — runs in thread pool."""
         t0 = time.monotonic()
 
+        # Downscale large frames — 1280x720 takes 20s+ on Pi Zero,
+        # 640x360 is ~4x faster and still plenty for text recognition
+        h, w = frame.shape[:2]
+        if w > 800:
+            scale = 640 / w
+            frame = cv2.resize(frame, (640, int(h * scale)),
+                               interpolation=cv2.INTER_AREA)
+
         if self.preprocess:
             frame = self._preprocess(frame)
 
