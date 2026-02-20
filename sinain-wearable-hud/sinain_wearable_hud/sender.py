@@ -12,7 +12,7 @@ import uuid
 
 from .gateway import OpenClawGateway
 from .observation import ObservationBuffer, build_observation_message
-from .protocol import AudioChunk, RoomFrame
+from .protocol import AudioChunk, DisplayState, RoomFrame
 
 log = logging.getLogger(__name__)
 
@@ -27,9 +27,11 @@ class Sender:
     """
 
     def __init__(self, config: dict, gateway: OpenClawGateway,
-                 observation_buffer: ObservationBuffer | None = None):
+                 observation_buffer: ObservationBuffer | None = None,
+                 display_state: DisplayState | None = None):
         self.gateway = gateway
         self._buffer = observation_buffer
+        self._display_state = display_state
         self._in_flight = False
         self._latencies: list[float] = []
         self._last_stats_ts = time.time()
@@ -63,6 +65,12 @@ class Sender:
                     f" text_hints={frame.text_hint_count}"
                     f" | {size_kb}KB {frame.width}x{frame.height}"
                 )
+
+            # Update debug display with observation + OCR streams
+            if self._display_state is not None:
+                self._display_state.set_observation(message)
+                if frame.ocr_text:
+                    self._display_state.set_ocr(frame.ocr_text, 0.0)
 
             idem_key = f"frame-{uuid.uuid4().hex[:12]}"
             t0 = time.time()

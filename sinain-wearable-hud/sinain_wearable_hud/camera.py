@@ -200,7 +200,7 @@ class CameraCapture:
 
             # Run OCR on full-res frame before encoding (which may downscale)
             ocr_text = ""
-            if self._ocr_engine and classification in (FrameClass.TEXT, FrameClass.SCENE):
+            if self._ocr_engine:
                 ocr_text = await self._ocr_engine.extract(frame)
 
             jpeg_bytes, w, h = self._encode_frame(frame, classification)
