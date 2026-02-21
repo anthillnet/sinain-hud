@@ -51,6 +51,7 @@ class OLEDDisplay:
         self.height = self.config.get("height", 128)
         self.font_size = self.config.get("font_size", 10)
         self.mode = self.config.get("mode", "response")  # "response" or "debug"
+        self.mirror = self.config.get("mirror", False)
         self.device = None
         self.last_frame: Image.Image | None = None
         self._last_rendered = ""
@@ -136,6 +137,9 @@ class OLEDDisplay:
             for line in lines:
                 draw.text((2, y), line, fill=text_intensity, font=font)
                 y += self.font_size + 2
+
+        if self.mirror:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
         self.last_frame = img
         return img
