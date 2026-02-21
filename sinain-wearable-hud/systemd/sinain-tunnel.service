@@ -1,0 +1,25 @@
+[Unit]
+Description=Sinain HUD Reverse SSH Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+EnvironmentFile=/home/pi/sinain-hud/sinain-wearable-hud/tunnel.env
+ExecStart=/usr/bin/autossh -M 0 -N \
+    -o "ServerAliveInterval=30" \
+    -o "ServerAliveCountMax=3" \
+    -o "ExitOnForwardFailure=yes" \
+    -o "StrictHostKeyChecking=accept-new" \
+    -i /home/pi/.ssh/sinain_tunnel \
+    -p ${VPS_SSH_PORT} \
+    -R 0.0.0.0:${REMOTE_SSH_PORT}:localhost:22 \
+    -R 0.0.0.0:${REMOTE_DEBUG_PORT}:localhost:8080 \
+    ${VPS_USER}@${VPS_HOST}
+Restart=always
+RestartSec=10
+Environment=AUTOSSH_GATETIME=0
+
+[Install]
+WantedBy=multi-user.target

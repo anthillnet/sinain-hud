@@ -70,8 +70,60 @@ Complete guide for assembling, configuring, and understanding the wearable HUD p
    - Username: `pi`, Password: (your choice)
    - Configure WiFi: your SSID + password, Country: DE
 5. Click **Write**, wait for completion
+6. **Don't eject yet** — run `prep-sdcard.sh` (see Step 1b)
 
 **Verify:** Imager says "Write Successful"
+
+---
+
+## Step 1b: Prep SD Card for Auto-Setup
+
+While the SD card is still inserted, run `prep-sdcard.sh` on your Mac. This writes everything the Pi needs to the boot partition so it sets up automatically on first boot — no SSH access required.
+
+### Prerequisites
+
+1. VPS is ready — run `setup-vps.sh` on VPS first (see Step 6b)
+2. Have your OpenClaw token and OpenRouter API key ready
+
+### Run prep
+
+```bash
+cd sinain-wearable-hud
+bash prep-sdcard.sh
+```
+
+The script will:
+- Ask for your VPS IP, OpenClaw token, and OpenRouter API key
+- Generate an SSH tunnel key pair
+- Write all config to the SD card's boot partition
+- Hook into the Pi's first-boot sequence
+
+At the end it prints the Pi's **public key** — add it to the VPS:
+
+```bash
+ssh root@<your-vps-ip>
+echo "<paste the public key>" >> /home/sinain-tunnel/.ssh/authorized_keys
+```
+
+### What happens on first boot
+
+```
+Power on → WiFi connects → Imager setup runs → reboot
+         → sinain-firstboot.service starts
+         → apt install (~5 min)
+         → git clone + pip install (~10 min)
+         → tunnel connects to VPS
+         → ssh -p 2222 pi@<vps-ip> works!
+```
+
+Total: ~15 minutes from power on to SSH access.
+
+Logs (if you can access the Pi locally):
+```bash
+cat /var/log/sinain-firstboot.log
+```
+
+**Verify:** `ssh -p 2222 pi@<your-vps-ip>` connects
 
 ---
 
@@ -211,7 +263,72 @@ Takes ~10-15 min on Pi Zero 2W (apt + pip).
 > sudo mkswap /swapfile && sudo swapon /swapfile
 > ```
 
-**Verify:** "Setup complete!" message.
+The install script generates an SSH key for the reverse tunnel and prints it at the end.
+
+**Verify:** "Setup complete!" message + public key printed.
+
+---
+
+## Step 6b: VPS Tunnel (Remote Access)
+
+The Pi maintains a persistent reverse SSH tunnel to your VPS via `autossh`. This gives you SSH and debug UI access from anywhere — no VPN client needed on your laptop/phone.
+
+```
+You (anywhere)  ──SSH──▶  VPS :2222  ──tunnel──▶  Pi :22
+You (browser)   ──HTTP─▶  VPS :8080  ──tunnel──▶  Pi :8080
+```
+
+### VPS setup (once)
+
+Copy `setup-vps.sh` to your VPS and run it:
+
+```bash
+scp setup-vps.sh root@<your-vps-ip>:~
+ssh root@<your-vps-ip> "bash setup-vps.sh"
+```
+
+This creates a `sinain-tunnel` user, configures `sshd` for reverse tunnels, and opens firewall ports.
+
+### Pi setup
+
+1. Edit `tunnel.env` with your VPS IP:
+
+```bash
+nano ~/sinain-hud/sinain-wearable-hud/tunnel.env
+```
+
+| Key | Value |
+|-----|-------|
+| `VPS_HOST` | Your VPS IP (e.g. `85.214.180.247`) |
+| `VPS_USER` | `sinain-tunnel` (created by `setup-vps.sh`) |
+| `VPS_SSH_PORT` | `22` (VPS SSH port) |
+| `REMOTE_SSH_PORT` | `2222` (port on VPS → Pi SSH) |
+| `REMOTE_DEBUG_PORT` | `8080` (port on VPS → Pi debug UI) |
+
+2. Copy the Pi's public key to VPS (printed by `install.sh`):
+
+```bash
+# Show the key again if needed
+cat ~/.ssh/sinain_tunnel.pub
+```
+
+Add it to `/home/sinain-tunnel/.ssh/authorized_keys` on the VPS.
+
+3. Test the tunnel:
+
+```bash
+sudo systemctl start sinain-tunnel
+sudo systemctl status sinain-tunnel
+```
+
+4. Verify from your laptop:
+
+```bash
+ssh -p 2222 pi@<your-vps-ip>
+open http://<your-vps-ip>:8080
+```
+
+The tunnel auto-starts on boot and reconnects automatically if the connection drops.
 
 ---
 
@@ -310,15 +427,16 @@ The bottom bar shows camera classification debug info and timestamps.
 **Access from Mac:**
 
 ```bash
-# Option 1: Direct (if port 8080 is reachable)
+# Option 1: Via VPS tunnel (works from anywhere, see Step 6b)
+open http://<your-vps-ip>:8080
+
+# Option 2: Local network (mDNS, same WiFi only)
 open http://sinain-wearable.local:8080
 
-# Option 2: SSH tunnel (recommended — works through firewalls/VLANs)
+# Option 3: SSH tunnel (manual fallback)
 ssh -f -N -L 8080:localhost:8080 pi@sinain-wearable.local
 open http://localhost:8080
 ```
-
-> **Port 8080 blocked?** Most home routers block inter-client traffic on non-standard ports. The SSH tunnel forwards the Pi's port through the already-working SSH connection. The `-f -N` flags run it in the background with no shell.
 
 **Verify:** OLED shows agent response, browser shows all 3 pipeline streams, logs show:
 - `OCR engine ready (model=google/gemini-2.5-flash)`
@@ -344,7 +462,10 @@ The service is already enabled (from install.sh), so it will auto-start on boot.
 ```
 sinain-wearable-hud/
 ├── config.example.yaml          # Template config (copy to config.yaml)
-├── install.sh                   # One-shot Pi setup script
+├── tunnel.env.example           # Template tunnel config (copy to tunnel.env)
+├── install.sh                   # One-shot Pi setup script (manual SSH path)
+├── prep-sdcard.sh               # Mac: auto-prep SD card for headless first boot
+├── setup-vps.sh                 # VPS setup for reverse SSH tunnel
 ├── requirements.txt             # Python dependencies
 ├── SETUP.md                     # This file
 ├── sinain_wearable_hud/
@@ -365,7 +486,8 @@ sinain-wearable-hud/
 │   ├── hud.css                  # Debug UI styles (dark theme, 3-column layout)
 │   └── hud.js                   # WebSocket client for live state updates
 └── systemd/
-    └── sinain-wearable-hud.service  # Systemd unit file
+    ├── sinain-wearable-hud.service  # Systemd unit file
+    └── sinain-tunnel.service        # Reverse SSH tunnel (autossh)
 ```
 
 ---
@@ -382,7 +504,10 @@ sinain-wearable-hud/
 | HTTP POST 401 to gateway | Wrong gateway token in config.yaml |
 | Root partition only 2GB on 128GB card | Run `sudo raspi-config nonint do_expand_rootfs && sudo reboot` |
 | `No module named 'pkg_resources'` | `pip install 'setuptools<82'` — Python 3.13/setuptools 82 removed it |
-| Port 8080 unreachable from Mac | Router may block inter-client traffic; use SSH tunnel (see Step 10) |
+| Port 8080 unreachable from Mac | Use VPS tunnel (see Step 6b), or SSH tunnel (see Step 10) |
+| Tunnel won't connect | Check `tunnel.env` VPS_HOST. Verify key is in VPS `authorized_keys`. Try: `ssh -i ~/.ssh/sinain_tunnel sinain-tunnel@<vps-ip>` |
+| Tunnel drops frequently | Check VPS `ClientAliveInterval` in sshd_config. `journalctl -u sinain-tunnel -f` for errors |
+| Port 2222 refused on VPS | Check firewall (`ufw status`). Verify `GatewayPorts clientspecified` in sshd_config |
 | OCR always returns empty | Check `ocr.api_key` in config.yaml. Logs should show `OCR engine ready`. |
 | OCR timeout (>15s) | OpenRouter may be slow; increase `ocr.timeout_s` or check API key quota. |
 | Agent gets only motion info | Verify OCR is running: logs should show `OCR extracted N chars`. Scene gate may drop frames; static scenes only trigger AMBIENT every 30s. |
