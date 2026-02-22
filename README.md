@@ -12,6 +12,7 @@ An always-on-top transparent overlay that displays real-time AI advice while you
 - **overlay/** — Flutter + Swift macOS app (the HUD you see)
 - **sinain-core/** — Node.js service (agent loop, audio pipeline, screen context, WebSocket server)
 - **sense_client/** — Python screen capture + privacy pipeline
+- **sinain-koog/** — Python reflection scripts (signal analysis, feedback, mining, curation, synthesis)
 - **sinain-hud-plugin/** — OpenClaw plugin (lifecycle hooks, auto-deploy, session summaries)
 - **skills/sinain-hud/** — Skill definition (HEARTBEAT.md, SKILL.md)
 
@@ -167,6 +168,7 @@ Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
 - [ ] Phase 4: Polish (diarization, smart batching, themes)
 - [x] Phase 5: OpenClaw escalation (SITUATION.md + hooks + agent.wait)
 - [x] Phase 6: Plugin architecture + persistent memory (sinain-hud plugin, claude-mem, observation feed, privacy pipeline)
+- [x] Phase 7: sinain-koog — offloaded reflection pipeline (5 Python scripts via OpenRouter, orchestrated by HEARTBEAT.md)
 
 ## License
 
