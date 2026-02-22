@@ -19,6 +19,12 @@ from .protocol import FrameClass
 
 log = logging.getLogger(__name__)
 
+# Downscale resolution for SSIM / motion classification.
+# 320x180 is 16× fewer pixels than 1280x720 — drops SSIM peak memory
+# from ~70 MB (float64) to ~2 MB (float32).  Classification accuracy is
+# unaffected because SSIM/motion only need structural similarity, not detail.
+_CLASSIFY_SIZE = (320, 180)
+
 
 class SceneGate:
     """Classifies camera frames and gates sends via adaptive cooldowns.
@@ -53,61 +59,79 @@ class SceneGate:
     def classify(self, frame: np.ndarray) -> tuple[FrameClass, dict]:
         """Classify a BGR frame. Returns (classification, metadata).
 
-        Metadata dict contains: ssim, motion_pct, text_hint_count, blur_var
+        Metadata dict contains: ssim, motion_pct, text_hint_count, blur_var,
+        motion_bbox, change_bbox, text_bboxes
         """
         now = time.time()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # --- Blur rejection ---
+        # --- Blur rejection (full-res for accuracy) ---
         blur_var = cv2.Laplacian(gray, cv2.CV_64F).var()
         if blur_var < self.blur_threshold:
             return FrameClass.DROP, {"blur_var": blur_var, "reason": "blurry"}
 
+        # Downscaled greyscale for SSIM / motion (saves ~68 MB per frame)
+        small = cv2.resize(gray, _CLASSIFY_SIZE,
+                           interpolation=cv2.INTER_AREA)
+
         # --- First frame: always send as SCENE ---
         if self._prev_gray is None:
-            self._prev_gray = gray
+            self._prev_gray = small
             self._last_ambient = now
-            return FrameClass.SCENE, self._meta(1.0, 0.0, 0, blur_var)
+            text_hints, text_bboxes = self._count_text_regions(gray)
+            return FrameClass.SCENE, self._meta(
+                1.0, 0.0, text_hints, blur_var,
+                text_bboxes=text_bboxes)
 
         # --- Change detection metrics ---
-        ssim = self._compute_ssim(gray, self._prev_gray)
-        motion_pct = self._compute_motion(gray, self._prev_gray)
-        text_hints = self._count_text_regions(gray)
+        ssim, ssim_map = self._compute_ssim(small, self._prev_gray)
+        motion_pct, motion_mask = self._compute_motion(small, self._prev_gray)
+        # MSER needs full-res detail for reliable text region detection
+        text_hints, text_bboxes = self._count_text_regions(gray)
 
-        meta = self._meta(ssim, motion_pct, text_hints, blur_var)
+        # Spatial bounding boxes (on their respective coordinate spaces)
+        motion_bbox = self._bbox_from_mask(motion_mask)
+        change_bbox = self._bbox_from_mask(
+            ((ssim_map < 0.5).astype(np.uint8) * 255))
+
+        meta = self._meta(
+            ssim, motion_pct, text_hints, blur_var,
+            motion_bbox=motion_bbox,
+            change_bbox=change_bbox,
+            text_bboxes=text_bboxes)
 
         # --- No change: high SSIM + low motion ---
         if ssim > self.stable_threshold and motion_pct < 2.0:
             # Check ambient heartbeat
             if now - self._last_ambient >= self.ambient_interval:
-                if not self._is_hist_duplicate(gray):
-                    self._accept(gray, now, FrameClass.AMBIENT)
+                if not self._is_hist_duplicate(small):
+                    self._accept(small, now, FrameClass.AMBIENT)
                     return FrameClass.AMBIENT, meta
             return FrameClass.DROP, meta
 
         # --- Major scene change ---
         if ssim < self.scene_threshold:
             if not self._in_cooldown(FrameClass.SCENE, now, 2.0):
-                self._accept(gray, now, FrameClass.SCENE)
+                self._accept(small, now, FrameClass.SCENE)
                 self._scene_active_until = now + 10.0
                 return FrameClass.SCENE, meta
 
         # --- Text regions with change ---
         if text_hints > 5 and ssim < self.stable_threshold:
             if not self._in_cooldown(FrameClass.TEXT, now, self.text_cooldown):
-                self._accept(gray, now, FrameClass.TEXT)
+                self._accept(small, now, FrameClass.TEXT)
                 return FrameClass.TEXT, meta
 
         # --- Sustained motion ---
         if motion_pct > self.motion_threshold:
             if not self._in_cooldown(FrameClass.MOTION, now, self.motion_cooldown):
-                self._accept(gray, now, FrameClass.MOTION)
+                self._accept(small, now, FrameClass.MOTION)
                 return FrameClass.MOTION, meta
 
         # --- Ambient heartbeat (for moderate changes that didn't meet above) ---
         if now - self._last_ambient >= self.ambient_interval:
-            if not self._is_hist_duplicate(gray):
-                self._accept(gray, now, FrameClass.AMBIENT)
+            if not self._is_hist_duplicate(small):
+                self._accept(small, now, FrameClass.AMBIENT)
                 return FrameClass.AMBIENT, meta
 
         return FrameClass.DROP, meta
@@ -132,14 +156,14 @@ class SceneGate:
             cooldown = min(cooldown, 2.0)
         return (now - last) < cooldown
 
-    def _compute_ssim(self, a: np.ndarray, b: np.ndarray) -> float:
-        """Simplified SSIM using OpenCV (avoids scikit-image on Pi)."""
-        # Use cv2's quality metrics if available, else mean-based approximation
+    def _compute_ssim(self, a: np.ndarray, b: np.ndarray
+                      ) -> tuple[float, np.ndarray]:
+        """Simplified SSIM. Returns (mean_score, ssim_map)."""
         c1 = (0.01 * 255) ** 2
         c2 = (0.03 * 255) ** 2
 
-        a_f = a.astype(np.float64)
-        b_f = b.astype(np.float64)
+        a_f = a.astype(np.float32)
+        b_f = b.astype(np.float32)
 
         mu_a = cv2.GaussianBlur(a_f, (11, 11), 1.5)
         mu_b = cv2.GaussianBlur(b_f, (11, 11), 1.5)
@@ -156,24 +180,41 @@ class SceneGate:
         den = (mu_a_sq + mu_b_sq + c1) * (sigma_a_sq + sigma_b_sq + c2)
 
         ssim_map = num / den
-        return float(ssim_map.mean())
+        return float(ssim_map.mean()), ssim_map
 
-    def _compute_motion(self, a: np.ndarray, b: np.ndarray) -> float:
-        """Percentage of pixels with significant change between frames."""
+    def _compute_motion(self, a: np.ndarray, b: np.ndarray
+                        ) -> tuple[float, np.ndarray]:
+        """Returns (motion_pct, binary_mask) of significant change."""
         diff = cv2.absdiff(a, b)
         _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
         changed = np.count_nonzero(thresh)
         total = thresh.shape[0] * thresh.shape[1]
-        return (changed / total) * 100.0
+        return (changed / total) * 100.0, thresh
 
-    def _count_text_regions(self, gray: np.ndarray) -> int:
-        """Cheap text presence hint using MSER stable regions."""
+    def _count_text_regions(self, gray: np.ndarray
+                           ) -> tuple[int, list[tuple[int, int, int, int]]]:
+        """Text presence hint via MSER. Returns (count, [(x,y,w,h)...])."""
         try:
             mser = cv2.MSER_create()
             regions, _ = mser.detectRegions(gray)
-            return len(regions)
+            bboxes = [cv2.boundingRect(r) for r in regions]
+            return len(regions), bboxes
         except Exception:
-            return 0
+            return 0, []
+
+    @staticmethod
+    def _bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+        """Convert a binary mask to a single merged bounding box (x,y,w,h)."""
+        mask_u8 = mask.astype(np.uint8)
+        if mask_u8.max() == 0:
+            return None
+        contours, _ = cv2.findContours(
+            mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        # Merge all contours into one bounding rect
+        all_pts = np.concatenate(contours)
+        return cv2.boundingRect(all_pts)
 
     def _is_hist_duplicate(self, gray: np.ndarray) -> bool:
         """Check if frame histogram is too similar to recently sent frames."""
@@ -189,10 +230,17 @@ class SceneGate:
 
     @staticmethod
     def _meta(ssim: float, motion_pct: float, text_hints: int,
-              blur_var: float) -> dict:
+              blur_var: float, *,
+              motion_bbox: tuple[int, int, int, int] | None = None,
+              change_bbox: tuple[int, int, int, int] | None = None,
+              text_bboxes: list[tuple[int, int, int, int]] | None = None,
+              ) -> dict:
         return {
             "ssim": round(ssim, 3),
             "motion_pct": round(motion_pct, 1),
             "text_hint_count": text_hints,
             "blur_var": round(blur_var, 1),
+            "motion_bbox": motion_bbox,
+            "change_bbox": change_bbox,
+            "text_bboxes": text_bboxes or [],
         }

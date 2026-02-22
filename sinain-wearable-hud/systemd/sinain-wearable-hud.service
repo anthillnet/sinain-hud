@@ -10,6 +10,8 @@ WorkingDirectory=/home/pi/sinain-hud/sinain-wearable-hud
 ExecStart=/home/pi/sinain-hud/sinain-wearable-hud/.venv/bin/python3 -m sinain_wearable_hud.main -c /home/pi/sinain-hud/sinain-wearable-hud/config.yaml
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
+KillMode=mixed
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

@@ -43,6 +43,8 @@ class EvalLogger:
         agent_response: str,
         vision_latency_ms: float,
         rpc_latency_ms: float,
+        is_roi_crop: bool = False,
+        roi_bbox: tuple[int, int, int, int] | None = None,
     ) -> None:
         """Write one JSON line capturing a full pipeline cycle."""
         if not self._enabled:
@@ -58,6 +60,8 @@ class EvalLogger:
             "agent_response": agent_response,
             "vision_latency_ms": round(vision_latency_ms, 1),
             "rpc_latency_ms": round(rpc_latency_ms, 1),
+            "is_roi_crop": is_roi_crop,
+            "roi_bbox": list(roi_bbox) if roi_bbox else None,
         }
 
         try:

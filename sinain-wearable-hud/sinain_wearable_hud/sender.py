@@ -156,6 +156,8 @@ class Sender:
             agent_response=response_text,
             vision_latency_ms=0.0,  # not tracked at sender level
             rpc_latency_ms=rpc_latency_ms,
+            is_roi_crop=frame.is_roi_crop,
+            roi_bbox=frame.roi_bbox,
         )
 
     def _maybe_log_stats(self) -> None:
