@@ -23,7 +23,10 @@ log = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-_VISION_PROMPT = (
+from .protocol import FrameClass
+
+# Classification-aware prompt variants
+_PROMPT_SCENE = (
     "Analyze this image from a wearable camera.\n\n"
     "1. SCENE: Describe what you see. Include the setting, environment, "
     "notable objects, people, activities, signage, screens, colors, lighting, "
@@ -34,6 +37,36 @@ _VISION_PROMPT = (
     "SCENE: [your description]\n"
     "TEXT: [extracted text or none]"
 )
+
+_PROMPT_TEXT = (
+    "This is a cropped region from a wearable camera focused on text.\n\n"
+    "1. TEXT: Extract ALL visible text exactly as written, preserving "
+    "line breaks, formatting, and layout. Be thorough — capture every word, "
+    "number, and symbol you can read.\n\n"
+    "2. SCENE: Brief description of what contains this text (sign, screen, "
+    "label, document, etc.).\n\n"
+    "Format your response exactly as:\n"
+    "SCENE: [brief context]\n"
+    "TEXT: [extracted text or none]"
+)
+
+_PROMPT_MOTION = (
+    "This image from a wearable camera shows an area with detected motion.\n\n"
+    "1. SCENE: Focus on what is happening — describe the activity, movement, "
+    "and actions taking place. What changed? Who or what is moving?\n\n"
+    "2. TEXT: Extract any visible text exactly as it appears. "
+    "If no text is visible, write: none\n\n"
+    "Format your response exactly as:\n"
+    "SCENE: [your description]\n"
+    "TEXT: [extracted text or none]"
+)
+
+_PROMPTS = {
+    FrameClass.SCENE: _PROMPT_SCENE,
+    FrameClass.AMBIENT: _PROMPT_SCENE,
+    FrameClass.TEXT: _PROMPT_TEXT,
+    FrameClass.MOTION: _PROMPT_MOTION,
+}
 
 
 class OCREngine:
@@ -78,7 +111,9 @@ class OCREngine:
             )
         return self._session
 
-    async def extract(self, frame: np.ndarray) -> tuple[str, str]:
+    async def extract(self, frame: np.ndarray,
+                      classification: FrameClass = FrameClass.SCENE,
+                      is_crop: bool = False) -> tuple[str, str]:
         """Analyze frame via vision API. Returns (description, ocr_text).
 
         Returns ("", "") on failure/timeout/disabled.
@@ -89,7 +124,7 @@ class OCREngine:
         t0 = time.monotonic()
         try:
             raw = await asyncio.wait_for(
-                self._call_vision(frame),
+                self._call_vision(frame, classification, is_crop),
                 timeout=self.timeout_s,
             )
             elapsed = time.monotonic() - t0
@@ -134,30 +169,44 @@ class OCREngine:
 
         return description, ocr_text
 
-    async def _call_vision(self, frame: np.ndarray) -> str:
+    async def _call_vision(self, frame: np.ndarray,
+                           classification: FrameClass = FrameClass.SCENE,
+                           is_crop: bool = False) -> str:
         """Send frame to OpenRouter vision API and return raw response."""
-        # Downscale to save bandwidth + API cost (detail: "low" anyway)
         h, w = frame.shape[:2]
-        if w > 800:
-            scale = 640 / w
-            frame = cv2.resize(frame, (640, int(h * scale)),
+        is_text = classification == FrameClass.TEXT
+
+        # Resolution: crops are already small, allow up to 800px;
+        # full frames downscale to 640px to save bandwidth
+        max_dim = 800 if is_crop else 640
+        if w > max_dim:
+            scale = max_dim / w
+            frame = cv2.resize(frame, (max_dim, int(h * scale)),
                                interpolation=cv2.INTER_AREA)
 
-        # Encode to JPEG
-        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        # JPEG quality: text crops get 85 for sharper text; others 70
+        jpeg_quality = 85 if is_text and is_crop else 70
+        _, buf = cv2.imencode(".jpg", frame,
+                              [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+
+        # Detail level: text crops use "auto" (enables high-res tiles for OCR);
+        # everything else uses "low" to save tokens
+        detail = "auto" if is_text and is_crop else "low"
+
+        prompt = _PROMPTS.get(classification, _PROMPT_SCENE)
 
         payload = {
             "model": self.model,
             "messages": [{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": _VISION_PROMPT},
+                    {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
                         "image_url": {
                             "url": f"data:image/jpeg;base64,{b64}",
-                            "detail": "low",
+                            "detail": detail,
                         },
                     },
                 ],

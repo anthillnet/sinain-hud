@@ -15,17 +15,17 @@
 
     <div id="panels">
         <section class="panel" id="panel-observation">
-            <h2>Observation Sent</h2>
-            <pre id="observation-text"></pre>
+            <h2>Observation Sent <span id="obs-count" class="count"></span></h2>
+            <div class="log" id="observation-log"></div>
         </section>
         <section class="panel" id="panel-vision">
-            <h2>Vision <span id="ocr-latency" class="latency"></span></h2>
-            <pre id="vision-text"></pre>
+            <h2>Vision <span id="ocr-latency" class="latency"></span> <span id="vision-count" class="count"></span></h2>
+            <div class="log" id="vision-log"></div>
         </section>
         <section class="panel" id="panel-response">
-            <h2>Agent Response</h2>
+            <h2>Agent Response <span id="response-count" class="count"></span></h2>
             <div id="oled-mirror"></div>
-            <pre id="response-text"></pre>
+            <div class="log" id="response-log"></div>
         </section>
     </div>
 

@@ -22,6 +22,7 @@ import numpy as np
 
 from .ocr import OCREngine
 from .protocol import FrameClass, RoomFrame
+from .roi_cropper import crop_roi
 from .scene_gate import SceneGate
 
 log = logging.getLogger(__name__)
@@ -155,16 +156,19 @@ class CameraCapture:
 
     def _encode_frame(self, frame: np.ndarray, classification: FrameClass
                       ) -> tuple[bytes, int, int]:
-        """JPEG-encode a frame. Downscale non-TEXT frames to save bandwidth."""
-        if classification != FrameClass.TEXT:
-            frame = cv2.resize(frame, (640, 480),
+        """JPEG-encode a frame. The ROI cropper already provides focused regions."""
+        h, w = frame.shape[:2]
+        # Only downscale large full-frame images (crops are already small)
+        if w > 800 and classification not in (FrameClass.TEXT,):
+            scale = 640 / w
+            frame = cv2.resize(frame, (640, int(h * scale)),
                                interpolation=cv2.INTER_AREA)
+            h, w = frame.shape[:2]
 
         quality = (self.quality_text if classification == FrameClass.TEXT
                    else self.quality_default)
         _, buf = cv2.imencode(".jpg", frame,
                               [cv2.IMWRITE_JPEG_QUALITY, quality])
-        h, w = frame.shape[:2]
         return buf.tobytes(), w, h
 
     # ── Main loop ─────────────────────────────────────────────────────
@@ -198,12 +202,19 @@ class CameraCapture:
                 self._maybe_log_stats()
                 continue
 
-            # Run vision analysis on full-res frame before encoding (which may downscale)
+            # Crop to ROI based on classification + spatial metadata
+            crop_result = crop_roi(frame, classification, meta)
+
+            # Vision analysis on the crop (not full frame)
             description, ocr_text = "", ""
             if self._ocr_engine:
-                description, ocr_text = await self._ocr_engine.extract(frame)
+                description, ocr_text = await self._ocr_engine.extract(
+                    crop_result.image, classification,
+                    not crop_result.is_full_frame)
 
-            jpeg_bytes, w, h = self._encode_frame(frame, classification)
+            # Encode the crop for JPEG payload
+            jpeg_bytes, w, h = self._encode_frame(
+                crop_result.image, classification)
             room_frame = RoomFrame(
                 jpeg_bytes=jpeg_bytes,
                 classification=classification,
@@ -214,6 +225,8 @@ class CameraCapture:
                 height=h,
                 description=description,
                 ocr_text=ocr_text,
+                roi_bbox=crop_result.bbox,
+                is_roi_crop=not crop_result.is_full_frame,
             )
 
             log.debug("[%s] ssim=%.2f motion=%.1f%% text=%d size=%dKB",
