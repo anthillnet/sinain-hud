@@ -9,7 +9,7 @@ Four lifecycle hooks + one command:
 | Hook | Purpose |
 |---|---|
 | `session_start` | Initializes per-session tool usage tracking |
-| `before_agent_start` | Syncs HEARTBEAT.md and SKILL.md from `sinain-sources/` to the agent workspace; creates `memory/` directories |
+| `before_agent_start` | Syncs HEARTBEAT.md, SKILL.md, and sinain-koog/ scripts from `sinain-sources/` to the agent workspace; creates `memory/` directories |
 | `tool_result_persist` | Strips `<private>` tags from tool results before they're saved to session history |
 | `agent_end` | Writes structured session summary to `memory/session-summaries.jsonl` |
 
@@ -26,6 +26,7 @@ Configured in `openclaw.json` under `plugins.entries.sinain-hud`:
       "sinain-hud": {
         "heartbeatPath": "sinain-sources/HEARTBEAT.md",
         "skillPath": "sinain-sources/SKILL.md",
+        "koogPath": "sinain-sources/sinain-koog",
         "sessionKey": "agent:main:sinain",
         "observationFeed": {
           "enabled": true,
@@ -42,6 +43,7 @@ Configured in `openclaw.json` under `plugins.entries.sinain-hud`:
 |---|---|---|
 | `heartbeatPath` | string | Path to HEARTBEAT.md source (resolved relative to state dir) |
 | `skillPath` | string | Path to SKILL.md source |
+| `koogPath` | string | Path to sinain-koog/ scripts directory |
 | `sessionKey` | string | Session key for the sinain agent |
 | `observationFeed.enabled` | boolean | Enable observation streaming |
 | `observationFeed.channel` | string | Delivery channel (`telegram`, `discord`, `slack`) |
@@ -55,9 +57,18 @@ The `before_agent_start` hook copies files from the persistent source directory 
 /mnt/openclaw-state/sinain-sources/     →  /home/node/.openclaw/workspace/
   HEARTBEAT.md                               HEARTBEAT.md
   SKILL.md                                   SKILL.md
+  sinain-koog/                               sinain-koog/
+    common.py                                  common.py
+    signal_analyzer.py                         signal_analyzer.py
+    feedback_analyzer.py                       feedback_analyzer.py
+    memory_miner.py                            memory_miner.py
+    playbook_curator.py                        playbook_curator.py
+    insight_synthesizer.py                     insight_synthesizer.py
+    git_backup.sh                              git_backup.sh  (chmod 755)
+    requirements.txt                           requirements.txt
 ```
 
-Only writes if content has actually changed (avoids unnecessary git diffs). Also ensures `memory/`, `memory/playbook-archive/`, and `memory/playbook-logs/` directories exist.
+Only writes if content has actually changed (avoids unnecessary git diffs). Also ensures `memory/`, `memory/playbook-archive/`, and `memory/playbook-logs/` directories exist. The `git_backup.sh` script is automatically made executable after sync.
 
 ## Privacy Tag Stripping
 

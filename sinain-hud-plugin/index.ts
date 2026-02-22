@@ -8,7 +8,7 @@
  * - Strips <private> tags from tool results before persistence
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
@@ -19,6 +19,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 type PluginConfig = {
   heartbeatPath?: string;
   skillPath?: string;
+  koogPath?: string;
   sessionKey?: string;
   observationFeed?: {
     enabled?: boolean;
@@ -91,6 +92,32 @@ function syncFileToWorkspace(
   }
 }
 
+function syncDirToWorkspace(
+  sourceDir: string,
+  workspaceDir: string,
+  targetDirName: string,
+  logger: OpenClawPluginApi["logger"],
+): number {
+  if (!existsSync(sourceDir)) return 0;
+  const targetDir = join(workspaceDir, targetDirName);
+  if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+  let synced = 0;
+  for (const entry of readdirSync(sourceDir)) {
+    const srcPath = join(sourceDir, entry);
+    if (!statSync(srcPath).isFile()) continue;
+    const targetPath = join(targetDir, entry);
+    const content = readFileSync(srcPath, "utf-8");
+    let existing = "";
+    try { existing = readFileSync(targetPath, "utf-8"); } catch {}
+    if (existing !== content) {
+      writeFileSync(targetPath, content, "utf-8");
+      synced++;
+    }
+  }
+  if (synced > 0) logger.info(`sinain-hud: synced ${synced} files to ${targetDirName}/`);
+  return synced;
+}
+
 // ============================================================================
 // Plugin Definition
 // ============================================================================
@@ -141,6 +168,15 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     syncFileToWorkspace(heartbeatSource, workspaceDir, "HEARTBEAT.md", api.logger);
     syncFileToWorkspace(skillSource, workspaceDir, "SKILL.md", api.logger);
+
+    // Sync sinain-koog/ scripts
+    const koogSource = cfg.koogPath ? api.resolvePath(cfg.koogPath) : undefined;
+    if (koogSource) {
+      syncDirToWorkspace(koogSource, workspaceDir, "sinain-koog", api.logger);
+      // Make git_backup.sh executable
+      const gbPath = join(workspaceDir, "sinain-koog", "git_backup.sh");
+      if (existsSync(gbPath)) try { chmodSync(gbPath, 0o755); } catch {}
+    }
 
     // Ensure memory directories exist
     for (const dir of ["memory", "memory/playbook-archive", "memory/playbook-logs"]) {
