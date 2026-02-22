@@ -36,6 +36,8 @@ class RoomFrame:
     height: int = 0
     description: str = ""  # scene description from vision model
     ocr_text: str = ""     # extracted text from vision model
+    roi_bbox: tuple[int, int, int, int] | None = None  # (x, y, w, h) or None
+    is_roi_crop: bool = False
 
 
 @dataclass

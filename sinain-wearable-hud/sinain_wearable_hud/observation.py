@@ -22,6 +22,7 @@ class _Entry:
     motion_pct: float
     description: str = ""
     ocr_text: str = ""
+    is_roi_crop: bool = False
     is_audio: bool = False
     audio_label: str = ""
 
@@ -47,6 +48,7 @@ class ObservationBuffer:
             motion_pct=frame.motion_pct,
             description=frame.description,
             ocr_text=frame.ocr_text,
+            is_roi_crop=frame.is_roi_crop,
         ))
 
     def add_audio(self, label: str, duration_s: float) -> None:
@@ -124,7 +126,10 @@ def build_observation_message(frame: RoomFrame, buffer: ObservationBuffer) -> st
     parts: list[str] = []
 
     # Header
-    parts.append(f"[sinain-wearable live context — tick #{buffer.tick}]")
+    header = f"[sinain-wearable live context — tick #{buffer.tick}]"
+    if frame.is_roi_crop:
+        header += f" [ROI crop — focused on {frame.classification.value} region]"
+    parts.append(header)
     parts.append("")
 
     # What I See — primary content from vision model
