@@ -159,7 +159,7 @@ def main():
         )
 
         try:
-            raw = call_llm(SYSTEM_PROMPT, user_prompt, max_tokens=800)
+            raw = call_llm(SYSTEM_PROMPT, user_prompt, script="feedback_analyzer")
             cleaned = raw.strip()
             if cleaned.startswith("```"):
                 cleaned = "\n".join(cleaned.split("\n")[1:])
