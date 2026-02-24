@@ -38,7 +38,8 @@ export class OpenClawWsClient extends EventEmitter {
   private circuitResetTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly CIRCUIT_THRESHOLD = 5;
   private static readonly CIRCUIT_WINDOW_MS = 2 * 60 * 1000; // 2-minute sliding window
-  private static readonly CIRCUIT_RESET_MS = 5 * 60 * 1000; // 5 minutes
+  private circuitResetDelay = 300_000;       // starts at 5 min, doubles on each trip
+  private readonly MAX_CIRCUIT_RESET = 1_800_000;  // caps at 30 min
 
   constructor(private config: OpenClawConfig) {
     super();
@@ -93,17 +94,30 @@ export class OpenClawWsClient extends EventEmitter {
     idemKey: string,
     sessionKey: string,
   ): Promise<any> {
-    return this.sendRpc("agent", {
+    if (this.circuitOpen) {
+      warn(TAG, "circuit breaker open, skipping agent RPC");
+      return null;
+    }
+    const result = await this.sendRpc("agent", {
       message,
       idempotencyKey: idemKey,
       sessionKey,
       deliver: false,
     }, 60000, { expectFinal: true });
+    if (result?.ok) {
+      this.circuitResetDelay = 300_000; // reset backoff on success
+    }
+    return result;
   }
 
   /** Check if connected and authenticated. */
   get isConnected(): boolean {
     return !!(this.ws && this.ws.readyState === WebSocket.OPEN && this.authenticated);
+  }
+
+  /** Check if the circuit breaker is currently open. */
+  get isCircuitOpen(): boolean {
+    return this.circuitOpen;
   }
 
   /** Graceful disconnect. */
@@ -241,14 +255,16 @@ export class OpenClawWsClient extends EventEmitter {
       this.circuitOpen = true;
       // Add 0-30s random jitter to prevent thundering herd on service recovery
       const jitterMs = Math.floor(Math.random() * 30000);
-      const resetDelayMs = OpenClawWsClient.CIRCUIT_RESET_MS + jitterMs;
-      warn(TAG, `circuit breaker opened after ${this.recentFailures.length} failures in window — pausing for ${Math.round(resetDelayMs / 1000)}s`);
+      const resetDelayMs = this.circuitResetDelay + jitterMs;
+      warn(TAG, `circuit breaker opened after ${this.recentFailures.length} failures in window — pausing for ${Math.round(resetDelayMs / 1000)}s (next reset: ${Math.round(Math.min(this.circuitResetDelay * 2, this.MAX_CIRCUIT_RESET) / 1000)}s)`);
       this.circuitResetTimer = setTimeout(() => {
         this.circuitOpen = false;
         this.recentFailures = [];
         log(TAG, "circuit breaker reset — resuming");
         this.connect();
       }, resetDelayMs);
+      // Progressive backoff: double the delay for next trip, capped at MAX
+      this.circuitResetDelay = Math.min(this.circuitResetDelay * 2, this.MAX_CIRCUIT_RESET);
     }
   }
 }

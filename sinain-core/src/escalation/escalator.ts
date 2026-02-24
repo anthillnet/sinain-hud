@@ -109,6 +109,11 @@ export class Escalator {
    * Decides whether to escalate and handles delivery.
    */
   onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): void {
+    // Skip entire escalation pipeline when circuit is open — saves scoring + message construction
+    if (this.wsClient.isCircuitOpen && !this.deps.openclawConfig.hookUrl) {
+      return;
+    }
+
     const { escalate, score, stale } = shouldEscalate(
       entry.digest,
       entry.hud,
