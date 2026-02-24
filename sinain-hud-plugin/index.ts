@@ -21,11 +21,6 @@ type PluginConfig = {
   skillPath?: string;
   koogPath?: string;
   sessionKey?: string;
-  observationFeed?: {
-    enabled?: boolean;
-    channel?: string;
-    targetId?: string;
-  };
 };
 
 type ToolUsageEntry = {
