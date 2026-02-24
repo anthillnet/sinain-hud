@@ -48,15 +48,10 @@ An always-on-top transparent overlay that displays real-time AI advice while you
            │   (hooks + agent.wait)    │◄─┘
            │                           │
            │  ┌──────────────────────┐ │
-           │  │  sinain-hud plugin   │ │    ┌──────────┐
-           │  │  (auto-deploy,       │ │    │ Telegram │
-           │  │   privacy strip,     │ │    │          │
-           │  │   session summaries) │ │    └────▲─────┘
-           │  └──────────────────────┘ │         │
-           │  ┌──────────────────────┐ │         │ SSE
-           │  │  claude-mem plugin   │─┼─────────┘
-           │  │  (memory, vectors,   │ │  observation
-           │  │   observation feed)  │ │  feed
+           │  │  sinain-hud plugin   │ │
+           │  │  (auto-deploy,       │ │
+           │  │   privacy strip,     │ │
+           │  │   session summaries) │ │
            │  └──────────────────────┘ │
            └───────────────────────────┘
 ```
@@ -167,7 +162,7 @@ Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
 - [x] Phase 3: Screen capture pipeline (OCR → context window)
 - [ ] Phase 4: Polish (diarization, smart batching, themes)
 - [x] Phase 5: OpenClaw escalation (SITUATION.md + hooks + agent.wait)
-- [x] Phase 6: Plugin architecture + persistent memory (sinain-hud plugin, claude-mem, observation feed, privacy pipeline)
+- [x] Phase 6: Plugin architecture (sinain-hud plugin, privacy pipeline)
 - [x] Phase 7: sinain-koog — offloaded reflection pipeline (5 Python scripts via OpenRouter, orchestrated by HEARTBEAT.md)
 
 ## License

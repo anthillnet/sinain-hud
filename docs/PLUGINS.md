@@ -4,12 +4,11 @@ Full reference for the OpenClaw plugins running on the strato server. For gatewa
 
 ## Overview
 
-Two plugins are deployed on the server:
+One plugin is deployed on the server:
 
 | Plugin | Purpose | Location |
 |---|---|---|
 | **sinain-hud** | Agent lifecycle management (file sync, privacy, session summaries) | `/mnt/openclaw-state/extensions/sinain-hud/` |
-| **claude-mem** | Persistent memory, vector search, observation feed | `/mnt/openclaw-state/extensions/claude-mem/` |
 
 ## Server File Layout
 
@@ -17,18 +16,12 @@ Two plugins are deployed on the server:
 /mnt/openclaw-state/                     # bind-mounted as /home/node/.openclaw
 ├── openclaw.json                        # main gateway config (plugins, agents, auth)
 ├── extensions/
-│   ├── sinain-hud/
-│   │   ├── index.ts                     # plugin implementation
-│   │   └── openclaw.plugin.json         # plugin manifest
-│   └── claude-mem/
-│       ├── index.ts
-│       ├── openclaw.plugin.json
-│       └── worker/                      # background worker (port 37777)
+│   └── sinain-hud/
+│       ├── index.ts                     # plugin implementation
+│       └── openclaw.plugin.json         # plugin manifest
 ├── sinain-sources/
 │   ├── HEARTBEAT.md                     # source of truth for auto-deploy
 │   └── SKILL.md
-├── claude-mem/                          # memory data (symlinked from ~/.claude-mem)
-├── start-services.sh                    # starts background workers on container boot
 ├── workspace/                           # agent workspace
 │   ├── HEARTBEAT.md                     # deployed by plugin from sinain-sources/
 │   ├── SKILL.md
@@ -79,72 +72,6 @@ skills/sinain-hud/    ──SCP──►  sinain-sources/   ──plugin──�
 ```
 
 SCP is manual (or via deploy-heartbeat skill). Plugin sync happens automatically on each agent start.
-
-## claude-mem Plugin
-
-Persistent memory with vector search, structured observations, and a Telegram observation feed.
-
-### Worker
-
-The claude-mem worker runs on port 37777 inside the container. It provides:
-- Vector similarity search over stored observations
-- Structured memory storage and retrieval
-- SSE event stream for the observation feed
-
-### Startup
-
-The worker is started by `/mnt/openclaw-state/start-services.sh`, which is chained into the docker-compose startup command. This means:
-- `docker compose restart` — worker survives (compose command re-runs)
-- `docker compose down/up` — container recreated, `start-services.sh` re-starts the worker
-- Container rebuild — Bun needs to be re-installed (it's at `/home/node/.bun/bin/bun`)
-
-### Data Persistence
-
-Worker data is persisted via a symlink inside the container:
-```
-~/.claude-mem → ~/.openclaw/claude-mem → /mnt/openclaw-state/claude-mem (host)
-```
-
-### Observation Feed
-
-The observation feed streams structured observations from the agent to Telegram via SSE:
-
-```
-Agent produces observation → claude-mem stores it → SSE stream → Telegram bot → Chat 59835117
-```
-
-Configured in `openclaw.json`:
-```json
-{
-  "plugins": {
-    "entries": {
-      "claude-mem": {
-        "observationFeed": {
-          "enabled": true,
-          "channel": "telegram",
-          "targetId": "59835117"
-        }
-      }
-    }
-  }
-}
-```
-
-## Structured Observations (SenseObservation)
-
-sense_client auto-populates structured observations on every sense event:
-
-```python
-@dataclass
-class SenseObservation:
-    title: str       # e.g. "text in IntelliJ IDEA"
-    subtitle: str    # window title (first 80 chars)
-    facts: list[str] # ["app: IntelliJ IDEA", "window: analyzer.ts", "ssim: 0.850", "ocr: ..."]
-    narrative: str   # enriched by sinain-core's agent layer
-    concepts: list[str]  # enriched by sinain-core
-```
-
-`title` and `facts` are populated by sense_client from OCR/app context. `narrative` and `concepts` are added by sinain-core's agent layer before forwarding to OpenClaw.
 
 ## Privacy Pipeline
 
@@ -208,19 +135,6 @@ scp -i ~/.ssh/id_ed25519_strato \
 # No restart needed — plugin syncs on next agent start
 ```
 
-### claude-mem plugin
-
-```bash
-# Upload updated plugin
-scp -i ~/.ssh/id_ed25519_strato \
-  <claude-mem-dir>/index.ts <claude-mem-dir>/openclaw.plugin.json \
-  root@85.214.180.247:/mnt/openclaw-state/extensions/claude-mem/
-
-# Restart (also restarts the worker via start-services.sh)
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose restart'
-```
-
 ## Troubleshooting
 
 ### Plugin not loading
@@ -232,33 +146,6 @@ ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
 
 # Expected: "sinain-hud: plugin registered"
 # If missing: check openclaw.plugin.json is valid JSON, check extensions/ path
-```
-
-### Worker not starting
-
-```bash
-# Check if start-services.sh ran
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose exec openclaw-gateway ps aux | grep bun'
-
-# Check worker health
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose exec openclaw-gateway curl -s http://localhost:37777/health'
-
-# If bun not found: it needs to be installed (doesn't survive container rebuilds)
-```
-
-### Observation feed disconnecting
-
-The SSE connection from claude-mem to Telegram can drop if:
-- The Telegram bot token is invalid or rate-limited
-- The worker crashed (check worker health above)
-- Network issues between server and Telegram API
-
-Check worker logs and restart if needed:
-```bash
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose logs --tail 30 | grep -i "observation\|feed\|sse"'
 ```
 
 ### Auto-deploy not working
