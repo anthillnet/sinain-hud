@@ -136,7 +136,7 @@ def main():
 
     user_prompt = "\n\n".join(parts)
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt, max_tokens=1000)
+    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="memory_miner")
 
     # Parse
     try:
