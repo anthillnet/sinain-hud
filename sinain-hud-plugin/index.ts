@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, extname } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 // ============================================================================
@@ -92,6 +92,11 @@ function syncFileToWorkspace(
   }
 }
 
+/**
+ * Sync a source directory to the workspace with selective overwrite policy:
+ * - .json, .sh, .txt — always overwritten (infra/config files we control)
+ * - .py — deploy-once only (skip if already exists; bot owns these after first deploy)
+ */
 function syncDirToWorkspace(
   sourceDir: string,
   workspaceDir: string,
@@ -101,11 +106,22 @@ function syncDirToWorkspace(
   if (!existsSync(sourceDir)) return 0;
   const targetDir = join(workspaceDir, targetDirName);
   if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+
+  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt"]);
   let synced = 0;
+
   for (const entry of readdirSync(sourceDir)) {
     const srcPath = join(sourceDir, entry);
     if (!statSync(srcPath).isFile()) continue;
+
     const targetPath = join(targetDir, entry);
+    const ext = extname(entry).toLowerCase();
+
+    // Deploy-once files: skip if already present in workspace
+    if (!ALWAYS_OVERWRITE.has(ext) && existsSync(targetPath)) {
+      continue;
+    }
+
     const content = readFileSync(srcPath, "utf-8");
     let existing = "";
     try { existing = readFileSync(targetPath, "utf-8"); } catch {}

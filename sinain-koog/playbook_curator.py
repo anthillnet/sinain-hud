@@ -172,7 +172,7 @@ def main():
 
     user_prompt += "Curate the playbook. Return the FULL updated body text and a summary of changes."
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt, max_tokens=1500)
+    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="playbook_curator")
 
     # Parse response
     try:
