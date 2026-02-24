@@ -73,11 +73,16 @@ class OpenClawGateway:
         self._circuit_reset_handle: asyncio.TimerHandle | None = None
         self._CIRCUIT_THRESHOLD = 5
         self._CIRCUIT_WINDOW_S = 120.0
-        self._CIRCUIT_RESET_S = 300.0
+        self._circuit_reset_s = 300.0          # mutable, starts at 5 min, doubles on each trip
+        self._MAX_CIRCUIT_RESET_S = 1800.0     # caps at 30 min
 
     @property
     def is_connected(self) -> bool:
         return self._ws is not None and not self._ws.closed and self._authenticated
+
+    @property
+    def is_circuit_open(self) -> bool:
+        return self._circuit_open
 
     async def run(self, stop_event: asyncio.Event) -> None:
         """Main loop: connect, read messages, reconnect on failure."""
@@ -201,6 +206,10 @@ class OpenClawGateway:
 
         Returns the full response dict, or None on failure.
         """
+        if self._circuit_open:
+            log.warning("[%s] circuit breaker open, skipping RPC", TAG)
+            return None
+
         if not self.is_connected:
             log.warning("[%s] not connected, cannot send RPC", TAG)
             return None
@@ -244,6 +253,7 @@ class OpenClawGateway:
 
         # Extract text from response
         if resp.get("ok"):
+            self._circuit_reset_s = 300.0  # reset backoff on success
             payloads = (
                 resp.get("payload", {})
                 .get("result", {})
@@ -292,9 +302,10 @@ class OpenClawGateway:
 
         if len(self._recent_failures) >= self._CIRCUIT_THRESHOLD and not self._circuit_open:
             self._circuit_open = True
+            next_delay = min(self._circuit_reset_s * 2, self._MAX_CIRCUIT_RESET_S)
             log.warning(
-                "[%s] circuit breaker opened after %d failures — pausing for %.0fs",
-                TAG, len(self._recent_failures), self._CIRCUIT_RESET_S,
+                "[%s] circuit breaker opened after %d failures — pausing for %.0fs (next reset: %.0fs)",
+                TAG, len(self._recent_failures), self._circuit_reset_s, next_delay,
             )
 
             def reset_circuit() -> None:
@@ -304,8 +315,10 @@ class OpenClawGateway:
 
             loop = asyncio.get_event_loop()
             self._circuit_reset_handle = loop.call_later(
-                self._CIRCUIT_RESET_S, reset_circuit
+                self._circuit_reset_s, reset_circuit
             )
+            # Progressive backoff: double the delay for next trip, capped at MAX
+            self._circuit_reset_s = next_delay
 
     async def close(self) -> None:
         """Graceful shutdown."""
