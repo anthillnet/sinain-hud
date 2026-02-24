@@ -259,7 +259,7 @@ See [ESCALATION.md](./ESCALATION.md) for the full scoring table and configuratio
 
 ## 6. Server Plugins
 
-The OpenClaw gateway supports plugins that hook into the agent lifecycle. Two plugins are installed on the strato server.
+The OpenClaw gateway supports plugins that hook into the agent lifecycle. One plugin is installed on the strato server.
 
 For the full architecture reference, see [PLUGINS.md](./PLUGINS.md).
 
@@ -268,7 +268,6 @@ For the full architecture reference, see [PLUGINS.md](./PLUGINS.md).
 | Plugin | Location on server | Purpose |
 |---|---|---|
 | **sinain-hud** | `/mnt/openclaw-state/extensions/sinain-hud/` | Auto-deploys HEARTBEAT/SKILL files, tracks tool usage, generates session summaries, strips `<private>` tags |
-| **claude-mem** | `/mnt/openclaw-state/extensions/claude-mem/` | Persistent memory, observations, vector search |
 
 ### sinain-hud plugin
 
@@ -296,16 +295,6 @@ Configuration is in `openclaw.json` under `plugins.entries.sinain-hud`:
 }
 ```
 
-### claude-mem plugin
-
-Provides persistent memory and vector search. Includes a background worker process.
-
-- **Worker**: runs on port 37777 inside the container, auto-started by `/mnt/openclaw-state/start-services.sh`
-- **Data**: persisted via symlink `~/.claude-mem → ~/.openclaw/claude-mem`
-- **Observation feed**: streams structured observations via SSE to Telegram (chat ID `59835117`)
-
-The worker survives `docker compose restart` (started in the compose command chain). On `docker compose down/up`, the container is recreated but `start-services.sh` re-starts the worker automatically.
-
 ### Updating plugins
 
 ```bash
@@ -325,8 +314,4 @@ ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
 # Check plugin loaded
 ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
   'cd /opt/openclaw && docker compose logs --tail 20 | grep plugin'
-
-# Check claude-mem worker
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose exec openclaw-gateway curl -s http://localhost:37777/health'
 ```

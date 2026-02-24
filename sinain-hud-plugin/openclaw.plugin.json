@@ -23,22 +23,6 @@
       "sessionKey": {
         "type": "string",
         "description": "Session key for the sinain agent"
-      },
-      "observationFeed": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "channel": {
-            "type": "string",
-            "enum": ["telegram", "discord", "slack"]
-          },
-          "targetId": {
-            "type": "string"
-          }
-        }
       }
     }
   },
@@ -57,10 +41,6 @@
       "label": "Session Key",
       "placeholder": "agent:main:sinain",
       "help": "OpenClaw session key for the sinain agent"
-    },
-    "observationFeed.enabled": {
-      "label": "Observation Feed",
-      "help": "Stream structured observations to a messaging channel"
     }
   }
 }
