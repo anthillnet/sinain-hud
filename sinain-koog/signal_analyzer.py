@@ -99,7 +99,7 @@ def main():
         idle=args.idle,
     )
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt)
+    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="signal_analyzer")
 
     # Parse LLM response — extract JSON from possible markdown wrapping
     try:

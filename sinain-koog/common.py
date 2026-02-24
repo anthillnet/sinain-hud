@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from glob import glob
 from pathlib import Path
 
@@ -18,13 +19,47 @@ MODEL_SMART = "anthropic/claude-sonnet-4.6"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
+# ---------------------------------------------------------------------------
+# External config (koog-config.json)
+# ---------------------------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def _load_config() -> dict:
+    """Load koog-config.json from the same directory as this module. Cached."""
+    config_path = Path(__file__).resolve().parent / "koog-config.json"
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"[warn] koog-config.json not loaded: {exc}", file=sys.stderr)
+        return {}
+
+
+def _resolve_model(logical_name: str) -> str:
+    """Map a logical model name ('fast'/'smart') to an actual model ID via config."""
+    cfg = _load_config()
+    models = cfg.get("models", {})
+    return models.get(logical_name, logical_name)
+
+
 def call_llm(
     system_prompt: str,
     user_prompt: str,
     model: str = MODEL_FAST,
     max_tokens: int = 1500,
+    *,
+    script: str | None = None,
 ) -> str:
-    """Call OpenRouter chat completions API. Returns assistant message text."""
+    """Call OpenRouter chat completions API. Returns assistant message text.
+
+    When *script* is provided, model and max_tokens are overridden from
+    koog-config.json (external config the bot cannot modify).
+    """
+    if script:
+        cfg = _load_config()
+        script_cfg = cfg.get("scripts", {}).get(script, cfg.get("defaults", {}))
+        model = _resolve_model(script_cfg.get("model", "fast"))
+        max_tokens = script_cfg.get("maxTokens", max_tokens)
+
     api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")

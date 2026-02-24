@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 3 Step 5: Insight Synthesizer — produce suggestion + insight for Telegram.
 
-Uses claude-sonnet-4.6 (MODEL_SMART) for higher quality output.
+Uses the "smart" model (configured in koog-config.json) for higher quality output.
 Reads post-curation playbook + recent logs to generate one Telegram message
 with a practical suggestion and a surprising insight.
 
@@ -15,7 +15,6 @@ import json
 import sys
 
 from common import (
-    MODEL_SMART,
     call_llm,
     output_json,
     read_playbook,
@@ -113,7 +112,7 @@ def main():
         idle=args.idle,
     )
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt, model=MODEL_SMART, max_tokens=800)
+    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="insight_synthesizer")
 
     # Parse
     try:

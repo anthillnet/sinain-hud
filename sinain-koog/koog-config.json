@@ -1,0 +1,14 @@
+{
+  "models": {
+    "fast": "openai/gpt-oss-120b",
+    "smart": "anthropic/claude-sonnet-4.6"
+  },
+  "scripts": {
+    "signal_analyzer":    { "model": "fast",  "maxTokens": 1500 },
+    "feedback_analyzer":  { "model": "fast",  "maxTokens": 800 },
+    "memory_miner":       { "model": "fast",  "maxTokens": 1000 },
+    "playbook_curator":   { "model": "fast",  "maxTokens": 1500 },
+    "insight_synthesizer": { "model": "smart", "maxTokens": 800 }
+  },
+  "defaults": { "model": "fast", "maxTokens": 1500 }
+}
