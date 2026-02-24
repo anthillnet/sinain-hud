@@ -54,6 +54,11 @@ class Sender:
             log.debug("Skipping frame send (gateway not connected)")
             return False
 
+        if self.gateway.is_circuit_open:
+            self._sends_skipped += 1
+            log.debug("Skipping frame send (circuit open)")
+            return False
+
         self._in_flight = True
         try:
             if self._buffer is not None:
@@ -107,6 +112,11 @@ class Sender:
 
         if not self.gateway.is_connected:
             self._sends_skipped += 1
+            return False
+
+        if self.gateway.is_circuit_open:
+            self._sends_skipped += 1
+            log.debug("Skipping audio send (circuit open)")
             return False
 
         self._in_flight = True
