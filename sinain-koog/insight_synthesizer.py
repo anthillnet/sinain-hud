@@ -15,9 +15,11 @@ import json
 import sys
 
 from common import (
+    LLMError,
     call_llm,
+    extract_json,
     output_json,
-    read_playbook,
+    read_effective_playbook,
     read_recent_logs,
 )
 
@@ -101,7 +103,7 @@ def main():
     parser.add_argument("--idle", action="store_true", help="User is idle")
     args = parser.parse_args()
 
-    playbook = read_playbook(args.memory_dir)
+    playbook = read_effective_playbook(args.memory_dir)
     recent_logs = read_recent_logs(args.memory_dir, days=3)
 
     user_prompt = build_user_prompt(
@@ -112,18 +114,11 @@ def main():
         idle=args.idle,
     )
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="insight_synthesizer")
-
-    # Parse
     try:
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[1:])
-        if cleaned.endswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[:-1])
-        result = json.loads(cleaned)
-    except json.JSONDecodeError:
-        print(f"[warn] LLM returned non-JSON: {raw[:200]}", file=sys.stderr)
+        raw = call_llm(SYSTEM_PROMPT, user_prompt, script="insight_synthesizer", json_mode=True)
+        result = extract_json(raw)
+    except (ValueError, LLMError) as e:
+        print(f"[warn] {e}", file=sys.stderr)
         result = {
             "skip": True,
             "skipReason": "LLM response was not parseable JSON",

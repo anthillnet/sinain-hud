@@ -17,7 +17,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from common import (
+    LLMError,
     call_llm,
+    extract_json,
     list_daily_memory_files,
     output_json,
     parse_mining_index,
@@ -136,27 +138,25 @@ def main():
 
     user_prompt = "\n\n".join(parts)
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="memory_miner")
-
-    # Parse
+    llm_ok = False
     try:
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[1:])
-        if cleaned.endswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[:-1])
-        result = json.loads(cleaned)
-    except json.JSONDecodeError:
-        print(f"[warn] LLM returned non-JSON: {raw[:200]}", file=sys.stderr)
+        raw = call_llm(SYSTEM_PROMPT, user_prompt, script="memory_miner", json_mode=True)
+        result = extract_json(raw)
+        llm_ok = True
+    except (ValueError, LLMError) as e:
+        print(f"[warn] {e}", file=sys.stderr)
         result = {
             "findings": "Mining completed but LLM response was not parseable",
             "newPatterns": [],
         }
 
-    # Update mining index
+    # Only mark files as mined on successful parse — failed files will be retried
     new_dates = [Path(f).stem for f in to_mine]
-    update_mining_index(args.memory_dir, playbook, new_dates)
-    print(f"[info] Updated mining index with {new_dates}", file=sys.stderr)
+    if llm_ok:
+        update_mining_index(args.memory_dir, playbook, new_dates)
+        print(f"[info] Updated mining index with {new_dates}", file=sys.stderr)
+    else:
+        print(f"[info] Skipped mining index update (LLM failed) — {new_dates} will be retried", file=sys.stderr)
 
     output_json({
         "findings": result.get("findings", ""),

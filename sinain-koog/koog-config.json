@@ -7,8 +7,9 @@
     "signal_analyzer":    { "model": "fast",  "maxTokens": 1500 },
     "feedback_analyzer":  { "model": "fast",  "maxTokens": 800 },
     "memory_miner":       { "model": "fast",  "maxTokens": 1000 },
-    "playbook_curator":   { "model": "fast",  "maxTokens": 1500 },
-    "insight_synthesizer": { "model": "smart", "maxTokens": 800 }
+    "playbook_curator":   { "model": "fast",  "maxTokens": 3000, "timeout": 90 },
+    "insight_synthesizer": { "model": "smart", "maxTokens": 800 },
+    "module_manager":      { "model": "fast",  "maxTokens": 2000 }
   },
   "defaults": { "model": "fast", "maxTokens": 1500 }
 }
