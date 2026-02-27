@@ -14,6 +14,7 @@ import sys
 
 from common import (
     call_llm,
+    extract_json,
     output_json,
     parse_effectiveness,
     read_playbook,
@@ -159,19 +160,14 @@ def main():
         )
 
         try:
-            raw = call_llm(SYSTEM_PROMPT, user_prompt, script="feedback_analyzer")
-            cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                cleaned = "\n".join(cleaned.split("\n")[1:])
-            if cleaned.endswith("```"):
-                cleaned = "\n".join(cleaned.split("\n")[:-1])
-            llm_result = json.loads(cleaned)
+            raw = call_llm(SYSTEM_PROMPT, user_prompt, script="feedback_analyzer", json_mode=True)
+            llm_result = extract_json(raw)
             interpretation = llm_result.get("interpretation", "")
             # LLM can override directive if it has reasoning
             llm_directive = llm_result.get("curateDirective")
             if llm_directive in ("aggressive_prune", "normal", "stability", "insufficient_data"):
                 directive = llm_directive
-        except (json.JSONDecodeError, Exception) as e:
+        except (ValueError, Exception) as e:
             print(f"[warn] LLM feedback interpretation failed: {e}", file=sys.stderr)
             interpretation = "LLM analysis unavailable"
 
