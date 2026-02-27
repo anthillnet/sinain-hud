@@ -20,7 +20,21 @@ type PluginConfig = {
   heartbeatPath?: string;
   skillPath?: string;
   koogPath?: string;
+  modulesPath?: string;
   sessionKey?: string;
+};
+
+type ModuleRegistryEntry = {
+  status: "active" | "suspended" | "disabled";
+  priority: number;
+  activatedAt: string | null;
+  lastTriggered: string | null;
+  locked: boolean;
+};
+
+type ModuleRegistry = {
+  version: number;
+  modules: Record<string, ModuleRegistryEntry>;
 };
 
 type ToolUsageEntry = {
@@ -129,6 +143,149 @@ function syncDirToWorkspace(
   return synced;
 }
 
+/**
+ * Recursively sync a modules/ source directory to workspace with selective deploy policy:
+ * - module-registry.json → deploy-once (agent manages via module_manager.py)
+ * - manifest.json → always overwrite (plugin controls schema)
+ * - patterns.md → deploy-once (agent/extract may have modified)
+ * - context/*.json → always overwrite
+ */
+function syncModulesToWorkspace(
+  sourceDir: string,
+  workspaceDir: string,
+  logger: OpenClawPluginApi["logger"],
+): number {
+  if (!existsSync(sourceDir)) return 0;
+  const targetDir = join(workspaceDir, "modules");
+  if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+
+  const ALWAYS_OVERWRITE = new Set(["manifest.json"]);
+  const DEPLOY_ONCE = new Set(["module-registry.json", "patterns.md"]);
+  let synced = 0;
+
+  function syncRecursive(srcDir: string, dstDir: string): void {
+    if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
+
+    for (const entry of readdirSync(srcDir)) {
+      const srcPath = join(srcDir, entry);
+      const dstPath = join(dstDir, entry);
+      const stat = statSync(srcPath);
+
+      if (stat.isDirectory()) {
+        syncRecursive(srcPath, dstPath);
+        continue;
+      }
+
+      if (!stat.isFile()) continue;
+
+      const fileName = entry;
+      const isAlwaysOverwrite = ALWAYS_OVERWRITE.has(fileName) || fileName.startsWith("context/");
+      const isDeployOnce = DEPLOY_ONCE.has(fileName);
+
+      // Deploy-once: skip if already in workspace
+      if (isDeployOnce && existsSync(dstPath)) continue;
+
+      // Default for unknown files: deploy-once
+      if (!isAlwaysOverwrite && !isDeployOnce && existsSync(dstPath)) continue;
+
+      const content = readFileSync(srcPath, "utf-8");
+      let existing = "";
+      try { existing = readFileSync(dstPath, "utf-8"); } catch {}
+      if (existing !== content) {
+        writeFileSync(dstPath, content, "utf-8");
+        synced++;
+      }
+    }
+  }
+
+  syncRecursive(sourceDir, targetDir);
+  if (synced > 0) logger.info(`sinain-hud: synced ${synced} module files to modules/`);
+  return synced;
+}
+
+/**
+ * Generate the merged effective playbook from active modules + base playbook.
+ *
+ * Reads module-registry.json, collects patterns.md from each active module
+ * (sorted by priority desc), reads the base sinain-playbook.md, and writes
+ * the merged result to memory/sinain-playbook-effective.md.
+ */
+function generateEffectivePlaybook(
+  workspaceDir: string,
+  logger: OpenClawPluginApi["logger"],
+): boolean {
+  const registryPath = join(workspaceDir, "modules", "module-registry.json");
+  if (!existsSync(registryPath)) {
+    logger.info("sinain-hud: no module-registry.json found, skipping effective playbook generation");
+    return false;
+  }
+
+  let registry: ModuleRegistry;
+  try {
+    registry = JSON.parse(readFileSync(registryPath, "utf-8")) as ModuleRegistry;
+  } catch (err) {
+    logger.warn(`sinain-hud: failed to parse module-registry.json: ${String(err)}`);
+    return false;
+  }
+
+  // Collect active modules sorted by priority desc
+  const activeModules: Array<{ id: string; priority: number }> = [];
+  for (const [id, entry] of Object.entries(registry.modules)) {
+    if (entry.status === "active") {
+      activeModules.push({ id, priority: entry.priority });
+    }
+  }
+  activeModules.sort((a, b) => b.priority - a.priority);
+
+  // Build module stack header
+  const stackLabel = activeModules.map((m) => `${m.id}(${m.priority})`).join(", ");
+
+  // Collect patterns from each active module
+  const sections: string[] = [];
+  sections.push(`<!-- module-stack: ${stackLabel} -->`);
+  sections.push("");
+
+  for (const mod of activeModules) {
+    const patternsPath = join(workspaceDir, "modules", mod.id, "patterns.md");
+    if (!existsSync(patternsPath)) continue;
+    try {
+      const patterns = readFileSync(patternsPath, "utf-8").trim();
+      if (patterns) {
+        sections.push(`<!-- module: ${mod.id} (priority ${mod.priority}) -->`);
+        sections.push(patterns);
+        sections.push("");
+      }
+    } catch {
+      // Skip unreadable patterns
+    }
+  }
+
+  // Append base playbook
+  const basePlaybookPath = join(workspaceDir, "memory", "sinain-playbook.md");
+  if (existsSync(basePlaybookPath)) {
+    try {
+      const base = readFileSync(basePlaybookPath, "utf-8").trim();
+      if (base) {
+        sections.push("<!-- base-playbook -->");
+        sections.push(base);
+        sections.push("");
+      }
+    } catch {
+      // Skip if unreadable
+    }
+  }
+
+  // Write effective playbook (always overwrite)
+  const effectivePath = join(workspaceDir, "memory", "sinain-playbook-effective.md");
+  const effectiveDir = dirname(effectivePath);
+  if (!existsSync(effectiveDir)) mkdirSync(effectiveDir, { recursive: true });
+
+  const content = sections.join("\n");
+  writeFileSync(effectivePath, content, "utf-8");
+  logger.info(`sinain-hud: generated effective playbook (${activeModules.length} active modules)`);
+  return true;
+}
+
 // ============================================================================
 // Plugin Definition
 // ============================================================================
@@ -187,6 +344,13 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       // Make git_backup.sh executable
       const gbPath = join(workspaceDir, "sinain-koog", "git_backup.sh");
       if (existsSync(gbPath)) try { chmodSync(gbPath, 0o755); } catch {}
+    }
+
+    // Sync modules and generate effective playbook
+    const modulesSource = cfg.modulesPath ? api.resolvePath(cfg.modulesPath) : undefined;
+    if (modulesSource && existsSync(modulesSource)) {
+      syncModulesToWorkspace(modulesSource, workspaceDir, api.logger);
+      generateEffectivePlaybook(workspaceDir, api.logger);
     }
 
     // Ensure memory directories exist
@@ -361,6 +525,74 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         : "sinain-hud plugin active, no active sessions";
 
       return { text };
+    },
+  });
+
+  // ==========================================================================
+  // Command: /sinain_modules — show active module stack
+  // ==========================================================================
+
+  api.registerCommand({
+    name: "sinain_modules",
+    description: "Show active knowledge module stack and suspended modules",
+    handler: () => {
+      // Find workspace dir from active sessions
+      let workspaceDir: string | undefined;
+      for (const state of sessionStates.values()) {
+        if (state.workspaceDir) { workspaceDir = state.workspaceDir; break; }
+      }
+      if (!workspaceDir) {
+        return { text: "No workspace directory available (no active session)." };
+      }
+
+      const registryPath = join(workspaceDir, "modules", "module-registry.json");
+      if (!existsSync(registryPath)) {
+        return { text: "Module system not initialized (no module-registry.json found)." };
+      }
+
+      let registry: ModuleRegistry;
+      try {
+        registry = JSON.parse(readFileSync(registryPath, "utf-8")) as ModuleRegistry;
+      } catch {
+        return { text: "Failed to parse module-registry.json." };
+      }
+
+      const active: Array<{ id: string; priority: number; locked: boolean }> = [];
+      const suspended: string[] = [];
+      const disabled: string[] = [];
+
+      for (const [id, entry] of Object.entries(registry.modules)) {
+        if (entry.status === "active") {
+          active.push({ id, priority: entry.priority, locked: entry.locked });
+        } else if (entry.status === "suspended") {
+          suspended.push(id);
+        } else if (entry.status === "disabled") {
+          disabled.push(id);
+        }
+      }
+
+      active.sort((a, b) => b.priority - a.priority);
+
+      const lines: string[] = ["**Knowledge Module Stack**\n"];
+
+      if (active.length > 0) {
+        lines.push("Active (highest priority first):");
+        for (const m of active) {
+          const lock = m.locked ? " [locked]" : "";
+          lines.push(`  ${m.priority} — ${m.id}${lock}`);
+        }
+      } else {
+        lines.push("No active modules.");
+      }
+
+      if (suspended.length > 0) {
+        lines.push(`\nSuspended: ${suspended.join(", ")}`);
+      }
+      if (disabled.length > 0) {
+        lines.push(`\nDisabled: ${disabled.join(", ")}`);
+      }
+
+      return { text: lines.join("\n") };
     },
   });
 

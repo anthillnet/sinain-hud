@@ -17,7 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
+    LLMError,
     call_llm,
+    extract_json,
     output_json,
     read_playbook,
     read_recent_logs,
@@ -170,20 +172,17 @@ def main():
     if args.mining_findings:
         user_prompt += f"## Mining Findings\n{args.mining_findings}\n\n"
 
-    user_prompt += "Curate the playbook. Return the FULL updated body text and a summary of changes."
+    user_prompt += (
+        "Curate the playbook. Return the FULL updated body text and a summary of changes.\n\n"
+        "IMPORTANT: Output ONLY the JSON object. No explanation, no reasoning, "
+        "no commentary — start your response with { and end with }."
+    )
 
-    raw = call_llm(SYSTEM_PROMPT, user_prompt, script="playbook_curator")
-
-    # Parse response
     try:
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[1:])
-        if cleaned.endswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[:-1])
-        result = json.loads(cleaned)
-    except json.JSONDecodeError:
-        print(f"[warn] LLM returned non-JSON, keeping playbook unchanged: {raw[:200]}", file=sys.stderr)
+        raw = call_llm(SYSTEM_PROMPT, user_prompt, script="playbook_curator", json_mode=True)
+        result = extract_json(raw)
+    except (ValueError, LLMError) as e:
+        print(f"[warn] {e}", file=sys.stderr)
         output_json({
             "changes": {"added": [], "pruned": [], "promoted": []},
             "staleItemActions": [],

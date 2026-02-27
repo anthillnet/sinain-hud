@@ -22,6 +22,7 @@ Run once at the start of each tick — both Phase 2 and Phase 3 consume this dat
 1. `sessions_history({ sessionKey: "agent:main:sinain", limit: 50, includeTools: false })`
 2. Determine **IDLE** status: no user activity in the last 30 minutes
 3. Compose **SESSION_SUMMARY**: 2–3 sentences describing the current state (what the user is doing, key topics, errors seen). This string is passed to every script via `--session-summary`.
+4. **Module stack awareness**: If `memory/sinain-playbook-effective.md` exists, read the `<!-- module-stack: ... -->` header to understand which knowledge modules are active and their priorities. Scripts that read the effective playbook will automatically use module-enriched patterns.
 
 ---
 
@@ -104,6 +105,8 @@ Only pass `--mining-findings` if `MINING_RESULT` is not null.
 
 Parse → `CURATOR_RESULT`. The script archives the playbook, applies changes, and returns what was added/pruned/promoted.
 
+> **Important:** The curator modifies ONLY the base `sinain-playbook.md`, never module patterns. Module patterns in `modules/<id>/patterns.md` are managed separately via `module_manager.py`.
+
 ### Step 4: MANDATORY GATE — Log assembly
 
 **This step MUST execute before any HEARTBEAT_OK or output.**
@@ -151,3 +154,32 @@ Parse → `SYNTH_RESULT`.
 **If `skip: true`:**
 - Record `skipReason` in Step 4 log
 - Reply **HEARTBEAT_OK**
+
+---
+
+## Module Management (on-demand, not per-tick)
+
+Knowledge modules are hot-swappable domain-specific "brain modules" that enrich the effective playbook. The plugin merges active module patterns with the base playbook at each agent start.
+
+**View active modules:**
+```bash
+uv run python3 sinain-koog/module_manager.py --modules-dir modules/ stack
+```
+
+**Activate / suspend a module:**
+```bash
+uv run python3 sinain-koog/module_manager.py --modules-dir modules/ activate react-native-dev --priority 85
+uv run python3 sinain-koog/module_manager.py --modules-dir modules/ suspend react-native-dev
+```
+
+**Extract a new module from playbook + logs (uses LLM):**
+```bash
+uv run --with requests python3 sinain-koog/module_manager.py --modules-dir modules/ extract new-domain \
+  --domain "domain description" --memory-dir memory/
+```
+
+**Rules:**
+- Locked modules (e.g. `base-behaviors`) cannot be suspended or disabled
+- Priority determines order in the effective playbook (highest first)
+- Newly extracted modules start as "suspended" — activate explicitly
+- The curator ONLY writes to `sinain-playbook.md` — module patterns are separate
