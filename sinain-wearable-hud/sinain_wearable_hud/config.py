@@ -9,7 +9,7 @@ _ENV_PATTERN = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
 
 DEFAULTS = {
     "gateway": {
-        "ws_url": "ws://85.214.180.247:18789",
+        "ws_url": "wss://sinain.duckdns.org",
         "token": "",
         "session_key": "agent:main:sinain",
     },
