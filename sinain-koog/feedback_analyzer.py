@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Phase 3 Step 2/2b: Feedback Analyzer — score feedback + compute effectiveness.
 
-Effectiveness is computed mechanically (Python math). LLM interprets patterns
-in feedback scores to produce a curate directive for the playbook curator.
+Fully mechanical: effectiveness, feedback scores, directive, and interpretation
+are all computed from log data without an LLM call.  The previous gpt-5-nano
+integration was removed after 60+ ticks of identical static output (avg 0.4,
+directive 'stability') regardless of context.
 
 Usage:
     python3 feedback_analyzer.py --memory-dir memory/ --session-summary "..."
@@ -13,35 +15,9 @@ import json
 import sys
 
 from common import (
-    call_llm,
-    extract_json,
     output_json,
-    parse_effectiveness,
-    read_playbook,
     read_recent_logs,
 )
-
-SYSTEM_PROMPT = """\
-You are a feedback analysis agent for a personal AI assistant (sinain).
-Your job: interpret feedback patterns from heartbeat logs to guide playbook curation.
-
-You receive:
-1. Feedback scores from recent heartbeat ticks (compositeScore values)
-2. Mechanically computed effectiveness metrics
-3. A session summary for current context
-
-Analyze which patterns correlate with high vs low scores. Determine a curate directive:
-- "aggressive_prune": effectiveness rate < 0.4 — prune weak patterns, many outputs were unhelpful
-- "normal": 0.4 <= rate <= 0.7 — balanced add/prune cycle
-- "stability": rate > 0.7 — mostly working well, only add strong evidence (score > 0.5)
-- "insufficient_data": fewer than 5 outputs in 7 days — skip effectiveness adjustments
-
-Respond with ONLY a JSON object:
-{
-  "feedbackScores": {"avg": 0.45, "high": ["pattern that scored well", ...], "low": ["pattern that scored poorly", ...]},
-  "interpretation": "brief analysis of what's working vs not",
-  "curateDirective": "normal"
-}"""
 
 
 def compute_effectiveness(logs: list[dict]) -> dict:
@@ -134,6 +110,79 @@ def determine_directive(effectiveness: dict) -> str:
     return "normal"
 
 
+def compute_score_trend(logs: list[dict]) -> str:
+    """Detect score trend from recent logs: rising, falling, or flat."""
+    scores = []
+    for entry in sorted(logs, key=lambda e: e.get("ts", "")):
+        fb = entry.get("feedbackScores", {})
+        avg = fb.get("avg")
+        if avg is not None:
+            scores.append(avg)
+    if len(scores) < 3:
+        return "insufficient"
+    # Compare first third vs last third
+    third = max(1, len(scores) // 3)
+    early_avg = sum(scores[:third]) / third
+    late_avg = sum(scores[-third:]) / third
+    delta = late_avg - early_avg
+    if delta > 0.1:
+        return "rising"
+    elif delta < -0.1:
+        return "falling"
+    return "flat"
+
+
+def generate_interpretation(
+    feedback_scores: dict, effectiveness: dict, directive: str, logs: list[dict]
+) -> str:
+    """Heuristic interpretation from mechanical metrics — no LLM needed.
+
+    Replaces the gpt-5-nano call that was returning static output (avg 0.4,
+    directive 'stability') regardless of context across 60+ ticks.
+    """
+    parts = []
+
+    trend = compute_score_trend(logs)
+    avg = feedback_scores.get("avg", 0)
+    rate = effectiveness.get("rate", 0)
+    outputs = effectiveness.get("outputs", 0)
+
+    # Score summary
+    if trend == "rising":
+        parts.append(f"Scores trending up (avg {avg})")
+    elif trend == "falling":
+        parts.append(f"Scores trending down (avg {avg}) — review recent patterns")
+    elif trend == "flat":
+        parts.append(f"Scores flat at avg {avg}")
+    else:
+        parts.append(f"Too few data points for trend (avg {avg})")
+
+    # Effectiveness summary
+    pos = effectiveness.get("positive", 0)
+    neg = effectiveness.get("negative", 0)
+    if outputs > 0:
+        parts.append(f"Effectiveness {rate:.0%} ({pos} positive, {neg} negative of {outputs} outputs)")
+
+    # Pattern highlights
+    high = feedback_scores.get("high", [])
+    low = feedback_scores.get("low", [])
+    if high:
+        parts.append(f"Working well: {', '.join(high[:3])}")
+    if low:
+        parts.append(f"Underperforming: {', '.join(low[:3])}")
+
+    # Directive rationale
+    rationale = {
+        "aggressive_prune": "Low effectiveness — pruning weak patterns",
+        "normal": "Balanced cycle — standard add/prune",
+        "stability": "High effectiveness — preserving current patterns",
+        "insufficient_data": "Not enough data for effectiveness tuning",
+    }
+    parts.append(rationale.get(directive, f"Directive: {directive}"))
+
+    return ". ".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Phase 3: Feedback analysis")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
@@ -141,35 +190,12 @@ def main():
     args = parser.parse_args()
 
     logs = read_recent_logs(args.memory_dir, days=7)
-    playbook = read_playbook(args.memory_dir)
 
-    # Mechanical computation
+    # Fully mechanical computation — no LLM call
     effectiveness = compute_effectiveness(logs)
     feedback_scores = extract_feedback_scores(logs)
     directive = determine_directive(effectiveness)
-
-    # LLM interprets patterns (only if we have enough data)
-    interpretation = ""
-    if logs:
-        user_prompt = (
-            f"## Session Summary\n{args.session_summary}\n\n"
-            f"## Feedback Scores\n{json.dumps(feedback_scores, indent=2)}\n\n"
-            f"## Effectiveness Metrics\n{json.dumps(effectiveness, indent=2)}\n\n"
-            f"## Current Directive (mechanical): {directive}\n\n"
-            f"Analyze which patterns are working and which aren't. Confirm or adjust the directive."
-        )
-
-        try:
-            raw = call_llm(SYSTEM_PROMPT, user_prompt, script="feedback_analyzer", json_mode=True)
-            llm_result = extract_json(raw)
-            interpretation = llm_result.get("interpretation", "")
-            # LLM can override directive if it has reasoning
-            llm_directive = llm_result.get("curateDirective")
-            if llm_directive in ("aggressive_prune", "normal", "stability", "insufficient_data"):
-                directive = llm_directive
-        except (ValueError, Exception) as e:
-            print(f"[warn] LLM feedback interpretation failed: {e}", file=sys.stderr)
-            interpretation = "LLM analysis unavailable"
+    interpretation = generate_interpretation(feedback_scores, effectiveness, directive, logs)
 
     output_json({
         "feedbackScores": feedback_scores,
