@@ -11,7 +11,7 @@ Five lifecycle hooks, one tool, four commands, and a background service:
 | Hook | Purpose |
 |---|---|
 | `session_start` | Initializes per-session tool usage and compliance tracking |
-| `before_agent_start` | Syncs HEARTBEAT.md, SKILL.md, sinain-koog/, and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories |
+| `before_agent_start` | Syncs HEARTBEAT.md, SKILL.md, sinain-koog/ (recursively, including eval/), and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories |
 | `tool_result_persist` | Strips `<private>` tags from tool results; tracks `sinain_heartbeat_tick` calls for compliance validation |
 | `agent_end` | Writes structured session summary; validates heartbeat compliance (warns on skip, escalates after 3 consecutive skips) |
 | `session_end` | Cleans up orphaned session state |
@@ -32,7 +32,7 @@ The heartbeat tool accepts `{ sessionSummary: string, idle: boolean }` and runs:
 
 | Command | Purpose |
 |---|---|
-| `/sinain_status` | Shows active sessions, uptime, and tool call counts |
+| `/sinain_status` | Shows persistent session data from `sessions.json` (update time, tokens, compactions, transcript size) and resilience metrics |
 | `/sinain_modules` | Shows active knowledge module stack, suspended and disabled modules |
 | `/sinain_eval` | Shows latest evaluation report and recent tick evaluation metrics |
 | `/sinain_eval_level` | Sets evaluation level: `mechanical`, `sampled`, or `full` |
@@ -40,10 +40,13 @@ The heartbeat tool accepts `{ sessionSummary: string, idle: boolean }` and runs:
 ### Service
 
 **Curation pipeline** — runs every 30 minutes in the background:
-1. Feedback analysis (`feedback_analyzer.py`) → extracts `curateDirective`
+1. Feedback analysis (`feedback_analyzer.py`) → extracts `curateDirective` + effectiveness metrics
 2. Memory mining (`memory_miner.py`) → reads unread daily memory files
 3. Playbook curation (`playbook_curator.py`) → archives, applies changes
-4. Effective playbook regeneration → merges base playbook + active module patterns
+4. Effectiveness footer update → writes metrics into playbook
+5. Effective playbook regeneration → merges base playbook + active module patterns
+6. Tick evaluation (`tick_evaluator.py`) → runs mechanical + sampled judges (120s timeout)
+7. Daily eval report (`eval_reporter.py`) → generates report once per day after 03:00 UTC
 
 ## Configuration
 
@@ -91,6 +94,9 @@ The `before_agent_start` hook copies files from the persistent source directory 
     manifest.json                              (always overwritten)
     module-registry.json                       (deploy-once)
     */patterns.md                              (deploy-once)
+  sinain-koog/eval/                          sinain-koog/eval/   (recursive)
+    *.py                                       (deploy-once)
+    *.json, *.jsonl                             (always overwritten)
 ```
 
 Only writes if content has actually changed (avoids unnecessary git diffs).
@@ -138,6 +144,17 @@ On `agent_end`, the plugin appends a JSON line to `memory/session-summaries.json
   "messageCount": 8
 }
 ```
+
+## Context Overflow Watchdog
+
+Automatically recovers from runaway context growth that causes repeated agent failures.
+
+- **Detection:** Tracks consecutive errors matching `/overloaded|context.*too.*long|token.*limit/i` on `cfg.sessionKey`
+- **Trigger:** 5 consecutive errors + transcript ≥ 1 MB
+- **Action:** Archives transcript via `copyFileSync`, truncates to empty, resets `contextTokens` in `sessions.json`
+- **Resets:** Counter clears on any successful session completion and on `gateway_start`
+
+The 1 MB minimum guard prevents resets from transient API outages when the transcript is small.
 
 ## Deployment
 

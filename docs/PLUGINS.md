@@ -29,8 +29,21 @@ One plugin is deployed on the server:
 │   │   ├── memory_miner.py
 │   │   ├── playbook_curator.py
 │   │   ├── insight_synthesizer.py
+│   │   ├── tick_evaluator.py
+│   │   ├── eval_reporter.py
 │   │   ├── git_backup.sh
-│   │   └── koog-config.json
+│   │   ├── koog-config.json
+│   │   └── eval/
+│   │       ├── assertions.py
+│   │       ├── schemas.py
+│   │       ├── judges/
+│   │       │   ├── base_judge.py
+│   │       │   ├── signal_judge.py
+│   │       │   ├── curation_judge.py
+│   │       │   ├── insight_judge.py
+│   │       │   └── mining_judge.py
+│   │       └── scenarios/
+│   │           └── *.jsonl
 │   └── modules/                         # knowledge modules (auto-deployed)
 │       ├── module-registry.json
 │       └── <module-id>/
@@ -84,7 +97,7 @@ See [sinain-hud-plugin/README.md](../sinain-hud-plugin/README.md) for the full r
 
 **Hooks:**
 - `session_start` — initializes per-session tracking (tool usage, heartbeat compliance)
-- `before_agent_start` — syncs HEARTBEAT.md, SKILL.md, sinain-koog/, and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories
+- `before_agent_start` — syncs HEARTBEAT.md, SKILL.md, sinain-koog/ (recursively, including eval/ subdirectory), and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories
 - `tool_result_persist` — strips `<private>` tags from tool results; tracks `sinain_heartbeat_tick` calls for compliance
 - `agent_end` — writes session summary; validates heartbeat compliance (logs warnings on skip, escalates after 3 consecutive skips)
 
@@ -92,13 +105,20 @@ See [sinain-hud-plugin/README.md](../sinain-hud-plugin/README.md) for the full r
 - `sinain_heartbeat_tick` — executes all heartbeat mechanical work (git backup, signal analysis, insight synthesis, log writing) and returns structured JSON with results, recommended actions, and Telegram output
 
 **Commands:**
-- `/sinain_status` — shows active sessions, uptime, tool call counts
+- `/sinain_status` — shows persistent session data from disk (update time, token count, compactions, transcript size) and resilience metrics
 - `/sinain_modules` — shows active knowledge module stack and suspended modules
 - `/sinain_eval` — shows latest evaluation report and metrics
 - `/sinain_eval_level` — sets evaluation level (mechanical, sampled, full)
 
 **Service:**
-- Curation pipeline on 30-minute timer — runs feedback analysis, memory mining, playbook curation, and regenerates the effective playbook
+- Curation pipeline on 30-minute timer:
+  1. Feedback analysis (`feedback_analyzer.py`) → extracts `curateDirective` + effectiveness metrics
+  2. Memory mining (`memory_miner.py`) → reads unread daily memory files
+  3. Playbook curation (`playbook_curator.py`) → archives, applies changes
+  4. Effectiveness footer update → writes metrics into playbook
+  5. Effective playbook regeneration → merges base playbook + active module patterns
+  6. Tick evaluation (`tick_evaluator.py`) → runs mechanical + sampled judges (120s timeout)
+  7. Daily eval report (`eval_reporter.py`) → generates report once per day after 03:00 UTC
 
 **Auto-deploy flow:**
 ```
@@ -108,6 +128,7 @@ skills/sinain-hud/    ──SCP──►  sinain-sources/   ──plugin──�
   SKILL.md                        SKILL.md                       SKILL.md
 sinain-koog/          ──SCP──►  sinain-sources/   ──plugin──►  workspace/
   *.py, *.sh, *.json              sinain-koog/                   sinain-koog/
+  eval/                           sinain-koog/eval/              sinain-koog/eval/
 ```
 
 SCP is manual (or via `/deploy-heartbeat` skill). Plugin sync happens automatically on each agent start.
@@ -117,6 +138,7 @@ SCP is manual (or via `/deploy-heartbeat` skill). Plugin sync happens automatica
 - `.py` — deploy-once only (skip if already exists; agent owns these after first deploy)
 - `modules/manifest.json` — always overwrite
 - `modules/module-registry.json`, `modules/*/patterns.md` — deploy-once
+- `eval/` — synced recursively; `.py` deploy-once, `.json`/`.jsonl` always overwritten
 
 ## Heartbeat Tool
 
@@ -177,6 +199,26 @@ Privacy is enforced at two levels:
 
 The `tool_result_persist` hook strips any remaining `<private>` tags from tool results before they're saved to session history. This catches content that bypassed the client filter (e.g., tool outputs generated server-side).
 
+## Context Overflow Watchdog
+
+Protects against runaway context growth that causes repeated agent failures.
+
+**Detection:** The `session_end` hook tracks consecutive errors on `cfg.sessionKey` that match `/overloaded|context.*too.*long|token.*limit/i`.
+
+**Trigger:** 5 consecutive matching errors AND transcript file ≥ 1 MB.
+
+**Action:**
+1. Archive transcript via `copyFileSync` → `<name>.archived.<timestamp>.jsonl`
+2. Truncate original transcript to empty
+3. Reset `contextTokens` to 0 in `sessions.json`
+4. Clear all resilience counters (overflow, outage, consecutive failures)
+
+**Counter resets:**
+- On any successful session completion (for the monitored session key)
+- On `gateway_start` (full tracking state reset)
+
+The 1 MB minimum guard prevents resets caused by transient API outages when the transcript is actually small.
+
 ## Deploying Plugin Updates
 
 **IMPORTANT:** Always use `docker-compose.openclaw.yml` — the default `docker-compose.yml` uses unset env vars and will fail.
@@ -208,12 +250,17 @@ scp -i ~/.ssh/id_ed25519 \
 ### sinain-koog scripts
 
 ```bash
-# Upload updated scripts
+# Upload updated scripts (top-level files)
 scp -i ~/.ssh/id_ed25519 \
   sinain-koog/*.py sinain-koog/*.sh sinain-koog/*.json sinain-koog/*.txt \
   root@YOUR-SERVER-IP:/mnt/openclaw-state/sinain-sources/sinain-koog/
 
-# No restart needed — .json/.sh/.txt always overwritten on agent start
+# Upload eval/ subdirectory (judges, scenarios, assertions)
+scp -ri ~/.ssh/id_ed25519 \
+  sinain-koog/eval/ \
+  root@YOUR-SERVER-IP:/mnt/openclaw-state/sinain-sources/sinain-koog/eval/
+
+# No restart needed — .json/.sh/.txt/.jsonl always overwritten on agent start
 # .py files are deploy-once: only copied if not already present in workspace
 ```
 
@@ -258,6 +305,15 @@ If HEARTBEAT.md or SKILL.md aren't being synced to the workspace:
 If `docker compose restart` fails with "invalid spec" or empty variable errors:
 - You're using the wrong compose file. Use `-f docker-compose.openclaw.yml`
 - The default `docker-compose.yml` references `${OPENCLAW_CONFIG_DIR}` which is not set on the host
+
+### Context overflow auto-reset fired
+
+If logs show "OVERFLOW THRESHOLD REACHED — attempting transcript reset":
+- This is expected when the agent hits context limits repeatedly (5 consecutive overload errors + transcript ≥ 1 MB)
+- Check `memory/` for the archived transcript: `*.archived.<timestamp>.jsonl`
+- The agent should recover automatically on the next tick
+- If resets happen frequently, check compaction settings (`maxHistoryShare`, `reserveTokensFloor`) in openclaw.json
+- If resets are skipped ("transcript only XKB"), the errors are likely transient API outages, not real overflow
 
 ### Heartbeat compliance warnings
 
