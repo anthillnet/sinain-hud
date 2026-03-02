@@ -8,7 +8,7 @@ One plugin is deployed on the server:
 
 | Plugin | Purpose | Location |
 |---|---|---|
-| **sinain-hud** | Agent lifecycle management (file sync, privacy, session summaries) | `/mnt/openclaw-state/extensions/sinain-hud/` |
+| **sinain-hud** | Agent lifecycle management (file sync, heartbeat tool, privacy, compliance, curation, session summaries) | `/mnt/openclaw-state/extensions/sinain-hud/` |
 
 ## Server File Layout
 
@@ -21,16 +21,35 @@ One plugin is deployed on the server:
 │       └── openclaw.plugin.json         # plugin manifest
 ├── sinain-sources/
 │   ├── HEARTBEAT.md                     # source of truth for auto-deploy
-│   └── SKILL.md
+│   ├── SKILL.md
+│   ├── sinain-koog/                     # reflection scripts (auto-deployed)
+│   │   ├── common.py
+│   │   ├── signal_analyzer.py
+│   │   ├── feedback_analyzer.py
+│   │   ├── memory_miner.py
+│   │   ├── playbook_curator.py
+│   │   ├── insight_synthesizer.py
+│   │   ├── git_backup.sh
+│   │   └── koog-config.json
+│   └── modules/                         # knowledge modules (auto-deployed)
+│       ├── module-registry.json
+│       └── <module-id>/
+│           ├── manifest.json
+│           └── patterns.md
 ├── workspace/                           # agent workspace
 │   ├── HEARTBEAT.md                     # deployed by plugin from sinain-sources/
 │   ├── SKILL.md
 │   ├── SITUATION.md
+│   ├── sinain-koog/                     # deployed scripts
+│   ├── modules/                         # deployed knowledge modules
 │   └── memory/
 │       ├── sinain-playbook.md
+│       ├── sinain-playbook-effective.md # merged base + module patterns
 │       ├── session-summaries.jsonl      # written by sinain-hud plugin
 │       ├── playbook-archive/
-│       └── playbook-logs/
+│       ├── playbook-logs/               # heartbeat tick logs (YYYY-MM-DD.jsonl)
+│       ├── eval-logs/
+│       └── eval-reports/
 ├── agents/                              # agent state and session transcripts
 ├── credentials/                         # API keys
 └── telegram/                            # Telegram channel state
@@ -44,24 +63,42 @@ Gateway starts
        └─► For each openclaw.plugin.json:
             ├─► Load plugin (require index.ts)
             ├─► Call plugin export with api object
-            └─► Register hooks, commands, services
+            └─► Register hooks, commands, tools, services
                  │
                  ▼
          Hooks fire on agent events:
            session_start → before_agent_start → tool_result_persist → agent_end → session_end
+
+         Tools available during agent sessions:
+           sinain_heartbeat_tick — deterministic heartbeat execution
+
+         Services run in background:
+           Curation pipeline — 30-minute timer
 ```
 
-Plugins register hooks via `api.on(eventName, handler)`. The `tool_result_persist` hook is synchronous (can modify tool results before they're saved); all others are async.
+Plugins register hooks via `api.on(eventName, handler)`. The `tool_result_persist` hook is synchronous (can modify tool results before they're saved); all others are async. Tools are registered via `api.registerTool()` and become available to the agent during sessions.
 
 ## sinain-hud Plugin
 
 See [sinain-hud-plugin/README.md](../sinain-hud-plugin/README.md) for the full reference.
 
 **Hooks:**
-- `session_start` — initializes per-session tracking
-- `before_agent_start` — syncs HEARTBEAT.md + SKILL.md from `sinain-sources/` to workspace
-- `tool_result_persist` — strips `<private>` tags from tool results
-- `agent_end` — writes session summary to `memory/session-summaries.jsonl`
+- `session_start` — initializes per-session tracking (tool usage, heartbeat compliance)
+- `before_agent_start` — syncs HEARTBEAT.md, SKILL.md, sinain-koog/, and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories
+- `tool_result_persist` — strips `<private>` tags from tool results; tracks `sinain_heartbeat_tick` calls for compliance
+- `agent_end` — writes session summary; validates heartbeat compliance (logs warnings on skip, escalates after 3 consecutive skips)
+
+**Tool:**
+- `sinain_heartbeat_tick` — executes all heartbeat mechanical work (git backup, signal analysis, insight synthesis, log writing) and returns structured JSON with results, recommended actions, and Telegram output
+
+**Commands:**
+- `/sinain_status` — shows active sessions, uptime, tool call counts
+- `/sinain_modules` — shows active knowledge module stack and suspended modules
+- `/sinain_eval` — shows latest evaluation report and metrics
+- `/sinain_eval_level` — sets evaluation level (mechanical, sampled, full)
+
+**Service:**
+- Curation pipeline on 30-minute timer — runs feedback analysis, memory mining, playbook curation, and regenerates the effective playbook
 
 **Auto-deploy flow:**
 ```
@@ -69,9 +106,56 @@ sinain-hud repo                  Server                          Agent workspace
 skills/sinain-hud/    ──SCP──►  sinain-sources/   ──plugin──►  workspace/
   HEARTBEAT.md                    HEARTBEAT.md                   HEARTBEAT.md
   SKILL.md                        SKILL.md                       SKILL.md
+sinain-koog/          ──SCP──►  sinain-sources/   ──plugin──►  workspace/
+  *.py, *.sh, *.json              sinain-koog/                   sinain-koog/
 ```
 
-SCP is manual (or via deploy-heartbeat skill). Plugin sync happens automatically on each agent start.
+SCP is manual (or via `/deploy-heartbeat` skill). Plugin sync happens automatically on each agent start.
+
+**Directory sync policy:**
+- `.json`, `.sh`, `.txt` — always overwritten (infra/config files)
+- `.py` — deploy-once only (skip if already exists; agent owns these after first deploy)
+- `modules/manifest.json` — always overwrite
+- `modules/module-registry.json`, `modules/*/patterns.md` — deploy-once
+
+## Heartbeat Tool
+
+The `sinain_heartbeat_tick` tool replaces the old multi-phase heartbeat protocol. Instead of the agent manually running 5 phases of scripts, the tool handles everything deterministically:
+
+1. **Git backup** (30s timeout) — commits and pushes workspace changes
+2. **Signal analysis** (60s timeout) — analyzes session history for actionable signals
+3. **Insight synthesis** (60s timeout) — generates suggestions/insights
+4. **Log writing** — appends structured JSON to `memory/playbook-logs/YYYY-MM-DD.jsonl`
+
+Returns structured JSON:
+```json
+{
+  "status": "ok",
+  "gitBackup": "abc1234 | nothing to commit",
+  "signals": [...],
+  "recommendedAction": { "action": "skip|sessions_spawn|telegram_tip", "task": "...", "confidence": 0.8 },
+  "output": { "suggestion": "...", "insight": "..." },
+  "skipped": false,
+  "skipReason": null,
+  "logWritten": true
+}
+```
+
+The agent's only responsibilities are:
+1. Fetch session history and compose a summary
+2. Call `sinain_heartbeat_tick` with the summary
+3. Act on `recommendedAction` (spawn subagent or send Telegram tip)
+4. Reply HEARTBEAT_OK
+
+### Heartbeat Compliance Validation
+
+The plugin tracks whether `sinain_heartbeat_tick` was called during heartbeat agent runs:
+- `tool_result_persist` hook sets `heartbeatToolCalled = true` when the tool is invoked
+- `agent_end` hook checks if the agent was a heartbeat run (`messageProvider === "heartbeat"`)
+- If the tool wasn't called: logs a warning, increments `consecutiveHeartbeatSkips`
+- After 3 consecutive skips: logs an ESCALATION warning
+
+This prevents the agent from replying HEARTBEAT_OK without actually executing the heartbeat work.
 
 ## Privacy Pipeline
 
@@ -93,23 +177,9 @@ Privacy is enforced at two levels:
 
 The `tool_result_persist` hook strips any remaining `<private>` tags from tool results before they're saved to session history. This catches content that bypassed the client filter (e.g., tool outputs generated server-side).
 
-## 2-Pass Context Reading
-
-HEARTBEAT.md implements a progressive disclosure strategy to minimize token usage:
-
-**Pass 1 (lightweight, every tick):**
-```javascript
-sessions_history({ sessionKey: "agent:main:sinain", limit: 50, includeTools: false })
-```
-Message summaries only — scans for signals (errors, feedback, spawn results, topic changes).
-
-**Pass 2 (targeted, only if Pass 1 found signals):**
-```javascript
-sessions_history({ sessionKey: "agent:main:sinain", limit: 10, includeTools: true })
-```
-Full tool details for the most recent active window. Skipped entirely on idle ticks with no signals — saves 3-5x in token usage.
-
 ## Deploying Plugin Updates
+
+**IMPORTANT:** Always use `docker-compose.openclaw.yml` — the default `docker-compose.yml` uses unset env vars and will fail.
 
 ### sinain-hud plugin
 
@@ -119,9 +189,9 @@ scp -i ~/.ssh/id_ed25519_strato \
   sinain-hud-plugin/index.ts sinain-hud-plugin/openclaw.plugin.json \
   root@85.214.180.247:/mnt/openclaw-state/extensions/sinain-hud/
 
-# Restart to reload
+# Restart to reload (MUST use -f flag)
 ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose restart'
+  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
 ```
 
 ### Skill files (HEARTBEAT.md, SKILL.md)
@@ -135,6 +205,34 @@ scp -i ~/.ssh/id_ed25519_strato \
 # No restart needed — plugin syncs on next agent start
 ```
 
+### sinain-koog scripts
+
+```bash
+# Upload updated scripts
+scp -i ~/.ssh/id_ed25519_strato \
+  sinain-koog/*.py sinain-koog/*.sh sinain-koog/*.json sinain-koog/*.txt \
+  root@85.214.180.247:/mnt/openclaw-state/sinain-sources/sinain-koog/
+
+# No restart needed — .json/.sh/.txt always overwritten on agent start
+# .py files are deploy-once: only copied if not already present in workspace
+```
+
+### Gateway config (openclaw.json)
+
+```bash
+# Read current config
+ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+  'cat /mnt/openclaw-state/openclaw.json'
+
+# Edit (note: em-dashes are stored as \u2014 in JSON)
+ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+  'sed -i "s|old text|new text|" /mnt/openclaw-state/openclaw.json'
+
+# Restart required after config changes
+ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
+```
+
 ## Troubleshooting
 
 ### Plugin not loading
@@ -142,7 +240,7 @@ scp -i ~/.ssh/id_ed25519_strato \
 ```bash
 # Check gateway logs for plugin registration
 ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose logs --tail 50 | grep -i plugin'
+  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml logs --tail 50 openclaw-gateway 2>&1 | grep -i plugin'
 
 # Expected: "sinain-hud: plugin registered"
 # If missing: check openclaw.plugin.json is valid JSON, check extensions/ path
@@ -154,3 +252,16 @@ If HEARTBEAT.md or SKILL.md aren't being synced to the workspace:
 1. Verify source files exist: `ls /mnt/openclaw-state/sinain-sources/`
 2. Check plugin config has correct `heartbeatPath` / `skillPath`
 3. Check gateway logs for sync messages: `grep "sinain-hud: synced" <logs>`
+
+### Gateway restart fails
+
+If `docker compose restart` fails with "invalid spec" or empty variable errors:
+- You're using the wrong compose file. Use `-f docker-compose.openclaw.yml`
+- The default `docker-compose.yml` references `${OPENCLAW_CONFIG_DIR}` which is not set on the host
+
+### Heartbeat compliance warnings
+
+If logs show "heartbeat compliance violation — tool not called":
+- The agent replied HEARTBEAT_OK without calling `sinain_heartbeat_tick`
+- Check HEARTBEAT.md content is the tool-based version (should reference `sinain_heartbeat_tick`)
+- Check the heartbeat prompt in `openclaw.json` mentions the tool call requirement

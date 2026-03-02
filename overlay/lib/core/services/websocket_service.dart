@@ -28,12 +28,14 @@ class WebSocketService extends ChangeNotifier {
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
   final _scrollController = StreamController<String>.broadcast();
   final _spawnTaskController = StreamController<SpawnTask>.broadcast();
+  final _copyController = StreamController<String>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
+  Stream<String> get copyStream => _copyController.stream;
   bool get connected => _connected;
   String get audioState => _audioState;
   String get screenState => _screenState;
@@ -62,6 +64,10 @@ class WebSocketService extends ChangeNotifier {
 
   void scrollFeed(String direction) {
     _scrollController.add(direction);
+  }
+
+  void requestCopy(String activeTab) {
+    _copyController.add(activeTab);
   }
 
   WebSocketService({this.url = 'ws://localhost:9500'});
@@ -228,6 +234,7 @@ class WebSocketService extends ChangeNotifier {
     _statusController.close();
     _scrollController.close();
     _spawnTaskController.close();
+    _copyController.close();
     super.dispose();
   }
 

@@ -48,6 +48,7 @@ type SessionState = {
   startedAt: number;
   toolUsage: ToolUsageEntry[];
   workspaceDir?: string;
+  heartbeatToolCalled?: boolean;
 };
 
 // ============================================================================
@@ -293,6 +294,9 @@ function generateEffectivePlaybook(
 export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   const cfg = (api.pluginConfig ?? {}) as PluginConfig;
   const sessionStates = new Map<string, SessionState>();
+  let curationInterval: ReturnType<typeof setInterval> | null = null;
+  let lastWorkspaceDir: string | null = null;
+  let consecutiveHeartbeatSkips = 0;
 
   api.logger.info("sinain-hud: plugin registered");
 
@@ -317,7 +321,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     const workspaceDir = ctx.workspaceDir;
     if (!workspaceDir) return;
 
-    // Track workspace dir in session state
+    // Track workspace dir in session state and for curation timer
+    lastWorkspaceDir = workspaceDir;
     const sessionKey = ctx.sessionKey;
     if (sessionKey) {
       const state = sessionStates.get(sessionKey);
@@ -354,7 +359,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     }
 
     // Ensure memory directories exist
-    for (const dir of ["memory", "memory/playbook-archive", "memory/playbook-logs"]) {
+    for (const dir of ["memory", "memory/playbook-archive", "memory/playbook-logs",
+                        "memory/eval-logs", "memory/eval-reports"]) {
       const fullPath = join(workspaceDir, dir);
       if (!existsSync(fullPath)) {
         mkdirSync(fullPath, { recursive: true });
@@ -377,6 +383,11 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           toolName: ctx.toolName ?? "unknown",
           ts: Date.now(),
         });
+
+        // Track heartbeat tool calls for compliance validation
+        if (ctx.toolName === "sinain_heartbeat_tick") {
+          state.heartbeatToolCalled = true;
+        }
       }
     }
 
@@ -475,6 +486,23 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         api.logger.warn(
           `sinain-hud: failed to write session summary: ${String(err)}`,
         );
+      }
+    }
+
+    // Heartbeat compliance validation
+    if ((ctx as Record<string, unknown>).messageProvider === "heartbeat") {
+      if (!state.heartbeatToolCalled) {
+        consecutiveHeartbeatSkips++;
+        api.logger.warn(
+          `sinain-hud: heartbeat compliance violation — tool not called (consecutive: ${consecutiveHeartbeatSkips})`,
+        );
+        if (consecutiveHeartbeatSkips >= 3) {
+          api.logger.warn(
+            `sinain-hud: ESCALATION — ${consecutiveHeartbeatSkips} consecutive heartbeat skips`,
+          );
+        }
+      } else {
+        consecutiveHeartbeatSkips = 0;
       }
     }
 
@@ -597,6 +625,346 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   });
 
   // ==========================================================================
+  // Command: /sinain_eval — show latest evaluation report + metrics
+  // ==========================================================================
+
+  api.registerCommand({
+    name: "sinain_eval",
+    description: "Show latest evaluation report and current eval metrics",
+    handler: () => {
+      let workspaceDir: string | undefined;
+      for (const state of sessionStates.values()) {
+        if (state.workspaceDir) { workspaceDir = state.workspaceDir; break; }
+      }
+      if (!workspaceDir) {
+        return { text: "No workspace directory available (no active session)." };
+      }
+
+      const reportsDir = join(workspaceDir, "memory", "eval-reports");
+      const logsDir = join(workspaceDir, "memory", "eval-logs");
+      const lines: string[] = ["**Evaluation Report**\n"];
+
+      // Find latest report
+      let latestReport = "";
+      if (existsSync(reportsDir)) {
+        const reports = readdirSync(reportsDir)
+          .filter((f: string) => f.endsWith(".md"))
+          .sort()
+          .reverse();
+        if (reports.length > 0) {
+          try {
+            latestReport = readFileSync(join(reportsDir, reports[0]), "utf-8");
+            lines.push(latestReport.trim());
+          } catch {
+            lines.push("Failed to read latest report.");
+          }
+        }
+      }
+
+      if (!latestReport) {
+        lines.push("No eval reports generated yet.\n");
+      }
+
+      // Show latest eval-log entries
+      if (existsSync(logsDir)) {
+        const logFiles = readdirSync(logsDir)
+          .filter((f: string) => f.endsWith(".jsonl"))
+          .sort()
+          .reverse();
+        if (logFiles.length > 0) {
+          try {
+            const content = readFileSync(join(logsDir, logFiles[0]), "utf-8");
+            const entries = content.trim().split("\n").slice(-5);
+            lines.push("\n**Recent Tick Evaluations** (last 5):");
+            for (const line of entries) {
+              try {
+                const e = JSON.parse(line) as Record<string, unknown>;
+                const judges = e.judges ? ` judgeAvg=${e.judgeAvg ?? "?"}` : "";
+                lines.push(`  ${e.tickTs} — passRate=${e.passRate}${judges}`);
+              } catch {
+                // skip malformed line
+              }
+            }
+          } catch {
+            // skip if unreadable
+          }
+        }
+      }
+
+      return { text: lines.join("\n") };
+    },
+  });
+
+  // ==========================================================================
+  // Command: /sinain_eval_level — change evaluation level at runtime
+  // ==========================================================================
+
+  api.registerCommand({
+    name: "sinain_eval_level",
+    description: "Set evaluation level: mechanical, sampled, or full",
+    handler: (args) => {
+      let workspaceDir: string | undefined;
+      for (const state of sessionStates.values()) {
+        if (state.workspaceDir) { workspaceDir = state.workspaceDir; break; }
+      }
+      if (!workspaceDir) {
+        return { text: "No workspace directory available (no active session)." };
+      }
+
+      const level = (args.text ?? "").trim().toLowerCase();
+      const validLevels = ["mechanical", "sampled", "full"];
+      if (!validLevels.includes(level)) {
+        return { text: `Invalid level '${level}'. Valid options: ${validLevels.join(", ")}` };
+      }
+
+      const configPath = join(workspaceDir, "memory", "eval-config.json");
+      const configDir = join(workspaceDir, "memory");
+      if (!existsSync(configDir)) {
+        mkdirSync(configDir, { recursive: true });
+      }
+
+      const config = {
+        level,
+        changedAt: new Date().toISOString(),
+      };
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+
+      return { text: `Eval level set to '${level}'. Next tick evaluation will use this level.` };
+    },
+  });
+
+  // ==========================================================================
+  // Tool: sinain_heartbeat_tick — deterministic heartbeat execution
+  // ==========================================================================
+
+  api.registerTool(
+    (ctx) => {
+      const workspaceDir = ctx.workspaceDir;
+      if (!workspaceDir) return null;
+
+      return {
+        name: "sinain_heartbeat_tick",
+        label: "Heartbeat Tick",
+        description:
+          "Execute all heartbeat mechanical work: git backup, signal analysis, insight synthesis, and log writing. " +
+          "Returns structured JSON with script results, recommended actions, and output for Telegram.",
+        parameters: {
+          type: "object",
+          properties: {
+            sessionSummary: {
+              type: "string",
+              description: "2-3 sentence summary of current session state",
+            },
+            idle: {
+              type: "boolean",
+              description: "True if user has been inactive >30 minutes",
+            },
+          },
+          required: ["sessionSummary", "idle"],
+        },
+        async execute(
+          _toolCallId: string,
+          params: { sessionSummary: string; idle: boolean },
+        ) {
+          const result: Record<string, unknown> = {
+            status: "ok",
+            gitBackup: null,
+            signals: [],
+            recommendedAction: { action: "skip", task: null, confidence: 0 },
+            output: null,
+            skipped: false,
+            skipReason: null,
+            logWritten: false,
+          };
+
+          // Helper: run a python script and parse JSON stdout
+          const runScript = async (
+            args: string[],
+            timeoutMs = 60_000,
+          ): Promise<Record<string, unknown> | null> => {
+            try {
+              const out = await api.runtime.system.runCommandWithTimeout(
+                ["uv", "run", "--with", "requests", "python3", ...args],
+                { timeoutMs, cwd: workspaceDir },
+              );
+              if (out.code !== 0) {
+                api.logger.warn(
+                  `sinain-hud: heartbeat script failed: ${args[0]} (code ${out.code})\n${out.stderr}`,
+                );
+                return null;
+              }
+              return JSON.parse(out.stdout.trim());
+            } catch (err) {
+              api.logger.warn(
+                `sinain-hud: heartbeat script error: ${args[0]}: ${String(err)}`,
+              );
+              return null;
+            }
+          };
+
+          // 1. Git backup (30s timeout)
+          try {
+            const gitOut = await api.runtime.system.runCommandWithTimeout(
+              ["bash", "sinain-koog/git_backup.sh"],
+              { timeoutMs: 30_000, cwd: workspaceDir },
+            );
+            result.gitBackup = gitOut.stdout.trim() || "nothing to commit";
+          } catch (err) {
+            api.logger.warn(`sinain-hud: git backup error: ${String(err)}`);
+            result.gitBackup = `error: ${String(err)}`;
+          }
+
+          // 2. Signal analysis (60s timeout)
+          const signalArgs = [
+            "sinain-koog/signal_analyzer.py",
+            "--memory-dir", "memory/",
+            "--session-summary", params.sessionSummary,
+          ];
+          if (params.idle) signalArgs.push("--idle");
+
+          const signalResult = await runScript(signalArgs, 60_000);
+          if (signalResult) {
+            result.signals = signalResult.signals ?? [];
+            result.recommendedAction = signalResult.recommendedAction ?? {
+              action: "skip",
+              task: null,
+              confidence: 0,
+            };
+          }
+
+          // 3. Insight synthesis (60s timeout)
+          const synthArgs = [
+            "sinain-koog/insight_synthesizer.py",
+            "--memory-dir", "memory/",
+            "--session-summary", params.sessionSummary,
+          ];
+          if (params.idle) synthArgs.push("--idle");
+
+          const synthResult = await runScript(synthArgs, 60_000);
+          if (synthResult) {
+            if (synthResult.skip === false) {
+              result.output = {
+                suggestion: synthResult.suggestion ?? null,
+                insight: synthResult.insight ?? null,
+              };
+            } else {
+              result.skipped = true;
+              result.skipReason = synthResult.skipReason ?? "synthesizer skipped";
+            }
+          }
+
+          // 4. Write log entry to memory/playbook-logs/YYYY-MM-DD.jsonl
+          try {
+            const now = new Date();
+            const dateStr = now.toISOString().slice(0, 10);
+            const logDir = join(workspaceDir, "memory", "playbook-logs");
+            if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+
+            const logEntry = {
+              ts: now.toISOString(),
+              idle: params.idle,
+              sessionHistorySummary: params.sessionSummary,
+              signals: result.signals,
+              recommendedAction: result.recommendedAction,
+              output: result.output,
+              skipped: result.skipped,
+              skipReason: result.skipReason,
+              gitBackup: result.gitBackup,
+            };
+
+            writeFileSync(
+              join(logDir, `${dateStr}.jsonl`),
+              JSON.stringify(logEntry) + "\n",
+              { flag: "a" },
+            );
+            result.logWritten = true;
+          } catch (err) {
+            api.logger.warn(
+              `sinain-hud: failed to write heartbeat log: ${String(err)}`,
+            );
+          }
+
+          return {
+            content: [
+              { type: "text" as const, text: JSON.stringify(result, null, 2) },
+            ],
+            details: result,
+          };
+        },
+      } as any; // AnyAgentTool — plain JSON schema, no TypeBox dependency
+    },
+    { name: "sinain_heartbeat_tick" },
+  );
+
+  // ==========================================================================
+  // Curation pipeline (runs on 30-min timer)
+  // ==========================================================================
+
+  async function runCurationPipeline(workspaceDir: string): Promise<void> {
+    const runScript = async (
+      args: string[],
+      timeoutMs = 90_000,
+    ): Promise<Record<string, unknown> | null> => {
+      try {
+        const result = await api.runtime.system.runCommandWithTimeout(
+          ["uv", "run", "--with", "requests", "python3", ...args],
+          { timeoutMs, cwd: workspaceDir },
+        );
+        if (result.code !== 0) {
+          api.logger.warn(
+            `sinain-hud: curation script failed: ${args[0]} (code ${result.code})\n${result.stderr}`,
+          );
+          return null;
+        }
+        return JSON.parse(result.stdout.trim());
+      } catch (err) {
+        api.logger.warn(
+          `sinain-hud: curation script error: ${args[0]}: ${String(err)}`,
+        );
+        return null;
+      }
+    };
+
+    api.logger.info("sinain-hud: curation pipeline starting");
+
+    // Step 1: Feedback analysis
+    const feedback = await runScript([
+      "sinain-koog/feedback_analyzer.py",
+      "--memory-dir", "memory/",
+      "--session-summary", "periodic curation (plugin timer)",
+    ]);
+    const directive = (feedback as Record<string, unknown> | null)?.curateDirective as string ?? "stability";
+
+    // Step 2: Memory mining (background task — mines unread daily files)
+    const mining = await runScript([
+      "sinain-koog/memory_miner.py",
+      "--memory-dir", "memory/",
+    ]);
+    const findings = mining?.findings ? JSON.stringify(mining.findings) : null;
+
+    // Step 3: Playbook curation
+    const curatorArgs = [
+      "sinain-koog/playbook_curator.py",
+      "--memory-dir", "memory/",
+      "--session-summary", "periodic curation (plugin timer)",
+      "--curate-directive", directive,
+    ];
+    if (findings) {
+      curatorArgs.push("--mining-findings", findings);
+    }
+    const curator = await runScript(curatorArgs);
+
+    // Step 4: Regenerate effective playbook after curation
+    generateEffectivePlaybook(workspaceDir, api.logger);
+
+    // Log result
+    const changes = (curator as Record<string, unknown> | null)?.changes ?? "unknown";
+    api.logger.info(
+      `sinain-hud: curation pipeline complete (directive=${directive}, changes=${JSON.stringify(changes)})`,
+    );
+  }
+
+  // ==========================================================================
   // Service registration
   // ==========================================================================
 
@@ -606,8 +974,30 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       api.logger.info(
         `sinain-hud: service started (heartbeat: ${cfg.heartbeatPath ?? "not configured"})`,
       );
+      // Start curation timer — runs every 30 minutes
+      curationInterval = setInterval(async () => {
+        // Find workspace dir from active sessions or last known
+        let workspaceDir: string | undefined;
+        for (const state of sessionStates.values()) {
+          if (state.workspaceDir) { workspaceDir = state.workspaceDir; break; }
+        }
+        workspaceDir ??= lastWorkspaceDir ?? undefined;
+        if (!workspaceDir) {
+          api.logger.info("sinain-hud: curation skipped — no workspace dir");
+          return;
+        }
+        try {
+          await runCurationPipeline(workspaceDir);
+        } catch (err) {
+          api.logger.warn(`sinain-hud: curation pipeline error: ${String(err)}`);
+        }
+      }, 30 * 60 * 1000); // 30 minutes
     },
     stop: () => {
+      if (curationInterval) {
+        clearInterval(curationInterval);
+        curationInterval = null;
+      }
       api.logger.info("sinain-hud: service stopped");
       sessionStates.clear();
     },

@@ -42,6 +42,12 @@ Quality gate — you MUST skip if:
 - The suggestion would repeat something from recent heartbeat outputs
 - The insight is obvious or doesn't connect distinct observations
 
+Proactivity rules:
+- On ACTIVE days, LOWER your skip threshold — the user wants daily engagement
+- If the last 3+ outputs were skipped, you MUST produce output (find something worth saying)
+- Prefer a moderate-quality insight over silence — the user explicitly asked for more proactive insights
+- When idle, focus on mined pattern synthesis and cross-day trend observations
+
 Total message MUST be under 500 characters.
 
 Respond with ONLY a JSON object. If producing output:
@@ -92,6 +98,12 @@ def build_user_prompt(
         if recent_outputs:
             parts.append(f"\n## Recent Outputs (DO NOT REPEAT)\n{json.dumps(recent_outputs, indent=2)}")
 
+    # Count recent skips to enforce proactivity
+    if recent_logs:
+        recent_skips = sum(1 for e in recent_logs[:5] if e.get("skipped", True))
+        if recent_skips >= 3:
+            parts.append(f"\n## PROACTIVITY OVERRIDE: {recent_skips} of last 5 outputs were skipped. You MUST produce output this tick.")
+
     return "\n".join(parts)
 
 
@@ -134,7 +146,16 @@ def main():
             # Truncate insight to fit
             max_insight = 500 - len(suggestion) - 10  # buffer
             if max_insight > 50:
-                insight = insight[:max_insight] + "..."
+                truncated = insight[:max_insight]
+                # Cut at last sentence boundary
+                last_period = truncated.rfind(".")
+                last_excl = truncated.rfind("!")
+                last_q = truncated.rfind("?")
+                boundary = max(last_period, last_excl, last_q)
+                if boundary > max_insight // 2:
+                    insight = truncated[:boundary + 1]
+                else:
+                    insight = truncated.rstrip() + "..."
                 result["insight"] = insight
                 total_chars = len(suggestion) + len(insight)
             else:

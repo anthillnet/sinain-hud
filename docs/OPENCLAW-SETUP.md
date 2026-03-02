@@ -204,7 +204,7 @@ The WebSocket client stops reconnecting after 5 failures. Check that the gateway
 ssh -p 2222 node@<gateway-ip> "openclaw gateway status"
 
 # Local Docker
-docker compose -f docker-compose.openclaw.yml logs openclaw-gateway
+docker compose -f docker-compose.openclaw.yml logs --tail 50 openclaw-gateway
 ```
 
 Restart sinain-core after fixing the gateway to reset the circuit breaker.
@@ -267,15 +267,17 @@ For the full architecture reference, see [PLUGINS.md](./PLUGINS.md).
 
 | Plugin | Location on server | Purpose |
 |---|---|---|
-| **sinain-hud** | `/mnt/openclaw-state/extensions/sinain-hud/` | Auto-deploys HEARTBEAT/SKILL files, tracks tool usage, generates session summaries, strips `<private>` tags |
+| **sinain-hud** | `/mnt/openclaw-state/extensions/sinain-hud/` | Agent lifecycle (file sync, heartbeat tool, compliance, curation, privacy, session summaries) |
 
 ### sinain-hud plugin
 
-Manages the agent lifecycle for sinain. Key hooks:
+Manages the agent lifecycle for sinain. Key capabilities:
 
-- **`before_agent_start`** — syncs `HEARTBEAT.md` and `SKILL.md` from `/mnt/openclaw-state/sinain-sources/` to the agent workspace
-- **`tool_result_persist`** — strips `<private>` tags from tool results before they're saved to session history
-- **`agent_end`** — writes structured session summaries to `memory/session-summaries.jsonl`
+- **`before_agent_start`** — syncs HEARTBEAT.md, SKILL.md, sinain-koog/, and modules/ from `sinain-sources/` to workspace; generates effective playbook
+- **`sinain_heartbeat_tick` tool** — deterministic heartbeat execution (git backup, signal analysis, insight synthesis, log writing)
+- **`tool_result_persist`** — strips `<private>` tags; tracks heartbeat tool calls for compliance validation
+- **`agent_end`** — writes session summaries; validates heartbeat compliance (escalates after 3 consecutive skips)
+- **Curation service** — 30-minute timer runs feedback analysis, memory mining, playbook curation
 
 Source files live at `/mnt/openclaw-state/sinain-sources/` (persistent across restarts). The plugin reads from there and copies to the workspace each time an agent starts.
 
@@ -286,9 +288,14 @@ Configuration is in `openclaw.json` under `plugins.entries.sinain-hud`:
   "plugins": {
     "entries": {
       "sinain-hud": {
-        "heartbeatPath": "/path/to/sinain-sources/HEARTBEAT.md",
-        "skillPath": "/path/to/sinain-sources/SKILL.md",
-        "sessionKey": "agent:main:sinain"
+        "enabled": true,
+        "config": {
+          "heartbeatPath": "/home/node/.openclaw/sinain-sources/HEARTBEAT.md",
+          "skillPath": "/home/node/.openclaw/sinain-sources/SKILL.md",
+          "koogPath": "/home/node/.openclaw/sinain-sources/sinain-koog",
+          "modulesPath": "/home/node/.openclaw/sinain-sources/modules",
+          "sessionKey": "agent:main:sinain"
+        }
       }
     }
   }
@@ -297,15 +304,17 @@ Configuration is in `openclaw.json` under `plugins.entries.sinain-hud`:
 
 ### Updating plugins
 
+**IMPORTANT:** Always use `docker-compose.openclaw.yml` — the default compose file uses unset env vars and will fail.
+
 ```bash
 # SCP updated plugin files to the server
 scp -i ~/.ssh/id_ed25519_strato \
   sinain-hud-plugin/index.ts sinain-hud-plugin/openclaw.plugin.json \
   root@85.214.180.247:/mnt/openclaw-state/extensions/sinain-hud/
 
-# Restart to pick up changes
+# Restart to pick up changes (MUST use -f flag)
 ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose restart'
+  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
 ```
 
 ### Checking plugin status
@@ -313,5 +322,5 @@ ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
 ```bash
 # Check plugin loaded
 ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
-  'cd /opt/openclaw && docker compose logs --tail 20 | grep plugin'
+  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml logs --tail 30 openclaw-gateway 2>&1 | grep -i plugin'
 ```

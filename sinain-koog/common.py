@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from glob import glob
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-MODEL_FAST = "openai/gpt-oss-120b"
+MODEL_FAST = "google/gemini-3-flash-preview"
 MODEL_SMART = "anthropic/claude-sonnet-4.6"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -215,6 +216,35 @@ def call_llm(
     if not content:
         raise LLMError(f"LLM returned empty response (model={model})")
     return content
+
+
+def call_llm_with_fallback(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    script: str | None = None,
+    json_mode: bool = False,
+    retries: int = 1,
+) -> str:
+    """call_llm with automatic retry on failure (same model).
+
+    Tries the configured model. On LLMError (timeout, HTTP error, empty
+    response), retries up to *retries* times with the same model.
+    """
+    last_err: LLMError | None = None
+    for attempt in range(1 + retries):
+        try:
+            return call_llm(system_prompt, user_prompt, script=script, json_mode=json_mode)
+        except LLMError as e:
+            last_err = e
+            if attempt < retries:
+                wait = 2 ** attempt  # 1s, 2s, 4s...
+                print(f"[retry] attempt {attempt + 1} failed: {e} — retrying in {wait}s",
+                      file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print(f"[retry] all {1 + retries} attempts failed: {e}", file=sys.stderr)
+    raise last_err
 
 
 # ---------------------------------------------------------------------------
