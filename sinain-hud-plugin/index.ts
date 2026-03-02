@@ -8,7 +8,7 @@
  * - Strips <private> tags from tool results before persistence
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync, copyFileSync } from "node:fs";
 import { join, dirname, extname } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
@@ -67,6 +67,11 @@ const OUTAGE_MIN_SAMPLES = 3;                  // need ≥3 samples before thres
 const FILE_SYNC_DEBOUNCE_MS = 3 * 60_000;     // skip file sync if done <3 min ago
 const PLAYBOOK_GEN_DEBOUNCE_MS = 5 * 60_000;  // skip playbook gen if done <5 min ago
 const SHORT_FAILURE_THRESHOLD_MS = 10_000;     // fails in <10s = likely API error
+
+// Context overflow watchdog constants
+const OVERFLOW_CONSECUTIVE_THRESHOLD = 5;        // N consecutive overload errors → trigger reset
+const OVERFLOW_TRANSCRIPT_MIN_BYTES = 1_000_000; // 1MB guard — skip reset if transcript is small (transient outage)
+const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit/i;
 
 function stripPrivateTags(text: string): string {
   return text.replace(PRIVATE_TAG_RE, "").trim();
@@ -324,6 +329,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   let outageDetected = false;
   let consecutiveFailures = 0;
   let outageStartTs = 0;
+  let consecutiveOverflowErrors = 0;
 
   function computeErrorRate(): { rate: number; total: number; failures: number } {
     const cutoff = Date.now() - ERROR_WINDOW_MS;
@@ -335,6 +341,70 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     if (total === 0) return { rate: 0, total: 0, failures: 0 };
     const failures = recentOutcomes.filter((o) => !o.success).length;
     return { rate: failures / total, total, failures };
+  }
+
+  function performOverflowReset(): boolean {
+    const targetSessionKey = cfg.sessionKey;
+    if (!targetSessionKey || !lastWorkspaceDir) {
+      api.logger.warn("sinain-hud: overflow reset aborted — no sessionKey or workspace dir");
+      return false;
+    }
+
+    // Derive sessions directory: workspace = ~/.openclaw/workspace → sessions = ~/.openclaw/agents/main/sessions/
+    const sessionsDir = join(dirname(lastWorkspaceDir), "agents", "main", "sessions");
+    const sessionsJsonPath = join(sessionsDir, "sessions.json");
+
+    if (!existsSync(sessionsJsonPath)) {
+      api.logger.warn(`sinain-hud: overflow reset aborted — sessions.json not found at ${sessionsJsonPath}`);
+      return false;
+    }
+
+    let sessionsData: Record<string, Record<string, unknown>>;
+    try {
+      sessionsData = JSON.parse(readFileSync(sessionsJsonPath, "utf-8"));
+    } catch (err) {
+      api.logger.warn(`sinain-hud: overflow reset aborted — cannot parse sessions.json: ${err}`);
+      return false;
+    }
+
+    const session = sessionsData[targetSessionKey];
+    const transcriptPath = session?.sessionFile as string | undefined;
+    if (!transcriptPath || !existsSync(transcriptPath)) {
+      api.logger.warn(`sinain-hud: overflow reset aborted — transcript not found: ${transcriptPath}`);
+      return false;
+    }
+
+    // Guard: only reset if transcript is actually large
+    const size = statSync(transcriptPath).size;
+    if (size < OVERFLOW_TRANSCRIPT_MIN_BYTES) {
+      api.logger.info(
+        `sinain-hud: overflow reset skipped — transcript only ${Math.round(size / 1024)}KB (threshold: ${Math.round(OVERFLOW_TRANSCRIPT_MIN_BYTES / 1024)}KB)`,
+      );
+      return false;
+    }
+
+    // Archive → truncate → reset metadata
+    const archivePath = transcriptPath.replace(/\.jsonl$/, `.archived.${Date.now()}.jsonl`);
+    try {
+      copyFileSync(transcriptPath, archivePath);
+    } catch (err) {
+      api.logger.warn(`sinain-hud: overflow reset aborted — archive failed: ${err}`);
+      return false;
+    }
+
+    writeFileSync(transcriptPath, "", "utf-8");
+
+    try {
+      session.contextTokens = 0;
+      writeFileSync(sessionsJsonPath, JSON.stringify(sessionsData, null, 2), "utf-8");
+    } catch {
+      // Non-fatal — gateway recomputes tokens from transcript content
+    }
+
+    api.logger.info(
+      `sinain-hud: === OVERFLOW RESET === Transcript truncated (was ${Math.round(size / 1024)}KB). Archive: ${archivePath}`,
+    );
+    return true;
   }
 
   api.logger.info("sinain-hud: plugin registered");
@@ -526,7 +596,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         api.logger.info(
           `sinain-hud: OUTAGE RECOVERED — resumed after ${Math.round(outageDurationMs / 1000)}s`,
         );
-        outageStartTs = 0;
+        // outageStartTs is NOT reset here — before_agent_start uses it to
+        // inject recovery context on the next run, then resets it itself.
       }
     } else if (isShortFailure) {
       consecutiveFailures++;
@@ -537,6 +608,27 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         api.logger.warn(
           `sinain-hud: OUTAGE DETECTED — ${Math.round(rate * 100)}% error rate over ${total} samples, ${consecutiveFailures} consecutive failures`,
         );
+      }
+    }
+
+    // ── Context overflow watchdog ──────────────────────────────────────
+    if (sessionKey === cfg.sessionKey) {
+      if (!isSuccess && OVERFLOW_ERROR_PATTERN.test(String(event.error ?? ""))) {
+        consecutiveOverflowErrors++;
+        api.logger.warn(
+          `sinain-hud: overflow watchdog — error #${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`,
+        );
+        if (consecutiveOverflowErrors >= OVERFLOW_CONSECUTIVE_THRESHOLD) {
+          api.logger.warn("sinain-hud: OVERFLOW THRESHOLD REACHED — attempting transcript reset");
+          if (performOverflowReset()) {
+            consecutiveOverflowErrors = 0;
+            outageDetected = false;
+            consecutiveFailures = 0;
+            outageStartTs = 0;
+          }
+        }
+      } else if (isSuccess) {
+        consecutiveOverflowErrors = 0;
       }
     }
 
@@ -634,6 +726,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     consecutiveFailures = 0;
     outageStartTs = 0;
     consecutiveHeartbeatSkips = 0;
+    consecutiveOverflowErrors = 0;
     api.logger.info("sinain-hud: gateway started, session + resilience tracking reset");
   });
 
@@ -672,6 +765,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       lines.push(`- Error rate: ${Math.round(rate * 100)}% (${failures}/${total} in ${ERROR_WINDOW_MS / 60_000}min window)`);
       lines.push(`- Last success: ${lastSuccessTs > 0 ? `${Math.round((Date.now() - lastSuccessTs) / 1000)}s ago` : "never"}`);
       lines.push(`- Heartbeat skips: ${consecutiveHeartbeatSkips}`);
+      lines.push(`- Overflow watchdog: ${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`);
 
       return { text: lines.join("\n") };
     },
