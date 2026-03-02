@@ -8,7 +8,7 @@
 
 ## Setup
 
-1. `sessions_history({ sessionKey: "agent:main:sinain", limit: 50, includeTools: false })`
+1. `sessions_history({ sessionKey: "agent:main:sinain", limit: 20, includeTools: false })`
 2. Determine **IDLE** status: no user activity in the last 30 minutes
 3. Compose **SESSION_SUMMARY**: 2–3 sentences describing the current state (what the user is doing, key topics, errors seen)
 

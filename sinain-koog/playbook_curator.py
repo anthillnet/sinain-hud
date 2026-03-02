@@ -35,7 +35,7 @@ The playbook has these sections:
 2. Patterns: "When [context], [approach] worked (score: X)" or failed patterns
 3. User preference observations
 4. Stale items with [since: YYYY-MM-DD] or [deferred: YYYY-MM-DD, reason: "..."] tags
-5. Footer comments (effectiveness) — DO NOT modify these
+5. Footer comments (effectiveness) — DO NOT modify these (managed by plugin)
 
 Curate rules:
 - ADD new successful patterns from recent sessions
