@@ -18,9 +18,10 @@ from pathlib import Path
 
 from common import (
     LLMError,
-    call_llm,
+    call_llm_with_fallback,
     extract_json,
     output_json,
+    read_effective_playbook,
     read_playbook,
     read_recent_logs,
 )
@@ -44,6 +45,8 @@ Curate rules:
 - PROMOTE patterns seen 3+ times from "observed" to "established"
 - Three Laws: (1) don't remove error-prevention patterns, (2) preserve high-scoring approaches, (3) then evolve
 - Keep under 50 lines — density over completeness
+- DEDUPLICATE: if multiple patterns describe the same concept (e.g., "idle standby" variants), merge them into ONE canonical pattern
+- Before adding: check if the pattern already exists in the Active Module Patterns section — do NOT duplicate module patterns into the base playbook
 
 Curate directive controls aggressiveness:
 - "aggressive_prune": effectiveness is low — remove weak/unverified patterns aggressively
@@ -140,6 +143,7 @@ def main():
     args = parser.parse_args()
 
     playbook = read_playbook(args.memory_dir)
+    effective_playbook = read_effective_playbook(args.memory_dir)
     logs = read_recent_logs(args.memory_dir, days=7)
 
     # Archive before modification
@@ -172,6 +176,9 @@ def main():
     if args.mining_findings:
         user_prompt += f"## Mining Findings\n{args.mining_findings}\n\n"
 
+    if effective_playbook != playbook:
+        user_prompt += f"## Active Module Patterns (DO NOT duplicate these)\n{effective_playbook}\n\n"
+
     user_prompt += (
         "Curate the playbook. Return the FULL updated body text and a summary of changes.\n\n"
         "IMPORTANT: Output ONLY the JSON object. No explanation, no reasoning, "
@@ -179,7 +186,7 @@ def main():
     )
 
     try:
-        raw = call_llm(SYSTEM_PROMPT, user_prompt, script="playbook_curator", json_mode=True)
+        raw = call_llm_with_fallback(SYSTEM_PROMPT, user_prompt, script="playbook_curator", json_mode=True)
         result = extract_json(raw)
     except (ValueError, LLMError) as e:
         print(f"[warn] {e}", file=sys.stderr)
@@ -191,8 +198,15 @@ def main():
         })
         return
 
+    # Validate: updatedPlaybook should not be empty and should differ from input
+    updated_body = result.get("updatedPlaybook", "")
+    if not updated_body or not updated_body.strip():
+        print("[warn] LLM returned empty playbook body, keeping original", file=sys.stderr)
+        updated_body = body
+    elif updated_body.strip() == body.strip():
+        print("[info] Curator made no changes", file=sys.stderr)
+
     # Write updated playbook
-    updated_body = result.get("updatedPlaybook", body)
     new_playbook = reassemble_playbook(header, updated_body, footer)
 
     playbook_path = Path(args.memory_dir) / "sinain-playbook.md"

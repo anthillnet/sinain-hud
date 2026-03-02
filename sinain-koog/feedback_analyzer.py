@@ -70,30 +70,36 @@ def compute_effectiveness(logs: list[dict]) -> dict:
 
 
 def extract_feedback_scores(logs: list[dict]) -> dict:
-    """Extract composite scores and correlate with patterns."""
+    """Extract composite scores with time-decay weighting."""
     all_scores = []
     high_patterns = []
     low_patterns = []
 
-    for entry in logs:
+    for i, entry in enumerate(logs):  # logs are newest-first
         feedback = entry.get("feedbackScores", {})
         avg = feedback.get("avg")
         if avg is not None:
-            all_scores.append(avg)
-
-        # Correlate with output
-        output = entry.get("output", {})
-        suggestion = output.get("suggestion", "") if output else ""
+            # Decay: recent entries weighted more (1.0 for newest, 0.3 for oldest)
+            weight = max(0.3, 1.0 - (i / max(len(logs), 1)) * 0.7)
+            all_scores.append((avg, weight))
 
         for h in feedback.get("high", []):
-            high_patterns.append(h)
+            if h not in high_patterns:  # deduplicate
+                high_patterns.append(h)
         for lo in feedback.get("low", []):
-            low_patterns.append(lo)
+            if lo not in low_patterns:  # deduplicate
+                low_patterns.append(lo)
 
-    avg_score = round(sum(all_scores) / len(all_scores), 2) if all_scores else 0
+    if all_scores:
+        weighted_sum = sum(s * w for s, w in all_scores)
+        weight_sum = sum(w for _, w in all_scores)
+        avg_score = round(weighted_sum / weight_sum, 2)
+    else:
+        avg_score = 0
+
     return {
         "avg": avg_score,
-        "high": high_patterns[:5],  # Top 5
+        "high": high_patterns[:5],
         "low": low_patterns[:5],
     }
 
@@ -197,11 +203,17 @@ def main():
     directive = determine_directive(effectiveness)
     interpretation = generate_interpretation(feedback_scores, effectiveness, directive, logs)
 
+    # Compute skip rate for proactivity tracking
+    total_ticks = len(logs)
+    skip_ticks = sum(1 for e in logs if e.get("skipped", True))
+    skip_rate = round(skip_ticks / total_ticks, 2) if total_ticks > 0 else 1.0
+
     output_json({
         "feedbackScores": feedback_scores,
         "effectiveness": effectiveness,
         "curateDirective": directive,
         "interpretation": interpretation,
+        "skipRate": skip_rate,
     })
 
 

@@ -23,6 +23,7 @@ from common import (
     list_daily_memory_files,
     output_json,
     parse_mining_index,
+    read_effective_playbook,
     read_file_safe,
     read_playbook,
 )
@@ -93,8 +94,9 @@ def main():
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     args = parser.parse_args()
 
-    playbook = read_playbook(args.memory_dir)
-    mined_dates = parse_mining_index(playbook)
+    raw_playbook = read_playbook(args.memory_dir)
+    playbook = read_effective_playbook(args.memory_dir)
+    mined_dates = parse_mining_index(raw_playbook)
     unmined = get_unmined_files(args.memory_dir, mined_dates)
 
     if not unmined:
@@ -105,8 +107,8 @@ def main():
         })
         return
 
-    # Pick up to 2 unmined files
-    to_mine = unmined[:2]
+    # Pick up to 3 unmined files
+    to_mine = unmined[:3]
     mined_contents = {}
     for f in to_mine:
         content = read_file_safe(f)
@@ -128,12 +130,12 @@ def main():
     parts = [f"## Current Playbook\n{playbook}"]
     for name, content in mined_contents.items():
         # Truncate very large files
-        if len(content) > 4000:
-            content = content[:4000] + "\n... [truncated]"
+        if len(content) > 6000:
+            content = content[:6000] + "\n... [truncated]"
         parts.append(f"## Daily Memory: {name}\n{content}")
     if devmatrix:
-        if len(devmatrix) > 2000:
-            devmatrix = devmatrix[:2000] + "\n... [truncated]"
+        if len(devmatrix) > 3000:
+            devmatrix = devmatrix[:3000] + "\n... [truncated]"
         parts.append(f"## DevMatrix Summary\n{devmatrix}")
 
     user_prompt = "\n\n".join(parts)
@@ -153,7 +155,7 @@ def main():
     # Only mark files as mined on successful parse — failed files will be retried
     new_dates = [Path(f).stem for f in to_mine]
     if llm_ok:
-        update_mining_index(args.memory_dir, playbook, new_dates)
+        update_mining_index(args.memory_dir, raw_playbook, new_dates)
         print(f"[info] Updated mining index with {new_dates}", file=sys.stderr)
     else:
         print(f"[info] Skipped mining index update (LLM failed) — {new_dates} will be retried", file=sys.stderr)
