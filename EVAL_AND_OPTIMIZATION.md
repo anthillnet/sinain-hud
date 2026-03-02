@@ -138,7 +138,7 @@ These five changes alone would bring worst-case end-to-end latency from ~80s dow
 
 Per the agentic evaluation framework (see `agentic-evaluation-intro.md`):
 
-**Current state: L1 (Ad-hoc)** — No systematic evaluation, manual testing only.
+**Current state: L1 → L2 (transitioning)** — Eval judges integrated, tick_evaluator runs automatically in the curation pipeline, daily eval reports generated after 03:00 UTC.
 
 ### L1 → L2: Foundation
 
@@ -147,12 +147,13 @@ Per the agentic evaluation framework (see `agentic-evaluation-intro.md`):
   - 20+ annotated screen recordings for sense evaluation
   - 10+ audio samples with ground-truth transcripts for WER
   - 50+ (context, expected_output) pairs for agent evaluation
+- [x] Scenario datasets (`eval/scenarios/*.jsonl`) — judge-specific scenario files deployed
 - [ ] Instrument all three pipelines with timestamp tracing
 
 ### L2 → L3: Automation
 
 - [ ] Automated eval on commit (run benchmarks in CI)
-- [ ] LLM-as-Judge scoring integrated into test suite
+- [x] LLM-as-Judge scoring integrated — `tick_evaluator.py` + `eval_reporter.py` run in curation pipeline (mechanical + sampled judges per tick, daily aggregated reports)
 - [ ] Dashboard showing latency P50/P95 and quality scores over time
 
 ### L3 → L4: Observability

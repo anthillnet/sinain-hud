@@ -73,6 +73,70 @@ const OVERFLOW_CONSECUTIVE_THRESHOLD = 5;        // N consecutive overload error
 const OVERFLOW_TRANSCRIPT_MIN_BYTES = 1_000_000; // 1MB guard — skip reset if transcript is small (transient outage)
 const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit/i;
 
+// ============================================================================
+// Parent context injection (subagent support)
+// ============================================================================
+
+const PARENT_CONTEXT_MAX_CHARS = 4000;
+const PARENT_CONTEXT_TTL_MS = 10 * 60_000; // 10 minutes — stale cache won't be injected
+
+type ParentContextCache = {
+  sessionKey: string;
+  capturedAt: number;
+  contextText: string;
+};
+
+function isSubagentSession(sessionKey: string): boolean {
+  return sessionKey.includes(":subagent:") || sessionKey.startsWith("subagent:");
+}
+
+function extractRecentContext(
+  messages: unknown[],
+  prompt: string,
+  maxChars: number,
+): string {
+  const lines: string[] = [];
+  let budget = maxChars;
+
+  // Process messages in reverse (most recent first)
+  for (let i = messages.length - 1; i >= 0 && budget > 0; i--) {
+    const msg = messages[i];
+    if (!msg || typeof msg !== "object") continue;
+
+    const { role, content } = msg as Record<string, unknown>;
+    if (typeof role !== "string") continue;
+    // Skip tool messages — verbose and low-value for context transfer
+    if (role === "tool" || role === "tool_result") continue;
+
+    let text = "";
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      text = content
+        .filter((b: unknown) => b && typeof b === "object" && (b as Record<string, unknown>).type === "text")
+        .map((b: unknown) => String((b as Record<string, unknown>).text ?? ""))
+        .join("\n");
+    }
+    if (!text) continue;
+
+    const truncated = text.slice(0, 500);
+    const line = `[${role}]: ${truncated}`;
+    if (line.length > budget) break;
+    lines.unshift(line);
+    budget -= line.length + 1; // +1 for newline
+  }
+
+  // Prepend current prompt if budget remains
+  if (prompt && budget > 0) {
+    const promptLine = `[system-prompt]: ${prompt.slice(0, 500)}`;
+    if (promptLine.length <= budget) {
+      lines.unshift(promptLine);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function stripPrivateTags(text: string): string {
   return text.replace(PRIVATE_TAG_RE, "").trim();
 }
@@ -331,6 +395,23 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   let outageStartTs = 0;
   let consecutiveOverflowErrors = 0;
 
+  // Parent context cache for subagent injection
+  let parentContextCache: ParentContextCache | null = null;
+
+  function appendToContextCache(line: string): void {
+    if (!parentContextCache) return;
+    parentContextCache.contextText += "\n" + line;
+    parentContextCache.capturedAt = Date.now();
+    // Trim from front if over budget (keep most recent context)
+    if (parentContextCache.contextText.length > PARENT_CONTEXT_MAX_CHARS) {
+      const excess = parentContextCache.contextText.length - PARENT_CONTEXT_MAX_CHARS;
+      const newStart = parentContextCache.contextText.indexOf("\n", excess);
+      parentContextCache.contextText = newStart >= 0
+        ? parentContextCache.contextText.slice(newStart + 1)
+        : parentContextCache.contextText.slice(excess);
+    }
+  }
+
   function computeErrorRate(): { rate: number; total: number; failures: number } {
     const cutoff = Date.now() - ERROR_WINDOW_MS;
     // Prune entries older than the window
@@ -343,6 +424,13 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     return { rate: failures / total, total, failures };
   }
 
+  function getSessionsJsonPath(): string | null {
+    if (!lastWorkspaceDir) return null;
+    const sessionsDir = join(dirname(lastWorkspaceDir), "agents", "main", "sessions");
+    const p = join(sessionsDir, "sessions.json");
+    return existsSync(p) ? p : null;
+  }
+
   function performOverflowReset(): boolean {
     const targetSessionKey = cfg.sessionKey;
     if (!targetSessionKey || !lastWorkspaceDir) {
@@ -350,12 +438,10 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       return false;
     }
 
-    // Derive sessions directory: workspace = ~/.openclaw/workspace → sessions = ~/.openclaw/agents/main/sessions/
-    const sessionsDir = join(dirname(lastWorkspaceDir), "agents", "main", "sessions");
-    const sessionsJsonPath = join(sessionsDir, "sessions.json");
+    const sessionsJsonPath = getSessionsJsonPath();
 
-    if (!existsSync(sessionsJsonPath)) {
-      api.logger.warn(`sinain-hud: overflow reset aborted — sessions.json not found at ${sessionsJsonPath}`);
+    if (!sessionsJsonPath) {
+      api.logger.warn(`sinain-hud: overflow reset aborted — sessions.json not found`);
       return false;
     }
 
@@ -426,7 +512,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   // Hook: before_agent_start — auto-deploy HEARTBEAT.md + SKILL.md
   // ==========================================================================
 
-  api.on("before_agent_start", async (_event, ctx) => {
+  api.on("before_agent_start", async (event, ctx) => {
     const workspaceDir = ctx.workspaceDir;
     if (!workspaceDir) return;
 
@@ -489,15 +575,62 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
     }
 
-    // ── Recovery context injection after outage ─────────────────────────
+    // ── Context capture + subagent injection ────────────────────────────
+    const isSubagent = sessionKey ? isSubagentSession(sessionKey) : false;
+
+    if (!isSubagent) {
+      // Main session: capture recent conversation context for future subagents
+      const messages = (event as Record<string, unknown>).messages as unknown[] | undefined;
+      const prompt = (event as Record<string, unknown>).prompt as string | undefined;
+      if (messages && Array.isArray(messages) && messages.length > 0) {
+        const contextText = extractRecentContext(messages, prompt ?? "", PARENT_CONTEXT_MAX_CHARS);
+        if (contextText) {
+          parentContextCache = {
+            sessionKey: sessionKey ?? "unknown",
+            capturedAt: now,
+            contextText,
+          };
+          api.logger.info(
+            `sinain-hud: captured parent context (${contextText.length} chars, ${messages.length} messages)`,
+          );
+        }
+      }
+    }
+
+    // ── Accumulate context parts (outage recovery + subagent injection) ─
+    const contextParts: string[] = [];
+
+    // Recovery context injection after outage
     if (outageStartTs > 0 && !outageDetected && lastSuccessTs > outageStartTs) {
       const outageDurationMin = Math.round((lastSuccessTs - outageStartTs) / 60_000);
       outageStartTs = 0; // one-shot: only inject once
       api.logger.info(`sinain-hud: injecting recovery context (outage lasted ~${outageDurationMin}min)`);
-      return {
-        prependContext: `[SYSTEM] The upstream API was unavailable for ~${outageDurationMin} minutes. ` +
-          `Multiple queued messages may have accumulated. Prioritize the current task, skip catch-up on stale items, and keep responses concise.`,
-      };
+      contextParts.push(
+        `[SYSTEM] The upstream API was unavailable for ~${outageDurationMin} minutes. ` +
+        `Multiple queued messages may have accumulated. Prioritize the current task, skip catch-up on stale items, and keep responses concise.`,
+      );
+    }
+
+    // Subagent: inject cached parent context
+    if (isSubagent && parentContextCache) {
+      const cacheAgeMs = now - parentContextCache.capturedAt;
+      if (cacheAgeMs < PARENT_CONTEXT_TTL_MS) {
+        const cacheAgeSec = Math.round(cacheAgeMs / 1000);
+        api.logger.info(
+          `sinain-hud: injected parent context for subagent (${parentContextCache.contextText.length} chars, ${cacheAgeSec}s old)`,
+        );
+        contextParts.push(
+          `[PARENT SESSION CONTEXT] The following is a summary of the recent conversation from the parent session that spawned you. Use it to understand references to code, files, or decisions discussed earlier:\n\n${parentContextCache.contextText}`,
+        );
+      } else {
+        api.logger.info(
+          `sinain-hud: skipped stale parent context for subagent (${Math.round(cacheAgeMs / 1000)}s old, TTL=${PARENT_CONTEXT_TTL_MS / 1000}s)`,
+        );
+      }
+    }
+
+    if (contextParts.length > 0) {
+      return { prependContext: contextParts.join("\n\n") };
     }
   });
 
@@ -712,6 +845,49 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   });
 
   // ==========================================================================
+  // Hook: llm_output — continuously refresh parent context cache
+  // ==========================================================================
+
+  api.on("llm_output", async (event, ctx) => {
+    const sessionKey = ctx.sessionKey;
+    if (!sessionKey || isSubagentSession(sessionKey)) return;
+    if (!parentContextCache) return;
+
+    const latest = ((event as Record<string, unknown>).assistantTexts as string[] | undefined)?.at(-1);
+    if (!latest) return;
+    appendToContextCache(`[assistant]: ${latest.slice(0, 500)}`);
+  });
+
+  // ==========================================================================
+  // Hook: llm_input — capture user turns mid-session
+  // ==========================================================================
+
+  api.on("llm_input", async (event, ctx) => {
+    const sessionKey = ctx.sessionKey;
+    if (!sessionKey || isSubagentSession(sessionKey)) return;
+    if (!parentContextCache) return;
+
+    const prompt = (event as Record<string, unknown>).prompt as string | undefined;
+    if (!prompt) return;
+    appendToContextCache(`[user]: ${prompt.slice(0, 500)}`);
+  });
+
+  // ==========================================================================
+  // Hook: subagent_spawning — diagnostic logging
+  // ==========================================================================
+
+  api.on("subagent_spawning", async (event, ctx) => {
+    const cacheAge = parentContextCache
+      ? `${Math.round((Date.now() - parentContextCache.capturedAt) / 1000)}s`
+      : "none";
+    const childKey = (event as Record<string, unknown>).childSessionKey ?? "?";
+    const parentKey = (ctx as Record<string, unknown>).requesterSessionKey ?? "?";
+    api.logger.info(
+      `sinain-hud: subagent spawning (child=${childKey}, parent=${parentKey}, contextCache=${cacheAge})`,
+    );
+  });
+
+  // ==========================================================================
   // Hook: gateway_start — reset all tracking on gateway restart
   // ==========================================================================
 
@@ -727,6 +903,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     outageStartTs = 0;
     consecutiveHeartbeatSkips = 0;
     consecutiveOverflowErrors = 0;
+    parentContextCache = null;
     api.logger.info("sinain-hud: gateway started, session + resilience tracking reset");
   });
 
@@ -738,24 +915,32 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     name: "sinain_status",
     description: "Show sinain-hud plugin status and active sessions",
     handler: () => {
-      const sessions = Array.from(sessionStates.entries()).map(
-        ([key, state]) => ({
-          sessionKey: key,
-          uptime: Math.round((Date.now() - state.startedAt) / 1000),
-          toolCalls: state.toolUsage.length,
-        }),
-      );
-
       const lines: string[] = ["sinain-hud plugin active"];
 
-      // Session info
-      if (sessions.length > 0) {
-        lines.push("\nSessions:");
-        for (const s of sessions) {
-          lines.push(`- ${s.sessionKey}: ${s.uptime}s uptime, ${s.toolCalls} tool calls`);
+      // Persistent session info from disk
+      const sessionsJsonPath = getSessionsJsonPath();
+      if (sessionsJsonPath) {
+        try {
+          const sessionsData = JSON.parse(readFileSync(sessionsJsonPath, "utf-8"));
+          const keysToShow = [cfg.sessionKey, "agent:main:main"].filter(Boolean);
+          lines.push("\nSessions:");
+          for (const key of keysToShow) {
+            const s = sessionsData[key as string];
+            if (!s) continue;
+            const updatedAgo = s.updatedAt ? `${Math.round((Date.now() - s.updatedAt) / 1000)}s ago` : "?";
+            const tokens = s.contextTokens ?? "?";
+            const compactions = s.compactionCount ?? 0;
+            let transcriptSize = "?";
+            if (s.sessionFile && existsSync(s.sessionFile)) {
+              transcriptSize = `${Math.round(statSync(s.sessionFile).size / 1024)}KB`;
+            }
+            lines.push(`- ${key}: updated ${updatedAgo}, ${tokens} tokens, ${compactions} compactions, transcript ${transcriptSize}`);
+          }
+        } catch {
+          lines.push("No session data available.");
         }
       } else {
-        lines.push("No active sessions.");
+        lines.push("No session data available (workspace not set).");
       }
 
       // Resilience info
@@ -766,6 +951,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       lines.push(`- Last success: ${lastSuccessTs > 0 ? `${Math.round((Date.now() - lastSuccessTs) / 1000)}s ago` : "never"}`);
       lines.push(`- Heartbeat skips: ${consecutiveHeartbeatSkips}`);
       lines.push(`- Overflow watchdog: ${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`);
+      lines.push(`- Parent context cache: ${parentContextCache ? `${parentContextCache.contextText.length} chars, ${Math.round((Date.now() - parentContextCache.capturedAt) / 1000)}s old` : "empty"}`);
 
       return { text: lines.join("\n") };
     },
