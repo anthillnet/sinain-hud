@@ -57,6 +57,17 @@ type SessionState = {
 
 const PRIVATE_TAG_RE = /<private>[\s\S]*?<\/private>/g;
 
+// ============================================================================
+// Retry storm resilience constants
+// ============================================================================
+
+const ERROR_WINDOW_MS = 5 * 60_000;           // 5-min sliding window for error rate
+const OUTAGE_ERROR_RATE_THRESHOLD = 0.8;       // 80% failure → outage detected
+const OUTAGE_MIN_SAMPLES = 3;                  // need ≥3 samples before threshold applies
+const FILE_SYNC_DEBOUNCE_MS = 3 * 60_000;     // skip file sync if done <3 min ago
+const PLAYBOOK_GEN_DEBOUNCE_MS = 5 * 60_000;  // skip playbook gen if done <5 min ago
+const SHORT_FAILURE_THRESHOLD_MS = 10_000;     // fails in <10s = likely API error
+
 function stripPrivateTags(text: string): string {
   return text.replace(PRIVATE_TAG_RE, "").trim();
 }
@@ -103,9 +114,10 @@ function syncFileToWorkspace(
 }
 
 /**
- * Sync a source directory to the workspace with selective overwrite policy:
- * - .json, .sh, .txt — always overwritten (infra/config files we control)
- * - .py — deploy-once only (skip if already exists; bot owns these after first deploy)
+ * Recursively sync a source directory to the workspace with selective overwrite policy:
+ * - .json, .sh, .txt, .jsonl — always overwritten (infra/config files we control)
+ * - .py and others — deploy-once only (skip if already exists; bot owns these after first deploy)
+ * Skips __pycache__ and hidden directories.
  */
 function syncDirToWorkspace(
   sourceDir: string,
@@ -117,29 +129,34 @@ function syncDirToWorkspace(
   const targetDir = join(workspaceDir, targetDirName);
   if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
-  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt"]);
+  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt", ".jsonl"]);
   let synced = 0;
 
-  for (const entry of readdirSync(sourceDir)) {
-    const srcPath = join(sourceDir, entry);
-    if (!statSync(srcPath).isFile()) continue;
-
-    const targetPath = join(targetDir, entry);
-    const ext = extname(entry).toLowerCase();
-
-    // Deploy-once files: skip if already present in workspace
-    if (!ALWAYS_OVERWRITE.has(ext) && existsSync(targetPath)) {
-      continue;
-    }
-
-    const content = readFileSync(srcPath, "utf-8");
-    let existing = "";
-    try { existing = readFileSync(targetPath, "utf-8"); } catch {}
-    if (existing !== content) {
-      writeFileSync(targetPath, content, "utf-8");
-      synced++;
+  function syncRecursive(srcDir: string, dstDir: string): void {
+    if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
+    for (const entry of readdirSync(srcDir)) {
+      const srcPath = join(srcDir, entry);
+      const dstPath = join(dstDir, entry);
+      const stat = statSync(srcPath);
+      if (stat.isDirectory()) {
+        if (entry.startsWith("__") || entry.startsWith(".")) continue;
+        syncRecursive(srcPath, dstPath);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const ext = extname(entry).toLowerCase();
+      if (!ALWAYS_OVERWRITE.has(ext) && existsSync(dstPath)) continue;
+      const content = readFileSync(srcPath, "utf-8");
+      let existing = "";
+      try { existing = readFileSync(dstPath, "utf-8"); } catch {}
+      if (existing !== content) {
+        writeFileSync(dstPath, content, "utf-8");
+        synced++;
+      }
     }
   }
+
+  syncRecursive(sourceDir, targetDir);
   if (synced > 0) logger.info(`sinain-hud: synced ${synced} files to ${targetDirName}/`);
   return synced;
 }
@@ -297,6 +314,28 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   let curationInterval: ReturnType<typeof setInterval> | null = null;
   let lastWorkspaceDir: string | null = null;
   let consecutiveHeartbeatSkips = 0;
+  let lastEvalReportDate: string | null = null;
+
+  // Retry storm resilience state
+  const recentOutcomes: Array<{ ts: number; success: boolean; error?: string }> = [];
+  let lastSuccessTs = 0;
+  let lastPlaybookGenTs = 0;
+  let lastFileSyncTs = 0;
+  let outageDetected = false;
+  let consecutiveFailures = 0;
+  let outageStartTs = 0;
+
+  function computeErrorRate(): { rate: number; total: number; failures: number } {
+    const cutoff = Date.now() - ERROR_WINDOW_MS;
+    // Prune entries older than the window
+    while (recentOutcomes.length > 0 && recentOutcomes[0].ts < cutoff) {
+      recentOutcomes.shift();
+    }
+    const total = recentOutcomes.length;
+    if (total === 0) return { rate: 0, total: 0, failures: 0 };
+    const failures = recentOutcomes.filter((o) => !o.success).length;
+    return { rate: failures / total, total, failures };
+  }
 
   api.logger.info("sinain-hud: plugin registered");
 
@@ -331,40 +370,64 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
     }
 
-    // Sync HEARTBEAT.md and SKILL.md from local source to workspace
-    const heartbeatSource = cfg.heartbeatPath
-      ? api.resolvePath(cfg.heartbeatPath)
-      : undefined;
-    const skillSource = cfg.skillPath
-      ? api.resolvePath(cfg.skillPath)
-      : undefined;
+    const now = Date.now();
 
-    syncFileToWorkspace(heartbeatSource, workspaceDir, "HEARTBEAT.md", api.logger);
-    syncFileToWorkspace(skillSource, workspaceDir, "SKILL.md", api.logger);
+    // ── Debounced file sync (skip if done <3 min ago) ───────────────────
+    const fileSyncDue = lastFileSyncTs === 0 || (now - lastFileSyncTs) >= FILE_SYNC_DEBOUNCE_MS;
+    if (fileSyncDue) {
+      const heartbeatSource = cfg.heartbeatPath
+        ? api.resolvePath(cfg.heartbeatPath)
+        : undefined;
+      const skillSource = cfg.skillPath
+        ? api.resolvePath(cfg.skillPath)
+        : undefined;
 
-    // Sync sinain-koog/ scripts
-    const koogSource = cfg.koogPath ? api.resolvePath(cfg.koogPath) : undefined;
-    if (koogSource) {
-      syncDirToWorkspace(koogSource, workspaceDir, "sinain-koog", api.logger);
-      // Make git_backup.sh executable
-      const gbPath = join(workspaceDir, "sinain-koog", "git_backup.sh");
-      if (existsSync(gbPath)) try { chmodSync(gbPath, 0o755); } catch {}
+      syncFileToWorkspace(heartbeatSource, workspaceDir, "HEARTBEAT.md", api.logger);
+      syncFileToWorkspace(skillSource, workspaceDir, "SKILL.md", api.logger);
+
+      const koogSource = cfg.koogPath ? api.resolvePath(cfg.koogPath) : undefined;
+      if (koogSource) {
+        syncDirToWorkspace(koogSource, workspaceDir, "sinain-koog", api.logger);
+        const gbPath = join(workspaceDir, "sinain-koog", "git_backup.sh");
+        if (existsSync(gbPath)) try { chmodSync(gbPath, 0o755); } catch {}
+      }
+
+      const modulesSource = cfg.modulesPath ? api.resolvePath(cfg.modulesPath) : undefined;
+      if (modulesSource && existsSync(modulesSource)) {
+        syncModulesToWorkspace(modulesSource, workspaceDir, api.logger);
+      }
+
+      lastFileSyncTs = now;
     }
 
-    // Sync modules and generate effective playbook
-    const modulesSource = cfg.modulesPath ? api.resolvePath(cfg.modulesPath) : undefined;
-    if (modulesSource && existsSync(modulesSource)) {
-      syncModulesToWorkspace(modulesSource, workspaceDir, api.logger);
-      generateEffectivePlaybook(workspaceDir, api.logger);
+    // ── Debounced playbook generation (skip if done <5 min ago) ─────────
+    const playbookGenDue = lastPlaybookGenTs === 0 || (now - lastPlaybookGenTs) >= PLAYBOOK_GEN_DEBOUNCE_MS;
+    if (playbookGenDue) {
+      const modulesSource = cfg.modulesPath ? api.resolvePath(cfg.modulesPath) : undefined;
+      if (modulesSource && existsSync(modulesSource)) {
+        generateEffectivePlaybook(workspaceDir, api.logger);
+        lastPlaybookGenTs = now;
+      }
     }
 
-    // Ensure memory directories exist
+    // ── Memory dirs — always run (cheap, idempotent) ────────────────────
     for (const dir of ["memory", "memory/playbook-archive", "memory/playbook-logs",
                         "memory/eval-logs", "memory/eval-reports"]) {
       const fullPath = join(workspaceDir, dir);
       if (!existsSync(fullPath)) {
         mkdirSync(fullPath, { recursive: true });
       }
+    }
+
+    // ── Recovery context injection after outage ─────────────────────────
+    if (outageStartTs > 0 && !outageDetected && lastSuccessTs > outageStartTs) {
+      const outageDurationMin = Math.round((lastSuccessTs - outageStartTs) / 60_000);
+      outageStartTs = 0; // one-shot: only inject once
+      api.logger.info(`sinain-hud: injecting recovery context (outage lasted ~${outageDurationMin}min)`);
+      return {
+        prependContext: `[SYSTEM] The upstream API was unavailable for ~${outageDurationMin} minutes. ` +
+          `Multiple queued messages may have accumulated. Prioritize the current task, skip catch-up on stale items, and keep responses concise.`,
+      };
     }
   });
 
@@ -443,15 +506,49 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     const durationMs = event.durationMs ?? (Date.now() - state.startedAt);
     const toolCount = state.toolUsage.length;
+    const isSuccess = event.success === true;
+    const isShortFailure = !isSuccess && durationMs < SHORT_FAILURE_THRESHOLD_MS;
 
-    // Count tool usage by name
+    // ── Retry storm: track outcome ──────────────────────────────────────
+    recentOutcomes.push({
+      ts: Date.now(),
+      success: isSuccess,
+      error: isSuccess ? undefined : String(event.error ?? "unknown"),
+    });
+
+    if (isSuccess) {
+      const wasOutage = outageDetected;
+      const outageDurationMs = outageStartTs > 0 ? Date.now() - outageStartTs : 0;
+      consecutiveFailures = 0;
+      outageDetected = false;
+      lastSuccessTs = Date.now();
+      if (wasOutage) {
+        api.logger.info(
+          `sinain-hud: OUTAGE RECOVERED — resumed after ${Math.round(outageDurationMs / 1000)}s`,
+        );
+        outageStartTs = 0;
+      }
+    } else if (isShortFailure) {
+      consecutiveFailures++;
+      const { rate, total } = computeErrorRate();
+      if (!outageDetected && total >= OUTAGE_MIN_SAMPLES && rate >= OUTAGE_ERROR_RATE_THRESHOLD) {
+        outageDetected = true;
+        outageStartTs = Date.now();
+        api.logger.warn(
+          `sinain-hud: OUTAGE DETECTED — ${Math.round(rate * 100)}% error rate over ${total} samples, ${consecutiveFailures} consecutive failures`,
+        );
+      }
+    }
+
+    // ── Count tool usage by name ────────────────────────────────────────
     const toolCounts: Record<string, number> = {};
     for (const usage of state.toolUsage) {
       toolCounts[usage.toolName] = (toolCounts[usage.toolName] ?? 0) + 1;
     }
 
-    // Write session summary to workspace
-    if (state.workspaceDir) {
+    // ── Write session summary (skip during outage — noise reduction) ───
+    const skipSummary = outageDetected && isShortFailure;
+    if (state.workspaceDir && !skipSummary) {
       const summaryPath = join(
         state.workspaceDir,
         "memory",
@@ -475,7 +572,6 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         if (!existsSync(dir)) {
           mkdirSync(dir, { recursive: true });
         }
-        // Fire-and-forget append
         writeFileSync(summaryPath, JSON.stringify(summary) + "\n", {
           flag: "a",
         });
@@ -489,9 +585,14 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
     }
 
-    // Heartbeat compliance validation
+    // ── Heartbeat compliance (exempt during outage) ─────────────────────
     if ((ctx as Record<string, unknown>).messageProvider === "heartbeat") {
-      if (!state.heartbeatToolCalled) {
+      if (outageDetected && isShortFailure) {
+        // Agent couldn't even process the prompt — don't count as a skip
+        api.logger.info(
+          `sinain-hud: heartbeat compliance exempted (outage active, ${Math.round(durationMs / 1000)}s run)`,
+        );
+      } else if (!state.heartbeatToolCalled) {
         consecutiveHeartbeatSkips++;
         api.logger.warn(
           `sinain-hud: heartbeat compliance violation — tool not called (consecutive: ${consecutiveHeartbeatSkips})`,
@@ -524,7 +625,16 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
   api.on("gateway_start", async () => {
     sessionStates.clear();
-    api.logger.info("sinain-hud: gateway started, session tracking reset");
+    // Reset all resilience state — clean slate on restart
+    recentOutcomes.length = 0;
+    lastSuccessTs = 0;
+    lastPlaybookGenTs = 0;
+    lastFileSyncTs = 0;
+    outageDetected = false;
+    consecutiveFailures = 0;
+    outageStartTs = 0;
+    consecutiveHeartbeatSkips = 0;
+    api.logger.info("sinain-hud: gateway started, session + resilience tracking reset");
   });
 
   // ==========================================================================
@@ -543,16 +653,27 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         }),
       );
 
-      const text = sessions.length > 0
-        ? `sinain-hud plugin active\n\nSessions:\n${sessions
-            .map(
-              (s) =>
-                `- ${s.sessionKey}: ${s.uptime}s uptime, ${s.toolCalls} tool calls`,
-            )
-            .join("\n")}`
-        : "sinain-hud plugin active, no active sessions";
+      const lines: string[] = ["sinain-hud plugin active"];
 
-      return { text };
+      // Session info
+      if (sessions.length > 0) {
+        lines.push("\nSessions:");
+        for (const s of sessions) {
+          lines.push(`- ${s.sessionKey}: ${s.uptime}s uptime, ${s.toolCalls} tool calls`);
+        }
+      } else {
+        lines.push("No active sessions.");
+      }
+
+      // Resilience info
+      const { rate, total, failures } = computeErrorRate();
+      lines.push("\n**Resilience**");
+      lines.push(`- Outage: ${outageDetected ? `ACTIVE (${Math.round((Date.now() - outageStartTs) / 1000)}s, ${consecutiveFailures} consecutive failures)` : "clear"}`);
+      lines.push(`- Error rate: ${Math.round(rate * 100)}% (${failures}/${total} in ${ERROR_WINDOW_MS / 60_000}min window)`);
+      lines.push(`- Last success: ${lastSuccessTs > 0 ? `${Math.round((Date.now() - lastSuccessTs) / 1000)}s ago` : "never"}`);
+      lines.push(`- Heartbeat skips: ${consecutiveHeartbeatSkips}`);
+
+      return { text: lines.join("\n") };
     },
   });
 
@@ -897,6 +1018,28 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   );
 
   // ==========================================================================
+  // Effectiveness footer update
+  // ==========================================================================
+
+  function updateEffectivenessFooter(
+    workspaceDir: string,
+    effectiveness: Record<string, unknown>,
+  ): void {
+    const playbookPath = join(workspaceDir, "memory", "sinain-playbook.md");
+    if (!existsSync(playbookPath)) return;
+    let content = readFileSync(playbookPath, "utf-8");
+    const today = new Date().toISOString().slice(0, 10);
+    const newFooter = `<!-- effectiveness: outputs=${effectiveness.outputs ?? 0}, positive=${effectiveness.positive ?? 0}, negative=${effectiveness.negative ?? 0}, neutral=${effectiveness.neutral ?? 0}, rate=${effectiveness.rate ?? 0}, updated=${today} -->`;
+    const footerRe = /<!--\s*effectiveness:[^>]+-->/;
+    if (footerRe.test(content)) {
+      content = content.replace(footerRe, newFooter);
+    } else {
+      content = content.trimEnd() + "\n\n" + newFooter + "\n";
+    }
+    writeFileSync(playbookPath, content, "utf-8");
+  }
+
+  // ==========================================================================
   // Curation pipeline (runs on 30-min timer)
   // ==========================================================================
 
@@ -954,8 +1097,35 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     }
     const curator = await runScript(curatorArgs);
 
-    // Step 4: Regenerate effective playbook after curation
+    // Step 4: Update effectiveness footer with fresh metrics
+    const effectiveness = (feedback as Record<string, unknown> | null)?.effectiveness;
+    if (effectiveness && typeof effectiveness === "object") {
+      try {
+        updateEffectivenessFooter(workspaceDir, effectiveness as Record<string, unknown>);
+      } catch (err) {
+        api.logger.warn(`sinain-hud: effectiveness footer update failed: ${String(err)}`);
+      }
+    }
+
+    // Step 5: Regenerate effective playbook after curation
     generateEffectivePlaybook(workspaceDir, api.logger);
+
+    // Step 6: Tick evaluation (runs mechanical + sampled judges)
+    await runScript([
+      "sinain-koog/tick_evaluator.py",
+      "--memory-dir", "memory/",
+    ], 120_000);
+
+    // Step 7: Daily eval report (run once per day after 03:00 UTC)
+    const nowUTC = new Date();
+    const todayStr = nowUTC.toISOString().slice(0, 10);
+    if (nowUTC.getUTCHours() >= 3 && lastEvalReportDate !== todayStr) {
+      await runScript([
+        "sinain-koog/eval_reporter.py",
+        "--memory-dir", "memory/",
+      ], 120_000);
+      lastEvalReportDate = todayStr;
+    }
 
     // Log result
     const changes = (curator as Record<string, unknown> | null)?.changes ?? "unknown";
@@ -976,6 +1146,13 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       );
       // Start curation timer — runs every 30 minutes
       curationInterval = setInterval(async () => {
+        // Skip curation during outage — scripts would work (OpenRouter) but
+        // results are wasted when no agent runs succeed
+        if (outageDetected) {
+          api.logger.info("sinain-hud: curation skipped — outage active");
+          return;
+        }
+
         // Find workspace dir from active sessions or last known
         let workspaceDir: string | undefined;
         for (const state of sessionStates.values()) {
