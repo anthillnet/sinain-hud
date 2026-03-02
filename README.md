@@ -104,6 +104,8 @@ Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behav
 | `Cmd+Shift+E` | Cycle HUD tab (Stream ↔ Agent) |
 | `Cmd+Shift+Up` | Scroll feed up (pauses auto-scroll) |
 | `Cmd+Shift+Down` | Scroll feed down (resumes auto-scroll at bottom) |
+| `Cmd+Shift+P` | Toggle position (bottom-right ↔ top-right) |
+| `Cmd+Shift+Y` | Copy target message to clipboard |
 
 ## Display Modes
 

@@ -43,6 +43,11 @@ macos/Runner/
   - `⌘⇧A` — Toggle audio feed on HUD
   - `⌘⇧↑` — Scroll feed up
   - `⌘⇧↓` — Scroll feed down
+  - `⌘⇧S` — Toggle screen capture pipeline
+  - `⌘⇧V` — Toggle screen feed on HUD
+  - `⌘⇧E` — Cycle HUD tab (Stream ↔ Agent)
+  - `⌘⇧P` — Toggle position (bottom-right ↔ top-right)
+  - `⌘⇧Y` — Copy target message to clipboard
 - **WebSocket bridge** — Connects to `ws://localhost:9500` with auto-reconnect
 - **LSUIElement** — Hidden from Dock and Cmd+Tab
 

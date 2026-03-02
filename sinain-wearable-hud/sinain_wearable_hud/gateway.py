@@ -155,6 +155,8 @@ class OpenClawGateway:
                 "params": {
                     "minProtocol": 3,
                     "maxProtocol": 3,
+                    "role": "operator",
+                    "scopes": ["operator.read", "operator.write"],
                     "client": {
                         "id": "gateway-client",
                         "displayName": "Sinain Wearable HUD",
@@ -241,6 +243,7 @@ class OpenClawGateway:
                 "sessionKey": self.session_key,
                 "idempotencyKey": idempotency_key,
                 "deliver": False,
+                "responseTarget": "self",
             },
         })
         log.debug("[%s] agent RPC sent (id=%s): %s", TAG, rpc_id, message[:100])
