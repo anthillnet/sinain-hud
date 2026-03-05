@@ -317,7 +317,7 @@ function syncModulesToWorkspace(
   if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
   const ALWAYS_OVERWRITE = new Set(["manifest.json"]);
-  const DEPLOY_ONCE = new Set(["module-registry.json", "patterns.md"]);
+  const DEPLOY_ONCE = new Set(["module-registry.json", "patterns.md", "guidance.md"]);
   let synced = 0;
 
   function syncRecursive(srcDir: string, dstDir: string): void {
@@ -358,6 +358,72 @@ function syncModulesToWorkspace(
   syncRecursive(sourceDir, targetDir);
   if (synced > 0) logger.info(`sinain-hud: synced ${synced} module files to modules/`);
   return synced;
+}
+
+/**
+ * Collect behavioral guidance from all active modules for prependContext injection.
+ *
+ * Reads module-registry.json, collects guidance.md from each active module
+ * (sorted by priority desc). Imported modules get a [transferred] label.
+ * Returns a formatted [MODULE GUIDANCE] block or empty string.
+ */
+function collectModuleGuidance(
+  workspaceDir: string,
+  logger: OpenClawPluginApi["logger"],
+): string {
+  const registryPath = join(workspaceDir, "modules", "module-registry.json");
+  if (!existsSync(registryPath)) return "";
+
+  let registry: ModuleRegistry;
+  try {
+    registry = JSON.parse(readFileSync(registryPath, "utf-8")) as ModuleRegistry;
+  } catch {
+    return "";
+  }
+
+  // Active modules sorted by priority desc
+  const activeModules: Array<{ id: string; priority: number }> = [];
+  for (const [id, entry] of Object.entries(registry.modules)) {
+    if (entry.status === "active") {
+      activeModules.push({ id, priority: entry.priority });
+    }
+  }
+  activeModules.sort((a, b) => b.priority - a.priority);
+
+  const guidanceSections: string[] = [];
+  let moduleCount = 0;
+
+  for (const mod of activeModules) {
+    const guidancePath = join(workspaceDir, "modules", mod.id, "guidance.md");
+    if (!existsSync(guidancePath)) continue;
+
+    try {
+      const content = readFileSync(guidancePath, "utf-8").trim();
+      if (!content) continue;
+
+      // Check if module was imported (transferred)
+      let label = mod.id;
+      const manifestPath = join(workspaceDir, "modules", mod.id, "manifest.json");
+      if (existsSync(manifestPath)) {
+        try {
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+          if (manifest.importedAt) {
+            label = `${manifest.name || mod.id} [transferred]`;
+          }
+        } catch { /* skip */ }
+      }
+
+      guidanceSections.push(`### ${label}\n${content}`);
+      moduleCount++;
+    } catch {
+      // Skip unreadable guidance
+    }
+  }
+
+  if (guidanceSections.length === 0) return "";
+
+  logger.info(`sinain-hud: injecting guidance from ${moduleCount} module(s)`);
+  return `[MODULE GUIDANCE]\n${guidanceSections.join("\n\n")}`;
 }
 
 /**
@@ -409,6 +475,16 @@ function generateEffectivePlaybook(
       const patterns = readFileSync(patternsPath, "utf-8").trim();
       if (patterns) {
         sections.push(`<!-- module: ${mod.id} (priority ${mod.priority}) -->`);
+        // Attribution for transferred (imported) modules
+        const manifestPath = join(workspaceDir, "modules", mod.id, "manifest.json");
+        if (existsSync(manifestPath)) {
+          try {
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+            if (manifest.importedAt) {
+              sections.push(`> *[Transferred knowledge: ${manifest.name || mod.id}]*`);
+            }
+          } catch { /* skip if manifest unreadable */ }
+        }
         sections.push(patterns);
         sections.push("");
       }
@@ -762,6 +838,24 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         if (content) contextParts.push(`[SITUATION]\n${content}`);
       } catch {}
     }
+
+    // Knowledge transfer attribution — if effective playbook contains imported modules
+    const effectivePlaybookPath = join(workspaceDir, "memory", "sinain-playbook-effective.md");
+    if (existsSync(effectivePlaybookPath)) {
+      try {
+        const effectiveContent = readFileSync(effectivePlaybookPath, "utf-8");
+        if (effectiveContent.includes("[Transferred knowledge:")) {
+          contextParts.push(
+            "[KNOWLEDGE TRANSFER] Some patterns in your playbook were transferred from " +
+            "another sinain instance. When surfacing these, briefly cite their origin."
+          );
+        }
+      } catch { /* skip if unreadable */ }
+    }
+
+    // Module guidance injection — behavioral instructions from active modules
+    const moduleGuidance = collectModuleGuidance(workspaceDir, api.logger);
+    if (moduleGuidance) contextParts.push(moduleGuidance);
 
     // Synchronous: knowledge graph context (10s timeout, skipped on failure)
     try {

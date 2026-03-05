@@ -2,10 +2,14 @@
 """Module Manager — CLI for managing sinain knowledge modules.
 
 Management subcommands (no LLM):
-    list, activate, suspend, priority, stack, info
+    list, activate, suspend, priority, stack, info, guidance
 
 Extraction subcommand (uses LLM):
     extract — reads playbook + logs, uses LLM to extract domain patterns
+
+Transfer subcommands (no LLM):
+    export — package a module as a portable .sinain-module.json bundle
+    import — import a module from a .sinain-module.json bundle
 
 Usage:
     python3 module_manager.py --modules-dir modules/ list
@@ -14,8 +18,16 @@ Usage:
     python3 module_manager.py --modules-dir modules/ priority react-native-dev 90
     python3 module_manager.py --modules-dir modules/ stack
     python3 module_manager.py --modules-dir modules/ info react-native-dev
+    python3 module_manager.py --modules-dir modules/ guidance react-native-dev
+    python3 module_manager.py --modules-dir modules/ guidance react-native-dev \\
+        --set "When user asks about hot reload, suggest Hermes bytecode caching"
+    python3 module_manager.py --modules-dir modules/ guidance react-native-dev --clear
     python3 module_manager.py --modules-dir modules/ extract new-domain \\
         --domain "description" --memory-dir memory/ [--min-score 0.3]
+    python3 module_manager.py --modules-dir modules/ export ocr-pipeline \\
+        [--output /tmp/ocr.sinain-module.json]
+    python3 module_manager.py --modules-dir modules/ import bundle.sinain-module.json \\
+        [--activate] [--force]
 """
 
 import argparse
@@ -246,12 +258,52 @@ def cmd_info(modules_dir: Path, args: argparse.Namespace) -> None:
     if patterns_path.exists():
         patterns_lines = len(patterns_path.read_text(encoding="utf-8").splitlines())
 
+    guidance_path = modules_dir / module_id / "guidance.md"
+    guidance_chars = 0
+    if guidance_path.exists():
+        guidance_chars = len(guidance_path.read_text(encoding="utf-8"))
+
     print(json.dumps({
         "id": module_id,
         "manifest": manifest,
         "registry": entry if entry else None,
         "patternsLines": patterns_lines,
         "patternsPath": str(patterns_path),
+        "guidanceChars": guidance_chars,
+    }, ensure_ascii=False))
+
+
+def cmd_guidance(modules_dir: Path, args: argparse.Namespace) -> None:
+    """View, set, or clear per-module behavioral guidance."""
+    module_id = args.module_id
+    module_dir = modules_dir / module_id
+    manifest = _load_manifest(modules_dir, module_id)
+    if not manifest:
+        _error(f"Module '{module_id}' not found (no manifest.json in {module_dir})")
+
+    guidance_path = module_dir / "guidance.md"
+
+    if args.clear:
+        if guidance_path.exists():
+            guidance_path.unlink()
+        print(json.dumps({"module": module_id, "guidance": "", "cleared": True}, ensure_ascii=False))
+        return
+
+    if args.set is not None:
+        guidance_path.write_text(args.set, encoding="utf-8")
+        print(json.dumps({
+            "module": module_id,
+            "guidanceChars": len(args.set),
+            "written": True,
+        }, ensure_ascii=False))
+        return
+
+    # Default: view
+    guidance = guidance_path.read_text(encoding="utf-8") if guidance_path.exists() else ""
+    print(json.dumps({
+        "module": module_id,
+        "hasGuidance": bool(guidance),
+        "guidance": guidance,
     }, ensure_ascii=False))
 
 
@@ -299,6 +351,14 @@ def cmd_extract(modules_dir: Path, args: argparse.Namespace) -> None:
     if not playbook and not recent_logs:
         _error("No playbook or logs found — nothing to extract from")
 
+    # Enrich with knowledge graph context (optional, degrades gracefully)
+    kg_context = ""
+    try:
+        from triple_query import get_related_context
+        kg_context = get_related_context(str(memory_dir), [domain], max_chars=1000)
+    except Exception:
+        pass  # triple store unavailable — proceed without
+
     # Build user prompt
     parts = [f"## Domain: {domain}"]
     if playbook:
@@ -314,6 +374,8 @@ def cmd_extract(modules_dir: Path, args: argparse.Namespace) -> None:
                 "output": entry.get("output"),
             }, ensure_ascii=False))
         parts.append(f"\n## Recent Log Entries (last 7 days)\n" + "\n".join(log_entries))
+    if kg_context:
+        parts.append(f"\n## Knowledge Graph Context\n{kg_context}")
     if min_score:
         parts.append(f"\n## Minimum Score Filter: {min_score}")
 
@@ -396,6 +458,153 @@ def cmd_extract(modules_dir: Path, args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Subcommands: export / import (portable bundles)
+# ---------------------------------------------------------------------------
+
+def cmd_export(modules_dir: Path, args: argparse.Namespace) -> None:
+    """Export a module as a portable .sinain-module.json bundle."""
+    module_id = args.module_id
+    module_dir = modules_dir / module_id
+
+    manifest = _load_manifest(modules_dir, module_id)
+    if not manifest:
+        _error(f"Module '{module_id}' not found (no manifest.json)")
+
+    # Read patterns
+    patterns_path = module_dir / "patterns.md"
+    patterns = patterns_path.read_text(encoding="utf-8") if patterns_path.exists() else ""
+
+    # Read guidance
+    guidance_path = module_dir / "guidance.md"
+    guidance = guidance_path.read_text(encoding="utf-8") if guidance_path.exists() else ""
+
+    # Read context files
+    context = {}
+    context_dir = module_dir / "context"
+    if context_dir.is_dir():
+        for f in sorted(context_dir.iterdir()):
+            if f.is_file():
+                try:
+                    context[f.name] = f.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    pass  # skip binary files
+
+    bundle = {
+        "format": "sinain-module-v1",
+        "moduleId": module_id,
+        "exportedAt": _now_iso(),
+        "manifest": manifest,
+        "patterns": patterns,
+        "guidance": guidance,
+        "context": context,
+    }
+
+    output_path = Path(args.output) if args.output else Path(f"{module_id}.sinain-module.json")
+    output_path.write_text(json.dumps(bundle, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    print(json.dumps({
+        "exported": module_id,
+        "outputPath": str(output_path),
+        "patternsChars": len(patterns),
+        "guidanceChars": len(guidance),
+        "contextFiles": len(context),
+    }, ensure_ascii=False))
+
+
+def cmd_import(modules_dir: Path, args: argparse.Namespace) -> None:
+    """Import a module from a .sinain-module.json bundle."""
+    bundle_path = Path(args.bundle)
+    if not bundle_path.exists():
+        _error(f"Bundle file not found: {bundle_path}")
+
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        _error(f"Invalid bundle file: {e}")
+
+    # Validate format
+    if bundle.get("format") != "sinain-module-v1":
+        _error(f"Unknown bundle format: {bundle.get('format')} (expected sinain-module-v1)")
+
+    module_id = bundle.get("moduleId")
+    if not module_id:
+        _error("Bundle missing moduleId")
+
+    module_dir = modules_dir / module_id
+
+    # Check for existing module
+    if module_dir.exists() and not args.force:
+        _error(f"Module '{module_id}' already exists. Use --force to overwrite.")
+
+    # Create module directory
+    module_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write manifest (stamp with import metadata)
+    manifest = bundle.get("manifest", {})
+    manifest["importedAt"] = _now_iso()
+    manifest["source"] = "module_manager import"
+    manifest["importedFrom"] = str(bundle_path.name)
+    (module_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    # Write patterns
+    patterns = bundle.get("patterns", "")
+    if patterns:
+        (module_dir / "patterns.md").write_text(patterns, encoding="utf-8")
+
+    # Write guidance
+    guidance = bundle.get("guidance", "")
+    if guidance:
+        (module_dir / "guidance.md").write_text(guidance, encoding="utf-8")
+
+    # Write context files
+    context = bundle.get("context", {})
+    if context:
+        context_dir = module_dir / "context"
+        context_dir.mkdir(exist_ok=True)
+        for fname, content in context.items():
+            (context_dir / fname).write_text(content, encoding="utf-8")
+
+    # Register in registry
+    registry = _load_registry(modules_dir)
+    status = "active" if args.activate else "suspended"
+    priority = manifest.get("priority", {}).get("default", 70) if isinstance(manifest.get("priority"), dict) else 70
+    registry.setdefault("modules", {})[module_id] = {
+        "status": status,
+        "priority": priority,
+        "activatedAt": _now_iso() if args.activate else None,
+        "lastTriggered": None,
+        "locked": False,
+    }
+    _save_registry(modules_dir, registry)
+
+    # If activating, fire-and-forget KG ingestion (same as cmd_activate)
+    if args.activate:
+        import subprocess
+        try:
+            subprocess.run(
+                ["python3", "triple_ingest.py", "--memory-dir",
+                 str(modules_dir.parent / "memory"),
+                 "--ingest-module", module_id, "--modules-dir", str(modules_dir),
+                 "--embed"],
+                capture_output=True, timeout=15,
+                cwd=str(Path(__file__).parent),
+            )
+        except Exception:
+            pass
+
+    print(json.dumps({
+        "imported": module_id,
+        "status": status,
+        "priority": priority,
+        "patternsChars": len(patterns),
+        "contextFiles": len(context),
+        "modulePath": str(module_dir),
+    }, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -435,12 +644,29 @@ def main():
     p_info = subparsers.add_parser("info", help="Show module details")
     p_info.add_argument("module_id", help="Module ID")
 
+    # guidance
+    p_guid = subparsers.add_parser("guidance", help="View/set/clear per-module behavioral guidance")
+    p_guid.add_argument("module_id", help="Module ID")
+    p_guid.add_argument("--set", default=None, help="Set guidance text")
+    p_guid.add_argument("--clear", action="store_true", help="Clear guidance")
+
     # extract
     p_ext = subparsers.add_parser("extract", help="Extract domain patterns using LLM")
     p_ext.add_argument("module_id", help="Module ID to create")
     p_ext.add_argument("--domain", required=True, help="Domain description")
     p_ext.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     p_ext.add_argument("--min-score", type=float, default=0.3, help="Minimum pattern score (default: 0.3)")
+
+    # export
+    p_exp = subparsers.add_parser("export", help="Export module as portable bundle")
+    p_exp.add_argument("module_id", help="Module ID to export")
+    p_exp.add_argument("--output", default=None, help="Output file path (default: <id>.sinain-module.json)")
+
+    # import
+    p_imp = subparsers.add_parser("import", help="Import module from portable bundle")
+    p_imp.add_argument("bundle", help="Path to .sinain-module.json bundle file")
+    p_imp.add_argument("--activate", action="store_true", help="Activate module immediately after import")
+    p_imp.add_argument("--force", action="store_true", help="Overwrite existing module")
 
     args = parser.parse_args()
 
@@ -451,7 +677,10 @@ def main():
         "priority": cmd_priority,
         "stack": cmd_stack,
         "info": cmd_info,
+        "guidance": cmd_guidance,
         "extract": cmd_extract,
+        "export": cmd_export,
+        "import": cmd_import,
     }
 
     handler = commands.get(args.command)

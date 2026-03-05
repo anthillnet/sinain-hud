@@ -95,6 +95,10 @@ def _build_embed_text(entity_id: str, attrs: dict[str, list[str]]) -> str:
         priority = attrs.get("priority", ["medium"])[0]
         return f"signal: {desc} (priority: {priority})" if desc else ""
 
+    if etype == "guidance":
+        text = attrs.get("text", [""])[0]
+        return f"guidance: {text}" if text else ""
+
     if etype == "module":
         name = attrs.get("name", [""])[0]
         description = attrs.get("description", [""])[0]
@@ -171,11 +175,12 @@ def cmd_mining(args: argparse.Namespace) -> None:
 
 
 def cmd_module(args: argparse.Namespace) -> None:
-    """Ingest a module's patterns into the triple store."""
+    """Ingest a module's patterns and guidance into the triple store."""
     modules_dir = Path(args.modules_dir)
     module_id = args.ingest_module
     manifest_path = modules_dir / module_id / "manifest.json"
     patterns_path = modules_dir / module_id / "patterns.md"
+    guidance_path = modules_dir / module_id / "guidance.md"
 
     if not manifest_path.exists():
         output_json({"ingested": 0, "source": "module", "error": f"manifest not found: {manifest_path}"})
@@ -183,11 +188,12 @@ def cmd_module(args: argparse.Namespace) -> None:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     patterns_text = read_file_safe(str(patterns_path))
+    guidance_text = read_file_safe(str(guidance_path))
 
     store = TripleStore(_db_path(args.memory_dir))
     try:
         extractor = TripleExtractor(store)
-        triples = extractor.extract_module(module_id, manifest, patterns_text)
+        triples = extractor.extract_module(module_id, manifest, patterns_text, guidance_text)
         tx = store.begin_tx("module_ingest", metadata={"module_id": module_id})
         count = _assert_triples(store, tx, triples)
         if args.embed:
