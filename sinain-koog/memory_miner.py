@@ -138,6 +138,16 @@ def main():
             devmatrix = devmatrix[:3000] + "\n... [truncated]"
         parts.append(f"## DevMatrix Summary\n{devmatrix}")
 
+    # Inject graph context if triple store available
+    try:
+        from triple_query import get_related_concepts
+        keywords = [Path(f).stem for f in to_mine]
+        graph_ctx = get_related_concepts(args.memory_dir, keywords)
+        if graph_ctx:
+            parts.append(f"## Knowledge Graph Context\n{graph_ctx}")
+    except ImportError:
+        pass
+
     user_prompt = "\n\n".join(parts)
 
     llm_ok = False
