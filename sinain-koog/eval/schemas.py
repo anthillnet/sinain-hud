@@ -18,7 +18,14 @@ SIGNAL_ANALYZER_SCHEMA: dict = {
     "properties": {
         "signals": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+                "type": "object",
+                "required": ["description", "priority"],
+                "properties": {
+                    "description": {"type": "string"},
+                    "priority": {"enum": ["high", "medium", "low"]},
+                },
+            },
         },
         "recommendedAction": {
             "oneOf": [
@@ -28,7 +35,7 @@ SIGNAL_ANALYZER_SCHEMA: dict = {
                     "required": ["action"],
                     "properties": {
                         "action": {"enum": ["sessions_spawn", "telegram_tip", "skip"]},
-                        "task": {"type": "string"},
+                        "task": {"oneOf": [{"type": "string"}, {"type": "null"}]},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     },
                 },
@@ -118,7 +125,7 @@ PLAYBOOK_CURATOR_SCHEMA: dict = {
 
 INSIGHT_SYNTHESIZER_SCHEMA: dict = {
     "type": "object",
-    "required": ["skip"],
+    "required": [],
     "properties": {
         "skip": {"type": "boolean"},
         "suggestion": {"type": "string"},

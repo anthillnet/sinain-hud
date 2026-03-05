@@ -53,7 +53,7 @@ def tmp_memory_dir(tmp_path):
             "ts": "2026-02-28T10:00:00Z",
             "idle": False,
             "sessionSummary": "Debugging OCR pipeline",
-            "signals": ["OCR pipeline backpressure detected"],
+            "signals": [{"description": "OCR pipeline backpressure detected", "priority": "high"}],
             "recommendedAction": {"action": "sessions_spawn", "task": "Debug OCR backpressure", "confidence": 0.8},
             "feedbackScores": {"avg": 0.35, "high": ["OCR fix"], "low": []},
             "effectiveness": {"outputs": 8, "positive": 5, "negative": 1, "neutral": 2, "rate": 0.63},
@@ -169,7 +169,7 @@ def sample_log_entry():
     return {
         "ts": "2026-02-28T10:00:00Z",
         "idle": False,
-        "signals": ["OCR pipeline backpressure detected"],
+        "signals": [{"description": "OCR pipeline backpressure detected", "priority": "high"}],
         "recommendedAction": {"action": "sessions_spawn", "task": "Debug OCR backpressure", "confidence": 0.8},
         "feedbackScores": {"avg": 0.35, "high": ["OCR fix"], "low": []},
         "effectiveness": {"outputs": 8, "positive": 5, "negative": 1, "neutral": 2, "rate": 0.63},

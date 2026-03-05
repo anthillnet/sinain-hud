@@ -226,14 +226,41 @@ async function main() {
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
 
-    getHealthPayload: () => ({
-      agent: agentLoop.getStats(),
-      escalation: escalator.getStats(),
-      transcription: transcription.getProfilingStats(),
-      situation: { path: config.situationMdPath },
-      traces: tracer ? tracer.getMetricsSummary() : null,
-      profiling: profiler.getSnapshot(),
-    }),
+    getHealthPayload: () => {
+      const escStats = escalator.getStats();
+      const warnings: string[] = [];
+
+      // Compute health warnings from escalation metrics
+      const totalAttempts = (escStats.totalDirectResponses as number) + (escStats.totalTimeouts as number);
+      const timeoutRate = totalAttempts > 0 ? (escStats.totalTimeouts as number) / totalAttempts : 0;
+
+      if (totalAttempts >= 5 && timeoutRate > 0.3) {
+        warnings.push(`high_timeout_rate: ${Math.round(timeoutRate * 100)}%`);
+      }
+      if ((escStats.consecutiveTimeouts as number) >= 3) {
+        warnings.push(`consecutive_timeouts: ${escStats.consecutiveTimeouts}`);
+      }
+      const lastResp = escStats.lastResponseTs as number;
+      if (lastResp > 0 && Date.now() - lastResp > 5 * 60 * 1000) {
+        warnings.push(`stale_responses: ${Math.round((Date.now() - lastResp) / 60000)}min`);
+      }
+      if ((escStats.totalSpawnResponses as number) > 5 && (escStats.totalDirectResponses as number) === 0) {
+        warnings.push("no_direct_responses");
+      }
+      if ((escStats.avgResponseMs as number) > 30000) {
+        warnings.push(`slow_responses: ${Math.round(escStats.avgResponseMs as number)}ms avg`);
+      }
+
+      return {
+        warnings,
+        agent: agentLoop.getStats(),
+        escalation: escStats,
+        transcription: transcription.getProfilingStats(),
+        situation: { path: config.situationMdPath },
+        traces: tracer ? tracer.getMetricsSummary() : null,
+        profiling: profiler.getSnapshot(),
+      };
+    },
 
     getAgentDigest: () => agentLoop.getDigest(),
     getAgentHistory: (limit) => agentLoop.getHistory(limit),

@@ -227,12 +227,12 @@ The 1 MB minimum guard prevents resets caused by transient API outages when the 
 
 ```bash
 # Upload updated plugin code
-scp -i ~/.ssh/id_ed25519_strato \
+scp -i ~/.ssh/<your-key> \
   sinain-hud-plugin/index.ts sinain-hud-plugin/openclaw.plugin.json \
-  root@85.214.180.247:/mnt/openclaw-state/extensions/sinain-hud/
+  root@<your-server-ip>:/mnt/openclaw-state/extensions/sinain-hud/
 
 # Restart to reload (MUST use -f flag)
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
 ```
 
@@ -240,9 +240,9 @@ ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
 
 ```bash
 # Upload to persistent source dir (plugin auto-deploys to workspace)
-scp -i ~/.ssh/id_ed25519_strato \
+scp -i ~/.ssh/<your-key> \
   skills/sinain-hud/HEARTBEAT.md \
-  root@85.214.180.247:/mnt/openclaw-state/sinain-sources/HEARTBEAT.md
+  root@<your-server-ip>:/mnt/openclaw-state/sinain-sources/HEARTBEAT.md
 
 # No restart needed — plugin syncs on next agent start
 ```
@@ -251,14 +251,14 @@ scp -i ~/.ssh/id_ed25519_strato \
 
 ```bash
 # Upload updated scripts (top-level files)
-scp -i ~/.ssh/id_ed25519_strato \
+scp -i ~/.ssh/<your-key> \
   sinain-koog/*.py sinain-koog/*.sh sinain-koog/*.json sinain-koog/*.txt \
-  root@85.214.180.247:/mnt/openclaw-state/sinain-sources/sinain-koog/
+  root@<your-server-ip>:/mnt/openclaw-state/sinain-sources/sinain-koog/
 
 # Upload eval/ subdirectory (judges, scenarios, assertions)
-scp -ri ~/.ssh/id_ed25519_strato \
+scp -ri ~/.ssh/<your-key> \
   sinain-koog/eval/ \
-  root@85.214.180.247:/mnt/openclaw-state/sinain-sources/sinain-koog/eval/
+  root@<your-server-ip>:/mnt/openclaw-state/sinain-sources/sinain-koog/eval/
 
 # No restart needed — .json/.sh/.txt/.jsonl always overwritten on agent start
 # .py files are deploy-once: only copied if not already present in workspace
@@ -268,15 +268,15 @@ scp -ri ~/.ssh/id_ed25519_strato \
 
 ```bash
 # Read current config
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cat /mnt/openclaw-state/openclaw.json'
 
 # Edit (note: em-dashes are stored as \u2014 in JSON)
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'sed -i "s|old text|new text|" /mnt/openclaw-state/openclaw.json'
 
 # Restart required after config changes
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
 ```
 
@@ -286,7 +286,7 @@ ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
 
 ```bash
 # Check gateway logs for plugin registration
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml logs --tail 50 openclaw-gateway 2>&1 | grep -i plugin'
 
 # Expected: "sinain-hud: plugin registered"

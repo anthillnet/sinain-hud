@@ -38,7 +38,7 @@ async def run(config: dict) -> None:
 
     # Gateway config
     gw_cfg = config.get("gateway", {})
-    ws_url = gw_cfg.get("ws_url", "ws://85.214.180.247:18789")
+    ws_url = gw_cfg.get("ws_url", "ws://localhost:18789")
     token = gw_cfg.get("token", "")
     session_key = gw_cfg.get("session_key", "agent:main:sinain")
 

@@ -279,7 +279,7 @@ Set the following keys:
 | Key | Source | Description |
 |-----|--------|-------------|
 | `gateway.token` | OpenClaw server `/opt/openclaw/openclaw.json` → `gateway.auth.token` | 48-char hex token for WebSocket auth |
-| `gateway.ws_url` | Your OpenClaw server | WebSocket URL, e.g. `ws://85.214.180.247:18789` |
+| `gateway.ws_url` | Your OpenClaw server | WebSocket URL, e.g. `ws://<your-server-ip>:18789` |
 | `gateway.session_key` | Your agent session | e.g. `agent:main:sinain` |
 | `ocr.api_key` | [OpenRouter](https://openrouter.ai/keys) | API key for vision OCR (starts with `sk-or-v1-`) |
 
