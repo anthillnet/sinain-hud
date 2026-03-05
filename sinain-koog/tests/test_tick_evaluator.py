@@ -27,21 +27,30 @@ from tick_evaluator import validate_tick_schemas, load_eval_config
 
 class TestSchemaValidation:
     def test_valid_signal_analyzer(self):
-        data = {"signals": ["signal1"], "recommendedAction": None, "idle": False}
+        data = {"signals": [{"description": "signal1", "priority": "high"}], "recommendedAction": None, "idle": False}
         errors = validate(data, SCHEMA_REGISTRY["signal_analyzer"])
         assert errors == []
 
     def test_valid_signal_with_action(self):
         data = {
-            "signals": ["sig"],
+            "signals": [{"description": "sig", "priority": "medium"}],
             "recommendedAction": {"action": "sessions_spawn", "task": "debug", "confidence": 0.8},
             "idle": False,
         }
         errors = validate(data, SCHEMA_REGISTRY["signal_analyzer"])
         assert errors == []
 
+    def test_valid_signal_with_null_task(self):
+        data = {
+            "signals": [{"description": "idle detected", "priority": "low"}],
+            "recommendedAction": {"action": "skip", "task": None, "confidence": 0.9},
+            "idle": True,
+        }
+        errors = validate(data, SCHEMA_REGISTRY["signal_analyzer"])
+        assert errors == []
+
     def test_invalid_signal_missing_required(self):
-        data = {"signals": ["sig"]}  # missing idle, recommendedAction
+        data = {"signals": [{"description": "sig", "priority": "high"}]}  # missing idle, recommendedAction
         errors = validate(data, SCHEMA_REGISTRY["signal_analyzer"])
         assert any("idle" in e for e in errors)
 
@@ -90,6 +99,15 @@ class TestSchemaValidation:
     def test_valid_insight_output(self):
         data = {
             "skip": False,
+            "suggestion": "Try frame batching",
+            "insight": "Evening correlates with exploration",
+            "totalChars": 55,
+        }
+        errors = validate(data, SCHEMA_REGISTRY["insight_synthesizer"])
+        assert errors == []
+
+    def test_valid_insight_without_skip(self):
+        data = {
             "suggestion": "Try frame batching",
             "insight": "Evening correlates with exploration",
             "totalChars": 55,
