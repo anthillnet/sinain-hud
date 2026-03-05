@@ -1,6 +1,6 @@
 # sinain-hud OpenClaw Plugin
 
-OpenClaw plugin that manages the sinain-hud agent lifecycle on the server.
+Plugin for the [anthillnet fork of OpenClaw](https://github.com/anthillnet/openclaw) that manages the sinain-hud agent lifecycle on the server.
 
 ## What It Does
 
@@ -162,16 +162,16 @@ The 1 MB minimum guard prevents resets from transient API outages when the trans
 
 ```bash
 # Upload plugin files to the server
-scp -i ~/.ssh/id_ed25519_strato \
+scp -i ~/.ssh/<your-key> \
   sinain-hud-plugin/index.ts sinain-hud-plugin/openclaw.plugin.json \
-  root@85.214.180.247:/mnt/openclaw-state/extensions/sinain-hud/
+  root@<your-server-ip>:/mnt/openclaw-state/extensions/sinain-hud/
 
 # Restart gateway to load updated plugin
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
 
 # Verify plugin loaded
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml logs --tail=30 openclaw-gateway 2>&1 | grep sinain'
 ```
 

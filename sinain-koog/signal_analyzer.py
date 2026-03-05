@@ -60,8 +60,12 @@ def build_user_prompt(
     recent_logs: list[dict],
     playbook: str,
     idle: bool,
+    current_time: str | None = None,
 ) -> str:
     parts = []
+
+    if current_time:
+        parts.append(f"## Current Time\n{current_time}")
 
     parts.append(f"## Session Summary\n{session_summary}")
 
@@ -95,6 +99,7 @@ def main():
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--session-summary", required=True, help="Brief session summary from main agent")
     parser.add_argument("--idle", action="store_true", help="User is idle (>30 min)")
+    parser.add_argument("--current-time", default=None, help="Current local time string (e.g. 'Monday, 2 March 2026, 14:30 (Europe/Berlin)')")
     args = parser.parse_args()
 
     playbook = read_effective_playbook(args.memory_dir)
@@ -105,6 +110,7 @@ def main():
         recent_logs=recent_logs,
         playbook=playbook,
         idle=args.idle,
+        current_time=args.current_time,
     )
 
     try:

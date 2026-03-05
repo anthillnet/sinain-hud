@@ -22,6 +22,7 @@ type PluginConfig = {
   koogPath?: string;
   modulesPath?: string;
   sessionKey?: string;
+  userTimezone?: string;
 };
 
 type ModuleRegistryEntry = {
@@ -72,6 +73,19 @@ const SHORT_FAILURE_THRESHOLD_MS = 10_000;     // fails in <10s = likely API err
 const OVERFLOW_CONSECUTIVE_THRESHOLD = 5;        // N consecutive overload errors → trigger reset
 const OVERFLOW_TRANSCRIPT_MIN_BYTES = 1_000_000; // 1MB guard — skip reset if transcript is small (transient outage)
 const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit/i;
+
+// Proactive session hygiene constants
+const SESSION_HYGIENE_SIZE_BYTES = 2_000_000;   // 2MB — proactive archive+truncate threshold
+const SESSION_HYGIENE_AGE_MS = 24 * 60 * 60 * 1000; // 24h — max session age before proactive reset
+
+// Health watchdog constants
+const WATCHDOG_INTERVAL_MS = 5 * 60_000;          // 5 min — independent of curation timer
+const ALERT_COOLDOWN_MS = 15 * 60_000;            // 15 min per alert type
+const STALENESS_WARNING_MS = 10 * 60_000;          // 10 min no success → warning
+const STALENESS_CRITICAL_MS = 15 * 60_000;         // 15 min no success after reset → emergency restart
+const SESSION_SIZE_WARNING_BYTES = 1_500_000;      // 1.5MB → proactive reset
+const SESSION_SIZE_RESTART_BYTES = 2_000_000;      // 2MB → forced reset
+const AUTO_RESTART_COOLDOWN_MS = 60 * 60_000;     // max 1 auto-restart per hour
 
 // ============================================================================
 // Parent context injection (subagent support)
@@ -142,6 +156,61 @@ function stripPrivateTags(text: string): string {
 }
 
 // ============================================================================
+// Telegram alert helpers
+// ============================================================================
+
+let _cachedBotToken: string | null | undefined; // undefined = not read yet
+let _alertMissingConfigLogged = false;
+
+function readBotToken(stateDir: string): string | null {
+  if (_cachedBotToken !== undefined) return _cachedBotToken;
+  try {
+    const openclawJson = join(stateDir, "openclaw.json");
+    const raw = JSON.parse(readFileSync(openclawJson, "utf-8"));
+    const token = raw?.channels?.telegram?.botToken ?? raw?.telegram?.botToken ?? null;
+    _cachedBotToken = typeof token === "string" && token.length > 10 ? token : null;
+  } catch {
+    _cachedBotToken = null;
+  }
+  return _cachedBotToken;
+}
+
+const _alertCooldowns = new Map<string, number>();
+
+async function sendTelegramAlert(
+  alertType: string,
+  title: string,
+  body: string,
+  stateDir: string,
+): Promise<void> {
+  const chatId = process.env.SINAIN_ALERT_CHAT_ID;
+  const token = readBotToken(stateDir);
+
+  if (!chatId || !token) {
+    if (!_alertMissingConfigLogged) {
+      _alertMissingConfigLogged = true;
+      // Will be picked up by whoever has access to logger — logged once
+      console.log("sinain-hud: Telegram alerts disabled (missing SINAIN_ALERT_CHAT_ID or bot token)");
+    }
+    return;
+  }
+
+  // Per-type cooldown
+  const lastSent = _alertCooldowns.get(alertType) ?? 0;
+  if (Date.now() - lastSent < ALERT_COOLDOWN_MS) return;
+  _alertCooldowns.set(alertType, Date.now());
+
+  const text = `${title}\n${body}`;
+  fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+  }).catch(() => {
+    // Fire-and-forget — alert failure must never break the watchdog
+  });
+}
+
+// ============================================================================
 // File sync helpers
 // ============================================================================
 
@@ -198,7 +267,7 @@ function syncDirToWorkspace(
   const targetDir = join(workspaceDir, targetDirName);
   if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
-  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt", ".jsonl"]);
+  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt", ".jsonl", ".py"]);
   let synced = 0;
 
   function syncRecursive(srcDir: string, dstDir: string): void {
@@ -398,6 +467,11 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   // Parent context cache for subagent injection
   let parentContextCache: ParentContextCache | null = null;
 
+  // Health watchdog state
+  let watchdogInterval: ReturnType<typeof setInterval> | null = null;
+  let lastResetTs = 0;
+  let lastAutoRestartTs = 0;
+
   function appendToContextCache(line: string): void {
     if (!parentContextCache) return;
     parentContextCache.contextText += "\n" + line;
@@ -573,6 +647,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       if (!existsSync(fullPath)) {
         mkdirSync(fullPath, { recursive: true });
       }
+      // Ensure directory is writable even if created by another process (e.g. root)
+      try { chmodSync(fullPath, 0o755); } catch {}
     }
 
     // ── Context capture + subagent injection ────────────────────────────
@@ -597,8 +673,22 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
     }
 
-    // ── Accumulate context parts (outage recovery + subagent injection) ─
+    // ── Accumulate context parts (time + outage recovery + subagent injection)
     const contextParts: string[] = [];
+
+    // Time awareness — always inject current local time
+    const userTz = cfg.userTimezone ?? "Europe/Berlin";
+    const nowLocal = new Date().toLocaleString("en-GB", {
+      timeZone: userTz,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    contextParts.push(`[CURRENT TIME] ${nowLocal} (${userTz})`);
 
     // Recovery context injection after outage
     if (outageStartTs > 0 && !outageDetected && lastSuccessTs > outageStartTs) {
@@ -731,6 +821,14 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         );
         // outageStartTs is NOT reset here — before_agent_start uses it to
         // inject recovery context on the next run, then resets it itself.
+
+        // Send recovery alert via Telegram
+        const sd = getStateDir();
+        if (sd) {
+          sendTelegramAlert("recovery", "✅ *sinain-hud* recovered",
+            `• Gateway up, first run succeeded\n• Downtime: ~${Math.round(outageDurationMs / 60_000)}min`,
+            sd);
+        }
       }
     } else if (isShortFailure) {
       consecutiveFailures++;
@@ -741,6 +839,12 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         api.logger.warn(
           `sinain-hud: OUTAGE DETECTED — ${Math.round(rate * 100)}% error rate over ${total} samples, ${consecutiveFailures} consecutive failures`,
         );
+        const sd = getStateDir();
+        if (sd) {
+          sendTelegramAlert("outage", "🔴 *sinain-hud* OUTAGE DETECTED",
+            `• ${Math.round(rate * 100)}% error rate over ${total} samples\n• ${consecutiveFailures} consecutive failures`,
+            sd);
+        }
       }
     }
 
@@ -754,10 +858,17 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         if (consecutiveOverflowErrors >= OVERFLOW_CONSECUTIVE_THRESHOLD) {
           api.logger.warn("sinain-hud: OVERFLOW THRESHOLD REACHED — attempting transcript reset");
           if (performOverflowReset()) {
+            lastResetTs = Date.now();
             consecutiveOverflowErrors = 0;
             outageDetected = false;
             consecutiveFailures = 0;
             outageStartTs = 0;
+            const sd = getStateDir();
+            if (sd) {
+              sendTelegramAlert("overflow_reset", "⚠️ *sinain-hud* overflow reset triggered",
+                `• ${OVERFLOW_CONSECUTIVE_THRESHOLD} consecutive overflow errors\n• Transcript truncated`,
+                sd);
+            }
           }
         }
       } else if (isSuccess) {
@@ -904,7 +1015,12 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     consecutiveHeartbeatSkips = 0;
     consecutiveOverflowErrors = 0;
     parentContextCache = null;
-    api.logger.info("sinain-hud: gateway started, session + resilience tracking reset");
+    // Reset watchdog alert state
+    lastResetTs = 0;
+    _alertCooldowns.clear();
+    _cachedBotToken = undefined; // re-read on next alert
+    _alertMissingConfigLogged = false;
+    api.logger.info("sinain-hud: gateway started, session + resilience + watchdog tracking reset");
   });
 
   // ==========================================================================
@@ -1135,6 +1251,38 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   });
 
   // ==========================================================================
+  // Command: /sinain_health — on-demand health check
+  // ==========================================================================
+
+  api.registerCommand({
+    name: "sinain_health",
+    description: "Run health watchdog checks on-demand and show results",
+    handler: () => {
+      const checks = runHealthChecks();
+      const lines: string[] = ["**Health Watchdog Report**\n"];
+
+      lines.push(`Transcript: ${checks.transcriptMB !== null ? `${checks.transcriptMB}MB` : "unknown"}`);
+      lines.push(`Last success: ${checks.staleSec > 0 ? `${checks.staleSec}s ago` : lastSuccessTs > 0 ? "just now" : "never"}`);
+      lines.push(`Error rate: ${Math.round(checks.errorRate * 100)}% (${checks.errorTotal} samples)`);
+      lines.push(`Overflow counter: ${checks.overflowCount}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`);
+      lines.push(`Last reset: ${lastResetTs > 0 ? `${Math.round((Date.now() - lastResetTs) / 1000)}s ago` : "never"}`);
+      lines.push(`Last auto-restart: ${lastAutoRestartTs > 0 ? `${Math.round((Date.now() - lastAutoRestartTs) / 1000)}s ago` : "never"}`);
+      lines.push(`Alerts configured: ${process.env.SINAIN_ALERT_CHAT_ID ? "yes" : "no (SINAIN_ALERT_CHAT_ID not set)"}`);
+
+      if (checks.issues.length > 0) {
+        lines.push(`\n**Issues detected:**`);
+        for (const issue of checks.issues) {
+          lines.push(`  ⚠️ ${issue}`);
+        }
+      } else {
+        lines.push(`\n✅ All checks passed`);
+      }
+
+      return { text: lines.join("\n") };
+    },
+  });
+
+  // ==========================================================================
   // Tool: sinain_heartbeat_tick — deterministic heartbeat execution
   // ==========================================================================
 
@@ -1215,11 +1363,19 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             result.gitBackup = `error: ${String(err)}`;
           }
 
+          // Current time string for koog scripts
+          const hbTz = cfg.userTimezone ?? "Europe/Berlin";
+          const currentTimeStr = new Date().toLocaleString("en-GB", {
+            timeZone: hbTz, weekday: "long", year: "numeric", month: "long",
+            day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+          }) + ` (${hbTz})`;
+
           // 2. Signal analysis (60s timeout)
           const signalArgs = [
             "sinain-koog/signal_analyzer.py",
             "--memory-dir", "memory/",
             "--session-summary", params.sessionSummary,
+            "--current-time", currentTimeStr,
           ];
           if (params.idle) signalArgs.push("--idle");
 
@@ -1238,6 +1394,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             "sinain-koog/insight_synthesizer.py",
             "--memory-dir", "memory/",
             "--session-summary", params.sessionSummary,
+            "--current-time", currentTimeStr,
           ];
           if (params.idle) synthArgs.push("--idle");
 
@@ -1415,6 +1572,146 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   }
 
   // ==========================================================================
+  // Health watchdog helpers
+  // ==========================================================================
+
+  function getStateDir(): string | null {
+    // State dir is the parent of the workspace dir (e.g. /home/node/.openclaw)
+    if (!lastWorkspaceDir) return null;
+    return dirname(lastWorkspaceDir);
+  }
+
+  function getTranscriptSize(): { path: string; bytes: number } | null {
+    const sessionsJsonPath = getSessionsJsonPath();
+    if (!sessionsJsonPath || !cfg.sessionKey) return null;
+    try {
+      const sessionsData = JSON.parse(readFileSync(sessionsJsonPath, "utf-8"));
+      const session = sessionsData[cfg.sessionKey];
+      const transcriptPath = session?.sessionFile as string | undefined;
+      if (!transcriptPath || !existsSync(transcriptPath)) return null;
+      return { path: transcriptPath, bytes: statSync(transcriptPath).size };
+    } catch {
+      return null;
+    }
+  }
+
+  function runHealthChecks(): {
+    transcriptMB: number | null;
+    staleSec: number;
+    errorRate: number;
+    errorTotal: number;
+    overflowCount: number;
+    resetRecently: boolean;
+    issues: string[];
+  } {
+    const transcript = getTranscriptSize();
+    const transcriptMB = transcript ? +(transcript.bytes / 1_000_000).toFixed(2) : null;
+    const staleSec = lastSuccessTs > 0 ? Math.round((Date.now() - lastSuccessTs) / 1000) : 0;
+    const { rate, total } = computeErrorRate();
+    const resetRecently = lastResetTs > 0 && (Date.now() - lastResetTs) < STALENESS_CRITICAL_MS * 2;
+
+    const issues: string[] = [];
+    if (transcriptMB !== null && transcript!.bytes >= SESSION_SIZE_WARNING_BYTES) {
+      issues.push(`transcript ${transcriptMB}MB (threshold ${(SESSION_SIZE_WARNING_BYTES / 1_000_000).toFixed(1)}MB)`);
+    }
+    if (lastSuccessTs > 0 && (Date.now() - lastSuccessTs) >= STALENESS_WARNING_MS && recentOutcomes.length >= 3) {
+      issues.push(`stale ${staleSec}s since last success`);
+    }
+    if (total >= 5 && rate > 0.5) {
+      issues.push(`error rate ${Math.round(rate * 100)}% (${total} samples)`);
+    }
+    if (consecutiveOverflowErrors >= 3) {
+      issues.push(`overflow errors ${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`);
+    }
+    if (resetRecently && lastSuccessTs > 0 && lastSuccessTs < lastResetTs) {
+      issues.push("post-reset stall (no success since reset)");
+    }
+
+    return { transcriptMB, staleSec, errorRate: rate, errorTotal: total, overflowCount: consecutiveOverflowErrors, resetRecently, issues };
+  }
+
+  async function runHealthWatchdog(): Promise<void> {
+    const stateDir = getStateDir();
+    if (!stateDir) return;
+
+    const transcript = getTranscriptSize();
+    const now = Date.now();
+
+    // ── Layer 1: Proactive session size check ────────────────────────────
+    if (transcript && transcript.bytes >= SESSION_SIZE_WARNING_BYTES) {
+      const sizeMB = (transcript.bytes / 1_000_000).toFixed(1);
+
+      if (transcript.bytes >= SESSION_SIZE_RESTART_BYTES) {
+        // Critical — force reset
+        api.logger.warn(`sinain-hud: watchdog — transcript ${sizeMB}MB, forcing overflow reset`);
+        if (performOverflowReset()) {
+          lastResetTs = now;
+          consecutiveOverflowErrors = 0;
+          sendTelegramAlert("proactive_reset", "⚠️ *sinain-hud* proactive session reset", `• Transcript was ${sizeMB}MB → truncated\n• No downtime expected`, stateDir);
+        }
+      } else {
+        // Warning — proactive reset at 1.5MB
+        api.logger.info(`sinain-hud: watchdog — transcript ${sizeMB}MB, proactive reset`);
+        if (performOverflowReset()) {
+          lastResetTs = now;
+          consecutiveOverflowErrors = 0;
+          sendTelegramAlert("proactive_reset", "⚠️ *sinain-hud* proactive session reset", `• Transcript was ${sizeMB}MB → truncated\n• No downtime expected`, stateDir);
+        }
+      }
+    }
+
+    // ── Staleness check ──────────────────────────────────────────────────
+    if (lastSuccessTs > 0 && recentOutcomes.length >= 3) {
+      const staleMs = now - lastSuccessTs;
+
+      if (staleMs >= STALENESS_WARNING_MS && staleMs < STALENESS_CRITICAL_MS) {
+        const staleMin = Math.round(staleMs / 60_000);
+        sendTelegramAlert("staleness_warning", "⚠️ *sinain-hud* response stale",
+          `• No successful run in ${staleMin}min\n• Error rate: ${Math.round(computeErrorRate().rate * 100)}%`,
+          stateDir);
+      }
+    }
+
+    // ── Layer 2: Emergency restart — reset didn't recover ────────────────
+    if (lastResetTs > 0 && lastSuccessTs > 0 && lastSuccessTs < lastResetTs) {
+      const sinceResetMs = now - lastResetTs;
+      if (sinceResetMs >= STALENESS_CRITICAL_MS) {
+        // Reset was performed but no success since → queue is jammed
+        const canRestart = (now - lastAutoRestartTs) >= AUTO_RESTART_COOLDOWN_MS;
+        if (canRestart) {
+          const staleMin = Math.round((now - lastSuccessTs) / 60_000);
+          api.logger.warn(`sinain-hud: EMERGENCY RESTART — reset ${Math.round(sinceResetMs / 60_000)}min ago, no recovery`);
+          // Send alert BEFORE exit so user sees it
+          await sendTelegramAlert("emergency_restart", "🔴 *sinain-hud* EMERGENCY RESTART",
+            `• Queue jammed — reset didn't recover in ${Math.round(sinceResetMs / 60_000)}min\n• Last success: ${staleMin}min ago\n• Gateway restarting now (~5s)`,
+            stateDir);
+          lastAutoRestartTs = now;
+          // Give Telegram a moment to deliver
+          await new Promise((r) => setTimeout(r, 1000));
+          process.exit(1);
+        } else {
+          api.logger.warn("sinain-hud: watchdog — would restart but cooldown active (max 1/hour)");
+        }
+      }
+    }
+
+    // ── Error rate alert ─────────────────────────────────────────────────
+    const { rate, total } = computeErrorRate();
+    if (total >= 5 && rate > 0.5) {
+      sendTelegramAlert("high_error_rate", "⚠️ *sinain-hud* high error rate",
+        `• ${Math.round(rate * 100)}% failures over ${total} samples\n• Consecutive overflow errors: ${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`,
+        stateDir);
+    }
+
+    // ── Overflow approaching threshold ───────────────────────────────────
+    if (consecutiveOverflowErrors >= 3 && consecutiveOverflowErrors < OVERFLOW_CONSECUTIVE_THRESHOLD) {
+      sendTelegramAlert("overflow_warning", "⚠️ *sinain-hud* overflow errors accumulating",
+        `• ${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD} consecutive overflow errors\n• Auto-reset will trigger at ${OVERFLOW_CONSECUTIVE_THRESHOLD}`,
+        stateDir);
+    }
+  }
+
+  // ==========================================================================
   // Service registration
   // ==========================================================================
 
@@ -1424,6 +1721,15 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       api.logger.info(
         `sinain-hud: service started (heartbeat: ${cfg.heartbeatPath ?? "not configured"})`,
       );
+
+      // Start health watchdog — runs every 5 minutes, independent of curation
+      watchdogInterval = setInterval(() => {
+        runHealthWatchdog().catch((err) => {
+          api.logger.warn(`sinain-hud: watchdog error: ${String(err)}`);
+        });
+      }, WATCHDOG_INTERVAL_MS);
+      api.logger.info("sinain-hud: health watchdog started (5-min interval)");
+
       // Start curation timer — runs every 30 minutes
       curationInterval = setInterval(async () => {
         // Skip curation during outage — scripts would work (OpenRouter) but
@@ -1448,12 +1754,47 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         } catch (err) {
           api.logger.warn(`sinain-hud: curation pipeline error: ${String(err)}`);
         }
+
+        // ── Proactive session hygiene ──────────────────────────────────
+        // Check sinain session size/age and archive+truncate if needed.
+        // This prevents context bloat from causing cascading RPC timeouts.
+        try {
+          const sessionsJsonPath = getSessionsJsonPath();
+          if (sessionsJsonPath && cfg.sessionKey) {
+            const sessionsData = JSON.parse(readFileSync(sessionsJsonPath, "utf-8"));
+            const sinainSession = sessionsData[cfg.sessionKey];
+            if (sinainSession?.sessionFile && existsSync(sinainSession.sessionFile)) {
+              const size = statSync(sinainSession.sessionFile).size;
+              const createdAt = typeof sinainSession.createdAt === "number"
+                ? sinainSession.createdAt
+                : Date.now();
+              const ageMs = Date.now() - createdAt;
+              if (size > SESSION_HYGIENE_SIZE_BYTES || ageMs > SESSION_HYGIENE_AGE_MS) {
+                api.logger.info(
+                  `sinain-hud: proactive session hygiene \u2014 size=${Math.round(size / 1024)}KB, age=${Math.round(ageMs / 3600000)}h`,
+                );
+                if (performOverflowReset()) {
+                  consecutiveOverflowErrors = 0;
+                  outageDetected = false;
+                  consecutiveFailures = 0;
+                  outageStartTs = 0;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          api.logger.warn(`sinain-hud: session hygiene check error: ${String(err)}`);
+        }
       }, 30 * 60 * 1000); // 30 minutes
     },
     stop: () => {
       if (curationInterval) {
         clearInterval(curationInterval);
         curationInterval = null;
+      }
+      if (watchdogInterval) {
+        clearInterval(watchdogInterval);
+        watchdogInterval = null;
       }
       api.logger.info("sinain-hud: service stopped");
       sessionStates.clear();
