@@ -59,6 +59,13 @@ export class Escalator {
     totalNoReply: 0,
     lastEscalationTs: 0,
     lastResponseTs: 0,
+    // Health metrics
+    totalTimeouts: 0,
+    totalDirectResponses: 0,
+    totalSpawnResponses: 0,
+    avgResponseMs: 0,
+    consecutiveTimeouts: 0,
+    lastTimeoutTs: 0,
   };
 
   private outboundBytes = 0;
@@ -312,6 +319,7 @@ ${recentLines.join("\n")}`;
       }, 120_000, { expectFinal: true });
 
       log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
+      this.stats.totalSpawnResponses++;
 
       // Extract result — child agent actually ran the task and returned content
       const payloads = result?.payload?.result?.payloads;
@@ -615,6 +623,14 @@ ${recentLines.join("\n")}`;
           const p = result.payload;
           log(TAG, `WS RPC ok \u2192 runId=${p.runId}, status=${p.status}`);
 
+          // ── Health tracking: direct response success ──
+          this.stats.totalDirectResponses++;
+          this.stats.consecutiveTimeouts = 0;
+          // EMA α=0.2: smooths latency while reacting to sustained changes
+          this.stats.avgResponseMs = this.stats.avgResponseMs === 0
+            ? rpcLatencyMs
+            : this.stats.avgResponseMs * 0.8 + rpcLatencyMs * 0.2;
+
           const payloads = p.result?.payloads;
           let responseText = "";
           if (Array.isArray(payloads) && payloads.length > 0) {
@@ -651,6 +667,26 @@ ${recentLines.join("\n")}`;
         }
         return;
       } catch (err: any) {
+        // ── Health tracking: RPC timeout/failure ──
+        const isTimeout = /rpc timeout/i.test(err.message);
+        if (isTimeout) {
+          this.stats.totalTimeouts++;
+          this.stats.consecutiveTimeouts++;
+          this.stats.lastTimeoutTs = Date.now();
+          this.deps.profiler?.gauge("escalation.totalTimeouts", this.stats.totalTimeouts);
+
+          if (this.stats.consecutiveTimeouts >= 3) {
+            warn(TAG, `\u26a0 ${this.stats.consecutiveTimeouts} consecutive timeouts \u2014 gateway may be overloaded`);
+          }
+          const totalAttempts = this.stats.totalDirectResponses + this.stats.totalTimeouts;
+          if (totalAttempts > 0 && totalAttempts % 10 === 0) {
+            const timeoutPct = Math.round(this.stats.totalTimeouts / totalAttempts * 100);
+            if (timeoutPct > 30) {
+              warn(TAG, `\u26a0 high timeout rate: ${timeoutPct}% (${this.stats.totalTimeouts}/${totalAttempts}) \u2014 consider increasing cooldown or resetting session`);
+            }
+          }
+        }
+
         log(TAG, `agent RPC failed: ${err.message} \u2014 falling back to HTTP`);
         this.pushError(`RPC exception: ${err.message}`);
       }

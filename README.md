@@ -56,7 +56,7 @@ An always-on-top transparent overlay that displays real-time AI advice while you
            └───────────────────────────┘
 ```
 
-The agent loop runs a periodic tick: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline.
+The agent loop runs a periodic tick: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline and [docs/ESCALATION-HEALTH.md](docs/ESCALATION-HEALTH.md) for health monitoring, warnings, and runbooks.
 
 ## Quick Start
 
@@ -64,7 +64,7 @@ The agent loop runs a periodic tick: capture screen/audio, build a context windo
 - macOS 11.0+ (Big Sur or later)
 - Flutter 3.10+ (`brew install flutter`)
 - Node.js 22+ (`brew install node`)
-- An OpenClaw instance with Sinain running
+- An [anthillnet/openclaw](https://github.com/anthillnet/openclaw) instance (our fork of OpenClaw, includes the sinain-hud plugin)
 
 ### 1. sinain-core Service
 
@@ -84,9 +84,20 @@ flutter pub get
 flutter run -d macos --debug
 ```
 
-### 3. OpenClaw Extension (optional)
+### 3. Screen Capture (optional)
 
-Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behavior.
+```bash
+cd sense_client
+pip install -r requirements.txt
+# Requires Tesseract: brew install tesseract
+python -m sense_client
+```
+
+macOS will prompt for Screen Recording permission on first run.
+
+### 4. OpenClaw Extension (optional)
+
+This requires the [anthillnet fork of OpenClaw](https://github.com/anthillnet/openclaw), which includes the sinain-hud plugin. Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behavior.
 
 ## Hotkeys
 
