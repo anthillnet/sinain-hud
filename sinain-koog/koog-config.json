@@ -11,9 +11,16 @@
     "insight_synthesizer": { "model": "smart", "maxTokens": 800 },
     "module_manager":      { "model": "fast",  "maxTokens": 2000 },
     "tick_evaluator":      { "model": "smart", "maxTokens": 200, "timeout": 30 },
-    "eval_reporter":       { "model": "smart", "maxTokens": 1000 }
+    "eval_reporter":       { "model": "smart", "maxTokens": 1000 },
+    "triple_extractor":    { "model": "fast",  "maxTokens": 1500, "timeout": 30 }
   },
   "defaults": { "model": "fast", "maxTokens": 1500 },
+  "triplestore": {
+    "dbPath": "memory/triplestore.db",
+    "maxTriplesPerTx": 100,
+    "conceptExtractionMode": "tiered",
+    "gcOlderThanDays": 30
+  },
   "eval": {
     "level": "sampled",
     "sampleRate": 0.3,

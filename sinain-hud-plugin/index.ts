@@ -641,6 +641,26 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
     }
 
+    // ── Fire-and-forget: ingest active module patterns into triple store
+    try {
+      const regPath = join(workspaceDir, "modules", "module-registry.json");
+      if (existsSync(regPath)) {
+        const reg = JSON.parse(readFileSync(regPath, "utf-8"));
+        for (const [id, entry] of Object.entries(reg.modules || {})) {
+          if ((entry as Record<string, unknown>).status === "active") {
+            api.runtime.system.runCommandWithTimeout(
+              ["uv", "run", "--with", "requests", "python3",
+               "sinain-koog/triple_ingest.py",
+               "--memory-dir", "memory/",
+               "--ingest-module", id,
+               "--modules-dir", "modules/"],
+              { timeoutMs: 15_000, cwd: workspaceDir },
+            ).catch(() => {});
+          }
+        }
+      }
+    } catch {}
+
     // ── Memory dirs — always run (cheap, idempotent) ────────────────────
     for (const dir of ["memory", "memory/playbook-archive", "memory/playbook-logs",
                         "memory/eval-logs", "memory/eval-reports"]) {
@@ -742,6 +762,24 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         if (content) contextParts.push(`[SITUATION]\n${content}`);
       } catch {}
     }
+
+    // Synchronous: knowledge graph context (10s timeout, skipped on failure)
+    try {
+      const ragResult = await api.runtime.system.runCommandWithTimeout(
+        ["uv", "run", "--with", "requests", "python3",
+         "sinain-koog/triple_query.py",
+         "--memory-dir", join(workspaceDir, "memory"),
+         "--context", "current session",
+         "--max-chars", "1500"],
+        { timeoutMs: 10_000, cwd: workspaceDir },
+      );
+      if (ragResult.code === 0) {
+        const parsed = JSON.parse(ragResult.stdout.trim());
+        if (parsed.context && parsed.context.length > 50) {
+          contextParts.push(`[KNOWLEDGE GRAPH CONTEXT]\n${parsed.context}`);
+        }
+      }
+    } catch {}
 
     if (contextParts.length > 0) {
       return { prependContext: contextParts.join("\n\n") };
@@ -961,6 +999,18 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         api.logger.info(
           `sinain-hud: session summary written (${toolCount} tools, ${Math.round(durationMs / 1000)}s)`,
         );
+
+        // Fire-and-forget: ingest session summary into triple store
+        if (state.workspaceDir) {
+          api.runtime.system.runCommandWithTimeout(
+            ["uv", "run", "--with", "requests", "python3",
+             "sinain-koog/triple_ingest.py",
+             "--memory-dir", "memory/",
+             "--ingest-session", JSON.stringify(summary),
+             "--embed"],
+            { timeoutMs: 15_000, cwd: state.workspaceDir },
+          ).catch(() => {});
+        }
       } catch (err) {
         api.logger.warn(
           `sinain-hud: failed to write session summary: ${String(err)}`,
@@ -1434,6 +1484,16 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
               task: null,
               confidence: 0,
             };
+
+            // Fire-and-forget: ingest signal into triple store
+            const tickTs = new Date().toISOString();
+            runScript([
+              "sinain-koog/triple_ingest.py",
+              "--memory-dir", "memory/",
+              "--tick-ts", tickTs,
+              "--signal-result", JSON.stringify(signalResult),
+              "--embed",
+            ], 15_000).catch(() => {});
           }
 
           // 3. Insight synthesis (60s timeout)
@@ -1569,6 +1629,16 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     ]);
     const findings = mining?.findings ? JSON.stringify(mining.findings) : null;
 
+    // Fire-and-forget: ingest mining results into triple store
+    if (mining) {
+      runScript([
+        "sinain-koog/triple_ingest.py",
+        "--memory-dir", "memory/",
+        "--ingest-mining", JSON.stringify(mining),
+        "--embed",
+      ], 15_000).catch(() => {});
+    }
+
     // Step 3: Playbook curation
     const curatorArgs = [
       "sinain-koog/playbook_curator.py",
@@ -1580,6 +1650,14 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       curatorArgs.push("--mining-findings", findings);
     }
     const curator = await runScript(curatorArgs);
+
+    // Fire-and-forget: ingest playbook patterns into triple store
+    runScript([
+      "sinain-koog/triple_ingest.py",
+      "--memory-dir", "memory/",
+      "--ingest-playbook",
+      "--embed",
+    ], 15_000).catch(() => {});
 
     // Step 4: Update effectiveness footer with fresh metrics
     const effectiveness = (feedback as Record<string, unknown> | null)?.effectiveness;
