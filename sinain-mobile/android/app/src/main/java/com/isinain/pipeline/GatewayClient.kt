@@ -41,6 +41,7 @@ class GatewayClient(
     private var authenticated = false
     private var rpcId = 1
     private var closing = false
+    private var pendingRunId: String? = null
 
     // Pending RPCs
     private data class PendingRpc(
@@ -105,6 +106,8 @@ class GatewayClient(
                 pending.remove(id)?.timeoutFuture?.cancel(false)
             }
 
+            pendingRunId = idempotencyKey
+
             val payload = JSONObject().apply {
                 put("type", "req")
                 put("method", "agent")
@@ -114,7 +117,6 @@ class GatewayClient(
                     put("sessionKey", sessionKey)
                     put("idempotencyKey", idempotencyKey)
                     put("deliver", false)
-                    put("responseTarget", "self")
                 })
             }
 
@@ -224,14 +226,20 @@ class GatewayClient(
             return
         }
 
-        // 3. Handle streaming events
+        // 3. Handle streaming events (filter by runId to prevent cross-talk)
         if (type == "event" && msg.optString("event") == "agent") {
             val payload = msg.optJSONObject("payload")
-            if (payload?.optString("stream") == "assistant") {
-                val data = payload.optJSONObject("data")
-                val text = data?.optString("text", "") ?: ""
-                if (text.isNotEmpty()) {
-                    onResponse?.invoke(text)
+            if (payload != null) {
+                // Only process events matching our pending RPC
+                val eventRunId = payload.optString("runId", "")
+                if (eventRunId != pendingRunId) return
+
+                if (payload.optString("stream") == "assistant") {
+                    val data = payload.optJSONObject("data")
+                    val text = data?.optString("text", "") ?: ""
+                    if (text.isNotEmpty()) {
+                        onResponse?.invoke(text)
+                    }
                 }
             }
             return

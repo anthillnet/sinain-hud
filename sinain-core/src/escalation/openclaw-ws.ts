@@ -103,7 +103,7 @@ export class OpenClawWsClient extends EventEmitter {
       idempotencyKey: idemKey,
       sessionKey,
       deliver: false,
-    }, 60000, { expectFinal: true });
+    }, 120000, { expectFinal: true });
     if (result?.ok) {
       this.circuitResetDelay = 300_000; // reset backoff on success
     }

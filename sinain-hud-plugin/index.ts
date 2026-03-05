@@ -68,11 +68,12 @@ const OUTAGE_MIN_SAMPLES = 3;                  // need ≥3 samples before thres
 const FILE_SYNC_DEBOUNCE_MS = 3 * 60_000;     // skip file sync if done <3 min ago
 const PLAYBOOK_GEN_DEBOUNCE_MS = 5 * 60_000;  // skip playbook gen if done <5 min ago
 const SHORT_FAILURE_THRESHOLD_MS = 10_000;     // fails in <10s = likely API error
+const LONG_FAILURE_THRESHOLD_MS = 3 * 60_000;  // >3min failure = likely stuck retry loop
 
 // Context overflow watchdog constants
 const OVERFLOW_CONSECUTIVE_THRESHOLD = 5;        // N consecutive overload errors → trigger reset
 const OVERFLOW_TRANSCRIPT_MIN_BYTES = 1_000_000; // 1MB guard — skip reset if transcript is small (transient outage)
-const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit/i;
+const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit|extra usage is required/i;
 
 // Proactive session hygiene constants
 const SESSION_HYGIENE_SIZE_BYTES = 2_000_000;   // 2MB — proactive archive+truncate threshold
@@ -719,6 +720,29 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
     }
 
+    // Heartbeat enforcement (replaces fork's system-prompt.ts logic)
+    if (cfg.heartbeatPath) {
+      const hbTarget = join(workspaceDir, "HEARTBEAT.md");
+      if (existsSync(hbTarget)) {
+        contextParts.push(
+          "[HEARTBEAT PROTOCOL] HEARTBEAT.md is loaded in your project context. " +
+          "On every heartbeat poll, you MUST execute the full protocol defined in " +
+          "HEARTBEAT.md — all phases, all steps, in order. " +
+          "Only reply HEARTBEAT_OK if HEARTBEAT.md explicitly permits it " +
+          "after you have completed all mandatory steps."
+        );
+      }
+    }
+
+    // SITUATION.md bootstrap (replaces fork's workspace.ts logic)
+    const situationPath = join(workspaceDir, "SITUATION.md");
+    if (existsSync(situationPath)) {
+      try {
+        const content = readFileSync(situationPath, "utf-8").trim();
+        if (content) contextParts.push(`[SITUATION]\n${content}`);
+      } catch {}
+    }
+
     if (contextParts.length > 0) {
       return { prependContext: contextParts.join("\n\n") };
     }
@@ -873,6 +897,29 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         }
       } else if (isSuccess) {
         consecutiveOverflowErrors = 0;
+      }
+
+      // Duration-gated overflow reset: long failure + overflow error pattern = stuck retry loop.
+      // The core misclassifies "extra usage is required" as rate_limit → infinite retry.
+      // After the run times out (>3min), we detect it and reset for the next cycle.
+      const isLongFailure = !isSuccess && durationMs > LONG_FAILURE_THRESHOLD_MS;
+      if (isLongFailure && OVERFLOW_ERROR_PATTERN.test(String(event.error ?? ""))) {
+        api.logger.warn(
+          `sinain-hud: long failure (${Math.round(durationMs / 1000)}s) with overflow error — immediate reset`,
+        );
+        if (performOverflowReset()) {
+          lastResetTs = Date.now();
+          consecutiveOverflowErrors = 0;
+          outageDetected = false;
+          consecutiveFailures = 0;
+          outageStartTs = 0;
+          const sd = getStateDir();
+          if (sd) {
+            sendTelegramAlert("overflow_reset", "⚠️ *sinain-hud* overflow reset (stuck retry)",
+              `• ${Math.round(durationMs / 1000)}s failed run with overflow error\n• Transcript truncated, next heartbeat should recover`,
+              sd);
+          }
+        }
       }
     }
 

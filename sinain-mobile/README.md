@@ -1,97 +1,41 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# sinain-mobile
 
-# Getting Started
+Cross-platform React Native companion app for SinainHUD. Streams live camera frames from Ray-Ban Meta smart glasses via the Meta Wearables Device Access Toolkit (MWDAT) SDK and runs an on-device image processing pipeline.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Platforms
 
-## Step 1: Start Metro
+| Platform | Native code | Notes |
+|----------|-------------|-------|
+| **iOS** | Swift (`ios/ISinain/`) | CocoaPods, MWDAT SDK |
+| **Android** | Kotlin (`android/.../isinain/`) | Foreground service, MIUI compat |
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Quick Start
 
-To start the Metro dev server, run the following command from the root of your React Native project:
-
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+```bash
+npm install
 ```
 
 ### iOS
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```bash
+cd ios && pod install && cd ..
+npx react-native run-ios --device
 ```
 
-Then, and every time you update your native dependencies, run:
+### Android
 
-```sh
-bundle exec pod install
+See [docs/ANDROID-REBUILD-SPEC.md](../docs/ANDROID-REBUILD-SPEC.md) for the full build guide — it covers JDK/NDK requirements, Gradle configuration, MIUI compatibility, and deployment to Xiaomi devices.
+
+```bash
+npx react-native run-android
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Pipeline Architecture
 
-```sh
-# Using npm
-npm run ios
+The on-device pipeline is configured in `src/pipeline/config.ts` (TypeScript), with native counterparts:
+- **iOS**: `ios/ISinain/Config/PipelineConfig.swift`
+- **Android**: `android/app/src/main/java/com/isinain/pipeline/PipelineConfig.kt`
 
-# OR using Yarn
-yarn ios
-```
+## License
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+MIT — see [LICENSE](../LICENSE) in the repo root.

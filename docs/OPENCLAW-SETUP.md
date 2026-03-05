@@ -308,12 +308,12 @@ Configuration is in `openclaw.json` under `plugins.entries.sinain-hud`:
 
 ```bash
 # SCP updated plugin files to the server
-scp -i ~/.ssh/id_ed25519_strato \
+scp -i ~/.ssh/<your-key> \
   sinain-hud-plugin/index.ts sinain-hud-plugin/openclaw.plugin.json \
-  root@85.214.180.247:/mnt/openclaw-state/extensions/sinain-hud/
+  root@<your-server-ip>:/mnt/openclaw-state/extensions/sinain-hud/
 
 # Restart to pick up changes (MUST use -f flag)
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
 ```
 
@@ -321,6 +321,6 @@ ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
 
 ```bash
 # Check plugin loaded
-ssh -i ~/.ssh/id_ed25519_strato root@85.214.180.247 \
+ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
   'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml logs --tail 30 openclaw-gateway 2>&1 | grep -i plugin'
 ```

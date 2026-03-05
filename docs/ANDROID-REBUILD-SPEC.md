@@ -46,7 +46,7 @@ This specification contains every detail needed to rebuild the sinain-mobile And
 |---|---|---|
 | `OPENCLAW_TOKEN` | `.env` | OpenClaw gateway authentication |
 | `OPENROUTER_API_KEY` | `.env` | OpenRouter vision API (Gemini Flash) |
-| `GATEWAY_WS_URL` | `.env` (optional) | Override default `wss://sinain.duckdns.org` |
+| `GATEWAY_WS_URL` | `.env` (optional) | Override default `wss://<your-domain>` |
 | `github_token` | `~/.gradle/gradle.properties` | MWDAT GitHub Packages access |
 
 ---
@@ -687,7 +687,7 @@ Two data classes:
 **PipelineConfig**:
 | Field | Default | Purpose |
 |---|---|---|
-| gatewayWsUrl | `wss://sinain.duckdns.org` | WebSocket gateway URL |
+| gatewayWsUrl | `wss://<your-domain>` | WebSocket gateway URL |
 | gatewayToken | `""` | Auth token |
 | sessionKey | `"agent:main:sinain"` | Agent session key |
 | openRouterApiKey | `""` | OpenRouter API key |
@@ -1078,7 +1078,7 @@ Key types: `FrameData`, `PhotoResult`, `WearableState`, `StreamConfig`, `Wearabl
 
 ### 8.3: Config
 
-File: `src/pipeline/config.ts` -- Reads `.env` via `react-native-dotenv` `@env` module. Produces `PipelineConfig` with gateway (wsUrl, token, sessionKey) and vision (apiKey, model) sections. Defaults: `wss://sinain.duckdns.org`, `agent:main:sinain`, `google/gemini-2.5-flash`.
+File: `src/pipeline/config.ts` -- Reads `.env` via `react-native-dotenv` `@env` module. Produces `PipelineConfig` with gateway (wsUrl, token, sessionKey) and vision (apiKey, model) sections. Defaults: `wss://<your-domain>`, `agent:main:sinain`, `google/gemini-2.5-flash`.
 
 ### 8.4: Hooks
 
