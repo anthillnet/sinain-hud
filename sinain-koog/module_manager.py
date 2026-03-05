@@ -131,6 +131,21 @@ def cmd_activate(modules_dir: Path, args: argparse.Namespace) -> None:
         "locked": entry.get("locked", manifest.get("locked", False)),
     }
     _save_registry(modules_dir, registry)
+
+    # Fire-and-forget: ingest module patterns into triple store
+    import subprocess
+    try:
+        subprocess.run(
+            ["python3", "triple_ingest.py", "--memory-dir",
+             str(modules_dir.parent / "memory"),
+             "--ingest-module", module_id, "--modules-dir", str(modules_dir),
+             "--embed"],
+            capture_output=True, timeout=15,
+            cwd=str(Path(__file__).parent),
+        )
+    except Exception:
+        pass
+
     print(json.dumps({
         "activated": module_id,
         "priority": priority,
@@ -151,6 +166,20 @@ def cmd_suspend(modules_dir: Path, args: argparse.Namespace) -> None:
 
     entry["status"] = "suspended"
     _save_registry(modules_dir, registry)
+
+    # Fire-and-forget: retract module patterns from triple store
+    import subprocess
+    try:
+        subprocess.run(
+            ["python3", "triple_ingest.py", "--memory-dir",
+             str(modules_dir.parent / "memory"),
+             "--retract-module", module_id],
+            capture_output=True, timeout=15,
+            cwd=str(Path(__file__).parent),
+        )
+    except Exception:
+        pass
+
     print(json.dumps({"suspended": module_id}, ensure_ascii=False))
 
 
