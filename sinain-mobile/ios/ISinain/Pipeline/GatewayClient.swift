@@ -25,6 +25,7 @@ final class GatewayClient: GatewayConnecting {
     private var authenticated = false
     private var rpcId = 1
     private var closing = false
+    private var pendingRunId: String?
 
     // Pending RPCs
     private struct PendingRpc {
@@ -96,6 +97,8 @@ final class GatewayClient: GatewayConnecting {
                 timer: timeoutWork,
                 expectFinal: true
             )
+
+            self.pendingRunId = idempotencyKey
 
             let payload: [String: Any] = [
                 "type": "req",
@@ -229,13 +232,18 @@ final class GatewayClient: GatewayConnecting {
             return
         }
 
-        // 3. Handle streaming events
+        // 3. Handle streaming events (filter by runId to prevent cross-talk)
         if type == "event", (msg["event"] as? String) == "agent" {
-            if let payload = msg["payload"] as? [String: Any],
-               (payload["stream"] as? String) == "assistant",
-               let data = payload["data"] as? [String: Any],
-               let text = data["text"] as? String {
-                onResponse?(text)
+            if let payload = msg["payload"] as? [String: Any] {
+                // Only process events matching our pending RPC
+                let eventRunId = payload["runId"] as? String
+                guard eventRunId == pendingRunId else { return }
+
+                if (payload["stream"] as? String) == "assistant",
+                   let data = payload["data"] as? [String: Any],
+                   let text = data["text"] as? String {
+                    onResponse?(text)
+                }
             }
             return
         }

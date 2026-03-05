@@ -7,7 +7,7 @@ export interface PipelineConfig {
 
 export const DEFAULT_CONFIG: PipelineConfig = {
   gateway: {
-    wsUrl: 'wss://sinain.duckdns.org',
+    wsUrl: 'wss://localhost:18789',
     token: '',
     sessionKey: 'agent:main:sinain',
   },

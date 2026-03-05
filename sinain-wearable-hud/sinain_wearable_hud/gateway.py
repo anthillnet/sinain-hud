@@ -243,7 +243,6 @@ class OpenClawGateway:
                 "sessionKey": self.session_key,
                 "idempotencyKey": idempotency_key,
                 "deliver": False,
-                "responseTarget": "self",
             },
         })
         log.debug("[%s] agent RPC sent (id=%s): %s", TAG, rpc_id, message[:100])

@@ -6,7 +6,7 @@ struct PipelineConfig {
 
     // MARK: - Gateway
 
-    var gatewayWsUrl: String = "wss://sinain.duckdns.org"
+    var gatewayWsUrl: String = "wss://localhost:18789"
     var gatewayToken: String = ""
     var sessionKey: String = "agent:main:sinain"
 
