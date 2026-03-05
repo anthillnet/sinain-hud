@@ -228,11 +228,13 @@ class TripleExtractor:
         return triples
 
     def extract_module(
-        self, module_id: str, manifest: dict, patterns_text: str
+        self, module_id: str, manifest: dict, patterns_text: str,
+        guidance_text: str = "",
     ) -> list[Triple]:
-        """Extract triples from a module's manifest (Tier 1) + patterns.md (Tier 2).
+        """Extract triples from a module's manifest (Tier 1) + patterns.md + guidance.md (Tier 2).
 
-        Creates module:{id} entity + pattern entities from patterns.md.
+        Creates module:{id} entity + pattern entities from patterns.md
+        + guidance entities from guidance.md.
         """
         triples: list[Triple] = []
         entity_id = f"module:{module_id}"
@@ -252,6 +254,21 @@ class TripleExtractor:
                 # Link patterns to module
                 if pt.attribute == "text" and pt.entity_id.startswith("pattern:"):
                     triples.append(Triple(pt.entity_id, "belongs_to", entity_id, "ref"))
+
+        # Tier 2b: extract guidance items from guidance.md
+        if guidance_text:
+            guidance_triples = self.extract_playbook(guidance_text)
+            for gt in guidance_triples:
+                # Remap pattern: → guidance: entity prefix
+                if gt.entity_id.startswith("pattern:"):
+                    gt = Triple(
+                        gt.entity_id.replace("pattern:", "guidance:", 1),
+                        gt.attribute, gt.value, gt.value_type,
+                    )
+                triples.append(gt)
+                if gt.attribute == "text" and gt.entity_id.startswith("guidance:"):
+                    triples.append(Triple(gt.entity_id, "type", "guidance"))
+                    triples.append(Triple(gt.entity_id, "belongs_to", entity_id, "ref"))
 
         return triples
 

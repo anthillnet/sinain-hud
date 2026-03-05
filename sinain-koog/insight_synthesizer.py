@@ -61,7 +61,11 @@ If skipping (be specific about WHY, citing what you read):
 {
   "skip": true,
   "skipReason": "specific reason citing files/patterns examined — 'no new data' is NOT valid"
-}"""
+}
+
+When your suggestion or insight references a pattern from a section marked
+"[Transferred knowledge: ...]", naturally mention this origin (e.g. "Based on
+transferred OCR expertise, ..."). Keep the attribution brief and natural."""
 
 
 def build_user_prompt(
