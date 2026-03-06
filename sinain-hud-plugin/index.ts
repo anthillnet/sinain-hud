@@ -1542,12 +1542,18 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             }
           };
 
+          // Latency tracking helper
+          const latencyMs: Record<string, number> = {};
+          const heartbeatStart = Date.now();
+
           // 1. Git backup (30s timeout)
           try {
+            const t0 = Date.now();
             const gitOut = await api.runtime.system.runCommandWithTimeout(
               ["bash", "sinain-koog/git_backup.sh"],
               { timeoutMs: 30_000, cwd: workspaceDir },
             );
+            latencyMs.gitBackup = Date.now() - t0;
             result.gitBackup = gitOut.stdout.trim() || "nothing to commit";
           } catch (err) {
             api.logger.warn(`sinain-hud: git backup error: ${String(err)}`);
@@ -1570,7 +1576,9 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           ];
           if (params.idle) signalArgs.push("--idle");
 
+          const signalT0 = Date.now();
           const signalResult = await runScript(signalArgs, 60_000);
+          latencyMs.signalAnalysis = Date.now() - signalT0;
           if (signalResult) {
             result.signals = signalResult.signals ?? [];
             result.recommendedAction = signalResult.recommendedAction ?? {
@@ -1599,7 +1607,9 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           ];
           if (params.idle) synthArgs.push("--idle");
 
+          const synthT0 = Date.now();
           const synthResult = await runScript(synthArgs, 60_000);
+          latencyMs.insightSynthesis = Date.now() - synthT0;
           if (synthResult) {
             if (synthResult.skip === false) {
               result.output = {
@@ -1619,6 +1629,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             const logDir = join(workspaceDir, "memory", "playbook-logs");
             if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
 
+            const totalLatencyMs = Date.now() - heartbeatStart;
             const logEntry = {
               ts: now.toISOString(),
               idle: params.idle,
@@ -1629,6 +1640,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
               skipped: result.skipped,
               skipReason: result.skipReason,
               gitBackup: result.gitBackup,
+              latencyMs,
+              totalLatencyMs,
             };
 
             writeFileSync(
@@ -1707,20 +1720,25 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     };
 
     api.logger.info("sinain-hud: curation pipeline starting");
+    const curationLatency: Record<string, number> = {};
 
     // Step 1: Feedback analysis
+    const feedbackT0 = Date.now();
     const feedback = await runScript([
       "sinain-koog/feedback_analyzer.py",
       "--memory-dir", "memory/",
       "--session-summary", "periodic curation (plugin timer)",
     ]);
+    curationLatency.feedback = Date.now() - feedbackT0;
     const directive = (feedback as Record<string, unknown> | null)?.curateDirective as string ?? "stability";
 
     // Step 2: Memory mining (background task — mines unread daily files)
+    const miningT0 = Date.now();
     const mining = await runScript([
       "sinain-koog/memory_miner.py",
       "--memory-dir", "memory/",
     ]);
+    curationLatency.mining = Date.now() - miningT0;
     const findings = mining?.findings ? JSON.stringify(mining.findings) : null;
 
     // Fire-and-forget: ingest mining results into triple store
@@ -1743,7 +1761,9 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     if (findings) {
       curatorArgs.push("--mining-findings", findings);
     }
+    const curatorT0 = Date.now();
     const curator = await runScript(curatorArgs);
+    curationLatency.curation = Date.now() - curatorT0;
 
     // Fire-and-forget: ingest playbook patterns into triple store
     runScript([
@@ -1783,10 +1803,10 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       lastEvalReportDate = todayStr;
     }
 
-    // Log result
+    // Log result with curation latency
     const changes = (curator as Record<string, unknown> | null)?.changes ?? "unknown";
     api.logger.info(
-      `sinain-hud: curation pipeline complete (directive=${directive}, changes=${JSON.stringify(changes)})`,
+      `sinain-hud: curation pipeline complete (directive=${directive}, changes=${JSON.stringify(changes)}, latency=${JSON.stringify(curationLatency)})`,
     );
   }
 

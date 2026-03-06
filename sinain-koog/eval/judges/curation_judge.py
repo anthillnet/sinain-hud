@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from .base_judge import run_judge
+from .base_judge import run_judge, run_multi_judge
+
+_DIMENSIONS = ["directive_alignment", "evidence_quality"]
 
 SYSTEM_PROMPT = """\
 You are an evaluator scoring the quality of playbook curation changes.
@@ -12,13 +14,14 @@ The curator follows a directive and three laws:
   Law 2: Preserve high-scoring approaches
   Law 3: Then evolve
 
-Rate the curation on a 1-4 scale:
-  4: Changes perfectly match directive + evidence, three laws respected
-  3: Good changes, minor alignment issues with directive
-  2: Changes misaligned with directive or weak evidence
-  1: Destructive changes, violated three laws, or ignored directive entirely
+Rate on TWO dimensions (1-4 each):
+  directive_alignment: Do the changes match the curate directive and respect the three laws?
+    4=perfect match + laws respected, 3=good with minor issues, 2=misaligned, 1=destructive/ignored
+  evidence_quality: Are the changes backed by concrete evidence from logs/metrics?
+    4=strong evidence cited, 3=reasonable evidence, 2=weak/missing evidence, 1=no evidence
 
-Respond with ONLY a JSON object: {"score": <1-4>, "reasoning": "brief explanation"}"""
+Respond with ONLY a JSON object:
+{"scores": {"directive_alignment": <1-4>, "evidence_quality": <1-4>}, "reasoning": "brief explanation"}"""
 
 
 def judge_curation(
@@ -27,7 +30,11 @@ def judge_curation(
     playbook_before: str = "",
     **kwargs,
 ) -> dict | None:
-    """Evaluate playbook curation quality. Returns {"score": 1-4, "reasoning": str} or None."""
+    """Evaluate playbook curation quality.
+
+    Returns {"scores": {"directive_alignment": int, "evidence_quality": int}, "score": int, "reasoning": str}
+    or None.
+    """
     changes = curator_result.get("changes", {})
     stale_actions = curator_result.get("staleItemActions", [])
     lines = curator_result.get("playbookLines", "?")
@@ -40,7 +47,6 @@ def judge_curation(
     ]
 
     if playbook_before:
-        # Truncate to keep prompt manageable
         parts.append(f"\n## Playbook Before (excerpt)\n{playbook_before[:1500]}")
 
-    return run_judge(SYSTEM_PROMPT, "\n".join(parts), **kwargs)
+    return run_multi_judge(SYSTEM_PROMPT, "\n".join(parts), _DIMENSIONS, **kwargs)
