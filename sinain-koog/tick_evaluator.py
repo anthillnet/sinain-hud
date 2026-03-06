@@ -343,24 +343,49 @@ def main():
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     eval_log_file = eval_log_dir / f"{today}.jsonl"
 
-    results_written = 0
+    attempted = 0
+    succeeded = 0
+    failed = 0
+    fail_ticks: list[str] = []
+
     for entry in unevaluated:
-        # Recent logs for assertion context (logs before this tick)
         tick_ts = entry.get("ts", "")
-        recent = [e for e in playbook_logs if e.get("ts", "") < tick_ts]
+        attempted += 1
 
-        result = evaluate_tick(entry, recent, playbook_text, daily_files, eval_config)
+        try:
+            # Recent logs for assertion context (logs before this tick)
+            recent = [e for e in playbook_logs if e.get("ts", "") < tick_ts]
 
-        with open(eval_log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(result, ensure_ascii=False) + "\n")
-        results_written += 1
+            result = evaluate_tick(entry, recent, playbook_text, daily_files, eval_config)
 
-        status = "PASS" if result["passRate"] >= 0.85 else "WARN"
-        judge_info = f" judgeAvg={result.get('judgeAvg', '-')}" if result.get("judges") else ""
-        print(f"[tick-eval] {status} tick={tick_ts} passRate={result['passRate']}{judge_info}",
-              file=sys.stderr)
+            with open(eval_log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(result, ensure_ascii=False) + "\n")
+            succeeded += 1
 
-    print(f"[tick-eval] wrote {results_written} eval entries to {eval_log_file}", file=sys.stderr)
+            status = "PASS" if result["passRate"] >= 0.85 else "WARN"
+            judge_info = f" judgeAvg={result.get('judgeAvg', '-')}" if result.get("judges") else ""
+            print(f"[tick-eval] {status} tick={tick_ts} passRate={result['passRate']}{judge_info}",
+                  file=sys.stderr)
+        except Exception as exc:
+            failed += 1
+            fail_ticks.append(tick_ts)
+            print(f"[tick-eval] ERROR tick={tick_ts}: {exc}", file=sys.stderr)
+
+    # Write run summary so the reporter can detect partial runs
+    run_summary = {
+        "_type": "run_summary",
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "failed": failed,
+        "isPartial": failed > 0,
+        "failedTicks": fail_ticks,
+    }
+    with open(eval_log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(run_summary, ensure_ascii=False) + "\n")
+
+    print(f"[tick-eval] wrote {succeeded} eval entries to {eval_log_file} "
+          f"(attempted={attempted}, failed={failed})", file=sys.stderr)
 
 
 if __name__ == "__main__":
