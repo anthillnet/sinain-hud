@@ -180,6 +180,13 @@ export class Escalator {
     });
   }
 
+  /** Push fresh SITUATION.md content to the gateway server (fire-and-forget). */
+  pushSituationMd(content: string): void {
+    if (!this.wsClient.isConnected) return;
+    this.wsClient.sendRpc("situation.update", { content }, 10_000)
+      .catch((err: any) => warn(TAG, `situation.update rpc failed: ${err.message}`));
+  }
+
   /** Send a direct user message to OpenClaw. */
   async sendDirect(text: string): Promise<void> {
     const idemKey = `direct-${Date.now()}`;
