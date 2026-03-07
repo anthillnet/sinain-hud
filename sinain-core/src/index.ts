@@ -111,6 +111,9 @@ async function main() {
       // Escalation continues as normal
       escalator.onAgentAnalysis(entry, contextWindow);
     },
+    onSituationUpdate: (content) => {
+      escalator.pushSituationMd(content);
+    },
     onHudUpdate: (text) => {
       wsHandler.broadcast(text, "normal", "stream");
     },

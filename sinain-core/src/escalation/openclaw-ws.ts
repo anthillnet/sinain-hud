@@ -147,7 +147,7 @@ export class OpenClawWsClient extends EventEmitter {
           minProtocol: 3,
           maxProtocol: 3,
           role: "operator",
-          scopes: ["operator.read", "operator.write"],
+          scopes: ["operator.read", "operator.write", "operator.admin"],
           client: {
             id: "gateway-client",
             displayName: "Sinain Core",
