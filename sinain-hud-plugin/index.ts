@@ -1834,6 +1834,34 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     api.logger.info(
       `sinain-hud: curation pipeline complete (directive=${directive}, changes=${JSON.stringify(changes)}, latency=${JSON.stringify(curationLatency)})`,
     );
+
+    // Write curation result to playbook-logs so eval_reporter can track churn
+    if (curator) {
+      try {
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const logDir = join(workspaceDir, "memory", "playbook-logs");
+        const curatorChanges = (curator as Record<string, unknown>).changes as Record<string, string[]> | undefined;
+        const curationEntry = {
+          _type: "curation",
+          ts: new Date().toISOString(),
+          directive,
+          playbookChanges: {
+            added:    curatorChanges?.added    ?? [],
+            pruned:   curatorChanges?.pruned   ?? [],
+            promoted: curatorChanges?.promoted ?? [],
+            playbookLines: (curator as Record<string, unknown>).playbookLines ?? 0,
+          },
+          latencyMs: curationLatency,
+        };
+        writeFileSync(
+          join(logDir, `${dateStr}.jsonl`),
+          JSON.stringify(curationEntry) + "\n",
+          { flag: "a" },
+        );
+      } catch (err) {
+        api.logger.warn(`sinain-hud: failed to write curation log entry: ${String(err)}`);
+      }
+    }
   }
 
   // ==========================================================================
