@@ -154,6 +154,8 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey))
         // ID 14: Cmd+Shift+Y → copy target message to clipboard
         registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 15: Cmd+Shift+R → toggle demo mode (privacy off = visible to screencapture)
+        registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -264,6 +266,13 @@ class AppDelegate: FlutterAppDelegate {
 
         case 14: // Cmd+Shift+Y → copy target message
             hotkeyChannel?.invokeMethod("onCopyMessage", arguments: nil)
+
+        case 15: // Cmd+Shift+R → toggle demo mode
+            if #available(macOS 12.0, *) {
+                let currentlyPrivate = window.sharingType == .none
+                window.sharingType = currentlyPrivate ? .readOnly : .none
+                hotkeyChannel?.invokeMethod("onTogglePrivacy", arguments: !currentlyPrivate)
+            }
 
         default:
             break

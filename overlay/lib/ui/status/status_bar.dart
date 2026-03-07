@@ -102,6 +102,29 @@ class StatusBar extends StatelessWidget {
                 : Colors.white.withValues(alpha: 0.3),
           ),
           const SizedBox(width: 8),
+          if (!settings.privacyMode) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                color: const Color(0xFFFF6600).withValues(alpha: 0.2),
+                border: Border.all(
+                  color: const Color(0xFFFF6600).withValues(alpha: 0.6),
+                  width: 0.5,
+                ),
+              ),
+              child: const Text(
+                'DEMO',
+                style: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 8,
+                  color: Color(0xFFFF6600),
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
           // Mode label
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
