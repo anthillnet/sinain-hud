@@ -177,10 +177,8 @@ def compute_playbook_health(playbook_logs: list[dict]) -> dict:
             pl = changes.get("playbookLines")
             if isinstance(pl, int):
                 line_counts.append(pl)
-            added = changes.get("changes", {})
-            if isinstance(added, dict):
-                total_added += len(added.get("added", []))
-                total_pruned += len(added.get("pruned", []))
+            total_added += len(changes.get("added", []))
+            total_pruned += len(changes.get("pruned", []))
 
     tick_count = len(playbook_logs) or 1
     return {
