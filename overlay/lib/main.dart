@@ -68,6 +68,10 @@ void main() async {
       case 'onTogglePosition':
         final top = call.arguments as bool;
         await settingsService.setTopPosition(top);
+      case 'onTogglePrivacy':
+        final privacyMode = call.arguments as bool;
+        settingsService.setPrivacyModeTransient(privacyMode);
+        await windowService.setPrivacyMode(privacyMode);
     }
   });
 
