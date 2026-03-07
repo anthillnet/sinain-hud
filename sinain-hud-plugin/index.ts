@@ -8,7 +8,7 @@
  * - Strips <private> tags from tool results before persistence
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync, copyFileSync, renameSync } from "node:fs";
 import { join, dirname, extname } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
@@ -645,6 +645,32 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   }
 
   api.logger.info("sinain-hud: plugin registered");
+
+  // ==========================================================================
+  // RPC: situation.update — receive fresh SITUATION.md from sinain-core
+  // ==========================================================================
+
+  api.registerGatewayMethod("situation.update", ({ params, respond }: { params: Record<string, unknown>; respond: (ok: boolean, result: unknown, error?: unknown) => void }) => {
+    const content = params.content;
+    if (typeof content !== "string" || !content) {
+      respond(false, null, { code: "invalid_params", message: "content must be a non-empty string" });
+      return;
+    }
+    if (!lastWorkspaceDir) {
+      respond(false, null, { code: "not_ready", message: "workspace not initialized" });
+      return;
+    }
+    const situationPath = join(lastWorkspaceDir, "SITUATION.md");
+    const tmpPath = situationPath + ".rpc.tmp";
+    try {
+      writeFileSync(tmpPath, content, "utf-8");
+      renameSync(tmpPath, situationPath);
+      respond(true, { ok: true, bytes: content.length });
+      api.logger.info(`sinain-hud: SITUATION.md updated via RPC (${content.length} chars)`);
+    } catch (err: any) {
+      respond(false, null, { code: "write_error", message: err.message });
+    }
+  });
 
   // ==========================================================================
   // Hook: session_start — initialize per-session tracking

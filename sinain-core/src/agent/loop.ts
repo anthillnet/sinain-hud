@@ -27,6 +27,8 @@ export interface AgentLoopDeps {
   getRecorderStatus?: () => RecorderStatus | null;
   /** Optional: profiler for metrics collection. */
   profiler?: Profiler;
+  /** Called after each successful SITUATION.md write with the content string. */
+  onSituationUpdate?: (content: string) => void;
 }
 
 export interface TraceContext {
@@ -324,7 +326,8 @@ export class AgentLoop extends EventEmitter {
       const escalationScore = calculateEscalationScore(digest, contextWindow);
 
       // Write SITUATION.md (enhanced with escalation context and recorder status)
-      writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
+      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
+      this.deps.onSituationUpdate?.(situationContent);
 
       // Notify for escalation check
       traceCtx?.startSpan("escalation-check");
