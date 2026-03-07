@@ -255,8 +255,16 @@ class SCKCapture:
         display = displays[0]  # primary display
 
         # 6. Create content filter + stream configuration
+        # Exclude sinain-hud overlay (it manages its own privacy; we must exclude
+        # explicitly so demo mode doesn't create a feedback loop)
+        windows = content_result[0].windows()
+        excluded = [
+            w for w in windows
+            if w.owningApplication() and
+               w.owningApplication().bundleIdentifier() == 'com.sinain.hud'
+        ]
         content_filter = sck['SCContentFilter'].alloc() \
-            .initWithDisplay_excludingWindows_(display, [])
+            .initWithDisplay_excludingWindows_(display, excluded)
 
         config = sck['SCStreamConfiguration'].alloc().init()
         # Native GPU-level downscaling — no PIL resize() needed

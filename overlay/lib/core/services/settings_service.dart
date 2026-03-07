@@ -81,6 +81,11 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setPrivacyModeTransient(bool value) {
+    _settings.privacyMode = value;
+    notifyListeners();
+  }
+
   Future<void> setTopPosition(bool value) async {
     _settings.topPosition = value;
     await _prefs.setBool(_keyTopPosition, value);
