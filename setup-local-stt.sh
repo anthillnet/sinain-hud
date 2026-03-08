@@ -19,6 +19,7 @@ fail() { echo -e "${BOLD}[setup]${RESET} ${RED}✗${RESET} $*"; exit 1; }
 MODEL_DIR="$HOME/models"
 MODEL_NAME="ggml-large-v3-turbo.bin"
 MODEL_PATH="${LOCAL_WHISPER_MODEL:-$MODEL_DIR/$MODEL_NAME}"
+MODEL_PATH="${MODEL_PATH/#\~/$HOME}"
 
 # ── 1. Check / install whisper-cli ───────────────────────────────────────────
 if ! command -v whisper-cli >/dev/null 2>&1; then
@@ -59,14 +60,15 @@ fi
 
 # ── 3. Quick smoke test ─────────────────────────────────────────────────────
 log "Smoke test..."
-TMP_WAV=$(mktemp /tmp/sinain-whisper-test-XXXXXX.wav)
+TMP_DIR=$(mktemp -d /tmp/sinain-whisper-test-XXXXXX)
+TMP_WAV="$TMP_DIR/test.wav"
 sox -n -r 16000 -c 1 -b 16 "$TMP_WAV" trim 0 1 2>/dev/null || true
 if [ -f "$TMP_WAV" ] && whisper-cli -m "$MODEL_PATH" -f "$TMP_WAV" --no-timestamps -l en -np >/dev/null 2>&1; then
   ok "whisper-cli works"
 else
   warn "smoke test failed — whisper may still work with real audio"
 fi
-rm -f "$TMP_WAV"
+rm -rf "$TMP_DIR"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""

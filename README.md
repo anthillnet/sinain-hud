@@ -276,7 +276,7 @@ This will:
 | `Cmd+Shift+H` | **Panic hide** — instant stealth + click-through + privacy |
 | `Cmd+Shift+C` | Toggle click-through mode |
 | `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
-| `Cmd+Shift+T` | Toggle audio capture (start/stop transcription) |
+| `Cmd+Shift+T` | Toggle audio capture (mute/unmute transcription) |
 | `Cmd+Shift+D` | Switch audio device (primary ↔ alt) |
 | `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
 | `Cmd+Shift+S` | Toggle screen capture pipeline |

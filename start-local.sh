@@ -17,6 +17,7 @@ log()  { echo -e "${BOLD}[local]${RESET} $*"; }
 MODEL_DIR="$HOME/models"
 MODEL_NAME="ggml-large-v3-turbo.bin"
 MODEL_PATH="${LOCAL_WHISPER_MODEL:-$MODEL_DIR/$MODEL_NAME}"
+MODEL_PATH="${MODEL_PATH/#\~/$HOME}"
 WHISPER_BIN="${LOCAL_WHISPER_BIN:-whisper-cli}"
 
 # ── Preflight: whisper-cli must be installed ─────────────────────────────────
