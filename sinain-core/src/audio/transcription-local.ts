@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFile, unlink, mkdtemp } from "node:fs/promises";
+import { writeFile, unlink, rmdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AudioChunk, TranscriptResult } from "../types.js";
@@ -67,7 +67,7 @@ export class LocalTranscriptionBackend {
     } finally {
       // Cleanup temp files
       await unlink(wavPath).catch(() => {});
-      await unlink(tmpDir).catch(() => {});
+      await rmdir(tmpDir).catch(() => {});
     }
   }
 
