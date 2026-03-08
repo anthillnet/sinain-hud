@@ -180,6 +180,16 @@ async function main() {
     wsHandler.updateState({ audio: "muted" });
   });
 
+  systemAudioPipeline.on("muted", () => {
+    log(TAG, "system audio muted (capture process still running)");
+    wsHandler.updateState({ audio: "muted" });
+  });
+
+  systemAudioPipeline.on("unmuted", () => {
+    log(TAG, "system audio unmuted");
+    wsHandler.updateState({ audio: "active" });
+  });
+
   // Mic pipeline lifecycle events
   if (micPipeline) {
     micPipeline.on("error", (err) => {
