@@ -55,6 +55,7 @@ def main():
 
     config = load_config(args.config)
 
+    log("initializing capture...")
     capture = create_capture(
         mode=config["capture"]["mode"],
         target=config["capture"]["target"],
@@ -68,6 +69,7 @@ def main():
     extractor = ROIExtractor(
         padding=config["detection"]["roiPadding"],
     )
+    log("initializing OCR...")
     ocr = create_ocr(config)
     gate = DecisionGate(
         min_ocr_chars=config["gate"]["minOcrChars"],
