@@ -391,6 +391,14 @@ export class SenseBuffer {
     return this._version;
   }
 
+  /** Clear all events and accumulated deltas. */
+  clear(): void {
+    this.events = [];
+    this._accumulatedDeltas = [];
+    this._activityCounts.clear();
+    this._version++;
+  }
+
   /** Strip imageData from events beyond the most recent maxImagesKept. */
   private trimImages(): void {
     let imagesFound = 0;
