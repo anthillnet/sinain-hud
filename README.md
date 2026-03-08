@@ -1,112 +1,249 @@
 # SinainHUD
 
-Private AI overlay for macOS. Live advice from [Sinain](https://github.com/Geravant/sinain), invisible to screen capture.
+Ambient AI overlay for macOS — invisible to screen capture, surfacing real-time insights from
+audio and screen context via an LLM agent loop. A ghost window (`NSWindow.sharingType = .none`)
+whispers advice only you can see, while a reflection pipeline running every 30 minutes curates
+your accumulated context into a living playbook.
 
-A vampire whispering in your ear — except it's text, and only you can see it.
-
-## What is this?
-
-An always-on-top transparent overlay that displays real-time AI advice while you work, present, or take calls. Uses macOS `NSWindow.sharingType = .none` to stay invisible to screen sharing, recording, and screenshots.
-
-**Components:**
-- **overlay/** — Flutter + Swift macOS app (the HUD you see)
-- **sinain-core/** — Node.js service (agent loop, audio pipeline, screen context, WebSocket server)
-- **sense_client/** — Python screen capture + privacy pipeline
-- **sinain-koog/** — Python reflection scripts (signal analysis, feedback, mining, curation, synthesis)
-- **sinain-hud-plugin/** — OpenClaw plugin (lifecycle hooks, auto-deploy, session summaries)
-- **skills/sinain-hud/** — Skill definition (HEARTBEAT.md, SKILL.md)
-
-## Architecture
+## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        macOS Host                            │
-│                                                              │
-│  ┌────────────┐      ┌──────────────────────────────────┐   │
-│  │ SinainHUD  │◄════►│         sinain-core              │   │
-│  │ (Overlay)  │ WS   │         localhost:9500           │   │
-│  └────────────┘      │                                  │   │
-│                      │  ┌──────────┐  ┌──────────────┐  │   │
-│                      │  │ Audio    │  │ Agent Loop   │  │   │
-│                      │  │ Pipeline │  │ (digest,     │  │   │
-│  ┌────────────┐      │  └────┬─────┘  │  escalation) │  │   │
-│  │sense_client│─────►│       │        └──────┬───────┘  │   │
-│  │(capture +  │ POST │       │               │          │   │
-│  │ privacy)   │      └───────┼───────────────┼──────────┘   │
-│  └────────────┘              │               │               │
-│   <private> strip            │          writeSituationMd()   │
-│   + auto-redact              │               ▼               │
-│                              │    ~/.openclaw/workspace/     │
-│                              │       SITUATION.md            │
-└──────────────────────────────┼───────────────────────────────┘
-                               │ escalateToOpenClaw()
-                    ┌──────────┼──────────┐
-                    │  HTTP    │    WS    │
-                    ▼          ▼          │
-           ┌───────────────────────────┐  │
-           │   OpenClaw Gateway        │  │
-           │   (hooks + agent.wait)    │◄─┘
-           │                           │
-           │  ┌──────────────────────┐ │
-           │  │  sinain-hud plugin   │ │
-           │  │  (auto-deploy,       │ │
-           │  │   privacy strip,     │ │
-           │  │   session summaries) │ │
-           │  └──────────────────────┘ │
-           └───────────────────────────┘
+Audio (BlackHole) ──┐
+                    ├─► sinain-core :9500 ──► OpenClaw Gateway ──► AI Agent
+Screen (SCKit) ─────┘         │                      │
+                              │ WebSocket feed        │ [HUD:feed] responses
+                              ▼                       ▼
+                         Overlay (Flutter)       Telegram alerts
+                              │
+                         SITUATION.md ──► sinain-koog (30-min reflection)
+                                                  │
+                                         triplestore.db (Graph RAG)
 ```
 
-The agent loop runs a periodic tick: capture screen/audio, build a context window, generate a digest via LLM, optionally escalate to OpenClaw. See [docs/ESCALATION.md](docs/ESCALATION.md) for the full escalation pipeline and [docs/ESCALATION-HEALTH.md](docs/ESCALATION-HEALTH.md) for health monitoring, warnings, and runbooks.
+| Component | Language | Purpose |
+|---|---|---|
+| **overlay/** | Dart / Swift | Ghost window HUD, 4 display modes, global hotkeys |
+| **sinain-core/** | Node.js (TypeScript) | Audio transcription, agent loop, escalation, WS feed |
+| **sense_client/** | Python | ScreenCaptureKit capture, SSIM diff, OCR, privacy filter |
+| **sinain-koog/** | Python | Reflection pipeline: signal analysis, memory mining, playbook curation, evaluation, triplestore |
+| **sinain-hud-plugin/** | TypeScript | OpenClaw plugin: lifecycle hooks, auto-deploy, heartbeat compliance, overflow watchdog |
+| **modules/** | JSON + Markdown | Hot-swappable knowledge modules with priority-based stacking |
 
-## Quick Start
+---
 
-### Prerequisites
-- macOS 11.0+ (Big Sur or later)
-- Flutter 3.10+ (`brew install flutter`)
-- Node.js 22+ (`brew install node`)
-- An [anthillnet/openclaw](https://github.com/anthillnet/openclaw) instance (our fork of OpenClaw, includes the sinain-hud plugin)
+## Components
 
-### 1. sinain-core Service
+### overlay/
+
+Flutter macOS ghost window. Uses `NSWindow.sharingType = .none` — invisible to all screen
+sharing, recording, and screenshots. Connects to sinain-core over a local WebSocket.
+
+**Display modes:**
+- **Feed** — scrolling text feed (default)
+- **Alert** — single urgent card
+- **Minimal** — one-line ticker at screen edge
+- **Hidden** — invisible
+
+Global hotkeys registered via a native Swift plugin. See [Hotkeys](#hotkeys).
+
+### sinain-core/
+
+Node.js hub service running on `:9500`. Responsibilities:
+
+- **Audio pipeline** — captures from BlackHole (or any audio device) via sox/ffmpeg, transcribes
+  with Gemini Flash, applies VAD threshold to skip silence
+- **Agent loop** — periodic tick: builds context window from recent transcript + screen OCR,
+  runs local LLM digest, optionally escalates to OpenClaw gateway
+- **Escalation** — three modes: `off`, `selective` (trigger-based), `focus` (always-on);
+  sends context to the AI agent and streams `[HUD:feed]` responses back to the overlay
+- **SITUATION.md sync** — after every tick, pushes live situation context to the gateway
+  workspace via `situation.update` RPC
+- **WebSocket server** — feeds transcript items, agent responses, and control messages to the overlay
+
+See [docs/ESCALATION.md](docs/ESCALATION.md) and [docs/ESCALATION-HEALTH.md](docs/ESCALATION-HEALTH.md).
+
+### sense_client/
+
+Python screen capture pipeline with three capture backends (in priority order):
+
+1. **SCKCapture** — ScreenCaptureKit (macOS 12.3+); async zero-copy IOSurface, 2 FPS,
+   GPU-native downscaling; camera-safe (no CoreMediaIO contention)
+2. **ScreenKitCapture** — IPC fallback, reads frames from overlay app via `~/.sinain/capture/`
+3. **ScreenCapture** — `CGDisplayCreateImage` legacy fallback
+
+Change detection via SSIM diff suppresses unchanged frames before OCR. Privacy pipeline strips
+`<private>...</private>` tags and auto-redacts credit cards, API keys, bearer tokens, and passwords.
+
+### sinain-koog/
+
+Python reflection pipeline triggered every 30 minutes by the sinain-hud-plugin HEARTBEAT:
+
+| Script | Role |
+|---|---|
+| `signal_analyzer.py` | Identifies recurring friction signals from session history |
+| `feedback_analyzer.py` | Mines agent responses for quality patterns |
+| `memory_miner.py` | Extracts facts and concepts from idle session history |
+| `playbook_curator.py` | Merges signals + feedback into `sinain-playbook.md` |
+| `insight_synthesizer.py` | Produces `sinain-insights.md` daily synthesis |
+| `tick_evaluator.py` | Scores each agent response against rubric |
+| `eval_reporter.py` | Generates delta reports after 03:00 UTC daily |
+| `triple_ingest.py` | Ingests playbook entries into the triplestore |
+
+### sinain-hud-plugin/
+
+OpenClaw server plugin providing:
+
+- **`before_agent_start` hook** — auto-deploys HEARTBEAT.md, SKILL.md, sinain-koog scripts, and
+  active module stack to the gateway workspace; generates `sinain-playbook-effective.md` by
+  merging all active module patterns by priority
+- **Curation pipeline** — runs the full sinain-koog reflection pipeline every 30 minutes
+- **Context overflow watchdog** — auto-archives and truncates session transcript after 5
+  consecutive token-limit errors (1 MB minimum guard)
+- **Privacy stripping** — strips `<private>` tags from tool results before session persistence
+- **`/sinain_status` command** — shows session state, overflow counter, last evaluation
+- **`/sinain_modules` command** — shows the active module stack with priorities
+
+### modules/
+
+Hot-swappable knowledge packages. Each module is a directory with:
+- `manifest.json` — id, name, priority (0–100), triggers, locked flag
+- `patterns.md` — behavioral patterns injected into the agent's effective playbook
+
+| Module | Status | Priority |
+|---|---|---|
+| `base-behaviors` | locked (always-on) | 0 |
+| `claude-code-workflow` | activatable | configurable |
+| `cairn2e-rules` | activatable | configurable |
+
+Managed via `sinain-koog/module_manager.py`. See [Knowledge Modules](#knowledge-modules--skill-extraction).
+
+---
+
+## Memory System
+
+SinainHUD uses a four-layer memory architecture, each layer with a distinct lifetime and purpose:
+
+### Layer 1 — OpenClaw built-in memory
+
+`memory.md` in the gateway workspace — curated long-term facts and preferences. Maintained by the
+AI agent directly (tool calls). Also includes daily memory logs and compaction hooks that
+summarize older history to stay within context limits.
+
+### Layer 2 — Plugin sync engine
+
+The `before_agent_start` hook fires before every agent session. It auto-deploys:
+- Latest HEARTBEAT.md and SKILL.md from `sinain-koog/memory/`
+- Active knowledge module stack (merged by priority into `sinain-playbook-effective.md`)
+- All sinain-koog reflection scripts
+
+This ensures every session starts with a fresh, consolidated context snapshot.
+
+### Layer 3 — sinain-koog reflection pipeline
+
+Runs every 30 minutes via HEARTBEAT. The pipeline:
+1. Analyzes recent signals and feedback for quality patterns
+2. Mines idle history for facts worth preserving
+3. Curates and updates `sinain-playbook.md`
+4. Scores recent agent responses (tick evaluator)
+5. Generates delta evaluation reports
+6. Ingests high-value entries into the triplestore
+
+### Layer 4 — Knowledge modules
+
+Domain expertise packages that are hot-swapped in and out as context changes.
+See [Knowledge Modules](#knowledge-modules--skill-extraction).
+
+---
+
+## Knowledge Modules + Skill Extraction
+
+A knowledge module packages domain expertise into a reusable, portable unit. Modules are stacked
+by priority — higher-priority patterns take precedence in the effective playbook.
+
+### CLI
 
 ```bash
-cd sinain-core
-npm install
-cp .env.example .env
-# Edit .env with your OpenClaw gateway URL and token
-npm run dev
+python3 sinain-koog/module_manager.py --modules-dir modules/ <subcommand>
 ```
 
-### 2. Overlay App
+| Subcommand | Description |
+|---|---|
+| `list` | List all modules with status and priority |
+| `stack` | Show the active stack in priority order |
+| `activate <id> [--priority N]` | Activate a module |
+| `suspend <id>` | Suspend a module (keeps it on disk) |
+| `priority <id> <N>` | Change priority (0–100) |
+| `info <id>` | Show module metadata |
+| `guidance <id>` | Show or set session-specific guidance |
+| `extract <new-id> --domain "..."` | **Extract** a new module from accumulated session knowledge (LLM-assisted) |
+| `export <id>` | Package module as a `.sinain-module.json` bundle |
+| `import <bundle>` | Import a module bundle |
 
-```bash
-cd overlay
-flutter pub get
-flutter run -d macos --debug
+The `extract` subcommand reads your playbook and memory logs, uses an LLM to identify coherent
+domain patterns, and creates a new module (suspended by default — review before activating).
+
+---
+
+## Triplestore / Semantic Memory
+
+> 🚧 **In Progress** — designed and operational; Graph RAG integration actively being developed.
+
+`sinain-koog/triplestore.py` implements a Datomic-inspired immutable EAV (entity–attribute–value)
+triple store backed by SQLite, with four covering indexes (EAVT, AEVT, VAET, AVET) for fast
+graph traversal.
+
+**Entity namespaces:**
+
+| Prefix | Examples |
+|---|---|
+| `pattern:*` | Recurring behavioral patterns |
+| `concept:*` | Domain concepts and terms |
+| `session:*` | Session summaries |
+| `signal:*` | Detected friction signals |
+| `observation:*` | Agent observations |
+
+**Triple extraction pipeline** (3-tier):
+
+1. JSON direct extraction — structured LLM output parsed directly
+2. Regex + validation — pattern-matched fallback for partial JSON
+3. LLM fallback — free-text extraction when structured output fails
+
+**Embeddings:** OpenRouter `text-embedding-3-small` (primary) with local MiniLM fallback.
+
+**Graph RAG:** Vector seed → BFS traversal → re-ranked context injected at agent start.
+Subagent sessions use isolated `BranchView`; novelties merged back on completion.
+
+---
+
+## HUD Skill Protocol
+
+The AI agent communicates with the overlay using a structured message format:
+
+```
+[HUD:feed priority=<normal|high|urgent>] <message>
+[HUD:silent]
+[HUD:pong]
 ```
 
-### 3. Screen Capture (optional)
+**Priority semantics:**
+- `normal` — helpful info, no time pressure
+- `high` — user needs this in the next 30 seconds
+- `urgent` — about to make a mistake or miss something critical
 
-```bash
-cd sense_client
-pip install -r requirements.txt
-# Requires Tesseract: brew install tesseract
-python -m sense_client
-```
+Silence is a valid response — `[HUD:silent]` suppresses output when the agent has nothing to add.
 
-macOS will prompt for Screen Recording permission on first run.
+See [docs/HUD-SKILL-PROTOCOL.md](docs/HUD-SKILL-PROTOCOL.md) for the full spec.
 
-### 4. OpenClaw Extension (optional)
-
-This requires the [anthillnet fork of OpenClaw](https://github.com/anthillnet/openclaw), which includes the sinain-hud plugin. Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behavior.
+---
 
 ## Hotkeys
 
 | Shortcut | Action |
 |---|---|
 | `Cmd+Shift+Space` | Toggle overlay visibility |
+| `Cmd+Shift+H` | **Panic hide** — instant stealth + click-through + privacy |
 | `Cmd+Shift+C` | Toggle click-through mode |
 | `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
-| `Cmd+Shift+H` | Panic hide — instant stealth + click-through + privacy |
 | `Cmd+Shift+T` | Toggle audio capture (start/stop transcription) |
 | `Cmd+Shift+D` | Switch audio device (primary ↔ alt) |
 | `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
@@ -118,65 +255,88 @@ This requires the [anthillnet fork of OpenClaw](https://github.com/anthillnet/op
 | `Cmd+Shift+P` | Toggle position (bottom-right ↔ top-right) |
 | `Cmd+Shift+Y` | Copy target message to clipboard |
 
-## Display Modes
+---
 
-- **Feed**: Scrolling text feed (default)
-- **Alert**: Single urgent card
-- **Minimal**: One-line ticker at screen edge
-- **Hidden**: Invisible
+## Quick Start
+
+### Prerequisites
+
+- macOS 12.3+ (ScreenCaptureKit required for sense_client primary backend)
+- Node.js 22+
+- Python 3.11+
+- Flutter 3.10+ (`brew install flutter`)
+- Tesseract (`brew install tesseract`) — for sense_client OCR
+- An [OpenClaw](https://github.com/anthillnet/openclaw) gateway instance with the sinain-hud plugin
+
+### Setup
+
+```bash
+git clone <repo>
+cd sinain-hud
+cp sinain-core/.env.example sinain-core/.env
+# Edit sinain-core/.env — fill in OPENROUTER_API_KEY, OPENCLAW_WS_TOKEN, etc.
+```
+
+### Run
+
+```bash
+./start.sh
+# Optional flags:
+./start.sh --no-sense    # skip screen capture pipeline
+./start.sh --no-overlay  # skip Flutter overlay (headless mode)
+```
+
+The overlay and sinain-core start together. macOS will prompt for Screen Recording permission on
+first run.
+
+---
 
 ## Configuration
 
-sinain-core reads from environment or `.env`:
+Key environment variables in `sinain-core/.env`:
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENCLAW_GATEWAY_URL` | `http://localhost:3000` | OpenClaw gateway |
-| `OPENCLAW_TOKEN` | — | Gateway auth token |
-| `OPENCLAW_SESSION_KEY` | — | Target session |
+| `OPENCLAW_WS_URL` | `ws://localhost:18789` | OpenClaw gateway WebSocket |
+| `OPENCLAW_WS_TOKEN` | — | 48-char hex gateway auth token |
+| `OPENCLAW_HTTP_URL` | `http://localhost:18789/hooks/agent` | Gateway HTTP hooks endpoint |
+| `OPENCLAW_SESSION_KEY` | `agent:main:sinain` | Target session key (must match gateway) |
+| `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` / `rich` |
+| `ESCALATION_COOLDOWN_MS` | `30000` | Minimum ms between escalations |
 | `WS_PORT` | `9500` | WebSocket port for overlay |
-| `RELAY_MIN_INTERVAL_MS` | `30000` | Min time between escalations |
-| `AUDIO_DEVICE` | `default` | Audio capture device (e.g. `BlackHole 2ch`) |
-| `AUDIO_ALT_DEVICE` | `BlackHole 2ch` | Alt device for `Cmd+Shift+D` switch |
-| `AUDIO_GAIN_DB` | `20` | Gain applied to capture (dB, helps with BlackHole) |
-| `AUDIO_VAD_THRESHOLD` | `0.003` | RMS energy threshold for voice detection |
-| `AUDIO_CHUNK_MS` | `10000` | Audio chunk duration before transcription |
-| `AUDIO_CAPTURE_CMD` | `sox` | Capture backend (`sox` or `ffmpeg`) |
-| `OPENROUTER_API_KEY` | — | OpenRouter API key for transcription + triggers |
-| `TRIGGER_ENABLED` | `false` | Enable Gemini Flash trigger classification |
+| `OPENROUTER_API_KEY` | — | For transcription and local agent model |
+| `AUDIO_DEVICE` | `BlackHole 2ch` | Audio capture device |
+| `AUDIO_CHUNK_MS` | `5000` | Audio chunk duration before transcription |
+| `AGENT_MODEL` | `google/gemini-2.5-flash-lite` | Local digest model |
 
-Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
+See [docs/OPENCLAW-SETUP.md](docs/OPENCLAW-SETUP.md) for the full gateway deployment guide.
 
-| Variable | Default | Description |
-|---|---|---|
-| `OPENCLAW_GATEWAY_WS_URL` | `ws://localhost:18789` | OpenClaw gateway WebSocket |
-| `OPENCLAW_GATEWAY_TOKEN` | — | Token for gateway WS auth |
-| `OPENCLAW_HOOK_URL` | `http://localhost:18789/hooks/agent` | OpenClaw HTTP hooks endpoint |
-| `OPENCLAW_HOOK_TOKEN` | — | Token for HTTP hook auth |
-| `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` |
-| `ESCALATION_COOLDOWN_MS` | `30000` | Min ms between escalations |
-| `SITUATION_MD_ENABLED` | `true` | Write SITUATION.md each tick |
-| `OPENCLAW_WORKSPACE_DIR` | `~/.openclaw/workspace` | Directory for SITUATION.md |
+---
 
-## Privacy
+## Privacy Model
 
-- Overlay is **invisible** to screen sharing, recording, and screenshots
-- All traffic stays on localhost (sinain-core ↔ overlay)
-- Audio is transcribed in memory, never stored to disk
-- Panic hide (`Cmd+Shift+H`) instantly clears everything
-- **`<private>` tags**: wrap any on-screen text in `<private>...</private>` — sense_client strips it before sending to sinain-core
-- **Auto-redaction**: credit cards, API keys, bearer tokens, AWS keys, and passwords are automatically redacted from OCR text
-- **Server-side stripping**: the sinain-hud plugin strips any remaining `<private>` tags from tool results before they're persisted to session history
+- **Ghost overlay** — `NSWindow.sharingType = .none`: invisible to screen share, recording,
+  and screenshots
+- **`<private>` tags** — wrap any on-screen text in `<private>...</private>`; sense_client strips
+  it client-side; the sinain-hud plugin strips any remainder server-side before persistence
+- **Auto-redaction** — sense_client automatically redacts credit cards, API keys, bearer tokens,
+  AWS keys, and passwords from OCR text
+- **Panic hotkey** — `Cmd+Shift+H`: instant stealth + click-through + privacy mode in one keystroke
+- **Local-first** — sinain-core ↔ overlay traffic stays on localhost; audio is transcribed
+  in-memory and never written to disk
 
-## Roadmap
+---
 
-- [x] Phase 1: Overlay + Bridge MVP
-- [x] Phase 2: Audio pipeline (live transcription → context)
-- [x] Phase 3: Screen capture pipeline (OCR → context window)
-- [ ] Phase 4: Polish (diarization, smart batching, themes)
-- [x] Phase 5: OpenClaw escalation (SITUATION.md + hooks + agent.wait)
-- [x] Phase 6: Plugin architecture (sinain-hud plugin, privacy pipeline)
-- [x] Phase 7: sinain-koog — offloaded reflection pipeline (5 Python scripts via OpenRouter, orchestrated by HEARTBEAT.md)
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+- **overlay/** — Dart/Swift; follow Flutter conventions
+- **sinain-core/** — TypeScript strict mode; `npm run lint` before commit
+- **sense_client/** — Python 3.11+; type annotations preferred
+- **sinain-koog/** — Python 3.11+; each script should be independently runnable with `--help`
+
+---
 
 ## License
 
