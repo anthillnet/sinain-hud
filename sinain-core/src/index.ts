@@ -369,6 +369,9 @@ async function main() {
     },
     onToggleScreen: () => {
       screenActive = !screenActive;
+      if (!screenActive) {
+        senseBuffer.clear();
+      }
       wsHandler.updateState({ screen: screenActive ? "active" : "off" });
       return screenActive;
     },
