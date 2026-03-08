@@ -137,6 +137,7 @@ export interface TranscriptionConfig {
   local: {
     bin: string;
     modelPath: string;
+    language: string;
     timeoutMs: number;
   };
 }
