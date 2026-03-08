@@ -1,0 +1,40 @@
+services:
+  openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      # Claude / Anthropic
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Gateway auth
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      # Claude web session (optional)
+      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
+      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
+      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
+      # Other providers (optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # sinain-koog reflection scripts
+      OPENROUTER_API_KEY_REFLECTION: ${OPENROUTER_API_KEY_REFLECTION:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # sinain health watchdog alerts
+      SINAIN_ALERT_CHAT_ID: "59835117"
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
+    volumes:
+      - /mnt/openclaw-state:/home/node/.openclaw
+    ports:
+      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+      - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
+      - "2222:22"
+      - "18791:18791"
+    init: true
+    restart: unless-stopped
+    command:
+      [
+        "sh", "-c",
+        "mkdir -p /home/node/.openclaw/.config && ln -sfn /home/node/.openclaw/.config /home/node/.config && sudo /usr/sbin/sshd && exec openclaw gateway --bind ${OPENCLAW_GATEWAY_BIND:-lan} --port 18789 --allow-unconfigured"
+      ]

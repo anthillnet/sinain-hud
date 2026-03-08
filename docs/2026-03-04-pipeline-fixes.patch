@@ -1,0 +1,411 @@
+diff --git a/sinain-hud-plugin/index.ts b/sinain-hud-plugin/index.ts
+index 8231fc0..6fe4e21 100644
+--- a/sinain-hud-plugin/index.ts
++++ b/sinain-hud-plugin/index.ts
+@@ -22,6 +22,7 @@ type PluginConfig = {
+   koogPath?: string;
+   modulesPath?: string;
+   sessionKey?: string;
++  userTimezone?: string;
+ };
+ 
+ type ModuleRegistryEntry = {
+@@ -198,7 +199,7 @@ function syncDirToWorkspace(
+   const targetDir = join(workspaceDir, targetDirName);
+   if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+ 
+-  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt", ".jsonl"]);
++  const ALWAYS_OVERWRITE = new Set([".json", ".sh", ".txt", ".jsonl", ".py"]);
+   let synced = 0;
+ 
+   function syncRecursive(srcDir: string, dstDir: string): void {
+@@ -573,6 +574,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+       if (!existsSync(fullPath)) {
+         mkdirSync(fullPath, { recursive: true });
+       }
++      // Ensure directory is writable even if created by another process (e.g. root)
++      try { chmodSync(fullPath, 0o755); } catch {}
+     }
+ 
+     // ── Context capture + subagent injection ────────────────────────────
+@@ -597,9 +600,23 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+       }
+     }
+ 
+-    // ── Accumulate context parts (outage recovery + subagent injection) ─
++    // ── Accumulate context parts (time + outage recovery + subagent injection)
+     const contextParts: string[] = [];
+ 
++    // Time awareness — always inject current local time
++    const userTz = cfg.userTimezone ?? "Europe/Berlin";
++    const nowLocal = new Date().toLocaleString("en-GB", {
++      timeZone: userTz,
++      weekday: "long",
++      year: "numeric",
++      month: "long",
++      day: "numeric",
++      hour: "2-digit",
++      minute: "2-digit",
++      hour12: false,
++    });
++    contextParts.push(`[CURRENT TIME] ${nowLocal} (${userTz})`);
++
+     // Recovery context injection after outage
+     if (outageStartTs > 0 && !outageDetected && lastSuccessTs > outageStartTs) {
+       const outageDurationMin = Math.round((lastSuccessTs - outageStartTs) / 60_000);
+@@ -1210,16 +1227,29 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+               { timeoutMs: 30_000, cwd: workspaceDir },
+             );
+             result.gitBackup = gitOut.stdout.trim() || "nothing to commit";
++            // Update heartbeat-state.json with last successful backup timestamp
++            try {
++              const statePath = join(workspaceDir, "memory", "heartbeat-state.json");
++              writeFileSync(statePath, JSON.stringify({ lastGitBackup: Date.now() }) + "\n");
++            } catch { /* non-critical */ }
+           } catch (err) {
+             api.logger.warn(`sinain-hud: git backup error: ${String(err)}`);
+             result.gitBackup = `error: ${String(err)}`;
+           }
+ 
++          // Current time string for koog scripts
++          const hbTz = cfg.userTimezone ?? "Europe/Berlin";
++          const currentTimeStr = new Date().toLocaleString("en-GB", {
++            timeZone: hbTz, weekday: "long", year: "numeric", month: "long",
++            day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
++          }) + ` (${hbTz})`;
++
+           // 2. Signal analysis (60s timeout)
+           const signalArgs = [
+             "sinain-koog/signal_analyzer.py",
+             "--memory-dir", "memory/",
+             "--session-summary", params.sessionSummary,
++            "--current-time", currentTimeStr,
+           ];
+           if (params.idle) signalArgs.push("--idle");
+ 
+@@ -1238,6 +1268,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+             "sinain-koog/insight_synthesizer.py",
+             "--memory-dir", "memory/",
+             "--session-summary", params.sessionSummary,
++            "--current-time", currentTimeStr,
+           ];
+           if (params.idle) synthArgs.push("--idle");
+ 
+@@ -1245,6 +1276,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+           if (synthResult) {
+             if (synthResult.skip === false) {
+               result.output = {
++                skip: false,
+                 suggestion: synthResult.suggestion ?? null,
+                 insight: synthResult.insight ?? null,
+               };
+@@ -1252,6 +1284,9 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+               result.skipped = true;
+               result.skipReason = synthResult.skipReason ?? "synthesizer skipped";
+             }
++          } else {
++            result.skipped = true;
++            result.skipReason = "insight_synthesizer script failed or timed out";
+           }
+ 
+           // 4. Write log entry to memory/playbook-logs/YYYY-MM-DD.jsonl
+@@ -1390,28 +1425,58 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+     // Step 5: Regenerate effective playbook after curation
+     generateEffectivePlaybook(workspaceDir, api.logger);
+ 
+-    // Step 6: Tick evaluation (runs mechanical + sampled judges)
+-    await runScript([
++    // Log result
++    const changes = (curator as Record<string, unknown> | null)?.changes ?? "unknown";
++    api.logger.info(
++      `sinain-hud: curation pipeline complete (directive=${directive}, changes=${JSON.stringify(changes)})`,
++    );
++  }
++
++  // ==========================================================================
++  // Eval pipeline (runs independently of outage state — mostly local checks)
++  // ==========================================================================
++
++  async function runEvalPipeline(workspaceDir: string): Promise<void> {
++    const runEvalScript = async (
++      args: string[],
++      timeoutMs = 120_000,
++    ): Promise<boolean> => {
++      try {
++        const result = await api.runtime.system.runCommandWithTimeout(
++          ["uv", "run", "--with", "requests", "python3", ...args],
++          { timeoutMs, cwd: workspaceDir },
++        );
++        if (result.code !== 0) {
++          api.logger.warn(
++            `sinain-hud: eval script failed: ${args[0]} (code ${result.code})\n${result.stderr}`,
++          );
++          return false;
++        }
++        return true;
++      } catch (err) {
++        api.logger.warn(
++          `sinain-hud: eval script error: ${args[0]}: ${String(err)}`,
++        );
++        return false;
++      }
++    };
++
++    // Tick evaluation (runs mechanical + sampled judges)
++    await runEvalScript([
+       "sinain-koog/tick_evaluator.py",
+       "--memory-dir", "memory/",
+-    ], 120_000);
++    ]);
+ 
+-    // Step 7: Daily eval report (run once per day after 03:00 UTC)
++    // Daily eval report (run once per day after 03:00 UTC)
+     const nowUTC = new Date();
+     const todayStr = nowUTC.toISOString().slice(0, 10);
+     if (nowUTC.getUTCHours() >= 3 && lastEvalReportDate !== todayStr) {
+-      await runScript([
++      await runEvalScript([
+         "sinain-koog/eval_reporter.py",
+         "--memory-dir", "memory/",
+-      ], 120_000);
++      ]);
+       lastEvalReportDate = todayStr;
+     }
+-
+-    // Log result
+-    const changes = (curator as Record<string, unknown> | null)?.changes ?? "unknown";
+-    api.logger.info(
+-      `sinain-hud: curation pipeline complete (directive=${directive}, changes=${JSON.stringify(changes)})`,
+-    );
+   }
+ 
+   // ==========================================================================
+@@ -1426,13 +1491,6 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+       );
+       // Start curation timer — runs every 30 minutes
+       curationInterval = setInterval(async () => {
+-        // Skip curation during outage — scripts would work (OpenRouter) but
+-        // results are wasted when no agent runs succeed
+-        if (outageDetected) {
+-          api.logger.info("sinain-hud: curation skipped — outage active");
+-          return;
+-        }
+-
+         // Find workspace dir from active sessions or last known
+         let workspaceDir: string | undefined;
+         for (const state of sessionStates.values()) {
+@@ -1443,10 +1501,22 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
+           api.logger.info("sinain-hud: curation skipped — no workspace dir");
+           return;
+         }
++        // Curation (LLM-dependent) — skip during outage
++        if (!outageDetected) {
++          try {
++            await runCurationPipeline(workspaceDir);
++          } catch (err) {
++            api.logger.warn(`sinain-hud: curation pipeline error: ${String(err)}`);
++          }
++        } else {
++          api.logger.info("sinain-hud: curation skipped — outage active (eval still runs)");
++        }
++
++        // Eval (mostly local) — always runs regardless of outage
+         try {
+-          await runCurationPipeline(workspaceDir);
++          await runEvalPipeline(workspaceDir);
+         } catch (err) {
+-          api.logger.warn(`sinain-hud: curation pipeline error: ${String(err)}`);
++          api.logger.warn(`sinain-hud: eval pipeline error: ${String(err)}`);
+         }
+       }, 30 * 60 * 1000); // 30 minutes
+     },
+diff --git a/sinain-koog/common.py b/sinain-koog/common.py
+index 0d7aa71..352c9a2 100644
+--- a/sinain-koog/common.py
++++ b/sinain-koog/common.py
+@@ -346,9 +346,14 @@ def read_today_log(memory_dir: str) -> list[dict]:
+ 
+ 
+ def list_daily_memory_files(memory_dir: str) -> list[str]:
+-    """List YYYY-MM-DD.md files in memory/, sorted newest first."""
+-    pattern = str(Path(memory_dir) / "????-??-??.md")
+-    files = sorted(glob(pattern), reverse=True)
++    """List YYYY-MM-DD*.md files in memory/, sorted newest first.
++
++    Matches both exact date files (2026-02-27.md) and suffixed variants
++    (2026-02-28-session2.md) that the agent may create.
++    """
++    exact = glob(str(Path(memory_dir) / "????-??-??.md"))
++    suffixed = glob(str(Path(memory_dir) / "????-??-??-*.md"))
++    files = sorted(set(exact + suffixed), reverse=True)
+     return files
+ 
+ 
+diff --git a/sinain-koog/eval/schemas.py b/sinain-koog/eval/schemas.py
+index fcc7b0e..ff8e16d 100644
+--- a/sinain-koog/eval/schemas.py
++++ b/sinain-koog/eval/schemas.py
+@@ -28,7 +28,7 @@ SIGNAL_ANALYZER_SCHEMA: dict = {
+                     "required": ["action"],
+                     "properties": {
+                         "action": {"enum": ["sessions_spawn", "telegram_tip", "skip"]},
+-                        "task": {"type": "string"},
++                        "task": {"type": ["string", "null"]},
+                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                     },
+                 },
+@@ -201,7 +201,8 @@ def _validate(instance: Any, schema: dict, path: str, errors: list[str]) -> None
+     if expected_type:
+         ok = _type_check(instance, expected_type)
+         if not ok:
+-            errors.append(f"{path or '.'}: expected {expected_type}, got {type(instance).__name__}")
++            type_label = expected_type if isinstance(expected_type, str) else "|".join(expected_type)
++            errors.append(f"{path or '.'}: expected {type_label}, got {type(instance).__name__}")
+             return
+ 
+     # --- required ---
+@@ -229,7 +230,9 @@ def _validate(instance: Any, schema: dict, path: str, errors: list[str]) -> None
+             errors.append(f"{path or '.'}: {instance} > maximum {schema['maximum']}")
+ 
+ 
+-def _type_check(instance: Any, expected: str) -> bool:
++def _type_check(instance: Any, expected: str | list[str]) -> bool:
++    if isinstance(expected, list):
++        return any(_type_check(instance, t) for t in expected)
+     if expected == "object":
+         return isinstance(instance, dict)
+     if expected == "array":
+diff --git a/sinain-koog/feedback_analyzer.py b/sinain-koog/feedback_analyzer.py
+index e023f55..0774b6d 100644
+--- a/sinain-koog/feedback_analyzer.py
++++ b/sinain-koog/feedback_analyzer.py
+@@ -23,13 +23,13 @@ from common import (
+ def compute_effectiveness(logs: list[dict]) -> dict:
+     """Mechanically compute effectiveness from playbook-log entries.
+ 
+-    - outputs: ticks where Step 5 produced output (not skipped)
++    - outputs: ticks where Step 5 actually delivered output (not skipped AND output is non-null)
+     - positive: ticks where output was followed by avg compositeScore > 0.2
+     - negative: ticks where output was followed by avg compositeScore < -0.1
+     - neutral: remainder
+     - rate: positive / outputs
+     """
+-    output_ticks = [e for e in logs if not e.get("skipped", True)]
++    output_ticks = [e for e in logs if not e.get("skipped", True) and e.get("output")]
+     outputs = len(output_ticks)
+ 
+     if outputs == 0:
+@@ -48,7 +48,7 @@ def compute_effectiveness(logs: list[dict]) -> dict:
+         # Look at next tick's feedback
+         if i + 1 < len(sorted_logs):
+             next_entry = sorted_logs[i + 1]
+-            feedback = next_entry.get("feedbackScores", {})
++            feedback = next_entry.get("feedbackScores") or {}
+             avg = feedback.get("avg", 0)
+             if avg > 0.2:
+                 positive += 1
+@@ -76,7 +76,7 @@ def extract_feedback_scores(logs: list[dict]) -> dict:
+     low_patterns = []
+ 
+     for i, entry in enumerate(logs):  # logs are newest-first
+-        feedback = entry.get("feedbackScores", {})
++        feedback = entry.get("feedbackScores") or {}
+         avg = feedback.get("avg")
+         if avg is not None:
+             # Decay: recent entries weighted more (1.0 for newest, 0.3 for oldest)
+@@ -120,7 +120,7 @@ def compute_score_trend(logs: list[dict]) -> str:
+     """Detect score trend from recent logs: rising, falling, or flat."""
+     scores = []
+     for entry in sorted(logs, key=lambda e: e.get("ts", "")):
+-        fb = entry.get("feedbackScores", {})
++        fb = entry.get("feedbackScores") or {}
+         avg = fb.get("avg")
+         if avg is not None:
+             scores.append(avg)
+diff --git a/sinain-koog/memory_miner.py b/sinain-koog/memory_miner.py
+index f5ddfb0..2633afb 100644
+--- a/sinain-koog/memory_miner.py
++++ b/sinain-koog/memory_miner.py
+@@ -51,14 +51,19 @@ Respond with ONLY a JSON object:
+ }"""
+ 
+ 
++def _extract_date(filename: str) -> str:
++    """Extract YYYY-MM-DD date from filenames like '2026-02-28.md' or '2026-02-28-session2.md'."""
++    stem = Path(filename).stem  # "2026-02-28" or "2026-02-28-session2"
++    return stem[:10]  # Always first 10 chars = YYYY-MM-DD
++
++
+ def get_unmined_files(memory_dir: str, mined_dates: list[str]) -> list[str]:
+     """Find daily memory files not yet mined (not in index)."""
+     all_files = list_daily_memory_files(memory_dir)
+     unmined = []
+     for f in all_files:
+-        # Extract date from filename (YYYY-MM-DD.md)
+-        stem = Path(f).stem  # "2026-02-17"
+-        if stem not in mined_dates:
++        date = _extract_date(f)
++        if date not in mined_dates:
+             unmined.append(f)
+     return unmined
+ 
+@@ -153,7 +158,7 @@ def main():
+         }
+ 
+     # Only mark files as mined on successful parse — failed files will be retried
+-    new_dates = [Path(f).stem for f in to_mine]
++    new_dates = [_extract_date(f) for f in to_mine]
+     if llm_ok:
+         update_mining_index(args.memory_dir, raw_playbook, new_dates)
+         print(f"[info] Updated mining index with {new_dates}", file=sys.stderr)
+diff --git a/sinain-koog/signal_analyzer.py b/sinain-koog/signal_analyzer.py
+index b209941..3d8a5ae 100644
+--- a/sinain-koog/signal_analyzer.py
++++ b/sinain-koog/signal_analyzer.py
+@@ -60,9 +60,13 @@ def build_user_prompt(
+     recent_logs: list[dict],
+     playbook: str,
+     idle: bool,
++    current_time: str | None = None,
+ ) -> str:
+     parts = []
+ 
++    if current_time:
++        parts.append(f"## Current Time\n{current_time}")
++
+     parts.append(f"## Session Summary\n{session_summary}")
+ 
+     if idle:
+@@ -95,6 +99,7 @@ def main():
+     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
+     parser.add_argument("--session-summary", required=True, help="Brief session summary from main agent")
+     parser.add_argument("--idle", action="store_true", help="User is idle (>30 min)")
++    parser.add_argument("--current-time", default=None, help="Current local time string (e.g. 'Monday, 2 March 2026, 14:30 (Europe/Berlin)')")
+     args = parser.parse_args()
+ 
+     playbook = read_effective_playbook(args.memory_dir)
+@@ -105,6 +110,7 @@ def main():
+         recent_logs=recent_logs,
+         playbook=playbook,
+         idle=args.idle,
++        current_time=args.current_time,
+     )
+ 
+     try:
+@@ -118,6 +124,16 @@ def main():
+             "idle": args.idle,
+         }
+ 
++    # Normalize signals: LLM may return dicts with {description, priority} instead of strings
++    raw_signals = result.get("signals", [])
++    normalized_signals = []
++    for s in raw_signals:
++        if isinstance(s, dict):
++            normalized_signals.append(s.get("description", str(s)))
++        else:
++            normalized_signals.append(str(s))
++    result["signals"] = normalized_signals
++
+     # Suppress low-confidence actions
+     action = result.get("recommendedAction")
+     if action and isinstance(action, dict):

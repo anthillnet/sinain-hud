@@ -45,7 +45,7 @@ export function writeSituationMd(
   entry: AgentEntry,
   escalationScore?: EscalationScore,
   recorderStatus?: RecorderStatus | null,
-): void {
+): string {
   const dir = path.dirname(situationMdPath);
   const tmpPath = situationMdPath + ".tmp";
 
@@ -54,7 +54,7 @@ export function writeSituationMd(
   } catch (err: any) {
     if (err.code !== "EEXIST") {
       error(TAG, "mkdir failed:", err.message);
-      return;
+      return "";
     }
   }
 
@@ -166,4 +166,6 @@ export function writeSituationMd(
     error(TAG, "write failed:", err.message);
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
   }
+
+  return content;
 }

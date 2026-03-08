@@ -155,6 +155,8 @@ class OpenClawGateway:
                 "params": {
                     "minProtocol": 3,
                     "maxProtocol": 3,
+                    "role": "operator",
+                    "scopes": ["operator.read", "operator.write"],
                     "client": {
                         "id": "gateway-client",
                         "displayName": "Sinain Wearable HUD",
