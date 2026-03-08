@@ -29,6 +29,7 @@ export class TranscriptionService extends EventEmitter {
   private destroyed: boolean = false;
   private pendingRequests: number = 0;
   private readonly MAX_CONCURRENT = 5;
+  private localBackend: LocalTranscriptionBackend | null = null;
 
   private latencies: number[] = [];
   private cumulativeLatencies: number[] = [];
@@ -46,11 +47,13 @@ export class TranscriptionService extends EventEmitter {
     super();
     this.config = config;
 
-    if (!config.openrouterApiKey) {
+    if (config.backend === "local") {
+      this.localBackend = new LocalTranscriptionBackend(config.local);
+    } else if (!config.openrouterApiKey) {
       warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
     }
 
-    log(TAG, `initialized: model=${config.geminiModel} language=${config.language}`);
+    log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
 
     this.latencyStatsTimer = setInterval(() => this.logStats(), 60_000);
   }
@@ -69,7 +72,11 @@ export class TranscriptionService extends EventEmitter {
     this.pendingRequests++;
     this.profiler?.gauge("transcription.pending", this.pendingRequests);
     try {
-      await this.transcribeViaOpenRouter(chunk);
+      if (this.localBackend) {
+        await this.transcribeViaLocal(chunk);
+      } else {
+        await this.transcribeViaOpenRouter(chunk);
+      }
     } catch (err) {
       this.errorCount++;
       this.profiler?.gauge("transcription.errors", this.errorCount);
@@ -82,6 +89,7 @@ export class TranscriptionService extends EventEmitter {
 
   destroy(): void {
     this.destroyed = true;
+    this.localBackend?.destroy();
     if (this.latencyStatsTimer) { clearInterval(this.latencyStatsTimer); this.latencyStatsTimer = null; }
     this.logStats();
     this.removeAllListeners();
@@ -109,6 +117,36 @@ export class TranscriptionService extends EventEmitter {
     this.latencies = [];
   }
 
+  // ── Local whisper backend ──
+
+  private async transcribeViaLocal(chunk: AudioChunk): Promise<void> {
+    const startTs = Date.now();
+    const result = await this.localBackend!.transcribe(chunk);
+    const elapsed = Date.now() - startTs;
+
+    this.latencies.push(elapsed);
+    this.cumulativeLatencies.push(elapsed);
+    if (this.cumulativeLatencies.length > 1_000) this.cumulativeLatencies.shift();
+    this.profiler?.timerRecord("transcription.call", elapsed);
+    this.totalAudioDurationMs += chunk.durationMs;
+
+    if (!result) return;
+
+    const { text } = result;
+
+    if (text.length < 3) {
+      debug(TAG, `transcript too short, dropping: "${text}"`);
+      return;
+    }
+
+    if (isHallucination(text)) {
+      warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+      return;
+    }
+
+    this.emit("transcript", result);
+  }
+
   // ── OpenRouter backend ──
 
   /** Get cumulative profiling stats for /health. */
@@ -123,6 +161,7 @@ export class TranscriptionService extends EventEmitter {
     const estimatedCost = (this.totalTokensConsumed / 1_000_000) * costPerMToken;
 
     return {
+      backend: this.config.backend,
       calls: this.totalCalls,
       p50Ms: Math.round(p50),
       p95Ms: Math.round(p95),
