@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
@@ -25,6 +26,7 @@ class _FeedViewState extends State<FeedView> {
   final ScrollController _scrollController = ScrollController();
   StreamSubscription<FeedItem>? _feedSub;
   StreamSubscription<String>? _scrollSub;
+  StreamSubscription<String>? _copySub;
   Timer? _fadeTimer;
   bool _autoScroll = true;
 
@@ -43,6 +45,7 @@ class _FeedViewState extends State<FeedView> {
             : ws.feedStream)
         .listen(_onFeedItem);
     _scrollSub ??= ws.scrollStream.listen(_onScrollCommand);
+    _copySub ??= ws.copyStream.listen(_onCopyCommand);
   }
 
   void _onFeedItem(FeedItem item) {
@@ -88,6 +91,26 @@ class _FeedViewState extends State<FeedView> {
     }
   }
 
+  void _onCopyCommand(String activeTab) {
+    // Only respond if this FeedView's channel matches the active tab
+    if (activeTab != widget.channel.name) return;
+    if (_items.isEmpty) return;
+
+    String targetText;
+    if (_autoScroll || !_scrollController.hasClients) {
+      // Auto-scroll mode: copy the last (newest) message
+      targetText = _items.last.text;
+    } else {
+      // Manual scroll: estimate the topmost visible item from scroll offset
+      final offset = _scrollController.offset;
+      const estimatedItemHeight = 20.0;
+      final index = (offset / estimatedItemHeight).floor().clamp(0, _items.length - 1);
+      targetText = _items[index].text;
+    }
+
+    Clipboard.setData(ClipboardData(text: targetText));
+  }
+
   void _fadeOldItems() {
     if (!mounted) return;
     final now = DateTime.now();
@@ -123,6 +146,7 @@ class _FeedViewState extends State<FeedView> {
   void dispose() {
     _feedSub?.cancel();
     _scrollSub?.cancel();
+    _copySub?.cancel();
     _fadeTimer?.cancel();
     _scrollController.dispose();
     super.dispose();

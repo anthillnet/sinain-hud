@@ -61,11 +61,17 @@ void main() async {
         wsService.sendCommand('toggle_screen');
       case 'onToggleScreenFeed':
         wsService.toggleScreenFeed();
+      case 'onCopyMessage':
+        wsService.requestCopy(settingsService.settings.activeTab.name);
       case 'onCycleTab':
         settingsService.cycleTab();
       case 'onTogglePosition':
         final top = call.arguments as bool;
         await settingsService.setTopPosition(top);
+      case 'onTogglePrivacy':
+        final privacyMode = call.arguments as bool;
+        settingsService.setPrivacyModeTransient(privacyMode);
+        await windowService.setPrivacyMode(privacyMode);
     }
   });
 

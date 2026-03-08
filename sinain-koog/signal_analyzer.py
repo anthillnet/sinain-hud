@@ -33,6 +33,11 @@ Signal types and recommended actions:
 | User stuck (same search/error loop) | sessions_spawn: "Debug [issue]: investigate and propose fix" |
 | No meaningful signal | skip |
 
+Signal priority levels:
+- HIGH: Repeated errors, build failures, stuck loops — always act
+- MEDIUM: New topic exploration, workflow opportunity — act if confident
+- LOW: General browsing, social media — skip unless highly relevant
+
 Rules:
 - Max 1 recommended action per analysis
 - NEVER repeat an action that appears in recent log entries
@@ -40,9 +45,11 @@ Rules:
 - If idle (>30 min no activity), set idle=true and skip Phase 2 action
 - Confidence: 0.0-1.0 (only recommend actions with confidence > 0.5)
 
+Include a "priority" field ("high"/"medium"/"low") in each signal.
+
 Respond with ONLY a JSON object (no markdown, no explanation):
 {
-  "signals": ["signal1 description", ...],
+  "signals": [{"description": "signal text", "priority": "high|medium|low"}, ...],
   "recommendedAction": {"action": "sessions_spawn|telegram_tip|skip", "task": "description if not skip", "confidence": 0.7} or null,
   "idle": false
 }"""
@@ -53,8 +60,12 @@ def build_user_prompt(
     recent_logs: list[dict],
     playbook: str,
     idle: bool,
+    current_time: str | None = None,
 ) -> str:
     parts = []
+
+    if current_time:
+        parts.append(f"## Current Time\n{current_time}")
 
     parts.append(f"## Session Summary\n{session_summary}")
 
@@ -63,7 +74,7 @@ def build_user_prompt(
 
     if recent_logs:
         log_summary = []
-        for entry in recent_logs[:3]:
+        for entry in recent_logs[:6]:
             actions = entry.get("actionsConsidered", [])
             chosen = [a for a in actions if a.get("chosen")]
             skipped = entry.get("skipped", False)
@@ -73,12 +84,12 @@ def build_user_prompt(
             )
             for a in chosen:
                 log_summary.append(f"  -> {a.get('action', '?')}: {a.get('reason', '?')}")
-        parts.append(f"\n## Recent Log Entries (last 3)\n" + "\n".join(log_summary))
+        parts.append(f"\n## Recent Log Entries (last 6)\n" + "\n".join(log_summary))
 
     if playbook:
-        # Truncate playbook to first 30 lines for context
-        lines = playbook.splitlines()[:30]
-        parts.append(f"\n## Current Playbook (first 30 lines)\n" + "\n".join(lines))
+        # Truncate playbook to first 50 lines for context
+        lines = playbook.splitlines()[:50]
+        parts.append(f"\n## Current Playbook (first 50 lines)\n" + "\n".join(lines))
 
     return "\n".join(parts)
 
@@ -88,6 +99,7 @@ def main():
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--session-summary", required=True, help="Brief session summary from main agent")
     parser.add_argument("--idle", action="store_true", help="User is idle (>30 min)")
+    parser.add_argument("--current-time", default=None, help="Current local time string (e.g. 'Monday, 2 March 2026, 14:30 (Europe/Berlin)')")
     args = parser.parse_args()
 
     playbook = read_effective_playbook(args.memory_dir)
@@ -98,6 +110,7 @@ def main():
         recent_logs=recent_logs,
         playbook=playbook,
         idle=args.idle,
+        current_time=args.current_time,
     )
 
     try:
@@ -110,6 +123,14 @@ def main():
             "recommendedAction": None,
             "idle": args.idle,
         }
+
+    # Suppress low-confidence actions
+    action = result.get("recommendedAction")
+    if action and isinstance(action, dict):
+        confidence = action.get("confidence", 0)
+        if confidence < 0.5:
+            result["recommendedAction"] = {"action": "skip", "task": None, "confidence": confidence}
+            print(f"[info] Suppressed low-confidence action ({confidence})", file=sys.stderr)
 
     # Ensure idle flag matches CLI arg
     result["idle"] = args.idle

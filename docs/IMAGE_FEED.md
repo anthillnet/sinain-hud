@@ -290,7 +290,7 @@ sense_client/
     "majorChangeThreshold": 0.85
   },
   "relay": {
-    "url": "http://YOUR-SERVER-IP:18791",
+    "url": "http://<your-server-ip>:18791",
     "sendThumbnails": true,
     "maxImageKB": 500
   }

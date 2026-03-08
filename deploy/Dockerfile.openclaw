@@ -1,0 +1,57 @@
+FROM node:22-bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    sudo \
+    procps \
+    build-essential \
+    file \
+    unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+# SSH server for tunneling
+RUN apt-get update && apt-get install -y openssh-server && \
+    mkdir -p /run/sshd && \
+    sed -i 's/#GatewayPorts no/GatewayPorts yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitTunnel no/PermitTunnel yes/' /etc/ssh/sshd_config && \
+    echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
+
+ENV NPM_CONFIG_FUND=false
+ENV NPM_CONFIG_AUDIT=false
+ENV OPENCLAW_NO_ONBOARD=1
+ENV NODE_ENV=production
+
+# Install vanilla OpenClaw from npm (no longer using fork tgz)
+RUN npm install -g openclaw@latest
+
+# Install uv (Python package manager) into a shared location
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# Install Homebrew as the node user
+RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+USER node
+RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+
+USER root
+RUN mkdir -p /home/node/.openclaw && chown -R node:node /home/node/.openclaw \
+    && chown -R node:node /usr/local/lib/node_modules /usr/local/bin
+
+# Add SSH public key
+RUN mkdir -p /home/node/.ssh && \
+    chmod 700 /home/node/.ssh
+COPY authorized_keys /home/node/.ssh/authorized_keys
+RUN chmod 600 /home/node/.ssh/authorized_keys && \
+    chown -R node:node /home/node/.ssh
+
+USER node
+WORKDIR /home/node
+
+EXPOSE 18789 18790 22
+
+CMD ["sh", "-c", "mkdir -p /home/node/.openclaw/.config && ln -sfn /home/node/.openclaw/.config /home/node/.config && sudo /usr/sbin/sshd && exec openclaw gateway --bind lan --port 18789"]
