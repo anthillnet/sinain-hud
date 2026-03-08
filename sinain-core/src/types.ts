@@ -16,6 +16,7 @@ export interface FeedMessage {
 export interface StatusMessage {
   type: "status";
   audio: string;
+  mic: string;
   screen: string;
   connection: string;
 }
@@ -77,6 +78,7 @@ export interface FeedItem {
   ts: number;
   source: "audio" | "sense" | "agent" | "openclaw" | "system";
   channel: FeedChannel;
+  audioSource?: AudioSourceTag;
 }
 
 // ── Sense buffer types ──
@@ -99,6 +101,8 @@ export interface SenseEvent {
 
 // ── Audio pipeline types ──
 
+export type AudioSourceTag = "system" | "mic";
+
 export interface AudioPipelineConfig {
   device: string;
   sampleRate: number;
@@ -106,7 +110,7 @@ export interface AudioPipelineConfig {
   chunkDurationMs: number;
   vadEnabled: boolean;
   vadThreshold: number;
-  captureCommand: "sox" | "ffmpeg";
+  captureCommand: "sox" | "ffmpeg" | "screencapturekit";
   autoStart: boolean;
   gainDb: number;
 }
@@ -117,14 +121,24 @@ export interface AudioChunk {
   ts: number;
   durationMs: number;
   energy: number;
+  audioSource: AudioSourceTag;
 }
 
 // ── Transcription types ──
 
+export type TranscriptionBackend = "openrouter" | "local";
+
 export interface TranscriptionConfig {
+  backend: TranscriptionBackend;
   openrouterApiKey: string;
   geminiModel: string;
   language: string;
+  /** Local whisper-cpp settings (only used when backend=local) */
+  local: {
+    bin: string;
+    modelPath: string;
+    timeoutMs: number;
+  };
 }
 
 export interface TranscriptResult {
@@ -133,6 +147,7 @@ export interface TranscriptResult {
   refined: boolean;
   confidence: number;
   ts: number;
+  audioSource: AudioSourceTag;
 }
 
 // ── Recorder types ──
@@ -291,6 +306,7 @@ export interface MetricsSummary {
 
 export interface BridgeState {
   audio: "active" | "muted";
+  mic: "active" | "muted";
   screen: "active" | "off";
   connection: "connected" | "disconnected" | "connecting";
 }
@@ -337,6 +353,8 @@ export interface CoreConfig {
   port: number;
   audioConfig: AudioPipelineConfig;
   audioAltDevice: string;
+  micConfig: AudioPipelineConfig;
+  micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AgentConfig;
   escalationConfig: EscalationConfig;

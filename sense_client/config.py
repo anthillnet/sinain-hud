@@ -1,4 +1,5 @@
 """Configuration loader for sense_client."""
+from __future__ import annotations
 
 import json
 import os
