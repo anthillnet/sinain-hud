@@ -1,4 +1,5 @@
 """OCR backends for UI text extraction: macOS Vision (preferred) and Tesseract (fallback)."""
+from __future__ import annotations
 
 import io
 import re

@@ -185,6 +185,24 @@ ok "port 9500 free"
 
 echo ""
 
+# ── 1b. Build sck-capture if source exists and binary is stale ─────────────
+if [ -f "$SCRIPT_DIR/tools/sck-capture/main.swift" ]; then
+  if [ ! -f "$SCRIPT_DIR/tools/sck-capture/sck-capture" ] || \
+     [ "$SCRIPT_DIR/tools/sck-capture/main.swift" -nt "$SCRIPT_DIR/tools/sck-capture/sck-capture" ]; then
+    log "Building sck-capture (unified screen + audio capture)..."
+    if (cd "$SCRIPT_DIR/tools/sck-capture" && bash build.sh); then
+      ok "sck-capture built"
+    else
+      warn "sck-capture build failed — audio falls back to ffmpeg/sox, screen to CGDisplayCreateImage"
+    fi
+  else
+    ok "sck-capture binary up to date"
+  fi
+fi
+
+# Ensure IPC directory for screen frames
+mkdir -p "$HOME/.sinain/capture"
+
 # ── 2. Start sinain-core ──────────────────────────────────────────────────
 log "Starting sinain-core..."
 (cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | sed -u "s/^/$(printf "${CYAN}[core]${RESET}    ")/" &
