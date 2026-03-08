@@ -100,6 +100,7 @@ export function loadConfig(): CoreConfig {
     local: {
       bin: env("LOCAL_WHISPER_BIN", "whisper-cli"),
       modelPath: resolvePath(env("LOCAL_WHISPER_MODEL", "~/models/ggml-large-v3-turbo.bin")),
+      language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
     },
   };
