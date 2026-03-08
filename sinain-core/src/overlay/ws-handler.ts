@@ -32,6 +32,7 @@ export class WsHandler {
   private onProfilingCb: ProfilingHandler | null = null;
   private state: BridgeState = {
     audio: "muted",
+    mic: "muted",
     screen: "off",
     connection: "disconnected",
   };
@@ -65,6 +66,7 @@ export class WsHandler {
     this.sendTo(ws, {
       type: "status",
       audio: this.state.audio,
+      mic: this.state.mic,
       screen: this.state.screen,
       connection: this.state.connection,
     });
@@ -136,6 +138,7 @@ export class WsHandler {
     const msg: StatusMessage = {
       type: "status",
       audio: this.state.audio,
+      mic: this.state.mic,
       screen: this.state.screen,
       connection: this.state.connection,
     };

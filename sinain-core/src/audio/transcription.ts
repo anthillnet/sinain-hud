@@ -1,9 +1,23 @@
 import { EventEmitter } from "node:events";
 import type { TranscriptionConfig, AudioChunk, TranscriptResult } from "../types.js";
 import type { Profiler } from "../profiler.js";
-import { log, warn, error } from "../log.js";
+import { LocalTranscriptionBackend } from "./transcription-local.js";
+import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe";
+
+/** Detect repeated-token hallucinations like "kuch kuch kuch kuch..." */
+function isHallucination(text: string): boolean {
+  const words = text.split(/[\s,]+/).filter(Boolean);
+  if (words.length < 6) return false;
+  const freq = new Map<string, number>();
+  for (const w of words) {
+    const lw = w.toLowerCase();
+    freq.set(lw, (freq.get(lw) || 0) + 1);
+  }
+  const maxFreq = Math.max(...freq.values());
+  return maxFreq / words.length > 0.6;
+}
 
 /**
  * Transcription service — sends audio chunks to OpenRouter (Gemini) for transcription.
@@ -14,7 +28,7 @@ export class TranscriptionService extends EventEmitter {
   private config: TranscriptionConfig;
   private destroyed: boolean = false;
   private pendingRequests: number = 0;
-  private readonly MAX_CONCURRENT = 3;
+  private readonly MAX_CONCURRENT = 5;
 
   private latencies: number[] = [];
   private cumulativeLatencies: number[] = [];
@@ -131,7 +145,7 @@ export class TranscriptionService extends EventEmitter {
     const base64Audio = chunk.buffer.toString("base64");
     const startTs = Date.now();
 
-    log(TAG, `sending ${chunk.durationMs}ms chunk to OpenRouter (${Math.round(chunk.buffer.length / 1024)}KB)`);
+    debug(TAG, `sending ${chunk.durationMs}ms chunk to OpenRouter (${Math.round(chunk.buffer.length / 1024)}KB)`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -149,7 +163,7 @@ export class TranscriptionService extends EventEmitter {
             role: "user",
             content: [
               { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
-              { type: "text", text: "Transcribe this audio. Output only the transcript text, nothing else." },
+              { type: "text", text: `Transcribe this audio in ${this.config.language}. Output ONLY the transcript text, nothing else. If the audio is not in ${this.config.language}, output an empty string.` },
             ],
           }],
         }),
@@ -183,6 +197,16 @@ export class TranscriptionService extends EventEmitter {
         return;
       }
 
+      if (text.length < 3) {
+        debug(TAG, `transcript too short, dropping: "${text}"`);
+        return;
+      }
+
+      if (isHallucination(text)) {
+        warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+        return;
+      }
+
       log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
 
       if (data.usage) {
@@ -195,6 +219,7 @@ export class TranscriptionService extends EventEmitter {
         refined: false,
         confidence: 0.8,
         ts: Date.now(),
+        audioSource: chunk.audioSource,
       };
 
       this.emit("transcript", result);
