@@ -63,7 +63,7 @@ export class LocalTranscriptionBackend {
       };
     } catch (err) {
       error(TAG, "local transcription failed:", err instanceof Error ? err.message : err);
-      return null;
+      throw err;
     } finally {
       // Cleanup temp files
       await unlink(wavPath).catch(() => {});
@@ -73,12 +73,14 @@ export class LocalTranscriptionBackend {
 
   private runWhisper(wavPath: string): Promise<string> {
     return new Promise((resolve, reject) => {
+      // whisper-cli expects ISO 639-1 codes ("en"), not BCP-47 ("en-US")
+      const lang = this.config.language.split("-")[0].toLowerCase();
       const args = [
         "-m", this.config.modelPath,
         "-f", wavPath,
         "--no-timestamps",
-        "-l", this.config.language,
-        "--print-progress", "false",
+        "-l", lang,
+        "-np",
       ];
 
       debug(TAG, `exec: ${this.config.bin} ${args.join(" ")}`);
@@ -105,6 +107,14 @@ export class LocalTranscriptionBackend {
 
       proc.on("close", (code) => {
         clearTimeout(timer);
+
+        // whisper-cli may print errors to stderr but still exit 0
+        if (stderr.includes("unknown language") || stderr.includes("error:")) {
+          const msg = stderr.trim().slice(0, 300);
+          reject(new Error(`whisper-cpp stderr: ${msg}`));
+          return;
+        }
+
         if (code !== 0) {
           const msg = stderr.trim().slice(0, 300) || `exit code ${code}`;
           reject(new Error(`whisper-cpp failed: ${msg}`));
