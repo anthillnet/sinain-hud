@@ -85,6 +85,9 @@ When to spawn "task" for coding problems:
 - ONLY spawn ONCE per distinct problem - do not repeat for the same problem
 - The spawned task should provide a complete solution with code and explanation
 
+Audio sources: [\ud83d\udd0a]=system/speaker audio, [\ud83c\udf99]=microphone (user's voice).
+Treat [\ud83c\udf99] as direct user speech. Treat [\ud83d\udd0a] as external audio.
+
 Rules:
 - "hud" is for a minimal overlay display. Example: "Editing hud-relay.mjs in IDEA"
 - "digest" is for an AI assistant to understand the full situation and offer help.
@@ -131,7 +134,7 @@ App history: ${appSwitches || "(none)"}${recorderSection}
 Screen (OCR text, newest first):
 ${screenLines || "(no screen data)"}
 
-Audio transcript (newest first):
+Audio transcript (newest first, \ud83d\udd0a=system, \ud83c\udf99=mic):
 ${audioLines || "(silence)"}${imageNote}`;
 }
 
