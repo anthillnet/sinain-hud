@@ -62,7 +62,7 @@ function calculateRmsEnergy(pcmData: Buffer): number {
  * Spawns sox or ffmpeg to capture audio from a macOS device,
  * accumulates raw PCM data, and emits WAV chunks at regular intervals.
  *
- * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'error' (Error)
+ * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'muted', 'unmuted', 'error' (Error)
  */
 /**
  * Pre-allocated buffer size for audio accumulation.
@@ -83,6 +83,7 @@ export class AudioPipeline extends EventEmitter {
   private silentChunks: number = 0;
   private speechChunks: number = 0;
   private errorCount: number = 0;
+  private muted: boolean = false;
   private profiler: Profiler | null = null;
 
   setProfiler(p: Profiler): void { this.profiler = p; }
@@ -115,6 +116,7 @@ export class AudioPipeline extends EventEmitter {
       return;
     }
 
+    this.muted = false;
     this.chunkTimer = setInterval(() => {
       this.emitChunk();
     }, this.config.chunkDurationMs);
@@ -129,6 +131,7 @@ export class AudioPipeline extends EventEmitter {
 
     log(TAG, "stopping capture...");
     this.running = false;
+    this.muted = false;
 
     if (this.chunkTimer) {
       clearInterval(this.chunkTimer);
@@ -156,6 +159,32 @@ export class AudioPipeline extends EventEmitter {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  mute(): void {
+    if (!this.running || this.muted) return;
+    this.muted = true;
+    if (this.chunkTimer) {
+      clearInterval(this.chunkTimer);
+      this.chunkTimer = null;
+    }
+    this.bufferWriteOffset = 0;
+    log(TAG, "muted (sck-capture still running)");
+    this.emit("muted");
+  }
+
+  unmute(): void {
+    if (!this.running || !this.muted) return;
+    this.muted = false;
+    this.chunkTimer = setInterval(() => {
+      this.emitChunk();
+    }, this.config.chunkDurationMs);
+    log(TAG, "unmuted");
+    this.emit("unmuted");
+  }
+
+  isMuted(): boolean {
+    return this.muted;
   }
 
   getDevice(): string {
@@ -307,6 +336,7 @@ export class AudioPipeline extends EventEmitter {
    * Falls back to growing buffer if needed (rare case for very long audio).
    */
   private writeToBuffer(data: Buffer): void {
+    if (this.muted) return;
     // Check if we need to grow the buffer (rare case)
     if (this.bufferWriteOffset + data.length > this.preallocBuffer.length) {
       // Grow to 2x current size
