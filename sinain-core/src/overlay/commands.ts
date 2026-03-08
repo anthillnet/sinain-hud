@@ -49,14 +49,18 @@ function handleCommand(action: string, deps: CommandDeps): void {
 
   switch (action) {
     case "toggle_audio": {
-      if (systemAudioPipeline.isRunning()) {
-        systemAudioPipeline.stop();
-        wsHandler.broadcast("System audio capture stopped", "normal");
-        log(TAG, "system audio toggled OFF");
+      if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
+        systemAudioPipeline.mute();
+        wsHandler.broadcast("System audio muted", "normal");
+        log(TAG, "system audio muted (sck-capture still running)");
+      } else if (systemAudioPipeline.isRunning() && systemAudioPipeline.isMuted()) {
+        systemAudioPipeline.unmute();
+        wsHandler.broadcast("System audio unmuted", "normal");
+        log(TAG, "system audio unmuted");
       } else {
         systemAudioPipeline.start();
         wsHandler.broadcast("System audio capture started", "normal");
-        log(TAG, "system audio toggled ON");
+        log(TAG, "system audio started (was not running)");
       }
       break;
     }
