@@ -63,6 +63,7 @@ class CaptureOutputHandler: NSObject, SCStreamOutput {
     let audioEnabled: Bool
     let fps: Double
     private var lastFrameTime: Double = 0
+    private var audioFormatLogged = false
 
     init(screenDir: String, audioEnabled: Bool, fps: Double) {
         self.screenDir = screenDir
@@ -86,20 +87,45 @@ class CaptureOutputHandler: NSObject, SCStreamOutput {
     }
 
     private func handleAudio(_ sampleBuffer: CMSampleBuffer) {
+        // One-time log of actual audio format from ScreenCaptureKit
+        if !audioFormatLogged {
+            if let desc = CMSampleBufferGetFormatDescription(sampleBuffer),
+               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc) {
+                let fmt = asbd.pointee
+                fputs("[sck-capture] audio format: \(fmt.mSampleRate)Hz, \(fmt.mChannelsPerFrame)ch, \(fmt.mBitsPerChannel)bit, flags=0x\(String(fmt.mFormatFlags, radix: 16))\n", stderr)
+            }
+            audioFormatLogged = true
+        }
+
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         let length = CMBlockBufferGetDataLength(blockBuffer)
         guard length > 0 else { return }
 
-        var data = Data(count: length)
-        data.withUnsafeMutableBytes { rawPtr in
+        // Read raw Float32 samples from ScreenCaptureKit
+        var floatData = Data(count: length)
+        floatData.withUnsafeMutableBytes { rawPtr in
             guard let baseAddress = rawPtr.baseAddress else { return }
             CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
         }
 
-        // Write raw PCM to stdout
-        data.withUnsafeBytes { rawPtr in
+        // Convert Float32 (-1.0..1.0) → Int16 (-32768..32767)
+        let sampleCount = length / 4  // Float32 = 4 bytes
+        var int16Data = Data(count: sampleCount * 2)  // Int16 = 2 bytes
+        floatData.withUnsafeBytes { srcPtr in
+            int16Data.withUnsafeMutableBytes { dstPtr in
+                guard let src = srcPtr.baseAddress?.assumingMemoryBound(to: Float32.self),
+                      let dst = dstPtr.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                for i in 0..<sampleCount {
+                    let clamped = min(max(src[i], -1.0), 1.0)
+                    dst[i] = Int16(clamped * 32767.0)
+                }
+            }
+        }
+
+        // Write Int16 PCM to stdout
+        int16Data.withUnsafeBytes { rawPtr in
             guard let base = rawPtr.baseAddress else { return }
-            fwrite(base, 1, data.count, stdout)
+            fwrite(base, 1, int16Data.count, stdout)
         }
     }
 
@@ -216,9 +242,15 @@ func run() async throws {
         src.resume()
     }
 
-    // Keep alive
+    // Keep alive — exit if orphaned (parent died)
+    let parentPid = getppid()
     while true {
-        try await Task.sleep(for: .seconds(3600))
+        try await Task.sleep(for: .seconds(5))
+        if getppid() != parentPid {
+            fputs("[sck-capture] parent process died — exiting\n", stderr)
+            try? await stream.stopCapture()
+            exit(0)
+        }
     }
 }
 
