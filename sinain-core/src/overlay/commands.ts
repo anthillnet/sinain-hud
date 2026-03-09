@@ -49,10 +49,18 @@ function handleCommand(action: string, deps: CommandDeps): void {
 
   switch (action) {
     case "toggle_audio": {
+      const isSck = systemAudioPipeline.getCaptureCommand() === "screencapturekit";
       if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
-        systemAudioPipeline.mute();
+        if (isSck) {
+          // sck-capture also captures screen — keep process alive, just mute audio
+          systemAudioPipeline.mute();
+          log(TAG, "system audio muted (sck-capture still running for screen)");
+        } else {
+          // sox/ffmpeg are audio-only — full stop
+          systemAudioPipeline.stop();
+          log(TAG, "system audio stopped");
+        }
         wsHandler.broadcast("System audio muted", "normal");
-        log(TAG, "system audio muted (sck-capture still running)");
       } else if (systemAudioPipeline.isRunning() && systemAudioPipeline.isMuted()) {
         systemAudioPipeline.unmute();
         wsHandler.broadcast("System audio unmuted", "normal");
