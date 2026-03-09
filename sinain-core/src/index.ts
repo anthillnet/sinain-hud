@@ -258,6 +258,7 @@ async function main() {
     wsHandler,
     profiler,
     feedbackStore: feedbackStore ?? undefined,
+    isScreenActive: () => screenActive,
 
     onSenseEvent: (event: SenseEvent) => {
       // Respect toggle_screen — if user disabled screen, ignore sense events
