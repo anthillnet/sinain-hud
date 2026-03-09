@@ -169,7 +169,7 @@ export class AudioPipeline extends EventEmitter {
       this.chunkTimer = null;
     }
     this.bufferWriteOffset = 0;
-    log(TAG, "muted (sck-capture still running)");
+    log(TAG, `muted (${this.config.captureCommand} process still running)`);
     this.emit("muted");
   }
 
@@ -189,6 +189,10 @@ export class AudioPipeline extends EventEmitter {
 
   getDevice(): string {
     return this.config.device;
+  }
+
+  getCaptureCommand(): "sox" | "ffmpeg" | "screencapturekit" {
+    return this.config.captureCommand;
   }
 
   switchDevice(device: string): void {
@@ -305,7 +309,7 @@ export class AudioPipeline extends EventEmitter {
 
     proc.stderr?.on("data", (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) {
+      if (msg && !/^In:.*Out:/.test(msg)) {
         log(TAG, `${name} stderr: ${msg.slice(0, 200)}`);
       }
     });

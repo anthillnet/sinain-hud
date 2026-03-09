@@ -64,6 +64,11 @@ kill_stale() {
     killed=true
   fi
 
+  # Kill previous sck-capture instances
+  if pkill -f "tools/sck-capture/sck-capture" 2>/dev/null; then
+    killed=true
+  fi
+
   # Kill previous sinain-core processes
   if pkill -f "tsx.*src/index.ts" 2>/dev/null; then
     killed=true
@@ -103,6 +108,7 @@ kill_stale() {
   if $killed; then
     sleep 2
     pkill -9 -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
+    pkill -9 -f "sck-capture" 2>/dev/null || true
     pkill -9 -f "tsx.*src/index.ts" 2>/dev/null || true
     lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
     sleep 1
@@ -135,6 +141,7 @@ cleanup() {
   fi
 
   lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+  pkill -f "tools/sck-capture/sck-capture" 2>/dev/null || true
   pkill -f "python3 -m sense_client" 2>/dev/null || true
   pkill -f "Python -m sense_client" 2>/dev/null || true
   pkill -f "tsx.*src/index.ts" 2>/dev/null || true
