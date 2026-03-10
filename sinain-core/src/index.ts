@@ -16,7 +16,7 @@ import { SignalCollector } from "./learning/signal-collector.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
-import { isDuplicateTranscript } from "./util/dedup.js";
+import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
 
 const TAG = "core";
@@ -28,6 +28,7 @@ async function main() {
   const config = loadConfig();
   log(TAG, `port: ${config.port}`);
   log(TAG, `audio: device=${config.audioConfig.device} cmd=${config.audioConfig.captureCommand} chunk=${config.audioConfig.chunkDurationMs}ms`);
+  log(TAG, `mic: enabled=${config.micEnabled} device=${config.micConfig.device} cmd=${config.micConfig.captureCommand}`);
   log(TAG, `transcription: model=${config.transcriptionConfig.geminiModel}`);
   log(TAG, `agent: model=${config.agentConfig.model} debounce=${config.agentConfig.debounceMs}ms max=${config.agentConfig.maxIntervalMs}ms`);
   log(TAG, `escalation: mode=${config.escalationConfig.mode} cooldown=${config.escalationConfig.cooldownMs}ms stale=${config.escalationConfig.staleMs}ms`);
@@ -140,56 +141,114 @@ async function main() {
     escalator.setSignalCollector(signalCollector);
   }
 
-  // ── Initialize audio pipeline ──
-  const audioPipeline = new AudioPipeline(config.audioConfig);
+  // ── Initialize audio pipelines ──
+  const systemAudioPipeline = new AudioPipeline(config.audioConfig, "system");
+  const micPipeline = config.micEnabled ? new AudioPipeline(config.micConfig, "mic") : null;
   const transcription = new TranscriptionService(config.transcriptionConfig);
-  audioPipeline.setProfiler(profiler);
+  systemAudioPipeline.setProfiler(profiler);
+  if (micPipeline) micPipeline.setProfiler(profiler);
   transcription.setProfiler(profiler);
 
-  // Wire: audio chunks → transcription
-  audioPipeline.on("chunk", (chunk) => {
+  // Wire: audio chunks → transcription (both pipelines share the same transcription service)
+  systemAudioPipeline.on("chunk", (chunk) => {
     transcription.processChunk(chunk).catch((err) => {
       error(TAG, "transcription error:", err instanceof Error ? err.message : err);
     });
   });
 
-  audioPipeline.on("error", (err) => {
-    error(TAG, "audio pipeline error:", err instanceof Error ? err.message : err);
-    wsHandler.broadcast("\u26a0 Audio capture error. Check device settings.", "high");
+  if (micPipeline) {
+    micPipeline.on("chunk", (chunk) => {
+      transcription.processChunk(chunk).catch((err) => {
+        error(TAG, "mic transcription error:", err instanceof Error ? err.message : err);
+      });
+    });
+  }
+
+  // System audio pipeline lifecycle events
+  systemAudioPipeline.on("error", (err) => {
+    error(TAG, "system audio pipeline error:", err instanceof Error ? err.message : err);
+    wsHandler.broadcast("\u26a0 System audio capture error. Check device settings.", "high");
   });
 
-  audioPipeline.on("started", () => {
-    log(TAG, "audio pipeline started");
+  systemAudioPipeline.on("started", () => {
+    log(TAG, "system audio pipeline started");
     wsHandler.updateState({ audio: "active" });
   });
 
-  audioPipeline.on("stopped", () => {
-    log(TAG, "audio pipeline stopped");
+  systemAudioPipeline.on("stopped", () => {
+    log(TAG, "system audio pipeline stopped");
     wsHandler.updateState({ audio: "muted" });
   });
 
+  systemAudioPipeline.on("muted", () => {
+    log(TAG, "system audio muted (capture process still running)");
+    wsHandler.updateState({ audio: "muted" });
+  });
+
+  systemAudioPipeline.on("unmuted", () => {
+    log(TAG, "system audio unmuted");
+    wsHandler.updateState({ audio: "active" });
+  });
+
+  // Mic pipeline lifecycle events
+  if (micPipeline) {
+    micPipeline.on("error", (err) => {
+      error(TAG, "mic pipeline error:", err instanceof Error ? err.message : err);
+      wsHandler.broadcast("\u26a0 Mic capture error. Check device settings.", "high");
+    });
+
+    micPipeline.on("started", () => {
+      log(TAG, "mic pipeline started");
+      wsHandler.updateState({ mic: "active" });
+    });
+
+    micPipeline.on("stopped", () => {
+      log(TAG, "mic pipeline stopped");
+      wsHandler.updateState({ mic: "muted" });
+    });
+  }
+
   // Wire: transcripts → feed buffer + overlay + agent trigger + recorder
-  // Dedup state: track last 3 transcripts to filter near-duplicates
-  const recentTranscripts: string[] = [];
+  // Per-source dedup: track last 3 transcripts per source
+  const recentSystemTranscripts: string[] = [];
+  const recentMicTranscripts: string[] = [];
 
   transcription.on("transcript", (result) => {
-    // Skip near-duplicate transcripts (repetitive audio/music/TV)
-    if (isDuplicateTranscript(result.text, recentTranscripts)) {
-      log(TAG, `transcript deduped: "${result.text.slice(0, 60)}..."`);
+    const isSystem = result.audioSource === "system";
+    const recentSame = isSystem ? recentSystemTranscripts : recentMicTranscripts;
+
+    // Skip near-duplicate transcripts within same source
+    if (isDuplicateTranscript(result.text, recentSame)) {
+      log(TAG, `transcript deduped (${result.audioSource}): "${result.text.slice(0, 60)}..."`);
       return;
     }
-    // Track recent transcripts (ring buffer of 3)
-    recentTranscripts.push(result.text.trim());
-    if (recentTranscripts.length > 3) recentTranscripts.shift();
 
-    const item = feedBuffer.push(`[\ud83d\udcdd] ${result.text}`, "normal", "audio", "stream");
-    wsHandler.broadcast(`[\ud83d\udcdd] ${result.text}`, "normal");
+    // Cross-stream dedup: drop mic transcript if >70% similar to recent system transcript
+    if (!isSystem && recentSystemTranscripts.length > 0) {
+      const trimmed = result.text.trim();
+      for (const recent of recentSystemTranscripts) {
+        if (bigramSimilarity(trimmed, recent) > 0.70) {
+          log(TAG, `mic transcript cross-deduped (speakers pickup): "${trimmed.slice(0, 60)}..."`);
+          return;
+        }
+      }
+    }
+
+    // Track recent transcripts (ring buffer of 3 per source)
+    recentSame.push(result.text.trim());
+    if (recentSame.length > 3) recentSame.shift();
+
+    const emoji = isSystem ? "\ud83d\udd0a" : "\ud83c\udf99";
+    const tag = `[${emoji}]`;
+    const item = feedBuffer.push(`${tag} ${result.text}`, "normal", "audio", "stream");
+    if (!isSystem) item.audioSource = "mic";
+    wsHandler.broadcast(`${tag} ${result.text}`, "normal");
     recorder.onFeedItem(item); // Collect for recording if active
     agentLoop.onNewContext(); // Trigger debounced analysis
   });
 
   // ── Screen capture active flag ──
-  let screenActive = false;
+  let screenActive = true;
 
   // ── Create HTTP + WS server ──
   const server = createAppServer({
@@ -199,9 +258,12 @@ async function main() {
     wsHandler,
     profiler,
     feedbackStore: feedbackStore ?? undefined,
+    isScreenActive: () => screenActive,
 
     onSenseEvent: (event: SenseEvent) => {
-      screenActive = true;
+      // Respect toggle_screen — if user disabled screen, ignore sense events
+      if (!screenActive) return;
+
       wsHandler.updateState({ screen: "active" });
 
       // Track app context for recorder
@@ -300,17 +362,24 @@ async function main() {
   // ── Wire overlay commands ──
   setupCommands({
     wsHandler,
-    audioPipeline,
+    systemAudioPipeline,
+    micPipeline,
     config,
     onUserMessage: async (text) => {
       await escalator.sendDirect(text);
     },
     onToggleScreen: () => {
       screenActive = !screenActive;
+      if (!screenActive) {
+        senseBuffer.clear();
+      }
       wsHandler.updateState({ screen: screenActive ? "active" : "off" });
       return screenActive;
     },
   });
+
+  // Broadcast initial screen state so overlay gets correct status on connect
+  wsHandler.updateState({ screen: "active" });
 
   // ── Start services ──
   try {
@@ -346,17 +415,26 @@ async function main() {
   // Start agent loop
   agentLoop.start();
 
-  // Auto-start audio if configured
+  // Auto-start system audio if configured
   if (config.audioConfig.autoStart) {
-    log(TAG, "auto-starting audio pipeline...");
-    audioPipeline.start();
+    log(TAG, "auto-starting system audio pipeline...");
+    systemAudioPipeline.start();
   } else {
-    log(TAG, "audio pipeline ready (not auto-started \u2014 send toggle_audio or set AUDIO_AUTO_START=true)");
+    log(TAG, "system audio pipeline ready (not auto-started \u2014 send toggle_audio or set AUDIO_AUTO_START=true)");
+  }
+
+  // Auto-start mic if configured
+  if (micPipeline && config.micConfig.autoStart) {
+    log(TAG, "auto-starting mic pipeline...");
+    micPipeline.start();
+  } else if (micPipeline) {
+    log(TAG, "mic pipeline ready (not auto-started \u2014 send toggle_mic or set MIC_AUTO_START=true)");
   }
 
   log(TAG, "\u2713 sinain-core running");
   log(TAG, `  http+ws: http://0.0.0.0:${config.port}`);
-  log(TAG, `  audio:   ${config.audioConfig.autoStart ? "active" : "standby"}`);
+  log(TAG, `  audio:   ${config.audioConfig.autoStart ? "active" : "standby"} (${config.audioConfig.captureCommand})`);
+  log(TAG, `  mic:     ${config.micEnabled ? (config.micConfig.autoStart ? "active" : "standby") : "disabled"}`);
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
 
@@ -368,7 +446,8 @@ async function main() {
     profiler.stop();
     recorder.forceStop(); // Stop any active recording
     agentLoop.stop();
-    audioPipeline.stop();
+    systemAudioPipeline.stop();
+    if (micPipeline) micPipeline.stop();
     transcription.destroy();
     escalator.stop();
     signalCollector?.destroy();

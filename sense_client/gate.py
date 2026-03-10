@@ -1,4 +1,5 @@
 """Decision gate — classifies sense events and decides what to send."""
+from __future__ import annotations
 
 import difflib
 import time

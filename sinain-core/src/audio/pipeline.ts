@@ -1,8 +1,13 @@
 import { EventEmitter } from "node:events";
+import os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
-import type { AudioPipelineConfig, AudioChunk } from "../types.js";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { AudioPipelineConfig, AudioChunk, AudioSourceTag } from "../types.js";
 import type { Profiler } from "../profiler.js";
-import { log, warn, error } from "../log.js";
+import { log, warn, error, debug } from "../log.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TAG = "audio";
 
@@ -57,7 +62,7 @@ function calculateRmsEnergy(pcmData: Buffer): number {
  * Spawns sox or ffmpeg to capture audio from a macOS device,
  * accumulates raw PCM data, and emits WAV chunks at regular intervals.
  *
- * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'error' (Error)
+ * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'muted', 'unmuted', 'error' (Error)
  */
 /**
  * Pre-allocated buffer size for audio accumulation.
@@ -68,6 +73,7 @@ const PREALLOC_BUFFER_SIZE = 320 * 1024;
 
 export class AudioPipeline extends EventEmitter {
   private config: AudioPipelineConfig;
+  private audioSourceTag: AudioSourceTag;
   private process: ChildProcess | null = null;
   // Pre-allocated buffer to reduce GC pressure (vs Buffer.concat per chunk)
   private preallocBuffer: Buffer = Buffer.allocUnsafe(PREALLOC_BUFFER_SIZE);
@@ -77,13 +83,15 @@ export class AudioPipeline extends EventEmitter {
   private silentChunks: number = 0;
   private speechChunks: number = 0;
   private errorCount: number = 0;
+  private muted: boolean = false;
   private profiler: Profiler | null = null;
 
   setProfiler(p: Profiler): void { this.profiler = p; }
 
-  constructor(config: AudioPipelineConfig) {
+  constructor(config: AudioPipelineConfig, audioSourceTag: AudioSourceTag = "system") {
     super();
     this.config = config;
+    this.audioSourceTag = audioSourceTag;
   }
 
   start(): void {
@@ -97,6 +105,8 @@ export class AudioPipeline extends EventEmitter {
     try {
       if (this.config.captureCommand === "sox") {
         this.startSox();
+      } else if (this.config.captureCommand === "screencapturekit") {
+        this.startScreenCaptureKit();
       } else {
         this.startFfmpeg();
       }
@@ -106,6 +116,7 @@ export class AudioPipeline extends EventEmitter {
       return;
     }
 
+    this.muted = false;
     this.chunkTimer = setInterval(() => {
       this.emitChunk();
     }, this.config.chunkDurationMs);
@@ -120,6 +131,7 @@ export class AudioPipeline extends EventEmitter {
 
     log(TAG, "stopping capture...");
     this.running = false;
+    this.muted = false;
 
     if (this.chunkTimer) {
       clearInterval(this.chunkTimer);
@@ -149,8 +161,38 @@ export class AudioPipeline extends EventEmitter {
     return this.running;
   }
 
+  mute(): void {
+    if (!this.running || this.muted) return;
+    this.muted = true;
+    if (this.chunkTimer) {
+      clearInterval(this.chunkTimer);
+      this.chunkTimer = null;
+    }
+    this.bufferWriteOffset = 0;
+    log(TAG, `muted (${this.config.captureCommand} process still running)`);
+    this.emit("muted");
+  }
+
+  unmute(): void {
+    if (!this.running || !this.muted) return;
+    this.muted = false;
+    this.chunkTimer = setInterval(() => {
+      this.emitChunk();
+    }, this.config.chunkDurationMs);
+    log(TAG, "unmuted");
+    this.emit("unmuted");
+  }
+
+  isMuted(): boolean {
+    return this.muted;
+  }
+
   getDevice(): string {
     return this.config.device;
+  }
+
+  getCaptureCommand(): "sox" | "ffmpeg" | "screencapturekit" {
+    return this.config.captureCommand;
   }
 
   switchDevice(device: string): void {
@@ -216,6 +258,27 @@ export class AudioPipeline extends EventEmitter {
     this.wireProcessEvents("ffmpeg");
   }
 
+  // ── ScreenCaptureKit capture ──
+
+  private startScreenCaptureKit(): void {
+    const binaryPath = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
+    const args = [
+      "--sample-rate", String(this.config.sampleRate),
+      "--channels", String(this.config.channels),
+      "--screen-dir", resolve(os.homedir(), ".sinain", "capture"),
+      "--fps", "1",
+      "--scale", "0.5",
+    ];
+
+    log(TAG, `spawning: ${binaryPath} ${args.join(" ")}`);
+
+    this.process = spawn(binaryPath, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    // sck-capture outputs raw PCM (no WAV header) on stdout, screen frames via IPC
+    this.wireProcessEvents("sck-capture");
+  }
+
   // ── Process event wiring ──
 
   private wireProcessEvents(name: string): void {
@@ -246,7 +309,7 @@ export class AudioPipeline extends EventEmitter {
 
     proc.stderr?.on("data", (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) {
+      if (msg && !/^In:.*Out:/.test(msg)) {
         log(TAG, `${name} stderr: ${msg.slice(0, 200)}`);
       }
     });
@@ -277,6 +340,7 @@ export class AudioPipeline extends EventEmitter {
    * Falls back to growing buffer if needed (rare case for very long audio).
    */
   private writeToBuffer(data: Buffer): void {
+    if (this.muted) return;
     // Check if we need to grow the buffer (rare case)
     if (this.bufferWriteOffset + data.length > this.preallocBuffer.length) {
       // Grow to 2x current size
@@ -312,14 +376,12 @@ export class AudioPipeline extends EventEmitter {
     if (this.config.vadEnabled && energy < this.config.vadThreshold) {
       this.silentChunks++;
       this.profiler?.gauge("audio.silentChunks", this.silentChunks);
-      if (this.silentChunks === 1 || this.silentChunks % 6 === 0) {
-        log(TAG, `VAD: silent (energy=${energy.toFixed(4)} < ${this.config.vadThreshold}), ${this.silentChunks} silent chunk(s)`);
-      }
+      debug(TAG, `VAD: silent (energy=${energy.toFixed(4)} < ${this.config.vadThreshold}), ${this.silentChunks} silent chunk(s)`);
       return;
     }
 
     if (this.silentChunks > 0) {
-      log(TAG, `VAD: speech detected after ${this.silentChunks} silent chunk(s) (energy=${energy.toFixed(4)})`);
+      debug(TAG, `VAD: speech detected after ${this.silentChunks} silent chunk(s) (energy=${energy.toFixed(4)})`);
       this.silentChunks = 0;
     }
 
@@ -339,9 +401,10 @@ export class AudioPipeline extends EventEmitter {
       ts: Date.now(),
       durationMs,
       energy,
+      audioSource: this.audioSourceTag,
     };
 
-    log(TAG, `chunk: ${durationMs}ms, ${wavBuffer.length} bytes, energy=${energy.toFixed(4)}`);
+    debug(TAG, `chunk: ${durationMs}ms, ${wavBuffer.length} bytes, energy=${energy.toFixed(4)}`);
     this.emit("chunk", chunk);
   }
 }

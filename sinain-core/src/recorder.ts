@@ -93,9 +93,13 @@ export class Recorder {
     if (item.source !== "audio") return;
     if (!item.text || item.text.trim().length === 0) return;
 
-    // Strip the [📝] prefix if present
+    // Strip audio source prefixes if present ([📝], [🔊], [🎤])
     let text = item.text;
     if (text.startsWith("[📝] ")) {
+      text = text.slice(5);
+    } else if (text.startsWith("[🔊] ")) {
+      text = text.slice(5);
+    } else if (text.startsWith("[🎤] ")) {
       text = text.slice(5);
     }
 
