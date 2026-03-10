@@ -64,6 +64,11 @@ kill_stale() {
     killed=true
   fi
 
+  # Kill previous sck-capture instances
+  if pkill -f "tools/sck-capture/sck-capture" 2>/dev/null; then
+    killed=true
+  fi
+
   # Kill previous sinain-core processes
   if pkill -f "tsx.*src/index.ts" 2>/dev/null; then
     killed=true
@@ -103,6 +108,7 @@ kill_stale() {
   if $killed; then
     sleep 2
     pkill -9 -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
+    pkill -9 -f "sck-capture" 2>/dev/null || true
     pkill -9 -f "tsx.*src/index.ts" 2>/dev/null || true
     lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
     sleep 1
@@ -135,6 +141,7 @@ cleanup() {
   fi
 
   lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+  pkill -f "tools/sck-capture/sck-capture" 2>/dev/null || true
   pkill -f "python3 -m sense_client" 2>/dev/null || true
   pkill -f "Python -m sense_client" 2>/dev/null || true
   pkill -f "tsx.*src/index.ts" 2>/dev/null || true
@@ -184,6 +191,24 @@ fi
 ok "port 9500 free"
 
 echo ""
+
+# ── 1b. Build sck-capture if source exists and binary is stale ─────────────
+if [ -f "$SCRIPT_DIR/tools/sck-capture/main.swift" ]; then
+  if [ ! -f "$SCRIPT_DIR/tools/sck-capture/sck-capture" ] || \
+     [ "$SCRIPT_DIR/tools/sck-capture/main.swift" -nt "$SCRIPT_DIR/tools/sck-capture/sck-capture" ]; then
+    log "Building sck-capture (unified screen + audio capture)..."
+    if (cd "$SCRIPT_DIR/tools/sck-capture" && bash build.sh); then
+      ok "sck-capture built"
+    else
+      warn "sck-capture build failed — audio falls back to ffmpeg/sox, screen to CGDisplayCreateImage"
+    fi
+  else
+    ok "sck-capture binary up to date"
+  fi
+fi
+
+# Ensure IPC directory for screen frames
+mkdir -p "$HOME/.sinain/capture"
 
 # ── 2. Start sinain-core ──────────────────────────────────────────────────
 log "Starting sinain-core..."

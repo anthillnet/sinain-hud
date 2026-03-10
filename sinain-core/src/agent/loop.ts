@@ -7,7 +7,7 @@ import { buildContextWindow } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
-import { log, warn, error } from "../log.js";
+import { log, warn, error, debug } from "../log.js";
 
 const TAG = "agent";
 
@@ -307,7 +307,11 @@ export class AgentLoop extends EventEmitter {
       if (this.agentBuffer.length > historyLimit) this.agentBuffer.shift();
 
       const imageCount = contextWindow.images?.length || 0;
-      log(TAG, `#${entry.id} (${latencyMs}ms, ${tokensIn}in+${tokensOut}out tok, model=${usedModel}, richness=${richness}, images=${imageCount}) hud="${hud}"`);
+      if (hud !== this.lastPushedHud) {
+        log(TAG, `#${entry.id} (${latencyMs}ms, ${tokensIn}in+${tokensOut}out tok, model=${usedModel}, richness=${richness}, images=${imageCount}) hud="${hud}"`);
+      } else {
+        debug(TAG, `#${entry.id} (${latencyMs}ms) hud unchanged`);
+      }
 
       // Push HUD line to feed (suppress "—", "Idle", and all in focus mode)
       if (this.deps.agentConfig.pushToFeed &&

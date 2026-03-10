@@ -1,9 +1,23 @@
 import { EventEmitter } from "node:events";
 import type { TranscriptionConfig, AudioChunk, TranscriptResult } from "../types.js";
 import type { Profiler } from "../profiler.js";
-import { log, warn, error } from "../log.js";
+import { LocalTranscriptionBackend } from "./transcription-local.js";
+import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe";
+
+/** Detect repeated-token hallucinations like "kuch kuch kuch kuch..." */
+function isHallucination(text: string): boolean {
+  const words = text.split(/[\s,]+/).filter(Boolean);
+  if (words.length < 6) return false;
+  const freq = new Map<string, number>();
+  for (const w of words) {
+    const lw = w.toLowerCase();
+    freq.set(lw, (freq.get(lw) || 0) + 1);
+  }
+  const maxFreq = Math.max(...freq.values());
+  return maxFreq / words.length > 0.6;
+}
 
 /**
  * Transcription service — sends audio chunks to OpenRouter (Gemini) for transcription.
@@ -14,7 +28,8 @@ export class TranscriptionService extends EventEmitter {
   private config: TranscriptionConfig;
   private destroyed: boolean = false;
   private pendingRequests: number = 0;
-  private readonly MAX_CONCURRENT = 3;
+  private readonly MAX_CONCURRENT = 5;
+  private localBackend: LocalTranscriptionBackend | null = null;
 
   private latencies: number[] = [];
   private cumulativeLatencies: number[] = [];
@@ -32,11 +47,13 @@ export class TranscriptionService extends EventEmitter {
     super();
     this.config = config;
 
-    if (!config.openrouterApiKey) {
+    if (config.backend === "local") {
+      this.localBackend = new LocalTranscriptionBackend(config.local);
+    } else if (!config.openrouterApiKey) {
       warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
     }
 
-    log(TAG, `initialized: model=${config.geminiModel} language=${config.language}`);
+    log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
 
     this.latencyStatsTimer = setInterval(() => this.logStats(), 60_000);
   }
@@ -55,7 +72,11 @@ export class TranscriptionService extends EventEmitter {
     this.pendingRequests++;
     this.profiler?.gauge("transcription.pending", this.pendingRequests);
     try {
-      await this.transcribeViaOpenRouter(chunk);
+      if (this.localBackend) {
+        await this.transcribeViaLocal(chunk);
+      } else {
+        await this.transcribeViaOpenRouter(chunk);
+      }
     } catch (err) {
       this.errorCount++;
       this.profiler?.gauge("transcription.errors", this.errorCount);
@@ -68,6 +89,7 @@ export class TranscriptionService extends EventEmitter {
 
   destroy(): void {
     this.destroyed = true;
+    this.localBackend?.destroy();
     if (this.latencyStatsTimer) { clearInterval(this.latencyStatsTimer); this.latencyStatsTimer = null; }
     this.logStats();
     this.removeAllListeners();
@@ -95,6 +117,36 @@ export class TranscriptionService extends EventEmitter {
     this.latencies = [];
   }
 
+  // ── Local whisper backend ──
+
+  private async transcribeViaLocal(chunk: AudioChunk): Promise<void> {
+    const startTs = Date.now();
+    const result = await this.localBackend!.transcribe(chunk);
+    const elapsed = Date.now() - startTs;
+
+    this.latencies.push(elapsed);
+    this.cumulativeLatencies.push(elapsed);
+    if (this.cumulativeLatencies.length > 1_000) this.cumulativeLatencies.shift();
+    this.profiler?.timerRecord("transcription.call", elapsed);
+    this.totalAudioDurationMs += chunk.durationMs;
+
+    if (!result) return;
+
+    const { text } = result;
+
+    if (text.length < 3) {
+      debug(TAG, `transcript too short, dropping: "${text}"`);
+      return;
+    }
+
+    if (isHallucination(text)) {
+      warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+      return;
+    }
+
+    this.emit("transcript", result);
+  }
+
   // ── OpenRouter backend ──
 
   /** Get cumulative profiling stats for /health. */
@@ -109,6 +161,7 @@ export class TranscriptionService extends EventEmitter {
     const estimatedCost = (this.totalTokensConsumed / 1_000_000) * costPerMToken;
 
     return {
+      backend: this.config.backend,
       calls: this.totalCalls,
       p50Ms: Math.round(p50),
       p95Ms: Math.round(p95),
@@ -131,7 +184,7 @@ export class TranscriptionService extends EventEmitter {
     const base64Audio = chunk.buffer.toString("base64");
     const startTs = Date.now();
 
-    log(TAG, `sending ${chunk.durationMs}ms chunk to OpenRouter (${Math.round(chunk.buffer.length / 1024)}KB)`);
+    debug(TAG, `sending ${chunk.durationMs}ms chunk to OpenRouter (${Math.round(chunk.buffer.length / 1024)}KB)`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -149,7 +202,7 @@ export class TranscriptionService extends EventEmitter {
             role: "user",
             content: [
               { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
-              { type: "text", text: "Transcribe this audio. Output only the transcript text, nothing else." },
+              { type: "text", text: `Transcribe this audio in ${this.config.language}. Output ONLY the transcript text, nothing else. If the audio is not in ${this.config.language}, output an empty string.` },
             ],
           }],
         }),
@@ -183,6 +236,16 @@ export class TranscriptionService extends EventEmitter {
         return;
       }
 
+      if (text.length < 3) {
+        debug(TAG, `transcript too short, dropping: "${text}"`);
+        return;
+      }
+
+      if (isHallucination(text)) {
+        warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+        return;
+      }
+
       log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
 
       if (data.usage) {
@@ -195,6 +258,7 @@ export class TranscriptionService extends EventEmitter {
         refined: false,
         confidence: 0.8,
         ts: Date.now(),
+        audioSource: chunk.audioSource,
       };
 
       this.emit("transcript", result);

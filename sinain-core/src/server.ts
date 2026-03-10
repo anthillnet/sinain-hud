@@ -23,6 +23,7 @@ export interface ServerDeps {
   onSenseEvent: (event: SenseEvent) => void;
   onSenseDelta?: (data: { app: string; activity: string; changes: TextDelta[]; priority?: string; ts: number }) => void;
   onFeedPost: (text: string, priority: string) => void;
+  isScreenActive: () => boolean;
   onSenseProfile: (snapshot: any) => void;
   getHealthPayload: () => Record<string, unknown>;
   getAgentDigest: () => unknown;
@@ -73,6 +74,10 @@ export function createAppServer(deps: ServerDeps) {
     try {
       // ── /sense ──
       if (req.method === "POST" && url.pathname === "/sense") {
+        if (!deps.isScreenActive()) {
+          res.end(JSON.stringify({ ok: true, gated: true }));
+          return;
+        }
         const body = await readBody(req, MAX_SENSE_BODY);
         senseInBytes += Buffer.byteLength(body);
         deps.profiler?.gauge("network.senseInBytes", senseInBytes);
@@ -276,6 +281,12 @@ export function createAppServer(deps: ServerDeps) {
       ws.on("message", (data) => {
         try {
           const msg = JSON.parse(data.toString());
+
+          // Gate sense ingestion when screen is toggled off
+          if (!deps.isScreenActive()) {
+            ws.send(JSON.stringify({ type: "ack", gated: true }));
+            return;
+          }
 
           // Handle different message types
           if (msg.type === "delta") {

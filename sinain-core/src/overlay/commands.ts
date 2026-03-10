@@ -9,7 +9,8 @@ const TAG = "cmd";
 
 export interface CommandDeps {
   wsHandler: WsHandler;
-  audioPipeline: AudioPipeline;
+  systemAudioPipeline: AudioPipeline;
+  micPipeline: AudioPipeline | null;
   config: CoreConfig;
   onUserMessage: (text: string) => Promise<void>;
   /** Toggle screen capture — returns new state */
@@ -21,7 +22,7 @@ export interface CommandDeps {
  * Registers as the WS handler's onIncoming callback.
  */
 export function setupCommands(deps: CommandDeps): void {
-  const { wsHandler, audioPipeline, config } = deps;
+  const { wsHandler } = deps;
 
   wsHandler.onIncoming(async (msg: InboundMessage, _client: WebSocket) => {
     switch (msg.type) {
@@ -44,18 +45,47 @@ export function setupCommands(deps: CommandDeps): void {
 }
 
 function handleCommand(action: string, deps: CommandDeps): void {
-  const { wsHandler, audioPipeline, config } = deps;
+  const { wsHandler, systemAudioPipeline, micPipeline, config } = deps;
 
   switch (action) {
     case "toggle_audio": {
-      if (audioPipeline.isRunning()) {
-        audioPipeline.stop();
-        wsHandler.broadcast("Audio capture stopped", "normal");
-        log(TAG, "audio toggled OFF");
+      const isSck = systemAudioPipeline.getCaptureCommand() === "screencapturekit";
+      if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
+        if (isSck) {
+          // sck-capture also captures screen — keep process alive, just mute audio
+          systemAudioPipeline.mute();
+          log(TAG, "system audio muted (sck-capture still running for screen)");
+        } else {
+          // sox/ffmpeg are audio-only — full stop
+          systemAudioPipeline.stop();
+          log(TAG, "system audio stopped");
+        }
+        wsHandler.broadcast("System audio muted", "normal");
+      } else if (systemAudioPipeline.isRunning() && systemAudioPipeline.isMuted()) {
+        systemAudioPipeline.unmute();
+        wsHandler.broadcast("System audio unmuted", "normal");
+        log(TAG, "system audio unmuted");
       } else {
-        audioPipeline.start();
-        wsHandler.broadcast("Audio capture started", "normal");
-        log(TAG, "audio toggled ON");
+        systemAudioPipeline.start();
+        wsHandler.broadcast("System audio capture started", "normal");
+        log(TAG, "system audio started (was not running)");
+      }
+      break;
+    }
+    case "toggle_mic": {
+      if (!micPipeline) {
+        wsHandler.broadcast("\u26a0 Mic not enabled (set MIC_ENABLED=true)", "normal");
+        log(TAG, "toggle_mic: mic not enabled");
+        break;
+      }
+      if (micPipeline.isRunning()) {
+        micPipeline.stop();
+        wsHandler.broadcast("Mic capture stopped", "normal");
+        log(TAG, "mic toggled OFF");
+      } else {
+        micPipeline.start();
+        wsHandler.broadcast("Mic capture started", "normal");
+        log(TAG, "mic toggled ON");
       }
       break;
     }
@@ -69,10 +99,10 @@ function handleCommand(action: string, deps: CommandDeps): void {
       break;
     }
     case "switch_device": {
-      const current = audioPipeline.getDevice();
+      const current = systemAudioPipeline.getDevice();
       const alt = config.audioAltDevice;
       const next = current === config.audioConfig.device ? alt : config.audioConfig.device;
-      audioPipeline.switchDevice(next);
+      systemAudioPipeline.switchDevice(next);
       wsHandler.broadcast(`Audio device \u2192 ${next}`, "normal");
       log(TAG, `audio device switched: ${current} \u2192 ${next}`);
       break;
