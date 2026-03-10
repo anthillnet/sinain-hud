@@ -1,7 +1,6 @@
 import type { InboundMessage } from "../types.js";
 import type { WsHandler } from "./ws-handler.js";
 import type { AudioPipeline } from "../audio/pipeline.js";
-import type { CoreConfig } from "../types.js";
 import { WebSocket } from "ws";
 import { log } from "../log.js";
 
@@ -11,7 +10,6 @@ export interface CommandDeps {
   wsHandler: WsHandler;
   systemAudioPipeline: AudioPipeline;
   micPipeline: AudioPipeline | null;
-  config: CoreConfig;
   onUserMessage: (text: string) => Promise<void>;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
@@ -45,22 +43,15 @@ export function setupCommands(deps: CommandDeps): void {
 }
 
 function handleCommand(action: string, deps: CommandDeps): void {
-  const { wsHandler, systemAudioPipeline, micPipeline, config } = deps;
+  const { wsHandler, systemAudioPipeline, micPipeline } = deps;
 
   switch (action) {
     case "toggle_audio": {
-      const isSck = systemAudioPipeline.getCaptureCommand() === "screencapturekit";
+      // sck-capture also captures screen — always mute/unmute, never stop
       if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
-        if (isSck) {
-          // sck-capture also captures screen — keep process alive, just mute audio
-          systemAudioPipeline.mute();
-          log(TAG, "system audio muted (sck-capture still running for screen)");
-        } else {
-          // sox/ffmpeg are audio-only — full stop
-          systemAudioPipeline.stop();
-          log(TAG, "system audio stopped");
-        }
+        systemAudioPipeline.mute();
         wsHandler.broadcast("System audio muted", "normal");
+        log(TAG, "system audio muted (sck-capture still running for screen)");
       } else if (systemAudioPipeline.isRunning() && systemAudioPipeline.isMuted()) {
         systemAudioPipeline.unmute();
         wsHandler.broadcast("System audio unmuted", "normal");
@@ -99,12 +90,9 @@ function handleCommand(action: string, deps: CommandDeps): void {
       break;
     }
     case "switch_device": {
-      const current = systemAudioPipeline.getDevice();
-      const alt = config.audioAltDevice;
-      const next = current === config.audioConfig.device ? alt : config.audioConfig.device;
-      systemAudioPipeline.switchDevice(next);
-      wsHandler.broadcast(`Audio device \u2192 ${next}`, "normal");
-      log(TAG, `audio device switched: ${current} \u2192 ${next}`);
+      // TODO: implement device switching (needs AudioPipeline.switchDevice + AUDIO_ALT_DEVICE config)
+      wsHandler.broadcast("\u26a0 Device switching not yet implemented", "normal");
+      log(TAG, "switch_device: not yet implemented");
       break;
     }
     default:

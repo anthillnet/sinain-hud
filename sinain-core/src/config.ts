@@ -68,15 +68,13 @@ function resolvePath(p: string): string {
 
 export function loadConfig(): CoreConfig {
   const audioConfig: AudioPipelineConfig = {
-    device: env("AUDIO_DEVICE", "BlackHole 2ch"),
+    device: env("AUDIO_DEVICE", "default"),
     sampleRate: intEnv("AUDIO_SAMPLE_RATE", 16000),
     channels: 1,
     chunkDurationMs: intEnv("AUDIO_CHUNK_MS", 5000),
     vadEnabled: boolEnv("AUDIO_VAD_ENABLED", true),
     vadThreshold: floatEnv("AUDIO_VAD_THRESHOLD", 0.001),
-    captureCommand: env("AUDIO_CAPTURE_CMD", "screencapturekit") as "sox" | "ffmpeg" | "screencapturekit",
     autoStart: boolEnv("AUDIO_AUTO_START", true),
-    gainDb: intEnv("AUDIO_GAIN_DB", 20),
   };
 
   const micEnabled = boolEnv("MIC_ENABLED", false);
@@ -87,20 +85,23 @@ export function loadConfig(): CoreConfig {
     chunkDurationMs: intEnv("MIC_CHUNK_MS", 5000),
     vadEnabled: boolEnv("MIC_VAD_ENABLED", true),
     vadThreshold: floatEnv("MIC_VAD_THRESHOLD", 0.008),
-    captureCommand: env("MIC_CAPTURE_CMD", "sox") as "sox" | "ffmpeg" | "screencapturekit",
     autoStart: boolEnv("MIC_AUTO_START", false),
-    gainDb: intEnv("MIC_GAIN_DB", 0),
   };
+
+  const langRaw = env("TRANSCRIPTION_LANGUAGE", "en");
+  const languages = langRaw.split(",").map(l => l.trim().split("-")[0].toLowerCase());
 
   const transcriptionConfig: TranscriptionConfig = {
     backend: env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"],
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
-    language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
+    language: langRaw,
+    languages,
     local: {
       bin: env("LOCAL_WHISPER_BIN", "whisper-cli"),
       modelPath: resolvePath(env("LOCAL_WHISPER_MODEL", "~/models/ggml-large-v3-turbo.bin")),
-      language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
+      language: langRaw,
+      languages,
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
     },
   };
@@ -152,7 +153,6 @@ export function loadConfig(): CoreConfig {
   return {
     port: intEnv("PORT", 9500),
     audioConfig,
-    audioAltDevice: env("AUDIO_ALT_DEVICE", "BlackHole 2ch"),
     micConfig,
     micEnabled,
     transcriptionConfig,
