@@ -3,6 +3,7 @@ import { writeFile, unlink, rmdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AudioChunk, TranscriptResult } from "../types.js";
+import type { TranscriptionBackend } from "./transcription-backend.js";
 import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe-local";
@@ -14,6 +15,8 @@ export interface LocalTranscriptionConfig {
   modelPath: string;
   /** Language code, e.g. "en", "ru" (default: "en") */
   language: string;
+  /** Parsed language codes, e.g. ["en", "ru"] */
+  languages: string[];
   /** Timeout per chunk in ms (default: 15000) */
   timeoutMs: number;
 }
@@ -24,7 +27,7 @@ export interface LocalTranscriptionConfig {
  * Writes WAV chunk to a temp file, runs whisper-cli, parses stdout.
  * Fully isolated — does not touch the OpenRouter path.
  */
-export class LocalTranscriptionBackend {
+export class LocalTranscriptionBackend implements TranscriptionBackend {
   private config: LocalTranscriptionConfig;
   private destroyed = false;
 
@@ -73,15 +76,20 @@ export class LocalTranscriptionBackend {
 
   private runWhisper(wavPath: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      // whisper-cli expects ISO 639-1 codes ("en"), not BCP-47 ("en-US")
-      const lang = this.config.language.split("-")[0].toLowerCase();
       const args = [
         "-m", this.config.modelPath,
         "-f", wavPath,
         "--no-timestamps",
-        "-l", lang,
         "-np",
       ];
+      // Single language: pass -l for faster inference.
+      // Multiple languages: pass -l auto so whisper auto-detects per chunk
+      // (without -l, whisper defaults to "en" and translates non-English speech).
+      if (this.config.languages.length === 1) {
+        args.push("-l", this.config.languages[0]);
+      } else {
+        args.push("-l", "auto");
+      }
 
       debug(TAG, `exec: ${this.config.bin} ${args.join(" ")}`);
 

@@ -8,6 +8,7 @@ import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
+import { TaskDispatcher } from "./agent/task-dispatcher.js";
 import { Recorder } from "./recorder.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
@@ -16,7 +17,6 @@ import { SignalCollector } from "./learning/signal-collector.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
-import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
 
 const TAG = "core";
@@ -27,8 +27,8 @@ async function main() {
   // ── Load config ──
   const config = loadConfig();
   log(TAG, `port: ${config.port}`);
-  log(TAG, `audio: device=${config.audioConfig.device} cmd=${config.audioConfig.captureCommand} chunk=${config.audioConfig.chunkDurationMs}ms`);
-  log(TAG, `mic: enabled=${config.micEnabled} device=${config.micConfig.device} cmd=${config.micConfig.captureCommand}`);
+  log(TAG, `audio: device=${config.audioConfig.device} chunk=${config.audioConfig.chunkDurationMs}ms`);
+  log(TAG, `mic: enabled=${config.micEnabled} device=${config.micConfig.device}`);
   log(TAG, `transcription: backend=${config.transcriptionConfig.backend} model=${config.transcriptionConfig.geminiModel}`);
   log(TAG, `agent: model=${config.agentConfig.model} debounce=${config.agentConfig.debounceMs}ms max=${config.agentConfig.maxIntervalMs}ms`);
   log(TAG, `escalation: mode=${config.escalationConfig.mode} cooldown=${config.escalationConfig.cooldownMs}ms stale=${config.escalationConfig.staleMs}ms`);
@@ -69,6 +69,9 @@ async function main() {
     feedbackStore: feedbackStore ?? undefined,
   });
 
+  // ── Initialize task dispatcher ──
+  const taskDispatcher = new TaskDispatcher({ recorder, escalator });
+
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
     feedBuffer,
@@ -78,40 +81,7 @@ async function main() {
     situationMdPath: config.situationMdPath,
     getRecorderStatus: () => recorder.getStatus(),
     profiler,
-    onAnalysis: (entry, contextWindow) => {
-      // Handle recorder commands
-      const stopResult = recorder.handleCommand(entry.record);
-
-      // Dispatch task via subagent spawn
-      if (entry.task || stopResult) {
-        let task: string;
-        let label: string | undefined;
-
-        if (stopResult && stopResult.segments > 0 && entry.task) {
-          // Recording stopped with explicit task instruction
-          task = `${entry.task}\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
-          label = stopResult.title;
-        } else if (stopResult && stopResult.segments > 0) {
-          // Recording stopped without explicit task — default to cleanup/summarize
-          task = `Clean up and summarize this recording transcript:\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
-          label = stopResult.title;
-        } else if (entry.task) {
-          // Standalone task without recording
-          task = entry.task;
-        } else {
-          task = "";
-        }
-
-        if (task) {
-          escalator.dispatchSpawnTask(task, label).catch(err => {
-            error(TAG, "spawn task dispatch error:", err);
-          });
-        }
-      }
-
-      // Escalation continues as normal
-      escalator.onAgentAnalysis(entry, contextWindow);
-    },
+    onAnalysis: (entry, contextWindow) => taskDispatcher.onAnalysis(entry, contextWindow),
     onSituationUpdate: (content) => {
       escalator.pushSituationMd(content);
     },
@@ -209,35 +179,8 @@ async function main() {
   }
 
   // Wire: transcripts → feed buffer + overlay + agent trigger + recorder
-  // Per-source dedup: track last 3 transcripts per source
-  const recentSystemTranscripts: string[] = [];
-  const recentMicTranscripts: string[] = [];
-
   transcription.on("transcript", (result) => {
     const isSystem = result.audioSource === "system";
-    const recentSame = isSystem ? recentSystemTranscripts : recentMicTranscripts;
-
-    // Skip near-duplicate transcripts within same source
-    if (isDuplicateTranscript(result.text, recentSame)) {
-      log(TAG, `transcript deduped (${result.audioSource}): "${result.text.slice(0, 60)}..."`);
-      return;
-    }
-
-    // Cross-stream dedup: drop mic transcript if >70% similar to recent system transcript
-    if (!isSystem && recentSystemTranscripts.length > 0) {
-      const trimmed = result.text.trim();
-      for (const recent of recentSystemTranscripts) {
-        if (bigramSimilarity(trimmed, recent) > 0.70) {
-          log(TAG, `mic transcript cross-deduped (speakers pickup): "${trimmed.slice(0, 60)}..."`);
-          return;
-        }
-      }
-    }
-
-    // Track recent transcripts (ring buffer of 3 per source)
-    recentSame.push(result.text.trim());
-    if (recentSame.length > 3) recentSame.shift();
-
     const emoji = isSystem ? "\ud83d\udd0a" : "\ud83c\udf99";
     const tag = `[${emoji}]`;
     const item = feedBuffer.push(`${tag} ${result.text}`, "normal", "audio", "stream");
@@ -322,8 +265,8 @@ async function main() {
         escalation: escStats,
         transcription: transcription.getProfilingStats(),
         audio: {
-          system: { running: systemAudioPipeline.isRunning(), device: systemAudioPipeline.getDevice(), cmd: config.audioConfig.captureCommand },
-          mic: micPipeline ? { running: micPipeline.isRunning(), device: micPipeline.getDevice(), cmd: config.micConfig.captureCommand } : null,
+          system: { running: systemAudioPipeline.isRunning(), device: systemAudioPipeline.getDevice() },
+          mic: micPipeline ? { running: micPipeline.isRunning(), device: micPipeline.getDevice() } : null,
         },
         situation: { path: config.situationMdPath },
         traces: tracer ? tracer.getMetricsSummary() : null,
@@ -368,7 +311,6 @@ async function main() {
     wsHandler,
     systemAudioPipeline,
     micPipeline,
-    config,
     onUserMessage: async (text) => {
       await escalator.sendDirect(text);
     },
@@ -437,7 +379,7 @@ async function main() {
 
   log(TAG, "\u2713 sinain-core running");
   log(TAG, `  http+ws: http://0.0.0.0:${config.port}`);
-  log(TAG, `  audio:   ${config.audioConfig.autoStart ? "active" : "standby"} (${config.audioConfig.captureCommand})`);
+  log(TAG, `  audio:   ${config.audioConfig.autoStart ? "active" : "standby"} (sck-capture)`);
   log(TAG, `  mic:     ${config.micEnabled ? (config.micConfig.autoStart ? "active" : "standby") : "disabled"}`);
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
