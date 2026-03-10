@@ -74,6 +74,8 @@ void main() async {
       case 'onTogglePosition':
         final top = call.arguments as bool;
         await settingsService.setTopPosition(top);
+      case 'onToggleTts':
+        wsService.sendCommand('toggle_tts');
       case 'onTogglePrivacy':
         final privacyMode = call.arguments as bool;
         settingsService.setPrivacyModeTransient(privacyMode);

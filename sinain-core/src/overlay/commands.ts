@@ -1,6 +1,7 @@
 import type { InboundMessage } from "../types.js";
 import type { WsHandler } from "./ws-handler.js";
 import type { AudioPipeline } from "../audio/pipeline.js";
+import type { TtsSpeaker } from "../audio/tts.js";
 import { WebSocket } from "ws";
 import { log } from "../log.js";
 
@@ -10,6 +11,7 @@ export interface CommandDeps {
   wsHandler: WsHandler;
   systemAudioPipeline: AudioPipeline;
   micPipeline: AudioPipeline | null;
+  ttsSpeaker: TtsSpeaker | null;
   onUserMessage: (text: string) => Promise<void>;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
@@ -93,6 +95,17 @@ function handleCommand(action: string, deps: CommandDeps): void {
       // TODO: implement device switching (needs AudioPipeline.switchDevice + AUDIO_ALT_DEVICE config)
       wsHandler.broadcast("\u26a0 Device switching not yet implemented", "normal");
       log(TAG, "switch_device: not yet implemented");
+      break;
+    }
+    case "toggle_tts": {
+      if (!deps.ttsSpeaker) {
+        wsHandler.broadcast("TTS not available", "normal");
+        break;
+      }
+      const nowEnabled = deps.ttsSpeaker.toggle();
+      wsHandler.updateState({ tts: nowEnabled ? "active" : "muted" });
+      wsHandler.broadcast(`TTS speak mode ${nowEnabled ? "on" : "off"}`, "normal");
+      log(TAG, `TTS toggled ${nowEnabled ? "ON" : "OFF"}`);
       break;
     }
     default:

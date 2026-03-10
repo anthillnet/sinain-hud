@@ -9,6 +9,7 @@ import { AgentLoop } from "./agent/loop.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { TaskDispatcher } from "./agent/task-dispatcher.js";
+import { TtsSpeaker } from "./audio/tts.js";
 import { Recorder } from "./recorder.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
@@ -58,6 +59,9 @@ async function main() {
     ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
     : null;
 
+  // ── Initialize TTS ──
+  const ttsSpeaker = new TtsSpeaker(config.ttsConfig);
+
   // ── Initialize escalation ──
   const escalator = new Escalator({
     feedBuffer,
@@ -66,6 +70,7 @@ async function main() {
     openclawConfig: config.openclawConfig,
     profiler,
     feedbackStore: feedbackStore ?? undefined,
+    onTtsSpeak: (text) => ttsSpeaker.speak(text),
   });
 
   // ── Initialize task dispatcher ──
@@ -85,6 +90,7 @@ async function main() {
     },
     onHudUpdate: (text) => {
       wsHandler.broadcast(text, "normal", "stream");
+      ttsSpeaker.speak(text);
     },
     onTraceStart: tracer ? (tickId) => {
       const ctx = tracer.startTrace(tickId);
@@ -116,6 +122,23 @@ async function main() {
   systemAudioPipeline.setProfiler(profiler);
   if (micPipeline) micPipeline.setProfiler(profiler);
   transcription.setProfiler(profiler);
+
+  // Wire: mute system audio during TTS to prevent feedback loop
+  let ttsMutedAudio = false;
+  ttsSpeaker.setSuppressCallbacks(
+    () => {
+      if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
+        systemAudioPipeline.mute();
+        ttsMutedAudio = true;
+      }
+    },
+    () => {
+      if (ttsMutedAudio) {
+        systemAudioPipeline.unmute();
+        ttsMutedAudio = false;
+      }
+    },
+  );
 
   // Wire: audio chunks → transcription (both pipelines share the same transcription service)
   systemAudioPipeline.on("chunk", (chunk) => {
@@ -315,6 +338,7 @@ async function main() {
     wsHandler,
     systemAudioPipeline,
     micPipeline,
+    ttsSpeaker,
     onUserMessage: async (text) => {
       await escalator.sendDirect(text);
     },
@@ -330,6 +354,7 @@ async function main() {
 
   // Broadcast initial screen state so overlay gets correct status on connect
   wsHandler.updateState({ screen: "active" });
+  wsHandler.updateState({ tts: ttsSpeaker.isEnabled() ? "active" : "muted" });
 
   // ── Start services ──
   try {
@@ -387,6 +412,7 @@ async function main() {
   log(TAG, `  mic:     ${config.micEnabled ? (config.micConfig.autoStart ? "active" : "standby") : "disabled"}`);
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
+  log(TAG, `  tts:     ${config.ttsConfig.enabled ? "enabled" : "disabled"}`);
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
@@ -399,6 +425,7 @@ async function main() {
     systemAudioPipeline.stop();
     if (micPipeline) micPipeline.stop();
     transcription.destroy();
+    ttsSpeaker.destroy();
     escalator.stop();
     signalCollector?.destroy();
     feedbackStore?.destroy();

@@ -21,6 +21,7 @@ class WebSocketService extends ChangeNotifier {
   String _audioState = 'muted';
   String _micState = 'muted';
   String _screenState = 'off';
+  String _ttsState = 'muted';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
 
@@ -50,6 +51,7 @@ class WebSocketService extends ChangeNotifier {
   String get audioState => _audioState;
   String get micState => _micState;
   String get screenState => _screenState;
+  String get ttsState => _ttsState;
   bool get audioFeedEnabled => _audioFeedEnabled;
   bool get screenFeedEnabled => _screenFeedEnabled;
 
@@ -208,6 +210,11 @@ class WebSocketService extends ChangeNotifier {
           if (screen != null && screen != _screenState) {
             _log('status: screen $_screenState → $screen');
             _screenState = screen;
+            notifyListeners();
+          }
+          final tts = statusData['tts'] as String?;
+          if (tts != null && tts != _ttsState) {
+            _ttsState = tts;
             notifyListeners();
           }
           _statusController.add(statusData);

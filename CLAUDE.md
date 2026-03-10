@@ -98,6 +98,9 @@ All config via environment variables or `.env` file. Key vars:
 - `AGENT_VISION_MODEL` — Vision model (default: `google/gemini-2.5-flash`)
 - `ESCALATION_MODE` — `off | selective | focus | rich` (default: `rich`)
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
+- `TTS_ENABLED` — TTS speak mode (default: `false`, toggle: `Cmd+Shift+G`)
+- `TTS_VOICE` — macOS voice name (default: system default)
+- `TTS_RATE` — Words per minute (default: `200`)
 
 See `sinain-core/.env.example` for the complete list.
 

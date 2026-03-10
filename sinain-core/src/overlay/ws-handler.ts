@@ -38,6 +38,7 @@ export class WsHandler {
     audio: "muted",
     mic: "muted",
     screen: "off",
+    tts: "muted",
     connection: "disconnected",
   };
   private replayBuffer: FeedMessage[] = [];
@@ -84,6 +85,7 @@ export class WsHandler {
       audio: this.state.audio,
       mic: this.state.mic,
       screen: this.state.screen,
+      tts: this.state.tts,
       connection: this.state.connection,
     });
 
@@ -166,6 +168,7 @@ export class WsHandler {
       audio: this.state.audio,
       mic: this.state.mic,
       screen: this.state.screen,
+      tts: this.state.tts,
       connection: this.state.connection,
     };
     this.broadcastMessage(msg);

@@ -18,6 +18,7 @@ export interface StatusMessage {
   audio: string;
   mic: string;
   screen: string;
+  tts: string;
   connection: string;
 }
 
@@ -118,6 +119,12 @@ export interface AudioPipelineConfig {
   vadEnabled: boolean;
   vadThreshold: number;
   autoStart: boolean;
+}
+
+export interface TtsConfig {
+  enabled: boolean;
+  voice: string;    // macOS voice name, "" = system default
+  rate: number;     // words per minute (say default is 175)
 }
 
 export interface AudioChunk {
@@ -317,6 +324,7 @@ export interface BridgeState {
   audio: "active" | "muted";
   mic: "active" | "muted";
   screen: "active" | "off";
+  tts: "active" | "muted";
   connection: "connected" | "disconnected" | "connecting";
 }
 
@@ -389,4 +397,5 @@ export interface CoreConfig {
   traceEnabled: boolean;
   traceDir: string;
   learningConfig: LearningConfig;
+  ttsConfig: TtsConfig;
 }
