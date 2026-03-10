@@ -54,7 +54,7 @@ export function writeSituationMd(
   } catch (err: any) {
     if (err.code !== "EEXIST") {
       error(TAG, "mkdir failed:", err.message);
-      return;
+      return "";
     }
   }
 
