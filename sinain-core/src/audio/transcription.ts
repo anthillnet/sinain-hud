@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
 import type { TranscriptionConfig, AudioChunk, TranscriptResult } from "../types.js";
 import type { Profiler } from "../profiler.js";
+import type { TranscriptionBackend } from "./transcription-backend.js";
 import { LocalTranscriptionBackend } from "./transcription-local.js";
+import { OpenRouterTranscriptionBackend } from "./transcription-openrouter.js";
+import { isDuplicateTranscript, bigramSimilarity } from "../util/dedup.js";
 import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe";
@@ -20,12 +23,13 @@ function isHallucination(text: string): boolean {
 }
 
 /**
- * Transcription service — sends audio chunks to OpenRouter (Gemini) for transcription.
+ * Transcription service — sends audio chunks to the configured backend for transcription.
  *
  * Events: 'transcript' (TranscriptResult)
  */
 export class TranscriptionService extends EventEmitter {
   private config: TranscriptionConfig;
+  private backend: TranscriptionBackend;
   private destroyed: boolean = false;
   private pendingRequests: number = 0;
   private readonly MAX_CONCURRENT = 5;
@@ -34,11 +38,14 @@ export class TranscriptionService extends EventEmitter {
   private cumulativeLatencies: number[] = [];
   private latencyStatsTimer: ReturnType<typeof setInterval> | null = null;
   private totalAudioDurationMs: number = 0;
-  private totalTokensConsumed: number = 0;
   private profiler: Profiler | null = null;
   private errorCount: number = 0;
   private dropCount: number = 0;
   private totalCalls: number = 0;
+
+  // Per-source dedup: track last 3 transcripts per source
+  private recentSystemTranscripts: string[] = [];
+  private recentMicTranscripts: string[] = [];
 
   setProfiler(p: Profiler): void { this.profiler = p; }
 
@@ -46,11 +53,21 @@ export class TranscriptionService extends EventEmitter {
     super();
     this.config = config;
 
-    if (!config.openrouterApiKey) {
-      warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
+    if (config.backend === "local") {
+      this.backend = new LocalTranscriptionBackend(config.local);
+    } else {
+      if (!config.openrouterApiKey) {
+        warn(TAG, "OpenRouter API key not set — transcription will fail");
+      }
+      this.backend = new OpenRouterTranscriptionBackend({
+        openrouterApiKey: config.openrouterApiKey,
+        geminiModel: config.geminiModel,
+        language: config.language,
+        languages: config.languages,
+      });
     }
 
-    log(TAG, `initialized: model=${config.geminiModel} language=${config.language}`);
+    log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
 
     this.latencyStatsTimer = setInterval(() => this.logStats(), 60_000);
   }
@@ -69,7 +86,7 @@ export class TranscriptionService extends EventEmitter {
     this.pendingRequests++;
     this.profiler?.gauge("transcription.pending", this.pendingRequests);
     try {
-      await this.transcribeViaOpenRouter(chunk);
+      await this.transcribeViaBackend(chunk);
     } catch (err) {
       this.errorCount++;
       this.profiler?.gauge("transcription.errors", this.errorCount);
@@ -82,6 +99,7 @@ export class TranscriptionService extends EventEmitter {
 
   destroy(): void {
     this.destroyed = true;
+    this.backend.destroy();
     if (this.latencyStatsTimer) { clearInterval(this.latencyStatsTimer); this.latencyStatsTimer = null; }
     this.logStats();
     this.removeAllListeners();
@@ -100,16 +118,15 @@ export class TranscriptionService extends EventEmitter {
 
     if (this.totalAudioDurationMs > 0) {
       const audioMinutes = this.totalAudioDurationMs / 60_000;
+      const tokensConsumed = this.getTokensConsumed();
       const costPerMToken = 0.075;
-      const estimatedCost = (this.totalTokensConsumed / 1_000_000) * costPerMToken;
+      const estimatedCost = (tokensConsumed / 1_000_000) * costPerMToken;
       const costPerMinute = audioMinutes > 0 ? estimatedCost / audioMinutes : 0;
-      log(TAG, `cost stats: ${this.totalTokensConsumed} tokens, ${audioMinutes.toFixed(1)} audio-min, ~$${estimatedCost.toFixed(6)} total, ~$${costPerMinute.toFixed(6)}/audio-min`);
+      log(TAG, `cost stats: ${tokensConsumed} tokens, ${audioMinutes.toFixed(1)} audio-min, ~$${estimatedCost.toFixed(6)} total, ~$${costPerMinute.toFixed(6)}/audio-min`);
     }
 
     this.latencies = [];
   }
-
-  // ── OpenRouter backend ──
 
   /** Get cumulative profiling stats for /health. */
   getProfilingStats(): Record<string, unknown> {
@@ -119,10 +136,12 @@ export class TranscriptionService extends EventEmitter {
     const p95 = n > 0 ? sorted[Math.floor(n * 0.95)] : 0;
     const avg = n > 0 ? sorted.reduce((a, b) => a + b, 0) / n : 0;
     const audioMinutes = this.totalAudioDurationMs / 60_000;
+    const tokensConsumed = this.getTokensConsumed();
     const costPerMToken = 0.075;
-    const estimatedCost = (this.totalTokensConsumed / 1_000_000) * costPerMToken;
+    const estimatedCost = (tokensConsumed / 1_000_000) * costPerMToken;
 
     return {
+      backend: this.config.backend,
       calls: this.totalCalls,
       p50Ms: Math.round(p50),
       p95Ms: Math.round(p95),
@@ -134,106 +153,76 @@ export class TranscriptionService extends EventEmitter {
     };
   }
 
-  private async transcribeViaOpenRouter(chunk: AudioChunk): Promise<void> {
-    if (!this.config.openrouterApiKey) {
-      this.errorCount++;
-      this.profiler?.gauge("transcription.errors", this.errorCount);
-      error(TAG, "OpenRouter API key not configured");
+  // ── Unified backend dispatch ──
+
+  private async transcribeViaBackend(chunk: AudioChunk): Promise<void> {
+    const startTs = Date.now();
+    const result = await this.backend.transcribe(chunk);
+    const elapsed = Date.now() - startTs;
+
+    this.latencies.push(elapsed);
+    this.cumulativeLatencies.push(elapsed);
+    if (this.cumulativeLatencies.length > 1_000) this.cumulativeLatencies.shift();
+    this.profiler?.timerRecord("transcription.call", elapsed);
+    this.totalAudioDurationMs += chunk.durationMs;
+
+    if (!result) return;
+
+    const { text } = result;
+
+    if (text.length < 3) {
+      debug(TAG, `transcript too short, dropping: "${text}"`);
       return;
     }
 
-    const base64Audio = chunk.buffer.toString("base64");
-    const startTs = Date.now();
-
-    debug(TAG, `sending ${chunk.durationMs}ms chunk to OpenRouter (${Math.round(chunk.buffer.length / 1024)}KB)`);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.config.openrouterApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.config.geminiModel,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
-              { type: "text", text: `Transcribe this audio in ${this.config.language}. Output ONLY the transcript text, nothing else. If the audio is not in ${this.config.language}, output an empty string.` },
-            ],
-          }],
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        this.errorCount++;
-        this.profiler?.gauge("transcription.errors", this.errorCount);
-        const body = await response.text().catch(() => "(no body)");
-        error(TAG, `OpenRouter error ${response.status}: ${body.slice(0, 300)}`);
-        return;
-      }
-
-      const data = await response.json() as {
-        choices?: Array<{ message?: { content?: string } }>;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
-      };
-
-      const text = data.choices?.[0]?.message?.content?.trim();
-      const elapsed = Date.now() - startTs;
-
-      this.latencies.push(elapsed);
-      this.cumulativeLatencies.push(elapsed);
-      if (this.cumulativeLatencies.length > 1_000) this.cumulativeLatencies.shift();
-      this.profiler?.timerRecord("transcription.call", elapsed);
-      this.totalAudioDurationMs += chunk.durationMs;
-
-      if (!text) {
-        warn(TAG, `OpenRouter returned empty transcript (${elapsed}ms)`);
-        return;
-      }
-
-      if (text.length < 3) {
-        debug(TAG, `transcript too short, dropping: "${text}"`);
-        return;
-      }
-
-      if (isHallucination(text)) {
-        warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
-        return;
-      }
-
-      log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
-
-      if (data.usage) {
-        this.totalTokensConsumed += (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0);
-      }
-
-      const result: TranscriptResult = {
-        text,
-        source: "openrouter",
-        refined: false,
-        confidence: 0.8,
-        ts: Date.now(),
-        audioSource: chunk.audioSource,
-      };
-
-      this.emit("transcript", result);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        this.errorCount++;
-        this.profiler?.gauge("transcription.errors", this.errorCount);
-        warn(TAG, "OpenRouter request timed out (30s)");
-      } else {
-        throw err;
-      }
-    } finally {
-      clearTimeout(timeout);
+    if (isHallucination(text)) {
+      warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+      return;
     }
+
+    // Dedup before emitting
+    if (this.isDeduplicated(result)) return;
+
+    log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
+    this.emit("transcript", result);
   }
 
+  // ── Dedup ──
+
+  private isDeduplicated(result: TranscriptResult): boolean {
+    const isSystem = result.audioSource === "system";
+    const recentSame = isSystem ? this.recentSystemTranscripts : this.recentMicTranscripts;
+
+    // Skip near-duplicate transcripts within same source
+    if (isDuplicateTranscript(result.text, recentSame)) {
+      log(TAG, `transcript deduped (${result.audioSource}): "${result.text.slice(0, 60)}..."`);
+      return true;
+    }
+
+    // Cross-stream dedup: drop mic transcript if >70% similar to recent system transcript
+    if (!isSystem && this.recentSystemTranscripts.length > 0) {
+      const trimmed = result.text.trim();
+      for (const recent of this.recentSystemTranscripts) {
+        if (bigramSimilarity(trimmed, recent) > 0.70) {
+          log(TAG, `mic transcript cross-deduped (speakers pickup): "${trimmed.slice(0, 60)}..."`);
+          return true;
+        }
+      }
+    }
+
+    // Track recent transcripts (ring buffer of 3 per source)
+    recentSame.push(result.text.trim());
+    if (recentSame.length > 3) recentSame.shift();
+
+    return false;
+  }
+
+  // ── Token tracking ──
+
+  private getTokensConsumed(): number {
+    if (this.backend instanceof OpenRouterTranscriptionBackend) {
+      return this.backend.getTokensConsumed();
+    }
+    return 0;
+  }
 }

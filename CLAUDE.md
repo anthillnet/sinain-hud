@@ -98,7 +98,6 @@ All config via environment variables or `.env` file. Key vars:
 - `AGENT_VISION_MODEL` — Vision model (default: `google/gemini-2.5-flash`)
 - `ESCALATION_MODE` — `off | selective | focus | rich` (default: `rich`)
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
-- `AUDIO_DEVICE` — macOS audio device (default: `BlackHole 2ch`)
 
 See `sinain-core/.env.example` for the complete list.
 

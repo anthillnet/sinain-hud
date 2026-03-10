@@ -59,10 +59,10 @@ function calculateRmsEnergy(pcmData: Buffer): number {
 
 /**
  * Audio capture pipeline.
- * Spawns sox or ffmpeg to capture audio from a macOS device,
+ * Spawns sck-capture to capture audio via ScreenCaptureKit (system) or AVAudioEngine (mic),
  * accumulates raw PCM data, and emits WAV chunks at regular intervals.
  *
- * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'error' (Error)
+ * Events: 'chunk' (AudioChunk), 'started', 'stopped', 'muted', 'unmuted', 'error' (Error)
  */
 /**
  * Pre-allocated buffer size for audio accumulation.
@@ -83,7 +83,11 @@ export class AudioPipeline extends EventEmitter {
   private silentChunks: number = 0;
   private speechChunks: number = 0;
   private errorCount: number = 0;
+  private muted: boolean = false;
   private profiler: Profiler | null = null;
+  private totalBytesReceived: number = 0;
+  private lastEnergy: number = 0;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
 
   setProfiler(p: Profiler): void { this.profiler = p; }
 
@@ -99,25 +103,22 @@ export class AudioPipeline extends EventEmitter {
       return;
     }
 
-    log(TAG, `starting capture: device=${this.config.device} cmd=${this.config.captureCommand} rate=${this.config.sampleRate}`);
+    log(TAG, `starting capture: source=${this.audioSourceTag} device=${this.config.device} rate=${this.config.sampleRate}`);
 
     try {
-      if (this.config.captureCommand === "sox") {
-        this.startSox();
-      } else if (this.config.captureCommand === "screencapturekit") {
-        this.startScreenCaptureKit();
-      } else {
-        this.startFfmpeg();
-      }
+      this.spawnSckCapture();
     } catch (err) {
       error(TAG, "failed to spawn capture process:", err);
       this.emit("error", err);
       return;
     }
 
+    this.muted = false;
     this.chunkTimer = setInterval(() => {
       this.emitChunk();
     }, this.config.chunkDurationMs);
+
+    this.statsTimer = setInterval(() => this.logPipelineStats(), 30_000);
 
     this.running = true;
     this.emit("started");
@@ -129,10 +130,16 @@ export class AudioPipeline extends EventEmitter {
 
     log(TAG, "stopping capture...");
     this.running = false;
+    this.muted = false;
 
     if (this.chunkTimer) {
       clearInterval(this.chunkTimer);
       this.chunkTimer = null;
+    }
+
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer);
+      this.statsTimer = null;
     }
 
     if (this.process) {
@@ -158,91 +165,70 @@ export class AudioPipeline extends EventEmitter {
     return this.running;
   }
 
+  mute(): void {
+    if (!this.running || this.muted) return;
+    this.muted = true;
+    if (this.chunkTimer) {
+      clearInterval(this.chunkTimer);
+      this.chunkTimer = null;
+    }
+    this.bufferWriteOffset = 0;
+    log(TAG, "muted (sck-capture process still running)");
+    this.emit("muted");
+  }
+
+  unmute(): void {
+    if (!this.running || !this.muted) return;
+    this.muted = false;
+    this.chunkTimer = setInterval(() => {
+      this.emitChunk();
+    }, this.config.chunkDurationMs);
+    log(TAG, "unmuted");
+    this.emit("unmuted");
+  }
+
+  isMuted(): boolean {
+    return this.muted;
+  }
+
   getDevice(): string {
     return this.config.device;
   }
 
-  switchDevice(device: string): void {
-    const wasRunning = this.running;
-    if (wasRunning) this.stop();
-    this.config = { ...this.config, device };
-    log(TAG, `device switched to: ${device}`);
-    if (wasRunning) this.start();
+  /** Whether this pipeline's capture process also captures screen frames. */
+  capturesScreen(): boolean {
+    return this.audioSourceTag === "system";
   }
 
-  // ── sox capture ──
+  // ── sck-capture spawn (system audio + screen, or mic-only) ──
 
-  private startSox(): void {
-    const args = [
-      "-t", "wav",
-      "-r", String(this.config.sampleRate),
-      "-c", String(this.config.channels),
-      "-b", "16",
-      "-",
-    ];
-    if (this.config.gainDb > 0) {
-      args.push("gain", String(this.config.gainDb));
-    }
-
-    const env: Record<string, string> = { ...process.env } as Record<string, string>;
-    if (this.config.device !== "default") {
-      env["AUDIODEV"] = this.config.device;
-    }
-
-    log(TAG, `spawning: rec ${args.join(" ")}${this.config.device !== "default" ? ` (AUDIODEV=${this.config.device})` : ""}`);
-
-    this.process = spawn("rec", args, {
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    this.wireProcessEvents("sox");
-  }
-
-  // ── ffmpeg capture ──
-
-  private startFfmpeg(): void {
-    // Use "none:<device>" to explicitly skip video device enumeration.
-    // Without "none", AVFoundation may initialise CoreMediaIO (camera stack),
-    // which prevents other apps (e.g. Google Meet) from acquiring the camera.
-    const deviceInput = this.config.device === "default"
-      ? "none:0"
-      : `none:${this.config.device}`;
-
-    const args = [
-      "-f", "avfoundation",
-      "-i", deviceInput,
-      "-ar", String(this.config.sampleRate),
-      "-ac", String(this.config.channels),
-      "-f", "s16le",
-      "pipe:1",
-    ];
-
-    log(TAG, `spawning: ffmpeg ${args.join(" ")}`);
-
-    this.process = spawn("ffmpeg", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    this.wireProcessEvents("ffmpeg");
-  }
-
-  // ── ScreenCaptureKit capture ──
-
-  private startScreenCaptureKit(): void {
+  private spawnSckCapture(): void {
     const binaryPath = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
     const args = [
       "--sample-rate", String(this.config.sampleRate),
       "--channels", String(this.config.channels),
-      "--screen-dir", resolve(os.homedir(), ".sinain", "capture"),
-      "--fps", "1",
-      "--scale", "0.5",
     ];
+
+    if (this.audioSourceTag === "mic") {
+      // Mic mode: AVAudioEngine, no SCStream
+      args.push("--mic");
+      if (this.config.device !== "default") {
+        args.push("--mic-device", this.config.device);
+      }
+    } else {
+      // System mode: ScreenCaptureKit (audio + screen)
+      args.push(
+        "--screen-dir", resolve(os.homedir(), ".sinain", "capture"),
+        "--fps", "1",
+        "--scale", "0.5",
+      );
+    }
 
     log(TAG, `spawning: ${binaryPath} ${args.join(" ")}`);
 
     this.process = spawn(binaryPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
-    // sck-capture outputs raw PCM (no WAV header) on stdout, screen frames via IPC
     this.wireProcessEvents("sck-capture");
   }
 
@@ -252,31 +238,14 @@ export class AudioPipeline extends EventEmitter {
     const proc = this.process;
     if (!proc) return;
 
-    let headerSkipped = name !== "sox";
-    let headerBuf = Buffer.alloc(0);
-
     proc.stdout?.on("data", (data: Buffer) => {
       if (!this.running) return;
-
-      if (!headerSkipped) {
-        headerBuf = Buffer.concat([headerBuf, data]);
-        if (headerBuf.length >= 44) {
-          const remaining = headerBuf.subarray(44);
-          headerSkipped = true;
-          headerBuf = Buffer.alloc(0);
-          if (remaining.length > 0) {
-            this.writeToBuffer(remaining);
-          }
-        }
-        return;
-      }
-
       this.writeToBuffer(data);
     });
 
     proc.stderr?.on("data", (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) {
+      if (msg && !/^In:.*Out:/.test(msg)) {
         log(TAG, `${name} stderr: ${msg.slice(0, 200)}`);
       }
     });
@@ -307,6 +276,7 @@ export class AudioPipeline extends EventEmitter {
    * Falls back to growing buffer if needed (rare case for very long audio).
    */
   private writeToBuffer(data: Buffer): void {
+    if (this.muted) return;
     // Check if we need to grow the buffer (rare case)
     if (this.bufferWriteOffset + data.length > this.preallocBuffer.length) {
       // Grow to 2x current size
@@ -318,6 +288,7 @@ export class AudioPipeline extends EventEmitter {
 
     data.copy(this.preallocBuffer, this.bufferWriteOffset);
     this.bufferWriteOffset += data.length;
+    this.totalBytesReceived += data.length;
     this.profiler?.gauge("audio.accumulatorKb", Math.round(this.bufferWriteOffset / 1024));
   }
 
@@ -337,6 +308,7 @@ export class AudioPipeline extends EventEmitter {
     if (alignedPcm.length === 0) return;
 
     const energy = calculateRmsEnergy(alignedPcm);
+    this.lastEnergy = energy;
     this.profiler?.gauge("audio.lastChunkKb", Math.round(alignedPcm.length / 1024));
 
     if (this.config.vadEnabled && energy < this.config.vadThreshold) {
@@ -372,5 +344,12 @@ export class AudioPipeline extends EventEmitter {
 
     debug(TAG, `chunk: ${durationMs}ms, ${wavBuffer.length} bytes, energy=${energy.toFixed(4)}`);
     this.emit("chunk", chunk);
+  }
+
+  private logPipelineStats(): void {
+    const totalKb = Math.round(this.totalBytesReceived / 1024);
+    log(TAG, `pipeline[${this.audioSourceTag}] stats: ` +
+      `${totalKb}KB received, ${this.speechChunks} speech / ${this.silentChunks} silent chunks, ` +
+      `lastEnergy=${this.lastEnergy.toFixed(5)}, vadThreshold=${this.config.vadThreshold}`);
   }
 }
