@@ -27,6 +27,7 @@ export class OpenClawWsClient extends EventEmitter {
   private rpcId = 1;
   private pending = new Map<string, PendingRpc>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
 
   // Exponential backoff
   private reconnectDelay = 1000;
@@ -49,6 +50,7 @@ export class OpenClawWsClient extends EventEmitter {
   connect(): void {
     if (!this.config.gatewayToken && !this.config.hookUrl) return;
     if (this.ws) return;
+    this.stopped = false;
     if (this.circuitOpen) {
       log(TAG, "circuit breaker open \u2014 skipping connect");
       return;
@@ -61,7 +63,6 @@ export class OpenClawWsClient extends EventEmitter {
 
       this.ws.on("open", () => {
         log(TAG, `ws connected: ${wsUrl} (awaiting challenge)`);
-        this.reconnectDelay = 1000; // Reset backoff on successful connect
       });
 
       this.ws.on("message", (raw) => {
@@ -122,6 +123,7 @@ export class OpenClawWsClient extends EventEmitter {
 
   /** Graceful disconnect. */
   disconnect(): void {
+    this.stopped = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.circuitResetTimer) { clearTimeout(this.circuitResetTimer); this.circuitResetTimer = null; }
     if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
@@ -165,10 +167,22 @@ export class OpenClawWsClient extends EventEmitter {
     if (msg.type === "res" && msg.id === "connect-1") {
       if (msg.ok) {
         this.authenticated = true;
+        this.reconnectDelay = 1000; // Reset backoff on successful auth
         log(TAG, "gateway authenticated");
         this.emit("connected");
       } else {
-        error(TAG, "auth failed:", msg.error || msg.payload?.error || "unknown");
+        const errInfo = msg.error || msg.payload?.error || "unknown";
+        const authReason = msg.error?.details?.authReason
+          || msg.payload?.error?.details?.authReason;
+        error(TAG, "auth failed:", errInfo);
+
+        // Permanent auth errors — don't retry, token won't fix itself
+        if (authReason === "token_mismatch") {
+          error(TAG, "permanent auth error — stopping reconnect (check OPENCLAW_GATEWAY_TOKEN)");
+          this.disconnect();
+          return;
+        }
+
         this.ws?.close();
       }
       return;
@@ -231,6 +245,7 @@ export class OpenClawWsClient extends EventEmitter {
   }
 
   private scheduleReconnect(): void {
+    if (this.stopped) return;
     if (this.reconnectTimer) return;
     log(TAG, `reconnecting in ${this.reconnectDelay}ms...`);
     this.reconnectTimer = setTimeout(() => {

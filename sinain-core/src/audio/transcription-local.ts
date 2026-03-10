@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { writeFile, unlink, mkdtemp } from "node:fs/promises";
+import { writeFile, unlink, rmdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AudioChunk, TranscriptResult } from "../types.js";
+import type { TranscriptionBackend } from "./transcription-backend.js";
 import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe-local";
@@ -14,6 +15,8 @@ export interface LocalTranscriptionConfig {
   modelPath: string;
   /** Language code, e.g. "en", "ru" (default: "en") */
   language: string;
+  /** Parsed language codes, e.g. ["en", "ru"] */
+  languages: string[];
   /** Timeout per chunk in ms (default: 15000) */
   timeoutMs: number;
 }
@@ -24,7 +27,7 @@ export interface LocalTranscriptionConfig {
  * Writes WAV chunk to a temp file, runs whisper-cli, parses stdout.
  * Fully isolated — does not touch the OpenRouter path.
  */
-export class LocalTranscriptionBackend {
+export class LocalTranscriptionBackend implements TranscriptionBackend {
   private config: LocalTranscriptionConfig;
   private destroyed = false;
 
@@ -63,11 +66,11 @@ export class LocalTranscriptionBackend {
       };
     } catch (err) {
       error(TAG, "local transcription failed:", err instanceof Error ? err.message : err);
-      return null;
+      throw err;
     } finally {
       // Cleanup temp files
       await unlink(wavPath).catch(() => {});
-      await unlink(tmpDir).catch(() => {});
+      await rmdir(tmpDir).catch(() => {});
     }
   }
 
@@ -77,9 +80,16 @@ export class LocalTranscriptionBackend {
         "-m", this.config.modelPath,
         "-f", wavPath,
         "--no-timestamps",
-        "-l", this.config.language,
-        "--print-progress", "false",
+        "-np",
       ];
+      // Single language: pass -l for faster inference.
+      // Multiple languages: pass -l auto so whisper auto-detects per chunk
+      // (without -l, whisper defaults to "en" and translates non-English speech).
+      if (this.config.languages.length === 1) {
+        args.push("-l", this.config.languages[0]);
+      } else {
+        args.push("-l", "auto");
+      }
 
       debug(TAG, `exec: ${this.config.bin} ${args.join(" ")}`);
 
@@ -105,6 +115,14 @@ export class LocalTranscriptionBackend {
 
       proc.on("close", (code) => {
         clearTimeout(timer);
+
+        // whisper-cli may print errors to stderr but still exit 0
+        if (stderr.includes("unknown language") || stderr.includes("error:")) {
+          const msg = stderr.trim().slice(0, 300);
+          reject(new Error(`whisper-cpp stderr: ${msg}`));
+          return;
+        }
+
         if (code !== 0) {
           const msg = stderr.trim().slice(0, 300) || `exit code ${code}`;
           reject(new Error(`whisper-cpp failed: ${msg}`));

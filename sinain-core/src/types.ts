@@ -110,9 +110,7 @@ export interface AudioPipelineConfig {
   chunkDurationMs: number;
   vadEnabled: boolean;
   vadThreshold: number;
-  captureCommand: "sox" | "ffmpeg" | "screencapturekit";
   autoStart: boolean;
-  gainDb: number;
 }
 
 export interface AudioChunk {
@@ -126,17 +124,21 @@ export interface AudioChunk {
 
 // ── Transcription types ──
 
-export type TranscriptionBackend = "openrouter" | "local";
+export type TranscriptionBackendName = "openrouter" | "local";
 
 export interface TranscriptionConfig {
-  backend: TranscriptionBackend;
+  backend: TranscriptionBackendName;
   openrouterApiKey: string;
   geminiModel: string;
   language: string;
+  /** Parsed from TRANSCRIPTION_LANGUAGE, e.g. ["en", "ru"] */
+  languages: string[];
   /** Local whisper-cpp settings (only used when backend=local) */
   local: {
     bin: string;
     modelPath: string;
+    language: string;
+    languages: string[];
     timeoutMs: number;
   };
 }
@@ -352,7 +354,6 @@ export interface LearningConfig {
 export interface CoreConfig {
   port: number;
   audioConfig: AudioPipelineConfig;
-  audioAltDevice: string;
   micConfig: AudioPipelineConfig;
   micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;

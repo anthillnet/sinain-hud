@@ -99,6 +99,38 @@ macOS will prompt for Screen Recording permission on first run.
 
 This requires the [anthillnet fork of OpenClaw](https://github.com/anthillnet/openclaw), which includes the sinain-hud plugin. Install the HUD skill in your OpenClaw workspace for Sinain's HUD-specific behavior.
 
+## Local Transcription (whisper.cpp)
+
+By default sinain-core uses OpenRouter for audio transcription. You can switch to fully local, offline transcription via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — no API keys needed for audio.
+
+### One-time setup
+
+```bash
+./setup-local-stt.sh
+```
+
+This will:
+1. Install `whisper-cli` via Homebrew (if not present)
+2. Download the `ggml-large-v3-turbo` model (~1.5 GB) to `~/models/`
+3. Run a smoke test to verify everything works
+
+### Launch with local transcription
+
+```bash
+./start-local.sh            # wraps start.sh with local env vars
+./start-local.sh --no-sense # skip screen capture, audio only
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `TRANSCRIPTION_BACKEND` | `openrouter` | `openrouter` or `local` |
+| `LOCAL_WHISPER_BIN` | `whisper-cli` | Path to whisper-cli binary |
+| `LOCAL_WHISPER_MODEL` | `~/models/ggml-large-v3-turbo.bin` | Path to GGML model file |
+| `LOCAL_WHISPER_TIMEOUT_MS` | `15000` | Max time per transcription call |
+| `TRANSCRIPTION_LANGUAGE` | `en-US` | Language code (auto-converted to ISO 639-1 for whisper) |
+
 ## Hotkeys
 
 | Shortcut | Action |
@@ -107,8 +139,7 @@ This requires the [anthillnet fork of OpenClaw](https://github.com/anthillnet/op
 | `Cmd+Shift+C` | Toggle click-through mode |
 | `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
 | `Cmd+Shift+H` | Panic hide — instant stealth + click-through + privacy |
-| `Cmd+Shift+T` | Toggle audio capture (start/stop transcription) |
-| `Cmd+Shift+D` | Switch audio device (primary ↔ alt) |
+| `Cmd+Shift+T` | Toggle audio capture (mute/unmute transcription) |
 | `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
 | `Cmd+Shift+S` | Toggle screen capture pipeline |
 | `Cmd+Shift+V` | Toggle screen feed on HUD (show/hide sense items) |
@@ -136,12 +167,8 @@ sinain-core reads from environment or `.env`:
 | `OPENCLAW_SESSION_KEY` | — | Target session |
 | `WS_PORT` | `9500` | WebSocket port for overlay |
 | `RELAY_MIN_INTERVAL_MS` | `30000` | Min time between escalations |
-| `AUDIO_DEVICE` | `default` | Audio capture device (e.g. `BlackHole 2ch`) |
-| `AUDIO_ALT_DEVICE` | `BlackHole 2ch` | Alt device for `Cmd+Shift+D` switch |
-| `AUDIO_GAIN_DB` | `20` | Gain applied to capture (dB, helps with BlackHole) |
 | `AUDIO_VAD_THRESHOLD` | `0.003` | RMS energy threshold for voice detection |
-| `AUDIO_CHUNK_MS` | `10000` | Audio chunk duration before transcription |
-| `AUDIO_CAPTURE_CMD` | `sox` | Capture backend (`sox` or `ffmpeg`) |
+| `AUDIO_CHUNK_MS` | `5000` | Audio chunk duration before transcription |
 | `OPENROUTER_API_KEY` | — | OpenRouter API key for transcription + triggers |
 | `TRIGGER_ENABLED` | `false` | Enable Gemini Flash trigger classification |
 
