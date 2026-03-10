@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig, TtsConfig } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -139,6 +139,12 @@ export function loadConfig(): CoreConfig {
     sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:sinain"),
   };
 
+  const ttsConfig: TtsConfig = {
+    enabled: boolEnv("TTS_ENABLED", false),
+    voice: env("TTS_VOICE", ""),
+    rate: intEnv("TTS_RATE", 200),
+  };
+
   const learningConfig: LearningConfig = {
     enabled: boolEnv("LEARNING_ENABLED", true),
     feedbackDir: resolvePath(env("FEEDBACK_DIR", "~/.sinain-core/feedback")),
@@ -157,5 +163,6 @@ export function loadConfig(): CoreConfig {
     traceEnabled: boolEnv("TRACE_ENABLED", true),
     traceDir: resolvePath(env("TRACE_DIR", "~/.sinain-core/traces")),
     learningConfig,
+    ttsConfig,
   };
 }

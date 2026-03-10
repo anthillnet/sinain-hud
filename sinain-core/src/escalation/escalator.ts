@@ -21,6 +21,7 @@ export interface EscalatorDeps {
   profiler?: Profiler;
   feedbackStore?: FeedbackStore;
   signalCollector?: SignalCollector;
+  onTtsSpeak?: (text: string) => void;
 }
 
 /**
@@ -856,6 +857,7 @@ ${recentLines.join("\n")}`;
     const text = `[🤖] ${output.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
     this.deps.wsHandler.broadcast(text, "high", "agent");
+    this.deps.onTtsSpeak?.(output.trim().slice(0, 500));
     this.stats.totalResponses++;
     this.deps.profiler?.gauge("escalation.totalResponses", this.stats.totalResponses);
     this.stats.lastResponseTs = Date.now();

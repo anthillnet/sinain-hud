@@ -112,6 +112,17 @@ class StatusBar extends StatelessWidget {
                 ? const Color(0xFF00FF88)
                 : Colors.white.withValues(alpha: 0.3),
           ),
+          const SizedBox(width: 4),
+          // TTS indicator
+          Icon(
+            ws.ttsState == 'active'
+                ? Icons.record_voice_over
+                : Icons.voice_over_off,
+            size: 10,
+            color: ws.ttsState == 'active'
+                ? const Color(0xFF00FF88)
+                : Colors.white.withValues(alpha: 0.3),
+          ),
           const SizedBox(width: 8),
           if (!settings.privacyMode) ...[
             Container(
