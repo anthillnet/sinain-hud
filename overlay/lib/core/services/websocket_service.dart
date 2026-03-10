@@ -19,6 +19,7 @@ class WebSocketService extends ChangeNotifier {
   Timer? _profilingTimer;
   final DateTime _startTime = DateTime.now();
   String _audioState = 'muted';
+  String _micState = 'muted';
   String _screenState = 'off';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
@@ -38,6 +39,7 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get copyStream => _copyController.stream;
   bool get connected => _connected;
   String get audioState => _audioState;
+  String get micState => _micState;
   String get screenState => _screenState;
   bool get audioFeedEnabled => _audioFeedEnabled;
   bool get screenFeedEnabled => _screenFeedEnabled;
@@ -127,7 +129,7 @@ class WebSocketService extends ChangeNotifier {
         case 'feed':
           final item = FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
           _log('FEED [${item.channel.name}]: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
-          if (!_audioFeedEnabled && item.text.startsWith('[📝]')) break;
+          if (!_audioFeedEnabled && (item.text.startsWith('[📝]') || item.text.startsWith('[🔊]') || item.text.startsWith('[🎤]'))) break;
           if (!_screenFeedEnabled && item.text.startsWith('[👁]')) break;
           if (item.channel == FeedChannel.agent) {
             _agentFeedController.add(item);
@@ -140,6 +142,11 @@ class WebSocketService extends ChangeNotifier {
           final audio = statusData['audio'] as String?;
           if (audio != null && audio != _audioState) {
             _audioState = audio;
+            notifyListeners();
+          }
+          final mic = statusData['mic'] as String?;
+          if (mic != null && mic != _micState) {
+            _micState = mic;
             notifyListeners();
           }
           final screen = statusData['screen'] as String?;

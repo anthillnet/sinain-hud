@@ -91,13 +91,24 @@ class StatusBar extends StatelessWidget {
                 : Colors.white.withValues(alpha: 0.3),
           ),
           const SizedBox(width: 6),
-          // Audio indicator
+          // Audio indicator (system)
           Icon(
             ws.audioState == 'active'
                 ? Icons.volume_up_rounded
                 : Icons.volume_off_rounded,
             size: 10,
             color: ws.audioState == 'active'
+                ? const Color(0xFF00FF88)
+                : Colors.white.withValues(alpha: 0.3),
+          ),
+          const SizedBox(width: 4),
+          // Mic indicator
+          Icon(
+            ws.micState == 'active'
+                ? Icons.mic
+                : Icons.mic_off,
+            size: 10,
+            color: ws.micState == 'active'
                 ? const Color(0xFF00FF88)
                 : Colors.white.withValues(alpha: 0.3),
           ),
