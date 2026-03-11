@@ -793,6 +793,14 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             `sinain-hud: captured parent context (${contextText.length} chars, ${messages.length} messages)`,
           );
         }
+
+        // Log whether incoming escalation message has playbook knowledge section
+        const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
+        const content = typeof lastUser?.content === "string"
+          ? lastUser.content
+          : (lastUser?.content?.find?.((c: any) => c.type === "text")?.text ?? "");
+        const hasKnowledge = content.includes("## Established Patterns");
+        api.logger.info(`sinain-hud: incoming message has_knowledge=${hasKnowledge} (${content.length} chars)`);
       }
     }
 
@@ -865,16 +873,21 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       } catch {}
     }
 
-    // Knowledge transfer attribution — if effective playbook contains imported modules
+    // Inject effective playbook patterns into every agent turn
     const effectivePlaybookPath = join(workspaceDir, "memory", "sinain-playbook-effective.md");
     if (existsSync(effectivePlaybookPath)) {
       try {
-        const effectiveContent = readFileSync(effectivePlaybookPath, "utf-8");
-        if (effectiveContent.includes("[Transferred knowledge:")) {
-          contextParts.push(
-            "[KNOWLEDGE TRANSFER] Some patterns in your playbook were transferred from " +
-            "another sinain instance. When surfacing these, briefly cite their origin."
-          );
+        const playbookContent = readFileSync(effectivePlaybookPath, "utf-8").trim();
+        if (playbookContent) {
+          contextParts.push(`[PLAYBOOK PATTERNS]\n${playbookContent}`);
+          api.logger.info(`sinain-hud: injected playbook patterns (${playbookContent.length} chars)`);
+          // Attribution hint when playbook contains transferred knowledge
+          if (playbookContent.includes("[Transferred knowledge:")) {
+            contextParts.push(
+              "[KNOWLEDGE TRANSFER] Some patterns in your playbook were transferred from " +
+              "another sinain instance. When surfacing these, briefly cite their origin."
+            );
+          }
         }
       } catch { /* skip if unreadable */ }
     }
