@@ -8,6 +8,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
+import { KnowledgeService } from "./knowledge-service.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
 
@@ -30,6 +31,7 @@ export interface EscalatorDeps {
  */
 export class Escalator {
   private wsClient: OpenClawWsClient;
+  private knowledgeService = new KnowledgeService();
   private lastEscalationTs = Date.now();
   private lastEscalatedDigest = "";
 
@@ -145,38 +147,45 @@ export class Escalator {
     const recentFeedback = this.deps.feedbackStore?.queryRecent(5) ?? [];
 
     const escalationReason = stale ? "stale" : undefined;
-    const message = buildEscalationMessage(
-      entry.digest,
-      contextWindow,
-      entry,
-      this.deps.escalationConfig.mode,
-      escalationReason,
-      recentFeedback,
-    );
-    const idemKey = `hud-${entry.id}-${Date.now()}`;
 
-    const staleTag = stale ? ", STALE" : "";
-    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag})`);
+    // Fetch knowledge context async then escalate — fire-and-forget from caller's perspective
+    this.knowledgeService.getContext(entry.digest).then(knowledge => {
+      const message = buildEscalationMessage(
+        entry.digest,
+        contextWindow,
+        entry,
+        this.deps.escalationConfig.mode,
+        escalationReason,
+        recentFeedback,
+        knowledge,
+      );
+      const idemKey = `hud-${entry.id}-${Date.now()}`;
 
-    // Store context for response handling
-    this.lastEscalationContext = contextWindow;
+      const staleTag = stale ? ", STALE" : "";
+      log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag})`);
 
-    // Skip if an escalation RPC is already in-flight (prevents pile-up)
-    if (this.escalationInFlight) {
-      log(TAG, `skipping escalation tick #${entry.id} — RPC in-flight`);
-      return;
-    }
+      // Store context for response handling
+      this.lastEscalationContext = contextWindow;
 
-    // Fire async — don't block the agent tick loop
-    this.doEscalate(message, idemKey, entry.digest, {
-      tickId: entry.id,
-      hud: entry.hud,
-      currentApp: contextWindow.currentApp,
-      escalationScore: score.total,
-      escalationReasons: score.reasons,
-      codingContext: isCodingContext(contextWindow).coding,
+      // Skip if an escalation RPC is already in-flight (prevents pile-up)
+      if (this.escalationInFlight) {
+        log(TAG, `skipping escalation tick #${entry.id} — RPC in-flight`);
+        return;
+      }
+
+      // Fire async — don't block the agent tick loop
+      this.doEscalate(message, idemKey, entry.digest, {
+        tickId: entry.id,
+        hud: entry.hud,
+        currentApp: contextWindow.currentApp,
+        escalationScore: score.total,
+        escalationReasons: score.reasons,
+        codingContext: isCodingContext(contextWindow).coding,
+      }).catch(err => {
+        error(TAG, "escalation error:", err.message);
+      });
     }).catch(err => {
-      error(TAG, "escalation error:", err.message);
+      error(TAG, "knowledge fetch error:", err.message);
     });
   }
 
