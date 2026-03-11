@@ -1,5 +1,6 @@
 import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord } from "../types.js";
 import { normalizeAppName } from "../agent/context-window.js";
+import type { KnowledgeContext } from "./knowledge-service.js";
 
 /** Regex patterns for detecting errors in OCR text. */
 const ERROR_PATTERN = /error|failed|exception|crash|traceback|typeerror|referenceerror|syntaxerror|cannot read|enoent|panic|fatal/i;
@@ -66,57 +67,47 @@ export function isCodingContext(context: ContextWindow): CodingContextResult {
   };
 }
 
+const SHARED_RULES = `ALWAYS respond — do NOT return NO_REPLY under any circumstances.
+NEVER describe what the user is doing — they can see their own screen.
+NEVER say "standing by", "monitoring", or any filler phrase.
+Every response must fix something, teach something, or connect dots the user hasn't noticed.`;
+
 function getInstructions(mode: EscalationMode, context: ContextWindow): string {
   const { coding, needsSolution } = isCodingContext(context);
 
   if (needsSolution) {
-    // Coding challenge/problem - be very action-oriented
-    return `The user is working on a coding problem. Be PROACTIVE and SOLVE IT:
-
+    return `The user is working on a coding problem. SOLVE IT:
 1. Provide a solution approach and working code based on what you can see
 2. Include time/space complexity
-3. If the problem isn't fully visible, provide the best solution you can based on available context
-   - Make reasonable assumptions and state them briefly
-   - A partial solution is better than no solution
+3. If the problem isn't fully visible, make reasonable assumptions (state them briefly) — a partial solution beats none
 
-Do NOT just describe what the user is doing - GIVE THEM THE ANSWER.
-Response should be actionable: working code with brief explanation.`;
+${SHARED_RULES}`;
   }
 
   if (coding) {
-    // General coding (IDE work, debugging) - offer assistance
-    return `The user is writing code. Be helpful and proactive:
-
+    return `The user is writing code:
 - If there's an error: investigate and suggest a fix with code
 - If they seem stuck: offer specific guidance or code snippets
-- If you see an opportunity to help: share relevant insights
+- If nothing is broken: share an insight about the visible technology or pattern (3-8 sentences + code if helpful)
 
-Keep responses focused and include code when helpful.
-(5-10 sentences + code if applicable). Be thorough.`;
+${SHARED_RULES}`;
   }
 
-  // Non-coding context — proactive insights instead of activity descriptions
   if (mode === "focus" || mode === "rich") {
-    return `Based on the above, ALWAYS provide a useful response for the user's HUD.
-Important: Do NOT respond with NO_REPLY — a response is always required.
-
+    return `Based on the above, provide a useful response for the user's HUD:
 - If there's an error: investigate and suggest a fix
-- If they seem stuck or asked a question: offer guidance
-- If they're reading/browsing content: share a relevant insight, connection to their projects, or practical tip related to what's on screen
+- If they asked a question: answer it
+- If they're reading/browsing: share a relevant insight or practical tip
 - If they're in a conversation or meeting: note key takeaways or action items
-- If context is minimal: tell a short, clever joke (tech humor, wordplay, or observational — keep it fresh, never repeat one you've told recently)
+- If context is minimal: tell a short clever joke (tech humor, wordplay — never repeat one you've told recently)
+(2-5 sentences). Be specific and actionable.
 
-NEVER just describe what the user is doing — they can see their own screen.
-NEVER respond with "standing by", "monitoring", or similar filler.
-Every response must teach something, suggest something, or connect dots the user hasn't noticed.
-(2-5 sentences). Be specific and actionable.`;
+${SHARED_RULES}`;
   }
 
-  return `Based on the above, proactively help the user:
-- If there's an error: investigate and suggest a fix
-- If they seem stuck: offer guidance
-- If they're coding: provide relevant insights
-- Keep your response concise and actionable (2-5 sentences)`;
+  return `Based on the above, proactively help the user. (2-5 sentences)
+
+${SHARED_RULES}`;
 }
 
 /**
@@ -141,6 +132,7 @@ export function buildEscalationMessage(
   mode: EscalationMode,
   escalationReason?: string,
   recentFeedback?: FeedbackRecord[],
+  knowledge?: KnowledgeContext,
 ): string {
   const sections: string[] = [];
 
@@ -243,6 +235,14 @@ export function buildEscalationMessage(
         sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
       }
     }
+  }
+
+  // Knowledge context: playbook patterns + triplestore entities (when available)
+  if (knowledge?.playbook) {
+    sections.push(`## Established Patterns (playbook)\n${knowledge.playbook}`);
+  }
+  if (knowledge?.entities) {
+    sections.push(`## Related Context (knowledge graph)\n${knowledge.entities}`);
   }
 
   // Mode-specific instructions (now context-aware)
