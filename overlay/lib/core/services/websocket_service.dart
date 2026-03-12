@@ -24,6 +24,15 @@ class WebSocketService extends ChangeNotifier {
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
 
+  // Messages received before the connection `ready` future resolves are buffered
+  // here and drained in order once `_connected` is set to true.
+  final List<dynamic> _preReadyBuffer = [];
+
+  // Connection lifecycle counters for diagnostics
+  int _connectAttempts = 0;
+  int _successfulConnects = 0;
+  DateTime? _connectedAt;
+
   final _feedController = StreamController<FeedItem>.broadcast();
   final _agentFeedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
@@ -80,16 +89,38 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void _doConnect() {
+    _connectAttempts++;
+    _log('connect attempt #$_connectAttempts → $url');
+
+    // Cancel the old subscription before touching the channel so we never have
+    // two active subscriptions on different channels. Failing to cancel here
+    // is the root cause of duplicate message processing across reconnects.
+    _subscription?.cancel();
+    _subscription = null;
+
     try {
       final uri = Uri.parse(url);
       _channel = WebSocketChannel.connect(uri);
 
-      // Wait for the connection to actually be ready
+      // Wait for the connection to actually be ready before marking connected
+      // and draining the pre-ready buffer.
       _channel!.ready.then((_) {
         _connected = true;
+        _connectedAt = DateTime.now();
         _retryCount = 0;
+        _successfulConnects++;
         notifyListeners();
-        _log('Connected to $url');
+        _log('connected ✓ (attempt #$_connectAttempts, successful connects=$_successfulConnects)');
+
+        // Drain messages buffered before ready resolved, in order
+        if (_preReadyBuffer.isNotEmpty) {
+          _log('draining ${_preReadyBuffer.length} pre-ready buffered message(s)');
+          final buffered = List<dynamic>.from(_preReadyBuffer);
+          _preReadyBuffer.clear();
+          for (final msg in buffered) {
+            _onMessage(msg);
+          }
+        }
 
         // Start periodic profiling reports
         _profilingTimer?.cancel();
@@ -104,19 +135,31 @@ class WebSocketService extends ChangeNotifier {
           }
         });
       }).catchError((e) {
-        _log('Connection handshake failed: $e');
+        _log('connection handshake failed: $e');
+        _preReadyBuffer.clear(); // discard buffered messages from failed attempt
         _connected = false;
         notifyListeners();
         _scheduleReconnect();
       });
 
       _subscription = _channel!.stream.listen(
-        _onMessage,
+        (data) {
+          if (_connected) {
+            // Normal path: fully connected, dispatch immediately
+            _onMessage(data);
+          } else {
+            // Pre-ready path: server sends status + replay burst before our
+            // `ready` future resolves. Buffer and drain once connected.
+            _preReadyBuffer.add(data);
+            _log('buffered pre-ready message (buffer size=${_preReadyBuffer.length})');
+          }
+        },
         onError: _onError,
         onDone: _onDone,
       );
     } catch (e) {
-      _log('Connection failed: $e');
+      _log('connection failed: $e');
+      _preReadyBuffer.clear();
       _scheduleReconnect();
     }
   }
@@ -141,16 +184,19 @@ class WebSocketService extends ChangeNotifier {
           final statusData = json['data'] as Map<String, dynamic>? ?? json;
           final audio = statusData['audio'] as String?;
           if (audio != null && audio != _audioState) {
+            _log('status: audio $_audioState → $audio');
             _audioState = audio;
             notifyListeners();
           }
           final mic = statusData['mic'] as String?;
           if (mic != null && mic != _micState) {
+            _log('status: mic $_micState → $mic');
             _micState = mic;
             notifyListeners();
           }
           final screen = statusData['screen'] as String?;
           if (screen != null && screen != _screenState) {
+            _log('status: screen $_screenState → $screen');
             _screenState = screen;
             notifyListeners();
           }
@@ -158,7 +204,7 @@ class WebSocketService extends ChangeNotifier {
           break;
         case 'spawn_task':
           final task = SpawnTask.fromJson(json);
-          _log('SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
+          _log('SPAWN_TASK: taskId=${task.taskId} status=${task.status.name} label=${task.label}');
           _spawnTaskController.add(task);
           break;
         case 'ping':
@@ -172,7 +218,7 @@ class WebSocketService extends ChangeNotifier {
           }
       }
     } catch (e) {
-      _log('Parse error: $e');
+      _log('parse error: $e');
       // Try treating raw string as a simple feed message
       _feedController.add(FeedItem(
         id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -182,15 +228,25 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void _onError(dynamic error) {
-    _log('WebSocket error: $error');
+    final uptime = _connectedAt != null
+        ? '${DateTime.now().difference(_connectedAt!).inSeconds}s uptime'
+        : 'never connected';
+    _log('WebSocket error ($uptime): $error');
     _connected = false;
+    _connectedAt = null;
+    _preReadyBuffer.clear();
     notifyListeners();
     _scheduleReconnect();
   }
 
   void _onDone() {
-    _log('WebSocket closed');
+    final uptime = _connectedAt != null
+        ? '${DateTime.now().difference(_connectedAt!).inSeconds}s uptime'
+        : 'never connected';
+    _log('WebSocket closed ($uptime), attempt #$_connectAttempts');
     _connected = false;
+    _connectedAt = null;
+    _preReadyBuffer.clear();
     notifyListeners();
     _scheduleReconnect();
   }
@@ -202,7 +258,7 @@ class WebSocketService extends ChangeNotifier {
       milliseconds: min(30000, 1000 * pow(2, _retryCount).toInt()),
     );
     _retryCount++;
-    _log('Reconnecting in ${delay.inSeconds}s (attempt $_retryCount)');
+    _log('reconnecting in ${delay.inSeconds}s (attempt #${_connectAttempts + 1}, retryCount=$_retryCount)');
     _reconnectTimer = Timer(delay, () {
       if (!_disposed) _doConnect();
     });
@@ -223,17 +279,24 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void disconnect() {
+    _log('disconnect: stopping (connected=$_connected)');
     _profilingTimer?.cancel();
     _profilingTimer = null;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _subscription?.cancel();
+    _subscription = null;
     _channel?.sink.close();
+    _channel = null;
     _connected = false;
+    _connectedAt = null;
+    _preReadyBuffer.clear();
     notifyListeners();
   }
 
   @override
   void dispose() {
+    _log('dispose');
     _disposed = true;
     disconnect();
     _feedController.close();
@@ -246,6 +309,8 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void _log(String msg) {
-    if (kDebugMode) print('[WebSocketService] $msg');
+    // Always log connection lifecycle events; use debugPrint to stay off the
+    // release build hot path but visible in Xcode console and flutter run.
+    debugPrint('[WS] $msg');
   }
 }
