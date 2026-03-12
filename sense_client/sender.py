@@ -9,9 +9,13 @@ from PIL import Image
 
 from .gate import SenseEvent
 
+# Retry config for /sense POST
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY_S = 1.0  # 1s, 2s, 4s (exponential)
+
 
 class SenseSender:
-    """POSTs sense events to the relay server."""
+    """POSTs sense events to the relay server with retry and backoff."""
 
     def __init__(self, url: str = "http://localhost:9500",
                  max_image_kb: int = 500, send_thumbnails: bool = True):
@@ -20,9 +24,15 @@ class SenseSender:
         self.send_thumbnails = send_thumbnails
         self._latencies: list[float] = []
         self._last_stats_ts: float = time.time()
+        self._consecutive_failures: int = 0
 
     def send(self, event: SenseEvent) -> bool:
-        """POST /sense with JSON payload. Returns True on success."""
+        """POST /sense with JSON payload. Returns True on success.
+
+        Retries up to _MAX_RETRIES times with exponential backoff on connection
+        errors or non-200 responses. This handles sinain-core restarts gracefully
+        without losing entire capture cycles.
+        """
         payload = {
             "type": event.type,
             "ts": event.ts,
@@ -47,20 +57,44 @@ class SenseSender:
                 "concepts": event.observation.concepts,
             }
 
-        try:
-            start = time.time()
-            resp = requests.post(
-                f"{self.url}/sense",
-                json=payload,
-                timeout=5,
-            )
-            elapsed_ms = (time.time() - start) * 1000
-            self._latencies.append(elapsed_ms)
-            self._maybe_log_stats()
-            return resp.status_code == 200
-        except Exception as e:
-            print(f"[sender] error: {e}")
-            return False
+        for attempt in range(_MAX_RETRIES):
+            try:
+                start = time.time()
+                resp = requests.post(
+                    f"{self.url}/sense",
+                    json=payload,
+                    timeout=5,
+                )
+                elapsed_ms = (time.time() - start) * 1000
+                self._latencies.append(elapsed_ms)
+                self._maybe_log_stats()
+
+                if resp.status_code == 200:
+                    if self._consecutive_failures > 0:
+                        print(f"[sender] reconnected after {self._consecutive_failures} failure(s)")
+                    self._consecutive_failures = 0
+                    return True
+
+                # Non-200 but not an exception — log and retry
+                print(f"[sender] HTTP {resp.status_code} on attempt {attempt + 1}/{_MAX_RETRIES}")
+
+            except requests.exceptions.ConnectionError as e:
+                print(f"[sender] connection error (attempt {attempt + 1}/{_MAX_RETRIES}): {e}")
+            except requests.exceptions.Timeout:
+                print(f"[sender] timeout (attempt {attempt + 1}/{_MAX_RETRIES})")
+            except Exception as e:
+                print(f"[sender] unexpected error (attempt {attempt + 1}/{_MAX_RETRIES}): {e}")
+
+            # Don't sleep after the last attempt
+            if attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
+                print(f"[sender] retrying in {delay:.1f}s...")
+                time.sleep(delay)
+
+        self._consecutive_failures += 1
+        if self._consecutive_failures == 1 or self._consecutive_failures % 10 == 0:
+            print(f"[sender] all {_MAX_RETRIES} attempts failed (consecutive failures: {self._consecutive_failures})")
+        return False
 
     def _maybe_log_stats(self):
         """Log P50/P95 send latencies every 60s."""
