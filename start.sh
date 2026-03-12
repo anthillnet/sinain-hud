@@ -2,16 +2,19 @@
 set -euo pipefail
 
 # ── SinainHUD — Launch All Services ──────────────────────────────────────────
-# After the sinain-core redesign, only 3 processes:
-#   1. sinain-core (Node.js) — HTTP + WS on :9500
-#   2. sense_client (Python) — optional
-#   3. overlay (Flutter) — optional
+# Processes:
+#   1. nanoclaw (Node.js) — WS/HTTP agent gateway on :18789
+#   2. sinain-core (Node.js) — HTTP + WS on :9500
+#   3. sense_client (Python) — optional
+#   4. overlay (Flutter) — optional
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+NANOCLAW_DIR="${NANOCLAW_DIR:-$HOME/IdeaProjects/nanoclaw}"
 PID_FILE="/tmp/sinain-pids.txt"
 PIDS=()
 SKIP_SENSE=false
 SKIP_OVERLAY=false
+USE_NANOCLAW=false
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 CYAN='\033[0;36m'
@@ -28,10 +31,12 @@ for arg in "$@"; do
   case "$arg" in
     --no-sense)   SKIP_SENSE=true ;;
     --no-overlay) SKIP_OVERLAY=true ;;
+    --nanoclaw)   USE_NANOCLAW=true ;;
     --help|-h)
-      echo "Usage: ./start.sh [--no-sense] [--no-overlay]"
+      echo "Usage: ./start.sh [--no-sense] [--no-overlay] [--nanoclaw]"
       echo "  --no-sense    Skip sense_client (screen capture)"
       echo "  --no-overlay  Skip overlay (Flutter HUD)"
+      echo "  --nanoclaw    Start nanoclaw locally (default: skipped, use external gateway)"
       exit 0
       ;;
     *) echo "Unknown flag: $arg"; exit 1 ;;
@@ -86,8 +91,15 @@ kill_stale() {
     killed=true
   fi
 
-  # Kill anything on our port (single port now)
+  # Kill anything on our ports
   local pid
+  if $USE_NANOCLAW; then
+    pid=$(lsof -i :18789 -sTCP:LISTEN -t 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+      killed=true
+    fi
+  fi
   pid=$(lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null || true)
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
@@ -110,6 +122,9 @@ kill_stale() {
     pkill -9 -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
     pkill -9 -f "sck-capture" 2>/dev/null || true
     pkill -9 -f "tsx.*src/index.ts" 2>/dev/null || true
+    if $USE_NANOCLAW; then
+      lsof -i :18789 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+    fi
     lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
     sleep 1
     warn "killed stale processes from previous run"
@@ -140,6 +155,9 @@ cleanup() {
     done
   fi
 
+  if $USE_NANOCLAW; then
+    lsof -i :18789 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+  fi
   lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
   pkill -f "tools/sck-capture/sck-capture" 2>/dev/null || true
   pkill -f "python3 -m sense_client" 2>/dev/null || true
@@ -174,6 +192,14 @@ else
   SKIP_OVERLAY=true
 fi
 
+# Check nanoclaw dir
+if $USE_NANOCLAW; then
+  if [ ! -d "$NANOCLAW_DIR" ]; then
+    fail "nanoclaw not found at $NANOCLAW_DIR — set NANOCLAW_DIR env var"
+  fi
+  ok "nanoclaw dir: $NANOCLAW_DIR"
+fi
+
 # Check sinain-core/node_modules
 if [ ! -d "$SCRIPT_DIR/sinain-core/node_modules" ]; then
   warn "sinain-core/node_modules missing"
@@ -184,7 +210,13 @@ else
   ok "sinain-core/node_modules present"
 fi
 
-# Check port
+# Check ports
+if $USE_NANOCLAW; then
+  if lsof -i :18789 -sTCP:LISTEN >/dev/null 2>&1; then
+    fail "Port 18789 still in use after cleanup"
+  fi
+  ok "port 18789 free"
+fi
 if lsof -i :9500 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Port 9500 still in use after cleanup"
 fi
@@ -210,13 +242,40 @@ fi
 # Ensure IPC directory for screen frames
 mkdir -p "$HOME/.sinain/capture"
 
-# ── 2. Start sinain-core ──────────────────────────────────────────────────
+# ── 2. Start nanoclaw ────────────────────────────────────────────────────────
+BLUE='\033[0;34m'
+NANOCLAW_PID=""
+if $USE_NANOCLAW; then
+  log "Starting nanoclaw..."
+  (cd "$NANOCLAW_DIR" && npm run dev 2>&1) | sed -u "s/^/$(printf "${BLUE}[nanoclaw]${RESET} ")/" &
+  NANOCLAW_PID=$!
+  PIDS+=("$NANOCLAW_PID")
+
+  # ── 3. Health-check nanoclaw ───────────────────────────────────────────────
+  NANOCLAW_OK=false
+  for i in $(seq 1 15); do
+    if lsof -i :18789 -sTCP:LISTEN >/dev/null 2>&1; then
+      NANOCLAW_OK=true
+      break
+    fi
+    sleep 1
+  done
+  if $NANOCLAW_OK; then
+    ok "nanoclaw listening on :18789"
+  else
+    fail "nanoclaw did not start after 15s"
+  fi
+else
+  warn "nanoclaw skipped (use --nanoclaw to start locally)"
+fi
+
+# ── 4. Start sinain-core ──────────────────────────────────────────────────
 log "Starting sinain-core..."
 (cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | sed -u "s/^/$(printf "${CYAN}[core]${RESET}    ")/" &
 CORE_PID=$!
 PIDS+=("$CORE_PID")
 
-# ── 3. Health-check sinain-core ────────────────────────────────────────────
+# ── 5. Health-check sinain-core ────────────────────────────────────────────
 CORE_OK=false
 for i in $(seq 1 15); do
   if curl -sf http://localhost:9500/health >/dev/null 2>&1; then
@@ -231,7 +290,7 @@ else
   fail "sinain-core did not become healthy after 15s"
 fi
 
-# ── 4. Start sense_client ───────────────────────────────────────────────────
+# ── 6. Start sense_client ───────────────────────────────────────────────────
 SENSE_PID=""
 if $SKIP_SENSE; then
   warn "sense_client skipped"
@@ -249,7 +308,7 @@ else
   fi
 fi
 
-# ── 5. Start overlay ────────────────────────────────────────────────────────
+# ── 7. Start overlay ────────────────────────────────────────────────────────
 OVERLAY_PID=""
 if $SKIP_OVERLAY; then
   warn "overlay skipped"
@@ -267,16 +326,24 @@ else
   fi
 fi
 
-# ── 6. Write PID file ───────────────────────────────────────────────────────
+# ── 8. Write PID file ───────────────────────────────────────────────────────
 {
+  [ -n "$NANOCLAW_PID" ] && echo "nanoclaw=$NANOCLAW_PID"
   echo "core=$CORE_PID"
   [ -n "$SENSE_PID" ]   && echo "sense=$SENSE_PID"
   [ -n "$OVERLAY_PID" ] && echo "overlay=$OVERLAY_PID"
 } > "$PID_FILE"
 
-# ── 7. Status banner ────────────────────────────────────────────────────────
+# ── 9. Status banner ────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}── SinainHUD (sinain-core) ────────────${RESET}"
+echo -e "${BOLD}── SinainHUD ──────────────────────────${RESET}"
+
+# nanoclaw
+if [ -n "$NANOCLAW_PID" ]; then
+  echo -e "  ${BLUE}nanoclaw${RESET} :18789  ${GREEN}✓${RESET}  (ws+http)"
+else
+  echo -e "  ${BLUE}nanoclaw${RESET} ${DIM}—       skipped${RESET}"
+fi
 
 # core
 echo -e "  ${CYAN}core${RESET}     :9500   ${GREEN}✓${RESET}  (http+ws)"
@@ -304,5 +371,5 @@ echo -e "  Press ${BOLD}Ctrl+C${RESET} to stop all services"
 echo -e "${BOLD}───────────────────────────────────────${RESET}"
 echo ""
 
-# ── 8. Wait for all children ────────────────────────────────────────────────
+# ── 10. Wait for all children ───────────────────────────────────────────────
 wait
