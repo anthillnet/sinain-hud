@@ -6,10 +6,12 @@ import { log, warn, error } from "../log.js";
 const TAG = "openclaw";
 
 interface PendingRpc {
+  method: string;
   resolve: (value: any) => void;
   reject: (reason: any) => void;
   timeout: ReturnType<typeof setTimeout>;
   expectFinal: boolean;
+  sentAt: number;
 }
 
 /**
@@ -42,27 +44,53 @@ export class OpenClawWsClient extends EventEmitter {
   private circuitResetDelay = 300_000;       // starts at 5 min, doubles on each trip
   private readonly MAX_CIRCUIT_RESET = 1_800_000;  // caps at 30 min
 
+  // Connection attempt counter for diagnostics
+  private connectAttempts = 0;
+  private connectedAt: number | null = null;
+
   constructor(private config: OpenClawConfig) {
     super();
   }
 
   /** Connect to the OpenClaw gateway. */
   connect(): void {
-    if (!this.config.gatewayToken && !this.config.hookUrl) return;
-    if (this.ws) return;
-    this.stopped = false;
+    if (!this.config.gatewayToken && !this.config.hookUrl) {
+      log(TAG, "connect: no gateway token or hookUrl — skipping");
+      return;
+    }
+    if (this.stopped) {
+      log(TAG, "connect: stopped — skipping");
+      return;
+    }
     if (this.circuitOpen) {
-      log(TAG, "circuit breaker open \u2014 skipping connect");
+      log(TAG, "connect: circuit breaker open — skipping");
       return;
     }
 
-    try {
-      const wsUrl = this.config.gatewayWsUrl;
-      this.ws = new WebSocket(wsUrl);
+    // If a ws instance exists but is in a non-usable state, terminate it cleanly
+    // before creating a new one. This prevents the circuit-reset path from being
+    // blocked by a stale CLOSING/CLOSED socket that hasn't triggered cleanup yet.
+    if (this.ws) {
+      const state = this.ws.readyState;
+      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
+        log(TAG, `connect: already ${state === WebSocket.OPEN ? "open" : "connecting"} — skipping`);
+        return;
+      }
+      log(TAG, `connect: terminating stale socket (readyState=${state})`);
+      try { this.ws.terminate(); } catch {}
+      this.ws = null;
       this.authenticated = false;
+    }
+
+    this.connectAttempts++;
+    const wsUrl = this.config.gatewayWsUrl;
+    log(TAG, `connect: attempt #${this.connectAttempts} → ${wsUrl}`);
+
+    try {
+      this.ws = new WebSocket(wsUrl);
 
       this.ws.on("open", () => {
-        log(TAG, `ws connected: ${wsUrl} (awaiting challenge)`);
+        log(TAG, `ws open (attempt #${this.connectAttempts}), awaiting challenge...`);
       });
 
       this.ws.on("message", (raw) => {
@@ -70,21 +98,25 @@ export class OpenClawWsClient extends EventEmitter {
           const msg = JSON.parse(typeof raw === "string" ? raw : raw.toString());
           this.handleMessage(msg);
         } catch (err: any) {
-          error(TAG, "ws message handler error:", err);
+          error(TAG, "ws message parse error:", err.message);
         }
       });
 
-      this.ws.on("close", () => {
-        log(TAG, "gateway disconnected");
-        this.cleanup();
+      this.ws.on("close", (code, reason) => {
+        const reasonStr = reason?.toString() || "";
+        const uptime = this.connectedAt ? `${Math.round((Date.now() - this.connectedAt) / 1000)}s uptime` : "never authenticated";
+        log(TAG, `ws closed: code=${code}${reasonStr ? ` reason="${reasonStr}"` : ""} (${uptime})`);
+        this.connectedAt = null;
+        this.cleanup("ws closed");
         this.scheduleReconnect();
       });
 
       this.ws.on("error", (err) => {
-        error(TAG, "ws error:", err.message || "connection failed");
+        // error event always precedes close; log it but let close handler drive cleanup
+        error(TAG, `ws error: ${err.message}`);
       });
     } catch (err: any) {
-      error(TAG, "connect failed:", err.message);
+      error(TAG, `connect: instantiation failed: ${err.message}`);
       this.ws = null;
     }
   }
@@ -96,9 +128,10 @@ export class OpenClawWsClient extends EventEmitter {
     sessionKey: string,
   ): Promise<any> {
     if (this.circuitOpen) {
-      warn(TAG, "circuit breaker open, skipping agent RPC");
+      warn(TAG, "sendAgentRpc: circuit breaker open — skipping");
       return null;
     }
+    log(TAG, `sendAgentRpc: session=${sessionKey} idemKey=${idemKey} msgLen=${message.length}`);
     const result = await this.sendRpc("agent", {
       message,
       idempotencyKey: idemKey,
@@ -121,18 +154,16 @@ export class OpenClawWsClient extends EventEmitter {
     return this.circuitOpen;
   }
 
-  /** Graceful disconnect. */
+  /** Graceful disconnect — does not schedule reconnect. */
   disconnect(): void {
+    log(TAG, `disconnect: stopping (pending=${this.pending.size})`);
     this.stopped = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.circuitResetTimer) { clearTimeout(this.circuitResetTimer); this.circuitResetTimer = null; }
-    if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
+    if (this.ws) { try { this.ws.close(1000, "graceful shutdown"); } catch {} this.ws = null; }
     this.authenticated = false;
-    for (const [, pending] of this.pending) {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error("disconnected"));
-    }
-    this.pending.clear();
+    this.connectedAt = null;
+    this.rejectAllPending("disconnected");
   }
 
   // ── Private ──
@@ -140,7 +171,7 @@ export class OpenClawWsClient extends EventEmitter {
   private handleMessage(msg: any): void {
     // Handle connect.challenge
     if (msg.type === "event" && msg.event === "connect.challenge") {
-      log(TAG, "received challenge, authenticating...");
+      log(TAG, "received connect.challenge — sending auth");
       this.ws?.send(JSON.stringify({
         type: "req",
         id: "connect-1",
@@ -167,22 +198,24 @@ export class OpenClawWsClient extends EventEmitter {
     if (msg.type === "res" && msg.id === "connect-1") {
       if (msg.ok) {
         this.authenticated = true;
+        this.connectedAt = Date.now();
         this.reconnectDelay = 1000; // Reset backoff on successful auth
-        log(TAG, "gateway authenticated");
+        log(TAG, `authenticated ✓ (attempt #${this.connectAttempts}, reconnectDelay reset to 1s)`);
         this.emit("connected");
       } else {
         const errInfo = msg.error || msg.payload?.error || "unknown";
         const authReason = msg.error?.details?.authReason
           || msg.payload?.error?.details?.authReason;
-        error(TAG, "auth failed:", errInfo);
+        error(TAG, `auth failed: ${JSON.stringify(errInfo)}`);
 
         // Permanent auth errors — don't retry, token won't fix itself
         if (authReason === "token_mismatch") {
-          error(TAG, "permanent auth error — stopping reconnect (check OPENCLAW_GATEWAY_TOKEN)");
+          error(TAG, "permanent auth failure (token_mismatch) — stopping. Check OPENCLAW_GATEWAY_TOKEN.");
           this.disconnect();
           return;
         }
 
+        log(TAG, "auth failed (transient) — closing to trigger reconnect");
         this.ws?.close();
       }
       return;
@@ -192,14 +225,30 @@ export class OpenClawWsClient extends EventEmitter {
     const msgId = msg.id != null ? String(msg.id) : null;
     if (msg.type === "res" && msgId && this.pending.has(msgId)) {
       const pending = this.pending.get(msgId)!;
+      const elapsed = Date.now() - pending.sentAt;
+
       // Skip intermediate "accepted" frame when expecting final
       if (pending.expectFinal && msg.payload?.status === "accepted") {
-        log(TAG, `rpc ${msgId}: accepted (waiting for final)`);
+        log(TAG, `rpc ${msgId} (${pending.method}): accepted after ${elapsed}ms, waiting for final`);
         return;
       }
+
       clearTimeout(pending.timeout);
       this.pending.delete(msgId);
+
+      if (msg.ok) {
+        log(TAG, `rpc ${msgId} (${pending.method}): ok in ${elapsed}ms, status=${msg.payload?.status ?? "n/a"}`);
+      } else {
+        warn(TAG, `rpc ${msgId} (${pending.method}): error in ${elapsed}ms: ${JSON.stringify(msg.error ?? msg.payload?.error).slice(0, 200)}`);
+      }
+
       pending.resolve(msg);
+      return;
+    }
+
+    // Unmatched response — might be for a pending that was already timed out
+    if (msg.type === "res" && msgId) {
+      warn(TAG, `rpc ${msgId}: received response for unknown/expired pending call`);
     }
   }
 
@@ -212,44 +261,83 @@ export class OpenClawWsClient extends EventEmitter {
   ): Promise<any> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated) {
-        reject(new Error("gateway not connected or not authenticated"));
+        const reason = !this.ws ? "no socket" : !this.authenticated ? "not authenticated" : `ws state=${this.ws.readyState}`;
+        warn(TAG, `sendRpc(${method}): not ready — ${reason}`);
+        reject(new Error(`gateway not connected: ${reason}`));
         return;
       }
 
       const id = String(this.rpcId++);
+      const sentAt = Date.now();
+      log(TAG, `sendRpc → id=${id} method=${method} timeout=${timeoutMs}ms pending=${this.pending.size + 1}`);
+
       const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        this.onRpcFailure();
-        reject(new Error(`rpc timeout: ${method}`));
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          const elapsed = Date.now() - sentAt;
+          warn(TAG, `rpc ${id} (${method}): TIMEOUT after ${elapsed}ms`);
+          this.onRpcFailure();
+          reject(new Error(`rpc timeout: ${method}`));
+        }
       }, timeoutMs);
 
       this.pending.set(id, {
+        method,
         resolve,
         reject: (reason) => { this.onRpcFailure(); reject(reason); },
         timeout,
         expectFinal: !!opts.expectFinal,
+        sentAt,
       });
 
-      this.ws.send(JSON.stringify({ type: "req", method, id, params }));
+      try {
+        this.ws.send(JSON.stringify({ type: "req", method, id, params }));
+      } catch (err: any) {
+        // send() threw synchronously — connection is broken
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        error(TAG, `sendRpc(${method}): ws.send() threw: ${err.message}`);
+        reject(new Error(`ws.send failed: ${err.message}`));
+      }
     });
   }
 
-  private cleanup(): void {
+  private cleanup(reason: string): void {
+    const pendingCount = this.pending.size;
     this.ws = null;
     this.authenticated = false;
-    for (const [, pending] of this.pending) {
+    if (pendingCount > 0) {
+      log(TAG, `cleanup (${reason}): rejecting ${pendingCount} pending RPCs`);
+      this.rejectAllPending(`gateway disconnected: ${reason}`);
+    }
+  }
+
+  private rejectAllPending(reason: string): void {
+    for (const [id, pending] of this.pending) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error("gateway disconnected"));
+      log(TAG, `  rejecting pending rpc ${id} (${pending.method}), was pending ${Date.now() - pending.sentAt}ms`);
+      pending.reject(new Error(reason));
     }
     this.pending.clear();
   }
 
   private scheduleReconnect(): void {
-    if (this.stopped) return;
-    if (this.reconnectTimer) return;
-    log(TAG, `reconnecting in ${this.reconnectDelay}ms...`);
+    if (this.stopped) {
+      log(TAG, "scheduleReconnect: stopped — not scheduling");
+      return;
+    }
+    if (this.reconnectTimer) {
+      log(TAG, "scheduleReconnect: already scheduled");
+      return;
+    }
+    if (this.circuitOpen) {
+      log(TAG, "scheduleReconnect: circuit open — deferring to circuit reset");
+      return;
+    }
+    log(TAG, `scheduleReconnect: in ${this.reconnectDelay}ms (backoff=${this.reconnectDelay}ms)`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      log(TAG, "scheduleReconnect: firing — calling connect()");
       this.connect();
     }, this.reconnectDelay);
     // Exponential backoff
@@ -273,11 +361,12 @@ export class OpenClawWsClient extends EventEmitter {
       // Add 0-30s random jitter to prevent thundering herd on service recovery
       const jitterMs = Math.floor(Math.random() * 30000);
       const resetDelayMs = this.circuitResetDelay + jitterMs;
-      warn(TAG, `circuit breaker opened after ${this.recentFailures.length} failures in window — pausing for ${Math.round(resetDelayMs / 1000)}s (next reset: ${Math.round(Math.min(this.circuitResetDelay * 2, this.MAX_CIRCUIT_RESET) / 1000)}s)`);
+      warn(TAG, `circuit breaker OPENED after ${this.recentFailures.length} failures — pausing ${Math.round(resetDelayMs / 1000)}s (next reset: ${Math.round(Math.min(this.circuitResetDelay * 2, this.MAX_CIRCUIT_RESET) / 1000)}s)`);
       this.circuitResetTimer = setTimeout(() => {
+        this.circuitResetTimer = null;
         this.circuitOpen = false;
         this.recentFailures = [];
-        log(TAG, "circuit breaker reset — resuming");
+        log(TAG, "circuit breaker RESET — calling connect()");
         this.connect();
       }, resetDelayMs);
       // Progressive backoff: double the delay for next trip, capped at MAX
