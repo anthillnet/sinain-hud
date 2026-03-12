@@ -1,6 +1,9 @@
 # SinainHUD — First-Install Setup Guide
 
-This guide walks you through setting up sinain-hud from scratch on your Mac. It assumes you already have an OpenClaw gateway running. If you don't, see [OPENCLAW-SETUP.md](./OPENCLAW-SETUP.md) first.
+This guide walks you through setting up sinain-hud from scratch on your Mac. You need a gateway for the agent — choose one:
+
+- **NanoClaw** (recommended for local / personal use) — runs on your Mac alongside sinain-hud. See §3a below.
+- **OpenClaw** (remote server / Docker) — see [OPENCLAW-SETUP.md](./OPENCLAW-SETUP.md).
 
 ---
 
@@ -31,6 +34,84 @@ cd sinain-core && npm install && cd ..
 # sense_client Python deps
 pip install -r sense_client/requirements.txt
 ```
+
+---
+
+## 3a. NanoClaw Gateway Setup (local, recommended)
+
+NanoClaw runs the Claude agent locally in Docker/Apple Container. No remote server is needed. sinain-hud's `./start.sh --nanoclaw` starts both services together.
+
+### Install
+
+```bash
+# Fork and clone (keeps your customizations separate from upstream)
+gh repo fork qwibitai/nanoclaw --clone
+cd nanoclaw
+npm install
+```
+
+Or without GitHub CLI:
+```bash
+git clone https://github.com/qwibitai/nanoclaw.git
+cd nanoclaw
+npm install
+```
+
+### Prerequisites
+
+| Requirement | Install |
+|---|---|
+| Node.js 20+ | `brew install node` |
+| Docker Desktop | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| Claude Code | `npm install -g @anthropic-ai/claude-code` |
+| Anthropic API key | [console.anthropic.com](https://console.anthropic.com) |
+
+> Apple Container can replace Docker on macOS. Run `/convert-to-apple-container` inside `claude` after initial setup.
+
+### Configure
+
+```bash
+cp .env.example .env   # or create .env from scratch
+```
+
+Minimum required fields in nanoclaw's `.env`:
+
+```ini
+# Claude API
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Token nanoclaw uses to authenticate sinain-core (generate any 48-char hex)
+SINAIN_WS_TOKEN=<48-char-hex>
+
+# Absolute path to your sinain-hud checkout (mounts knowledge files into the agent container)
+SINAIN_HUD_PATH=/Users/you/IdeaProjects/sinain-hud
+```
+
+Generate a secure token:
+```bash
+openssl rand -hex 24
+```
+
+### Build the agent container
+
+```bash
+./container/build.sh
+```
+
+This is a one-time step (repeat after container changes or nanoclaw upgrades).
+
+### Run with sinain-hud
+
+Pass `--nanoclaw` to `start.sh` — it starts NanoClaw and sinain-core together:
+
+```bash
+cd /path/to/sinain-hud
+./start.sh --nanoclaw
+```
+
+NanoClaw listens on `:18789`. The `start.sh` script health-checks it before starting sinain-core.
+
+> Skip §6 (plugin deployment) — the sinain-hud plugin is loaded automatically via `SINAIN_HUD_PATH`. No server-side steps are needed.
 
 ---
 
@@ -79,25 +160,28 @@ Used for the agent digest model (`AGENT_MODEL`) and screen OCR vision calls. Not
 Get one at [openrouter.ai/keys](https://openrouter.ai/keys).
 
 **`OPENCLAW_WS_URL`** and **`OPENCLAW_HTTP_URL`**
-Your gateway address. Examples:
-```ini
-# Remote server
-OPENCLAW_WS_URL=ws://85.214.180.247:18789
-OPENCLAW_HTTP_URL=http://85.214.180.247:18789/hooks/agent
+Your gateway address.
 
-# Local Docker
+```ini
+# NanoClaw (local — matches SINAIN_WS_PORT in nanoclaw's .env, default 18789)
 OPENCLAW_WS_URL=ws://localhost:18789
 OPENCLAW_HTTP_URL=http://localhost:18789/hooks/agent
+
+# OpenClaw remote server
+OPENCLAW_WS_URL=ws://85.214.180.247:18789
+OPENCLAW_HTTP_URL=http://85.214.180.247:18789/hooks/agent
 ```
 
 **`OPENCLAW_WS_TOKEN`**
-48-char hex from the gateway config. To find it:
-```bash
-# SSH into the gateway machine (or exec into the Docker container)
-cat ~/.openclaw/openclaw.json | python3 -m json.tool | grep -A5 '"gateway"'
-# Look for: "auth": { "token": "<48-char-hex>" }
-```
-This token is set when the gateway is first deployed (`--gateway-token` flag or `OPENCLAW_GATEWAY_TOKEN` env var).
+The auth token your gateway expects.
+
+- **NanoClaw**: copy the value of `SINAIN_WS_TOKEN` from nanoclaw's `.env`
+- **OpenClaw**: 48-char hex from the gateway config:
+  ```bash
+  ssh -i "$SSH_KEY" "$SERVER" \
+    "cat ~/.openclaw/openclaw.json | python3 -m json.tool | grep -A5 '\"gateway\"'"
+  # Look for: "auth": { "token": "<48-char-hex>" }
+  ```
 
 **`OPENCLAW_SESSION_KEY`**
 Keep the default: `agent:main:sinain`
@@ -114,9 +198,11 @@ See `.env.example` for the full list with inline comments.
 
 ---
 
-## 6. Deploy sinain-hud Plugin to OpenClaw
+## 6. Deploy sinain-hud Plugin to OpenClaw *(skip if using NanoClaw)*
 
-This is the only server-side step. The plugin hooks into the agent lifecycle to sync knowledge files, run heartbeat tools, and write session summaries.
+> **NanoClaw users**: the plugin is loaded automatically via `SINAIN_HUD_PATH` — no deployment needed. Skip to §7.
+
+This is the only server-side step for OpenClaw. The plugin hooks into the agent lifecycle to sync knowledge files, run heartbeat tools, and write session summaries.
 
 ```bash
 export SERVER=root@<your-gateway-ip>
@@ -299,3 +385,4 @@ The WS client stops reconnecting. Fix the gateway, then restart sinain-core to r
 - [ESCALATION.md](./ESCALATION.md) — how scoring and escalation triggering works
 - [OPENCLAW-SETUP.md](./OPENCLAW-SETUP.md) — deploy a new OpenClaw gateway from scratch
 - [PLUGINS.md](./PLUGINS.md) — full plugin architecture reference
+- [NanoClaw README](https://github.com/qwibitai/nanoclaw) — full NanoClaw docs, skills, and customization
