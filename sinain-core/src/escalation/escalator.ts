@@ -74,6 +74,7 @@ export class Escalator {
     this.wsClient = new OpenClawWsClient(deps.openclawConfig);
     // Load pending tasks from disk (crash recovery)
     this.pendingSpawnTasks = loadPendingTasks();
+    this.pruneStalePendingTasksOnStartup();
   }
 
   /** Late-bind the signal collector (created after AgentLoop). */
@@ -84,6 +85,17 @@ export class Escalator {
   /** Start the WS connection to OpenClaw. */
   start(): void {
     if (this.deps.escalationConfig.mode !== "off") {
+      // Resume polling for any tasks recovered from disk (these survived a crash).
+      // We defer to "connected" so the WS is ready before the first poll fires.
+      if (this.pendingSpawnTasks.size > 0) {
+        log(TAG, `recovered ${this.pendingSpawnTasks.size} pending spawn tasks from disk — will resume polling on connect`);
+        this.wsClient.once("connected", () => {
+          for (const [taskId] of this.pendingSpawnTasks) {
+            log(TAG, `resuming poll for recovered task: taskId=${taskId}`);
+            this.pollTaskCompletion(taskId);
+          }
+        });
+      }
       this.wsClient.connect();
       log(TAG, `mode: ${this.deps.escalationConfig.mode}`);
     }
@@ -154,7 +166,10 @@ export class Escalator {
       escalationReason,
       recentFeedback,
     );
-    const idemKey = `hud-${entry.id}-${Date.now()}`;
+    // Stable key: based on entry ID only, no timestamp. This way retries of the
+    // same analysis tick (e.g. after a transient disconnect) carry the same key
+    // and the gateway can deduplicate them correctly.
+    const idemKey = `hud-${entry.id}`;
 
     const staleTag = stale ? ", STALE" : "";
     log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag})`);
@@ -417,7 +432,7 @@ ${recentLines.join("\n")}`;
   private async pollTaskCompletion(taskId: string): Promise<void> {
     // Enforce concurrency cap — queue excess tasks
     if (this.activePolls >= Escalator.MAX_CONCURRENT_POLLS) {
-      log(TAG, `poll queued (${this.activePolls} active): taskId=${taskId}`);
+      log(TAG, `poll queued (activePolls=${this.activePolls} cap=${Escalator.MAX_CONCURRENT_POLLS}): taskId=${taskId}`);
       this.pollQueue.push(taskId);
       return;
     }
@@ -427,17 +442,27 @@ ${recentLines.join("\n")}`;
 
     const task = this.pendingSpawnTasks.get(taskId);
     if (!task) {
+      log(TAG, `pollTaskCompletion: task ${taskId} not in map — already completed or cancelled`);
       this.finishPoll();
       return;
     }
 
     const maxWaitMs = 5 * 60 * 1000; // 5 minutes
     const pollIntervalMs = 5000; // 5 seconds
+    log(TAG, `pollTaskCompletion: starting poll loop for taskId=${taskId} runId=${task.runId}`);
 
     const poll = async (): Promise<void> => {
+      // Re-check map membership on every iteration — removal is the cancellation signal.
+      // This prevents orphaned poll closures after stop() or task completion elsewhere.
+      if (!this.pendingSpawnTasks.has(taskId)) {
+        log(TAG, `poll: taskId=${taskId} removed from map — stopping poll`);
+        this.finishPoll();
+        return;
+      }
+
       const elapsed = Date.now() - task.startedAt;
       if (elapsed > maxWaitMs) {
-        log(TAG, `spawn-task timeout: taskId=${taskId}`);
+        log(TAG, `poll: taskId=${taskId} timed out after ${Math.round(elapsed / 1000)}s`);
         this.broadcastTaskEvent(taskId, "timeout", task.label, task.startedAt);
         this.pendingSpawnTasks.delete(taskId);
         savePendingTasks(this.pendingSpawnTasks);
@@ -446,7 +471,7 @@ ${recentLines.join("\n")}`;
       }
 
       if (!this.wsClient.isConnected) {
-        // Retry later
+        log(TAG, `poll: taskId=${taskId} — gateway not connected, retrying in ${pollIntervalMs}ms`);
         setTimeout(() => poll(), pollIntervalMs);
         return;
       }
@@ -458,15 +483,14 @@ ${recentLines.join("\n")}`;
           timeoutMs: pollIntervalMs,
         }, pollIntervalMs + 2000);
 
-        // Debug: log the poll result
-        log(TAG, `poll result: taskId=${taskId}, status=${waitResult?.payload?.status}, ok=${waitResult?.ok}`);
+        const status = waitResult?.payload?.status;
+        log(TAG, `poll: taskId=${taskId} status=${status} ok=${waitResult?.ok} elapsed=${Math.round(elapsed / 1000)}s`);
 
         // Accept multiple completion statuses
         const completedStatuses = ["ok", "completed", "done", "finished", "success"];
-        const status = waitResult?.payload?.status;
 
         if (waitResult?.ok && completedStatuses.includes(status)) {
-          log(TAG, `spawn-task completed: taskId=${taskId}, status=${status}`);
+          log(TAG, `poll: taskId=${taskId} COMPLETED (status=${status}) — fetching chat.history`);
 
           // Fetch the result from chat history
           const historyResult = await this.wsClient.sendRpc("chat.history", {
@@ -476,10 +500,11 @@ ${recentLines.join("\n")}`;
 
           const resultText = this.extractLatestAssistantReply(historyResult);
           if (resultText) {
+            log(TAG, `poll: taskId=${taskId} result text: "${resultText.slice(0, 80)}..."`);
             const labelDisplay = task.label || "Background task";
             this.pushResponse(`${labelDisplay}:\n${resultText}`);
           } else {
-            log(TAG, `spawn-task completed but no result text: taskId=${taskId}`);
+            log(TAG, `poll: taskId=${taskId} completed but no result text in chat.history`);
           }
 
           this.broadcastTaskEvent(taskId, "completed", task.label, task.startedAt, resultText ?? undefined);
@@ -489,8 +514,9 @@ ${recentLines.join("\n")}`;
           return;
         }
 
-        if (waitResult?.payload?.status === "error" || waitResult?.payload?.status === "failed") {
-          log(TAG, `spawn-task failed: taskId=${taskId}, error=${waitResult?.payload?.error || "unknown"}`);
+        if (status === "error" || status === "failed") {
+          const errDetail = waitResult?.payload?.error || "unknown";
+          warn(TAG, `poll: taskId=${taskId} FAILED: ${errDetail}`);
           this.broadcastTaskEvent(taskId, "failed", task.label, task.startedAt);
           this.pendingSpawnTasks.delete(taskId);
           savePendingTasks(this.pendingSpawnTasks);
@@ -498,21 +524,45 @@ ${recentLines.join("\n")}`;
           return;
         }
 
-        // Status is "timeout" or still running — emit polling once
+        // Status is "timeout" or still running — emit "polling" once, then reschedule
         if (!task.pollingEmitted) {
           task.pollingEmitted = true;
+          log(TAG, `poll: taskId=${taskId} still running — emitting polling state`);
           this.broadcastTaskEvent(taskId, "polling", task.label, task.startedAt);
         }
         setTimeout(() => poll(), 1000);
       } catch (err: any) {
-        warn(TAG, `poll error for taskId=${taskId}: ${err.message}`);
-        // Retry on transient errors
+        warn(TAG, `poll: taskId=${taskId} RPC error: ${err.message} — retrying in ${pollIntervalMs}ms`);
         setTimeout(() => poll(), pollIntervalMs);
       }
     };
 
     // Start polling
     poll();
+  }
+
+  /**
+   * Prune tasks that are clearly too old to recover (> maxWaitMs after their startedAt).
+   * Called once at startup after loading from disk.
+   */
+  private pruneStalePendingTasksOnStartup(): void {
+    const maxAge = 5 * 60 * 1000 + 30_000; // 5.5 min — just past the poll timeout
+    const now = Date.now();
+    let pruned = 0;
+    for (const [taskId, task] of this.pendingSpawnTasks) {
+      const age = now - task.startedAt;
+      if (age > maxAge) {
+        log(TAG, `startup: pruning stale task taskId=${taskId} (age=${Math.round(age / 1000)}s, label="${task.label}")`);
+        this.pendingSpawnTasks.delete(taskId);
+        pruned++;
+      }
+    }
+    if (pruned > 0) {
+      savePendingTasks(this.pendingSpawnTasks);
+      log(TAG, `startup: pruned ${pruned} stale spawn task(s) from disk`);
+    } else if (this.pendingSpawnTasks.size > 0) {
+      log(TAG, `startup: ${this.pendingSpawnTasks.size} recoverable task(s) found on disk`);
+    }
   }
 
   /** Decrement active polls and drain the queue. */
