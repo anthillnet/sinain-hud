@@ -1,6 +1,5 @@
 import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord } from "../types.js";
 import { normalizeAppName } from "../agent/context-window.js";
-import type { KnowledgeContext } from "./knowledge-service.js";
 
 /** Regex patterns for detecting errors in OCR text. */
 const ERROR_PATTERN = /error|failed|exception|crash|traceback|typeerror|referenceerror|syntaxerror|cannot read|enoent|panic|fatal/i;
@@ -132,7 +131,6 @@ export function buildEscalationMessage(
   mode: EscalationMode,
   escalationReason?: string,
   recentFeedback?: FeedbackRecord[],
-  knowledge?: KnowledgeContext,
 ): string {
   const sections: string[] = [];
 
@@ -235,14 +233,6 @@ export function buildEscalationMessage(
         sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
       }
     }
-  }
-
-  // Knowledge context: playbook patterns + triplestore entities (when available)
-  if (knowledge?.playbook) {
-    sections.push(`## Established Patterns (playbook)\n${knowledge.playbook}`);
-  }
-  if (knowledge?.entities) {
-    sections.push(`## Related Context (knowledge graph)\n${knowledge.entities}`);
   }
 
   // Mode-specific instructions (now context-aware)
