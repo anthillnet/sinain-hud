@@ -66,8 +66,15 @@ export interface ProfilingMessage {
   ts: number;
 }
 
+/** Overlay → sinain-core: user engaged with the HUD (copy, scroll, dismiss) */
+export interface HudEngagementMessage {
+  type: "hud_engagement";
+  action: "copy" | "scroll" | "dismissed";
+  ts: number;
+}
+
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | HudEngagementMessage;
 
 // ── Feed buffer types ──
 
@@ -320,6 +327,11 @@ export interface FeedbackSignals {
   dwellTimeMs: number | null;
   quickAppSwitch: boolean | null;
   compositeScore: number;           // -1.0 to 1.0
+  // Extended signals (v2)
+  digestSentiment: "improving" | "worsening" | "neutral" | null;
+  responseQuality: number | null;   // heuristic score [-0.1, +0.1]
+  spawnCompleted: boolean | null;   // patched async by Escalator
+  hudEngagement: "copy" | "scroll" | "dismissed" | null;  // patched async by WS event
 }
 
 export interface FeedbackRecord {
@@ -342,10 +354,16 @@ export interface FeedbackRecord {
   tags: string[];
 }
 
+export interface TagScore {
+  tag: string;
+  avg: number;
+  count: number;
+}
+
 export interface FeedbackSummary {
-  avg: number;          // Mean compositeScore, range [-1, +1]
-  high: string[];       // Escalation reason tags from records with compositeScore > 0.5
-  low: string[];        // Escalation reason tags from records with compositeScore < -0.2
+  avg: number;          // Recency-weighted mean compositeScore, range [-1, +1]
+  high: TagScore[];     // Per-tag scores from records with compositeScore > 0.5
+  low: TagScore[];      // Per-tag scores from records with compositeScore < -0.2
   count: number;        // Number of records with non-null compositeScore
   since: string;        // ISO timestamp of oldest record included
 }

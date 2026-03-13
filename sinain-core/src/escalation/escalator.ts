@@ -48,6 +48,11 @@ export class Escalator {
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
 
+  // Link spawn task IDs to feedback records for spawnCompleted signal
+  private spawnFeedbackMap = new Map<string, { recordId: string; date: string }>();
+  // Most recent feedback record — used to link next spawn
+  private lastFeedbackRecord: { recordId: string; date: string } | null = null;
+
   // Cap concurrent polling loops to limit RPC load
   private static readonly MAX_CONCURRENT_POLLS = 5;
   private activePolls = 0;
@@ -335,6 +340,11 @@ ${recentLines.join("\n")}`;
     const labelStr = label ? ` (label: "${label}")` : "";
     const idemKey = `spawn-task-${Date.now()}`;
 
+    // Link this spawn to the most recent feedback record for spawnCompleted signal
+    if (this.lastFeedbackRecord) {
+      this.spawnFeedbackMap.set(taskId, this.lastFeedbackRecord);
+    }
+
     // Generate a unique child session key — bypasses the main agent entirely
     const childSessionKey = `agent:main:subagent:${randomUUID()}`;
     const mainSessionKey = this.deps.openclawConfig.sessionKey;
@@ -399,6 +409,13 @@ ${recentLines.join("\n")}`;
           this.broadcastTaskEvent(taskId, "completed", label, startedAt,
             "task completed (no output captured)");
         }
+      }
+
+      // Patch spawnCompleted on the linked feedback record
+      const spawnLink = this.spawnFeedbackMap.get(taskId);
+      if (spawnLink && this.deps.signalCollector) {
+        this.deps.signalCollector.patchRecord(spawnLink.recordId, spawnLink.date, { spawnCompleted: true });
+        this.spawnFeedbackMap.delete(taskId);
       }
 
       // Persist for crash recovery (no polling needed — result already in hand)
@@ -534,6 +551,12 @@ ${recentLines.join("\n")}`;
           }
 
           this.broadcastTaskEvent(taskId, "completed", task.label, task.startedAt, resultText ?? undefined);
+          // Patch spawnCompleted on the linked feedback record
+          const pollLink = this.spawnFeedbackMap.get(taskId);
+          if (pollLink && this.deps.signalCollector) {
+            this.deps.signalCollector.patchRecord(pollLink.recordId, pollLink.date, { spawnCompleted: true });
+            this.spawnFeedbackMap.delete(taskId);
+          }
           this.pendingSpawnTasks.delete(taskId);
           savePendingTasks(this.pendingSpawnTasks);
           this.finishPoll();
@@ -868,6 +891,9 @@ ${recentLines.join("\n")}`;
       });
       this.deps.feedbackStore.append(record);
       this.deps.signalCollector.schedule(record);
+      // Track most recent feedback record for spawn linkage
+      const date = new Date(record.ts).toISOString().slice(0, 10);
+      this.lastFeedbackRecord = { recordId: record.id, date };
     } catch (err: any) {
       warn(TAG, `feedback record failed: ${err.message}`);
     }

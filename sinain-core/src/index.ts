@@ -360,6 +360,13 @@ async function main() {
     profiler.reportOverlay({ rssMb: msg.rssMb, uptimeS: msg.uptimeS, ts: msg.ts });
   });
 
+  // ── Wire overlay HUD engagement → signal collector ──
+  if (signalCollector) {
+    wsHandler.onHudEngagement((action, ts) => {
+      signalCollector.registerEngagement(action, ts);
+    });
+  }
+
   // ── Wire overlay commands ──
   setupCommands({
     wsHandler,
