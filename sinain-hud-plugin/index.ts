@@ -73,7 +73,7 @@ const LONG_FAILURE_THRESHOLD_MS = 3 * 60_000;  // >3min failure = likely stuck r
 // Context overflow watchdog constants
 const OVERFLOW_CONSECUTIVE_THRESHOLD = 5;        // N consecutive overload errors → trigger reset
 const OVERFLOW_TRANSCRIPT_MIN_BYTES = 1_000_000; // 1MB guard — skip reset if transcript is small (transient outage)
-const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit|extra usage is required/i;
+const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit|extra usage is required|prompt is too long/i;
 
 // Proactive session hygiene constants
 const SESSION_HYGIENE_SIZE_BYTES = 2_000_000;   // 2MB — proactive archive+truncate threshold
@@ -1045,7 +1045,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     // ── Context overflow watchdog ──────────────────────────────────────
     if (sessionKey === cfg.sessionKey) {
-      if (!isSuccess && OVERFLOW_ERROR_PATTERN.test(String(event.error ?? ""))) {
+      const overflowText = String(event.error ?? "") || String((event.payload as any)?.result?.payloads?.[0]?.text ?? "");
+      if (OVERFLOW_ERROR_PATTERN.test(overflowText)) {
         consecutiveOverflowErrors++;
         api.logger.warn(
           `sinain-hud: overflow watchdog — error #${consecutiveOverflowErrors}/${OVERFLOW_CONSECUTIVE_THRESHOLD}`,
@@ -1074,7 +1075,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       // The core misclassifies "extra usage is required" as rate_limit → infinite retry.
       // After the run times out (>3min), we detect it and reset for the next cycle.
       const isLongFailure = !isSuccess && durationMs > LONG_FAILURE_THRESHOLD_MS;
-      if (isLongFailure && OVERFLOW_ERROR_PATTERN.test(String(event.error ?? ""))) {
+      if (isLongFailure && OVERFLOW_ERROR_PATTERN.test(overflowText)) {
         api.logger.warn(
           `sinain-hud: long failure (${Math.round(durationMs / 1000)}s) with overflow error — immediate reset`,
         );
