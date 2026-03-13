@@ -81,6 +81,16 @@ class WebSocketService extends ChangeNotifier {
     _copyController.add(activeTab);
   }
 
+  /// Send a HUD engagement event to sinain-core for feedback signal collection.
+  /// [action] must be one of: 'copy', 'scroll', 'dismissed'.
+  void sendEngagement(String action) {
+    send({
+      'type': 'hud_engagement',
+      'action': action,
+      'ts': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
   WebSocketService({this.url = 'ws://localhost:9500'});
 
   void connect() {
