@@ -544,6 +544,10 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   // Parent context cache for subagent injection
   let parentContextCache: ParentContextCache | null = null;
 
+  // Feedback summary cache — populated via feedback.report RPC from sinain-core
+  let cachedFeedbackSummary: { avg: number; high: string[]; low: string[] } | null = null;
+  let feedbackSummaryCacheLoaded = false;
+
   // Health watchdog state
   let watchdogInterval: ReturnType<typeof setInterval> | null = null;
   let lastResetTs = 0;
@@ -648,7 +652,31 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
   // ==========================================================================
   // RPC: situation.update — receive fresh SITUATION.md from sinain-core
+  // RPC: feedback.report  — receive aggregated feedback summary from sinain-core
   // ==========================================================================
+
+  api.registerGatewayMethod("feedback.report", ({ params, respond }: { params: Record<string, unknown>; respond: (ok: boolean, result: unknown, error?: unknown) => void }) => {
+    const summary = params?.summary as Record<string, unknown> | undefined;
+    if (!summary || typeof summary.avg !== "number") {
+      respond(false, null, { code: "invalid_params", message: "summary.avg must be a number" });
+      return;
+    }
+    cachedFeedbackSummary = {
+      avg: summary.avg as number,
+      high: Array.isArray(summary.high) ? summary.high as string[] : [],
+      low: Array.isArray(summary.low) ? summary.low as string[] : [],
+    };
+    if (lastWorkspaceDir) {
+      const feedbackPath = join(lastWorkspaceDir, "memory", "feedback-summary.json");
+      const tmp = feedbackPath + ".tmp";
+      try {
+        writeFileSync(tmp, JSON.stringify(cachedFeedbackSummary, null, 2), "utf-8");
+        renameSync(tmp, feedbackPath);
+      } catch { /* non-fatal */ }
+    }
+    respond(true, { ok: true });
+    api.logger.info(`sinain-hud: feedback summary updated (avg=${(summary.avg as number).toFixed(2)}, count=${summary.count ?? "?"})`);
+  });
 
   api.registerGatewayMethod("situation.update", ({ params, respond }: { params: Record<string, unknown>; respond: (ok: boolean, result: unknown, error?: unknown) => void }) => {
     const content = params.content;
@@ -701,6 +729,25 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       if (state) {
         state.workspaceDir = workspaceDir;
       }
+    }
+
+    // ── Restore feedback summary cache from disk on first run (survives gateway restarts) ──
+    if (!feedbackSummaryCacheLoaded) {
+      feedbackSummaryCacheLoaded = true;
+      try {
+        const feedbackPath = join(workspaceDir, "memory", "feedback-summary.json");
+        if (existsSync(feedbackPath)) {
+          const parsed = JSON.parse(readFileSync(feedbackPath, "utf-8"));
+          if (parsed && typeof parsed.avg === "number") {
+            cachedFeedbackSummary = {
+              avg: parsed.avg,
+              high: Array.isArray(parsed.high) ? parsed.high : [],
+              low: Array.isArray(parsed.low) ? parsed.low : [],
+            };
+            api.logger.info(`sinain-hud: loaded cached feedback summary from disk (avg=${parsed.avg})`);
+          }
+        }
+      } catch { /* non-fatal */ }
     }
 
     const now = Date.now();
@@ -1674,6 +1721,9 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
               ts: now.toISOString(),
               idle: params.idle,
               sessionHistorySummary: params.sessionSummary,
+              feedbackScores: cachedFeedbackSummary
+                ? { avg: cachedFeedbackSummary.avg, high: cachedFeedbackSummary.high, low: cachedFeedbackSummary.low }
+                : null,
               signals: result.signals,
               recommendedAction: result.recommendedAction,
               output: result.output,

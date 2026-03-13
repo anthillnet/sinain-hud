@@ -238,21 +238,67 @@ All parts joined with `\n\n` and returned as `{ prependContext }`.
 JSONL log at `~/.sinain-core/feedback/YYYY-MM-DD.jsonl`. Each record is written at escalation
 time with `null` signals, then patched in-place by `signal-collector` at +60s, +120s, and +300s.
 
+`getSummary(days=3)` aggregates scored records into a `FeedbackSummary`:
+- `avg` — mean compositeScore over the window
+- `high` — escalation reason tags from records with compositeScore > 0.5
+- `low`  — escalation reason tags from records with compositeScore < -0.2
+- `count` / `since` — record count and oldest timestamp
+
 ### signal-collector.ts
 
 Schedules three deferred checks after each escalation (partial at 60s + 120s, final at 300s).
 Computes 5 signals per record:
 
-| Signal | Weight | Meaning |
-|--------|--------|---------|
+| Signal | Max positive contribution | Meaning |
+|--------|--------------------------|---------|
 | `errorCleared` | 0.50 | All error patterns absent from next 3 agent digests |
 | `noReEscalation` | 0.30 | Same escalation reasons didn't fire within 5 min |
 | `dwellTimeMs` | 0.15 | Time until next HUD push (>60s = positive, <10s = negative) |
-| `quickAppSwitch` | 0.10 | App changed within 10s of escalation (negative signal) |
-| `compositeScore` | — | Weighted sum, clamped to [-1, +1] |
+| `quickAppSwitch` | 0.05 | App changed within 10s of escalation (negative signal) |
+| `compositeScore` | — | Raw sum of contributions, clamped to [-1, +1] (not normalized) |
 
-`compositeScore` feeds back into `feedback_analyzer.py` as `feedbackScores.avg` via
-playbook-log JSONL entries written by the heartbeat tool.
+> **Note on `quickAppSwitch`:** The internal weight is 0.10 (used only to gate the "no data" early
+> return), but the actual contribution is `+0.05` when `quickAppSwitch=false` and `-0.15` when
+> `quickAppSwitch=true`. Positive contributions sum to exactly 1.0.
+
+### Cross-machine feedback delivery
+
+`compositeScore` is computed on the user's machine (sinain-core) but the curation pipeline runs
+on the OpenClaw server. The two sides are bridged via the `feedback.report` RPC — the same
+pattern as `situation.update`:
+
+```
+sinain-core (user machine)
+  FeedbackStore.getSummary(days=3)
+       → { avg, high[], low[], count, since }
+  Escalator.pushFeedbackSummary()
+       → sendRpc("feedback.report", { summary })   [on WS connect + every 10 min]
+
+OpenClaw plugin (server)
+  registerGatewayMethod("feedback.report")
+       → cachedFeedbackSummary updated in-memory
+       → memory/feedback-summary.json written atomically (tmp→rename)
+       → cache restored from disk on gateway restart
+
+sinain_heartbeat_tick tool handler
+       → logEntry.feedbackScores = { avg, high, low }
+
+feedback_analyzer.py
+       → reads feedbackScores.avg → real effectivenessScore + curateDirective
+```
+
+`feedbackScores: null` in a log entry means sinain-core hasn't pushed a summary yet (handled
+gracefully by `feedback_analyzer.py` via `entry.get("feedbackScores", {})`).
+
+### Key files
+
+| File | Role |
+|------|------|
+| `sinain-core/src/types.ts` | `FeedbackSummary` interface |
+| `sinain-core/src/learning/feedback-store.ts` | `getSummary()` method |
+| `sinain-core/src/escalation/escalator.ts` | `pushFeedbackSummary()` + 10-min interval |
+| `sinain-hud-plugin/index.ts` | `feedback.report` RPC handler + heartbeat log injection |
+| `memory/feedback-summary.json` | Persisted summary cache (runtime, gitignored) |
 
 ---
 

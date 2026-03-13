@@ -138,11 +138,6 @@ export function loadConfig(): CoreConfig {
     sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:sinain"),
   };
 
-  const situationDir = env("OPENCLAW_WORKSPACE_DIR", "~/.openclaw/workspace");
-  const situationMdPath = resolvePath(
-    env("SITUATION_MD_PATH", `${situationDir}/SITUATION.md`)
-  );
-
   const learningConfig: LearningConfig = {
     enabled: boolEnv("LEARNING_ENABLED", true),
     feedbackDir: resolvePath(env("FEEDBACK_DIR", "~/.sinain-core/feedback")),
@@ -159,7 +154,6 @@ export function loadConfig(): CoreConfig {
     agentConfig,
     escalationConfig,
     openclawConfig,
-    situationMdPath,
     traceEnabled: boolEnv("TRACE_ENABLED", true),
     traceDir: resolvePath(env("TRACE_DIR", "~/.sinain-core/traces")),
     learningConfig,

@@ -342,6 +342,14 @@ export interface FeedbackRecord {
   tags: string[];
 }
 
+export interface FeedbackSummary {
+  avg: number;          // Mean compositeScore, range [-1, +1]
+  high: string[];       // Escalation reason tags from records with compositeScore > 0.5
+  low: string[];        // Escalation reason tags from records with compositeScore < -0.2
+  count: number;        // Number of records with non-null compositeScore
+  since: string;        // ISO timestamp of oldest record included
+}
+
 export interface LearningConfig {
   enabled: boolean;
   feedbackDir: string;
@@ -360,7 +368,6 @@ export interface CoreConfig {
   agentConfig: AgentConfig;
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
-  situationMdPath: string;
   traceEnabled: boolean;
   traceDir: string;
   learningConfig: LearningConfig;

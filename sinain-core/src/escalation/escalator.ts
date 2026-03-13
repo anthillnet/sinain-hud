@@ -36,6 +36,10 @@ export class Escalator {
   // Prevent concurrent escalation RPCs (only 1 in-flight at a time)
   private escalationInFlight = false;
 
+  // Periodic feedback summary push
+  private feedbackPushInterval: ReturnType<typeof setInterval> | null = null;
+  private lastFeedbackPushTs = 0;
+
   // Spawn deduplication state
   private lastSpawnFingerprint = "";
   private lastSpawnTs = 0;
@@ -96,6 +100,11 @@ export class Escalator {
           }
         });
       }
+
+      // Push feedback summary immediately after (re)connect, then every 10 min
+      this.wsClient.on("connected", () => this.pushFeedbackSummary());
+      this.feedbackPushInterval = setInterval(() => this.pushFeedbackSummary(), 10 * 60_000);
+
       this.wsClient.connect();
       log(TAG, `mode: ${this.deps.escalationConfig.mode}`);
     }
@@ -103,6 +112,10 @@ export class Escalator {
 
   /** Stop and disconnect. */
   stop(): void {
+    if (this.feedbackPushInterval) {
+      clearInterval(this.feedbackPushInterval);
+      this.feedbackPushInterval = null;
+    }
     this.wsClient.disconnect();
   }
 
@@ -201,6 +214,19 @@ export class Escalator {
     if (!this.wsClient.isConnected) return;
     this.wsClient.sendRpc("situation.update", { content }, 10_000)
       .catch((err: any) => warn(TAG, `situation.update rpc failed: ${err.message}`));
+  }
+
+  /** Push aggregated feedback summary to the plugin via RPC (fire-and-forget). */
+  private async pushFeedbackSummary(): Promise<void> {
+    if (!this.wsClient.isConnected || !this.deps.feedbackStore) return;
+    if (Date.now() - this.lastFeedbackPushTs < 60_000) return; // debounce: max once per 60s
+    try {
+      const summary = this.deps.feedbackStore.getSummary(3);
+      if (summary.count === 0) return; // nothing to push yet
+      await this.wsClient.sendRpc("feedback.report", { summary }, 5_000);
+      this.lastFeedbackPushTs = Date.now();
+      log(TAG, `pushed feedback summary: avg=${summary.avg.toFixed(2)}, count=${summary.count}`);
+    } catch { /* fire-and-forget */ }
   }
 
   /** Send a direct user message to OpenClaw. */
