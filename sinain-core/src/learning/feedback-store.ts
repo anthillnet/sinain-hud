@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { FeedbackRecord, FeedbackSignals, FeedbackSummary } from "../types.js";
+import type { FeedbackRecord, FeedbackSignals, FeedbackSummary, TagScore } from "../types.js";
 import { log, error } from "../log.js";
 
 const TAG = "feedback-store";
@@ -65,6 +65,10 @@ export class FeedbackStore {
         dwellTimeMs: null,
         quickAppSwitch: null,
         compositeScore: 0,
+        digestSentiment: null,
+        responseQuality: null,
+        spawnCompleted: null,
+        hudEngagement: null,
       },
       tags: this.deriveTags(params),
     };
@@ -116,6 +120,22 @@ export class FeedbackStore {
     } catch {
       return false;
     }
+  }
+
+  /** Read signals for a specific record by ID. Returns null if not found. */
+  readSignals(recordId: string, date: string): FeedbackSignals | null {
+    const filePath = path.join(this.dir, `${date}.jsonl`);
+    try {
+      const content = fs.readFileSync(filePath, "utf-8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const rec = JSON.parse(line) as FeedbackRecord;
+          if (rec.id === recordId) return rec.signals;
+        } catch { /* skip malformed */ }
+      }
+    } catch { /* file missing */ }
+    return null;
   }
 
   /** Read all records for a given date. */
@@ -191,32 +211,60 @@ export class FeedbackStore {
 
     // Only records with a meaningful compositeScore (non-zero or explicit signal collected)
     const scored = records.filter(
-      r => r.signals.compositeScore !== 0 || r.signals.errorCleared !== null,
+      r => r.signals.compositeScore !== 0 || r.signals.errorCleared !== null || r.signals.digestSentiment !== null,
     );
 
     if (scored.length === 0) {
       return { avg: 0, high: [], low: [], count: 0, since: "" };
     }
 
-    const scores = scored.map(r => r.signals.compositeScore);
-    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-
-    const highSet = new Set<string>();
-    const lowSet = new Set<string>();
+    // Recency-weighted avg: weight = max(0.3, 1.0 - dayAge * 0.3) where dayAge = days since record
+    const nowMs = Date.now();
+    let weightedSum = 0;
+    let weightTotal = 0;
     for (const r of scored) {
-      if (r.signals.compositeScore > 0.5) {
-        for (const reason of r.escalationReasons) highSet.add(reason);
-      } else if (r.signals.compositeScore < -0.2) {
-        for (const reason of r.escalationReasons) lowSet.add(reason);
+      const dayAge = (nowMs - r.ts) / 86_400_000;
+      const w = Math.max(0.3, 1.0 - dayAge * 0.3);
+      weightedSum += r.signals.compositeScore * w;
+      weightTotal += w;
+    }
+    const avg = weightTotal > 0 ? weightedSum / weightTotal : 0;
+
+    // Per-tag score accumulation
+    const highTagScores = new Map<string, { sum: number; count: number }>();
+    const lowTagScores = new Map<string, { sum: number; count: number }>();
+
+    for (const r of scored) {
+      const score = r.signals.compositeScore;
+      if (score > 0.5) {
+        for (const reason of r.escalationReasons) {
+          const entry = highTagScores.get(reason) ?? { sum: 0, count: 0 };
+          entry.sum += score;
+          entry.count++;
+          highTagScores.set(reason, entry);
+        }
+      } else if (score < -0.2) {
+        for (const reason of r.escalationReasons) {
+          const entry = lowTagScores.get(reason) ?? { sum: 0, count: 0 };
+          entry.sum += score;
+          entry.count++;
+          lowTagScores.set(reason, entry);
+        }
       }
     }
+
+    const toTagScores = (map: Map<string, { sum: number; count: number }>): TagScore[] =>
+      Array.from(map.entries())
+        .map(([tag, { sum, count }]) => ({ tag, avg: Math.round((sum / count) * 1000) / 1000, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
 
     const oldest = scored.reduce((min, r) => r.ts < min ? r.ts : min, scored[0].ts);
 
     return {
       avg: Math.round(avg * 1000) / 1000,
-      high: Array.from(highSet).slice(0, 10),
-      low: Array.from(lowSet).slice(0, 10),
+      high: toTagScores(highTagScores),
+      low: toTagScores(lowTagScores),
       count: scored.length,
       since: new Date(oldest).toISOString(),
     };

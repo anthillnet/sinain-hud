@@ -69,11 +69,24 @@ def compute_effectiveness(logs: list[dict]) -> dict:
     }
 
 
+def parse_tag_scores(raw: list) -> list[dict]:
+    """Normalize tag scores — accepts both TagScore dicts and legacy plain strings."""
+    if not raw:
+        return []
+    if isinstance(raw[0], dict):
+        # New format: [{tag, avg, count}] — sort by count * |avg| descending
+        return sorted(raw, key=lambda x: x.get("count", 1) * abs(x.get("avg", 0)), reverse=True)
+    # Legacy format: plain strings — wrap with placeholder avg/count
+    return [{"tag": t, "avg": 0, "count": 1} for t in raw]
+
+
 def extract_feedback_scores(logs: list[dict]) -> dict:
     """Extract composite scores with time-decay weighting."""
     all_scores = []
-    high_patterns = []
-    low_patterns = []
+    high_patterns: list[dict] = []
+    low_patterns: list[dict] = []
+    seen_high: set[str] = set()
+    seen_low: set[str] = set()
 
     for i, entry in enumerate(logs):  # logs are newest-first
         feedback = entry.get("feedbackScores", {})
@@ -83,12 +96,16 @@ def extract_feedback_scores(logs: list[dict]) -> dict:
             weight = max(0.3, 1.0 - (i / max(len(logs), 1)) * 0.7)
             all_scores.append((avg, weight))
 
-        for h in feedback.get("high", []):
-            if h not in high_patterns:  # deduplicate
-                high_patterns.append(h)
-        for lo in feedback.get("low", []):
-            if lo not in low_patterns:  # deduplicate
-                low_patterns.append(lo)
+        for h in parse_tag_scores(feedback.get("high", [])):
+            tag = h["tag"] if isinstance(h, dict) else h
+            if tag not in seen_high:
+                seen_high.add(tag)
+                high_patterns.append(h if isinstance(h, dict) else {"tag": h, "avg": 0, "count": 1})
+        for lo in parse_tag_scores(feedback.get("low", [])):
+            tag = lo["tag"] if isinstance(lo, dict) else lo
+            if tag not in seen_low:
+                seen_low.add(tag)
+                low_patterns.append(lo if isinstance(lo, dict) else {"tag": lo, "avg": 0, "count": 1})
 
     if all_scores:
         weighted_sum = sum(s * w for s, w in all_scores)
@@ -169,13 +186,15 @@ def generate_interpretation(
     if outputs > 0:
         parts.append(f"Effectiveness {rate:.0%} ({pos} positive, {neg} negative of {outputs} outputs)")
 
-    # Pattern highlights
+    # Pattern highlights — high/low may be TagScore dicts or plain strings
     high = feedback_scores.get("high", [])
     low = feedback_scores.get("low", [])
     if high:
-        parts.append(f"Working well: {', '.join(high[:3])}")
+        high_tags = [h["tag"] if isinstance(h, dict) else h for h in high[:3]]
+        parts.append(f"Working well: {', '.join(high_tags)}")
     if low:
-        parts.append(f"Underperforming: {', '.join(low[:3])}")
+        low_tags = [lo["tag"] if isinstance(lo, dict) else lo for lo in low[:3]]
+        parts.append(f"Underperforming: {', '.join(low_tags)}")
 
     # Directive rationale
     rationale = {

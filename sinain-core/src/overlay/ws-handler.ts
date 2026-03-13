@@ -20,6 +20,7 @@ const SPAWN_TASK_TTL_MS = 120_000; // prune terminal tasks after 120s
 
 type MessageHandler = (msg: InboundMessage, client: WebSocket) => void;
 type ProfilingHandler = (msg: any) => void;
+type HudEngagementHandler = (action: "copy" | "scroll" | "dismissed", ts: number) => void;
 
 /**
  * WebSocket handler for overlay connections.
@@ -32,6 +33,7 @@ export class WsHandler {
   private spawnTaskPruneTimer: ReturnType<typeof setInterval> | null = null;
   private onMessage: MessageHandler | null = null;
   private onProfilingCb: ProfilingHandler | null = null;
+  private onHudEngagementCb: HudEngagementHandler | null = null;
   private state: BridgeState = {
     audio: "muted",
     mic: "muted",
@@ -58,6 +60,11 @@ export class WsHandler {
   /** Register handler for profiling messages from overlay. */
   onProfiling(handler: ProfilingHandler): void {
     this.onProfilingCb = handler;
+  }
+
+  /** Register handler for HUD engagement events from overlay. */
+  onHudEngagement(handler: HudEngagementHandler): void {
+    this.onHudEngagementCb = handler;
   }
 
   /** Handle a new WS connection (called from server.ts wss.on('connection')). */
@@ -218,6 +225,15 @@ export class WsHandler {
       case "profiling":
         if (this.onProfilingCb) this.onProfilingCb(msg);
         return;
+      case "hud_engagement": {
+        const em = msg as import("../types.js").HudEngagementMessage;
+        const action = em.action;
+        if (["copy", "scroll", "dismissed"].includes(action)) {
+          log(TAG, `← hud_engagement action=${action}`);
+          if (this.onHudEngagementCb) this.onHudEngagementCb(action, em.ts ?? Date.now());
+        }
+        return;
+      }
       default:
         warn(TAG, `unknown message type: ${(msg as any).type}`);
         return;
