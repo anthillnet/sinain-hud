@@ -5,7 +5,7 @@ import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRic
 import type { Profiler } from "../profiler.js";
 import { buildContextWindow } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
-import { writeSituationMd } from "./situation-writer.js";
+import { buildSituationContent } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
 import { log, warn, error, debug } from "../log.js";
 
@@ -16,7 +16,6 @@ export interface AgentLoopDeps {
   senseBuffer: SenseBuffer;
   agentConfig: AgentConfig;
   escalationMode: EscalationMode;
-  situationMdPath: string;
   /** Called after analysis with digest + context for escalation check. */
   onAnalysis: (entry: AgentEntry, contextWindow: ContextWindow) => void;
   /** Called to broadcast HUD line to overlay. */
@@ -326,11 +325,11 @@ export class AgentLoop extends EventEmitter {
       // Store digest
       this.latestDigest = entry;
 
-      // Calculate escalation score for both SITUATION.md and escalation check
+      // Calculate escalation score
       const escalationScore = calculateEscalationScore(digest, contextWindow);
 
-      // Write SITUATION.md (enhanced with escalation context and recorder status)
-      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
+      // Build situation content and push to remote gateway via RPC
+      const situationContent = buildSituationContent(contextWindow, digest, entry, escalationScore, recorderStatus);
       this.deps.onSituationUpdate?.(situationContent);
 
       // Notify for escalation check

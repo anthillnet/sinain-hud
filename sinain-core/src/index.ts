@@ -33,7 +33,6 @@ async function main() {
   log(TAG, `agent: model=${config.agentConfig.model} debounce=${config.agentConfig.debounceMs}ms max=${config.agentConfig.maxIntervalMs}ms`);
   log(TAG, `escalation: mode=${config.escalationConfig.mode} cooldown=${config.escalationConfig.cooldownMs}ms stale=${config.escalationConfig.staleMs}ms`);
   log(TAG, `openclaw: ws=${config.openclawConfig.gatewayWsUrl} http=${config.openclawConfig.hookUrl}`);
-  log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);
   log(TAG, `learning: enabled=${config.learningConfig.enabled} dir=${config.learningConfig.feedbackDir}`);
 
@@ -78,7 +77,6 @@ async function main() {
     senseBuffer,
     agentConfig: config.agentConfig,
     escalationMode: config.escalationConfig.mode,
-    situationMdPath: config.situationMdPath,
     getRecorderStatus: () => recorder.getStatus(),
     profiler,
     onAnalysis: (entry, contextWindow) => taskDispatcher.onAnalysis(entry, contextWindow),
@@ -268,7 +266,6 @@ async function main() {
           system: { running: systemAudioPipeline.isRunning(), device: systemAudioPipeline.getDevice() },
           mic: micPipeline ? { running: micPipeline.isRunning(), device: micPipeline.getDevice() } : null,
         },
-        situation: { path: config.situationMdPath },
         traces: tracer ? tracer.getMetricsSummary() : null,
         profiling: profiler.getSnapshot(),
       };
