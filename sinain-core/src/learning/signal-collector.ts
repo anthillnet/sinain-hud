@@ -13,6 +13,17 @@ const ERROR_PATTERNS = [
   "exit code", "segfault", "panic", "fatal", "enoent",
 ];
 
+/** Extended negative-sentiment markers for digestSentiment signal */
+const NEG_PATTERNS = [
+  ...ERROR_PATTERNS,
+  "blocked", "stuck", "cannot", "not working", "waiting", "timeout",
+];
+
+function countNegPatterns(text: string): number {
+  const lower = text.toLowerCase();
+  return NEG_PATTERNS.filter(p => lower.includes(p)).length;
+}
+
 function hasErrorPattern(text: string): boolean {
   const lower = text.toLowerCase();
   return ERROR_PATTERNS.some(p => lower.includes(p));
@@ -24,6 +35,8 @@ interface PendingCollection {
   recordDate: string;       // YYYY-MM-DD for file lookup
   escalationReasons: string[];
   digestAtEscalation: string;
+  openclawResponse: string;     // stored at schedule time for responseQuality
+  responseLatencyMs: number;    // stored at schedule time for responseQuality
   timers: ReturnType<typeof setTimeout>[];
 }
 
@@ -52,6 +65,8 @@ export class SignalCollector {
       recordDate: date,
       escalationReasons: record.escalationReasons,
       digestAtEscalation: record.digest,
+      openclawResponse: record.openclawResponse,
+      responseLatencyMs: record.responseLatencyMs,
       timers: [],
     };
 
@@ -76,6 +91,53 @@ export class SignalCollector {
     return this.pending.size;
   }
 
+  /**
+   * Patch a finalized (or in-flight) feedback record with new signal values.
+   * Called for async signals arriving outside the scheduled collection windows
+   * (e.g. spawnCompleted, hudEngagement).
+   */
+  patchRecord(recordId: string, date: string, patch: Partial<Omit<FeedbackSignals, "compositeScore">>): void {
+    const existing = this.feedbackStore.readSignals(recordId, date);
+    if (!existing) return;
+    const merged: FeedbackSignals = { ...existing, ...patch };
+    merged.compositeScore = this.computeComposite(merged);
+    this.feedbackStore.updateSignals(recordId, date, merged);
+    log(TAG, `patched record ${recordId}: score=${merged.compositeScore.toFixed(2)}, patch=${JSON.stringify(patch)}`);
+  }
+
+  /**
+   * Register a HUD engagement event from the overlay.
+   * Finds the most recent pending or finalized record within a 5-minute window
+   * and patches its hudEngagement signal.
+   */
+  registerEngagement(action: "copy" | "scroll" | "dismissed", eventTs: number): void {
+    const windowMs = 5 * 60_000;
+
+    // Search pending records first (most common case)
+    let target: PendingCollection | null = null;
+    for (const entry of this.pending.values()) {
+      if (eventTs - entry.recordTs <= windowMs && eventTs >= entry.recordTs) {
+        if (!target || entry.recordTs > target.recordTs) target = entry;
+      }
+    }
+
+    if (target) {
+      this.patchRecord(target.recordId, target.recordDate, { hudEngagement: action });
+      log(TAG, `hud_engagement action=${action} linked to pending record ${target.recordId}`);
+      return;
+    }
+
+    // Record already finalized — query feedbackStore for most recent record
+    const recent = this.feedbackStore.queryRecent(1);
+    if (recent.length > 0 && eventTs - recent[0].ts <= windowMs) {
+      const date = new Date(recent[0].ts).toISOString().slice(0, 10);
+      this.patchRecord(recent[0].id, date, { hudEngagement: action });
+      log(TAG, `hud_engagement action=${action} linked to finalized record ${recent[0].id}`);
+    } else {
+      log(TAG, `hud_engagement action=${action} — no recent record within ${windowMs}ms window`);
+    }
+  }
+
   // ── Private ──
 
   private collect(entry: PendingCollection, phase: "partial" | "final"): void {
@@ -90,7 +152,7 @@ export class SignalCollector {
 
       if (phase === "final") {
         this.pending.delete(entry.recordId);
-        log(TAG, `final signals for ${entry.recordId}: score=${signals.compositeScore.toFixed(2)}, err=${signals.errorCleared}, reesc=${signals.noReEscalation}`);
+        log(TAG, `final signals for ${entry.recordId}: score=${signals.compositeScore.toFixed(2)}, err=${signals.errorCleared}, reesc=${signals.noReEscalation}, sentiment=${signals.digestSentiment}, quality=${signals.responseQuality}`);
       }
 
       if (!updated && phase === "final") {
@@ -112,16 +174,40 @@ export class SignalCollector {
     let errorCleared: boolean | null = null;
     const hadError = entry.escalationReasons.some(r => r.startsWith("error:"));
     if (hadError) {
-      // Look at the 3 most recent agent entries
       const recentEntries = this.agentLoop.getHistory(3);
       if (recentEntries.length > 0) {
-        // All recent entries should be free of error patterns
         errorCleared = recentEntries.every(e => !hasErrorPattern(e.digest));
       }
     }
 
+    // ── digestSentiment: negative-marker trend across ALL escalations ──
+    let digestSentiment: FeedbackSignals["digestSentiment"] = null;
+    const atEscalation = countNegPatterns(entry.digestAtEscalation);
+    const recentForSentiment = this.agentLoop.getHistory(3);
+    if (recentForSentiment.length === 0 || atEscalation === 0) {
+      digestSentiment = "neutral";
+    } else {
+      const recentAvg = recentForSentiment.reduce((s, e) => s + countNegPatterns(e.digest), 0) / recentForSentiment.length;
+      digestSentiment = recentAvg < atEscalation * 0.5 ? "improving"
+                      : recentAvg > atEscalation * 1.5 ? "worsening"
+                      : "neutral";
+    }
+
+    // ── responseQuality: heuristic from stored escalation response data ──
+    let responseQuality: number | null = null;
+    if (elapsedMs >= 60_000) {
+      if (entry.responseLatencyMs > 30_000) {
+        responseQuality = -0.05;   // timeout
+      } else if (entry.openclawResponse.trim().length === 0) {
+        responseQuality = -0.1;    // no content
+      } else if (entry.openclawResponse.trim().length > 200) {
+        responseQuality = 0.1;     // substantive response
+      } else {
+        responseQuality = 0.05;    // short but present
+      }
+    }
+
     // ── noReEscalation: same reasons haven't fired within 5 min ──
-    // We check by looking at recent feedback records for overlapping reasons
     let noReEscalation: boolean | null = null;
     if (elapsedMs >= 60_000) {
       const recentRecords = this.feedbackStore.queryRecent(10);
@@ -148,12 +234,17 @@ export class SignalCollector {
     let quickAppSwitch: boolean | null = null;
     const appHistory = this.senseBuffer.appHistory(entry.recordTs);
     if (appHistory.length >= 2) {
-      // Check if there was an app switch within 10s of escalation
       const earlySwitch = appHistory.find(a =>
         a.ts > entry.recordTs && a.ts <= entry.recordTs + 10_000
       );
       quickAppSwitch = earlySwitch !== undefined;
     }
+
+    // ── Preserve existing async patches (spawnCompleted, hudEngagement) ──
+    // Read existing signals so we don't overwrite values patched between collections
+    const existing = this.feedbackStore.readSignals(entry.recordId, entry.recordDate);
+    const spawnCompleted = existing?.spawnCompleted ?? null;
+    const hudEngagement = existing?.hudEngagement ?? null;
 
     // ── compositeScore: weighted combination ──
     const compositeScore = this.computeComposite({
@@ -161,6 +252,10 @@ export class SignalCollector {
       noReEscalation,
       dwellTimeMs,
       quickAppSwitch,
+      digestSentiment,
+      responseQuality,
+      spawnCompleted,
+      hudEngagement,
     });
 
     return {
@@ -169,6 +264,10 @@ export class SignalCollector {
       dwellTimeMs,
       quickAppSwitch,
       compositeScore,
+      digestSentiment,
+      responseQuality,
+      spawnCompleted,
+      hudEngagement,
     };
   }
 
@@ -177,20 +276,21 @@ export class SignalCollector {
     noReEscalation: boolean | null;
     dwellTimeMs: number | null;
     quickAppSwitch: boolean | null;
+    digestSentiment?: FeedbackSignals["digestSentiment"];
+    responseQuality?: number | null;
+    spawnCompleted?: boolean | null;
+    hudEngagement?: FeedbackSignals["hudEngagement"];
   }): number {
     let score = 0;
-    let weight = 0;
 
-    // Error cleared: strong positive (+0.5)
+    // Error cleared: strong positive (+0.5) — only for error: escalations
     if (signals.errorCleared !== null) {
       score += signals.errorCleared ? 0.5 : -0.3;
-      weight += 0.5;
     }
 
     // No re-escalation: positive (+0.3)
     if (signals.noReEscalation !== null) {
       score += signals.noReEscalation ? 0.3 : -0.2;
-      weight += 0.3;
     }
 
     // Dwell time: weak positive if > 60s
@@ -200,17 +300,36 @@ export class SignalCollector {
       } else if (signals.dwellTimeMs < 10_000) {
         score -= 0.1;
       }
-      weight += 0.15;
     }
 
-    // Quick app switch: weak negative
+    // Quick app switch: reduced negative (was -0.15)
     if (signals.quickAppSwitch !== null) {
-      score += signals.quickAppSwitch ? -0.15 : 0.05;
-      weight += 0.1;
+      score += signals.quickAppSwitch ? -0.05 : 0.05;
     }
 
-    // Normalize if we have signals, otherwise return 0
-    if (weight === 0) return 0;
+    // Digest sentiment: broad resolution signal for all escalations
+    if (signals.digestSentiment != null) {
+      if (signals.digestSentiment === "improving") score += 0.25;
+      else if (signals.digestSentiment === "worsening") score -= 0.2;
+      // "neutral" contributes 0
+    }
+
+    // Response quality: heuristic from response length + latency
+    if (signals.responseQuality != null) {
+      score += Math.max(-0.1, Math.min(0.1, signals.responseQuality));
+    }
+
+    // Spawn completed: strong signal — linked background task succeeded
+    if (signals.spawnCompleted === true) {
+      score += 0.3;
+    }
+
+    // HUD engagement: direct signal from user interaction with the overlay
+    if (signals.hudEngagement != null) {
+      if (signals.hudEngagement === "copy") score += 0.3;
+      else if (signals.hudEngagement === "scroll") score += 0.15;
+      else if (signals.hudEngagement === "dismissed") score -= 0.1;
+    }
 
     // Clamp to [-1, 1]
     return Math.max(-1, Math.min(1, score));

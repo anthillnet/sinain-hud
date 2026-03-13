@@ -528,6 +528,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   const sessionStates = new Map<string, SessionState>();
   let curationInterval: ReturnType<typeof setInterval> | null = null;
   let lastWorkspaceDir: string | null = null;
+  let pendingSituationUpdates: string[] = [];
   let consecutiveHeartbeatSkips = 0;
   let lastEvalReportDate: string | null = null;
 
@@ -545,7 +546,14 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   let parentContextCache: ParentContextCache | null = null;
 
   // Feedback summary cache — populated via feedback.report RPC from sinain-core
-  let cachedFeedbackSummary: { avg: number; high: string[]; low: string[] } | null = null;
+  type TagScore = { tag: string; avg: number; count: number };
+  // Accepts both new TagScore[] format and legacy string[] for rollout backward-compat
+  function parseTagScores(arr: unknown): TagScore[] {
+    if (!Array.isArray(arr) || arr.length === 0) return [];
+    if (typeof arr[0] === "object" && arr[0] !== null && "tag" in arr[0]) return arr as TagScore[];
+    return (arr as string[]).map(tag => ({ tag, avg: 0, count: 1 }));
+  }
+  let cachedFeedbackSummary: { avg: number; high: TagScore[]; low: TagScore[] } | null = null;
   let feedbackSummaryCacheLoaded = false;
 
   // Health watchdog state
@@ -663,8 +671,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     }
     cachedFeedbackSummary = {
       avg: summary.avg as number,
-      high: Array.isArray(summary.high) ? summary.high as string[] : [],
-      low: Array.isArray(summary.low) ? summary.low as string[] : [],
+      high: parseTagScores(summary.high),
+      low: parseTagScores(summary.low),
     };
     if (lastWorkspaceDir) {
       const feedbackPath = join(lastWorkspaceDir, "memory", "feedback-summary.json");
@@ -685,7 +693,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       return;
     }
     if (!lastWorkspaceDir) {
-      respond(false, null, { code: "not_ready", message: "workspace not initialized" });
+      pendingSituationUpdates.push(content as string);
+      respond(true, { ok: true, queued: true });
       return;
     }
     const situationPath = join(lastWorkspaceDir, "SITUATION.md");
@@ -723,6 +732,22 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     // Track workspace dir in session state and for curation timer
     lastWorkspaceDir = workspaceDir;
+
+    // Flush any situation.update calls that arrived before workspace was ready
+    if (pendingSituationUpdates.length > 0) {
+      const latest = pendingSituationUpdates[pendingSituationUpdates.length - 1];
+      pendingSituationUpdates = [];
+      const situationPath = join(lastWorkspaceDir, "SITUATION.md");
+      const tmpPath = situationPath + ".rpc.tmp";
+      try {
+        writeFileSync(tmpPath, latest, "utf-8");
+        renameSync(tmpPath, situationPath);
+        api.logger.info(`sinain-hud: flushed queued SITUATION.md (${latest.length} chars)`);
+      } catch (err: any) {
+        api.logger.warn(`sinain-hud: failed to flush queued situation update: ${err.message}`);
+      }
+    }
+
     const sessionKey = ctx.sessionKey;
     if (sessionKey) {
       const state = sessionStates.get(sessionKey);
@@ -741,8 +766,8 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           if (parsed && typeof parsed.avg === "number") {
             cachedFeedbackSummary = {
               avg: parsed.avg,
-              high: Array.isArray(parsed.high) ? parsed.high : [],
-              low: Array.isArray(parsed.low) ? parsed.low : [],
+              high: parseTagScores(parsed.high),
+              low: parseTagScores(parsed.low),
             };
             api.logger.info(`sinain-hud: loaded cached feedback summary from disk (avg=${parsed.avg})`);
           }

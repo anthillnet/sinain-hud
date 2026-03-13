@@ -35,6 +35,7 @@ void main() async {
         final visible = call.arguments as bool;
         if (!visible) {
           await settingsService.setDisplayMode(DisplayMode.hidden);
+          wsService.sendEngagement('dismissed');
         } else if (settingsService.settings.displayMode == DisplayMode.hidden) {
           await settingsService.setDisplayMode(DisplayMode.feed);
         }
@@ -47,6 +48,9 @@ void main() async {
           orElse: () => DisplayMode.feed,
         );
         await settingsService.setDisplayMode(mode);
+        if (mode == DisplayMode.hidden) {
+          wsService.sendEngagement('dismissed');
+        }
       case 'onQuit':
         wsService.disconnect();
       case 'onToggleAudio':
@@ -57,12 +61,14 @@ void main() async {
         wsService.toggleAudioFeed();
       case 'onScrollFeed':
         wsService.scrollFeed(call.arguments as String);
+        wsService.sendEngagement('scroll');
       case 'onToggleScreen':
         wsService.sendCommand('toggle_screen');
       case 'onToggleScreenFeed':
         wsService.toggleScreenFeed();
       case 'onCopyMessage':
         wsService.requestCopy(settingsService.settings.activeTab.name);
+        wsService.sendEngagement('copy');
       case 'onCycleTab':
         settingsService.cycleTab();
       case 'onTogglePosition':
