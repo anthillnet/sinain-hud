@@ -1,17 +1,18 @@
 {
   "models": {
     "fast": "google/gemini-3-flash-preview",
+    "mid": "google/gemini-2.5-flash",
     "smart": "anthropic/claude-sonnet-4.6"
   },
   "scripts": {
     "signal_analyzer":    { "model": "fast",  "maxTokens": 1500 },
     "feedback_analyzer":  { "model": "fast",  "maxTokens": 800 },
-    "memory_miner":       { "model": "smart", "maxTokens": 1500 },
+    "memory_miner":       { "model": "mid",   "maxTokens": 1500 },
     "playbook_curator":   { "model": "fast",  "maxTokens": 3000, "timeout": 90 },
-    "insight_synthesizer": { "model": "smart", "maxTokens": 800 },
+    "insight_synthesizer": { "model": "mid",  "maxTokens": 800 },
     "module_manager":      { "model": "fast",  "maxTokens": 2000 },
-    "tick_evaluator":      { "model": "smart", "maxTokens": 200, "timeout": 30 },
-    "eval_reporter":       { "model": "smart", "maxTokens": 1000 },
+    "tick_evaluator":      { "model": "mid",   "maxTokens": 200, "timeout": 30 },
+    "eval_reporter":       { "model": "mid",   "maxTokens": 1000 },
     "triple_extractor":    { "model": "fast",  "maxTokens": 1500, "timeout": 30 }
   },
   "defaults": { "model": "fast", "maxTokens": 1500 },
@@ -25,7 +26,7 @@
     "level": "sampled",
     "sampleRate": 0.3,
     "judges": {
-      "model": "smart",
+      "model": "mid",
       "maxTokens": 200,
       "timeout": 30
     },
