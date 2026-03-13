@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { FeedbackRecord, FeedbackSignals } from "../types.js";
+import type { FeedbackRecord, FeedbackSignals, FeedbackSummary } from "../types.js";
 import { log, error } from "../log.js";
 
 const TAG = "feedback-store";
@@ -176,6 +176,49 @@ export class FeedbackStore {
       avgCompositeScore: avgScore !== null ? Math.round(avgScore * 1000) / 1000 : null,
       avgLatencyMs: Math.round(records.reduce((s, r) => s + r.responseLatencyMs, 0) / records.length),
       topTags: Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10),
+    };
+  }
+
+  /** Aggregate feedback summary for the last N days — used for `feedback.report` RPC push. */
+  getSummary(days = 3): FeedbackSummary {
+    const records: FeedbackRecord[] = [];
+    const today = new Date();
+    for (let d = 0; d < days; d++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - d);
+      records.push(...this.queryDay(date.toISOString().slice(0, 10)));
+    }
+
+    // Only records with a meaningful compositeScore (non-zero or explicit signal collected)
+    const scored = records.filter(
+      r => r.signals.compositeScore !== 0 || r.signals.errorCleared !== null,
+    );
+
+    if (scored.length === 0) {
+      return { avg: 0, high: [], low: [], count: 0, since: "" };
+    }
+
+    const scores = scored.map(r => r.signals.compositeScore);
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+    const highSet = new Set<string>();
+    const lowSet = new Set<string>();
+    for (const r of scored) {
+      if (r.signals.compositeScore > 0.5) {
+        for (const reason of r.escalationReasons) highSet.add(reason);
+      } else if (r.signals.compositeScore < -0.2) {
+        for (const reason of r.escalationReasons) lowSet.add(reason);
+      }
+    }
+
+    const oldest = scored.reduce((min, r) => r.ts < min ? r.ts : min, scored[0].ts);
+
+    return {
+      avg: Math.round(avg * 1000) / 1000,
+      high: Array.from(highSet).slice(0, 10),
+      low: Array.from(lowSet).slice(0, 10),
+      count: scored.length,
+      since: new Date(oldest).toISOString(),
     };
   }
 

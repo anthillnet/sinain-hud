@@ -1,11 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { ContextWindow, AgentEntry, RecorderStatus } from "../types.js";
 import type { EscalationScore } from "../escalation/scorer.js";
 import { normalizeAppName } from "./context-window.js";
-import { log, error } from "../log.js";
-
-const TAG = "situation";
 
 /**
  * Error stack trace patterns for extraction.
@@ -30,34 +25,16 @@ function extractErrors(text: string): string[] {
 }
 
 /**
- * Atomically write SITUATION.md for OpenClaw bootstrap.
- * Ported from relay's writeSituationMd() — uses write-then-rename for atomicity.
- *
- * Enhanced with:
- * - Escalation context (score and reasons)
- * - Detected errors section
- * - Active recording status
+ * Build SITUATION.md content for pushing to the OpenClaw gateway via RPC.
+ * Pure function — no file I/O. Content is sent remotely via situation.update RPC.
  */
-export function writeSituationMd(
-  situationMdPath: string,
+export function buildSituationContent(
   contextWindow: ContextWindow,
   digest: string,
   entry: AgentEntry,
   escalationScore?: EscalationScore,
   recorderStatus?: RecorderStatus | null,
 ): string {
-  const dir = path.dirname(situationMdPath);
-  const tmpPath = situationMdPath + ".tmp";
-
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch (err: any) {
-    if (err.code !== "EEXIST") {
-      error(TAG, "mkdir failed:", err.message);
-      return "";
-    }
-  }
-
   const now = new Date();
   const lines: string[] = [];
 
@@ -157,15 +134,5 @@ export function writeSituationMd(
   lines.push(`- Parsed OK: ${entry.parsedOk}`);
   lines.push("");
 
-  const content = lines.join("\n");
-
-  try {
-    fs.writeFileSync(tmpPath, content, "utf-8");
-    fs.renameSync(tmpPath, situationMdPath);
-  } catch (err: any) {
-    error(TAG, "write failed:", err.message);
-    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-  }
-
-  return content;
+  return lines.join("\n");
 }
