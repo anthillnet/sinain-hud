@@ -15,6 +15,7 @@ import concurrent.futures
 import json
 import os
 import time
+from datetime import datetime, timezone
 
 import numpy as np
 import requests as _requests
@@ -39,9 +40,19 @@ if sys.platform == "win32":
 else:
     CONTROL_FILE = "/tmp/sinain-sense-control.json"
 
+_log_file = None
+
 
 def log(msg: str):
-    print(f"[sense] {msg}", flush=True)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    line = f"{ts} [sense] {msg}"
+    print(line)
+    if _log_file:
+        try:
+            _log_file.write(line + "\n")
+            _log_file.flush()
+        except Exception:
+            pass
 
 
 def _gate_reason(gate, change, ocr, app_changed, window_changed):
@@ -90,10 +101,17 @@ def is_enabled(control_path: str) -> bool:
 
 
 def main():
+    global _log_file
     parser = argparse.ArgumentParser(description="Sinain screen capture pipeline")
     parser.add_argument("--config", default=None, help="Path to config JSON")
     parser.add_argument("--control", default=CONTROL_FILE, help="Path to control file")
+    parser.add_argument("--log-file", default=None, help="Append timestamped logs to this file")
     args = parser.parse_args()
+
+    if args.log_file:
+        log_path = os.path.expanduser(args.log_file)
+        os.makedirs(os.path.dirname(log_path) if os.path.dirname(log_path) else ".", exist_ok=True)
+        _log_file = open(log_path, "a", encoding="utf-8")
 
     config = load_config(args.config)
 

@@ -39,6 +39,7 @@ export class OpenClawWsClient extends EventEmitter {
   // Circuit breaker (time-window based)
   private recentFailures: number[] = [];  // timestamps of recent failures
   private circuitOpen = false;
+  private circuitOpenedAt = 0;
   private circuitResetTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly CIRCUIT_THRESHOLD = 5;
   private static readonly CIRCUIT_WINDOW_MS = 2 * 60 * 1000; // 2-minute sliding window
@@ -129,7 +130,8 @@ export class OpenClawWsClient extends EventEmitter {
     sessionKey: string,
   ): Promise<any> {
     if (this.circuitOpen) {
-      warn(TAG, "sendAgentRpc: circuit breaker open — skipping");
+      const remainingMs = Math.max(0, Math.round((this.circuitOpenedAt + this.circuitResetDelay / 2 - Date.now()) / 1000));
+      warn(TAG, `sendAgentRpc BLOCKED: circuit breaker open (opened ${Math.round((Date.now() - this.circuitOpenedAt) / 1000)}s ago, resets in ~${remainingMs}s)`);
       return null;
     }
     log(TAG, `sendAgentRpc: session=${sessionKey} idemKey=${idemKey} msgLen=${message.length}`);
@@ -138,7 +140,7 @@ export class OpenClawWsClient extends EventEmitter {
       idempotencyKey: idemKey,
       sessionKey,
       deliver: false,
-    }, 120000, { expectFinal: true });
+    }, 30000, { expectFinal: true });
     if (result?.ok) {
       this.circuitResetDelay = 300_000; // reset backoff on success
     }
@@ -293,7 +295,7 @@ export class OpenClawWsClient extends EventEmitter {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           const elapsed = Date.now() - sentAt;
-          warn(TAG, `rpc ${id} (${method}): TIMEOUT after ${elapsed}ms`);
+          warn(TAG, `rpc ${id} (${method}): TIMEOUT after ${elapsed}ms — escalationInFlight will release (failures=${this.recentFailures.length + 1}/${OpenClawWsClient.CIRCUIT_THRESHOLD})`);
           this.onRpcFailure();
           reject(new Error(`rpc timeout: ${method}`));
         }
@@ -370,12 +372,14 @@ export class OpenClawWsClient extends EventEmitter {
     const cutoff = now - OpenClawWsClient.CIRCUIT_WINDOW_MS;
     this.recentFailures = this.recentFailures.filter(ts => ts > cutoff);
 
+    log(TAG, `onRpcFailure: ${this.recentFailures.length}/${OpenClawWsClient.CIRCUIT_THRESHOLD} failures in window`);
     if (this.recentFailures.length >= 3) {
       warn(TAG, `${this.recentFailures.length} RPC failures in last ${OpenClawWsClient.CIRCUIT_WINDOW_MS / 1000}s (threshold: ${OpenClawWsClient.CIRCUIT_THRESHOLD})`);
     }
 
     if (this.recentFailures.length >= OpenClawWsClient.CIRCUIT_THRESHOLD && !this.circuitOpen) {
       this.circuitOpen = true;
+      this.circuitOpenedAt = Date.now();
       // Add 0-30s random jitter to prevent thundering herd on service recovery
       const jitterMs = Math.floor(Math.random() * 30000);
       const resetDelayMs = this.circuitResetDelay + jitterMs;

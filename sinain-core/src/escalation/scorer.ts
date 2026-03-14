@@ -1,4 +1,7 @@
 import type { ContextWindow, EscalationMode } from "../types.js";
+import { log } from "../log.js";
+
+const TAG = "scorer";
 
 /**
  * Score-based escalation decision with documented thresholds.
@@ -141,26 +144,52 @@ export function shouldEscalate(
   staleMs: number = 0,
 ): { escalate: boolean; score: EscalationScore; stale: boolean } {
   const score = calculateEscalationScore(digest, contextWindow);
+  const lastEscalationAge = Date.now() - lastEscalationTs;
+  log(TAG, `shouldEscalate: mode=${mode} cooldown=${cooldownMs}ms staleMs=${staleMs} lastEscalationAge=${lastEscalationAge}ms score=${score.total} reasons=[${score.reasons.join(",")}] hud="${hud.slice(0, 40)}"`);
 
-  if (mode === "off") return { escalate: false, score, stale: false };
+  if (mode === "off") {
+    log(TAG, "suppressed: mode=off");
+    return { escalate: false, score, stale: false };
+  }
 
-  // Cooldown check
-  if (Date.now() - lastEscalationTs < cooldownMs) return { escalate: false, score, stale: false };
+  // Rich/focus: always escalate — bypasses cooldown, idle guard, and dedup
+  if (mode === "focus" || mode === "rich") {
+    log(TAG, "escalating: rich/focus mode bypass");
+    return { escalate: true, score, stale: false };
+  }
+
+  // Cooldown check (selective mode only)
+  if (lastEscalationAge < cooldownMs) {
+    const remaining = Math.round((cooldownMs - lastEscalationAge) / 1000);
+    log(TAG, `suppressed: cooldown active (${remaining}s remaining)`);
+    return { escalate: false, score, stale: false };
+  }
 
   // Stale override: force escalation after prolonged silence (even when idle)
-  if (staleMs > 0 && Date.now() - lastEscalationTs > staleMs) {
+  if (staleMs > 0 && lastEscalationAge > staleMs) {
+    log(TAG, "escalating: stale override");
     return { escalate: true, score, stale: true };
   }
 
-  // Don't escalate idle
-  if (hud === "Idle" || hud === "\u2014") return { escalate: false, score, stale: false };
-
-  // Focus mode: always escalate (even if digest unchanged)
-  if (mode === "focus" || mode === "rich") return { escalate: true, score, stale: false };
+  // Don't escalate idle (selective mode only)
+  if (hud === "Idle" || hud === "\u2014") {
+    log(TAG, `suppressed: hud idle ("${hud}")`);
+    return { escalate: false, score, stale: false };
+  }
 
   // Selective mode: dedup identical digests
-  if (digest === lastEscalatedDigest) return { escalate: false, score, stale: false };
+  if (digest === lastEscalatedDigest) {
+    log(TAG, "suppressed: digest unchanged");
+    return { escalate: false, score, stale: false };
+  }
 
   // Selective mode: score-based
-  return { escalate: score.total >= ESCALATION_THRESHOLD, score, stale: false };
+  if (score.total < ESCALATION_THRESHOLD) {
+    log(TAG, `suppressed: score too low (${score.total} < ${ESCALATION_THRESHOLD})`);
+    return { escalate: false, score, stale: false };
+  }
+
+  const reasons = score.reasons.join(",");
+  log(TAG, `escalating: score ${score.total} reasons=[${reasons}]`);
+  return { escalate: true, score, stale: false };
 }

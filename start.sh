@@ -296,7 +296,7 @@ if $SKIP_SENSE; then
   warn "sense_client skipped"
 else
   log "Starting sense_client..."
-  (cd "$SCRIPT_DIR" && python3 -m sense_client) 2>&1 | sed -u "s/^/$(printf "${YELLOW}[sense]${RESET}   ")/" &
+  (cd "$SCRIPT_DIR" && python3 -m sense_client --log-file ~/.sinain/sense.log) 2>&1 | sed -u "s/^/$(printf "${YELLOW}[sense]${RESET}   ")/" &
   SENSE_PID=$!
   PIDS+=("$SENSE_PID")
   sleep 1
