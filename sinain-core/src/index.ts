@@ -125,17 +125,22 @@ async function main() {
 
   // Wire: mute system audio during TTS to prevent feedback loop
   let ttsMutedAudio = false;
+  let wasMutedBeforeTts = false;
   ttsSpeaker.setSuppressCallbacks(
     () => {
-      if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
+      wasMutedBeforeTts = systemAudioPipeline.isMuted();
+      if (systemAudioPipeline.isRunning() && !wasMutedBeforeTts) {
         systemAudioPipeline.mute();
         ttsMutedAudio = true;
       }
     },
     () => {
       if (ttsMutedAudio) {
-        systemAudioPipeline.unmute();
+        if (!wasMutedBeforeTts && systemAudioPipeline.isMuted()) {
+          systemAudioPipeline.unmute();
+        }
         ttsMutedAudio = false;
+        wasMutedBeforeTts = false;
       }
     },
   );

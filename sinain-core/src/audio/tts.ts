@@ -37,7 +37,7 @@ export class TtsSpeaker {
 
     // Cooldown — prevent feedback loops
     const now = Date.now();
-    if (now - this.lastSpeakTs < COOLDOWN_MS) return;
+    if (now - this.lastSpeakTs < COOLDOWN_MS && !this.speaking) return;
 
     // Sanitize: strip [emoji] prefixes, markdown, and truncate
     const clean = text
@@ -69,6 +69,7 @@ export class TtsSpeaker {
       if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
         warn(TAG, "`say` command not found — TTS disabled");
         this.broken = true;
+        this.enabled = false;
       }
       this.proc = null;
       if (this.speaking) {
