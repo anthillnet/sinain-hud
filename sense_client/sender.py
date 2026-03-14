@@ -71,29 +71,29 @@ class SenseSender:
 
                 if resp.status_code == 200:
                     if self._consecutive_failures > 0:
-                        print(f"[sender] reconnected after {self._consecutive_failures} failure(s)")
+                        print(f"[sender] reconnected after {self._consecutive_failures} failure(s)", flush=True)
                     self._consecutive_failures = 0
                     return True
 
                 # Non-200 but not an exception — log and retry
-                print(f"[sender] HTTP {resp.status_code} on attempt {attempt + 1}/{_MAX_RETRIES}")
+                print(f"[sender] HTTP {resp.status_code} on attempt {attempt + 1}/{_MAX_RETRIES}", flush=True)
 
             except requests.exceptions.ConnectionError as e:
-                print(f"[sender] connection error (attempt {attempt + 1}/{_MAX_RETRIES}): {e}")
+                print(f"[sender] connection error (attempt {attempt + 1}/{_MAX_RETRIES}): {e}", flush=True)
             except requests.exceptions.Timeout:
-                print(f"[sender] timeout (attempt {attempt + 1}/{_MAX_RETRIES})")
+                print(f"[sender] timeout (attempt {attempt + 1}/{_MAX_RETRIES})", flush=True)
             except Exception as e:
-                print(f"[sender] unexpected error (attempt {attempt + 1}/{_MAX_RETRIES}): {e}")
+                print(f"[sender] unexpected error (attempt {attempt + 1}/{_MAX_RETRIES}): {e}", flush=True)
 
             # Don't sleep after the last attempt
             if attempt < _MAX_RETRIES - 1:
                 delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
-                print(f"[sender] retrying in {delay:.1f}s...")
+                print(f"[sender] retrying in {delay:.1f}s...", flush=True)
                 time.sleep(delay)
 
         self._consecutive_failures += 1
         if self._consecutive_failures == 1 or self._consecutive_failures % 10 == 0:
-            print(f"[sender] all {_MAX_RETRIES} attempts failed (consecutive failures: {self._consecutive_failures})")
+            print(f"[sender] all {_MAX_RETRIES} attempts failed (consecutive failures: {self._consecutive_failures})", flush=True)
         return False
 
     def _maybe_log_stats(self):
@@ -106,7 +106,7 @@ class SenseSender:
         sorted_lat = sorted(self._latencies)
         p50 = sorted_lat[len(sorted_lat) // 2]
         p95 = sorted_lat[int(len(sorted_lat) * 0.95)]
-        print(f"[sender] relay latency: p50={p50:.0f}ms p95={p95:.0f}ms (n={len(sorted_lat)})")
+        print(f"[sender] relay latency: p50={p50:.0f}ms p95={p95:.0f}ms (n={len(sorted_lat)})", flush=True)
         self._latencies.clear()
         self._last_stats_ts = now
 

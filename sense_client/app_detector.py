@@ -1,10 +1,11 @@
-"""Detect the frontmost application and window title on macOS."""
+"""Detect the frontmost application and window title (cross-platform)."""
 
 import subprocess
+import sys
 
 
-class AppDetector:
-    """Detects the frontmost application and window title on macOS."""
+class MacAppDetector:
+    """Detects the frontmost application and window title on macOS via AppleScript."""
 
     def __init__(self):
         self._last_app: str = ""
@@ -43,3 +44,11 @@ class AppDetector:
         self._last_app = app
         self._last_window = window
         return app_changed, window_changed, app, window
+
+
+def AppDetector():
+    """Factory: returns the platform-appropriate app detector."""
+    if sys.platform == "win32":
+        from .app_detector_win import WinAppDetector
+        return WinAppDetector()
+    return MacAppDetector()
