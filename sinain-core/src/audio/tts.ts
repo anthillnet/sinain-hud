@@ -59,7 +59,7 @@ export class TtsSpeaker {
     const args: string[] = [];
     if (this.voice) args.push("-v", this.voice);
     if (this.rate) args.push("-r", String(this.rate));
-    args.push(clean);
+    args.push("--", clean);
 
     this.speaking = true;
     this.onSpeakStart?.();
@@ -70,6 +70,8 @@ export class TtsSpeaker {
         warn(TAG, "`say` command not found — TTS disabled");
         this.broken = true;
         this.enabled = false;
+      } else if (err) {
+        warn(TAG, "`say` failed:", (err as Error).message);
       }
       this.proc = null;
       if (this.speaking) {
@@ -92,6 +94,7 @@ export class TtsSpeaker {
   }
 
   toggle(): boolean {
+    if (this.broken) return false;
     this.enabled = !this.enabled;
     if (!this.enabled) this.cancel();
     log(TAG, `TTS ${this.enabled ? "enabled" : "disabled"}`);
