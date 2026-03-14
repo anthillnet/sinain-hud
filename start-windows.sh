@@ -117,18 +117,37 @@ cleanup() {
   echo ""
   log "Shutting down services..."
 
+  # Kill tracked pipeline PIDs (sed wrappers)
   if [ ${#PIDS[@]} -gt 0 ]; then
     for pid in "${PIDS[@]}"; do
       taskkill //F //PID "$pid" >/dev/null 2>&1 || true
     done
   fi
 
-  # Also kill by port in case PIDs are stale
+  # Kill actual child processes by name — pipeline PIDs are sed wrappers,
+  # not the real node/python/overlay processes, so we must kill by image name.
+  taskkill //F //IM sinain_hud.exe >/dev/null 2>&1 || true
+
+  # Kill sinain-core by port
   local pid
   pid=$(netstat -ano 2>/dev/null | grep ":9500.*LISTEN" | awk '{print $NF}' | head -1 || true)
   if [ -n "$pid" ] && [ "$pid" != "0" ]; then
     taskkill //F //PID "$pid" >/dev/null 2>&1 || true
   fi
+
+  # Kill nanoclaw by port if started
+  if $USE_NANOCLAW; then
+    pid=$(netstat -ano 2>/dev/null | grep ":18789.*LISTEN" | awk '{print $NF}' | head -1 || true)
+    if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+      taskkill //F //PID "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # Kill sense_client python processes (match the module invocation)
+  tasklist 2>/dev/null | grep -i "python" | awk '{print $2}' | while read ppid; do
+    wmic process where "ProcessId=$ppid" get CommandLine 2>/dev/null | grep -q "sense_client" && \
+      taskkill //F //PID "$ppid" >/dev/null 2>&1 || true
+  done
 
   rm -f "$PID_FILE"
   log "All services stopped."
@@ -195,7 +214,9 @@ APPDATA_DIR="${APPDATA:-$HOME/AppData/Roaming}"
 mkdir -p "$APPDATA_DIR/sinain/capture"
 mkdir -p "$APPDATA_DIR/sinain/feedback"
 mkdir -p "$APPDATA_DIR/sinain/traces"
+mkdir -p "$APPDATA_DIR/sinain/logs"
 mkdir -p "$APPDATA_DIR/openclaw/workspace"
+LOG_DIR="$APPDATA_DIR/sinain/logs"
 
 echo ""
 
@@ -226,7 +247,7 @@ fi
 NANOCLAW_PID=""
 if $USE_NANOCLAW; then
   log "Starting nanoclaw..."
-  (cd "$NANOCLAW_DIR" && npm run dev 2>&1) | sed -u "s/^/$(printf "${BLUE}[nanoclaw]${RESET} ")/" &
+  (cd "$NANOCLAW_DIR" && npm run dev 2>&1) | tee -a "$LOG_DIR/nanoclaw.log" | sed -u "s/^/$(printf "${BLUE}[nanoclaw]${RESET} ")/" &
   NANOCLAW_PID=$!
   PIDS+=("$NANOCLAW_PID")
 
@@ -249,7 +270,7 @@ fi
 
 # ── 4. Start sinain-core ─────────────────────────────────────────────────────
 log "Starting sinain-core..."
-(cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | sed -u "s/^/$(printf "${CYAN}[core]${RESET}    ")/" &
+(cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | tee -a "$LOG_DIR/core.log" | sed -u "s/^/$(printf "${CYAN}[core]${RESET}    ")/" &
 CORE_PID=$!
 PIDS+=("$CORE_PID")
 
@@ -274,15 +295,38 @@ if $SKIP_SENSE; then
   warn "sense_client skipped"
 else
   log "Starting sense_client..."
-  (cd "$SCRIPT_DIR" && $PYTHON_CMD -m sense_client 2>&1) | sed -u "s/^/$(printf "${YELLOW}[sense]${RESET}   ")/" &
+  (cd "$SCRIPT_DIR" && $PYTHON_CMD -m sense_client 2>&1) | tee -a "$LOG_DIR/sense.log" | sed -u "s/^/$(printf "${YELLOW}[sense]${RESET}   ")/" &
   SENSE_PID=$!
   PIDS+=("$SENSE_PID")
   sleep 2
-  if kill -0 "$SENSE_PID" 2>/dev/null; then
-    ok "sense_client running (pid:$SENSE_PID)"
-  else
-    warn "sense_client exited early — check logs above"
+  if ! kill -0 "$SENSE_PID" 2>/dev/null; then
+    warn "sense_client exited early — check $LOG_DIR/sense.log"
     SENSE_PID=""
+  else
+    # PID exists, but verify sinain-core actually received sense events
+    SENSE_HEALTHY=false
+    for i in $(seq 1 13); do
+      SENSE_EVENTS=$(curl -sf http://localhost:9500/health 2>/dev/null \
+        | $PYTHON_CMD -c "import sys,json; print(json.load(sys.stdin).get('senseEvents',0))" 2>/dev/null || echo "0")
+      if [ "$SENSE_EVENTS" -gt 0 ] 2>/dev/null; then
+        SENSE_HEALTHY=true
+        break
+      fi
+      # Re-check that process hasn't died while waiting
+      if ! kill -0 "$SENSE_PID" 2>/dev/null; then
+        warn "sense_client crashed during init — check $LOG_DIR/sense.log"
+        SENSE_PID=""
+        break
+      fi
+      sleep 1
+    done
+    if [ -n "$SENSE_PID" ]; then
+      if $SENSE_HEALTHY; then
+        ok "sense_client running (pid:$SENSE_PID, events:$SENSE_EVENTS)"
+      else
+        warn "sense_client running (pid:$SENSE_PID) but 0 events after 15s — may be frozen, check $LOG_DIR/sense.log"
+      fi
+    fi
   fi
 fi
 
@@ -305,7 +349,7 @@ else
   fi
   if [ -n "$OVERLAY_EXE" ]; then
     log "Starting overlay..."
-    "$OVERLAY_EXE" &
+    "$OVERLAY_EXE" 2>&1 | tee -a "$LOG_DIR/overlay.log" &
     OVERLAY_PID=$!
     PIDS+=("$OVERLAY_PID")
     sleep 2
@@ -359,6 +403,7 @@ else
 fi
 
 echo -e "${BOLD}───────────────────────────────────────────${RESET}"
+echo -e "  ${DIM}logs${RESET}     $LOG_DIR/"
 echo -e "  Press ${BOLD}Ctrl+C${RESET} to stop all services"
 echo -e "${BOLD}───────────────────────────────────────────${RESET}"
 echo ""
