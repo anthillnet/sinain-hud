@@ -32,6 +32,7 @@ export interface ServerDeps {
   getAgentConfig: () => unknown;
   updateAgentConfig: (updates: Record<string, unknown>) => unknown;
   getTraces: (after: number, limit: number) => unknown[];
+  reconnectGateway: () => void;
   feedbackStore?: FeedbackStore;
 }
 
@@ -240,6 +241,13 @@ export function createAppServer(deps: ServerDeps) {
         }
         const stats = deps.feedbackStore.getStats();
         res.end(JSON.stringify({ ok: true, ...stats }));
+        return;
+      }
+
+      // ── /reconnect-gateway ──
+      if (req.method === "POST" && url.pathname === "/reconnect-gateway") {
+        deps.reconnectGateway();
+        res.end(JSON.stringify({ ok: true, message: "gateway reconnection initiated" }));
         return;
       }
 
