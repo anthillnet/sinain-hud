@@ -30,7 +30,7 @@ export interface EscalatorDeps {
  */
 export class Escalator {
   private wsClient: OpenClawWsClient;
-  private lastEscalationTs = Date.now();
+  private lastEscalationTs = 0;
   private lastEscalatedDigest = "";
 
   // Prevent concurrent escalation RPCs (only 1 in-flight at a time)
@@ -95,6 +95,7 @@ export class Escalator {
 
   /** Start the WS connection to OpenClaw. */
   start(): void {
+    log(TAG, "escalator initialized: lastEscalationTs=0 (escalation unblocked from first tick)");
     if (this.deps.escalationConfig.mode !== "off") {
       // Resume polling for any tasks recovered from disk (these survived a crash).
       // We defer to "connected" so the WS is ready before the first poll fires.
@@ -836,6 +837,8 @@ ${recentLines.join("\n")}`;
       log(TAG, "no WS and no hookUrl \u2014 escalation skipped");
     }
     } finally {
+      const heldMs = Math.round((Date.now() - this.escalationInFlightSince) / 1000);
+      log(TAG, `escalationInFlight=false (was held ${heldMs}s)`);
       this.escalationInFlight = false;
     }
   }
