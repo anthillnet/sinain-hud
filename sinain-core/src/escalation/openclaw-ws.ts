@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import WebSocket from "ws";
 import type { OpenClawConfig } from "../types.js";
 import { log, warn, error } from "../log.js";
@@ -154,6 +155,19 @@ export class OpenClawWsClient extends EventEmitter {
     return this.circuitOpen;
   }
 
+  /** Force reconnection — resets stopped state and reconnect delay. */
+  resetConnection(): void {
+    log(TAG, "resetConnection: clearing stopped state, reconnecting");
+    this.stopped = false;
+    this.reconnectDelay = 1000;
+    if (this.ws) {
+      try { this.ws.close(1000, "reset"); } catch {}
+      this.ws = null;
+      this.authenticated = false;
+    }
+    this.connect();
+  }
+
   /** Graceful disconnect — does not schedule reconnect. */
   disconnect(): void {
     log(TAG, `disconnect: stopping (pending=${this.pending.size})`);
@@ -171,7 +185,10 @@ export class OpenClawWsClient extends EventEmitter {
   private handleMessage(msg: any): void {
     // Handle connect.challenge
     if (msg.type === "event" && msg.event === "connect.challenge") {
-      log(TAG, "received connect.challenge — sending auth");
+      const tokenHash = this.config.gatewayToken
+        ? createHash("sha256").update(this.config.gatewayToken).digest("hex").slice(0, 12)
+        : "none";
+      log(TAG, `received connect.challenge — sending auth (tokenHash=${tokenHash})`);
       this.ws?.send(JSON.stringify({
         type: "req",
         id: "connect-1",
@@ -208,10 +225,11 @@ export class OpenClawWsClient extends EventEmitter {
           || msg.payload?.error?.details?.authReason;
         error(TAG, `auth failed: ${JSON.stringify(errInfo)}`);
 
-        // Permanent auth errors — don't retry, token won't fix itself
+        // Auth errors — retry with long backoff (token may become valid after gateway restart)
         if (authReason === "token_mismatch") {
-          error(TAG, "permanent auth failure (token_mismatch) — stopping. Check OPENCLAW_GATEWAY_TOKEN.");
-          this.disconnect();
+          error(TAG, "auth failure (token_mismatch) — will retry with long backoff. Check OPENCLAW_GATEWAY_TOKEN.");
+          this.reconnectDelay = Math.min(this.reconnectDelay * 4, this.maxReconnectDelay);
+          this.ws?.close();
           return;
         }
 
