@@ -1,13 +1,9 @@
 import { EventEmitter } from "node:events";
-import os from "node:os";
-import { spawn, type ChildProcess } from "node:child_process";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import type { ChildProcess } from "node:child_process";
 import type { AudioPipelineConfig, AudioChunk, AudioSourceTag } from "../types.js";
+import type { CaptureSpawner } from "./capture-spawner.js";
 import type { Profiler } from "../profiler.js";
 import { log, warn, error, debug } from "../log.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TAG = "audio";
 
@@ -74,6 +70,7 @@ const PREALLOC_BUFFER_SIZE = 320 * 1024;
 export class AudioPipeline extends EventEmitter {
   private config: AudioPipelineConfig;
   private audioSourceTag: AudioSourceTag;
+  private captureSpawner: CaptureSpawner;
   private process: ChildProcess | null = null;
   // Pre-allocated buffer to reduce GC pressure (vs Buffer.concat per chunk)
   private preallocBuffer: Buffer = Buffer.allocUnsafe(PREALLOC_BUFFER_SIZE);
@@ -91,10 +88,12 @@ export class AudioPipeline extends EventEmitter {
 
   setProfiler(p: Profiler): void { this.profiler = p; }
 
-  constructor(config: AudioPipelineConfig, audioSourceTag: AudioSourceTag = "system") {
+  constructor(config: AudioPipelineConfig, audioSourceTag: AudioSourceTag = "system", captureSpawner?: CaptureSpawner) {
     super();
     this.config = config;
     this.audioSourceTag = audioSourceTag;
+    // If no spawner provided, lazily import the platform default
+    this.captureSpawner = captureSpawner!;
   }
 
   start(): void {
@@ -106,7 +105,7 @@ export class AudioPipeline extends EventEmitter {
     log(TAG, `starting capture: source=${this.audioSourceTag} device=${this.config.device} rate=${this.config.sampleRate}`);
 
     try {
-      this.spawnSckCapture();
+      this.spawnCaptureProcess();
     } catch (err) {
       error(TAG, "failed to spawn capture process:", err);
       this.emit("error", err);
@@ -200,36 +199,12 @@ export class AudioPipeline extends EventEmitter {
     return this.audioSourceTag === "system";
   }
 
-  // ── sck-capture spawn (system audio + screen, or mic-only) ──
+  // ── Capture process spawn (platform-dispatched via CaptureSpawner) ──
 
-  private spawnSckCapture(): void {
-    const binaryPath = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
-    const args = [
-      "--sample-rate", String(this.config.sampleRate),
-      "--channels", String(this.config.channels),
-    ];
-
-    if (this.audioSourceTag === "mic") {
-      // Mic mode: AVAudioEngine, no SCStream
-      args.push("--mic");
-      if (this.config.device !== "default") {
-        args.push("--mic-device", this.config.device);
-      }
-    } else {
-      // System mode: ScreenCaptureKit (audio + screen)
-      args.push(
-        "--screen-dir", resolve(os.homedir(), ".sinain", "capture"),
-        "--fps", "1",
-        "--scale", "0.5",
-      );
-    }
-
-    log(TAG, `spawning: ${binaryPath} ${args.join(" ")}`);
-
-    this.process = spawn(binaryPath, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    this.wireProcessEvents("sck-capture");
+  private spawnCaptureProcess(): void {
+    this.process = this.captureSpawner.spawn(this.config, this.audioSourceTag);
+    const name = process.platform === "win32" ? "win-audio-capture" : "sck-capture";
+    this.wireProcessEvents(name);
   }
 
   // ── Process event wiring ──

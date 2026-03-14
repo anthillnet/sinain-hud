@@ -35,6 +35,8 @@ export class Escalator {
 
   // Prevent concurrent escalation RPCs (only 1 in-flight at a time)
   private escalationInFlight = false;
+  private escalationInFlightSince = 0;
+  private static readonly INFLIGHT_TIMEOUT_MS = 120_000; // 2 min safety valve
 
   // Periodic feedback summary push
   private feedbackPushInterval: ReturnType<typeof setInterval> | null = null;
@@ -111,7 +113,10 @@ export class Escalator {
       this.feedbackPushInterval = setInterval(() => this.pushFeedbackSummary(), 10 * 60_000);
 
       this.wsClient.connect();
-      log(TAG, `mode: ${this.deps.escalationConfig.mode}`);
+      const tokenHash = this.deps.openclawConfig.gatewayToken
+        ? createHash("sha256").update(this.deps.openclawConfig.gatewayToken).digest("hex").slice(0, 12)
+        : "none";
+      log(TAG, `mode: ${this.deps.escalationConfig.mode}, tokenHash: ${tokenHash}, wsUrl: ${this.deps.openclawConfig.gatewayWsUrl}`);
     }
   }
 
@@ -129,7 +134,7 @@ export class Escalator {
     const wasOff = this.deps.escalationConfig.mode === "off";
     this.deps.escalationConfig.mode = mode;
     if (mode !== "off" && !this.wsClient.isConnected) {
-      this.wsClient.connect();
+      this.wsClient.resetConnection();
     }
     if (mode === "off") {
       this.wsClient.disconnect();
@@ -148,6 +153,7 @@ export class Escalator {
   onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): void {
     // Skip entire escalation pipeline when circuit is open — saves scoring + message construction
     if (this.wsClient.isCircuitOpen && !this.deps.openclawConfig.hookUrl) {
+      log(TAG, `tick #${entry.id}: skipped — circuit breaker open, no hookUrl`);
       return;
     }
 
@@ -162,7 +168,10 @@ export class Escalator {
       this.deps.escalationConfig.staleMs,
     );
 
-    if (!escalate) return;
+    if (!escalate) {
+      log(TAG, `tick #${entry.id}: not escalating (mode=${this.deps.escalationConfig.mode}, score=${score.total}, hud="${entry.hud.slice(0, 40)}")`);
+      return;
+    }
 
     // Mark cooldown immediately
     this.stats.totalEscalations++;
@@ -190,15 +199,23 @@ export class Escalator {
     const idemKey = `hud-${entry.id}`;
 
     const staleTag = stale ? ", STALE" : "";
-    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag})`);
+    const wsState = this.wsClient.isConnected ? "ws=connected" : this.wsClient.isCircuitOpen ? "ws=circuit-open" : "ws=disconnected";
+    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag}, ${wsState})`);
 
     // Store context for response handling
     this.lastEscalationContext = contextWindow;
 
     // Skip if an escalation RPC is already in-flight (prevents pile-up)
+    // Safety valve: reset stuck in-flight flag after timeout
     if (this.escalationInFlight) {
-      log(TAG, `skipping escalation tick #${entry.id} — RPC in-flight`);
-      return;
+      const inFlightDuration = Date.now() - this.escalationInFlightSince;
+      if (inFlightDuration > Escalator.INFLIGHT_TIMEOUT_MS) {
+        warn(TAG, `escalationInFlight stuck for ${Math.round(inFlightDuration / 1000)}s — resetting`);
+        this.escalationInFlight = false;
+      } else {
+        log(TAG, `skipping escalation tick #${entry.id} — RPC in-flight for ${Math.round(inFlightDuration / 1000)}s`);
+        return;
+      }
     }
 
     // Fire async — don't block the agent tick loop
@@ -304,11 +321,19 @@ ${recentLines.join("\n")}`;
     }
   }
 
+  /** Force-reconnect the gateway WS client. */
+  reconnectGateway(): void {
+    this.wsClient.resetConnection();
+  }
+
   /** Get stats for /health. */
   getStats(): Record<string, unknown> {
     return {
       mode: this.deps.escalationConfig.mode,
       gatewayConnected: this.wsClient.isConnected,
+      circuitOpen: this.wsClient.isCircuitOpen,
+      escalationInFlight: this.escalationInFlight,
+      escalationInFlightSince: this.escalationInFlight ? this.escalationInFlightSince : null,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
@@ -713,6 +738,7 @@ ${recentLines.join("\n")}`;
     },
   ): Promise<void> {
     this.escalationInFlight = true;
+    this.escalationInFlightSince = Date.now();
     try {
       // Primary: WS RPC
       if (this.wsClient.isConnected) {
