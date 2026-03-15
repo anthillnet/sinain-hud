@@ -122,15 +122,24 @@ async function main() {
   if (micPipeline) micPipeline.setProfiler(profiler);
   transcription.setProfiler(profiler);
 
-  // Wire: mute system audio during TTS to prevent feedback loop
+  // Wire: mute system audio + mic during TTS to prevent feedback loop
   let ttsMutedAudio = false;
+  let ttsMutedMic = false;
   let wasMutedBeforeTts = false;
+  let wasMicMutedBeforeTts = false;
   ttsSpeaker.setSuppressCallbacks(
     () => {
       wasMutedBeforeTts = systemAudioPipeline.isMuted();
       if (systemAudioPipeline.isRunning() && !wasMutedBeforeTts) {
         systemAudioPipeline.mute();
         ttsMutedAudio = true;
+      }
+      if (micPipeline) {
+        wasMicMutedBeforeTts = micPipeline.isMuted();
+        if (micPipeline.isRunning() && !wasMicMutedBeforeTts) {
+          micPipeline.mute();
+          ttsMutedMic = true;
+        }
       }
     },
     () => {
@@ -140,6 +149,13 @@ async function main() {
         }
         ttsMutedAudio = false;
         wasMutedBeforeTts = false;
+      }
+      if (ttsMutedMic && micPipeline) {
+        if (!wasMicMutedBeforeTts && micPipeline.isMuted()) {
+          micPipeline.unmute();
+        }
+        ttsMutedMic = false;
+        wasMicMutedBeforeTts = false;
       }
     },
   );
