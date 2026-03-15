@@ -4,6 +4,7 @@ import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
 import { setupCommands } from "./overlay/commands.js";
 import { AudioPipeline } from "./audio/pipeline.js";
+import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { shortAppName } from "./agent/context-window.js";
@@ -141,9 +142,19 @@ async function main() {
     escalator.setSignalCollector(signalCollector);
   }
 
+  // ── Platform-specific audio capture spawner ──
+  let captureSpawner: CaptureSpawner;
+  if (process.platform === "win32") {
+    const { WindowsCaptureSpawner } = await import("./audio/capture-spawner-win.js");
+    captureSpawner = new WindowsCaptureSpawner();
+  } else {
+    const { MacOSCaptureSpawner } = await import("./audio/capture-spawner-macos.js");
+    captureSpawner = new MacOSCaptureSpawner();
+  }
+
   // ── Initialize audio pipelines ──
-  const systemAudioPipeline = new AudioPipeline(config.audioConfig, "system");
-  const micPipeline = config.micEnabled ? new AudioPipeline(config.micConfig, "mic") : null;
+  const systemAudioPipeline = new AudioPipeline(config.audioConfig, "system", captureSpawner);
+  const micPipeline = config.micEnabled ? new AudioPipeline(config.micConfig, "mic", captureSpawner) : null;
   const transcription = new TranscriptionService(config.transcriptionConfig);
   systemAudioPipeline.setProfiler(profiler);
   if (micPipeline) micPipeline.setProfiler(profiler);
@@ -352,6 +363,7 @@ async function main() {
     },
 
     getTraces: (after, limit) => tracer ? tracer.getTraces(after, limit) : [],
+    reconnectGateway: () => escalator.reconnectGateway(),
   });
 
   // ── Wire overlay profiling ──
