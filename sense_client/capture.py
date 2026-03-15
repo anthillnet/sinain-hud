@@ -1,13 +1,20 @@
-"""Screen capture via IPC from sck-capture (preferred) or CoreGraphics fallback."""
+"""Screen capture via IPC from sck-capture (preferred) or CoreGraphics fallback.
+
+On Windows, uses mss (DXGI Desktop Duplication) via capture_win.py.
+"""
 from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from typing import Generator
 
-import Quartz
 from PIL import Image
+
+# macOS-only imports — deferred so the module loads on Windows
+if sys.platform == "darwin":
+    import Quartz
 
 
 class ScreenCapture:
@@ -185,14 +192,18 @@ class ScreenKitCapture:
 
 
 def create_capture(mode: str = "screen", target: int = 0,
-                   fps: float = 1, scale: float = 0.5
-                   ) -> ScreenKitCapture | ScreenCapture:
-    """Factory: ScreenKitCapture (IPC from sck-capture) → ScreenCapture (legacy).
+                   fps: float = 1, scale: float = 0.5):
+    """Factory: platform-dispatched screen capture backend.
 
-    Primary path reads JPEG frames written by the unified sck-capture Swift
-    binary via IPC (~/.sinain/capture/frame.jpg). Falls back to
-    CGDisplayCreateImage on older macOS or when sck-capture is not running.
+    macOS: ScreenKitCapture (IPC from sck-capture) → ScreenCapture (CoreGraphics).
+    Windows: WinScreenCapture (mss / DXGI Desktop Duplication).
     """
+    if sys.platform == "win32":
+        from .capture_win import WinScreenCapture
+        print("[capture] Using mss (DXGI Desktop Duplication)")
+        return WinScreenCapture(mode=mode, target=target, fps=fps, scale=scale)
+
+    # macOS path
     # 1. IPC from sck-capture (primary — Swift binary writes JPEG frames)
     if ScreenKitCapture.is_available():
         print("[capture] Using ScreenCaptureKit (sck-capture IPC)")

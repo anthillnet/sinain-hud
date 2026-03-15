@@ -63,8 +63,30 @@ function boolEnv(key: string, fallback: boolean): boolean {
 }
 
 function resolvePath(p: string): string {
+  if (process.platform === "win32") {
+    // Expand %APPDATA%, %USERPROFILE%, %TEMP% etc.
+    p = p.replace(/%([^%]+)%/g, (_, key) => process.env[key] || "");
+  }
   return p.replace(/^~/, os.homedir());
 }
+
+/** Return platform-appropriate default data directory. */
+function sinainDataDir(): string {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || resolve(os.homedir(), "AppData", "Roaming");
+    return resolve(appData, "sinain");
+  }
+  return resolve(os.homedir(), ".sinain-core");
+}
+
+function sinainCaptureDir(): string {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || resolve(os.homedir(), "AppData", "Roaming");
+    return resolve(appData, "sinain", "capture");
+  }
+  return resolve(os.homedir(), ".sinain", "capture");
+}
+
 
 export function loadConfig(): CoreConfig {
   const audioConfig: AudioPipelineConfig = {
@@ -143,9 +165,10 @@ export function loadConfig(): CoreConfig {
     env("SITUATION_MD_PATH", `${situationDir}/SITUATION.md`)
   );
 
+  const defaultFeedbackDir = resolve(sinainDataDir(), "feedback");
   const learningConfig: LearningConfig = {
     enabled: boolEnv("LEARNING_ENABLED", true),
-    feedbackDir: resolvePath(env("FEEDBACK_DIR", "~/.sinain-core/feedback")),
+    feedbackDir: resolvePath(env("FEEDBACK_DIR", defaultFeedbackDir)),
     retentionDays: intEnv("FEEDBACK_RETENTION_DAYS", 30),
   };
 
@@ -161,7 +184,7 @@ export function loadConfig(): CoreConfig {
     openclawConfig,
     situationMdPath,
     traceEnabled: boolEnv("TRACE_ENABLED", true),
-    traceDir: resolvePath(env("TRACE_DIR", "~/.sinain-core/traces")),
+    traceDir: resolvePath(env("TRACE_DIR", resolve(sinainDataDir(), "traces"))),
     learningConfig,
   };
 }
