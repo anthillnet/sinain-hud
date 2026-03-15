@@ -90,7 +90,6 @@ async function main() {
     },
     onHudUpdate: (text) => {
       wsHandler.broadcast(text, "normal", "stream");
-      ttsSpeaker.speak(text);
     },
     onTraceStart: tracer ? (tickId) => {
       const ctx = tracer.startTrace(tickId);
