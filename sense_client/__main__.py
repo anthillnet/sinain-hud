@@ -1,13 +1,28 @@
 """Entry point: python -m sense_client"""
 
+import io
+import sys
+import traceback
+
+# Force UTF-8 stdout/stderr on Windows to prevent UnicodeEncodeError crashes
+# when window titles contain non-cp1251 characters (e.g. Telegram's \u200e).
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+
 import argparse
 import concurrent.futures
 import json
 import os
-import resource
 import time
 
+import numpy as np
 import requests as _requests
+from skimage.metrics import structural_similarity
+
+# Platform-specific memory reporting
+if sys.platform != "win32":
+    import resource
 
 from .capture import ScreenCapture, create_capture
 from .change_detector import ChangeDetector
@@ -19,11 +34,38 @@ from .app_detector import AppDetector
 from .config import load_config
 from .privacy import apply_privacy
 
-CONTROL_FILE = "/tmp/sinain-sense-control.json"
+if sys.platform == "win32":
+    CONTROL_FILE = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "sinain-sense-control.json")
+else:
+    CONTROL_FILE = "/tmp/sinain-sense-control.json"
 
 
 def log(msg: str):
-    print(f"[sense] {msg}")
+    print(f"[sense] {msg}", flush=True)
+
+
+def _gate_reason(gate, change, ocr, app_changed, window_changed):
+    """Diagnose why the gate dropped an event."""
+    now = time.time() * 1000
+    ocr_len = len(ocr.text) if ocr.text else 0
+
+    # Check cooldown
+    recent_app = (now - gate.last_app_change_ts) < 10000
+    effective_cd = gate.adaptive_cooldown_ms if recent_app else gate.cooldown_ms
+    elapsed = now - gate.last_send_ts
+    if elapsed < effective_cd:
+        return f"cooldown ({elapsed:.0f}ms < {effective_cd}ms)"
+    if change is None:
+        return "no_change"
+    if ocr_len < gate.min_ocr_chars:
+        return f"too_few_chars ({ocr_len} < {gate.min_ocr_chars})"
+    if ocr.text and gate._is_duplicate(ocr.text):
+        return "duplicate (similar to recent text)"
+    if ocr.text and not gate._ocr_quality_ok(ocr.text):
+        return "bad_quality (ocr noise)"
+    if change.ssim_score >= gate.major_change_threshold:
+        return f"no_visual (ssim={change.ssim_score:.3f} >= {gate.major_change_threshold})"
+    return f"unknown (ocr={ocr_len}, ssim={change.ssim_score:.3f})"
 
 
 def _run_ocr(ocr, ocr_pool, rois) -> OCRResult:
@@ -126,11 +168,21 @@ def main():
     pending_rois = None
     pending_change = None
 
+    # Diagnostic state
+    _logged_first_ssim = False
+    _logged_first_frame = False
+    _last_heartbeat = time.time()
+
     for frame, ts in capture.capture_loop():
         # Check control file (pause/resume)
         if not is_enabled(args.control):
             time.sleep(1)
             continue
+
+        # First-frame log
+        if not _logged_first_frame:
+            log(f"first frame: {frame.size[0]}x{frame.size[1]} (scale={config['capture']['scale']})")
+            _logged_first_frame = True
 
         # 1. Check app/window change
         app_changed, window_changed, app_name, window_title = app_detector.detect_change()
@@ -151,12 +203,31 @@ def main():
         detect_times.append((time.time() - t0) * 1000)
         if len(detect_times) > 500: detect_times.clear()
         if change is None and not app_changed and not window_changed:
+            # Log first SSIM so we can see the range
+            if not _logged_first_ssim and detector.prev_frame is not None:
+                gray = np.array(frame.convert("L"))
+                score = structural_similarity(detector.prev_frame, gray)
+                log(f"first ssim sample: {score:.4f} (threshold={detector.threshold})")
+                _logged_first_ssim = True
+            # Periodic heartbeat
+            if time.time() - _last_heartbeat >= 30:
+                log(f"heartbeat: {capture.stats_ok} frames, {events_sent} sent, "
+                    f"{events_gated} gated, threshold={detector.threshold}")
+                _last_heartbeat = time.time()
             continue
+
+        if change:
+            log(f"change detected: ssim={change.ssim_score:.4f} contours={len(change.contours)}")
 
         # 3. Extract ROIs + stash as pending
         rois = []
         if change:
             rois = extractor.extract(frame, change.contours)
+            if rois:
+                roi_sizes = [f"{r.bbox[2]}x{r.bbox[3]}" for r in rois]
+                log(f"rois: {len(rois)} regions ({', '.join(roi_sizes)})")
+            else:
+                log(f"rois: 0 (contours={len(change.contours)} all too small)")
             if use_backpressure:
                 pending_frame = frame
                 pending_rois = rois
@@ -187,6 +258,11 @@ def main():
             log(f"OCR error: {e}")
         ocr_times.append((time.time() - t0) * 1000)
         if len(ocr_times) > 500: ocr_times.clear()
+
+        if ocr_result.text:
+            log(f"ocr: {len(ocr_result.text)} chars, {ocr_result.word_count} words")
+        else:
+            log(f"ocr: empty (rois={len(use_rois)})")
 
         # Shadow validation: run baseline OCR on original frame for comparison
         if use_shadow and use_backpressure and rois:
@@ -221,6 +297,8 @@ def main():
             window_changed=window_changed,
         )
         if event is None:
+            reason = _gate_reason(gate, use_change, ocr_result, app_changed, window_changed)
+            log(f"gate dropped: {reason}")
             events_gated += 1
             continue
 
@@ -304,9 +382,17 @@ def main():
                 f" detect={avg_detect:.1f}ms ocr={avg_ocr:.1f}ms send={avg_send:.1f}ms")
 
             # POST profiling snapshot to sinain-core
-            usage = resource.getrusage(resource.RUSAGE_SELF)
+            if sys.platform == "win32":
+                try:
+                    import psutil
+                    rss_mb = round(psutil.Process().memory_info().rss / 1048576, 1)
+                except Exception:
+                    rss_mb = 0.0
+            else:
+                usage = resource.getrusage(resource.RUSAGE_SELF)
+                rss_mb = round(usage.ru_maxrss / 1048576, 1)
             snapshot = {
-                "rssMb": round(usage.ru_maxrss / 1048576, 1),
+                "rssMb": rss_mb,
                 "uptimeS": round(now - start_time),
                 "ts": int(now * 1000),
                 "extra": {
@@ -338,4 +424,19 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        tb = traceback.format_exc()
+        print(f"[sense] CRASH:\n{tb}", file=sys.stderr, flush=True)
+        # Report crash to sinain-core so it's visible in health
+        try:
+            import requests as _req
+            _req.post(
+                "http://localhost:9500/profiling/sense",
+                json={"crash": tb, "ts": int(__import__("time").time() * 1000)},
+                timeout=2,
+            )
+        except Exception:
+            pass
+        raise
