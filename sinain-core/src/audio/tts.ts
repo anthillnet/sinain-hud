@@ -57,7 +57,6 @@ export class TtsSpeaker {
     const gen = ++this.generation;
 
     const args: string[] = [];
-    if (this.voice) args.push("-v", this.voice);
     if (this.rate) args.push("-r", String(this.rate));
     args.push("--", clean);
 
