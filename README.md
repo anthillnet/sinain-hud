@@ -138,8 +138,9 @@ This will:
 | `Cmd+Shift+Space` | Toggle overlay visibility |
 | `Cmd+Shift+C` | Toggle click-through mode |
 | `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
-| `Cmd+Shift+H` | Panic hide — instant stealth + click-through + privacy |
+| `Cmd+Shift+H` | Quit overlay UI (core keeps running, restart overlay to restore) |
 | `Cmd+Shift+T` | Toggle audio capture (mute/unmute transcription) |
+| `Cmd+Shift+D` | Switch audio device |
 | `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
 | `Cmd+Shift+S` | Toggle screen capture pipeline |
 | `Cmd+Shift+V` | Toggle screen feed on HUD (show/hide sense items) |
@@ -148,6 +149,8 @@ This will:
 | `Cmd+Shift+Down` | Scroll feed down (resumes auto-scroll at bottom) |
 | `Cmd+Shift+P` | Toggle position (bottom-right ↔ top-right) |
 | `Cmd+Shift+Y` | Copy target message to clipboard |
+| `Cmd+Shift+R` | Toggle demo mode (privacy off — visible to screen capture) |
+| `Cmd+Shift+G` | Toggle TTS speak mode |
 
 ## Display Modes
 
@@ -190,7 +193,7 @@ Escalation pipeline (see [docs/ESCALATION.md](docs/ESCALATION.md)):
 - Overlay is **invisible** to screen sharing, recording, and screenshots
 - All traffic stays on localhost (sinain-core ↔ overlay)
 - Audio is transcribed in memory, never stored to disk
-- Panic hide (`Cmd+Shift+H`) instantly clears everything
+- Quit overlay (`Cmd+Shift+H`) kills the Flutter UI; sinain-core continues running
 - **`<private>` tags**: wrap any on-screen text in `<private>...</private>` — sense_client strips it before sending to sinain-core
 - **Auto-redaction**: credit cards, API keys, bearer tokens, AWS keys, and passwords are automatically redacted from OCR text
 - **Server-side stripping**: the sinain-hud plugin strips any remaining `<private>` tags from tool results before they're persisted to session history
