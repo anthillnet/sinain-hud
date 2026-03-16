@@ -38,15 +38,41 @@ if ($waited -ge $maxWait) {
     Write-Host "[sinain] WARNING: sinain-core may not be ready after ${maxWait}s" -ForegroundColor Yellow
 }
 
+# 1b. Derive privacy vars from PRIVACY_MODE in .env files
+# (sinain-core loads dotenv internally — Start-Job won't inherit parent $env: changes,
+#  so we read the setting here and pass it explicitly via -ArgumentList)
+$privacyMode = "off"
+foreach ($envFile in @("$scriptDir\sinain-core\.env", "$scriptDir\.env")) {
+    if (Test-Path $envFile) {
+        $match = Select-String -Path $envFile -Pattern '^PRIVACY_MODE=(.+)' | Select-Object -Last 1
+        if ($match) {
+            $privacyMode = $match.Matches[0].Groups[1].Value.Trim()
+            break
+        }
+    }
+}
+$privacyOcr, $privacyImages = switch ($privacyMode) {
+    "paranoid" { "none",    "none" }
+    "strict"   { "summary", "none" }
+    "standard" { "redacted","none" }
+    default    { "full",    "full" }
+}
+# Allow explicit env overrides to win
+if ($env:PRIVACY_OCR_OPENROUTER)    { $privacyOcr    = $env:PRIVACY_OCR_OPENROUTER }
+if ($env:PRIVACY_IMAGES_OPENROUTER) { $privacyImages = $env:PRIVACY_IMAGES_OPENROUTER }
+Write-Host "[sinain] Privacy: mode=$privacyMode ocr_openrouter=$privacyOcr images_openrouter=$privacyImages" -ForegroundColor DarkCyan
+
 # 2. Start sense_client (unless -NoSense)
 $senseJob = $null
 if (-not $NoSense) {
     Write-Host "[sinain] Starting sense_client..." -ForegroundColor Green
     $senseJob = Start-Job -ScriptBlock {
-        param($dir)
+        param($dir, $ocrLevel, $imagesLevel)
+        $env:PRIVACY_OCR_OPENROUTER    = $ocrLevel
+        $env:PRIVACY_IMAGES_OPENROUTER = $imagesLevel
         Set-Location $dir
         & python -m sense_client
-    } -ArgumentList $scriptDir
+    } -ArgumentList $scriptDir, $privacyOcr, $privacyImages
 }
 
 # 3. Start overlay (unless -NoOverlay)

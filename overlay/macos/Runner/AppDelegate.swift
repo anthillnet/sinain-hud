@@ -156,6 +156,8 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(cmdKey | shiftKey))
         // ID 15: Cmd+Shift+R → toggle demo mode (privacy off = visible to screencapture)
         registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 17: Cmd+Shift+B → toggle trait voices
+        registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_B), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -273,6 +275,10 @@ class AppDelegate: FlutterAppDelegate {
                 window.sharingType = currentlyPrivate ? .readOnly : .none
                 hotkeyChannel?.invokeMethod("onTogglePrivacy", arguments: !currentlyPrivate)
             }
+
+        case 17: // Cmd+Shift+B → toggle trait voices
+            hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
+
 
         default:
             break

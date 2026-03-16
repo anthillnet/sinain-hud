@@ -289,6 +289,38 @@ else
   fail "sinain-core did not become healthy after 20s"
 fi
 
+# ── 5b. Propagate PRIVACY_MODE to sense_client env vars ──────────────────────
+# sinain-core loads PRIVACY_MODE via dotenv (not inherited by child processes).
+# Read it here so sense_client gets the matching OCR/image privacy levels.
+_privacy_mode=""
+for _env_file in "$SCRIPT_DIR/sinain-core/.env" "$SCRIPT_DIR/.env"; do
+  if [ -f "$_env_file" ]; then
+    _val=$(grep -E '^PRIVACY_MODE=' "$_env_file" | tail -1 | cut -d= -f2- | tr -d '[:space:]')
+    if [ -n "$_val" ]; then _privacy_mode="$_val"; break; fi
+  fi
+done
+_privacy_mode="${_privacy_mode:-off}"
+
+case "$_privacy_mode" in
+  paranoid)
+    export PRIVACY_OCR_OPENROUTER="${PRIVACY_OCR_OPENROUTER:-none}"
+    export PRIVACY_IMAGES_OPENROUTER="${PRIVACY_IMAGES_OPENROUTER:-none}"
+    ;;
+  strict)
+    export PRIVACY_OCR_OPENROUTER="${PRIVACY_OCR_OPENROUTER:-summary}"
+    export PRIVACY_IMAGES_OPENROUTER="${PRIVACY_IMAGES_OPENROUTER:-none}"
+    ;;
+  standard)
+    export PRIVACY_OCR_OPENROUTER="${PRIVACY_OCR_OPENROUTER:-redacted}"
+    export PRIVACY_IMAGES_OPENROUTER="${PRIVACY_IMAGES_OPENROUTER:-none}"
+    ;;
+  *)  # off or unknown: full (unrestricted)
+    export PRIVACY_OCR_OPENROUTER="${PRIVACY_OCR_OPENROUTER:-full}"
+    export PRIVACY_IMAGES_OPENROUTER="${PRIVACY_IMAGES_OPENROUTER:-full}"
+    ;;
+esac
+log "Privacy: mode=${_privacy_mode} ocr_openrouter=${PRIVACY_OCR_OPENROUTER} images_openrouter=${PRIVACY_IMAGES_OPENROUTER}"
+
 # ── 6. Start sense_client ────────────────────────────────────────────────────
 SENSE_PID=""
 if $SKIP_SENSE; then
