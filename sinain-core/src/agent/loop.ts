@@ -3,8 +3,6 @@ import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus } from "../types.js";
 import type { Profiler } from "../profiler.js";
-import type { TraitEngine, TraitSelection } from "./traits.js";
-import { writeTraitLog } from "./traits.js";
 import { buildContextWindow } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
@@ -31,10 +29,6 @@ export interface AgentLoopDeps {
   profiler?: Profiler;
   /** Called after each successful SITUATION.md write with the content string. */
   onSituationUpdate?: (content: string) => void;
-  /** Optional trait engine for personality voice selection. */
-  traitEngine?: TraitEngine;
-  /** Directory to write per-day trait log JSONL files. */
-  traitLogDir?: string;
 }
 
 export interface TraceContext {
@@ -262,21 +256,9 @@ export class AgentLoop extends EventEmitter {
       traceCtx?.startSpan("context-window");
       traceCtx?.endSpan({ richness, screenEvents: contextWindow.screenCount, audioEntries: contextWindow.audioCount });
 
-      // Trait selection: pick the best personality voice for this tick
-      let traitSelection: TraitSelection | null = null;
-      let traitSystemPrompt: string | undefined;
-      if (this.deps.traitEngine?.enabled) {
-        const ocrText = contextWindow.screen.map(e => e.ocr ?? "").join(" ");
-        const audioText = contextWindow.audio.map(e => e.text).join(" ");
-        traitSelection = this.deps.traitEngine.selectTrait(ocrText, audioText);
-        if (traitSelection) {
-          traitSystemPrompt = this.deps.traitEngine.buildSystemPrompt(traitSelection.trait, traitSelection.stat);
-        }
-      }
-
       traceCtx?.startSpan("llm-call");
       const recorderStatus = this.deps.getRecorderStatus?.() ?? null;
-      const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus, traitSystemPrompt);
+      const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus);
       this.deps.profiler?.timerRecord("agent.llmCall", result.latencyMs);
       traceCtx?.endSpan({ model: result.model, tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs });
 
@@ -320,11 +302,6 @@ export class AgentLoop extends EventEmitter {
           screenCount: contextWindow.screenCount,
         },
       };
-      if (traitSelection) {
-        entry.voice = traitSelection.trait.name;
-        entry.voice_stat = traitSelection.stat;
-        entry.voice_confidence = traitSelection.confidence;
-      }
       this.agentBuffer.push(entry);
       const historyLimit = this.deps.agentConfig.historyLimit || 50;
       if (this.agentBuffer.length > historyLimit) this.agentBuffer.shift();
@@ -377,22 +354,6 @@ export class AgentLoop extends EventEmitter {
         digestLength: digest.length,
         hudChanged: entry.pushed,
       });
-
-      // Fire-and-forget trait log
-      if (this.deps.traitEngine?.enabled && this.deps.traitLogDir) {
-        writeTraitLog(this.deps.traitLogDir, {
-          ts: new Date().toISOString(),
-          tickId: entry.id,
-          enabled: true,
-          voice: traitSelection?.trait.name ?? "none",
-          voice_stat: traitSelection?.stat ?? 0,
-          voice_confidence: traitSelection?.confidence ?? 0,
-          activation_scores: traitSelection?.allScores ?? {},
-          context_app: contextWindow.currentApp,
-          hud_length: entry.hud.length,
-          synthesis: false,
-        }).catch(() => {});
-      }
 
     } catch (err: any) {
       error(TAG, "tick error:", err.message || err);

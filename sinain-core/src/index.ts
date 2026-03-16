@@ -7,7 +7,6 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
-import { TraitEngine, loadTraitRoster } from "./agent/traits.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -29,9 +28,6 @@ async function main() {
 
   // ── Load config ──
   const config = loadConfig();
-  // ── Initialize privacy ──
-  initPrivacy(config.privacyConfig);
-  log(TAG, `privacy: mode=${config.privacyConfig.mode}`);
   log(TAG, `port: ${config.port}`);
   log(TAG, `audio: device=${config.audioConfig.device} cmd=${config.audioConfig.captureCommand} chunk=${config.audioConfig.chunkDurationMs}ms`);
   log(TAG, `mic: enabled=${config.micEnabled} device=${config.micConfig.device} cmd=${config.micConfig.captureCommand}`);
@@ -42,6 +38,10 @@ async function main() {
   log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);
   log(TAG, `learning: enabled=${config.learningConfig.enabled} dir=${config.learningConfig.feedbackDir}`);
+
+  // ── Initialize privacy ──
+  initPrivacy(config.privacyConfig);
+  log(TAG, `privacy: mode=${config.privacyConfig.mode}`);
 
   // ── Initialize core buffers (single source of truth) ──
   const feedBuffer = new FeedBuffer(100);
@@ -64,11 +64,6 @@ async function main() {
   const feedbackStore = config.learningConfig.enabled
     ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
     : null;
-
-  // ── Initialize trait engine ──
-  const traitRoster = loadTraitRoster(config.traitConfig.configPath);
-  const traitEngine = new TraitEngine(traitRoster, config.traitConfig);
-
 
   // ── Initialize escalation ──
   const escalator = new Escalator({
@@ -129,8 +124,6 @@ async function main() {
     onHudUpdate: (text) => {
       wsHandler.broadcast(text, "normal", "stream");
     },
-    traitEngine,
-    traitLogDir: config.traitConfig.logDir,
     onTraceStart: tracer ? (tickId) => {
       const ctx = tracer.startTrace(tickId);
       // Hook trace persistence
@@ -402,7 +395,6 @@ async function main() {
       wsHandler.updateState({ screen: screenActive ? "active" : "off" });
       return screenActive;
     },
-    onToggleTraits: () => traitEngine.toggle(),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
@@ -464,7 +456,6 @@ async function main() {
   log(TAG, `  mic:     ${config.micEnabled ? (config.micConfig.autoStart ? "active" : "standby") : "disabled"}`);
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
-  log(TAG, `  traits:  ${config.traitConfig.enabled ? "enabled" : "disabled"} (${traitRoster.length} traits)`);
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
