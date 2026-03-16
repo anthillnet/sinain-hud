@@ -13,6 +13,8 @@ export interface CommandDeps {
   onUserMessage: (text: string) => Promise<void>;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
+  /** Toggle trait voices — returns new enabled state */
+  onToggleTraits?: () => boolean;
 }
 
 /**
@@ -93,6 +95,17 @@ function handleCommand(action: string, deps: CommandDeps): void {
       // TODO: implement device switching (needs AudioPipeline.switchDevice + AUDIO_ALT_DEVICE config)
       wsHandler.broadcast("\u26a0 Device switching not yet implemented", "normal");
       log(TAG, "switch_device: not yet implemented");
+      break;
+    }
+    case "toggle_traits": {
+      if (!deps.onToggleTraits) {
+        wsHandler.broadcast("Trait voices not configured", "normal");
+        break;
+      }
+      const nowEnabled = deps.onToggleTraits();
+      wsHandler.updateState({ traits: nowEnabled ? "active" : "off" });
+      wsHandler.broadcast(`Trait voices ${nowEnabled ? "on" : "off"}`, "normal");
+      log(TAG, `traits toggled ${nowEnabled ? "ON" : "OFF"}`);
       break;
     }
     default:
