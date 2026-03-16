@@ -115,6 +115,27 @@ export interface AudioPipelineConfig {
   gainDb: number;
 }
 
+export interface TraitConfig {
+  enabled: boolean;
+  configPath: string;   // path to ~/.sinain/traits.json
+  entropyHigh: boolean; // Phase 2: boosts entropy roll to 15%
+  logDir: string;       // path to ~/.sinain-core/traits/
+}
+
+export interface TraitLogEntry {
+  ts: string;
+  tickId: number;
+  enabled: boolean;
+  voice: string;
+  voice_stat: number;
+  voice_confidence: number;
+  activation_scores: Record<string, number>;
+  context_app: string;
+  hud_length: number;
+  synthesis: boolean;
+}
+
+
 export interface AudioChunk {
   buffer: Buffer;
   source: string;
@@ -206,6 +227,9 @@ export interface AgentResult {
   tokensOut: number;
   model: string;
   parsedOk: boolean;
+  voice?: string;
+  voice_stat?: number;
+  voice_confidence?: number;
 }
 
 export interface AgentEntry extends AgentResult {
@@ -309,6 +333,7 @@ export interface BridgeState {
   audio: "active" | "muted";
   mic: "active" | "muted";
   screen: "active" | "off";
+  traits?: "active" | "off";
   connection: "connected" | "disconnected" | "connecting";
 }
 
@@ -348,6 +373,33 @@ export interface LearningConfig {
   retentionDays: number;
 }
 
+// ── Privacy matrix types ──
+
+export type PrivacyLevel = "full" | "redacted" | "summary" | "none";
+export type PrivacyDest = "local_buffer" | "local_llm" | "triple_store" | "openrouter" | "agent_gateway";
+
+export interface PrivacyRow {
+  local_buffer: PrivacyLevel;
+  local_llm: PrivacyLevel;
+  triple_store: PrivacyLevel;
+  openrouter: PrivacyLevel;
+  agent_gateway: PrivacyLevel;
+}
+
+export interface PrivacyMatrix {
+  audio_transcript: PrivacyRow;
+  screen_ocr: PrivacyRow;
+  screen_images: PrivacyRow;
+  window_titles: PrivacyRow;
+  credentials: PrivacyRow;
+  metadata: PrivacyRow;
+}
+
+export interface PrivacyConfig {
+  mode: string;   // "off" | "standard" | "strict" | "paranoid" | "custom"
+  matrix: PrivacyMatrix;
+}
+
 // ── Full core config ──
 
 export interface CoreConfig {
@@ -364,4 +416,6 @@ export interface CoreConfig {
   traceEnabled: boolean;
   traceDir: string;
   learningConfig: LearningConfig;
+  traitConfig: TraitConfig;
+  privacyConfig: PrivacyConfig;
 }

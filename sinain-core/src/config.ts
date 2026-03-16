@@ -2,7 +2,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig, TraitConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
+import { PRESETS } from "./privacy/presets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -88,6 +89,45 @@ function sinainCaptureDir(): string {
 }
 
 
+function loadPrivacyConfig(): PrivacyConfig {
+  const mode = env("PRIVACY_MODE", "off");
+
+  // Start with preset (default to "off" which is ALL_FULL)
+  const baseMatrix: PrivacyMatrix = PRESETS[mode] ? { ...PRESETS[mode] } : { ...PRESETS["off"] };
+
+  // Data type env var name → matrix key
+  const DATA_TYPE_MAP: Record<string, keyof PrivacyMatrix> = {
+    AUDIO: "audio_transcript",
+    OCR: "screen_ocr",
+    IMAGES: "screen_images",
+    TITLES: "window_titles",
+    CREDENTIALS: "credentials",
+    METADATA: "metadata",
+  };
+
+  // Destination env var name → row key
+  const DEST_MAP: Record<string, keyof PrivacyRow> = {
+    LOCAL_BUFFER: "local_buffer",
+    LOCAL_LLM: "local_llm",
+    TRIPLE_STORE: "triple_store",
+    OPENROUTER: "openrouter",
+    AGENT_GATEWAY: "agent_gateway",
+  };
+
+  // Allow per-cell overrides: PRIVACY_<DATA>_<DEST>=<level>
+  for (const [dtKey, dtField] of Object.entries(DATA_TYPE_MAP)) {
+    for (const [destKey, destField] of Object.entries(DEST_MAP)) {
+      const envKey = `PRIVACY_${dtKey}_${destKey}`;
+      const val = process.env[envKey];
+      if (val && ["full", "redacted", "summary", "none"].includes(val)) {
+        baseMatrix[dtField][destField] = val as PrivacyLevel;
+      }
+    }
+  }
+
+  return { mode, matrix: baseMatrix };
+}
+
 export function loadConfig(): CoreConfig {
   const audioConfig: AudioPipelineConfig = {
     device: env("AUDIO_DEVICE", "BlackHole 2ch"),
@@ -172,6 +212,15 @@ export function loadConfig(): CoreConfig {
     retentionDays: intEnv("FEEDBACK_RETENTION_DAYS", 30),
   };
 
+  const traitConfig: TraitConfig = {
+    enabled: boolEnv("TRAITS_ENABLED", false),
+    configPath: resolvePath(env("TRAITS_CONFIG", "~/.sinain/traits.json")),
+    entropyHigh: boolEnv("TRAIT_ENTROPY_HIGH", false),
+    logDir: resolvePath(env("TRAIT_LOG_DIR", "~/.sinain-core/traits")),
+  };
+
+  const privacyConfig = loadPrivacyConfig();
+
   return {
     port: intEnv("PORT", 9500),
     audioConfig,
@@ -186,5 +235,7 @@ export function loadConfig(): CoreConfig {
     traceEnabled: boolEnv("TRACE_ENABLED", true),
     traceDir: resolvePath(env("TRACE_DIR", resolve(sinainDataDir(), "traces"))),
     learningConfig,
+    traitConfig,
+    privacyConfig,
   };
 }
