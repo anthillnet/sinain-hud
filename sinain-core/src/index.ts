@@ -7,6 +7,7 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
+import { TraitEngine, loadTraitRoster } from "./agent/traits.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -64,6 +65,10 @@ async function main() {
   const feedbackStore = config.learningConfig.enabled
     ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
     : null;
+
+  // ── Initialize trait engine ──
+  const traitRoster = loadTraitRoster(config.traitConfig.configPath);
+  const traitEngine = new TraitEngine(traitRoster, config.traitConfig);
 
   // ── Initialize escalation ──
   const escalator = new Escalator({
@@ -137,6 +142,8 @@ async function main() {
       };
       return ctx;
     } : undefined,
+    traitEngine,
+    traitLogDir: config.traitConfig.logDir,
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
@@ -395,6 +402,7 @@ async function main() {
       wsHandler.updateState({ screen: screenActive ? "active" : "off" });
       return screenActive;
     },
+    onToggleTraits: () => traitEngine.toggle(),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
@@ -456,6 +464,7 @@ async function main() {
   log(TAG, `  mic:     ${config.micEnabled ? (config.micConfig.autoStart ? "active" : "standby") : "disabled"}`);
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
+  log(TAG, `  traits:  ${config.traitConfig.enabled ? "enabled" : "disabled"} (${traitRoster.length} traits)`);
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
