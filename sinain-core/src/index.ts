@@ -19,6 +19,7 @@ import { Profiler } from "./profiler.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
+import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
 
@@ -37,6 +38,10 @@ async function main() {
   log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);
   log(TAG, `learning: enabled=${config.learningConfig.enabled} dir=${config.learningConfig.feedbackDir}`);
+
+  // ── Initialize privacy ──
+  initPrivacy(config.privacyConfig);
+  log(TAG, `privacy: mode=${config.privacyConfig.mode}`);
 
   // ── Initialize core buffers (single source of truth) ──
   const feedBuffer = new FeedBuffer(100);
@@ -251,9 +256,11 @@ async function main() {
 
     const emoji = isSystem ? "\ud83d\udd0a" : "\ud83c\udf99";
     const tag = `[${emoji}]`;
-    const item = feedBuffer.push(`${tag} ${result.text}`, "normal", "audio", "stream");
+    const bufferLevel = levelFor("audio_transcript", "local_buffer");
+    const bufferText = applyLevel(result.text, bufferLevel, "audio");
+    const item = feedBuffer.push(`${tag} ${bufferText}`, "normal", "audio", "stream");
     if (!isSystem) item.audioSource = "mic";
-    wsHandler.broadcast(`${tag} ${result.text}`, "normal");
+    wsHandler.broadcast(`${tag} ${bufferText}`, "normal");
     recorder.onFeedItem(item); // Collect for recording if active
     agentLoop.onNewContext(); // Trigger debounced analysis
   });

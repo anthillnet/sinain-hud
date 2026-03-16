@@ -1,5 +1,6 @@
 import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord } from "../types.js";
 import { normalizeAppName } from "../agent/context-window.js";
+import { levelFor, applyLevel } from "../privacy/index.js";
 
 /** Regex patterns for detecting errors in OCR text. */
 const ERROR_PATTERN = /error|failed|exception|crash|traceback|typeerror|referenceerror|syntaxerror|cannot read|enoent|panic|fatal/i;
@@ -162,6 +163,20 @@ export function buildEscalationMessage(
   const hasErrors = errors.length > 0;
   const hasQuestion = escalationReason?.startsWith("question:");
 
+  // Privacy levels for agent_gateway destination
+  let ocrLevel: import("../types.js").PrivacyLevel = "full";
+  let audioLevel: import("../types.js").PrivacyLevel = "full";
+  let titlesLevel: import("../types.js").PrivacyLevel = "full";
+  try {
+    ocrLevel = levelFor("screen_ocr", "agent_gateway");
+    audioLevel = levelFor("audio_transcript", "agent_gateway");
+    titlesLevel = levelFor("window_titles", "agent_gateway");
+  } catch { /* privacy not initialized */ }
+
+  const applyOcr = (text: string) => applyLevel(text.slice(0, context.preset.maxOcrChars), ocrLevel, "ocr");
+  const applyAudio = (text: string) => applyLevel(text.slice(0, context.preset.maxTranscriptChars), audioLevel, "audio");
+  const applyTitle = (title: string | undefined) => title ? applyLevel(title, titlesLevel, "titles") : "";
+
   // In selective mode, prioritize sections based on escalation reason
   // In focus/rich modes, include everything
   if (mode === "selective") {
@@ -169,7 +184,7 @@ export function buildEscalationMessage(
     if (hasErrors) {
       sections.push("## Errors (high priority)");
       for (const e of errors) {
-        sections.push(`\`\`\`\n${e.ocr.slice(0, context.preset.maxOcrChars)}\n\`\`\``);
+        sections.push(`\`\`\`\n${applyOcr(e.ocr)}\n\`\`\``);
       }
       // Include screen context (reduced)
       if (context.screen.length > 0) {
@@ -177,7 +192,9 @@ export function buildEscalationMessage(
         for (const e of context.screen.slice(0, 5)) { // Limit in selective mode
           const ago = Math.round((Date.now() - e.ts) / 1000);
           const app = normalizeAppName(e.meta.app);
-          sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+          const title = applyTitle(e.meta.windowTitle);
+          const titlePart = title ? ` [${title}]` : "";
+          sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
         }
       }
     }
@@ -187,7 +204,7 @@ export function buildEscalationMessage(
         sections.push("## Audio (recent transcripts)");
         for (const e of context.audio) {
           const ago = Math.round((Date.now() - e.ts) / 1000);
-          sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+          sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
         }
       }
       // Include screen context (reduced)
@@ -196,7 +213,9 @@ export function buildEscalationMessage(
         for (const e of context.screen.slice(0, 5)) {
           const ago = Math.round((Date.now() - e.ts) / 1000);
           const app = normalizeAppName(e.meta.app);
-          sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+          const title = applyTitle(e.meta.windowTitle);
+          const titlePart = title ? ` [${title}]` : "";
+          sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
         }
       }
     }
@@ -207,14 +226,16 @@ export function buildEscalationMessage(
         for (const e of context.screen) {
           const ago = Math.round((Date.now() - e.ts) / 1000);
           const app = normalizeAppName(e.meta.app);
-          sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+          const title = applyTitle(e.meta.windowTitle);
+          const titlePart = title ? ` [${title}]` : "";
+          sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
         }
       }
       if (context.audio.length > 0) {
         sections.push("## Audio (recent transcripts)");
         for (const e of context.audio) {
           const ago = Math.round((Date.now() - e.ts) / 1000);
-          sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+          sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
         }
       }
     }
@@ -223,7 +244,7 @@ export function buildEscalationMessage(
     if (hasErrors) {
       sections.push("## Errors (high priority)");
       for (const e of errors) {
-        sections.push(`\`\`\`\n${e.ocr.slice(0, context.preset.maxOcrChars)}\n\`\`\``);
+        sections.push(`\`\`\`\n${applyOcr(e.ocr)}\n\`\`\``);
       }
     }
 
@@ -232,7 +253,9 @@ export function buildEscalationMessage(
       for (const e of context.screen) {
         const ago = Math.round((Date.now() - e.ts) / 1000);
         const app = normalizeAppName(e.meta.app);
-        sections.push(`- [${ago}s ago] [${app}] ${e.ocr.slice(0, context.preset.maxOcrChars)}`);
+        const title = applyTitle(e.meta.windowTitle);
+        const titlePart = title ? ` [${title}]` : "";
+        sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
       }
     }
 
@@ -240,7 +263,7 @@ export function buildEscalationMessage(
       sections.push("## Audio (recent transcripts)");
       for (const e of context.audio) {
         const ago = Math.round((Date.now() - e.ts) / 1000);
-        sections.push(`- [${ago}s ago] "${e.text.slice(0, context.preset.maxTranscriptChars)}"`);
+        sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
       }
     }
   }
