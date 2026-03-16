@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ContextWindow, AgentEntry, RecorderStatus } from "../types.js";
 import type { EscalationScore } from "../escalation/scorer.js";
+import type { TraitSelection } from "./traits.js";
 import { normalizeAppName } from "./context-window.js";
 import { log, error } from "../log.js";
 
@@ -45,6 +46,7 @@ export function writeSituationMd(
   entry: AgentEntry,
   escalationScore?: EscalationScore,
   recorderStatus?: RecorderStatus | null,
+  traitSelection?: TraitSelection | null,
 ): string {
   const dir = path.dirname(situationMdPath);
   const tmpPath = situationMdPath + ".tmp";
@@ -146,6 +148,20 @@ export function writeSituationMd(
     lines.push(`- Label: ${label}`);
     lines.push(`- Duration: ${durationSec}s`);
     lines.push(`- Segments: ${recorderStatus.segments}`);
+    lines.push("");
+  }
+
+  // Trait voice: frame downstream agent's perspective
+  if (traitSelection) {
+    const { trait, stat } = traitSelection;
+    const voiceFlavor = stat >= 7 ? trait.voice_high : stat <= 2 ? trait.voice_low : trait.description;
+    lines.push("## Active Voice");
+    lines.push("");
+    lines.push(`- Trait: ${trait.name} (stat ${stat}/10)`);
+    lines.push(`- Tagline: ${trait.tagline}`);
+    lines.push(`- Voice: "${voiceFlavor}"`);
+    lines.push("");
+    lines.push("> Frame your response through this lens naturally. Do not name the trait explicitly.");
     lines.push("");
   }
 

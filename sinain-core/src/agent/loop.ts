@@ -267,17 +267,13 @@ export class AgentLoop extends EventEmitter {
 
       // Trait selection: pick the best personality voice for this tick
       let traitSelection: TraitSelection | null = null;
-      let traitSystemPrompt: string | undefined;
       if (this.deps.traitEngine?.enabled) {
         const ocrText = contextWindow.screen.map(e => e.ocr ?? "").join(" ");
         const audioText = contextWindow.audio.map(e => e.text).join(" ");
         traitSelection = this.deps.traitEngine.selectTrait(ocrText, audioText);
-        if (traitSelection) {
-          traitSystemPrompt = this.deps.traitEngine.buildSystemPrompt(traitSelection.trait, traitSelection.stat);
-        }
       }
 
-      const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus, traitSystemPrompt);
+      const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus);
       this.deps.profiler?.timerRecord("agent.llmCall", result.latencyMs);
       traceCtx?.endSpan({ model: result.model, tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs });
 
@@ -354,7 +350,7 @@ export class AgentLoop extends EventEmitter {
       const escalationScore = calculateEscalationScore(digest, contextWindow);
 
       // Write SITUATION.md (enhanced with escalation context and recorder status)
-      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
+      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus, traitSelection);
       this.deps.onSituationUpdate?.(situationContent);
 
       // Notify for escalation check
