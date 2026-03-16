@@ -1,4 +1,5 @@
 import type { SenseEvent } from "../types.js";
+import { levelFor } from "../privacy/index.js";
 
 /**
  * Delta change from semantic layer
@@ -107,6 +108,15 @@ export class SenseBuffer {
       id: this.nextId++,
       receivedAt: Date.now(),
     };
+
+    // Privacy: strip imageData if screen_images local_buffer level is "none"
+    try {
+      const imgLevel = levelFor("screen_images", "local_buffer");
+      if (imgLevel === "none") {
+        delete event.imageData;
+        delete event.imageBbox;
+      }
+    } catch { /* privacy not yet initialized — keep image data */ }
 
     // Track activity type
     if (event.semantic?.context?.activity) {

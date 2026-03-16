@@ -25,6 +25,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+# ── Privacy helpers ───────────────────────────────────────────────────────────
+
+def _openrouter_allowed_for(data_type: str) -> bool:
+    """Return True if the data type is allowed to be sent to OpenRouter for embedding.
+
+    Reads PRIVACY_<DATA_TYPE>_OPENROUTER env var.
+    data_type examples: "AUDIO", "OCR", "METADATA"
+    """
+    key = f"PRIVACY_{data_type.upper()}_OPENROUTER"
+    level = os.environ.get(key, "full")
+    return level not in ("none",)
+
+
 _EMBEDDINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS embeddings (
     entity_id  TEXT PRIMARY KEY,
@@ -72,20 +85,28 @@ class Embedder:
 
     # ----- Embedding generation -----
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], data_type: str = "METADATA") -> list[list[float]]:
         """Generate embeddings for a list of texts.
 
-        Tries OpenRouter first, falls back to local model.
+        Tries OpenRouter first (if allowed by privacy policy), falls back to local model.
         Returns empty list on total failure.
+
+        Args:
+            texts: List of texts to embed.
+            data_type: Privacy data type key (e.g. "AUDIO", "OCR", "METADATA").
+                       Controls whether OpenRouter is allowed for this data.
         """
         if not texts:
             return []
 
-        # Try OpenRouter first
-        try:
-            return self._embed_openrouter(texts)
-        except Exception as e:
-            print(f"[embed] OpenRouter failed: {e}, trying local model", file=sys.stderr)
+        # Try OpenRouter first (unless privacy policy blocks it)
+        if _openrouter_allowed_for(data_type):
+            try:
+                return self._embed_openrouter(texts)
+            except Exception as e:
+                print(f"[embed] OpenRouter failed: {e}, trying local model", file=sys.stderr)
+        else:
+            print(f"[embed] OpenRouter blocked by privacy policy for {data_type}, using local model", file=sys.stderr)
 
         # Fallback to local model
         try:

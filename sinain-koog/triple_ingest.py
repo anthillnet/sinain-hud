@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -24,6 +25,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from triplestore import TripleStore
 from triple_extractor import TripleExtractor
 from common import output_json, read_effective_playbook, read_file_safe
+
+
+# ── Privacy matrix helpers ────────────────────────────────────────────────────
+
+def _privacy_level(data_type: str, dest: str) -> str:
+    """Read PRIVACY_<DATA_TYPE>_<DEST> env var, default 'full'."""
+    key = f"PRIVACY_{data_type.upper()}_{dest.upper()}"
+    val = os.environ.get(key, "full")
+    if val not in ("full", "redacted", "summary", "none"):
+        return "full"
+    return val
+
+
+def _should_ingest(data_type: str) -> bool:
+    """Return True if the data type is allowed to reach the triple store."""
+    level = _privacy_level(data_type, "TRIPLE_STORE")
+    return level != "none"
 
 
 def _db_path(memory_dir: str) -> str:
@@ -109,6 +127,10 @@ def _build_embed_text(entity_id: str, attrs: dict[str, list[str]]) -> str:
 
 def cmd_signal(args: argparse.Namespace) -> None:
     """Ingest signal analysis result."""
+    # Privacy gate: check if audio_transcript and screen_ocr are allowed for triple_store
+    if not _should_ingest("AUDIO") and not _should_ingest("OCR"):
+        output_json({"ingested": 0, "source": "signal", "skipped": "privacy_gate"})
+        return
     signal_data = json.loads(args.signal_result)
     store = TripleStore(_db_path(args.memory_dir))
     try:

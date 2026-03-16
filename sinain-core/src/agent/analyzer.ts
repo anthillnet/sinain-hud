@@ -1,6 +1,7 @@
 import type { AgentConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
 import { log, error } from "../log.js";
+import { levelFor, applyLevel } from "../privacy/index.js";
 
 const TAG = "agent";
 
@@ -103,21 +104,53 @@ Rules:
  */
 function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null): string {
   const now = Date.now();
-  const screenLines = ctx.screen
-    .map(e => {
-      const app = normalizeAppName(e.meta.app);
-      const ago = Math.round((now - (e.ts || now)) / 1000);
-      const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
-      return `[${ago}s ago] [${app}] ${ocr}`;
-    })
-    .join("\n");
 
-  const audioLines = ctx.audio
-    .map(e => {
-      const ago = Math.round((now - (e.ts || now)) / 1000);
-      return `[${ago}s ago] ${e.text.slice(0, ctx.preset.maxTranscriptChars)}`;
-    })
-    .join("\n");
+  // Privacy gating: check levels for openrouter destination
+  let screenLines: string;
+  try {
+    const ocrLevel = levelFor("screen_ocr", "openrouter");
+    const titlesLevel = levelFor("window_titles", "openrouter");
+    screenLines = ctx.screen
+      .map(e => {
+        const app = normalizeAppName(e.meta.app);
+        const ago = Math.round((now - (e.ts || now)) / 1000);
+        const rawOcr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
+        const ocr = e.ocr ? applyLevel(rawOcr, ocrLevel, "ocr") : "(no text)";
+        const title = e.meta.windowTitle ? applyLevel(e.meta.windowTitle, titlesLevel, "titles") : "";
+        const titlePart = title ? ` [${title}]` : "";
+        return `[${ago}s ago] [${app}]${titlePart} ${ocr || "(no text)"}`;
+      })
+      .join("\n");
+  } catch {
+    // Privacy not yet initialized — use full text
+    screenLines = ctx.screen
+      .map(e => {
+        const app = normalizeAppName(e.meta.app);
+        const ago = Math.round((now - (e.ts || now)) / 1000);
+        const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
+        return `[${ago}s ago] [${app}] ${ocr}`;
+      })
+      .join("\n");
+  }
+
+  let audioLines: string;
+  try {
+    const audioLevel = levelFor("audio_transcript", "openrouter");
+    audioLines = ctx.audio
+      .map(e => {
+        const ago = Math.round((now - (e.ts || now)) / 1000);
+        const text = applyLevel(e.text.slice(0, ctx.preset.maxTranscriptChars), audioLevel, "audio");
+        return `[${ago}s ago] ${text}`;
+      })
+      .join("\n");
+  } catch {
+    audioLines = ctx.audio
+      .map(e => {
+        const ago = Math.round((now - (e.ts || now)) / 1000);
+        return `[${ago}s ago] ${e.text.slice(0, ctx.preset.maxTranscriptChars)}`;
+      })
+      .join("\n");
+  }
 
   const appSwitches = ctx.appHistory
     .map(a => normalizeAppName(a.app))
@@ -125,8 +158,17 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
 
   const recorderSection = buildRecorderSection(recorderStatus);
 
-  const hasImages = ctx.images && ctx.images.length > 0;
-  const imageNote = hasImages ? `\n\nScreen screenshots (${ctx.images!.length}) are attached below.` : "";
+  // Gate images based on privacy level
+  let imagesForPrompt = ctx.images;
+  try {
+    const imgLevel = levelFor("screen_images", "openrouter");
+    if (imgLevel === "none") {
+      imagesForPrompt = [];
+    }
+  } catch { /* privacy not initialized, keep images */ }
+
+  const hasImages = imagesForPrompt && imagesForPrompt.length > 0;
+  const imageNote = hasImages ? `\n\nScreen screenshots (${imagesForPrompt!.length}) are attached below.` : "";
 
   return `Active app: ${normalizeAppName(ctx.currentApp)}
 App history: ${appSwitches || "(none)"}${recorderSection}
@@ -168,9 +210,18 @@ export async function analyzeContext(
   contextWindow: ContextWindow,
   config: AgentConfig,
   recorderStatus: RecorderStatus | null = null,
+  traitSystemPrompt?: string,
 ): Promise<AgentResult> {
   const userPrompt = buildUserPrompt(contextWindow, recorderStatus);
-  const images = contextWindow.images || [];
+  // Apply privacy gating for images sent to OpenRouter
+  let images = contextWindow.images || [];
+  try {
+    const imgLevel = levelFor("screen_images", "openrouter");
+    if (imgLevel === "none") {
+      images = [];
+    }
+  } catch { /* privacy not initialized, keep images */ }
+  const systemPrompt = traitSystemPrompt ?? SYSTEM_PROMPT;
 
   const models = [config.model, ...config.fallbackModels];
 
@@ -186,7 +237,7 @@ export async function analyzeContext(
 
   for (const model of models) {
     try {
-      return await callModel(SYSTEM_PROMPT, userPrompt, images, model, config);
+      return await callModel(systemPrompt, userPrompt, images, model, config);
     } catch (err: any) {
       lastError = err;
       log(TAG, `model ${model} failed: ${err.message || err}, trying next...`);

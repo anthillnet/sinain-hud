@@ -138,10 +138,15 @@ def main():
     use_text_dedup = opt.get("textDedup", False)
     use_shadow = opt.get("shadowValidation", False)
 
+    # Privacy matrix env vars (gate what leaves this process toward sinain-core/openrouter)
+    _privacy_ocr_openrouter = os.environ.get("PRIVACY_OCR_OPENROUTER", "full")
+    _privacy_images_openrouter = os.environ.get("PRIVACY_IMAGES_OPENROUTER", "full")
+
     log("sense_client started")
     log(f"  relay: {config['relay']['url']}")
     log(f"  fps: {config['capture']['fps']}, scale: {config['capture']['scale']}")
     log(f"  ocr backend: {config['ocr'].get('backend', 'auto')}")
+    log(f"  privacy: ocr_openrouter={_privacy_ocr_openrouter} images_openrouter={_privacy_images_openrouter}")
     log(f"  control: {args.control}")
     if use_backpressure:
         log("  optimization: backpressure ON")
@@ -289,6 +294,18 @@ def main():
                 word_count=ocr_result.word_count,
             )
 
+        # 5c. Privacy matrix: apply OCR gating for openrouter destination
+        if ocr_result.text and _privacy_ocr_openrouter != "full":
+            if _privacy_ocr_openrouter == "none":
+                ocr_result = OCRResult(text="", confidence=0, word_count=0)
+            elif _privacy_ocr_openrouter == "summary":
+                ocr_result = OCRResult(
+                    text=f"[SCREEN: {len(ocr_result.text)} chars]",
+                    confidence=ocr_result.confidence,
+                    word_count=1,
+                )
+            # "redacted" is already handled by apply_privacy above
+
         # 6. Decision gate
         event = gate.classify(
             change=use_change,
@@ -327,7 +344,10 @@ def main():
         )
 
         # Send small thumbnail for ALL event types (agent uses vision)
-        if event.type == "context":
+        # Privacy matrix: gate image sending based on PRIVACY_IMAGES_OPENROUTER
+        if _privacy_images_openrouter == "none":
+            pass  # Skip image packaging entirely
+        elif event.type == "context":
             event.roi = package_full_frame(use_frame)
         elif use_rois:
             event.roi = package_roi(use_rois[0])

@@ -29,8 +29,8 @@ The tool runs all scripts (git backup, signal analysis, insight synthesis) and w
 ## Act on Result
 
 - If `recommendedAction.action === "sessions_spawn"` → spawn a subagent with `.task`
-- If `recommendedAction.action === "telegram_tip"` → send `.task` to Telegram
-- If `output` is not null → send to Telegram: `Suggestion: {suggestion}\n\nInsight: {insight}`
+- If `recommendedAction.action === "telegram_tip"` → send `.task` to Telegram (chat_id: 59835117)
+- If `output` is not null → send to Telegram (chat_id: 59835117): `Suggestion: {suggestion}\n\nInsight: {insight}`
 
 ---
 
