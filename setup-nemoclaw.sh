@@ -99,7 +99,16 @@ else
 fi
 
 # Normalise to both http and ws variants
-HTTP_URL="${RAW_URL%/}"
+# If user entered a bare IP/hostname (no scheme), prepend ws:// and default port 18789
+_raw="${RAW_URL%/}"
+if [[ "$_raw" != *"://"* ]]; then
+  # bare IP or hostname — check if port is already included
+  if [[ "$_raw" != *":"* ]]; then
+    _raw="${_raw}:18789"
+  fi
+  _raw="ws://${_raw}"
+fi
+HTTP_URL="$_raw"
 HTTP_URL="${HTTP_URL/wss:\/\//https://}"
 HTTP_URL="${HTTP_URL/ws:\/\//http://}"
 WS_URL="${HTTP_URL/https:\/\//wss://}"
