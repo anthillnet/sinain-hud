@@ -43,6 +43,9 @@ export class Escalator {
   private lastSpawnTs = 0;
   private static readonly SPAWN_COOLDOWN_MS = 60_000; // 60 seconds between duplicate spawns
 
+  // Prevent concurrent spawn RPCs (sibling spawns only — never blocks regular escalations)
+  private spawnInFlight = false;
+
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
 
@@ -287,6 +290,7 @@ ${recentLines.join("\n")}`;
       circuitOpen: this.wsClient.isCircuitOpen,
       escalationInFlight: this.escalationInFlight,
       escalationInFlightSince: this.escalationInFlight ? this.escalationInFlightSince : null,
+      spawnInFlight: this.spawnInFlight,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
@@ -300,6 +304,12 @@ ${recentLines.join("\n")}`;
    * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
   async dispatchSpawnTask(task: string, label?: string): Promise<void> {
+    // Prevent sibling spawn RPCs from piling up (independent from escalationInFlight)
+    if (this.spawnInFlight) {
+      log(TAG, `spawn-task skipped — spawn RPC already in-flight`);
+      return;
+    }
+
     // --- Fingerprint dedup — hash the task content ---
     const fingerprint = createHash("sha256").update(task.trim()).digest("hex").slice(0, 16);
     const now = Date.now();
@@ -337,6 +347,10 @@ ${recentLines.join("\n")}`;
       return;
     }
 
+    // ★ Set spawnInFlight BEFORE first await — cleared in finally regardless of outcome.
+    // Dedicated lane flag: never touches escalationInFlight so regular escalations
+    // continue unblocked while this spawn RPC is pending.
+    this.spawnInFlight = true;
     try {
       // Send directly to a new child session via the gateway agent RPC
       const result = await this.wsClient.sendRpc("agent", {
@@ -348,7 +362,7 @@ ${recentLines.join("\n")}`;
         spawnedBy: mainSessionKey,
         idempotencyKey: idemKey,
         label: label || undefined,
-      }, 120_000, { expectFinal: true });
+      }, 45_000, { expectFinal: true });
 
       log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
       this.stats.totalSpawnResponses++;
@@ -400,6 +414,8 @@ ${recentLines.join("\n")}`;
     } catch (err: any) {
       error(TAG, `spawn-task failed: ${err.message}`);
       this.broadcastTaskEvent(taskId, "failed", label, startedAt);
+    } finally {
+      this.spawnInFlight = false;
     }
   }
 
