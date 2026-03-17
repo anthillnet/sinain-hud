@@ -8,6 +8,8 @@ import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
 import { log, warn, error, debug } from "../log.js";
+import type { TraitEngine, TraitSelection } from "./traits.js";
+import { writeTraitLog } from "./traits.js";
 
 const TAG = "agent";
 
@@ -29,6 +31,10 @@ export interface AgentLoopDeps {
   profiler?: Profiler;
   /** Called after each successful SITUATION.md write with the content string. */
   onSituationUpdate?: (content: string) => void;
+  /** Optional trait engine for personality voice selection. */
+  traitEngine?: TraitEngine;
+  /** Directory to write per-day trait log JSONL files. */
+  traitLogDir?: string;
 }
 
 export interface TraceContext {
@@ -258,6 +264,15 @@ export class AgentLoop extends EventEmitter {
 
       traceCtx?.startSpan("llm-call");
       const recorderStatus = this.deps.getRecorderStatus?.() ?? null;
+
+      // Trait selection: pick the best personality voice for this tick
+      let traitSelection: TraitSelection | null = null;
+      if (this.deps.traitEngine?.enabled) {
+        const ocrText = contextWindow.screen.map(e => e.ocr ?? "").join(" ");
+        const audioText = contextWindow.audio.map(e => e.text).join(" ");
+        traitSelection = this.deps.traitEngine.selectTrait(ocrText, audioText);
+      }
+
       const result = await analyzeContext(contextWindow, this.deps.agentConfig, recorderStatus);
       this.deps.profiler?.timerRecord("agent.llmCall", result.latencyMs);
       traceCtx?.endSpan({ model: result.model, tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs });
@@ -302,6 +317,11 @@ export class AgentLoop extends EventEmitter {
           screenCount: contextWindow.screenCount,
         },
       };
+      if (traitSelection) {
+        entry.voice = traitSelection.trait.name;
+        entry.voice_stat = traitSelection.stat;
+        entry.voice_confidence = traitSelection.confidence;
+      }
       this.agentBuffer.push(entry);
       const historyLimit = this.deps.agentConfig.historyLimit || 50;
       if (this.agentBuffer.length > historyLimit) this.agentBuffer.shift();
@@ -330,7 +350,7 @@ export class AgentLoop extends EventEmitter {
       const escalationScore = calculateEscalationScore(digest, contextWindow);
 
       // Write SITUATION.md (enhanced with escalation context and recorder status)
-      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
+      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus, traitSelection);
       this.deps.onSituationUpdate?.(situationContent);
 
       // Notify for escalation check
@@ -354,6 +374,22 @@ export class AgentLoop extends EventEmitter {
         digestLength: digest.length,
         hudChanged: entry.pushed,
       });
+
+      // Fire-and-forget trait log
+      if (this.deps.traitEngine?.enabled && this.deps.traitLogDir) {
+        writeTraitLog(this.deps.traitLogDir, {
+          ts: new Date().toISOString(),
+          tickId: entry.id,
+          enabled: true,
+          voice: traitSelection?.trait.name ?? "none",
+          voice_stat: traitSelection?.stat ?? 0,
+          voice_confidence: traitSelection?.confidence ?? 0,
+          activation_scores: traitSelection?.allScores ?? {},
+          context_app: contextWindow.currentApp,
+          hud_length: entry.hud.length,
+          synthesis: false,
+        }).catch(() => {});
+      }
 
     } catch (err: any) {
       error(TAG, "tick error:", err.message || err);
