@@ -3,9 +3,10 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
+import { randomBytes } from "crypto";
 
 const HOME       = os.homedir();
-const PLUGIN_DIR  = path.join(HOME, ".openclaw/extensions/sinain");
+const PLUGIN_DIR  = path.join(HOME, ".openclaw/extensions/sinain-hud");
 const SOURCES_DIR = path.join(HOME, ".openclaw/sinain-sources");
 const OC_JSON     = path.join(HOME, ".openclaw/openclaw.json");
 const WORKSPACE   = path.join(HOME, ".openclaw/workspace");
@@ -17,7 +18,9 @@ const HEARTBEAT  = path.join(PKG_DIR, "HEARTBEAT.md");
 
 console.log("\nInstalling sinain plugin...");
 
-// 1. Copy plugin files
+// 1. Copy plugin files (remove stale extensions/sinain dir if present from old installs)
+const stalePluginDir = path.join(HOME, ".openclaw/extensions/sinain");
+if (fs.existsSync(stalePluginDir)) fs.rmSync(stalePluginDir, { recursive: true, force: true });
 fs.mkdirSync(PLUGIN_DIR, { recursive: true });
 fs.copyFileSync(path.join(PKG_DIR, "index.ts"),             path.join(PLUGIN_DIR, "index.ts"));
 fs.copyFileSync(path.join(PKG_DIR, "openclaw.plugin.json"), path.join(PLUGIN_DIR, "openclaw.plugin.json"));
@@ -38,7 +41,7 @@ const reqFile = path.join(memoryDst, "requirements.txt");
 if (fs.existsSync(reqFile)) {
   console.log("  Installing Python dependencies...");
   try {
-    execSync(`pip3 install -r "${reqFile}" --quiet`, { stdio: "inherit" });
+    execSync(`pip3 install -r "${reqFile}" --quiet --break-system-packages`, { stdio: "inherit" });
     console.log("  ✓ Python dependencies installed");
   } catch {
     console.warn("  ⚠ pip3 unavailable — Python eval features disabled");
@@ -52,7 +55,7 @@ if (fs.existsSync(OC_JSON)) {
 }
 cfg.plugins ??= {};
 cfg.plugins.entries ??= {};
-cfg.plugins.entries["sinain"] = {
+cfg.plugins.entries["sinain-hud"] = {
   enabled: true,
   config: {
     heartbeatPath: path.join(SOURCES_DIR, "HEARTBEAT.md"),
@@ -60,13 +63,23 @@ cfg.plugins.entries["sinain"] = {
     sessionKey:    "agent:main:sinain"
   }
 };
+// Remove stale "sinain" entry if present from a previous install
+delete cfg.plugins.entries["sinain"];
+cfg.plugins.allow ??= [];
+if (!cfg.plugins.allow.includes("sinain-hud")) cfg.plugins.allow.push("sinain-hud");
 cfg.agents ??= {};
 cfg.agents.defaults ??= {};
 cfg.agents.defaults.sandbox ??= {};
 cfg.agents.defaults.sandbox.sessionToolsVisibility = "all";
-cfg.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
 cfg.gateway ??= {};
-cfg.gateway.bind = "lan";  // allow remote Mac to connect
+cfg.gateway.mode = "local";   // required for gateway to start
+cfg.gateway.bind = "lan";     // allow remote Mac to connect
+cfg.gateway.auth ??= {};
+cfg.gateway.auth.mode ??= "token";
+if (!cfg.gateway.auth.token) {
+  cfg.gateway.auth.token = randomBytes(24).toString("hex");
+}
+const authToken = cfg.gateway.auth.token;
 
 fs.mkdirSync(path.dirname(OC_JSON), { recursive: true });
 fs.writeFileSync(OC_JSON, JSON.stringify(cfg, null, 2));
@@ -91,23 +104,23 @@ if (backupUrl) {
   }
 }
 
-// 7. Reload gateway
+// 7. Start / restart gateway
 try {
-  execSync("openclaw reload", { stdio: "pipe" });
-  console.log("  ✓ Gateway reloaded");
+  execSync("openclaw gateway restart --background", { stdio: "pipe" });
+  console.log("  ✓ Gateway restarted");
 } catch {
   try {
-    execSync("openclaw stop && sleep 1 && openclaw start --background", { stdio: "pipe" });
-    console.log("  ✓ Gateway restarted");
+    execSync("openclaw gateway start --background", { stdio: "pipe" });
+    console.log("  ✓ Gateway started");
   } catch {
-    console.warn("  ⚠ Could not reload gateway — restart manually");
+    console.warn("  ⚠ Could not start gateway — run: openclaw gateway");
   }
 }
 
 console.log("\n✓ sinain installed successfully.");
 console.log("  Plugin config: ~/.openclaw/openclaw.json");
-console.log("  Auth token:    check your Brev dashboard → 'Gateway Token'");
-console.log("  Then run ./setup-nemoclaw.sh on your Mac.\n");
+console.log(`  Auth token:    ${authToken}`);
+console.log("  Next: run 'openclaw gateway' in a new terminal, then run ./setup-nemoclaw.sh on your Mac.\n");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
