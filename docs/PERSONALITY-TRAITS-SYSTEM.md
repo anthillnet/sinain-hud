@@ -355,7 +355,7 @@ When a trait with stat ≤ 2 wins, it speaks — but with Vestigial uncertainty.
 ## Evolution via Knowledge Graph
 
 ### What gets written
-After every tick, the sinain-core plugin (or sinain-koog post-processing) writes:
+After every tick, the sinain-core plugin (or sinain-memory post-processing) writes:
 
 ```
 entity: trait:pattern_recognition
@@ -538,7 +538,7 @@ The eval pipeline reads `playbook-logs/YYYY-MM-DD.jsonl` (koog pipeline). Trait 
 }
 ```
 
-### New: `sinain-koog/eval/schemas.py` — `voice_output` schema
+### New: `sinain-memory/eval/schemas.py` — `voice_output` schema
 ```python
 "voice_output": {
   "type": "object",
@@ -554,7 +554,7 @@ The eval pipeline reads `playbook-logs/YYYY-MM-DD.jsonl` (koog pipeline). Trait 
 }
 ```
 
-### New: `sinain-koog/eval/assertions.py` — trait assertions
+### New: `sinain-memory/eval/assertions.py` — trait assertions
 
 **`assert_trait_voice_valid(tick: dict, valid_names: set[str])`**
 - `voice` field must be one of the configured trait names (or a synthesis name)
@@ -576,7 +576,7 @@ The eval pipeline reads `playbook-logs/YYYY-MM-DD.jsonl` (koog pipeline). Trait 
 - Over a rolling window, higher-stat ticks should have higher average confidence
 - Correlation must be positive (> 0). Warns if negative correlation detected — suggests activation engine is broken.
 
-### New: `sinain-koog/eval/judges/trait_judge.py`
+### New: `sinain-memory/eval/judges/trait_judge.py`
 LLM judge evaluating trait authenticity. Runs in `sampled` eval mode (same as other judges).
 
 ```
@@ -592,12 +592,12 @@ Return JSON: {voice_authenticity, domain_fit, stat_coherence, notes}
 
 Budget: 200 tokens, 30s timeout, same model as other judges (Claude Sonnet 4.6).
 
-### New: `sinain-koog/trait_evaluator.py`
+### New: `sinain-memory/trait_evaluator.py`
 Reads `~/.sinain-core/traits/YYYY-MM-DD.jsonl`, runs schema + assertions + optional judge per tick.
 Writes results to `eval-logs/traits-YYYY-MM-DD.jsonl`.
 Scheduled alongside `tick_evaluator.py` (every 30min, offset by 5min).
 
-### Updates to `sinain-koog/eval_reporter.py`
+### Updates to `sinain-memory/eval_reporter.py`
 New section in daily report: **Trait System Performance**
 - Trait distribution histogram (which voices spoke most)
 - Average `voice_confidence` per trait (low = activation engine misfiring)
@@ -630,13 +630,13 @@ Regression thresholds:
 | New: `sinain-core/src/agent/traits.ts` | `loadTraitRoster(configPath)`, `TraitDefinition` interface, `BUILTIN_TRAITS` const, merge/validate logic, activation engine, heat state, persona builder |
 | New: `~/.sinain-core/traits/` | Per-tick trait log JSONL directory |
 | `modules/*/manifest.json` | Add optional `trait_config` section |
-| `sinain-koog/triple_ingest.py` | Add `--ingest-trait` mode |
-| `sinain-koog/playbook_curator.py` | Add `trait_performance` section curation |
-| New: `sinain-koog/trait_evaluator.py` | Reads trait log, runs schema + assertions + judge |
-| New: `sinain-koog/eval/judges/trait_judge.py` | LLM authenticity judge |
-| `sinain-koog/eval/assertions.py` | 5 new trait assertions |
-| `sinain-koog/eval/schemas.py` | `voice_output` schema |
-| `sinain-koog/eval_reporter.py` | Trait system performance section |
+| `sinain-memory/triple_ingest.py` | Add `--ingest-trait` mode |
+| `sinain-memory/playbook_curator.py` | Add `trait_performance` section curation |
+| New: `sinain-memory/trait_evaluator.py` | Reads trait log, runs schema + assertions + judge |
+| New: `sinain-memory/eval/judges/trait_judge.py` | LLM authenticity judge |
+| `sinain-memory/eval/assertions.py` | 5 new trait assertions |
+| `sinain-memory/eval/schemas.py` | `voice_output` schema |
+| `sinain-memory/eval_reporter.py` | Trait system performance section |
 | `overlay/` | Optional glyph prefix in HUD feed items |
 
 ---
@@ -689,7 +689,7 @@ Regression thresholds:
 - `sinain-core/src/types.ts:214` — AgentResult (add voice fields)
 - `sinain-core/src/config.ts` — env loading pattern
 - `modules/module-registry.json` — module manifest format
-- `sinain-koog/playbook_curator.py` — curation pipeline extension
-- `sinain-koog/triple_ingest.py` — triple write pipeline
+- `sinain-memory/playbook_curator.py` — curation pipeline extension
+- `sinain-memory/triple_ingest.py` — triple write pipeline
 - `docs/TRIPLESTORE-DESIGN.md` — KG schema reference
 - `~/.sinain/traits.json` — user trait config (optional, created by user)

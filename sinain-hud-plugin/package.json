@@ -1,0 +1,21 @@
+{
+  "name": "sinain",
+  "version": "1.0.0",
+  "description": "sinain OpenClaw plugin — AI overlay for macOS",
+  "type": "module",
+  "bin": {
+    "sinain": "./install.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "install.js",
+    "sinain-memory",
+    "HEARTBEAT.md"
+  ],
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}
