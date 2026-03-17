@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
@@ -210,13 +211,23 @@ class _FeedViewState extends State<FeedView> {
                   ),
                 // Text content
                 Expanded(
-                  child: Text(
-                    item.text,
-                    style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 12,
-                      color: color.withValues(alpha: item.opacity),
-                      height: 1.3,
+                  child: MarkdownBody(
+                    data: item.text,
+                    shrinkWrap: true,
+                    softLineBreak: true,
+                    styleSheet: MarkdownStyleSheet(
+                      p: TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: 12,
+                        color: color,
+                        height: 1.3,
+                      ),
+                      code: TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: 11,
+                        color: color,
+                        backgroundColor: Colors.white.withValues(alpha: 0.1),
+                      ),
                     ),
                   ),
                 ),
