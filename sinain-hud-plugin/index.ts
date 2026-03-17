@@ -72,11 +72,11 @@ const LONG_FAILURE_THRESHOLD_MS = 3 * 60_000;  // >3min failure = likely stuck r
 
 // Context overflow watchdog constants
 const OVERFLOW_CONSECUTIVE_THRESHOLD = 5;        // N consecutive overload errors → trigger reset
-const OVERFLOW_TRANSCRIPT_MIN_BYTES = 1_000_000; // 1MB guard — skip reset if transcript is small (transient outage)
+const OVERFLOW_TRANSCRIPT_MIN_BYTES = 500_000;   // 500KB guard — skip reset if transcript is small (transient outage)
 const OVERFLOW_ERROR_PATTERN = /overloaded|context.*too.*long|token.*limit|extra usage is required/i;
 
 // Proactive session hygiene constants
-const SESSION_HYGIENE_SIZE_BYTES = 2_000_000;   // 2MB — proactive archive+truncate threshold
+const SESSION_HYGIENE_SIZE_BYTES = 1_000_000;   // 1MB — proactive archive+truncate threshold
 const SESSION_HYGIENE_AGE_MS = 24 * 60 * 60 * 1000; // 24h — max session age before proactive reset
 
 // Health watchdog constants
@@ -84,8 +84,8 @@ const WATCHDOG_INTERVAL_MS = 5 * 60_000;          // 5 min — independent of cu
 const ALERT_COOLDOWN_MS = 15 * 60_000;            // 15 min per alert type
 const STALENESS_WARNING_MS = 10 * 60_000;          // 10 min no success → warning
 const STALENESS_CRITICAL_MS = 15 * 60_000;         // 15 min no success after reset → emergency restart
-const SESSION_SIZE_WARNING_BYTES = 1_500_000;      // 1.5MB → proactive reset
-const SESSION_SIZE_RESTART_BYTES = 2_000_000;      // 2MB → forced reset
+const SESSION_SIZE_WARNING_BYTES = 800_000;        // 800KB → proactive reset
+const SESSION_SIZE_RESTART_BYTES = 1_000_000;      // 1MB → forced reset
 const AUTO_RESTART_COOLDOWN_MS = 60 * 60_000;     // max 1 auto-restart per hour
 
 // ============================================================================
@@ -1496,6 +1496,24 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       }
 
       return { text: lines.join("\n") };
+    },
+  });
+
+  // ==========================================================================
+  // Command: /sinain_overflow_reset — manual overflow reset via Telegram
+  // ==========================================================================
+
+  api.registerCommand({
+    name: "sinain_overflow_reset",
+    description: "Manually trigger a session overflow reset — archives and truncates the transcript",
+    handler: () => {
+      const did = performOverflowReset();
+      if (did) {
+        lastResetTs = Date.now();
+        consecutiveOverflowErrors = 0;
+        return { text: "✅ Overflow reset complete — transcript archived and truncated, contextTokens zeroed." };
+      }
+      return { text: "⚠️ Overflow reset skipped — transcript below threshold or file not found." };
     },
   });
 
