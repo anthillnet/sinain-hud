@@ -56,6 +56,10 @@ sense_client (OCR pipeline)
 2. In that browser terminal, run:
 
 ```bash
+# Brev containers set HTTPS_PROXY="" which breaks Node 22 npm requests.
+# Unset it before running npx:
+unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
+
 npx @geravant/sinain
 # or, if you have a memory backup repo:
 SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
@@ -74,6 +78,18 @@ SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinai
   Auth token: check your Brev dashboard → 'Gateway Token'
   Then run ./setup-nemoclaw.sh on your Mac.
 ```
+
+### 1c. Start the OpenClaw gateway
+
+In a **second Code-Server terminal**, run:
+
+```bash
+openclaw gateway
+```
+
+Keep this terminal open — the gateway runs in the foreground. It will print its WebSocket URL and start accepting connections.
+
+> To run it in the background instead: `nohup openclaw gateway > ~/.openclaw/gateway.log 2>&1 &`
 
 4. **Note your auth token** — find it in the Brev dashboard under "Gateway Token"
 
@@ -127,14 +143,27 @@ See `sinain-core/.env.example` for the full list of available variables.
 
 ## Verifying the installation
 
-1. **Overlay appears** — a small HUD window should be visible on your screen
-2. **Health check**:
+### NemoClaw side (Code-Server terminal)
+
+1. **Gateway is running** — in the terminal running `openclaw gateway`, you should see:
+   ```
+   [gateway] Listening on ws://0.0.0.0:18789
+   ```
+2. **Plugin loaded** — run `openclaw status` and look for:
+   ```
+   sinain-hud: plugin registered
+   ```
+3. **Agent active** — run `/sinain_status` in any OpenClaw session — should show the sinain agent session as active
+
+### Mac side
+
+4. **Overlay appears** — a small HUD window should be visible on your screen
+5. **Health check**:
    ```bash
    curl http://localhost:9500/health
    # → {"status":"ok"}
    ```
-3. **Agent active** — in the Code-Server terminal, run `/sinain_status` — should show the agent session as active
-4. **End-to-end test** — speak a sentence or show text on screen; the overlay should update within ~10 seconds
+6. **End-to-end test** — speak a sentence or show text on screen; the overlay should update within ~10 seconds
 
 ---
 
@@ -165,3 +194,4 @@ git pull
 | Camera blocked in Google Meet | Ensure you're using the `ffmpeg`-based audio path (not `sox rec`) — see `start.sh` |
 | SCP ownership errors (manual deploy) | Run the `/fix-workspace-permissions` skill in an OpenClaw session |
 | sinain-core not picking up `.env` changes | Touch any source file (`touch sinain-core/src/index.ts`) or kill and restart the process |
+| `403 Forbidden` on npm install | `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy` then retry `npx @geravant/sinain` |
