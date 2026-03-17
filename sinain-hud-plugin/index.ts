@@ -19,7 +19,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 type PluginConfig = {
   heartbeatPath?: string;
   skillPath?: string;
-  koogPath?: string;
+  memoryPath?: string;
   modulesPath?: string;
   sessionKey?: string;
   userTimezone?: string;
@@ -718,10 +718,10 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       syncFileToWorkspace(heartbeatSource, workspaceDir, "HEARTBEAT.md", api.logger);
       syncFileToWorkspace(skillSource, workspaceDir, "SKILL.md", api.logger);
 
-      const koogSource = cfg.koogPath ? api.resolvePath(cfg.koogPath) : undefined;
-      if (koogSource) {
-        syncDirToWorkspace(koogSource, workspaceDir, "sinain-koog", api.logger);
-        const gbPath = join(workspaceDir, "sinain-koog", "git_backup.sh");
+      const memorySource = cfg.memoryPath ? api.resolvePath(cfg.memoryPath) : undefined;
+      if (memorySource) {
+        syncDirToWorkspace(memorySource, workspaceDir, "sinain-memory", api.logger);
+        const gbPath = join(workspaceDir, "sinain-memory", "git_backup.sh");
         if (existsSync(gbPath)) try { chmodSync(gbPath, 0o755); } catch {}
       }
 
@@ -752,7 +752,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           if ((entry as Record<string, unknown>).status === "active") {
             api.runtime.system.runCommandWithTimeout(
               ["uv", "run", "--with", "requests", "python3",
-               "sinain-koog/triple_ingest.py",
+               "sinain-memory/triple_ingest.py",
                "--memory-dir", "memory/",
                "--ingest-module", id,
                "--modules-dir", "modules/"],
@@ -887,7 +887,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     try {
       const ragResult = await api.runtime.system.runCommandWithTimeout(
         ["uv", "run", "--with", "requests", "python3",
-         "sinain-koog/triple_query.py",
+         "sinain-memory/triple_query.py",
          "--memory-dir", join(workspaceDir, "memory"),
          "--context", "current session",
          "--max-chars", "1500"],
@@ -1124,7 +1124,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
         if (state.workspaceDir) {
           api.runtime.system.runCommandWithTimeout(
             ["uv", "run", "--with", "requests", "python3",
-             "sinain-koog/triple_ingest.py",
+             "sinain-memory/triple_ingest.py",
              "--memory-dir", "memory/",
              "--ingest-session", JSON.stringify(summary),
              "--embed"],
@@ -1576,7 +1576,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           try {
             const t0 = Date.now();
             const gitOut = await api.runtime.system.runCommandWithTimeout(
-              ["bash", "sinain-koog/git_backup.sh"],
+              ["bash", "sinain-memory/git_backup.sh"],
               { timeoutMs: 30_000, cwd: workspaceDir },
             );
             latencyMs.gitBackup = Date.now() - t0;
@@ -1586,7 +1586,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             result.gitBackup = `error: ${String(err)}`;
           }
 
-          // Current time string for koog scripts
+          // Current time string for memory scripts
           const hbTz = cfg.userTimezone ?? "Europe/Berlin";
           const currentTimeStr = new Date().toLocaleString("en-GB", {
             timeZone: hbTz, weekday: "long", year: "numeric", month: "long",
@@ -1595,7 +1595,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
           // 2. Signal analysis (60s timeout)
           const signalArgs = [
-            "sinain-koog/signal_analyzer.py",
+            "sinain-memory/signal_analyzer.py",
             "--memory-dir", "memory/",
             "--session-summary", params.sessionSummary,
             "--current-time", currentTimeStr,
@@ -1616,7 +1616,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
             // Fire-and-forget: ingest signal into triple store
             const tickTs = new Date().toISOString();
             runScript([
-              "sinain-koog/triple_ingest.py",
+              "sinain-memory/triple_ingest.py",
               "--memory-dir", "memory/",
               "--tick-ts", tickTs,
               "--signal-result", JSON.stringify(signalResult),
@@ -1626,7 +1626,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
           // 3. Insight synthesis (60s timeout)
           const synthArgs = [
-            "sinain-koog/insight_synthesizer.py",
+            "sinain-memory/insight_synthesizer.py",
             "--memory-dir", "memory/",
             "--session-summary", params.sessionSummary,
             "--current-time", currentTimeStr,
@@ -1751,7 +1751,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     // Step 1: Feedback analysis
     const feedbackT0 = Date.now();
     const feedback = await runScript([
-      "sinain-koog/feedback_analyzer.py",
+      "sinain-memory/feedback_analyzer.py",
       "--memory-dir", "memory/",
       "--session-summary", "periodic curation (plugin timer)",
     ]);
@@ -1761,7 +1761,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     // Step 2: Memory mining (background task — mines unread daily files)
     const miningT0 = Date.now();
     const mining = await runScript([
-      "sinain-koog/memory_miner.py",
+      "sinain-memory/memory_miner.py",
       "--memory-dir", "memory/",
     ]);
     curationLatency.mining = Date.now() - miningT0;
@@ -1770,7 +1770,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     // Fire-and-forget: ingest mining results into triple store
     if (mining) {
       runScript([
-        "sinain-koog/triple_ingest.py",
+        "sinain-memory/triple_ingest.py",
         "--memory-dir", "memory/",
         "--ingest-mining", JSON.stringify(mining),
         "--embed",
@@ -1779,7 +1779,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     // Step 3: Playbook curation
     const curatorArgs = [
-      "sinain-koog/playbook_curator.py",
+      "sinain-memory/playbook_curator.py",
       "--memory-dir", "memory/",
       "--session-summary", "periodic curation (plugin timer)",
       "--curate-directive", directive,
@@ -1793,7 +1793,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     // Fire-and-forget: ingest playbook patterns into triple store
     runScript([
-      "sinain-koog/triple_ingest.py",
+      "sinain-memory/triple_ingest.py",
       "--memory-dir", "memory/",
       "--ingest-playbook",
       "--embed",
@@ -1814,7 +1814,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
 
     // Step 6: Tick evaluation (runs mechanical + sampled judges)
     await runScript([
-      "sinain-koog/tick_evaluator.py",
+      "sinain-memory/tick_evaluator.py",
       "--memory-dir", "memory/",
     ], 120_000);
 
@@ -1823,7 +1823,7 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
     const todayStr = nowUTC.toISOString().slice(0, 10);
     if (nowUTC.getUTCHours() >= 3 && lastEvalReportDate !== todayStr) {
       await runScript([
-        "sinain-koog/eval_reporter.py",
+        "sinain-memory/eval_reporter.py",
         "--memory-dir", "memory/",
       ], 120_000);
       lastEvalReportDate = todayStr;

@@ -336,6 +336,7 @@ export class AgentLoop extends EventEmitter {
       // Push HUD line to feed (suppress "—", "Idle", and all in focus mode)
       if (this.deps.agentConfig.pushToFeed &&
           this.deps.escalationMode !== "focus" &&
+          this.deps.escalationMode !== "rich" &&
           hud !== "\u2014" && hud !== "Idle" && hud !== this.lastPushedHud) {
         feedBuffer.push(`[\ud83e\udde0] ${hud}`, "normal", "agent", "stream");
         this.deps.onHudUpdate(`[\ud83e\udde0] ${hud}`);

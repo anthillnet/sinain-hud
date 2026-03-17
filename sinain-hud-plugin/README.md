@@ -11,7 +11,7 @@ Five lifecycle hooks, one tool, four commands, and a background service:
 | Hook | Purpose |
 |---|---|
 | `session_start` | Initializes per-session tool usage and compliance tracking |
-| `before_agent_start` | Syncs HEARTBEAT.md, SKILL.md, sinain-koog/ (recursively, including eval/), and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories |
+| `before_agent_start` | Syncs HEARTBEAT.md, SKILL.md, sinain-memory/ (recursively, including eval/), and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories |
 | `tool_result_persist` | Strips `<private>` tags from tool results; tracks `sinain_heartbeat_tick` calls for compliance validation |
 | `agent_end` | Writes structured session summary; validates heartbeat compliance (warns on skip, escalates after 3 consecutive skips) |
 | `session_end` | Cleans up orphaned session state |
@@ -23,9 +23,9 @@ Five lifecycle hooks, one tool, four commands, and a background service:
 | `sinain_heartbeat_tick` | Executes all heartbeat mechanical work (git backup, signal analysis, insight synthesis, log writing). Returns structured JSON with results, recommended actions, and Telegram output. |
 
 The heartbeat tool accepts `{ sessionSummary: string, idle: boolean }` and runs:
-1. `bash sinain-koog/git_backup.sh` (30s timeout)
-2. `uv run python3 sinain-koog/signal_analyzer.py` (60s timeout)
-3. `uv run python3 sinain-koog/insight_synthesizer.py` (60s timeout)
+1. `bash sinain-memory/git_backup.sh` (30s timeout)
+2. `uv run python3 sinain-memory/signal_analyzer.py` (60s timeout)
+3. `uv run python3 sinain-memory/insight_synthesizer.py` (60s timeout)
 4. Writes log entry to `memory/playbook-logs/YYYY-MM-DD.jsonl`
 
 ### Commands
@@ -61,7 +61,7 @@ Configured in `openclaw.json` under `plugins.entries.sinain-hud`:
         "config": {
           "heartbeatPath": "/home/node/.openclaw/sinain-sources/HEARTBEAT.md",
           "skillPath": "/home/node/.openclaw/sinain-sources/SKILL.md",
-          "koogPath": "/home/node/.openclaw/sinain-sources/sinain-koog",
+          "memoryPath": "/home/node/.openclaw/sinain-sources/sinain-memory",
           "modulesPath": "/home/node/.openclaw/sinain-sources/modules",
           "sessionKey": "agent:main:sinain"
         }
@@ -75,7 +75,7 @@ Configured in `openclaw.json` under `plugins.entries.sinain-hud`:
 |---|---|---|
 | `heartbeatPath` | string | Path to HEARTBEAT.md source (resolved relative to state dir) |
 | `skillPath` | string | Path to SKILL.md source |
-| `koogPath` | string | Path to sinain-koog/ scripts directory |
+| `memoryPath` | string | Path to sinain-memory/ scripts directory |
 | `modulesPath` | string | Path to modules/ directory for knowledge module system |
 | `sessionKey` | string | Session key for the sinain agent |
 
@@ -87,14 +87,14 @@ The `before_agent_start` hook copies files from the persistent source directory 
 /mnt/openclaw-state/sinain-sources/     →  /home/node/.openclaw/workspace/
   HEARTBEAT.md                               HEARTBEAT.md
   SKILL.md                                   SKILL.md
-  sinain-koog/                               sinain-koog/
+  sinain-memory/                               sinain-memory/
     *.json, *.sh, *.txt                        (always overwritten)
     *.py                                       (deploy-once — skip if exists)
   modules/                                   modules/
     manifest.json                              (always overwritten)
     module-registry.json                       (deploy-once)
     */patterns.md                              (deploy-once)
-  sinain-koog/eval/                          sinain-koog/eval/   (recursive)
+  sinain-memory/eval/                          sinain-memory/eval/   (recursive)
     *.py                                       (deploy-once)
     *.json, *.jsonl                             (always overwritten)
 ```
