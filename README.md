@@ -15,7 +15,7 @@ Screen (SCKit) ─────┘         │                      │
                               ▼                       ▼
                          Overlay (Flutter)       Telegram alerts
                               │
-                         SITUATION.md ──► sinain-koog (30-min reflection)
+                         SITUATION.md ──► sinain-memory (30-min reflection)
                                                   │
                                          triplestore.db (Graph RAG)
 ```
@@ -25,7 +25,7 @@ Screen (SCKit) ─────┘         │                      │
 | **overlay/** | Dart / Swift | Ghost window HUD, 4 display modes, global hotkeys |
 | **sinain-core/** | Node.js (TypeScript) | Audio transcription, agent loop, escalation, WS feed |
 | **sense_client/** | Python | ScreenCaptureKit capture, SSIM diff, OCR, privacy filter |
-| **sinain-koog/** | Python | Reflection pipeline: signal analysis, memory mining, playbook curation, evaluation, triplestore |
+| **sinain-memory/** | Python | Reflection pipeline: signal analysis, memory mining, playbook curation, evaluation, triplestore |
 | **sinain-hud-plugin/** | TypeScript | OpenClaw plugin: lifecycle hooks, auto-deploy, heartbeat compliance, overflow watchdog |
 | **modules/** | JSON + Markdown | Hot-swappable knowledge modules with priority-based stacking |
 
@@ -74,7 +74,7 @@ Python screen capture pipeline with three capture backends (in priority order):
 Change detection via SSIM diff suppresses unchanged frames before OCR. Privacy pipeline strips
 `<private>...</private>` tags and auto-redacts credit cards, API keys, bearer tokens, and passwords.
 
-### sinain-koog/
+### sinain-memory/
 
 Python reflection pipeline triggered every 30 minutes by the sinain-hud-plugin HEARTBEAT:
 
@@ -93,10 +93,10 @@ Python reflection pipeline triggered every 30 minutes by the sinain-hud-plugin H
 
 OpenClaw server plugin providing:
 
-- **`before_agent_start` hook** — auto-deploys HEARTBEAT.md, SKILL.md, sinain-koog scripts, and
+- **`before_agent_start` hook** — auto-deploys HEARTBEAT.md, SKILL.md, sinain-memory scripts, and
   active module stack to the gateway workspace; generates `sinain-playbook-effective.md` by
   merging all active module patterns by priority
-- **Curation pipeline** — runs the full sinain-koog reflection pipeline every 30 minutes
+- **Curation pipeline** — runs the full sinain-memory reflection pipeline every 30 minutes
 - **Context overflow watchdog** — auto-archives and truncates session transcript after 5
   consecutive token-limit errors (1 MB minimum guard)
 - **Privacy stripping** — strips `<private>` tags from tool results before session persistence
@@ -115,7 +115,7 @@ Hot-swappable knowledge packages. Each module is a directory with:
 | `claude-code-workflow` | activatable | configurable |
 | `cairn2e-rules` | activatable | configurable |
 
-Managed via `sinain-koog/module_manager.py`. See [Knowledge Modules](#knowledge-modules--skill-extraction).
+Managed via `sinain-memory/module_manager.py`. See [Knowledge Modules](#knowledge-modules--skill-extraction).
 
 ---
 
@@ -132,13 +132,13 @@ summarize older history to stay within context limits.
 ### Layer 2 — Plugin sync engine
 
 The `before_agent_start` hook fires before every agent session. It auto-deploys:
-- Latest HEARTBEAT.md and SKILL.md from `sinain-koog/memory/`
+- Latest HEARTBEAT.md and SKILL.md from `sinain-memory/memory/`
 - Active knowledge module stack (merged by priority into `sinain-playbook-effective.md`)
-- All sinain-koog reflection scripts
+- All sinain-memory reflection scripts
 
 This ensures every session starts with a fresh, consolidated context snapshot.
 
-### Layer 3 — sinain-koog reflection pipeline
+### Layer 3 — sinain-memory reflection pipeline
 
 Runs every 30 minutes via HEARTBEAT. The pipeline:
 1. Analyzes recent signals and feedback for quality patterns
@@ -163,7 +163,7 @@ by priority — higher-priority patterns take precedence in the effective playbo
 ### CLI
 
 ```bash
-python3 sinain-koog/module_manager.py --modules-dir modules/ <subcommand>
+python3 sinain-memory/module_manager.py --modules-dir modules/ <subcommand>
 ```
 
 | Subcommand | Description |
@@ -188,7 +188,7 @@ domain patterns, and creates a new module (suspended by default — review befor
 
 > 🚧 **In Progress** — designed and operational; Graph RAG integration actively being developed.
 
-`sinain-koog/triplestore.py` implements a Datomic-inspired immutable EAV (entity–attribute–value)
+`sinain-memory/triplestore.py` implements a Datomic-inspired immutable EAV (entity–attribute–value)
 triple store backed by SQLite, with four covering indexes (EAVT, AEVT, VAET, AVET) for fast
 graph traversal.
 
@@ -366,7 +366,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 - **overlay/** — Dart/Swift; follow Flutter conventions
 - **sinain-core/** — TypeScript strict mode; `npm run lint` before commit
 - **sense_client/** — Python 3.11+; type annotations preferred
-- **sinain-koog/** — Python 3.11+; each script should be independently runnable with `--help`
+- **sinain-memory/** — Python 3.11+; each script should be independently runnable with `--help`
 
 ---
 

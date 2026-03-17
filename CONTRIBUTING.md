@@ -25,7 +25,7 @@ Follow the existing patterns in each component:
 | **sinain-core/** | TypeScript | ESM, `tsx` runner |
 | **overlay/** | Dart + Swift | Flutter conventions, Swift for native plugins |
 | **sense_client/** | Python | Type hints, `snake_case` |
-| **sinain-koog/** | Python | Same as sense_client |
+| **sinain-memory/** | Python | Same as sense_client |
 | **sinain-hud-plugin/** | TypeScript | OpenClaw plugin API |
 
 ## Testing & Checks
