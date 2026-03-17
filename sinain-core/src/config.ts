@@ -203,7 +203,6 @@ export function loadConfig(): CoreConfig {
     queueTtlMs: intEnv("OPENCLAW_QUEUE_TTL_MS", 300_000),
     queueMaxSize: intEnv("OPENCLAW_QUEUE_MAX_SIZE", 10),
     pingIntervalMs: intEnv("OPENCLAW_PING_INTERVAL_MS", 30_000),
-    queueBackpressureThreshold: intEnv("OPENCLAW_QUEUE_BACKPRESSURE_THRESHOLD", 5),
   };
 
   const situationDir = env("OPENCLAW_WORKSPACE_DIR", "~/.openclaw/workspace");

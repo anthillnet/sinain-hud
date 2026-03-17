@@ -287,7 +287,6 @@ export interface OpenClawConfig {
   queueTtlMs: number;        // default: 300_000
   queueMaxSize: number;      // default: 10
   pingIntervalMs: number;    // default: 30_000
-  queueBackpressureThreshold: number; // default: 5 — skip new escalations when queue depth ≥ this
 }
 
 // ── Trace types ──

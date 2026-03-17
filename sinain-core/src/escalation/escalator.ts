@@ -77,7 +77,6 @@ export class Escalator {
     totalSpawnResponses: 0,
     avgResponseMs: 0,
     consecutiveTimeouts: 0,
-    consecutivePhase2Timeouts: 0,
     lastTimeoutTs: 0,
   };
 
@@ -192,13 +191,6 @@ export class Escalator {
 
     // Store context for response handling (used in pushResponse for coding-context max-length)
     this.lastEscalationContext = contextWindow;
-
-    // Backpressure: skip if queue is too deep (Phase 2 stall)
-    const bpThreshold = this.deps.openclawConfig.queueBackpressureThreshold;
-    if (this.queue.size >= bpThreshold) {
-      warn(TAG, `⚠ queue depth ${this.queue.size} ≥ ${bpThreshold} — backpressure, skipping escalation`);
-      return;
-    }
 
     // Enqueue — content-hash id deduplicates retries on the gateway side
     const queueEntry = this.queue.enqueue(message, this.deps.openclawConfig.sessionKey, {
@@ -671,16 +663,6 @@ ${recentLines.join("\n")}`;
           }).catch(err => {
             warn(TAG, `Phase 2 failed id=${entry.id}: ${err.message} — entry unblocked`);
             this.queue.markDelivered(entry.id);
-            const isPhase2Timeout = /phase2 timeout/i.test(err.message);
-            if (isPhase2Timeout) {
-              this.stats.consecutivePhase2Timeouts++;
-              if (this.stats.consecutivePhase2Timeouts >= 3) {
-                const dropped = this.queue.dropAccepted();
-                warn(TAG, `⚠ ${this.stats.consecutivePhase2Timeouts} consecutive Phase 2 timeouts — dropped ${dropped} stale accepted entries`);
-              }
-            } else {
-              this.stats.consecutivePhase2Timeouts = 0;
-            }
           });
 
         } catch (phase1Err: any) {
@@ -722,7 +704,6 @@ ${recentLines.join("\n")}`;
 
       this.stats.totalDirectResponses++;
       this.stats.consecutiveTimeouts = 0;
-      this.stats.consecutivePhase2Timeouts = 0;
       // EMA α=0.2: smooths latency while reacting to sustained changes
       this.stats.avgResponseMs = this.stats.avgResponseMs === 0
         ? rpcLatencyMs

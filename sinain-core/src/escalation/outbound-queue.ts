@@ -176,15 +176,6 @@ export class OutboundQueue {
     }
   }
 
-  /** Drop all accepted (in-flight Phase 2) entries — called when Phase 2 is repeatedly timing out. */
-  dropAccepted(): number {
-    const before = this.entries.length;
-    this.entries = this.entries.filter(e => e.status !== "accepted");
-    const dropped = before - this.entries.length;
-    if (dropped > 0) this.persist();
-    return dropped;
-  }
-
   /**
    * Record a failed Phase 1 attempt.
    * Increments attempts; drops entry if MAX_RETRIES exceeded.
