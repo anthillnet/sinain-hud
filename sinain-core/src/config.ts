@@ -198,10 +198,8 @@ export function loadConfig(): CoreConfig {
     hookUrl: env("OPENCLAW_HTTP_URL", env("OPENCLAW_HOOK_URL", "http://localhost:18789/hooks/agent")),
     hookToken: env("OPENCLAW_HTTP_TOKEN", env("OPENCLAW_HOOK_TOKEN", "")),
     sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:sinain"),
-    phase1TimeoutMs: intEnv("OPENCLAW_PHASE1_TIMEOUT_MS", 10_000),
+    phase1TimeoutMs: intEnv("OPENCLAW_PHASE1_TIMEOUT_MS", 30_000),
     phase2TimeoutMs: intEnv("OPENCLAW_PHASE2_TIMEOUT_MS", 120_000),
-    queueTtlMs: intEnv("OPENCLAW_QUEUE_TTL_MS", 300_000),
-    queueMaxSize: intEnv("OPENCLAW_QUEUE_MAX_SIZE", 10),
     pingIntervalMs: intEnv("OPENCLAW_PING_INTERVAL_MS", 30_000),
   };
 

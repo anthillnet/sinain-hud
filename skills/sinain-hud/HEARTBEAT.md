@@ -46,3 +46,17 @@ Reply **HEARTBEAT_OK**
 - Max 2 subagents. NEVER repeat a recent action. Prefer depth over breadth.
 - Memory mining, feedback, and curation run via plugin timer — do NOT invoke manually.
 - Module management is on-demand, not per-tick — see SKILL.md for module commands.
+
+---
+
+## NemoClaw Provisioning
+
+New Brev instance setup (run in Code-Server terminal):
+```
+SINAIN_BACKUP_REPO=<git-url> npx sinain
+```
+- Copies plugin files, patches `openclaw.json`, installs Python deps, restores memory from backup repo, reloads gateway
+- Token printed at end (or visible in Brev dashboard → Gateway Token)
+- Mac side: `./setup-nemoclaw.sh` → 5 prompts → overlay starts
+
+Memory is git-backed via `git_backup.sh` on every heartbeat tick. New instances restore instantly via `SINAIN_BACKUP_REPO`.

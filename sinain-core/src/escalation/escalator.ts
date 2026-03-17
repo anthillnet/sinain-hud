@@ -6,10 +6,10 @@ import type { FeedbackStore } from "../learning/feedback-store.js";
 import type { SignalCollector } from "../learning/signal-collector.js";
 import { randomUUID, createHash } from "node:crypto";
 import { OpenClawWsClient } from "./openclaw-ws.js";
-import { OutboundQueue, nextBackoff } from "./outbound-queue.js";
-import type { QueueEntry } from "./outbound-queue.js";
+import { EscalationSlot } from "./escalation-slot.js";
+import type { SlotEntry } from "./escalation-slot.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
-import { buildEscalationMessage, isCodingContext } from "./message-builder.js";
+import { isCodingContext, buildEscalationMessage } from "./message-builder.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
 
@@ -39,8 +39,7 @@ export interface EscalatorDeps {
  */
 export class Escalator {
   private wsClient: OpenClawWsClient;
-  private queue: OutboundQueue;
-  private workerRunning = false;
+  private slot: EscalationSlot;
 
   private lastEscalationTs = Date.now();
   private lastEscalatedDigest = "";
@@ -84,15 +83,28 @@ export class Escalator {
 
   constructor(private deps: EscalatorDeps) {
     this.wsClient = new OpenClawWsClient(deps.openclawConfig);
-    // Load persistent queue and reset any accepted entries to pending (crash recovery)
-    this.queue = OutboundQueue.load(
-      deps.openclawConfig.queueTtlMs,
-      deps.openclawConfig.queueMaxSize,
-    );
+    this.slot = new EscalationSlot(this.wsClient, deps.openclawConfig, {
+      onResponse: (result, entry, latencyMs) => this.handleEscalationResponse(result, entry, latencyMs),
+      onPhase1Failure: (isTimeout) => {
+        if (isTimeout) {
+          this.stats.totalTimeouts++;
+          this.stats.consecutiveTimeouts++;
+          this.stats.lastTimeoutTs = Date.now();
+          this.deps.profiler?.gauge("escalation.totalTimeouts", this.stats.totalTimeouts);
+          if (this.stats.consecutiveTimeouts >= 3) {
+            warn(TAG, `⚠ ${this.stats.consecutiveTimeouts} consecutive Phase 1 timeouts`);
+          }
+        }
+      },
+      onOutboundBytes: (n) => {
+        this.outboundBytes += n;
+        this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
+      },
+    });
     // Load pending tasks from disk (crash recovery)
     this.pendingSpawnTasks = loadPendingTasks();
-    // Drain queue on every WS reconnect
-    this.wsClient.on("connected", () => this.drainQueue());
+    // Attempt delivery on every WS reconnect
+    this.wsClient.on("connected", () => this.slot.onConnected());
   }
 
   /** Late-bind the signal collector (created after AgentLoop). */
@@ -108,11 +120,6 @@ export class Escalator {
         ? createHash("sha256").update(this.deps.openclawConfig.gatewayToken).digest("hex").slice(0, 12)
         : "none";
       log(TAG, `mode: ${this.deps.escalationConfig.mode}, tokenHash: ${tokenHash}, wsUrl: ${this.deps.openclawConfig.gatewayWsUrl}`);
-    }
-    // Drain any queued messages that survived a crash (WS connected already on hot reload)
-    if (this.queue.hasSendable) {
-      log(TAG, `start: found ${this.queue.size} queued entries from previous run`);
-      this.drainQueue();
     }
   }
 
@@ -172,19 +179,6 @@ export class Escalator {
     this.stats.lastEscalationTs = Date.now();
     this.lastEscalatedDigest = entry.digest;
 
-    // Fetch recent feedback for inline context (non-blocking, defaults to empty)
-    const recentFeedback = this.deps.feedbackStore?.queryRecent(5) ?? [];
-
-    const escalationReason = stale ? "stale" : undefined;
-    const message = buildEscalationMessage(
-      entry.digest,
-      contextWindow,
-      entry,
-      this.deps.escalationConfig.mode,
-      escalationReason,
-      recentFeedback,
-    );
-
     const staleTag = stale ? ", STALE" : "";
     const wsState = this.wsClient.isConnected ? "ws=connected" : "ws=disconnected";
     log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag}, ${wsState})`);
@@ -192,21 +186,34 @@ export class Escalator {
     // Store context for response handling (used in pushResponse for coding-context max-length)
     this.lastEscalationContext = contextWindow;
 
-    // Enqueue — content-hash id deduplicates retries on the gateway side
-    const queueEntry = this.queue.enqueue(message, this.deps.openclawConfig.sessionKey, {
-      tickId: entry.id,
-      hud: entry.hud,
-      currentApp: contextWindow.currentApp,
-      escalationScore: score.total,
-      escalationReasons: score.reasons,
-      codingContext: isCodingContext(contextWindow).coding,
-      digest: entry.digest,
-    });
+    const escalationReason = score.reasons.join(", ");
+    const message = buildEscalationMessage(
+      entry.digest,
+      contextWindow,
+      entry,
+      this.deps.escalationConfig.mode,
+      escalationReason,
+    );
 
-    log(TAG, `tick #${entry.id} → queued id=${queueEntry.id} (queueSize=${this.queue.size})`);
+    const slotId = createHash("sha256").update(this.deps.openclawConfig.sessionKey + entry.ts).digest("hex").slice(0, 16);
+    const slotEntry: SlotEntry = {
+      id: slotId,
+      message,
+      sessionKey: this.deps.openclawConfig.sessionKey,
+      feedbackCtx: {
+        tickId: entry.id,
+        hud: entry.hud,
+        currentApp: contextWindow.currentApp,
+        escalationScore: score.total,
+        escalationReasons: score.reasons,
+        codingContext: isCodingContext(contextWindow).coding,
+        digest: entry.digest,
+      },
+      ts: entry.ts,
+    };
 
-    // Nudge the worker
-    this.drainQueue();
+    log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot.depth}`);
+    this.slot.insert(slotEntry);
   }
 
   /** Push fresh SITUATION.md content to the gateway server (fire-and-forget). */
@@ -300,8 +307,8 @@ ${recentLines.join("\n")}`;
       mode: this.deps.escalationConfig.mode,
       gatewayConnected: this.wsClient.isConnected,
       circuitOpen: this.wsClient.isCircuitOpen,
-      queueSize: this.queue.size,
-      queueHead: this.queue.peekSendable()?.id ?? null,
+      slotDepth: this.slot.depth,
+      slotInFlight: this.slot.inFlightId,
       spawnInFlight: this.spawnInFlight,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
@@ -628,76 +635,8 @@ ${recentLines.join("\n")}`;
 
   // ── Private ──
 
-  /**
-   * Background worker: drains the outbound queue.
-   *
-   * Blocks on Phase 1 (acceptedPromise) — guarantees exactly 1 in-flight delivery at a time.
-   * Releases after Phase 1; Phase 2 (finalPromise) runs async without blocking the worker.
-   */
-  private async drainQueue(): Promise<void> {
-    if (this.workerRunning || !this.wsClient.isConnected) return;
-    this.workerRunning = true;
-    try {
-      while (this.queue.hasSendable) {
-        if (!this.wsClient.isConnected) break;
-        const entry = this.queue.peekSendable()!;
-        try {
-          this.outboundBytes += Buffer.byteLength(entry.message);
-          this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
-
-          const rpcStart = Date.now();
-          const { acceptedPromise, finalPromise } = this.wsClient.sendAgentRpcSplit(
-            entry.message, entry.id, entry.sessionKey,
-          );
-
-          // ★ Phase 1: block until delivery confirmed (10s timeout)
-          await acceptedPromise;
-          const phase1Ms = Date.now() - rpcStart;
-          this.queue.markAccepted(entry.id);
-          log(TAG, `Phase 1 accepted id=${entry.id} (${phase1Ms}ms) — worker releasing`);
-
-          // ★ Phase 2: async — never blocks the worker
-          finalPromise.then(result => {
-            this.queue.markDelivered(entry.id);
-            this.handleEscalationResponse(result, entry, Date.now() - rpcStart);
-          }).catch(err => {
-            warn(TAG, `Phase 2 failed id=${entry.id}: ${err.message} — entry unblocked`);
-            this.queue.markDelivered(entry.id);
-          });
-
-        } catch (phase1Err: any) {
-          // Phase 1 failure: real delivery failure → circuit counts it
-          const isTimeout = /phase1 timeout|rpc timeout/i.test(phase1Err.message);
-          if (isTimeout) {
-            this.stats.totalTimeouts++;
-            this.stats.consecutiveTimeouts++;
-            this.stats.lastTimeoutTs = Date.now();
-            this.deps.profiler?.gauge("escalation.totalTimeouts", this.stats.totalTimeouts);
-            if (this.stats.consecutiveTimeouts >= 3) {
-              warn(TAG, `⚠ ${this.stats.consecutiveTimeouts} consecutive Phase 1 timeouts`);
-            }
-          }
-          warn(TAG, `Phase 1 failed id=${entry.id}: ${phase1Err.message}`);
-
-          const retained = this.queue.markAttemptFailed(entry.id);
-          if (retained) {
-            const backoff = nextBackoff(entry.attempts);
-            if (backoff > 0) {
-              setTimeout(() => this.drainQueue(), backoff);
-              break;
-            }
-            // backoff=0: continue loop immediately (first retry)
-          }
-          // entry dropped (maxRetries): continue loop to process next entry
-        }
-      }
-    } finally {
-      this.workerRunning = false;
-    }
-  }
-
-  /** Process the agent response arriving in Phase 2. */
-  private handleEscalationResponse(result: any, entry: QueueEntry, rpcLatencyMs: number): void {
+  /** Process the agent response arriving in Phase 2 (called by EscalationSlot callback). */
+  private handleEscalationResponse(result: any, entry: SlotEntry, rpcLatencyMs: number): void {
     if (result?.ok && result.payload) {
       const p = result.payload;
       log(TAG, `WS RPC ok → runId=${p.runId}, status=${p.status}, latency=${rpcLatencyMs}ms`);
