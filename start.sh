@@ -237,7 +237,7 @@ fi
 _privacy_mode=""
 for _env_file in "$SCRIPT_DIR/sinain-core/.env" "$SCRIPT_DIR/.env"; do
   if [ -f "$_env_file" ]; then
-    _val=$(grep -E '^PRIVACY_MODE=' "$_env_file" | tail -1 | cut -d= -f2- | tr -d '[:space:]')
+    _val=$(grep -E '^PRIVACY_MODE=' "$_env_file" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]' || true)
     if [ -n "$_val" ]; then _privacy_mode="$_val"; break; fi
   fi
 done
