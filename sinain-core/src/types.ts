@@ -282,6 +282,11 @@ export interface OpenClawConfig {
   hookUrl: string;
   hookToken: string;
   sessionKey: string;
+  phase1TimeoutMs: number;   // default: 10_000
+  phase2TimeoutMs: number;   // default: 120_000
+  queueTtlMs: number;        // default: 300_000
+  queueMaxSize: number;      // default: 10
+  pingIntervalMs: number;    // default: 30_000
 }
 
 // ── Trace types ──

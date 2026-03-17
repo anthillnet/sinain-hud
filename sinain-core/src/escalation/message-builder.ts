@@ -85,15 +85,15 @@ Response should be actionable: working code with brief explanation.`;
   }
 
   if (coding) {
-    // General coding (IDE work, debugging) - offer assistance
-    return `The user is writing code. Be helpful and proactive:
+    return `The user is in a code editor. Be helpful and proactive. Do NOT respond with NO_REPLY — a response is always required.
 
 - If there's an error: investigate and suggest a fix with code
 - If they seem stuck: offer specific guidance or code snippets
-- If you see an opportunity to help: share relevant insights
+- If it's a non-code file (config, markdown, email): share a relevant insight, action item, or connection to their current project
+- If context is minimal: tell a short clever joke (tech humor — never repeat recent ones)
 
-Keep responses focused and include code when helpful.
-(5-10 sentences + code if applicable). Be thorough.`;
+NEVER just describe what the user is doing. Every response must teach, suggest, or connect dots.
+(2-5 sentences, or more + code if there's an error or code question).`;
   }
 
   // Non-coding context — proactive insights instead of activity descriptions

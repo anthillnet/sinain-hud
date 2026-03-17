@@ -6,12 +6,28 @@ import { log, warn, error } from "../log.js";
 
 const TAG = "openclaw";
 
+/** Ping timeout — if no pong arrives within this window after a ping, terminate. */
+const PING_TIMEOUT_MS = 5_000;
+
 interface PendingRpc {
   method: string;
   resolve: (value: any) => void;
   reject: (reason: any) => void;
   timeout: ReturnType<typeof setTimeout>;
   expectFinal: boolean;
+  sentAt: number;
+  // For split RPCs (sendAgentRpcSplit):
+  isSplit?: boolean;
+  acceptedResolve?: () => void;
+  acceptedReject?: (err: any) => void;
+  finalResolve?: (value: any) => void;
+  finalReject?: (reason: any) => void;
+}
+
+interface PendingFinalRpc {
+  finalResolve: (value: any) => void;
+  finalReject: (reason: any) => void;
+  finalTimeout: ReturnType<typeof setTimeout>;
   sentAt: number;
 }
 
@@ -23,12 +39,18 @@ interface PendingRpc {
  *   1. Server sends connect.challenge → client responds with connect + auth token
  *   2. Client sends 'agent' RPC → server responds with two-frame protocol (accepted + final)
  *   3. Client extracts text from payload.result.payloads[].text
+ *
+ * Split RPC protocol (sendAgentRpcSplit):
+ *   Phase 1 (10s timeout): await accepted frame → blocks queue worker
+ *   Phase 2 (120s timeout): final frame → resolved async, never trips circuit
  */
 export class OpenClawWsClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private authenticated = false;
   private rpcId = 1;
   private pending = new Map<string, PendingRpc>();
+  /** Phase 2 of split RPCs — resolved by final frame, rejected by 120s timeout or disconnect. */
+  private pendingFinal = new Map<string, PendingFinalRpc>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
 
@@ -48,6 +70,10 @@ export class OpenClawWsClient extends EventEmitter {
   // Connection attempt counter for diagnostics
   private connectAttempts = 0;
   private connectedAt: number | null = null;
+
+  // WS ping keepalive
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private pingTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private config: OpenClawConfig) {
     super();
@@ -103,6 +129,13 @@ export class OpenClawWsClient extends EventEmitter {
         }
       });
 
+      this.ws.on("pong", () => {
+        if (this.pingTimeoutTimer) {
+          clearTimeout(this.pingTimeoutTimer);
+          this.pingTimeoutTimer = null;
+        }
+      });
+
       this.ws.on("close", (code, reason) => {
         const reasonStr = reason?.toString() || "";
         const uptime = this.connectedAt ? `${Math.round((Date.now() - this.connectedAt) / 1000)}s uptime` : "never authenticated";
@@ -138,11 +171,111 @@ export class OpenClawWsClient extends EventEmitter {
       idempotencyKey: idemKey,
       sessionKey,
       deliver: false,
-    }, 120000, { expectFinal: true });
+    }, 45000, { expectFinal: true });
     if (result?.ok) {
       this.circuitResetDelay = 300_000; // reset backoff on success
     }
     return result;
+  }
+
+  /**
+   * Send a split-phase agent RPC.
+   *
+   * Returns two promises:
+   *   acceptedPromise — resolves when Phase 1 (accepted frame) arrives within 10s.
+   *     Rejection counts as a circuit-breaker failure (real delivery failure).
+   *   finalPromise — resolves when Phase 2 (final frame) arrives within 120s.
+   *     Timeout/rejection does NOT trip circuit breaker (agent slowness ≠ delivery failure).
+   *
+   * Queue worker awaits acceptedPromise, then releases immediately.
+   * finalPromise is handled async — response arrives later.
+   */
+  sendAgentRpcSplit(
+    message: string,
+    idemKey: string,
+    sessionKey: string,
+  ): { acceptedPromise: Promise<void>; finalPromise: Promise<any> } {
+    let acceptedResolve!: () => void;
+    let acceptedReject!: (err: any) => void;
+    let finalResolve!: (value: any) => void;
+    let finalReject!: (err: any) => void;
+
+    const acceptedPromise = new Promise<void>((res, rej) => {
+      acceptedResolve = res;
+      acceptedReject = rej;
+    });
+    const finalPromise = new Promise<any>((res, rej) => {
+      finalResolve = res;
+      finalReject = rej;
+    });
+
+    if (this.circuitOpen) {
+      const err = new Error("circuit breaker open");
+      acceptedReject(err);
+      finalReject(err);
+      return { acceptedPromise, finalPromise };
+    }
+
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated) {
+      const reason = !this.ws ? "no socket" : !this.authenticated ? "not authenticated" : `ws state=${this.ws.readyState}`;
+      const err = new Error(`gateway not connected: ${reason}`);
+      acceptedReject(err);
+      finalReject(err);
+      return { acceptedPromise, finalPromise };
+    }
+
+    const id = String(this.rpcId++);
+    const sentAt = Date.now();
+    log(TAG, `sendAgentRpcSplit → id=${id} idemKey=${idemKey} msgLen=${message.length}`);
+
+    const phase1Timeout = setTimeout(() => {
+      if (this.pending.has(id)) {
+        this.pending.delete(id);
+        const elapsed = Date.now() - sentAt;
+        warn(TAG, `rpc ${id} (agent) Phase 1 TIMEOUT after ${elapsed}ms`);
+        this.onRpcFailure();
+        const err = new Error(`rpc phase1 timeout: agent`);
+        acceptedReject(err);
+        finalReject(err);
+      }
+    }, this.config.phase1TimeoutMs);
+
+    this.pending.set(id, {
+      method: "agent",
+      resolve: () => {},  // unused for split RPCs
+      reject: () => {},   // unused for split RPCs
+      timeout: phase1Timeout,
+      expectFinal: false, // we handle the accepted frame ourselves
+      sentAt,
+      isSplit: true,
+      acceptedResolve,
+      acceptedReject,
+      finalResolve,
+      finalReject,
+    });
+
+    try {
+      this.ws.send(JSON.stringify({
+        type: "req",
+        method: "agent",
+        id,
+        params: {
+          message,
+          idempotencyKey: idemKey,
+          sessionKey,
+          deliver: false,
+        },
+      }));
+    } catch (err: any) {
+      clearTimeout(phase1Timeout);
+      this.pending.delete(id);
+      error(TAG, `sendAgentRpcSplit: ws.send() threw: ${err.message}`);
+      const sendErr = new Error(`ws.send failed: ${err.message}`);
+      acceptedReject(sendErr);
+      finalReject(sendErr);
+    }
+
+    return { acceptedPromise, finalPromise };
   }
 
   /** Check if connected and authenticated. */
@@ -170,14 +303,16 @@ export class OpenClawWsClient extends EventEmitter {
 
   /** Graceful disconnect — does not schedule reconnect. */
   disconnect(): void {
-    log(TAG, `disconnect: stopping (pending=${this.pending.size})`);
+    log(TAG, `disconnect: stopping (pending=${this.pending.size}, pendingFinal=${this.pendingFinal.size})`);
     this.stopped = true;
+    this.stopPing();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.circuitResetTimer) { clearTimeout(this.circuitResetTimer); this.circuitResetTimer = null; }
     if (this.ws) { try { this.ws.close(1000, "graceful shutdown"); } catch {} this.ws = null; }
     this.authenticated = false;
     this.connectedAt = null;
     this.rejectAllPending("disconnected");
+    this.rejectAllPendingFinal("disconnected");
   }
 
   // ── Private ──
@@ -218,6 +353,7 @@ export class OpenClawWsClient extends EventEmitter {
         this.connectedAt = Date.now();
         this.reconnectDelay = 1000; // Reset backoff on successful auth
         log(TAG, `authenticated ✓ (attempt #${this.connectAttempts}, reconnectDelay reset to 1s)`);
+        this.startPing();
         this.emit("connected");
       } else {
         const errInfo = msg.error || msg.payload?.error || "unknown";
@@ -241,11 +377,63 @@ export class OpenClawWsClient extends EventEmitter {
 
     // Handle RPC responses
     const msgId = msg.id != null ? String(msg.id) : null;
+
+    // Check pendingFinal first — Phase 2 final frames for split RPCs
+    if (msg.type === "res" && msgId && this.pendingFinal.has(msgId)) {
+      const pf = this.pendingFinal.get(msgId)!;
+      clearTimeout(pf.finalTimeout);
+      this.pendingFinal.delete(msgId);
+      const elapsed = Date.now() - pf.sentAt;
+      if (msg.ok) {
+        log(TAG, `rpc ${msgId} Phase 2 final: ok in ${elapsed}ms, status=${msg.payload?.status ?? "n/a"}`);
+        this.circuitResetDelay = 300_000; // success — reset circuit backoff
+        pf.finalResolve(msg);
+      } else {
+        warn(TAG, `rpc ${msgId} Phase 2 final: error in ${elapsed}ms: ${JSON.stringify(msg.error ?? msg.payload?.error).slice(0, 200)}`);
+        pf.finalReject(new Error(JSON.stringify(msg.error ?? msg.payload?.error ?? "phase2 error").slice(0, 200)));
+      }
+      return;
+    }
+
     if (msg.type === "res" && msgId && this.pending.has(msgId)) {
       const pending = this.pending.get(msgId)!;
       const elapsed = Date.now() - pending.sentAt;
 
-      // Skip intermediate "accepted" frame when expecting final
+      // Split RPC: handle accepted frame → transition to Phase 2
+      if (pending.isSplit) {
+        clearTimeout(pending.timeout);
+        this.pending.delete(msgId);
+
+        if (msg.payload?.status === "accepted") {
+          log(TAG, `rpc ${msgId} (agent) Phase 1 accepted in ${elapsed}ms`);
+          const phase2Timeout = setTimeout(() => {
+            if (this.pendingFinal.has(msgId)) {
+              const pf = this.pendingFinal.get(msgId)!;
+              this.pendingFinal.delete(msgId);
+              warn(TAG, `rpc ${msgId} Phase 2 TIMEOUT (${Date.now() - pf.sentAt}ms) — agent slow, unblocking`);
+              pf.finalReject(new Error("rpc phase2 timeout: agent"));
+              // Intentionally NOT calling onRpcFailure() — agent slowness ≠ delivery failure
+            }
+          }, this.config.phase2TimeoutMs);
+          this.pendingFinal.set(msgId, {
+            finalResolve: pending.finalResolve!,
+            finalReject: pending.finalReject!,
+            finalTimeout: phase2Timeout,
+            sentAt: pending.sentAt,
+          });
+          pending.acceptedResolve!();
+        } else {
+          // Phase 1 error response (not accepted)
+          warn(TAG, `rpc ${msgId} (agent) Phase 1 error in ${elapsed}ms: ${JSON.stringify(msg.error ?? msg.payload?.error).slice(0, 200)}`);
+          this.onRpcFailure();
+          const err = new Error(JSON.stringify(msg.error ?? msg.payload?.error ?? "phase1 error").slice(0, 200));
+          pending.acceptedReject!(err);
+          pending.finalReject!(err);
+        }
+        return;
+      }
+
+      // Regular RPC: skip intermediate "accepted" frame when expecting final
       if (pending.expectFinal && msg.payload?.status === "accepted") {
         log(TAG, `rpc ${msgId} (${pending.method}): accepted after ${elapsed}ms, waiting for final`);
         return;
@@ -320,13 +508,35 @@ export class OpenClawWsClient extends EventEmitter {
     });
   }
 
+  private startPing(): void {
+    this.stopPing();
+    if (!this.config.pingIntervalMs || this.config.pingIntervalMs <= 0) return;
+    this.pingTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      this.pingTimeoutTimer = setTimeout(() => {
+        warn(TAG, "ping timeout — terminating connection");
+        this.ws?.terminate();
+      }, PING_TIMEOUT_MS);
+      this.ws.ping();
+    }, this.config.pingIntervalMs);
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    if (this.pingTimeoutTimer) { clearTimeout(this.pingTimeoutTimer); this.pingTimeoutTimer = null; }
+  }
+
   private cleanup(reason: string): void {
+    this.stopPing();
     const pendingCount = this.pending.size;
+    const finalCount = this.pendingFinal.size;
     this.ws = null;
     this.authenticated = false;
-    if (pendingCount > 0) {
-      log(TAG, `cleanup (${reason}): rejecting ${pendingCount} pending RPCs`);
+    if (pendingCount > 0 || finalCount > 0) {
+      log(TAG, `cleanup (${reason}): rejecting ${pendingCount} pending, ${finalCount} pendingFinal RPCs`);
       this.rejectAllPending(`gateway disconnected: ${reason}`);
+      // Phase 2 rejections — no onRpcFailure() (agent slowness ≠ connection failure)
+      this.rejectAllPendingFinal(`gateway disconnected: ${reason}`);
     }
   }
 
@@ -334,9 +544,27 @@ export class OpenClawWsClient extends EventEmitter {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timeout);
       log(TAG, `  rejecting pending rpc ${id} (${pending.method}), was pending ${Date.now() - pending.sentAt}ms`);
-      pending.reject(new Error(reason));
+      if (pending.isSplit) {
+        // Phase 1 disconnect = real delivery failure → count for circuit breaker
+        this.onRpcFailure();
+        const err = new Error(reason);
+        pending.acceptedReject?.(err);
+        pending.finalReject?.(err);
+      } else {
+        pending.reject(new Error(reason));
+      }
     }
     this.pending.clear();
+  }
+
+  /** Reject all Phase 2 pending RPCs. Does NOT call onRpcFailure(). */
+  private rejectAllPendingFinal(reason: string): void {
+    for (const [id, pf] of this.pendingFinal) {
+      clearTimeout(pf.finalTimeout);
+      log(TAG, `  rejecting pendingFinal rpc ${id}, was pending ${Date.now() - pf.sentAt}ms`);
+      pf.finalReject(new Error(reason));
+    }
+    this.pendingFinal.clear();
   }
 
   private scheduleReconnect(): void {
