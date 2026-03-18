@@ -14,6 +14,7 @@ const WORKSPACE   = path.join(HOME, ".openclaw/workspace");
 const PKG_DIR    = path.dirname(new URL(import.meta.url).pathname);
 const MEMORY_SRC = path.join(PKG_DIR, "sinain-memory");
 const HEARTBEAT  = path.join(PKG_DIR, "HEARTBEAT.md");
+const SKILL      = path.join(PKG_DIR, "SKILL.md");
 
 console.log("\nInstalling sinain plugin...");
 
@@ -29,9 +30,11 @@ const memoryDst = path.join(SOURCES_DIR, "sinain-memory");
 copyDir(MEMORY_SRC, memoryDst);
 console.log("  ✓ sinain-memory copied");
 
-// 3. Stage HEARTBEAT.md
+// 3. Stage HEARTBEAT.md and SKILL.md
 fs.copyFileSync(HEARTBEAT, path.join(SOURCES_DIR, "HEARTBEAT.md"));
 console.log("  ✓ HEARTBEAT.md copied");
+fs.copyFileSync(SKILL, path.join(SOURCES_DIR, "SKILL.md"));
+console.log("  ✓ SKILL.md copied");
 
 // ── Detect environment and branch ───────────────────────────────────────────
 
@@ -107,6 +110,7 @@ async function installNemoClaw({ sandboxName }) {
     enabled: true,
     config: {
       heartbeatPath: "/sandbox/.openclaw/sinain-sources/HEARTBEAT.md",
+      skillPath:     "/sandbox/.openclaw/sinain-sources/SKILL.md",
       memoryPath:    "/sandbox/.openclaw/sinain-sources/sinain-memory",
       sessionKey:    "agent:main:sinain"
     }
@@ -191,6 +195,7 @@ async function installLocal() {
     enabled: true,
     config: {
       heartbeatPath: path.join(SOURCES_DIR, "HEARTBEAT.md"),
+      skillPath:     path.join(SOURCES_DIR, "SKILL.md"),
       memoryPath:    memoryDst,
       sessionKey:    "agent:main:sinain"
     }
