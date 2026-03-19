@@ -1,10 +1,11 @@
 {
   "name": "@geravant/sinain",
-  "version": "1.0.16",
+  "version": "1.0.18",
   "description": "sinain OpenClaw plugin — AI overlay for macOS",
   "type": "module",
   "bin": {
-    "sinain": "./install.js"
+    "sinain": "./install.js",
+    "sinain-knowledge": "./sinain-knowledge/deploy/cli.ts"
   },
   "scripts": {
     "postinstall": "node install.js"
@@ -14,11 +15,17 @@
     "openclaw.plugin.json",
     "install.js",
     "sinain-memory",
+    "sinain-knowledge",
     "HEARTBEAT.md",
     "SKILL.md"
   ],
   "engines": {
     "node": ">=18"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "license": "MIT"
 }

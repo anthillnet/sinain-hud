@@ -1,0 +1,5 @@
+HISTORY_TOOL=sessions_history
+TICK_TOOL=sinain_heartbeat_tick
+SPAWN_TOOL=sessions_spawn
+SESSION_KEY=agent:main:sinain
+TELEGRAM_CHAT_ID=59835117
