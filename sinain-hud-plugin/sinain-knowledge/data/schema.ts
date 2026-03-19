@@ -25,6 +25,7 @@ export type PluginConfig = {
   modulesPath?: string;
   sessionKey?: string;
   userTimezone?: string;
+  snapshotRepoPath?: string;
 };
 
 // ============================================================================

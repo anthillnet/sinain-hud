@@ -9,6 +9,7 @@
 import type { Logger, ScriptRunner } from "../data/schema.js";
 import type { KnowledgeStore } from "../data/store.js";
 import type { ResilienceManager } from "./resilience.js";
+import type { GitSnapshotStore } from "../data/git-store.js";
 
 // ============================================================================
 // Types
@@ -41,6 +42,7 @@ export type ContextAssemblyOpts = {
 
 export class CurationEngine {
   private curationInterval: ReturnType<typeof setInterval> | null = null;
+  private gitSnapshotStore: GitSnapshotStore | null = null;
 
   constructor(
     private store: KnowledgeStore,
@@ -49,6 +51,11 @@ export class CurationEngine {
     private config: { userTimezone: string },
     private logger: Logger,
   ) {}
+
+  /** Attach a git-backed snapshot store for periodic saves. */
+  setGitSnapshotStore(gitStore: GitSnapshotStore): void {
+    this.gitSnapshotStore = gitStore;
+  }
 
   // ── Heartbeat Tick ──────────────────────────────────────────────────────
 
@@ -310,6 +317,19 @@ export class CurationEngine {
         "--memory-dir", "memory/",
       ], 120_000);
       this.resilience.lastEvalReportDate = todayStr;
+    }
+
+    // Step 8: Periodic snapshot save to local git repo
+    if (this.gitSnapshotStore) {
+      try {
+        const snapT0 = Date.now();
+        const hash = this.gitSnapshotStore.save(this.store);
+        curationLatency.snapshotSave = Date.now() - snapT0;
+        this.logger.info(`sinain-hud: periodic snapshot saved → ${hash}`);
+        this.gitSnapshotStore.prune();
+      } catch (err) {
+        this.logger.warn(`sinain-hud: periodic snapshot save failed: ${String(err)}`);
+      }
     }
 
     // Log result

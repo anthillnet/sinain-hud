@@ -15,6 +15,7 @@ export interface SinainKnowledgeManifest {
   backend: "openclaw" | "generic";
   workspace: string;
   backupRepo?: string;
+  snapshotRepoPath?: string;
   heartbeat?: {
     every: string;
     path?: string;
