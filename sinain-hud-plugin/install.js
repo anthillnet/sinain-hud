@@ -120,7 +120,8 @@ async function installNemoClaw({ sandboxName }) {
   cfg.agents.defaults                                ??= {};
   cfg.agents.defaults.sandbox                        ??= {};
   cfg.agents.defaults.sandbox.sessionToolsVisibility  = "all";
-  // NemoClaw: gateway bind/auth and compaction are managed by OpenShell — do not overwrite them
+  // NemoClaw: gateway bind/auth are managed by OpenShell — but compaction must be set explicitly
+  cfg.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
 
   const token = cfg.gateway?.auth?.token ?? "(see sandbox openclaw.json)";
 
