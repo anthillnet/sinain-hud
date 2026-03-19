@@ -49,6 +49,9 @@ Usage:
   sinain-knowledge install [--backend openclaw|generic] [--workspace <path>]
   sinain-knowledge snapshot export <file>
   sinain-knowledge snapshot import <file> [--workspace <path>]
+  sinain-knowledge snapshot save [--workspace <path>] [--repo <path>]
+  sinain-knowledge snapshot list [--repo <path>] [--count <n>]
+  sinain-knowledge snapshot restore <ref> [--workspace <path>] [--repo <path>]
   sinain-knowledge protocol render --protocol <heartbeat|skill> --binding <openclaw|generic>
   sinain-knowledge protocol render --protocol <heartbeat|skill> --binding <openclaw|generic> --output <file>
 `);
@@ -116,8 +119,58 @@ async function cmdSnapshot(): Promise<void> {
 
     importSnapshot(store, snapshot);
     console.log(`Snapshot imported from ${file}`);
+  } else if (subcommand === "save") {
+    const workspace = getArg("--workspace") ?? process.cwd();
+    const repoPath = getArg("--repo");
+
+    const { KnowledgeStore } = await import("../data/store.js");
+    const { GitSnapshotStore } = await import("../data/git-store.js");
+
+    const logger = { info: console.log, warn: console.warn };
+    const store = new KnowledgeStore(workspace, logger);
+    const gitStore = new GitSnapshotStore(repoPath, logger);
+
+    const hash = gitStore.save(store);
+    console.log(`Snapshot saved → ${hash} (repo: ${gitStore.getRepoPath()})`);
+  } else if (subcommand === "list") {
+    const repoPath = getArg("--repo");
+    const count = parseInt(getArg("--count") ?? "20", 10);
+
+    const { GitSnapshotStore } = await import("../data/git-store.js");
+
+    const logger = { info: () => {}, warn: console.warn };
+    const gitStore = new GitSnapshotStore(repoPath, logger);
+    const entries = gitStore.list(count);
+
+    if (entries.length === 0) {
+      console.log("No snapshots found.");
+    } else {
+      console.log(`${entries.length} snapshot(s) in ${gitStore.getRepoPath()}:\n`);
+      for (const e of entries) {
+        console.log(`  ${e.hash}  ${e.date}  ${e.subject}`);
+      }
+    }
+  } else if (subcommand === "restore") {
+    const ref = args[2];
+    if (!ref) {
+      console.error("Usage: sinain-knowledge snapshot restore <ref>");
+      process.exit(1);
+    }
+
+    const workspace = getArg("--workspace") ?? process.cwd();
+    const repoPath = getArg("--repo");
+
+    const { KnowledgeStore } = await import("../data/store.js");
+    const { GitSnapshotStore } = await import("../data/git-store.js");
+
+    const logger = { info: console.log, warn: console.warn };
+    const store = new KnowledgeStore(workspace, logger);
+    const gitStore = new GitSnapshotStore(repoPath, logger);
+
+    gitStore.restore(store, ref);
+    console.log(`Snapshot ${ref} restored to ${workspace}`);
   } else {
-    console.error("Usage: sinain-knowledge snapshot <export|import> <file>");
+    console.error("Usage: sinain-knowledge snapshot <export|import|save|list|restore>");
     process.exit(1);
   }
 }

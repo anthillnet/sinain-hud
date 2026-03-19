@@ -21,6 +21,7 @@ import { KnowledgeStore } from "./sinain-knowledge/data/store.js";
 import { ResilienceManager, HealthWatchdog, OVERFLOW_CONSECUTIVE_THRESHOLD, SHORT_FAILURE_THRESHOLD_MS, ERROR_WINDOW_MS, SESSION_HYGIENE_SIZE_BYTES, SESSION_HYGIENE_AGE_MS, ALERT_COOLDOWN_MS } from "./sinain-knowledge/curation/resilience.js";
 import type { ResilienceBackend } from "./sinain-knowledge/curation/resilience.js";
 import { CurationEngine } from "./sinain-knowledge/curation/engine.js";
+import { GitSnapshotStore } from "./sinain-knowledge/data/git-store.js";
 
 // ============================================================================
 // Privacy helpers
@@ -264,6 +265,10 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
   const scriptRunner = (args: string[], opts: { timeoutMs: number; cwd: string }) =>
     api.runtime.system.runCommandWithTimeout(args, opts);
   const engine = new CurationEngine(store, scriptRunner, resilience, { userTimezone: cfg.userTimezone ?? "Europe/Berlin" }, api.logger);
+  if (cfg.snapshotRepoPath) {
+    engine.setGitSnapshotStore(new GitSnapshotStore(cfg.snapshotRepoPath, api.logger));
+    api.logger.info(`sinain-hud: git snapshot store configured at ${cfg.snapshotRepoPath}`);
+  }
   const watchdog = new HealthWatchdog(resilience, resilienceBackend, api.logger);
 
   function appendToContextCache(line: string): void {
