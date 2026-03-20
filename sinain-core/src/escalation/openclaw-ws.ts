@@ -1,10 +1,87 @@
 import { EventEmitter } from "node:events";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, createPrivateKey, createPublicKey, sign } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import WebSocket from "ws";
 import type { OpenClawConfig } from "../types.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "openclaw";
+
+// ── Device Identity ──────────────────────────────────────────────────────────
+
+interface DeviceIdentity {
+  deviceId: string;
+  publicKeyPem: string;
+  privateKeyPem: string;
+}
+
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+
+function base64UrlEncode(buf: Buffer): string {
+  return buf.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function derivePublicKeyRaw(publicKeyPem: string): Buffer {
+  const spki = createPublicKey(publicKeyPem).export({ type: "spki", format: "der" });
+  if (spki.length === ED25519_SPKI_PREFIX.length + 32 &&
+      spki.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
+    return spki.subarray(ED25519_SPKI_PREFIX.length);
+  }
+  return spki;
+}
+
+function fingerprintPublicKey(publicKeyPem: string): string {
+  return createHash("sha256").update(derivePublicKeyRaw(publicKeyPem)).digest("hex");
+}
+
+function publicKeyRawBase64Url(publicKeyPem: string): string {
+  return base64UrlEncode(derivePublicKeyRaw(publicKeyPem));
+}
+
+function signDevicePayload(privateKeyPem: string, payload: string): string {
+  const key = createPrivateKey(privateKeyPem);
+  return base64UrlEncode(sign(null, Buffer.from(payload, "utf8"), key) as unknown as Buffer);
+}
+
+function buildDeviceAuthPayloadV3(params: {
+  deviceId: string; clientId: string; clientMode: string;
+  role: string; scopes: string[]; signedAtMs: number;
+  token: string | null; nonce: string; platform: string;
+}): string {
+  return [
+    "v3", params.deviceId, params.clientId, params.clientMode,
+    params.role, params.scopes.join(","), String(params.signedAtMs),
+    params.token ?? "", params.nonce, params.platform.toLowerCase(), "",
+  ].join("|");
+}
+
+const DEVICE_IDENTITY_PATH = join(homedir(), ".sinain", "device-identity.json");
+
+function loadOrCreateDeviceIdentity(): DeviceIdentity {
+  try {
+    if (existsSync(DEVICE_IDENTITY_PATH)) {
+      const parsed = JSON.parse(readFileSync(DEVICE_IDENTITY_PATH, "utf8"));
+      if (parsed?.version === 1 && parsed.deviceId && parsed.publicKeyPem && parsed.privateKeyPem) {
+        const derivedId = fingerprintPublicKey(parsed.publicKeyPem);
+        return { deviceId: derivedId, publicKeyPem: parsed.publicKeyPem, privateKeyPem: parsed.privateKeyPem };
+      }
+    }
+  } catch {}
+
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }) as string;
+  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+  const deviceId = fingerprintPublicKey(publicKeyPem);
+
+  const dir = dirname(DEVICE_IDENTITY_PATH);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(DEVICE_IDENTITY_PATH, JSON.stringify({ version: 1, deviceId, publicKeyPem, privateKeyPem }, null, 2) + "\n", { mode: 0o600 });
+  log(TAG, `generated device identity → ${deviceId.slice(0, 12)}… (${DEVICE_IDENTITY_PATH})`);
+
+  return { deviceId, publicKeyPem, privateKeyPem };
+}
 
 /** Ping timeout — if no pong arrives within this window after a ping, terminate. */
 const PING_TIMEOUT_MS = 5_000;
@@ -47,6 +124,7 @@ interface PendingFinalRpc {
 export class OpenClawWsClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private authenticated = false;
+  private deviceIdentity: DeviceIdentity;
   private rpcId = 1;
   private pending = new Map<string, PendingRpc>();
   /** Phase 2 of split RPCs — resolved by final frame, rejected by 120s timeout or disconnect. */
@@ -77,6 +155,8 @@ export class OpenClawWsClient extends EventEmitter {
 
   constructor(private config: OpenClawConfig) {
     super();
+    this.deviceIdentity = loadOrCreateDeviceIdentity();
+    log(TAG, `device identity: ${this.deviceIdentity.deviceId.slice(0, 12)}…`);
   }
 
   /** Connect to the OpenClaw gateway. */
@@ -320,10 +400,27 @@ export class OpenClawWsClient extends EventEmitter {
   private handleMessage(msg: any): void {
     // Handle connect.challenge
     if (msg.type === "event" && msg.event === "connect.challenge") {
+      const nonce: string = msg.payload?.nonce ?? msg.nonce ?? "";
       const tokenHash = this.config.gatewayToken
         ? createHash("sha256").update(this.config.gatewayToken).digest("hex").slice(0, 12)
         : "none";
-      log(TAG, `received connect.challenge — sending auth (tokenHash=${tokenHash})`);
+      log(TAG, `received connect.challenge — sending auth (tokenHash=${tokenHash}, device=${this.deviceIdentity.deviceId.slice(0, 12)}…)`);
+
+      const scopes = ["operator.read", "operator.write", "operator.admin"];
+      const signedAtMs = Date.now();
+      const payload = buildDeviceAuthPayloadV3({
+        deviceId: this.deviceIdentity.deviceId,
+        clientId: "gateway-client",
+        clientMode: "backend",
+        role: "operator",
+        scopes,
+        signedAtMs,
+        token: this.config.gatewayToken || null,
+        nonce,
+        platform: process.platform,
+      });
+      const signature = signDevicePayload(this.deviceIdentity.privateKeyPem, payload);
+
       this.ws?.send(JSON.stringify({
         type: "req",
         id: "connect-1",
@@ -332,7 +429,7 @@ export class OpenClawWsClient extends EventEmitter {
           minProtocol: 3,
           maxProtocol: 3,
           role: "operator",
-          scopes: ["operator.read", "operator.write", "operator.admin"],
+          scopes,
           client: {
             id: "gateway-client",
             displayName: "Sinain Core",
@@ -341,6 +438,13 @@ export class OpenClawWsClient extends EventEmitter {
             mode: "backend",
           },
           auth: { token: this.config.gatewayToken },
+          device: {
+            id: this.deviceIdentity.deviceId,
+            publicKey: publicKeyRawBase64Url(this.deviceIdentity.publicKeyPem),
+            signature,
+            signedAt: signedAtMs,
+            nonce,
+          },
         },
       }));
       return;
