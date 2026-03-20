@@ -62,8 +62,10 @@ sense_client (OCR pipeline)
 unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
 
 npx @geravant/sinain
-# or, if you have a memory backup repo:
-SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
+# or, with backup repos (both optional):
+SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git \
+SINAIN_SNAPSHOT_REPO=git@github.com:yourname/sinain-snapshots.git \
+npx @geravant/sinain
 ```
 
 `npx @geravant/sinain` will:
@@ -72,6 +74,7 @@ SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinai
 - Patch `openclaw.json` in the sandbox (adds plugin config, `sessionToolsVisibility: all`)
 - Restart the OpenClaw gateway inside the sandbox
 - Forward sandbox port 18789 → VM port 18789 (so Brev's exposed port works)
+- Configure knowledge snapshot repo if `SINAIN_SNAPSHOT_REPO` is set (optional — backs up playbook and eval data)
 
 3. At the end you'll see output like:
 ```
@@ -232,8 +235,10 @@ If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart
 2. **Re-deploy sinain**:
    ```bash
    npx @geravant/sinain
-   # or with memory backup:
-   SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
+   # or with backup repos:
+   SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git \
+   SINAIN_SNAPSHOT_REPO=git@github.com:yourname/sinain-snapshots.git \
+   npx @geravant/sinain
    ```
 
 3. **Re-expose port 18789** in Brev dashboard (port exposures may reset on instance restart)
