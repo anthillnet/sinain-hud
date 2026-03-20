@@ -121,7 +121,7 @@ async function installNemoClaw({ sandboxName }) {
   cfg.agents.defaults.sandbox                        ??= {};
   cfg.agents.defaults.sandbox.sessionToolsVisibility  = "all";
   // NemoClaw: gateway bind/auth are managed by OpenShell — but compaction must be set explicitly
-  cfg.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
+  cfg.agents.defaults.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
 
   const token = cfg.gateway?.auth?.token ?? "(see sandbox openclaw.json)";
 
@@ -205,15 +205,24 @@ async function installLocal() {
   cfg.agents.defaults                                ??= {};
   cfg.agents.defaults.sandbox                        ??= {};
   cfg.agents.defaults.sandbox.sessionToolsVisibility  = "all";
-  cfg.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
+  cfg.agents.defaults.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
   cfg.gateway     ??= {};
   cfg.gateway.bind  = "lan";  // allow remote Mac to connect
+
+  // Propagate snapshot repo path to plugin config (used for periodic git-backed knowledge backups)
+  if (process.env.SINAIN_SNAPSHOT_REPO) {
+    cfg.plugins.entries["sinain-hud"].config.snapshotRepoPath = process.env.SINAIN_SNAPSHOT_REPO;
+  }
 
   fs.mkdirSync(path.dirname(OC_JSON), { recursive: true });
   fs.writeFileSync(OC_JSON, JSON.stringify(cfg, null, 2));
   console.log("  ✓ openclaw.json patched");
 
   // Memory restore from backup repo
+  // Set SINAIN_BACKUP_REPO to a private GitHub repo URL to seed the workspace with
+  // existing memory (session summaries, playbook, triplestore, identity files).
+  // Expected repo structure: memory/, playbook.md, identity/, triplestore.jsonl, SITUATION.md
+  // The repo MUST be private — the installer verifies this via GitHub API.
   const backupUrl = process.env.SINAIN_BACKUP_REPO;
   if (backupUrl) {
     try {
