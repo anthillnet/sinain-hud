@@ -270,10 +270,13 @@ export interface ContextWindow {
 
 // ── Escalation types ──
 
+export type EscalationTransport = "ws" | "http" | "auto";
+
 export interface EscalationConfig {
   mode: EscalationMode;
   cooldownMs: number;
   staleMs: number;  // force escalation after this many ms of silence (0 = disabled)
+  transport: EscalationTransport;
 }
 
 export interface OpenClawConfig {
