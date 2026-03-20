@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
+import { randomBytes } from "crypto";
 
 const HOME        = os.homedir();
 const PLUGIN_DIR  = path.join(HOME, ".openclaw/extensions/sinain-hud");
@@ -18,7 +19,9 @@ const SKILL      = path.join(PKG_DIR, "SKILL.md");
 
 console.log("\nInstalling sinain plugin...");
 
-// 1. Stage plugin files to local ~/.openclaw (used by both paths)
+// 1. Copy plugin files (remove stale extensions/sinain dir if present from old installs)
+const stalePluginDir = path.join(HOME, ".openclaw/extensions/sinain");
+if (fs.existsSync(stalePluginDir)) fs.rmSync(stalePluginDir, { recursive: true, force: true });
 fs.mkdirSync(PLUGIN_DIR, { recursive: true });
 fs.copyFileSync(path.join(PKG_DIR, "index.ts"),             path.join(PLUGIN_DIR, "index.ts"));
 fs.copyFileSync(path.join(PKG_DIR, "openclaw.plugin.json"), path.join(PLUGIN_DIR, "openclaw.plugin.json"));
@@ -115,6 +118,8 @@ async function installNemoClaw({ sandboxName }) {
       sessionKey:    "agent:main:sinain"
     }
   };
+  // Remove stale "sinain" entry if present from a previous install
+  delete cfg.plugins.entries["sinain"];
   if (!cfg.plugins.allow.includes("sinain-hud")) cfg.plugins.allow.push("sinain-hud");
   cfg.agents                                         ??= {};
   cfg.agents.defaults                                ??= {};
@@ -201,13 +206,24 @@ async function installLocal() {
       sessionKey:    "agent:main:sinain"
     }
   };
+  // Remove stale "sinain" entry if present from a previous install
+  delete cfg.plugins.entries["sinain"];
+  cfg.plugins.allow ??= [];
+  if (!cfg.plugins.allow.includes("sinain-hud")) cfg.plugins.allow.push("sinain-hud");
   cfg.agents                                         ??= {};
   cfg.agents.defaults                                ??= {};
   cfg.agents.defaults.sandbox                        ??= {};
   cfg.agents.defaults.sandbox.sessionToolsVisibility  = "all";
   cfg.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
-  cfg.gateway     ??= {};
-  cfg.gateway.bind  = "lan";  // allow remote Mac to connect
+  cfg.gateway       ??= {};
+  cfg.gateway.mode    = "local";   // required for gateway to start
+  cfg.gateway.bind    = "lan";     // allow remote Mac to connect
+  cfg.gateway.auth  ??= {};
+  cfg.gateway.auth.mode ??= "token";
+  if (!cfg.gateway.auth.token) {
+    cfg.gateway.auth.token = randomBytes(24).toString("hex");
+  }
+  const authToken = cfg.gateway.auth.token;
 
   fs.mkdirSync(path.dirname(OC_JSON), { recursive: true });
   fs.writeFileSync(OC_JSON, JSON.stringify(cfg, null, 2));
@@ -232,25 +248,23 @@ async function installLocal() {
     }
   }
 
-  // Reload gateway
+  // Start / restart gateway
   try {
-    execSync("openclaw reload", { stdio: "pipe" });
-    console.log("  ✓ Gateway reloaded");
+    execSync("openclaw gateway restart --background", { stdio: "pipe" });
+    console.log("  ✓ Gateway restarted");
   } catch {
     try {
-      execSync("openclaw stop && sleep 1 && openclaw start --background", { stdio: "pipe" });
-      console.log("  ✓ Gateway restarted");
+      execSync("openclaw gateway start --background", { stdio: "pipe" });
+      console.log("  ✓ Gateway started");
     } catch {
       console.warn("  ⚠ Could not start gateway — run: openclaw gateway");
     }
   }
 
-  console.log(`
-✓ sinain installed successfully.
-  Plugin config: ~/.openclaw/openclaw.json
-  Auth token:    check your Brev dashboard → 'Gateway Token'
-  Then run ./setup-nemoclaw.sh on your Mac.
-`);
+  console.log("\n✓ sinain installed successfully.");
+  console.log("  Plugin config: ~/.openclaw/openclaw.json");
+  console.log(`  Auth token:    ${authToken}`);
+  console.log("  Next: run 'openclaw gateway' in a new terminal, then run ./setup-nemoclaw.sh on your Mac.\n");
 }
 
 // ── Detection ────────────────────────────────────────────────────────────────
