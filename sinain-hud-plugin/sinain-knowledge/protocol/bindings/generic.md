@@ -1,0 +1,5 @@
+HISTORY_TOOL=get_history
+TICK_TOOL=sinain_heartbeat_tick
+SPAWN_TOOL=spawn_task
+SESSION_KEY=sinain
+TELEGRAM_CHAT_ID=
