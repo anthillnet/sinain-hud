@@ -15,6 +15,39 @@ skip() { echo -e "  ${yellow}(already set — skipping)${reset}"; }
 fail() { echo -e "  ${red}✗ $*${reset}"; exit 1; }
 warn() { echo -e "  ${yellow}⚠ $*${reset}"; }
 
+# Privacy guard — verify GitHub repos are private before configuring
+check_repo_privacy() {
+  local url="$1" owner_repo status is_private
+  if [[ "$url" != *"github.com"* ]]; then
+    echo "  ⚠ Non-GitHub repo — cannot auto-verify privacy."
+    printf "  Type 'yes, it is private' to confirm: "
+    read -r confirm
+    if [[ "$confirm" != "yes, it is private" ]]; then
+      fail "Aborted — cannot confirm repo privacy."
+      exit 1
+    fi
+    return
+  fi
+  owner_repo=$(echo "$url" | sed -E 's|https://github.com/||;s|git@github.com:||;s|\.git$||')
+  status=$(curl -s -o /dev/null -w "%{http_code}" "https://api.github.com/repos/$owner_repo")
+  if [ "$status" = "200" ]; then
+    is_private=$(curl -s "https://api.github.com/repos/$owner_repo" | \
+      python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('private', False))")
+    if [ "$is_private" = "True" ]; then
+      ok "Repo is private"
+    else
+      fail "SECURITY ERROR: github.com/$owner_repo is PUBLIC."
+      echo "    Fix: github.com/$owner_repo/settings → Change visibility → Private"
+      exit 1
+    fi
+  elif [ "$status" = "404" ]; then
+    ok "Repo is private (not publicly visible)"
+  else
+    fail "Cannot verify repo privacy (HTTP $status). Aborting for safety."
+    exit 1
+  fi
+}
+
 # Load current .env if it exists (for idempotency — skip already-set values)
 [ -f "$ENV_FILE" ] && source "$ENV_FILE" 2>/dev/null || true
 
@@ -24,7 +57,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # ── Step 1: OpenRouter API key ───────────────────────────────────────────────
-echo -e "${bold}[1/5] OpenRouter API key${reset}"
+echo -e "${bold}[1/6] OpenRouter API key${reset}"
 echo "  Used for screen analysis and audio transcription."
 echo "  Get one free at openrouter.ai"
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
@@ -36,7 +69,7 @@ fi
 echo ""
 
 # ── Step 2: Speech-to-text mode ──────────────────────────────────────────────
-echo -e "${bold}[2/5] Audio transcription${reset}"
+echo -e "${bold}[2/6] Audio transcription${reset}"
 echo "  a) Cloud  — uses OpenRouter (free, no download needed)"
 echo "  b) Local  — uses Whisper on your Mac (~1.5 GB model, fully private)"
 if [ -n "${TRANSCRIPTION_BACKEND:-}" ]; then
@@ -58,7 +91,7 @@ fi
 echo ""
 
 # ── Step 3: Install & start OpenClaw gateway ─────────────────────────────────
-echo -e "${bold}[3/5] Install & start OpenClaw gateway${reset}"
+echo -e "${bold}[3/6] Install & start OpenClaw gateway${reset}"
 
 # Ensure openclaw CLI is available
 if command -v openclaw >/dev/null 2>&1; then
@@ -164,7 +197,7 @@ ok "Auth token configured"
 echo ""
 
 # ── Step 4: Verify Anthropic auth ────────────────────────────────────────────
-echo -e "${bold}[4/5] Verify Anthropic auth (for the agent)${reset}"
+echo -e "${bold}[4/6] Verify Anthropic auth (for the agent)${reset}"
 echo "  The OpenClaw agent needs an Anthropic API key."
 echo "  This is stored in auth-profiles.json, NOT in sinain-core/.env."
 
@@ -199,8 +232,53 @@ else
 fi
 echo ""
 
-# ── Step 5: Restore knowledge snapshot (optional) ────────────────────────────
-echo -e "${bold}[5/5] Restore knowledge snapshot (optional)${reset}"
+# ── Step 5: Knowledge snapshot backup repo (optional) ────────────────────────
+echo -e "${bold}[5/6] Knowledge snapshot backup repo (optional)${reset}"
+echo "  A private GitHub repo to backup knowledge snapshots (playbook, modules, eval data)."
+echo "  Create one at github.com/new (must be PRIVATE). Paste the SSH or HTTPS clone URL."
+echo "  Leave blank to skip (snapshots stay local only)."
+SNAPSHOT_DIR="$HOME/.sinain/knowledge-snapshots"
+if [ -n "${SINAIN_SNAPSHOT_REPO:-}" ]; then
+  skip; SNAPSHOT_REPO="$SINAIN_SNAPSHOT_REPO"
+else
+  ask "Snapshot repo URL (or Enter to skip):"
+  SNAPSHOT_REPO="$REPLY"
+fi
+
+if [ -n "$SNAPSHOT_REPO" ]; then
+  echo "  Verifying repo privacy..."
+  check_repo_privacy "$SNAPSHOT_REPO"
+
+  mkdir -p "$SNAPSHOT_DIR"
+  if [ ! -d "$SNAPSHOT_DIR/.git" ]; then
+    git -C "$SNAPSHOT_DIR" init --quiet
+    git -C "$SNAPSHOT_DIR" config user.name "sinain-knowledge"
+    git -C "$SNAPSHOT_DIR" config user.email "sinain@local"
+  fi
+
+  # Set remote (add or update)
+  if git -C "$SNAPSHOT_DIR" remote get-url origin >/dev/null 2>&1; then
+    git -C "$SNAPSHOT_DIR" remote set-url origin "$SNAPSHOT_REPO"
+  else
+    git -C "$SNAPSHOT_DIR" remote add origin "$SNAPSHOT_REPO"
+  fi
+
+  # Pull existing snapshots if remote has content
+  if git -C "$SNAPSHOT_DIR" fetch origin 2>/dev/null; then
+    if git -C "$SNAPSHOT_DIR" rev-parse origin/main >/dev/null 2>&1; then
+      git -C "$SNAPSHOT_DIR" checkout -B main origin/main --quiet
+      ok "Snapshot repo restored from remote"
+    else
+      ok "Snapshot repo configured (empty remote)"
+    fi
+  else
+    ok "Snapshot repo configured (remote not reachable yet)"
+  fi
+fi
+echo ""
+
+# ── Step 6: Restore knowledge snapshot (optional) ────────────────────────────
+echo -e "${bold}[6/6] Restore knowledge snapshot (optional)${reset}"
 SNAPSHOT_DIR="$HOME/.sinain/knowledge-snapshots"
 
 if [ -d "$SNAPSHOT_DIR/.git" ]; then
@@ -223,7 +301,7 @@ echo ""
 # ── Write .env ───────────────────────────────────────────────────────────────
 # Strip lines we're about to rewrite; preserve everything else
 if [ -f "$ENV_FILE" ]; then
-  grep -vE "^(OPENROUTER_API_KEY|TRANSCRIPTION_BACKEND|OPENCLAW_)" \
+  grep -vE "^(OPENROUTER_API_KEY|TRANSCRIPTION_BACKEND|OPENCLAW_|SINAIN_SNAPSHOT_REPO)" \
     "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
 fi
 
@@ -237,6 +315,7 @@ fi
   echo "OPENCLAW_WS_TOKEN=${TOKEN}"
   echo "OPENCLAW_HTTP_TOKEN=${TOKEN}"
   echo "OPENCLAW_SESSION_KEY=agent:main:sinain"
+  if [ -n "$SNAPSHOT_REPO" ]; then echo "SINAIN_SNAPSHOT_REPO=${SNAPSHOT_REPO}"; fi
 } >> "$ENV_FILE"
 
 ok "Configuration saved to sinain-core/.env"

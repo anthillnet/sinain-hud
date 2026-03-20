@@ -193,7 +193,31 @@ export class GitSnapshotStore {
     this.git("commit", "-m", message);
     const hash = this.git("rev-parse", "--short", "HEAD");
     this.logger.info(`sinain-knowledge: snapshot saved → ${hash}`);
+    await this.push();
     return hash;
+  }
+
+  // ── Push ─────────────────────────────────────────────────────────────────
+
+  private async push(): Promise<void> {
+    try {
+      const remotes = this.git("remote");
+      if (!remotes) return;
+
+      // Use a longer timeout for network operations
+      execFileSync("git", ["push", "origin", "HEAD"], {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+        timeout: 30_000,
+        stdio: "pipe",
+      });
+      this.logger.info("sinain-knowledge: snapshot pushed to remote");
+    } catch (err) {
+      // Warn only if there IS a remote but push failed
+      this.logger.warn(
+        `sinain-knowledge: push failed (${err instanceof Error ? err.message.split("\n")[0] : String(err)})`,
+      );
+    }
   }
 
   // ── List ─────────────────────────────────────────────────────────────────

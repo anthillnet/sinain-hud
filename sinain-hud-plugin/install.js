@@ -150,6 +150,19 @@ async function installNemoClaw({ sandboxName }) {
     }
   }
 
+  // Knowledge snapshot repo (optional) — inside sandbox
+  const snapshotUrl = process.env.SINAIN_SNAPSHOT_REPO;
+  if (snapshotUrl) {
+    try {
+      await checkRepoPrivacy(snapshotUrl);
+      run(`ssh -T openshell-${sandboxName} 'mkdir -p ~/.sinain/knowledge-snapshots && cd ~/.sinain/knowledge-snapshots && ([ -d .git ] || (git init && git config user.name sinain-knowledge && git config user.email sinain@local)) && (git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "${snapshotUrl}" || git remote add origin "${snapshotUrl}") && (git fetch origin && git checkout -B main origin/main) 2>/dev/null || true'`);
+      console.log("  ✓ Snapshot repo configured in sandbox");
+    } catch (e) {
+      console.error("\n  ✗ Snapshot repo setup aborted:", e.message, "\n");
+      process.exit(1);
+    }
+  }
+
   // Restart openclaw gateway inside sandbox (kill existing PID + start fresh)
   try {
     // Find the gateway PID, kill it, then start a new instance detached
@@ -248,6 +261,9 @@ async function installLocal() {
     }
   }
 
+  // Knowledge snapshot repo (optional)
+  await setupSnapshotRepo();
+
   // Start / restart gateway
   try {
     execSync("openclaw gateway restart --background", { stdio: "pipe" });
@@ -265,6 +281,49 @@ async function installLocal() {
   console.log("  Plugin config: ~/.openclaw/openclaw.json");
   console.log(`  Auth token:    ${authToken}`);
   console.log("  Next: run 'openclaw gateway' in a new terminal, then run ./setup-nemoclaw.sh on your Mac.\n");
+}
+
+// ── Knowledge snapshot repo setup (shared) ──────────────────────────────────
+
+const SNAPSHOT_DIR = path.join(HOME, ".sinain", "knowledge-snapshots");
+
+async function setupSnapshotRepo() {
+  const snapshotUrl = process.env.SINAIN_SNAPSHOT_REPO;
+  if (!snapshotUrl) return;
+
+  try {
+    await checkRepoPrivacy(snapshotUrl);
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+
+    if (!fs.existsSync(path.join(SNAPSHOT_DIR, ".git"))) {
+      execSync(`git init "${SNAPSHOT_DIR}"`, { stdio: "pipe" });
+      execSync(`git -C "${SNAPSHOT_DIR}" config user.name "sinain-knowledge"`, { stdio: "pipe" });
+      execSync(`git -C "${SNAPSHOT_DIR}" config user.email "sinain@local"`, { stdio: "pipe" });
+    }
+
+    // Set remote (add or update)
+    try {
+      run_capture(`git -C "${SNAPSHOT_DIR}" remote get-url origin`);
+      execSync(`git -C "${SNAPSHOT_DIR}" remote set-url origin "${snapshotUrl}"`, { stdio: "pipe" });
+    } catch {
+      execSync(`git -C "${SNAPSHOT_DIR}" remote add origin "${snapshotUrl}"`, { stdio: "pipe" });
+    }
+
+    // Pull existing snapshots if remote has content
+    try {
+      execSync(`git -C "${SNAPSHOT_DIR}" fetch origin`, { stdio: "pipe", timeout: 15_000 });
+      execSync(`git -C "${SNAPSHOT_DIR}" checkout -B main origin/main`, { stdio: "pipe" });
+      console.log("  ✓ Snapshot repo restored from", snapshotUrl);
+    } catch {
+      console.log("  ✓ Snapshot repo configured (empty remote)");
+    }
+  } catch (e) {
+    if (e.message?.startsWith("SECURITY") || e.message?.startsWith("Refusing")) {
+      console.error("\n  ✗ Snapshot repo setup aborted:", e.message, "\n");
+      process.exit(1);
+    }
+    console.warn("  ⚠ Snapshot repo setup failed:", e.message);
+  }
 }
 
 // ── Detection ────────────────────────────────────────────────────────────────
