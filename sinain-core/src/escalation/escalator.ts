@@ -7,11 +7,20 @@ import type { SignalCollector } from "../learning/signal-collector.js";
 import { randomUUID, createHash } from "node:crypto";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { EscalationSlot } from "./escalation-slot.js";
-import type { SlotEntry } from "./escalation-slot.js";
+import type { SlotEntry, QueueFeedbackCtx } from "./escalation-slot.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { isCodingContext, buildEscalationMessage } from "./message-builder.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
+
+export interface HttpPendingEscalation {
+  id: string;
+  message: string;
+  score: number;
+  codingContext: boolean;
+  ts: number;
+  feedbackCtx: QueueFeedbackCtx | undefined;
+}
 
 const TAG = "escalation";
 
@@ -40,6 +49,7 @@ export interface EscalatorDeps {
 export class Escalator {
   private wsClient: OpenClawWsClient;
   private slot: EscalationSlot;
+  private httpPending: HttpPendingEscalation | null = null;
 
   private lastEscalationTs = Date.now();
   private lastEscalatedDigest = "";
@@ -112,9 +122,9 @@ export class Escalator {
     this.deps.signalCollector = sc;
   }
 
-  /** Start the WS connection to OpenClaw. */
+  /** Start the WS connection to OpenClaw (skipped when transport=http). */
   start(): void {
-    if (this.deps.escalationConfig.mode !== "off") {
+    if (this.deps.escalationConfig.mode !== "off" && this.deps.escalationConfig.transport !== "http") {
       this.wsClient.connect();
       const tokenHash = this.deps.openclawConfig.gatewayToken
         ? createHash("sha256").update(this.deps.openclawConfig.gatewayToken).digest("hex").slice(0, 12)
@@ -150,8 +160,9 @@ export class Escalator {
    * Decides whether to escalate and enqueues the message for delivery.
    */
   onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): void {
-    // Skip entire escalation pipeline when circuit is open
-    if (this.wsClient.isCircuitOpen) {
+    // Skip WS escalations when circuit is open (HTTP transport bypasses this)
+    const transport = this.deps.escalationConfig.transport;
+    if (this.wsClient.isCircuitOpen && transport !== "http") {
       log(TAG, `tick #${entry.id}: skipped — circuit breaker open`);
       return;
     }
@@ -212,8 +223,23 @@ export class Escalator {
       ts: entry.ts,
     };
 
-    log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot.depth}`);
-    this.slot.insert(slotEntry);
+    const useHttp = transport === "http" || (transport === "auto" && !this.wsClient.isConnected);
+
+    if (useHttp) {
+      // Store in HTTP pending slot (newest wins, like EscalationSlot)
+      this.httpPending = {
+        id: slotId,
+        message,
+        score: score.total,
+        codingContext: isCodingContext(contextWindow).coding,
+        ts: entry.ts,
+        feedbackCtx: slotEntry.feedbackCtx,
+      };
+      log(TAG, `tick #${entry.id} → httpPending id=${slotId} (transport=${transport})`);
+    } else {
+      log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot.depth}`);
+      this.slot.insert(slotEntry);
+    }
   }
 
   /** Push fresh SITUATION.md content to the gateway server (fire-and-forget). */
@@ -296,6 +322,38 @@ ${recentLines.join("\n")}`;
     }
   }
 
+  /** Return the current HTTP pending escalation (or null). */
+  getPendingHttp(): HttpPendingEscalation | null {
+    return this.httpPending;
+  }
+
+  /** Respond to an HTTP pending escalation. */
+  respondHttp(id: string, response: string): { ok: boolean; error?: string } {
+    if (!this.httpPending) {
+      return { ok: false, error: "no pending escalation" };
+    }
+    if (this.httpPending.id !== id) {
+      return { ok: false, error: `id mismatch: expected ${this.httpPending.id}` };
+    }
+
+    this.pushResponse(response, this.lastEscalationContext);
+
+    // Record feedback (async, non-blocking)
+    if (this.httpPending.feedbackCtx) {
+      const { digest, ...ctx } = this.httpPending.feedbackCtx;
+      this.recordFeedback(ctx, digest, this.httpPending.message, response, Date.now() - this.httpPending.ts);
+    }
+
+    log(TAG, `httpPending id=${id} responded (${response.length} chars)`);
+    this.httpPending = null;
+    return { ok: true };
+  }
+
+  /** Whether the gateway WS client is currently connected. */
+  get isGatewayConnected(): boolean {
+    return this.wsClient.isConnected;
+  }
+
   /** Force-reconnect the gateway WS client. */
   reconnectGateway(): void {
     this.wsClient.resetConnection();
@@ -305,10 +363,12 @@ ${recentLines.join("\n")}`;
   getStats(): Record<string, unknown> {
     return {
       mode: this.deps.escalationConfig.mode,
+      transport: this.deps.escalationConfig.transport,
       gatewayConnected: this.wsClient.isConnected,
       circuitOpen: this.wsClient.isCircuitOpen,
       slotDepth: this.slot.depth,
       slotInFlight: this.slot.inFlightId,
+      httpPendingId: this.httpPending?.id ?? null,
       spawnInFlight: this.spawnInFlight,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,

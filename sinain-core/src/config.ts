@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig, TraitConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, EscalationTransport, LearningConfig, TraitConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
 import { PRESETS } from "./privacy/presets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -190,6 +190,7 @@ export function loadConfig(): CoreConfig {
     mode: escalationMode,
     cooldownMs: intEnv("ESCALATION_COOLDOWN_MS", 30000),
     staleMs: intEnv("ESCALATION_STALE_MS", 90000),
+    transport: env("ESCALATION_TRANSPORT", "auto") as EscalationTransport,
   };
 
   const openclawConfig: OpenClawConfig = {
