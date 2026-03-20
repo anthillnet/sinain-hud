@@ -378,6 +378,10 @@ async function main() {
 
     getTraces: (after, limit) => tracer ? tracer.getTraces(after, limit) : [],
     reconnectGateway: () => escalator.reconnectGateway(),
+
+    // Bare agent HTTP escalation bridge
+    getEscalationPending: () => escalator.getPendingHttp(),
+    respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
   });
 
   // ── Wire overlay profiling ──
