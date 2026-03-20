@@ -130,7 +130,7 @@ async function cmdSnapshot(): Promise<void> {
     const store = new KnowledgeStore(workspace, logger);
     const gitStore = new GitSnapshotStore(repoPath, logger);
 
-    const hash = gitStore.save(store);
+    const hash = await gitStore.save(store);
     console.log(`Snapshot saved → ${hash} (repo: ${gitStore.getRepoPath()})`);
   } else if (subcommand === "list") {
     const repoPath = getArg("--repo");
@@ -140,7 +140,7 @@ async function cmdSnapshot(): Promise<void> {
 
     const logger = { info: () => {}, warn: console.warn };
     const gitStore = new GitSnapshotStore(repoPath, logger);
-    const entries = gitStore.list(count);
+    const entries = await gitStore.list(count);
 
     if (entries.length === 0) {
       console.log("No snapshots found.");
@@ -167,7 +167,7 @@ async function cmdSnapshot(): Promise<void> {
     const store = new KnowledgeStore(workspace, logger);
     const gitStore = new GitSnapshotStore(repoPath, logger);
 
-    gitStore.restore(store, ref);
+    await gitStore.restore(store, ref);
     console.log(`Snapshot ${ref} restored to ${workspace}`);
   } else {
     console.error("Usage: sinain-knowledge snapshot <export|import|save|list|restore>");

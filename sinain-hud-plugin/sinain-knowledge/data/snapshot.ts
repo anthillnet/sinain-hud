@@ -74,11 +74,23 @@ function computeIntegrity(snapshot: Omit<KnowledgeSnapshot, "integrity">): strin
   return createHash("sha256").update(content).digest("hex");
 }
 
+/** Resolve triplestore path, checking both naming conventions (TS vs Python). */
+export function resolveTriplestorePath(workspaceDir: string): string | null {
+  const p1 = join(workspaceDir, "memory", "triples.db");
+  if (existsSync(p1)) return p1;
+  const p2 = join(workspaceDir, "memory", "triplestore.db");
+  if (existsSync(p2)) return p2;
+  return null;
+}
+
 // ============================================================================
 // Export
 // ============================================================================
 
-export function exportSnapshot(store: KnowledgeStore): KnowledgeSnapshot {
+export function exportSnapshot(
+  store: KnowledgeStore,
+  opts?: { skipTriplestore?: boolean },
+): KnowledgeSnapshot {
   const workspaceDir = store.getWorkspaceDir();
 
   // Playbook
@@ -108,13 +120,13 @@ export function exportSnapshot(store: KnowledgeStore): KnowledgeSnapshot {
     }
   }
 
-  // Triplestore
-  const dbPath = join(workspaceDir, "memory", "triples.db");
+  // Triplestore — skip if caller handles it directly (e.g., git store binary copy)
   let dbBase64 = "";
-  if (existsSync(dbPath)) {
-    try {
-      dbBase64 = readFileSync(dbPath).toString("base64");
-    } catch {}
+  if (!opts?.skipTriplestore) {
+    const dbPath = resolveTriplestorePath(workspaceDir);
+    if (dbPath) {
+      try { dbBase64 = readFileSync(dbPath).toString("base64"); } catch {}
+    }
   }
 
   // Logs

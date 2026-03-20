@@ -323,10 +323,10 @@ export class CurationEngine {
     if (this.gitSnapshotStore) {
       try {
         const snapT0 = Date.now();
-        const hash = this.gitSnapshotStore.save(this.store);
+        const hash = await this.gitSnapshotStore.save(this.store);
         curationLatency.snapshotSave = Date.now() - snapT0;
         this.logger.info(`sinain-hud: periodic snapshot saved → ${hash}`);
-        this.gitSnapshotStore.prune();
+        await this.gitSnapshotStore.prune();
       } catch (err) {
         this.logger.warn(`sinain-hud: periodic snapshot save failed: ${String(err)}`);
       }
