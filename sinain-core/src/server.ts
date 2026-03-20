@@ -34,6 +34,8 @@ export interface ServerDeps {
   getTraces: (after: number, limit: number) => unknown[];
   reconnectGateway: () => void;
   feedbackStore?: FeedbackStore;
+  getEscalationPending?: () => any;
+  respondEscalation?: (id: string, response: string) => any;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -261,6 +263,27 @@ export function createAppServer(deps: ServerDeps) {
           overlayClients: wsHandler.clientCount,
           ...deps.getHealthPayload(),
         }));
+        return;
+      }
+
+      // ── /escalation/pending ──
+      if (req.method === "GET" && url.pathname === "/escalation/pending") {
+        const pending = deps.getEscalationPending?.();
+        res.end(JSON.stringify({ ok: true, escalation: pending ?? null }));
+        return;
+      }
+
+      // ── /escalation/respond ──
+      if (req.method === "POST" && url.pathname === "/escalation/respond") {
+        const body = await readBody(req, 65536);
+        const { id, response } = JSON.parse(body);
+        if (!id || !response) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing id or response" }));
+          return;
+        }
+        const result = deps.respondEscalation?.(id, response) ?? { ok: false, error: "escalation not configured" };
+        res.end(JSON.stringify(result));
         return;
       }
 
