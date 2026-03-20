@@ -12,7 +12,8 @@ sinain is a privacy-first AI overlay for macOS that watches your screen and audi
 | Node.js 18+ | For sinain-core runtime |
 | Python 3.9+ | For sense_client screen pipeline |
 | Flutter 3.27+ | To build the overlay (or use a prebuilt binary) |
-| NemoClaw instance on Brev | NVIDIA Brev account with a running OpenClaw container |
+| NemoClaw instance on Brev | NVIDIA Brev account with a running OpenClaw container ([NemoClaw README](https://github.com/NVIDIA/NemoClaw)) |
+| NemoClaw onboarded | `nemoclaw onboard` completed (part of NemoClaw initial setup) |
 | OpenRouter API key | Free at [openrouter.ai](https://openrouter.ai) — used for screen OCR and audio transcription |
 | Microphone + Screen Recording permissions | System Settings → Privacy & Security → Microphone / Screen Recording |
 
@@ -84,15 +85,19 @@ SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinai
 
 4. **Note your auth token** — it's printed directly in the output. No SSH tunnel needed; the Brev dashboard port exposure (step 1a) is all that's required.
 
-> **Known issue**: `openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0`, making the forwarded port unreachable externally even after Brev exposes it. Workaround: in the Code-Server terminal, after `npx` completes, run:
-> ```bash
-> # Find and kill the openshell forward
-> pid=$(ss -tlnp | awk -F"pid=" '/18789/{print $2}' | cut -d, -f1)
-> kill "$pid"
-> # Restart with 0.0.0.0 binding
-> nohup ssh -g -N -L 18789:localhost:18789 openshell-<your-sandbox-name> > /tmp/ssh-fwd-18789.log 2>&1 &
-> ```
-> This is being fixed in a future release of the installer.
+### 1c. Fix the port forward binding
+
+`openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0`, making port 18789 unreachable from your Mac even after Brev exposes it. This affects every installation — run these commands in the Code-Server terminal after `npx` completes:
+
+```bash
+# Find and kill the openshell forward
+pid=$(ss -tlnp | awk -F"pid=" '/18789/{print $2}' | cut -d, -f1)
+kill "$pid"
+# Restart with 0.0.0.0 binding
+nohup ssh -g -N -L 18789:localhost:18789 openshell-<your-sandbox-name> > /tmp/ssh-fwd-18789.log 2>&1 &
+```
+
+Replace `<your-sandbox-name>` with your actual sandbox name (e.g. `sinain-test`).
 
 ---
 
@@ -111,14 +116,20 @@ The wizard asks 5 fields:
 | **[1/5] OpenRouter API key** | Your key from openrouter.ai |
 | **[2/5] Audio transcription** | `a` for cloud (OpenRouter), `b` for local Whisper (~1.5 GB download) |
 | **[3/5] NemoClaw URL** | `ws://YOUR-IP:18789` (printed by `npx` in step 1b) |
-| **[4/5] Auth token** | The token printed by `npx` in step 1b |
+| **[4/5] Auth token** | The token printed by `npx` in step 1b — sets both `OPENCLAW_WS_TOKEN` and `OPENCLAW_HTTP_TOKEN` in `.env` |
 | **[5/5] Memory backup repo** | Private GitHub repo URL (optional — keeps your playbook portable across Brev instances) |
 
 > **Security**: the memory backup repo must be private. The wizard will verify this via the GitHub API and abort with an error if the repo is public.
 
 After you answer all prompts, `setup-nemoclaw.sh` writes `sinain-core/.env`.
 
-> **Note**: `setup-nemoclaw.sh` currently leaves `OPENCLAW_WS_TOKEN` and `OPENCLAW_HTTP_TOKEN` blank in `.env`. Copy the auth token from the `npx` output and paste it into both fields manually before starting sinain-core.
+**Important**: Verify that `OPENCLAW_WS_TOKEN` and `OPENCLAW_HTTP_TOKEN` are both set in `sinain-core/.env`. The setup script may leave them blank — if so, copy the auth token from the `npx` output (step 1b) and paste it into both fields:
+
+```bash
+# In sinain-core/.env, both must have the same 48-char hex token:
+OPENCLAW_WS_TOKEN=43bb3cd31fe38405791ba0c07530010a85e958f614706999
+OPENCLAW_HTTP_TOKEN=43bb3cd31fe38405791ba0c07530010a85e958f614706999
+```
 
 Then start all services:
 ```bash
@@ -179,13 +190,39 @@ git pull
 
 ---
 
+## Recovery after sandbox recreation
+
+If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart, `nemoclaw <name> destroy` + recreate), all sandbox state is wiped. Re-run:
+
+1. **Re-onboard NemoClaw** (if needed):
+   ```bash
+   nemoclaw onboard
+   ```
+
+2. **Re-deploy sinain**:
+   ```bash
+   npx @geravant/sinain
+   # or with memory backup:
+   SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
+   ```
+
+3. **Re-expose port 18789** in Brev dashboard (port exposures may reset on instance restart)
+
+4. **Apply openshell forward workaround** (see [Step 1c](#1c-fix-the-port-forward-binding))
+
+5. **Restart sinain-core on Mac** — the auth token will have changed:
+   - Update `OPENCLAW_WS_TOKEN` and `OPENCLAW_HTTP_TOKEN` in `sinain-core/.env`
+   - Run `./start.sh`
+
+---
+
 ## Known issues / next steps
 
 | Issue | Impact | Status |
 |---|---|---|
-| `openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0` | Port 18789 not reachable from Mac without manual workaround (see step 1b above) | Fix pending in installer |
+| `openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0` | Port 18789 not reachable from Mac without workaround (see [Step 1c](#1c-fix-the-port-forward-binding)) | Fix pending in installer |
 | `uv` not installed in Brev sandbox | Memory/playbook curation pipeline disabled (`signal_analyzer.py`, `insight_synthesizer.py`, `feedback_analyzer.py` etc. all fail with `spawn uv ENOENT`) | Workaround: `pip install uv` in sandbox, or switch scripts to use `python3` directly |
-| `setup-nemoclaw.sh` leaves tokens blank | Auth token must be manually copied into `.env` | Fix pending in setup script |
+| `setup-nemoclaw.sh` may leave tokens blank | Auth token must be manually verified/copied into `.env` (see Step 2) | Fix pending in setup script |
 
 ---
 
@@ -194,7 +231,7 @@ git pull
 | Symptom | Fix |
 |---|---|
 | "401 Unauthorized" or "Token error" | Re-run `npx @geravant/sinain` in Code-Server to regenerate token; update `OPENCLAW_WS_TOKEN` in `.env` |
-| Port not reachable / connection refused | Apply the `ssh -g` workaround in step 1b; re-expose port 18789 in Brev dashboard (port exposures can expire) |
+| Port not reachable / connection refused | Apply the `ssh -g` workaround in [Step 1c](#1c-fix-the-port-forward-binding); re-expose port 18789 in Brev dashboard (port exposures can expire) |
 | `gatewayConnected: false` in `/health` | Check tokens in `.env`; verify port 18789 is open (`nc -z -w3 <IP> 18789`) |
 | `totalResponses` stuck at 0 | Normal for up to ~90s on first connect; if it stays at 0, check gateway logs: `ssh -T openshell-<sandbox> "cat /tmp/oc-gateway.log"` |
 | Screen OCR not working | Check **System Settings → Privacy & Security → Screen Recording** — sinain-core must be listed |
@@ -202,3 +239,6 @@ git pull
 | `agent:main:sinain` session key mismatch | Verify `OPENCLAW_SESSION_KEY=agent:main:sinain` in `sinain-core/.env` |
 | Camera blocked in Google Meet | Ensure you're using the `ffmpeg`-based audio path (not `sox rec`) — see `start.sh` |
 | sinain-core not picking up `.env` changes | Touch any source file (`touch sinain-core/src/index.ts`) or kill and restart the process |
+| `FailoverError: Unknown model: nvidia-nim/...` | Model mismatch — inside the sandbox, the model should be `inference.local` (OpenShell routes it). Re-run `npx @geravant/sinain` to reset config. |
+| `FailoverError: No API key found for provider "anthropic"` | Agent model set incorrectly. Inside the sandbox, verify `agents.defaults.model` isn't set to `nvidia-nim/...` — OpenShell uses its own routing. |
+| Sandbox recreated, nothing works | See [Recovery after sandbox recreation](#recovery-after-sandbox-recreation) above |
