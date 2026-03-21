@@ -115,12 +115,14 @@ EOF
 ### Step 3: Server — Install sinain plugin
 
 ```bash
-npx @geravant/sinain
+npx @geravant/sinain install
 # or, with a memory backup repo:
-SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
+SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain install
 ```
 
 This copies plugin files, patches `openclaw.json` (sets `gateway.bind = "lan"`, `sessionToolsVisibility: "all"`, compaction params), and optionally clones the memory repo into `~/.openclaw/workspace/`.
+
+> **Note:** The same `@geravant/sinain` package also provides `sinain start` for running the full sinain stack locally on your Mac. See the [main README](../README.md#quick-start) for details.
 
 ### Step 4: Server — Remove stale Docker workspace path (migration only)
 
