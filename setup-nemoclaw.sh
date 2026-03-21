@@ -53,7 +53,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # ── Step 1: OpenRouter API key ───────────────────────────────────────────────
-echo -e "${bold}[1/5] OpenRouter API key${reset}"
+echo -e "${bold}[1/6] OpenRouter API key${reset}"
 echo "  Used for screen analysis and audio transcription."
 echo "  Get one free at openrouter.ai"
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
@@ -65,7 +65,7 @@ fi
 echo ""
 
 # ── Step 2: Speech-to-text mode ─────────────────────────────────────────────
-echo -e "${bold}[2/5] Audio transcription${reset}"
+echo -e "${bold}[2/6] Audio transcription${reset}"
 echo "  a) Cloud  — uses OpenRouter (free, no download needed)"
 echo "  b) Local  — uses Whisper on your Mac (~1.5 GB model, fully private)"
 if [ -n "${LOCAL_WHISPER_MODEL:-}" ] || [ -n "${TRANSCRIPTION_BACKEND:-}" ]; then
@@ -87,7 +87,7 @@ fi
 echo ""
 
 # ── Step 3: NemoClaw URL ─────────────────────────────────────────────────────
-echo -e "${bold}[3/5] NemoClaw URL${reset}"
+echo -e "${bold}[3/6] NemoClaw URL${reset}"
 echo "  In your Brev dashboard:"
 echo "    → Expose Port(s) → enter 18789 → TCP → note the IP shown"
 echo "  Then enter the URL here (e.g. ws://35.238.211.113:18789)"
@@ -99,7 +99,16 @@ else
 fi
 
 # Normalise to both http and ws variants
-HTTP_URL="${RAW_URL%/}"
+# If user entered a bare IP/hostname (no scheme), prepend ws:// and default port 18789
+_raw="${RAW_URL%/}"
+if [[ "$_raw" != *"://"* ]]; then
+  # bare IP or hostname — check if port is already included
+  if [[ "$_raw" != *":"* ]]; then
+    _raw="${_raw}:18789"
+  fi
+  _raw="ws://${_raw}"
+fi
+HTTP_URL="$_raw"
 HTTP_URL="${HTTP_URL/wss:\/\//https://}"
 HTTP_URL="${HTTP_URL/ws:\/\//http://}"
 WS_URL="${HTTP_URL/https:\/\//wss://}"
@@ -107,7 +116,7 @@ WS_URL="${WS_URL/http:\/\//ws://}"
 echo ""
 
 # ── Step 4: NemoClaw auth token ──────────────────────────────────────────────
-echo -e "${bold}[4/5] NemoClaw auth token${reset}"
+echo -e "${bold}[4/6] NemoClaw auth token${reset}"
 echo "  Printed by \`npx sinain\` in the Code-Server terminal."
 echo "  Also visible in your Brev dashboard under 'Gateway Token'."
 if [ -n "${OPENCLAW_WS_TOKEN:-}" ]; then
@@ -119,7 +128,7 @@ fi
 echo ""
 
 # ── Step 5: Memory backup repo (optional) ────────────────────────────────────
-echo -e "${bold}[5/5] Memory backup repo (recommended)${reset}"
+echo -e "${bold}[5/6] Memory backup repo (recommended)${reset}"
 echo "  A private GitHub repo keeps your playbook and memory portable across Brev instances."
 echo "  Create one at github.com/new (must be private). Paste the SSH or HTTPS clone URL."
 echo "  Leave blank to skip (memory stays on this instance only)."
@@ -136,10 +145,31 @@ if [ -n "$BACKUP_REPO" ]; then
 fi
 echo ""
 
+# ── Step 6: Knowledge snapshot backup repo (optional) ────────────────────────
+echo -e "${bold}[6/6] Knowledge snapshot backup repo (optional)${reset}"
+echo "  A private GitHub repo to backup knowledge snapshots (playbook, modules, eval data)."
+echo "  This is configured on the NemoClaw server — the plugin pushes snapshots periodically."
+echo "  Leave blank to skip (snapshots stay on server only)."
+if [ -n "${SINAIN_SNAPSHOT_REPO:-}" ]; then
+  skip; SNAPSHOT_REPO="$SINAIN_SNAPSHOT_REPO"
+else
+  ask "Snapshot repo URL (or Enter to skip):"
+  SNAPSHOT_REPO="$REPLY"
+fi
+
+if [ -n "$SNAPSHOT_REPO" ]; then
+  echo "  Verifying repo privacy..."
+  check_repo_privacy "$SNAPSHOT_REPO"
+  echo ""
+  echo -e "  ${yellow}NOTE:${reset} Re-run the server-side install with this env var:"
+  echo -e "  ${bold}SINAIN_SNAPSHOT_REPO=${SNAPSHOT_REPO} npx @geravant/sinain${reset}"
+fi
+echo ""
+
 # ── Write .env ───────────────────────────────────────────────────────────────
 # Strip lines we're about to rewrite; preserve everything else
 if [ -f "$ENV_FILE" ]; then
-  grep -vE "^(OPENROUTER_API_KEY|TRANSCRIPTION_BACKEND|LOCAL_WHISPER_MODEL|OPENCLAW_|SINAIN_BACKUP_REPO)" \
+  grep -vE "^(OPENROUTER_API_KEY|TRANSCRIPTION_BACKEND|LOCAL_WHISPER_MODEL|OPENCLAW_|SINAIN_BACKUP_REPO|SINAIN_SNAPSHOT_REPO)" \
     "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
 fi
 
@@ -154,6 +184,7 @@ fi
   echo "OPENCLAW_HTTP_TOKEN=${TOKEN}"
   echo "OPENCLAW_SESSION_KEY=agent:main:sinain"
   if [ -n "$BACKUP_REPO" ]; then echo "SINAIN_BACKUP_REPO=${BACKUP_REPO}"; fi
+  if [ -n "$SNAPSHOT_REPO" ]; then echo "SINAIN_SNAPSHOT_REPO=${SNAPSHOT_REPO}"; fi
 } >> "$ENV_FILE"
 
 ok "Configuration saved to sinain-core/.env"
