@@ -18,6 +18,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -80,6 +81,34 @@ Respond with ONLY a JSON object:
 }"""
 
 
+_STOPWORDS = frozenset({
+    "the", "and", "for", "when", "with", "that", "this", "from", "into",
+    "after", "before", "during", "should", "would", "could", "been", "have",
+    "will", "also", "then", "than", "not", "but", "are", "was", "were",
+    "can", "may", "use", "run", "set", "get", "try", "all", "any", "new",
+    "score", "seen",
+})
+
+
+def _extract_tags(value: str) -> list[str]:
+    """Extract searchable keyword tags from fact value text.
+
+    Returns up to 10 deduplicated lowercase tags suitable for AVET-indexed lookup.
+    """
+    # Lowercase words (including hyphenated compounds like "react-native")
+    words = re.findall(r"[a-z][a-z0-9-]+", value.lower())
+    tags = [w for w in words if len(w) > 2 and w not in _STOPWORDS]
+    # Detect compound terms from CamelCase or "Title Case" patterns
+    compounds = re.findall(r"[A-Z][a-z]+ [A-Z][a-z]+", value)
+    for c in compounds:
+        tags.append(c.lower().replace(" ", "-"))
+    # Numeric tokens that look meaningful (error codes, port numbers)
+    nums = re.findall(r"\b\d{3,5}\b", value)
+    tags.extend(nums)
+    # Deduplicate preserving order, cap at 10
+    return list(dict.fromkeys(tags))[:10]
+
+
 def _fact_id(entity: str, attribute: str, value: str) -> str:
     """Generate a deterministic fact entity ID from entity+attribute+value."""
     content = f"{entity}:{attribute}:{value}"
@@ -99,14 +128,19 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
 
         # Get all non-retracted fact entities with their attributes
         if entities:
-            # Entity-scoped query: find facts related to specified domains
-            domain_clause = " OR ".join([f"value = ?" for _ in entities])
+            # Tag-based search: find facts whose tags match any of the keywords
+            # Normalize keywords to lowercase for tag matching
+            keywords = [e.lower().replace(" ", "-") for e in entities]
+            placeholders = ",".join(["?" for _ in keywords])
             rows = store._conn.execute(
-                f"""SELECT DISTINCT entity_id FROM triples
-                    WHERE attribute = 'domain' AND NOT retracted
-                    AND ({domain_clause})
+                f"""SELECT entity_id, COUNT(*) as matches
+                    FROM triples
+                    WHERE attribute = 'tag' AND NOT retracted
+                    AND value IN ({placeholders})
+                    GROUP BY entity_id
+                    ORDER BY matches DESC
                     LIMIT ?""",
-                (*entities, limit),
+                (*keywords, limit),
             ).fetchall()
             fact_ids = [r["entity_id"] for r in rows]
         else:
@@ -172,6 +206,9 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
                 store.assert_triple(tx, entity_id, "reinforce_count", "1")
                 if domain:
                     store.assert_triple(tx, entity_id, "domain", domain)
+                # Auto-tag for keyword-based discovery
+                for tag in _extract_tags(value):
+                    store.assert_triple(tx, entity_id, "tag", tag)
                 stats["asserted"] += 1
 
             elif op == "reinforce":
@@ -338,6 +375,7 @@ def main() -> None:
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--digest", default=None, help="SessionDigest JSON string")
     parser.add_argument("--bootstrap", action="store_true", help="One-time: seed graph from playbook")
+    parser.add_argument("--retag", action="store_true", help="Re-extract tags for all existing facts")
     args = parser.parse_args()
 
     memory_dir = args.memory_dir
@@ -349,9 +387,37 @@ def main() -> None:
         output_json(result)
         return
 
+    # Retag mode: extract tags for all existing facts
+    if args.retag:
+        if not Path(db_path).exists():
+            output_json({"error": "knowledge-graph.db not found"})
+            return
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+        # Get all fact entities that have a 'value' attribute
+        rows = store._conn.execute(
+            "SELECT DISTINCT entity_id FROM triples WHERE attribute = 'value' AND NOT retracted AND entity_id LIKE 'fact:%'"
+        ).fetchall()
+        tagged = 0
+        for row in rows:
+            fid = row["entity_id"]
+            attrs = store.entity(fid)
+            value_text = attrs.get("value", [""])[0] if attrs else ""
+            existing_tags = set(attrs.get("tag", [])) if attrs else set()
+            new_tags = _extract_tags(value_text)
+            missing = [t for t in new_tags if t not in existing_tags]
+            if missing:
+                tx = store.begin_tx("retag", metadata=json.dumps({"entity_id": fid}))
+                for tag in missing:
+                    store.assert_triple(tx, fid, "tag", tag)
+                tagged += 1
+        store.close()
+        output_json({"retagged": tagged, "total_facts": len(rows)})
+        return
+
     # Normal mode: integrate session digest
     if not args.digest:
-        print("--digest is required (unless --bootstrap)", file=sys.stderr)
+        print("--digest is required (unless --bootstrap or --retag)", file=sys.stderr)
         output_json({"error": "--digest required"})
         return
 

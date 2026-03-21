@@ -21,7 +21,12 @@ def query_facts_by_entities(
     entities: list[str],
     max_facts: int = 5,
 ) -> list[dict]:
-    """Query knowledge graph for facts related to specified entities/domains."""
+    """Query knowledge graph for facts matching keywords via tag index.
+
+    Uses auto-extracted 'tag' attributes for discovery. Results ranked by
+    number of matching tags (more matches = more relevant). Falls back to
+    domain/entity_id matching for untagged facts.
+    """
     if not Path(db_path).exists():
         return []
 
@@ -29,25 +34,43 @@ def query_facts_by_entities(
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Find fact entity_ids that match the requested domains or entity names
-        placeholders = ",".join(["?" for _ in entities])
-        # Match by domain attribute OR by entity name substring
-        like_clauses = " OR ".join([f"entity_id LIKE ?" for _ in entities])
-        entity_likes = [f"fact:{e}%" for e in entities]
+        # Normalize keywords for tag matching
+        keywords = [e.lower().replace(" ", "-") for e in entities]
+        placeholders = ",".join(["?" for _ in keywords])
 
+        # Primary: tag-based ranked search (AVET index)
         rows = store._conn.execute(
-            f"""SELECT DISTINCT entity_id FROM triples
-                WHERE NOT retracted AND (
-                    (attribute = 'domain' AND value IN ({placeholders}))
-                    OR ({like_clauses})
-                )
+            f"""SELECT entity_id, COUNT(*) as matches
+                FROM triples
+                WHERE attribute = 'tag' AND NOT retracted
+                AND value IN ({placeholders})
+                GROUP BY entity_id
+                ORDER BY matches DESC
                 LIMIT ?""",
-            (*entities, *entity_likes, max_facts * 3),
+            (*keywords, max_facts * 3),
         ).fetchall()
 
         fact_ids = [r["entity_id"] for r in rows]
 
-        # Load full attributes for each fact, sorted by confidence
+        # Fallback: if tags found < max_facts, also search domain/entity_id (for untagged facts)
+        if len(fact_ids) < max_facts:
+            domain_placeholders = ",".join(["?" for _ in keywords])
+            like_clauses = " OR ".join([f"entity_id LIKE ?" for _ in keywords])
+            entity_likes = [f"fact:{kw}%" for kw in keywords]
+
+            fallback_rows = store._conn.execute(
+                f"""SELECT DISTINCT entity_id FROM triples
+                    WHERE NOT retracted AND entity_id NOT IN ({','.join(['?' for _ in fact_ids]) or "''"})
+                    AND (
+                        (attribute = 'domain' AND value IN ({domain_placeholders}))
+                        OR ({like_clauses})
+                    )
+                    LIMIT ?""",
+                (*fact_ids, *keywords, *entity_likes, max_facts - len(fact_ids)),
+            ).fetchall()
+            fact_ids.extend(r["entity_id"] for r in fallback_rows)
+
+        # Load full attributes for each fact
         facts = []
         for fid in fact_ids:
             attrs = store.entity(fid)
@@ -55,10 +78,12 @@ def query_facts_by_entities(
                 continue
             fact = {"entityId": fid}
             for attr_name, values in attrs.items():
+                if attr_name == "tag":
+                    continue  # Don't include tags in output (noise)
                 fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
 
-        # Sort by confidence descending
+        # Sort by confidence descending (tag ranking already done in SQL)
         facts.sort(key=lambda f: float(f.get("confidence", "0")), reverse=True)
         store.close()
         return facts[:max_facts]
