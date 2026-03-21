@@ -6,7 +6,7 @@ Run sinain-hud with **any coding agent** (Claude Code, Codex, Junie) instead of 
 
 | Requirement | Version | Check |
 |---|---|---|
-| Node.js | 22+ | `node -v` |
+| Node.js | 18+ | `node -v` |
 | Python 3 | 3.10+ | `python3 --version` |
 | Coding agent | see [Using Other Agents](#using-other-agents) |
 | sinain-core | built | `cd sinain-core && npm install` |
@@ -25,9 +25,32 @@ sinain-core (port 9500)          run.sh (bash poll loop)
 
 No gateway, no WebSocket RPC, no server. Just HTTP polling + any coding agent.
 
-## Quick Start (3 steps)
+## Quick Start
 
-### Step 1: Configure sinain-core for HTTP transport
+### Option A: npx (recommended)
+
+```bash
+npx @geravant/sinain start --agent=claude
+```
+
+On first run, create `~/.sinain/.env` with your OpenRouter API key:
+```bash
+mkdir -p ~/.sinain
+echo "OPENROUTER_API_KEY=sk-or-..." > ~/.sinain/.env
+```
+
+The launcher starts sinain-core, sense_client, and the agent poll loop in one process. Use `--agent=codex`, `--agent=goose`, or `--agent=aider` to switch agents.
+
+```bash
+npx @geravant/sinain start --no-sense     # skip screen capture
+npx @geravant/sinain start --no-overlay   # skip Flutter overlay
+npx @geravant/sinain stop                 # stop all services
+npx @geravant/sinain status               # check what's running
+```
+
+### Option B: From source (for development)
+
+#### Step 1: Configure sinain-core for HTTP transport
 
 Add to `sinain-core/.env`:
 
@@ -39,7 +62,7 @@ This routes all escalations to the HTTP pending slot instead of the WebSocket ga
 
 > **Tip**: Use `ESCALATION_TRANSPORT=auto` to fall back to HTTP only when the gateway is disconnected. Use `http` to bypass it completely.
 
-### Step 2: Restore knowledge (optional)
+#### Step 2: Restore knowledge (optional)
 
 If you have a knowledge snapshot from a previous OpenClaw deployment:
 
@@ -55,7 +78,7 @@ This populates `~/.openclaw/workspace/` with:
 
 If starting fresh, the agent works without a snapshot — it just won't have prior knowledge.
 
-### Step 3: Start
+#### Step 3: Start
 
 Terminal 1 — sinain-core:
 ```bash
