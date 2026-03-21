@@ -6,10 +6,36 @@
  * external process execution.
  */
 
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
 import type { Logger, ScriptRunner } from "../data/schema.js";
 import type { KnowledgeStore } from "../data/store.js";
 import type { ResilienceManager } from "./resilience.js";
 import type { GitSnapshotStore } from "../data/git-store.js";
+
+// ============================================================================
+// Distillation State
+// ============================================================================
+
+interface DistillState {
+  lastDistilledFeedId: number;
+  lastDistilledTs: string;
+}
+
+function readDistillState(workspaceDir: string): DistillState {
+  const p = join(workspaceDir, "memory", "distill-state.json");
+  try {
+    if (existsSync(p)) return JSON.parse(readFileSync(p, "utf-8"));
+  } catch {}
+  return { lastDistilledFeedId: 0, lastDistilledTs: "" };
+}
+
+function writeDistillState(workspaceDir: string, state: DistillState): void {
+  const dir = join(workspaceDir, "memory");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "distill-state.json"), JSON.stringify(state, null, 2), "utf-8");
+}
 
 // ============================================================================
 // Types
@@ -43,14 +69,17 @@ export type ContextAssemblyOpts = {
 export class CurationEngine {
   private curationInterval: ReturnType<typeof setInterval> | null = null;
   private gitSnapshotStore: GitSnapshotStore | null = null;
+  private sinainCoreUrl: string;
 
   constructor(
     private store: KnowledgeStore,
     private runScript: ScriptRunner,
     private resilience: ResilienceManager,
-    private config: { userTimezone: string },
+    private config: { userTimezone: string; sinainCoreUrl?: string },
     private logger: Logger,
-  ) {}
+  ) {
+    this.sinainCoreUrl = config.sinainCoreUrl || process.env.SINAIN_CORE_URL || "http://localhost:9500";
+  }
 
   /** Attach a git-backed snapshot store for periodic saves. */
   setGitSnapshotStore(gitStore: GitSnapshotStore): void {
@@ -143,15 +172,87 @@ export class CurationEngine {
         confidence: 0,
       };
 
-      // Fire-and-forget: ingest signal into triple store
-      const tickTs = new Date().toISOString();
-      runPythonScript([
-        "sinain-memory/triple_ingest.py",
-        "--memory-dir", "memory/",
-        "--tick-ts", tickTs,
-        "--signal-result", JSON.stringify(signalResult),
-        "--embed",
-      ], 15_000).catch(() => {});
+    }
+
+    // 2b. Session distillation check — fetch new feed items and distill if needed
+    try {
+      const distillState = readDistillState(workspaceDir);
+      const feedUrl = `${this.sinainCoreUrl}/feed?after=${distillState.lastDistilledFeedId}`;
+      const historyUrl = `${this.sinainCoreUrl}/agent/history?limit=10`;
+
+      const [feedResp, historyResp] = await Promise.all([
+        fetch(feedUrl).then(r => r.json()).catch(() => null),
+        fetch(historyUrl).then(r => r.json()).catch(() => null),
+      ]);
+
+      const feedItems = (feedResp as { messages?: unknown[] })?.messages ?? [];
+      const agentHistory = (historyResp as { results?: unknown[] })?.results ?? [];
+
+      // Only distill if there's meaningful new content (>3 non-trivial items)
+      const significantItems = (feedItems as Array<{ text?: string }>).filter(
+        (item) => item.text && !item.text.startsWith("[PERIODIC]") && item.text.length > 20,
+      );
+
+      if (significantItems.length > 3) {
+        this.logger.info(
+          `sinain-hud: distillation check — ${significantItems.length} new feed items since id=${distillState.lastDistilledFeedId}`,
+        );
+
+        // Combine feed + agent history as transcript
+        const transcript = JSON.stringify([...significantItems, ...agentHistory].slice(0, 100));
+        const sessionMeta = JSON.stringify({
+          ts: new Date().toISOString(),
+          sessionKey: params.sessionSummary,
+          feedItemCount: significantItems.length,
+        });
+
+        // Step 1: Distill
+        const distillT0 = Date.now();
+        const digest = await runPythonScript([
+          "sinain-memory/session_distiller.py",
+          "--memory-dir", "memory/",
+          "--transcript", transcript,
+          "--session-meta", sessionMeta,
+        ], 30_000);
+        latencyMs.distillation = Date.now() - distillT0;
+
+        if (digest && !digest.isEmpty && !digest.error) {
+          // Step 2: Integrate into playbook + knowledge graph
+          const integrateT0 = Date.now();
+          const integration = await runPythonScript([
+            "sinain-memory/knowledge_integrator.py",
+            "--memory-dir", "memory/",
+            "--digest", JSON.stringify(digest),
+          ], 60_000);
+          latencyMs.integration = Date.now() - integrateT0;
+
+          if (integration) {
+            this.logger.info(
+              `sinain-hud: knowledge integrated — changes=${JSON.stringify(integration.changes ?? {})}, graph=${JSON.stringify(integration.graphStats ?? {})}`,
+            );
+            result.distillation = { digest, integration };
+
+            // Regenerate effective playbook after integration
+            this.store.generateEffectivePlaybook();
+
+            // Render knowledge doc
+            this.store.renderKnowledgeDoc();
+          }
+        } else {
+          this.logger.info(`sinain-hud: distillation produced empty/error result, skipping integration`);
+        }
+
+        // Update watermark — always, even if distillation was empty, to advance past these items
+        const maxFeedId = (feedItems as Array<{ id?: number }>).reduce(
+          (max, item) => Math.max(max, item.id ?? 0), distillState.lastDistilledFeedId,
+        );
+        writeDistillState(workspaceDir, {
+          lastDistilledFeedId: maxFeedId,
+          lastDistilledTs: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`sinain-hud: distillation check error: ${String(err)}`);
     }
 
     // 3. Insight synthesis (60s timeout)
@@ -438,20 +539,32 @@ export class CurationEngine {
     const moduleGuidance = this.store.getActiveModuleGuidance();
     if (moduleGuidance) contextParts.push(moduleGuidance);
 
-    // Knowledge graph context (10s timeout)
+    // Knowledge document (pre-rendered, synchronous — replaces triple_query.py)
+    const knowledgeDocPath = join(workspaceDir, "memory", "sinain-knowledge.md");
     try {
-      const ragResult = await this.runScript(
-        ["uv", "run", "--with", "requests", "python3",
-         "sinain-memory/triple_query.py",
-         "--memory-dir", "memory",
-         "--context", "current session",
-         "--max-chars", "1500"],
-        { timeoutMs: 10_000, cwd: workspaceDir },
-      );
-      if (ragResult.code === 0) {
-        const parsed = JSON.parse(ragResult.stdout.trim());
-        if (parsed.context && parsed.context.length > 50) {
-          contextParts.push(`[KNOWLEDGE GRAPH CONTEXT]\n${parsed.context}`);
+      if (existsSync(knowledgeDocPath)) {
+        const knowledgeDoc = readFileSync(knowledgeDocPath, "utf-8");
+        if (knowledgeDoc.length > 50) {
+          contextParts.push(`[KNOWLEDGE]\n${knowledgeDoc}`);
+        }
+      }
+    } catch {}
+
+    // Dynamic graph enrichment for situation-specific facts (10s timeout)
+    try {
+      const situationEntities = this.store.extractSituationEntities();
+      if (situationEntities.length > 0) {
+        const graphResult = await this.runScript(
+          ["uv", "run", "--with", "requests", "python3",
+           "sinain-memory/graph_query.py",
+           "--db", "memory/knowledge-graph.db",
+           "--entities", JSON.stringify(situationEntities),
+           "--max-facts", "5",
+           "--format", "text"],
+          { timeoutMs: 10_000, cwd: workspaceDir },
+        );
+        if (graphResult.code === 0 && graphResult.stdout.trim().length > 20) {
+          contextParts.push(`[SITUATION-SPECIFIC KNOWLEDGE]\n${graphResult.stdout.trim()}`);
         }
       }
     } catch {}
