@@ -8,7 +8,7 @@ Run sinain-hud with **any coding agent** (Claude Code, Codex, Junie) instead of 
 |---|---|---|
 | Node.js | 22+ | `node -v` |
 | Python 3 | 3.10+ | `python3 --version` |
-| Claude Code CLI | latest | `claude --version` |
+| Coding agent | see [Using Other Agents](#using-other-agents) |
 | sinain-core | built | `cd sinain-core && npm install` |
 | macOS | 12.3+ | ScreenCaptureKit for sck-capture |
 
@@ -17,13 +17,13 @@ Run sinain-hud with **any coding agent** (Claude Code, Codex, Junie) instead of 
 ```
 sinain-core (port 9500)          run.sh (bash poll loop)
   ├─ agent loop (local LLM)       ├─ polls GET /escalation/pending
-  ├─ escalation scorer             ├─ invokes claude -p per escalation
-  ├─ HTTP escalation slot  ←────→ │   └─ MCP: sinain-mcp-server
-  ├─ feed buffer → overlay WS     │        └─ 10 tools (HTTP + Python)
+  ├─ escalation scorer             ├─ invokes $SINAIN_AGENT per escalation
+  ├─ HTTP escalation slot  ←────→ │   ├─ MCP agents: agent calls sinain tools
+  ├─ feed buffer → overlay WS     │   └─ Pipe agents: bash handles HTTP
   └─ SITUATION.md                  └─ heartbeat every 15 min
 ```
 
-No gateway, no WebSocket RPC, no server. Just HTTP polling + Claude CLI.
+No gateway, no WebSocket RPC, no server. Just HTTP polling + any coding agent.
 
 ## Quick Start (3 steps)
 
@@ -62,17 +62,25 @@ Terminal 1 — sinain-core:
 cd sinain-core && npm run dev
 ```
 
-Terminal 2 — bare agent:
+Terminal 2 — bare agent (default: Claude Code):
 ```bash
 cd sinain-agent && ./run.sh
 ```
 
-The agent polls every 5 seconds, invokes Claude per escalation, and runs a heartbeat every 15 minutes.
+Or with a different agent:
+```bash
+SINAIN_AGENT=codex ./run.sh    # Codex with MCP
+SINAIN_AGENT=goose ./run.sh    # Goose with MCP
+SINAIN_AGENT=aider ./run.sh    # Aider in pipe mode
+```
+
+The agent polls every 5 seconds, invokes the selected agent per escalation, and runs a heartbeat every 15 minutes.
 
 ## What You'll See
 
 ```
 sinain bare agent started
+  Agent: claude (MCP)
   Core: http://localhost:9500
   Poll: every 5s
   Heartbeat: every 900s
@@ -86,21 +94,62 @@ Responses appear on the HUD overlay as `[🤖]` messages, identical to OpenClaw 
 
 ## Configuration
 
-### Environment Variables
+Agent config lives in `sinain-agent/.env` (copy from `.env.example`):
+
+```bash
+cd sinain-agent && cp .env.example .env
+```
+
+### Agent Environment Variables (`sinain-agent/.env`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `SINAIN_AGENT` | `claude` | Agent to use: `claude`, `codex`, `junie`, `goose`, `aider`, or any command |
+| `SINAIN_CORE_URL` | `http://localhost:9500` | sinain-core URL |
+| `SINAIN_POLL_INTERVAL` | `5` | Seconds between escalation polls |
+| `SINAIN_HEARTBEAT_INTERVAL` | `900` | Seconds between heartbeat ticks (15 min) |
+| `SINAIN_WORKSPACE` | `~/.openclaw/workspace` | Workspace directory for knowledge files |
+
+### Core Environment Variables (`sinain-core/.env`)
 
 | Variable | Default | Description |
 |---|---|---|
 | `ESCALATION_TRANSPORT` | `auto` | `http` = bare agent only, `ws` = gateway only, `auto` = gateway when connected, HTTP fallback |
 | `ESCALATION_MODE` | `rich` | `off` / `selective` / `focus` / `rich` — controls escalation frequency |
 | `ESCALATION_COOLDOWN_MS` | `30000` | Minimum time between escalations |
-| `SINAIN_CORE_URL` | `http://localhost:9500` | sinain-core URL (for MCP server) |
-| `SINAIN_WORKSPACE` | `~/.openclaw/workspace` | Workspace directory for knowledge files |
-| `SINAIN_POLL_INTERVAL` | `5` | Seconds between escalation polls |
-| `SINAIN_HEARTBEAT_INTERVAL` | `900` | Seconds between heartbeat ticks (15 min) |
 
-### MCP Server Config
+### MCP Server Registration
 
-The MCP server is configured in `sinain-agent/mcp-config.json`. It uses `tsx` from sinain-core's node_modules to run `sinain-mcp-server/index.ts`.
+MCP agents need access to the sinain MCP server (`sinain-mcp-server/index.ts`). How it's configured depends on the agent:
+
+| Agent | MCP setup | Config location |
+|-------|-----------|-----------------|
+| Claude | Automatic — `--mcp-config` flag per invocation | `sinain-agent/mcp-config.json` |
+| Codex | Auto-registered on first `run.sh` via `codex mcp add` | `~/.codex/config.toml` |
+| Junie | Automatic — copies `mcp-config.json` to `--mcp-location` dir | `sinain-agent/.junie-mcp/mcp.json` |
+| Goose | Manual one-time `goose configure` | `~/.config/goose/` |
+| Aider | N/A — no MCP support (uses pipe mode) | — |
+
+**Manual registration** (if auto-setup fails or you need to customize):
+
+```bash
+# Codex
+codex mcp remove sinain 2>/dev/null
+codex mcp add sinain \
+  --env "SINAIN_CORE_URL=http://localhost:9500" \
+  --env "SINAIN_WORKSPACE=$HOME/.openclaw/workspace" \
+  -- ./sinain-core/node_modules/.bin/tsx ./sinain-mcp-server/index.ts
+
+# Goose (interactive)
+goose configure
+# → Add MCP server: name=sinain
+# → Command: ./sinain-core/node_modules/.bin/tsx
+# → Args: ./sinain-mcp-server/index.ts
+
+# Verify registration
+codex mcp list          # Codex
+goose mcp list          # Goose
+```
 
 ### Available MCP Tools
 
@@ -119,25 +168,66 @@ The MCP server is configured in `sinain-agent/mcp-config.json`. It uses `tsx` fr
 
 ## Using Other Agents
 
-The bare knuckles architecture works with any agent that can call HTTP or run MCP.
-
-### Codex / Junie (no MCP)
-
-Use the HTTP API directly with curl:
+Set `SINAIN_AGENT` to switch agents. The script auto-detects whether the agent supports MCP (calls sinain tools directly) or needs pipe mode (bash handles HTTP, agent just generates text).
 
 ```bash
-while true; do
-  ESC=$(curl -s http://localhost:9500/escalation/pending)
-  if [ "$(echo "$ESC" | jq -r '.escalation')" != "null" ]; then
-    ID=$(echo "$ESC" | jq -r '.escalation.id')
-    MSG=$(echo "$ESC" | jq -r '.escalation.message')
-    RESP=$(echo "$MSG" | your-agent-cli "Respond to this HUD escalation:")
-    curl -s -X POST http://localhost:9500/escalation/respond \
-      -H 'Content-Type: application/json' \
-      -d "{\"id\":\"$ID\",\"response\":$(echo "$RESP" | jq -Rs .)}"
-  fi
-  sleep 5
-done
+SINAIN_AGENT=claude|codex|junie|goose|aider|<command>   # default: claude
+```
+
+### Supported Agents
+
+| Agent | Mode | One-shot flag | MCP config | Auto-approve |
+|-------|------|---------------|------------|--------------|
+| `claude` | MCP | `-p "$prompt"` | `--mcp-config file.json` | `--dangerously-skip-permissions` |
+| `codex` | MCP | `exec "$prompt"` | `codex mcp add` (persistent) | `-s danger-full-access` |
+| `junie` | MCP | `--task "$prompt"` | `--mcp-location dir` (auto-configured) | N/A |
+| `goose` | MCP | `run --text "$prompt"` | `goose configure` (persistent) | N/A |
+| `aider` | pipe | `--yes -m "$prompt"` | N/A (no MCP) | `--yes` |
+| custom | pipe | stdin | N/A | N/A |
+
+### MCP Agents (claude, codex, junie, goose)
+
+These agents receive the sinain MCP server config and call tools (`sinain_get_escalation`, `sinain_respond`, etc.) autonomously. No extra HTTP wiring needed.
+
+**Claude Code** (default) — works out of the box:
+```bash
+./run.sh
+```
+
+**Codex** — MCP server auto-registered on first run (see [MCP Server Registration](#mcp-server-registration) to customize):
+```bash
+SINAIN_AGENT=codex ./run.sh
+```
+
+**Junie** — `mcp-config.json` is auto-copied to a `--mcp-location` directory on startup:
+```bash
+SINAIN_AGENT=junie ./run.sh
+```
+Junie expects `mcp.json` (not `mcp-config.json`) in a directory. The script handles the rename automatically. You can also place it in `~/.junie/mcp/mcp.json` for global access.
+
+**Goose** — requires one-time `goose configure` first (see [MCP Server Registration](#mcp-server-registration)):
+```bash
+SINAIN_AGENT=goose ./run.sh
+```
+
+### Pipe Agents (aider, custom)
+
+Agents without MCP support run in **pipe mode**: bash polls for escalations via HTTP, pipes the escalation message to the agent's stdin, captures the text response, and POSTs it back to sinain-core.
+
+Pipe mode also runs heartbeat scripts (signal_analyzer, playbook_curator) directly via Python instead of through MCP tools.
+
+**Aider:**
+```bash
+SINAIN_AGENT=aider ./run.sh
+```
+
+**Custom command** — any command that reads stdin and writes to stdout:
+```bash
+# Use any CLI that accepts piped input
+SINAIN_AGENT="llm -m gpt-4o" ./run.sh
+
+# Even a simple echo for testing
+SINAIN_AGENT="cat" ./run.sh
 ```
 
 ### HTTP API Reference
