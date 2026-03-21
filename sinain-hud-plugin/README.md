@@ -1,4 +1,13 @@
-# sinain-hud OpenClaw Plugin
+# @geravant/sinain
+
+This package serves two roles:
+
+1. **Standalone launcher** — run `npx @geravant/sinain start` to launch the full sinain stack (core, sense, overlay, agent) on your Mac. See the [main README](../README.md#quick-start) for usage.
+2. **OpenClaw plugin** — when installed on an OpenClaw gateway server (`npx @geravant/sinain install`), it manages the sinain-hud agent lifecycle.
+
+---
+
+## OpenClaw Plugin
 
 Plugin for the [anthillnet fork of OpenClaw](https://github.com/anthillnet/openclaw) that manages the sinain-hud agent lifecycle on the server.
 
