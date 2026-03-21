@@ -127,8 +127,8 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
             attrs = store.entity(fid)
             if attrs:
                 fact = {"entityId": fid}
-                for a in attrs:
-                    fact[a["attribute"]] = a["value"]
+                for attr_name, values in attrs.items():
+                    fact[attr_name] = values[0] if len(values) == 1 else values
                 facts.append(fact)
 
         store.close()
@@ -186,16 +186,15 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
 
                 cur_conf = 0.5
                 cur_count = 0
-                for a in attrs:
-                    if a["attribute"] == "confidence":
-                        try:
-                            cur_conf = float(a["value"])
-                        except ValueError:
-                            pass
-                    elif a["attribute"] == "reinforce_count":
-                        try:
-                            cur_count = int(a["value"])
-                        except ValueError:
+                if "confidence" in attrs:
+                    try:
+                        cur_conf = float(attrs["confidence"][0])
+                    except (ValueError, IndexError):
+                        pass
+                if "reinforce_count" in attrs:
+                    try:
+                        cur_count = int(attrs["reinforce_count"][0])
+                    except (ValueError, IndexError):
                             pass
 
                 new_conf = min(1.0, cur_conf + 0.15)
@@ -209,7 +208,10 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
                 store.assert_triple(tx, entity_id, "confidence", str(round(new_conf, 2)))
                 store.retract_triple(tx, entity_id, "reinforce_count", str(cur_count))
                 store.assert_triple(tx, entity_id, "reinforce_count", str(new_count))
-                store.retract_triple(tx, entity_id, "last_reinforced", "")  # retract any
+                # Retract old last_reinforced if present
+                old_reinforced = attrs.get("last_reinforced", [])
+                for val in old_reinforced:
+                    store.retract_triple(tx, entity_id, "last_reinforced", val)
                 store.assert_triple(tx, entity_id, "last_reinforced", digest_ts)
                 stats["reinforced"] += 1
 
@@ -224,8 +226,9 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
                 }))
                 # Retract all attributes of this entity
                 attrs = store.entity(entity_id)
-                for a in attrs:
-                    store.retract_triple(tx, entity_id, a["attribute"], a["value"])
+                for attr_name, values in attrs.items():
+                    for val in values:
+                        store.retract_triple(tx, entity_id, attr_name, val)
                 stats["retracted"] += 1
 
         store.close()

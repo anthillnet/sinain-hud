@@ -54,8 +54,8 @@ def query_facts_by_entities(
             if not attrs:
                 continue
             fact = {"entityId": fid}
-            for a in attrs:
-                fact[a["attribute"]] = a["value"]
+            for attr_name, values in attrs.items():
+                fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
 
         # Sort by confidence descending
@@ -93,8 +93,8 @@ def query_top_facts(db_path: str, limit: int = 30) -> list[dict]:
             if not attrs:
                 continue
             fact = {"entityId": fid}
-            for a in attrs:
-                fact[a["attribute"]] = a["value"]
+            for attr_name, values in attrs.items():
+                fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
 
         store.close()
