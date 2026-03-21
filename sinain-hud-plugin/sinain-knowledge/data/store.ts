@@ -485,4 +485,121 @@ export class KnowledgeStore {
     writeFileSync(tmpPath, content, "utf-8");
     renameSync(tmpPath, situationPath);
   }
+
+  // ── Knowledge Document ─────────────────────────────────────────────────
+
+  /**
+   * Render sinain-knowledge.md — the portable knowledge document (<8KB).
+   * Combines: playbook (working memory) + top graph facts (long-term memory)
+   * + recent session digests + active module guidance.
+   */
+  renderKnowledgeDoc(): boolean {
+    try {
+      const parts: string[] = [];
+      const now = new Date().toISOString();
+
+      parts.push(`# Sinain Knowledge`);
+      parts.push(`<!-- exported: ${now}, version: 3 -->\n`);
+
+      // Playbook (working memory)
+      const playbook = this.readPlaybook();
+      if (playbook) {
+        // Strip header/footer comments for the doc
+        const body = playbook
+          .split("\n")
+          .filter((l) => !l.trim().startsWith("<!--"))
+          .join("\n")
+          .trim();
+        if (body) {
+          parts.push(`## Playbook (Working Memory)\n${body}\n`);
+        }
+      }
+
+      // Recent session digests
+      const digestsPath = join(this.workspaceDir, "memory", "session-digests.jsonl");
+      if (existsSync(digestsPath)) {
+        try {
+          const lines = readFileSync(digestsPath, "utf-8")
+            .split("\n")
+            .filter((l) => l.trim())
+            .slice(-5);
+          if (lines.length > 0) {
+            parts.push(`## Recent Sessions`);
+            for (const line of lines) {
+              try {
+                const d = JSON.parse(line);
+                if (d.whatHappened) {
+                  parts.push(`- ${d.whatHappened}`);
+                }
+              } catch {}
+            }
+            parts.push("");
+          }
+        } catch {}
+      }
+
+      // Active module guidance (brief)
+      const guidance = this.getActiveModuleGuidance();
+      if (guidance && guidance.length > 20) {
+        // Truncate to keep doc under 8KB
+        const truncated = guidance.slice(0, 2000);
+        parts.push(`## Active Modules\n${truncated}\n`);
+      }
+
+      const doc = parts.join("\n").trim() + "\n";
+      const docPath = join(this.workspaceDir, "memory", "sinain-knowledge.md");
+      const memDir = join(this.workspaceDir, "memory");
+      if (!existsSync(memDir)) mkdirSync(memDir, { recursive: true });
+      writeFileSync(docPath, doc, "utf-8");
+      this.logger.info(`sinain-hud: rendered sinain-knowledge.md (${doc.length} chars)`);
+      return true;
+    } catch (err) {
+      this.logger.warn(`sinain-hud: failed to render knowledge doc: ${String(err)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Extract entity keywords from SITUATION.md for dynamic graph enrichment.
+   * Returns lowercase entity names found in the situation text.
+   */
+  extractSituationEntities(): string[] {
+    const situation = this.readSituation();
+    if (!situation) return [];
+
+    const entities: Set<string> = new Set();
+
+    // Extract from "Active Application:" line
+    const appMatch = situation.match(/Active Application:\s*(.+)/i);
+    if (appMatch) {
+      const app = appMatch[1].trim().toLowerCase().replace(/\s+/g, "-");
+      if (app.length > 2) entities.add(app);
+    }
+
+    // Extract from "Detected Errors:" section
+    const errorMatch = situation.match(/Detected Errors:[\s\S]*?(?=\n##|\n---|\Z)/i);
+    if (errorMatch) {
+      // Look for common error type patterns
+      const errorPatterns = errorMatch[0].matchAll(
+        /(?:Error|Exception|TypeError|SyntaxError|ReferenceError|HTTP\s*\d{3}|ENOENT|EACCES|timeout)/gi,
+      );
+      for (const m of errorPatterns) {
+        entities.add(m[0].toLowerCase());
+      }
+    }
+
+    // Extract technology keywords
+    const techKeywords = [
+      "react-native", "react", "flutter", "swift", "kotlin", "python",
+      "typescript", "javascript", "node", "docker", "kubernetes",
+      "intellij", "vscode", "xcode", "metro", "gradle", "cocoapods",
+      "openrouter", "anthropic", "gemini", "openclaw", "sinain",
+    ];
+    const lowerSituation = situation.toLowerCase();
+    for (const kw of techKeywords) {
+      if (lowerSituation.includes(kw)) entities.add(kw);
+    }
+
+    return [...entities].slice(0, 10);
+  }
 }

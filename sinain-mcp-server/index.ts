@@ -184,26 +184,106 @@ server.tool(
   },
 );
 
-// 8. sinain_knowledge_query
+// 8. sinain_get_knowledge
+server.tool(
+  "sinain_get_knowledge",
+  "Get the portable knowledge document (playbook + long-term facts + recent sessions)",
+  {},
+  async () => {
+    try {
+      // Read pre-rendered knowledge doc (fast, no subprocess)
+      const docPath = resolve(MEMORY_DIR, "sinain-knowledge.md");
+      if (existsSync(docPath)) {
+        const content = readFileSync(docPath, "utf-8");
+        return textResult(stripPrivateTags(content));
+      }
+      // Fallback: read playbook directly
+      const playbookPath = resolve(MEMORY_DIR, "sinain-playbook.md");
+      if (existsSync(playbookPath)) {
+        return textResult(stripPrivateTags(readFileSync(playbookPath, "utf-8")));
+      }
+      return textResult("No knowledge document available yet");
+    } catch (err: any) {
+      return textResult(`Error reading knowledge: ${err.message}`);
+    }
+  },
+);
+
+// 8b. sinain_knowledge_query (graph query — entity-based lookup)
 server.tool(
   "sinain_knowledge_query",
-  "Query the knowledge graph / memory triples for relevant context",
+  "Query the knowledge graph for facts about specific entities/domains",
   {
-    context: z.string(),
-    max_chars: z.number().optional().default(1500),
+    entities: z.array(z.string()).optional().default([]),
+    max_facts: z.number().optional().default(5),
   },
-  async ({ context, max_chars }) => {
+  async ({ entities, max_facts }) => {
     try {
-      const scriptPath = resolve(SCRIPTS_DIR, "triple_query.py");
-      const output = await runScript([
-        scriptPath,
-        "--memory-dir", MEMORY_DIR,
-        "--context", context,
-        "--max-chars", String(max_chars),
-      ]);
+      const dbPath = resolve(MEMORY_DIR, "knowledge-graph.db");
+      const scriptPath = resolve(SCRIPTS_DIR, "graph_query.py");
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(max_facts)];
+      if (entities.length > 0) {
+        args.push("--entities", JSON.stringify(entities));
+      }
+      const output = await runScript(args);
       return textResult(stripPrivateTags(output));
     } catch (err: any) {
-      return textResult(`Error querying knowledge: ${err.message}`);
+      return textResult(`Error querying graph: ${err.message}`);
+    }
+  },
+);
+
+// 8c. sinain_distill_session
+server.tool(
+  "sinain_distill_session",
+  "Distill the current session into knowledge (playbook updates + graph facts)",
+  {
+    session_summary: z.string().optional().default("Bare agent session distillation"),
+  },
+  async ({ session_summary }) => {
+    const results: string[] = [];
+
+    try {
+      // Fetch feed items from sinain-core
+      const coreUrl = process.env.SINAIN_CORE_URL || "http://localhost:9500";
+      const feedResp = await fetch(`${coreUrl}/feed?after=0`).then(r => r.json());
+      const historyResp = await fetch(`${coreUrl}/agent/history?limit=10`).then(r => r.json());
+
+      const feedItems = (feedResp as any).messages ?? [];
+      const agentHistory = (historyResp as any).results ?? [];
+
+      if (feedItems.length < 3) {
+        return textResult("Not enough feed items to distill (need >3)");
+      }
+
+      // Step 1: Distill
+      const transcript = JSON.stringify([...feedItems, ...agentHistory].slice(0, 100));
+      const meta = JSON.stringify({ ts: new Date().toISOString(), sessionKey: session_summary });
+
+      const distillOutput = await runScript([
+        resolve(SCRIPTS_DIR, "session_distiller.py"),
+        "--memory-dir", MEMORY_DIR,
+        "--transcript", transcript,
+        "--session-meta", meta,
+      ], 30_000);
+      results.push(`[session_distiller] ${distillOutput.trim().slice(0, 500)}`);
+
+      const digest = JSON.parse(distillOutput.trim());
+      if (digest.isEmpty || digest.error) {
+        return textResult(`Distillation skipped: ${digest.error || "empty session"}`);
+      }
+
+      // Step 2: Integrate
+      const integrateOutput = await runScript([
+        resolve(SCRIPTS_DIR, "knowledge_integrator.py"),
+        "--memory-dir", MEMORY_DIR,
+        "--digest", JSON.stringify(digest),
+      ], 60_000);
+      results.push(`[knowledge_integrator] ${integrateOutput.trim().slice(0, 500)}`);
+
+      return textResult(stripPrivateTags(results.join("\n\n")));
+    } catch (err: any) {
+      return textResult(`Distillation error: ${err.message}`);
     }
   },
 );

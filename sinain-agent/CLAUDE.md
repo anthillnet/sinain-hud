@@ -12,8 +12,10 @@ You have MCP tools from `sinain-mcp-server`:
 - `sinain_get_feedback` — get feedback signals from recent escalations
 - `sinain_post_feed` — push an arbitrary message to the HUD
 - `sinain_health` — check system health
-- `sinain_knowledge_query` — query the knowledge graph for relevant context
-- `sinain_heartbeat_tick` — run the full curation pipeline (git backup, signals, insights, playbook)
+- `sinain_get_knowledge` — get the portable knowledge document (playbook + long-term facts + sessions)
+- `sinain_knowledge_query` — query the knowledge graph for facts about specific entities/domains
+- `sinain_distill_session` — explicitly distill the current session into knowledge updates
+- `sinain_heartbeat_tick` — run the heartbeat pipeline (git backup, signals, distillation, insights)
 - `sinain_module_guidance` — get active module guidance
 
 ## Main Loop
@@ -23,7 +25,7 @@ Your primary job is an escalation response loop:
 1. Call `sinain_get_escalation` to check for pending escalations
 2. If an escalation is present:
    a. Read the escalation message carefully — it contains screen OCR, audio transcripts, app context, and the local agent's digest
-   b. Optionally call `sinain_knowledge_query` with key context from the escalation to enrich your response
+   b. Optionally call `sinain_get_knowledge` to read the knowledge document, or `sinain_knowledge_query` with specific entities to enrich your response
    c. Optionally call `sinain_module_guidance` to get active module instructions
    d. Craft a response and call `sinain_respond` with the escalation ID and your response
 3. If no escalation is pending, wait a few seconds and poll again
@@ -47,10 +49,12 @@ When responding to escalations:
 2. The tool runs the full pipeline automatically:
    - Git backup of memory directory
    - Signal analysis (detects opportunities from session patterns)
+   - **Session distillation** — fetches new feed items from sinain-core, distills patterns/learnings
+   - **Knowledge integration** — updates playbook (working memory) and knowledge graph (long-term memory)
    - Insight synthesis (generates suggestions from accumulated patterns)
-   - Playbook curation (updates effective playbook based on feedback)
 3. If the result contains a suggestion or insight, post it to the HUD via `sinain_post_feed`
-4. Optionally call `sinain_get_feedback` to review recent escalation scores
+4. Optionally call `sinain_get_knowledge` to review the portable knowledge document
+5. Optionally call `sinain_get_feedback` to review recent escalation scores
 
 ## Spawning Background Tasks
 
@@ -69,8 +73,11 @@ Rules:
 ## Files You Manage
 
 Your working memory lives at `~/.openclaw/workspace/memory/`:
-- `playbook.md` — your effective playbook (updated by curation pipeline)
-- `triplestore.db` — knowledge graph (SQLite, managed by Python scripts)
+- `sinain-playbook.md` — your effective playbook (working memory, updated by knowledge integrator)
+- `knowledge-graph.db` — long-term knowledge graph (SQLite, curated facts with confidence tracking)
+- `sinain-knowledge.md` — portable knowledge document (<8KB, playbook + top graph facts + recent sessions)
+- `session-digests.jsonl` — session distillation history
+- `distill-state.json` — watermark for what's been distilled
 - `playbook-logs/YYYY-MM-DD.jsonl` — decision logs
 
 ## Privacy

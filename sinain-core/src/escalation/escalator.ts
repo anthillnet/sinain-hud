@@ -9,7 +9,7 @@ import { OpenClawWsClient } from "./openclaw-ws.js";
 import { EscalationSlot } from "./escalation-slot.js";
 import type { SlotEntry, QueueFeedbackCtx } from "./escalation-slot.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
-import { isCodingContext, buildEscalationMessage } from "./message-builder.js";
+import { isCodingContext, buildEscalationMessage, fetchKnowledgeFacts } from "./message-builder.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
 
@@ -32,6 +32,7 @@ export interface EscalatorDeps {
   profiler?: Profiler;
   feedbackStore?: FeedbackStore;
   signalCollector?: SignalCollector;
+  queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
 }
 
 /**
@@ -159,7 +160,7 @@ export class Escalator {
    * Called after every agent analysis tick.
    * Decides whether to escalate and enqueues the message for delivery.
    */
-  onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): void {
+  async onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): Promise<void> {
     // Skip WS escalations when circuit is open (HTTP transport bypasses this)
     const transport = this.deps.escalationConfig.transport;
     if (this.wsClient.isCircuitOpen && transport !== "http") {
@@ -198,13 +199,28 @@ export class Escalator {
     this.lastEscalationContext = contextWindow;
 
     const escalationReason = score.reasons.join(", ");
-    const message = buildEscalationMessage(
+    let message = buildEscalationMessage(
       entry.digest,
       contextWindow,
       entry,
       this.deps.escalationConfig.mode,
       escalationReason,
     );
+
+    // Enrich with long-term knowledge facts (best-effort, 5s max)
+    if (this.deps.queryKnowledgeFacts) {
+      try {
+        const knowledgeSection = await fetchKnowledgeFacts(
+          contextWindow, entry.digest, this.deps.queryKnowledgeFacts,
+        );
+        if (knowledgeSection) {
+          message = message + "\n\n" + knowledgeSection;
+          log(TAG, `knowledge enrichment injected (${knowledgeSection.length} chars)`);
+        }
+      } catch (err) {
+        log(TAG, `knowledge enrichment failed: ${String(err)}`);
+      }
+    }
 
     const slotId = createHash("sha256").update(this.deps.openclawConfig.sessionKey + entry.ts).digest("hex").slice(0, 16);
     const slotEntry: SlotEntry = {

@@ -560,8 +560,10 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
           `sinain-hud: session summary written (${toolCount} tools, ${Math.round(durationMs / 1000)}s)`,
         );
 
-        // Fire-and-forget: ingest session summary into triple store
-        if (state.workspaceDir) {
+        // Fire-and-forget: ingest session summary into knowledge graph
+        // NOTE: Main knowledge integration happens in heartbeat tick (session_distiller + knowledge_integrator).
+        // This is a lightweight best-effort path for when agent_end fires (won't fire on kill).
+        if (false && state.workspaceDir) {
           api.runtime.system.runCommandWithTimeout(
             ["uv", "run", "--with", "requests", "python3",
              "sinain-memory/triple_ingest.py",
