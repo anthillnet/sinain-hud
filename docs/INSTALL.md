@@ -57,9 +57,15 @@ sense_client (OCR pipeline)
 2. In that browser terminal, run:
 
 ```bash
+# Brev containers set HTTPS_PROXY="" which breaks Node 22 npm requests.
+# Unset it before running npx:
+unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
+
 npx @geravant/sinain
-# or, if you have a memory backup repo:
-SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
+# or, with backup repos (both optional):
+SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git \
+SINAIN_SNAPSHOT_REPO=git@github.com:yourname/sinain-snapshots.git \
+npx @geravant/sinain
 ```
 
 `npx @geravant/sinain` will:
@@ -68,6 +74,7 @@ SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinai
 - Patch `openclaw.json` in the sandbox (adds plugin config, `sessionToolsVisibility: all`)
 - Restart the OpenClaw gateway inside the sandbox
 - Forward sandbox port 18789 → VM port 18789 (so Brev's exposed port works)
+- Configure knowledge snapshot repo if `SINAIN_SNAPSHOT_REPO` is set (optional — backs up playbook and eval data)
 
 3. At the end you'll see output like:
 ```
@@ -83,9 +90,21 @@ SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinai
        Auth token:    43bb3cd31fe38405791ba0c07530010a85e958f614706999
 ```
 
-4. **Note your auth token** — it's printed directly in the output. No SSH tunnel needed; the Brev dashboard port exposure (step 1a) is all that's required.
+### 1c. Start the OpenClaw gateway
 
-### 1c. Fix the port forward binding
+In a **second Code-Server terminal**, run:
+
+```bash
+openclaw gateway
+```
+
+Keep this terminal open — the gateway runs in the foreground. It will print its WebSocket URL and start accepting connections.
+
+> To run it in the background instead: `nohup openclaw gateway > ~/.openclaw/gateway.log 2>&1 &`
+
+4. **Note your auth token** — it's printed directly in the `npx` output (step 1b). If not visible, check `~/.openclaw/openclaw.json` → `gateway.auth.token`.
+
+### 1d. Fix the port forward binding
 
 `openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0`, making port 18789 unreachable from your Mac even after Brev exposes it. This affects every installation — run these commands in the Code-Server terminal after `npx` completes:
 
@@ -162,16 +181,30 @@ See `sinain-core/.env.example` for the full list of available variables.
 
 ## Verifying the installation
 
-1. **Health check**:
+### NemoClaw side (Code-Server terminal)
+
+1. **Gateway is running** — in the terminal running `openclaw gateway`, you should see:
+   ```
+   [gateway] Listening on ws://0.0.0.0:18789
+   ```
+2. **Plugin loaded** — run `openclaw status` and look for:
+   ```
+   sinain-hud: plugin registered
+   ```
+3. **Agent active** — run `/sinain_status` in any OpenClaw session — should show the sinain agent session as active
+
+### Mac side
+
+4. **Overlay appears** — a small HUD window should be visible on your screen
+5. **Health check**:
    ```bash
    curl http://localhost:9500/health
    # → {"ok":true,...}
    ```
-2. **Gateway connected** — in the health response, check `escalation.gatewayConnected: true`
-3. **Agent responding** — after ~60–90 seconds, `escalation.totalResponses` should be > 0
+6. **Gateway connected** — in the health response, check `escalation.gatewayConnected: true`
+7. **Agent responding** — after ~60–90 seconds, `escalation.totalResponses` should be > 0
    (Nemotron response latency is ~60s per escalation — this is normal)
-4. **Overlay appears** — a small HUD window should be visible on your screen
-5. **End-to-end test** — speak a sentence or show text on screen; the overlay should update within ~10 seconds
+8. **End-to-end test** — speak a sentence or show text on screen; the overlay should update within ~10 seconds
 
 ---
 
@@ -202,13 +235,15 @@ If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart
 2. **Re-deploy sinain**:
    ```bash
    npx @geravant/sinain
-   # or with memory backup:
-   SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git npx @geravant/sinain
+   # or with backup repos:
+   SINAIN_BACKUP_REPO=git@github.com:yourname/sinain-memory.git \
+   SINAIN_SNAPSHOT_REPO=git@github.com:yourname/sinain-snapshots.git \
+   npx @geravant/sinain
    ```
 
 3. **Re-expose port 18789** in Brev dashboard (port exposures may reset on instance restart)
 
-4. **Apply openshell forward workaround** (see [Step 1c](#1c-fix-the-port-forward-binding))
+4. **Apply openshell forward workaround** (see [Step 1d](#1d-fix-the-port-forward-binding))
 
 5. **Restart sinain-core on Mac** — the auth token will have changed:
    - Update `OPENCLAW_WS_TOKEN` and `OPENCLAW_HTTP_TOKEN` in `sinain-core/.env`
@@ -220,7 +255,7 @@ If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart
 
 | Issue | Impact | Status |
 |---|---|---|
-| `openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0` | Port 18789 not reachable from Mac without workaround (see [Step 1c](#1c-fix-the-port-forward-binding)) | Fix pending in installer |
+| `openshell forward start` binds to `127.0.0.1` instead of `0.0.0.0` | Port 18789 not reachable from Mac without workaround (see [Step 1d](#1d-fix-the-port-forward-binding)) | Fix pending in installer |
 | `uv` not installed in Brev sandbox | Memory/playbook curation pipeline disabled (`signal_analyzer.py`, `insight_synthesizer.py`, `feedback_analyzer.py` etc. all fail with `spawn uv ENOENT`) | Workaround: `pip install uv` in sandbox, or switch scripts to use `python3` directly |
 | `setup-nemoclaw.sh` may leave tokens blank | Auth token must be manually verified/copied into `.env` (see Step 2) | Fix pending in setup script |
 
@@ -231,7 +266,7 @@ If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart
 | Symptom | Fix |
 |---|---|
 | "401 Unauthorized" or "Token error" | Re-run `npx @geravant/sinain` in Code-Server to regenerate token; update `OPENCLAW_WS_TOKEN` in `.env` |
-| Port not reachable / connection refused | Apply the `ssh -g` workaround in [Step 1c](#1c-fix-the-port-forward-binding); re-expose port 18789 in Brev dashboard (port exposures can expire) |
+| Port not reachable / connection refused | Apply the `ssh -g` workaround in [Step 1d](#1d-fix-the-port-forward-binding); re-expose port 18789 in Brev dashboard (port exposures can expire) |
 | `gatewayConnected: false` in `/health` | Check tokens in `.env`; verify port 18789 is open (`nc -z -w3 <IP> 18789`) |
 | `totalResponses` stuck at 0 | Normal for up to ~90s on first connect; if it stays at 0, check gateway logs: `ssh -T openshell-<sandbox> "cat /tmp/oc-gateway.log"` |
 | Screen OCR not working | Check **System Settings → Privacy & Security → Screen Recording** — sinain-core must be listed |
@@ -242,3 +277,4 @@ If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart
 | `FailoverError: Unknown model: nvidia-nim/...` | Model mismatch — inside the sandbox, the model should be `inference.local` (OpenShell routes it). Re-run `npx @geravant/sinain` to reset config. |
 | `FailoverError: No API key found for provider "anthropic"` | Agent model set incorrectly. Inside the sandbox, verify `agents.defaults.model` isn't set to `nvidia-nim/...` — OpenShell uses its own routing. |
 | Sandbox recreated, nothing works | See [Recovery after sandbox recreation](#recovery-after-sandbox-recreation) above |
+| `403 Forbidden` on npm install | `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy` then retry `npx @geravant/sinain` |

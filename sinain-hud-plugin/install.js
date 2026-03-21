@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
+import { randomBytes } from "crypto";
 
 const HOME        = os.homedir();
 const PLUGIN_DIR  = path.join(HOME, ".openclaw/extensions/sinain-hud");
@@ -18,7 +19,9 @@ const SKILL      = path.join(PKG_DIR, "SKILL.md");
 
 console.log("\nInstalling sinain plugin...");
 
-// 1. Stage plugin files to local ~/.openclaw (used by both paths)
+// 1. Copy plugin files (remove stale extensions/sinain dir if present from old installs)
+const stalePluginDir = path.join(HOME, ".openclaw/extensions/sinain");
+if (fs.existsSync(stalePluginDir)) fs.rmSync(stalePluginDir, { recursive: true, force: true });
 fs.mkdirSync(PLUGIN_DIR, { recursive: true });
 fs.copyFileSync(path.join(PKG_DIR, "index.ts"),             path.join(PLUGIN_DIR, "index.ts"));
 fs.copyFileSync(path.join(PKG_DIR, "openclaw.plugin.json"), path.join(PLUGIN_DIR, "openclaw.plugin.json"));
@@ -115,6 +118,8 @@ async function installNemoClaw({ sandboxName }) {
       sessionKey:    "agent:main:sinain"
     }
   };
+  // Remove stale "sinain" entry if present from a previous install
+  delete cfg.plugins.entries["sinain"];
   if (!cfg.plugins.allow.includes("sinain-hud")) cfg.plugins.allow.push("sinain-hud");
   cfg.agents                                         ??= {};
   cfg.agents.defaults                                ??= {};
@@ -141,6 +146,19 @@ async function installNemoClaw({ sandboxName }) {
       console.log("  ✓ Memory restored from", backupUrl);
     } catch (e) {
       console.error("\n  ✗ Memory restore aborted:", e.message, "\n");
+      process.exit(1);
+    }
+  }
+
+  // Knowledge snapshot repo (optional) — inside sandbox
+  const snapshotUrl = process.env.SINAIN_SNAPSHOT_REPO;
+  if (snapshotUrl) {
+    try {
+      await checkRepoPrivacy(snapshotUrl);
+      run(`ssh -T openshell-${sandboxName} 'mkdir -p ~/.sinain/knowledge-snapshots && cd ~/.sinain/knowledge-snapshots && ([ -d .git ] || (git init && git config user.name sinain-knowledge && git config user.email sinain@local)) && (git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "${snapshotUrl}" || git remote add origin "${snapshotUrl}") && (git fetch origin && git checkout -B main origin/main) 2>/dev/null || true'`);
+      console.log("  ✓ Snapshot repo configured in sandbox");
+    } catch (e) {
+      console.error("\n  ✗ Snapshot repo setup aborted:", e.message, "\n");
       process.exit(1);
     }
   }
@@ -201,6 +219,10 @@ async function installLocal() {
       sessionKey:    "agent:main:sinain"
     }
   };
+  // Remove stale "sinain" entry if present from a previous install
+  delete cfg.plugins.entries["sinain"];
+  cfg.plugins.allow ??= [];
+  if (!cfg.plugins.allow.includes("sinain-hud")) cfg.plugins.allow.push("sinain-hud");
   cfg.agents                                         ??= {};
   cfg.agents.defaults                                ??= {};
   cfg.agents.defaults.sandbox                        ??= {};
@@ -241,25 +263,69 @@ async function installLocal() {
     }
   }
 
-  // Reload gateway
+  // Knowledge snapshot repo (optional)
+  await setupSnapshotRepo();
+
+  // Start / restart gateway
   try {
-    execSync("openclaw reload", { stdio: "pipe" });
-    console.log("  ✓ Gateway reloaded");
+    execSync("openclaw gateway restart --background", { stdio: "pipe" });
+    console.log("  ✓ Gateway restarted");
   } catch {
     try {
-      execSync("openclaw stop && sleep 1 && openclaw start --background", { stdio: "pipe" });
-      console.log("  ✓ Gateway restarted");
+      execSync("openclaw gateway start --background", { stdio: "pipe" });
+      console.log("  ✓ Gateway started");
     } catch {
       console.warn("  ⚠ Could not start gateway — run: openclaw gateway");
     }
   }
 
-  console.log(`
-✓ sinain installed successfully.
-  Plugin config: ~/.openclaw/openclaw.json
-  Auth token:    check your Brev dashboard → 'Gateway Token'
-  Then run ./setup-nemoclaw.sh on your Mac.
-`);
+  console.log("\n✓ sinain installed successfully.");
+  console.log("  Plugin config: ~/.openclaw/openclaw.json");
+  console.log(`  Auth token:    ${authToken}`);
+  console.log("  Next: run 'openclaw gateway' in a new terminal, then run ./setup-nemoclaw.sh on your Mac.\n");
+}
+
+// ── Knowledge snapshot repo setup (shared) ──────────────────────────────────
+
+const SNAPSHOT_DIR = path.join(HOME, ".sinain", "knowledge-snapshots");
+
+async function setupSnapshotRepo() {
+  const snapshotUrl = process.env.SINAIN_SNAPSHOT_REPO;
+  if (!snapshotUrl) return;
+
+  try {
+    await checkRepoPrivacy(snapshotUrl);
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+
+    if (!fs.existsSync(path.join(SNAPSHOT_DIR, ".git"))) {
+      execSync(`git init "${SNAPSHOT_DIR}"`, { stdio: "pipe" });
+      execSync(`git -C "${SNAPSHOT_DIR}" config user.name "sinain-knowledge"`, { stdio: "pipe" });
+      execSync(`git -C "${SNAPSHOT_DIR}" config user.email "sinain@local"`, { stdio: "pipe" });
+    }
+
+    // Set remote (add or update)
+    try {
+      run_capture(`git -C "${SNAPSHOT_DIR}" remote get-url origin`);
+      execSync(`git -C "${SNAPSHOT_DIR}" remote set-url origin "${snapshotUrl}"`, { stdio: "pipe" });
+    } catch {
+      execSync(`git -C "${SNAPSHOT_DIR}" remote add origin "${snapshotUrl}"`, { stdio: "pipe" });
+    }
+
+    // Pull existing snapshots if remote has content
+    try {
+      execSync(`git -C "${SNAPSHOT_DIR}" fetch origin`, { stdio: "pipe", timeout: 15_000 });
+      execSync(`git -C "${SNAPSHOT_DIR}" checkout -B main origin/main`, { stdio: "pipe" });
+      console.log("  ✓ Snapshot repo restored from", snapshotUrl);
+    } catch {
+      console.log("  ✓ Snapshot repo configured (empty remote)");
+    }
+  } catch (e) {
+    if (e.message?.startsWith("SECURITY") || e.message?.startsWith("Refusing")) {
+      console.error("\n  ✗ Snapshot repo setup aborted:", e.message, "\n");
+      process.exit(1);
+    }
+    console.warn("  ⚠ Snapshot repo setup failed:", e.message);
+  }
 }
 
 // ── Detection ────────────────────────────────────────────────────────────────

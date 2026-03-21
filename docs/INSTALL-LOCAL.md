@@ -53,15 +53,16 @@ cd sinain-hud
 
 The wizard handles everything: API keys, gateway install, plugin setup, `.env` config, optional snapshot restore, then launches sinain.
 
-The wizard asks 5 things:
+The wizard asks 6 things:
 
 | Prompt | What to enter |
 |---|---|
-| **[1/5] OpenRouter API key** | Your key from [openrouter.ai](https://openrouter.ai) — used for screen OCR and transcription |
-| **[2/5] Audio transcription** | `a` for cloud (OpenRouter), `b` for local Whisper (~1.5 GB download) |
-| **[3/5] Install & start gateway** | Automatic — installs `openclaw` via npm if needed, starts the gateway, installs the sinain plugin |
-| **[4/5] Verify Anthropic auth** | Checks if your Anthropic API key is configured in `auth-profiles.json` |
-| **[5/5] Restore snapshot** | If you have a knowledge snapshot at `~/.sinain/knowledge-snapshots/`, optionally restore it |
+| **[1/6] OpenRouter API key** | Your key from [openrouter.ai](https://openrouter.ai) — used for screen OCR and transcription |
+| **[2/6] Audio transcription** | `a` for cloud (OpenRouter), `b` for local Whisper (~1.5 GB download) |
+| **[3/6] Install & start gateway** | Automatic — installs `openclaw` via npm if needed, starts the gateway, installs the sinain plugin |
+| **[4/6] Verify Anthropic auth** | Checks if your Anthropic API key is configured in `auth-profiles.json` |
+| **[5/6] Snapshot backup repo** | Optional — private GitHub repo URL to backup knowledge snapshots (playbook, modules, eval). Leave blank to skip. |
+| **[6/6] Restore snapshot** | If you have a knowledge snapshot at `~/.sinain/knowledge-snapshots/`, optionally restore it |
 
 After the wizard completes, sinain launches automatically.
 
@@ -165,6 +166,7 @@ OPENCLAW_HTTP_URL=http://localhost:18789/hooks/agent
 OPENCLAW_WS_TOKEN=<48-char hex token from step 6>
 OPENCLAW_HTTP_TOKEN=<48-char hex token from step 6>
 OPENCLAW_SESSION_KEY=agent:main:sinain
+SINAIN_SNAPSHOT_REPO=git@github.com:yourname/sinain-snapshots.git  # optional
 ```
 
 > **Note:** `ANTHROPIC_API_KEY` is NOT needed in sinain-core's `.env` — it's only used by the gateway, configured in `auth-profiles.json`.
