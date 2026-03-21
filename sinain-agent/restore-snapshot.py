@@ -107,16 +107,49 @@ def restore():
             (MEMORY_DIR / "playbook-logs" / "restored.jsonl").write_text("\n".join(lines) + "\n")
             print(f"  Restored {len(pblogs)} playbook log entries")
 
-    # 4. Copy triplestore if present
-    triplestore_src = SNAPSHOT_PATH.parent / "triples.db"
-    if triplestore_src.exists():
-        triplestore_dst = MEMORY_DIR / "triplestore.db"
-        if not triplestore_dst.exists():
-            print(f"  Copying triplestore ({triplestore_src.stat().st_size / 1024 / 1024:.0f} MB)...")
-            shutil.copy2(triplestore_src, triplestore_dst)
-            print(f"  Restored triplestore.db")
-        else:
-            print(f"  Triplestore already exists, skipping")
+    # 4. Restore knowledge graph
+    # v3 format: facts are a JSON array in the snapshot, bootstrapped into a fresh SQLite DB
+    # v2 format: triplestore.db binary copy (legacy, 1.6GB — skip if v3 available)
+    graph_facts = snap.get("graphFacts", [])
+    if graph_facts:
+        print(f"  Bootstrapping knowledge graph from {len(graph_facts)} facts (v3 format)...")
+        graph_dst = MEMORY_DIR / "knowledge-graph.db"
+        try:
+            # Write facts as a temp JSONL and run knowledge_integrator --bootstrap
+            # Or just create the DB directly using triplestore.py if available
+            scripts_dst = WORKSPACE / "sinain-memory"
+            if scripts_dst.exists():
+                sys.path.insert(0, str(scripts_dst))
+                from triplestore import TripleStore
+                store = TripleStore(str(graph_dst))
+                for fact in graph_facts:
+                    tx = store.begin_tx("restore-snapshot")
+                    for key, val in fact.items():
+                        if key != "entityId":
+                            store.assert_triple(tx, fact.get("entityId", f"fact:{key}"), key, str(val))
+                store.close()
+                print(f"  Restored knowledge-graph.db ({len(graph_facts)} facts)")
+            else:
+                print(f"  WARNING: Cannot restore graph — sinain-memory scripts not deployed yet")
+        except Exception as e:
+            print(f"  WARNING: Knowledge graph restore failed: {e}")
+    else:
+        # Legacy v2: binary triplestore copy
+        triplestore_src = SNAPSHOT_PATH.parent / "triples.db"
+        if triplestore_src.exists():
+            triplestore_dst = MEMORY_DIR / "triplestore.db"
+            if not triplestore_dst.exists():
+                print(f"  Copying legacy triplestore ({triplestore_src.stat().st_size / 1024 / 1024:.0f} MB)...")
+                shutil.copy2(triplestore_src, triplestore_dst)
+                print(f"  Restored triplestore.db (legacy v2)")
+            else:
+                print(f"  Triplestore already exists, skipping")
+
+    # 4b. Restore knowledge document if present
+    knowledge_doc = snap.get("knowledgeDoc", "")
+    if knowledge_doc:
+        (MEMORY_DIR / "sinain-knowledge.md").write_text(knowledge_doc)
+        print(f"  Restored sinain-knowledge.md ({len(knowledge_doc)} chars)")
 
     # 5. Deploy sinain-memory scripts to workspace
     scripts_dst = WORKSPACE / "sinain-memory"

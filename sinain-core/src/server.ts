@@ -36,6 +36,8 @@ export interface ServerDeps {
   feedbackStore?: FeedbackStore;
   getEscalationPending?: () => any;
   respondEscalation?: (id: string, response: string) => any;
+  getKnowledgeDocPath?: () => string | null;
+  queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -204,6 +206,43 @@ export function createAppServer(deps: ServerDeps) {
         const updates = JSON.parse(body);
         const result = deps.updateAgentConfig(updates);
         res.end(JSON.stringify({ ok: true, config: result }));
+        return;
+      }
+
+      // ── /knowledge ──
+      if (req.method === "GET" && url.pathname === "/knowledge") {
+        // Return portable knowledge document
+        const knowledgePath = deps.getKnowledgeDocPath?.();
+        if (knowledgePath) {
+          try {
+            const { readFileSync } = await import("node:fs");
+            const content = readFileSync(knowledgePath, "utf-8");
+            res.end(JSON.stringify({ ok: true, content }));
+          } catch {
+            res.end(JSON.stringify({ ok: true, content: "" }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: true, content: "" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/knowledge/facts") {
+        // Query knowledge graph for entity-matched facts
+        const entitiesParam = url.searchParams.get("entities") || "";
+        const maxFacts = Math.min(parseInt(url.searchParams.get("max") || "5"), 20);
+        const entities = entitiesParam.split(",").map(e => e.trim()).filter(Boolean);
+
+        if (deps.queryKnowledgeFacts) {
+          try {
+            const facts = await deps.queryKnowledgeFacts(entities, maxFacts);
+            res.end(JSON.stringify({ ok: true, facts }));
+          } catch (err) {
+            res.end(JSON.stringify({ ok: true, facts: [], error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: true, facts: [] }));
+        }
         return;
       }
 

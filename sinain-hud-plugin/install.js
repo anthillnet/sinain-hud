@@ -228,15 +228,8 @@ async function installLocal() {
   cfg.agents.defaults.sandbox                        ??= {};
   cfg.agents.defaults.sandbox.sessionToolsVisibility  = "all";
   cfg.agents.defaults.compaction = { mode: "safeguard", maxHistoryShare: 0.2, reserveTokensFloor: 40000 };
-  cfg.gateway       ??= {};
-  cfg.gateway.mode    = "local";   // required for gateway to start
-  cfg.gateway.bind    = "lan";     // allow remote Mac to connect
-  cfg.gateway.auth  ??= {};
-  cfg.gateway.auth.mode ??= "token";
-  if (!cfg.gateway.auth.token) {
-    cfg.gateway.auth.token = randomBytes(24).toString("hex");
-  }
-  const authToken = cfg.gateway.auth.token;
+  cfg.gateway     ??= {};
+  cfg.gateway.bind  = "lan";  // allow remote Mac to connect
 
   // Propagate snapshot repo path to plugin config (used for periodic git-backed knowledge backups)
   if (process.env.SINAIN_SNAPSHOT_REPO) {
