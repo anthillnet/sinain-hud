@@ -291,35 +291,47 @@ This will:
 
 ## Quick Start
 
-### Prerequisites
-
-- macOS 12.3+ (ScreenCaptureKit required for sense_client primary backend)
-- Node.js 22+
-- Python 3.11+
-- Flutter 3.10+ (`brew install flutter`)
-- Tesseract (`brew install tesseract`) — for sense_client OCR
-- An [OpenClaw](https://github.com/anthillnet/openclaw) gateway instance with the sinain-hud plugin
-
-### Setup
+### Option A: Install via npm (recommended)
 
 ```bash
-git clone <repo>
+npx @geravant/sinain start
+```
+
+On first run, create `~/.sinain/.env`:
+```bash
+mkdir -p ~/.sinain
+echo "OPENROUTER_API_KEY=sk-or-..." > ~/.sinain/.env
+```
+
+Optional flags:
+```bash
+npx @geravant/sinain start --no-sense     # skip screen capture
+npx @geravant/sinain start --no-overlay   # skip Flutter overlay
+npx @geravant/sinain start --no-agent     # skip agent poll loop
+npx @geravant/sinain start --agent=codex  # use a different agent
+```
+
+Other commands:
+```bash
+npx @geravant/sinain stop           # stop all services
+npx @geravant/sinain status         # check what's running
+npx @geravant/sinain setup-overlay  # install Flutter overlay
+```
+
+**Prerequisites:** macOS 12.3+, Node.js 18+, Python 3.10+ (for screen capture), Flutter 3.10+ (for overlay). macOS will prompt for Screen Recording permission on first run.
+
+### Option B: From source
+
+```bash
+git clone https://github.com/anthillnet/sinain-hud
 cd sinain-hud
 cp sinain-core/.env.example sinain-core/.env
 # Edit sinain-core/.env — fill in OPENROUTER_API_KEY, OPENCLAW_WS_TOKEN, etc.
-```
-
-### Run
-
-```bash
 ./start.sh
 # Optional flags:
 ./start.sh --no-sense    # skip screen capture pipeline
 ./start.sh --no-overlay  # skip Flutter overlay (headless mode)
 ```
-
-The overlay and sinain-core start together. macOS will prompt for Screen Recording permission on
-first run.
 
 ---
 

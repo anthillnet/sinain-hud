@@ -11,7 +11,7 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
   set +a
 fi
 
-MCP_CONFIG="$SCRIPT_DIR/mcp-config.json"
+MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
 POLL_INTERVAL="${SINAIN_POLL_INTERVAL:-5}"
 HEARTBEAT_INTERVAL="${SINAIN_HEARTBEAT_INTERVAL:-900}" # 15 minutes
