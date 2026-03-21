@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
@@ -398,7 +399,7 @@ async function main() {
     getKnowledgeDocPath: () => {
       const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
       const p = `${workspace}/memory/sinain-knowledge.md`;
-      try { if (require("node:fs").existsSync(p)) return p; } catch {}
+      try { if (existsSync(p)) return p; } catch {}
       return null;
     },
     queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
