@@ -78,6 +78,17 @@ async function main() {
     openclawConfig: config.openclawConfig,
     profiler,
     feedbackStore: feedbackStore ?? undefined,
+    queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
+      const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+      const dbPath = `${workspace}/memory/knowledge-graph.db`;
+      const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
+      try {
+        const { execFileSync } = await import("node:child_process");
+        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
+        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
+        return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
+      } catch { return ""; }
+    },
   });
 
   // ── Initialize agent loop (event-driven) ──
