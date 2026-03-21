@@ -293,6 +293,53 @@ the local analyzer reported idle/no-change. Provide a PROACTIVE response:
 }
 
 /**
+ * Fetch relevant long-term knowledge facts for the current escalation context.
+ * Extracts entities from the context and queries the knowledge graph.
+ * Returns a formatted section or empty string if no relevant facts found.
+ */
+export async function fetchKnowledgeFacts(
+  context: ContextWindow,
+  digest: string,
+  queryFn?: (entities: string[], maxFacts: number) => Promise<string>,
+): Promise<string> {
+  if (!queryFn) return "";
+
+  // Extract entities from context: current app + error types + domain keywords
+  const entities: string[] = [];
+  const app = normalizeAppName(context.currentApp).toLowerCase().replace(/\s+/g, "-");
+  if (app && app.length > 2) entities.push(app);
+
+  // Extract error type keywords from digest
+  const errorPatterns = digest.matchAll(
+    /(?:Error|Exception|TypeError|SyntaxError|ReferenceError|HTTP\s*\d{3}|ENOENT|EACCES)/gi,
+  );
+  for (const m of errorPatterns) {
+    entities.push(m[0].toLowerCase());
+  }
+
+  // Extract technology keywords
+  const techKeywords = [
+    "react-native", "react", "flutter", "swift", "kotlin", "python",
+    "typescript", "node", "docker", "metro", "gradle", "cocoapods",
+    "intellij", "vscode", "xcode", "sinain",
+  ];
+  const lowerDigest = digest.toLowerCase();
+  for (const kw of techKeywords) {
+    if (lowerDigest.includes(kw)) entities.push(kw);
+  }
+
+  if (entities.length === 0) return "";
+
+  try {
+    const factsText = await queryFn(entities.slice(0, 5), 5);
+    if (factsText && factsText.trim().length > 20) {
+      return `## Past Experience\nBased on long-term knowledge relevant to this context:\n${factsText.trim()}`;
+    }
+  } catch {}
+  return "";
+}
+
+/**
  * Format a compact inline feedback section for escalation messages.
  * Shows recent performance so the agent can calibrate its response style.
  */

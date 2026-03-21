@@ -382,6 +382,25 @@ async function main() {
     // Bare agent HTTP escalation bridge
     getEscalationPending: () => escalator.getPendingHttp(),
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
+
+    // Knowledge graph integration
+    getKnowledgeDocPath: () => {
+      const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+      const p = `${workspace}/memory/sinain-knowledge.md`;
+      try { if (require("node:fs").existsSync(p)) return p; } catch {}
+      return null;
+    },
+    queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
+      const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+      const dbPath = `${workspace}/memory/knowledge-graph.db`;
+      const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
+      try {
+        const { execFileSync } = await import("node:child_process");
+        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
+        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
+        return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
+      } catch { return ""; }
+    },
   });
 
   // ── Wire overlay profiling ──
