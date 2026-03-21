@@ -279,10 +279,11 @@ async function installLocal() {
     }
   }
 
+  const token = cfg?.gateway?.auth?.token ?? "(see openclaw.json)";
   console.log("\n✓ sinain installed successfully.");
   console.log("  Plugin config: ~/.openclaw/openclaw.json");
-  console.log(`  Auth token:    ${authToken}`);
-  console.log("  Next: run 'openclaw gateway' in a new terminal, then run ./setup-nemoclaw.sh on your Mac.\n");
+  console.log(`  Auth token:    ${token}`);
+  console.log("  Next: run 'openclaw gateway' if not running, or restart to pick up changes.\n");
 }
 
 // ── Knowledge snapshot repo setup (shared) ──────────────────────────────────
