@@ -139,14 +139,19 @@ async function main() {
   // Start overlay
   let overlayStatus = "skipped";
   if (!skipOverlay) {
-    const overlayDir = findOverlayDir();
-    const hasFlutter = commandExists("flutter");
-    if (overlayDir && hasFlutter) {
-      log("Starting overlay...");
-      startProcess("overlay", "flutter", ["run", "-d", "macos"], {
-        cwd: overlayDir,
-        color: MAGENTA,
-      });
+    const overlay = findOverlay();
+    if (overlay?.type === "prebuilt") {
+      // Remove quarantine if present (ad-hoc signed app)
+      try {
+        const xattrs = execSync(`xattr "${overlay.path}"`, { encoding: "utf-8" });
+        if (xattrs.includes("com.apple.quarantine")) {
+          execSync(`xattr -dr com.apple.quarantine "${overlay.path}"`, { stdio: "pipe" });
+        }
+      } catch { /* no quarantine or xattr failed — try launching anyway */ }
+
+      log("Starting overlay (pre-built)...");
+      const binary = path.join(overlay.path, "Contents/MacOS/sinain_hud");
+      startProcess("overlay", binary, [], { color: MAGENTA });
       await sleep(2000);
       const overlayChild = children.find(c => c.name === "overlay");
       if (overlayChild && !overlayChild.proc.killed && overlayChild.proc.exitCode === null) {
@@ -156,10 +161,28 @@ async function main() {
         warn("overlay exited early — check logs above");
         overlayStatus = "failed";
       }
-    } else if (!overlayDir) {
-      warn("overlay not found — run: sinain setup-overlay");
+    } else if (overlay?.type === "source") {
+      const hasFlutter = commandExists("flutter");
+      if (hasFlutter) {
+        log("Starting overlay (flutter run)...");
+        startProcess("overlay", "flutter", ["run", "-d", "macos"], {
+          cwd: overlay.path,
+          color: MAGENTA,
+        });
+        await sleep(2000);
+        const overlayChild = children.find(c => c.name === "overlay");
+        if (overlayChild && !overlayChild.proc.killed && overlayChild.proc.exitCode === null) {
+          ok(`overlay running (pid:${overlayChild.pid})`);
+          overlayStatus = "running";
+        } else {
+          warn("overlay exited early — check logs above");
+          overlayStatus = "failed";
+        }
+      } else {
+        warn("flutter not found — overlay source found but can't build");
+      }
     } else {
-      warn("flutter not found — overlay skipped");
+      warn("overlay not found — run: sinain setup-overlay");
     }
   }
 
@@ -227,7 +250,7 @@ async function preflight() {
     skipSense = true;
   }
 
-  // Flutter (optional)
+  // Flutter (optional — only needed if no pre-built overlay)
   if (commandExists("flutter")) {
     try {
       const flutterVer = execSync("flutter --version 2>&1", { encoding: "utf-8" }).split("\n")[0].split(" ")[1];
@@ -236,8 +259,13 @@ async function preflight() {
       ok("flutter (version unknown)");
     }
   } else {
-    warn("flutter not found — overlay will be skipped");
-    skipOverlay = true;
+    const prebuiltApp = path.join(SINAIN_DIR, "overlay-app", "sinain_hud.app");
+    if (fs.existsSync(prebuiltApp)) {
+      ok("overlay: pre-built app");
+    } else {
+      warn("no overlay available — run: sinain setup-overlay");
+      skipOverlay = true;
+    }
   }
 
   // Port 9500
@@ -461,17 +489,23 @@ function generateMcpConfig() {
 
 // ── Overlay discovery ───────────────────────────────────────────────────────
 
-function findOverlayDir() {
-  // 1. Sibling overlay/ (running from cloned repo)
+function findOverlay() {
+  // 1. Dev monorepo: sibling overlay/ with pubspec.yaml (Flutter source)
   const siblingOverlay = path.join(PKG_DIR, "..", "overlay");
   if (fs.existsSync(path.join(siblingOverlay, "pubspec.yaml"))) {
-    return siblingOverlay;
+    return { type: "source", path: siblingOverlay };
   }
 
-  // 2. ~/.sinain/overlay/ (installed via setup-overlay)
+  // 2. Pre-built .app bundle (downloaded by setup-overlay)
+  const prebuiltApp = path.join(SINAIN_DIR, "overlay-app", "sinain_hud.app");
+  if (fs.existsSync(prebuiltApp)) {
+    return { type: "prebuilt", path: prebuiltApp };
+  }
+
+  // 3. Legacy: ~/.sinain/overlay/ source install (setup-overlay --from-source)
   const installedOverlay = path.join(SINAIN_DIR, "overlay");
   if (fs.existsSync(path.join(installedOverlay, "pubspec.yaml"))) {
-    return installedOverlay;
+    return { type: "source", path: installedOverlay };
   }
 
   return null;

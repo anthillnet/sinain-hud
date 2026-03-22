@@ -12,7 +12,7 @@ Run the entire sinain stack — including the OpenClaw agent gateway — on your
 | Node.js 22+ | For sinain-core, openclaw gateway, and plugin installer |
 | npm | Used to install `openclaw` globally |
 | Python 3.9+ | For sense_client screen pipeline |
-| Flutter 3.27+ | To build the overlay (or skip with `--no-overlay`) |
+| Flutter 3.27+ | Only for development — pre-built overlay available via `sinain setup-overlay` |
 | Anthropic API key | Used by OpenClaw gateway for the agent — configured in `auth-profiles.json` |
 | OpenRouter API key | Free at [openrouter.ai](https://openrouter.ai) — used for screen OCR and audio transcription |
 | Microphone + Screen Recording permissions | System Settings → Privacy & Security → Microphone / Screen Recording |
