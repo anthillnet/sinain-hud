@@ -11,9 +11,9 @@
 class WindowControlPlugin {
  public:
   static void Register(flutter::FlutterEngine* engine, HWND hwnd);
+  WindowControlPlugin(HWND hwnd);
 
  private:
-  WindowControlPlugin(HWND hwnd);
 
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& call,
