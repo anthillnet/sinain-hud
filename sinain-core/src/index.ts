@@ -423,6 +423,8 @@ async function main() {
         log("srv", `spawn via HTTP failed: ${err}`);
       });
     },
+    getSpawnPending: () => escalator.getSpawnPending(),
+    respondSpawn: (id: string, result: string) => escalator.respondSpawn(id, result),
   });
 
   // ── Wire overlay profiling ──
