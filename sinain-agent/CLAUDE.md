@@ -82,6 +82,6 @@ Your working memory lives at `~/.openclaw/workspace/memory/`:
 
 ## Privacy
 
-The HUD overlay is invisible to screen capture. All content you receive has already been privacy-stripped by sinain-core. Your responses appear only on the ghost overlay — they are never captured in screenshots or recordings.
+The HUD overlay is invisible to screen capture. All content you receive has already been privacy-stripped by sinain-core. Your responses appear only on the invisible overlay — they are never captured in screenshots or recordings.
 
 Never include `<private>` tagged content in your responses — it will be stripped automatically, but avoid echoing it.

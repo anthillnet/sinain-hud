@@ -30,14 +30,14 @@ openclaw gateway (port 18789, native Node.js)
 
 sinain-core (port 9500) ←→ ws://localhost:18789
   ↓
-overlay (ghost window)
+overlay (private HUD)
 sense_client (OCR pipeline)
 sck-capture (audio + screen)
 ```
 
 - **OpenClaw gateway** — native Node.js process on port 18789; runs the Claude agent with sinain plugin, memory, playbook, and evaluation
 - **sinain-core** — central hub (port 9500); manages audio, screen context, and the agent connection; uses Ed25519 device identity for scope-gated auth
-- **overlay** — macOS ghost window; invisible to screen capture via `NSWindow.sharingType = .none`
+- **overlay** — macOS private HUD; invisible to screen capture via `NSWindow.sharingType = .none`
 - **sense_client** — Python pipeline that detects screen changes and sends OCR'd text to sinain-core
 - **sck-capture** — Swift binary (ScreenCaptureKit); captures screen frames and system audio simultaneously
 

@@ -41,13 +41,13 @@ sck-capture   ← audio + screen       OpenClaw gateway (port 18789)
      ↓                                 ├─ sinain-hud plugin
 sinain-core ←→ WebSocket (WAN) ───────┘  ├─ sinain-knowledge
      ↓                                    └─ memory, playbook, eval
-overlay (ghost window)
+overlay (private HUD)
      ↓                               systemd: openclaw-gateway.service
 sense_client (OCR pipeline)          (auto-restarts on crash/reboot)
 ```
 
 - **sinain-core** — central hub on your Mac (port 9500); manages audio, screen context, and the agent connection
-- **overlay** — macOS ghost window; invisible to screen capture via `NSWindow.sharingType = .none`
+- **overlay** — macOS private HUD; invisible to screen capture via `NSWindow.sharingType = .none`
 - **sense_client** — Python pipeline that detects screen changes and sends OCR'd text to sinain-core
 - **sck-capture** — Swift binary (ScreenCaptureKit); captures screen frames and system audio simultaneously
 - **OpenClaw gateway** — native Node.js process on the server (port 18789); runs the Claude agent with sinain plugin, managed by systemd
