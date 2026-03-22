@@ -21,6 +21,7 @@ class HudShell extends StatefulWidget {
 
 class HudShellState extends State<HudShell> {
   bool _commandInputVisible = false;
+  DisplayMode _lastVisibleMode = DisplayMode.feed;
 
   /// Called externally (from main.dart hotkey handler) to show command input.
   void showCommandInput() {
@@ -51,33 +52,36 @@ class HudShellState extends State<HudShell> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>().settings;
+    final isHidden = settings.displayMode == DisplayMode.hidden;
 
-    if (settings.displayMode == DisplayMode.hidden) {
-      return const SizedBox.shrink();
+    if (!isHidden) {
+      _lastVisibleMode = settings.displayMode;
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          // Status bar — always visible unless hidden
-          const StatusBar(),
-          // Main content area
-          Expanded(
-            child: _buildContent(settings),
-          ),
-          // Command input — shown when user presses Cmd+Shift+/
-          if (_commandInputVisible)
-            CommandInput(
-              onSubmit: _onCommandSubmit,
-              onSpawn: _onSpawnCommand,
-              onDismiss: _dismissCommandInput,
+    return Offstage(
+      offstage: isHidden,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            const StatusBar(),
+            Expanded(
+              child: _buildContent(
+                settings.copyWith(displayMode: _lastVisibleMode),
+              ),
             ),
-        ],
+            if (_commandInputVisible)
+              CommandInput(
+                onSubmit: _onCommandSubmit,
+                onSpawn: _onSpawnCommand,
+                onDismiss: _dismissCommandInput,
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -100,6 +104,7 @@ class HudShellState extends State<HudShell> {
       case DisplayMode.minimal:
         return const TickerView();
       case DisplayMode.hidden:
+        // Unreachable — _lastVisibleMode is never hidden
         return const SizedBox.shrink();
     }
   }
