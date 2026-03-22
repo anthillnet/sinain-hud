@@ -40,28 +40,80 @@ Screen (SCKit / OCR) ──────┘         │                      │
 
 ## Quick Start
 
-### npx (recommended)
+### Step 1: Install Node.js and Python
+
+If you don't have them yet:
+- **Node.js 18+** — download from [nodejs.org](https://nodejs.org/) (LTS recommended)
+- **Python 3.10+** — download from [python.org](https://www.python.org/downloads/) or run `brew install python3`
+
+Verify with: `node -v` and `python3 --version`
+
+### Step 2: Get an OpenRouter API key
+
+1. Go to [openrouter.ai](https://openrouter.ai) and sign up (free tier works)
+2. Create an API key from the dashboard — it starts with `sk-or-...`
+
+### Step 3: Configure sinain
+
+```bash
+mkdir -p ~/.sinain
+nano ~/.sinain/.env
+```
+
+Add these lines (paste your actual key):
+```
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
+PRIVACY_MODE=standard
+```
+
+Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X` in nano).
+
+**Privacy modes** control what data is sent where. Pick one:
+
+| Mode | What it does |
+|---|---|
+| `off` | **Default.** All data flows freely — maximum insight quality, no filtering |
+| `standard` | Auto-redacts credentials (API keys, passwords, card numbers). Screen text and audio are redacted before being sent to cloud APIs. Good balance of privacy and functionality |
+| `strict` | Only summaries leave your machine — no raw text sent to cloud. Screen images blocked entirely |
+| `paranoid` | Almost nothing leaves your machine. Cloud APIs receive no data. Very limited functionality |
+
+We recommend `standard` for most users. See [Privacy Threat Model](docs/privacy-protection-design.md) for full details on what data goes where.
+
+### Step 4: Install the overlay
+
+This downloads the pre-built HUD app (~20 MB). No Flutter or Xcode needed.
+
+```bash
+npx @geravant/sinain setup-overlay
+```
+
+### Step 5: Grant macOS permissions
+
+sinain needs two permissions. macOS will prompt you on first run, but you can set them up in advance:
+
+1. Open **System Settings → Privacy & Security → Screen Recording** — add your Terminal app
+2. Open **System Settings → Privacy & Security → Microphone** — add your Terminal app
+
+> You may need to restart your Terminal after granting permissions.
+
+### Step 6: Start sinain
 
 ```bash
 npx @geravant/sinain start
 ```
 
-On first run, create `~/.sinain/.env`:
+You should see a status banner showing all services running. The HUD overlay appears as a small window on your screen — it's invisible to screen capture and recording.
+
+### Managing sinain
+
 ```bash
-mkdir -p ~/.sinain
-echo "OPENROUTER_API_KEY=sk-or-..." > ~/.sinain/.env
+npx @geravant/sinain stop       # stop all services
+npx @geravant/sinain status     # check what's running
+npx @geravant/sinain start --no-sense    # skip screen capture
+npx @geravant/sinain start --no-overlay  # headless (no HUD window)
 ```
 
-Optional flags: `--no-sense`, `--no-overlay`, `--no-agent`, `--agent=codex`
-
-To install the overlay (pre-built, no Flutter needed):
-```bash
-npx @geravant/sinain setup-overlay
-```
-
-Other commands: `npx @geravant/sinain stop | status`
-
-### From source
+### From source (for developers)
 
 ```bash
 git clone https://github.com/anthillnet/sinain-hud
@@ -146,7 +198,9 @@ See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
   by sense_client and server-side by the plugin before persistence
 - **Auto-redaction** — credit cards, API keys, bearer tokens, AWS keys, passwords
 - **Local-first** — all traffic stays on localhost; audio transcribed in-memory, never persisted
-- **Privacy modes** — configurable levels: off, standard, strict, paranoid
+- **Privacy modes** — 4 levels (`off`, `standard`, `strict`, `paranoid`) configured via
+  `PRIVACY_MODE` in `~/.sinain/.env`. Default is `off` (no filtering). Set to `standard`
+  for auto-redaction of sensitive data before it reaches cloud APIs. See [Step 3](#step-3-configure-sinain) in Quick Start.
 
 See [Privacy Threat Model](docs/privacy-protection-design.md) for the full design.
 
