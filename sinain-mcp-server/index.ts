@@ -367,7 +367,22 @@ server.tool(
   },
 );
 
-// 10. sinain_module_guidance
+// 10. sinain_user_command
+server.tool(
+  "sinain_user_command",
+  "Queue a user command to augment the next escalation context (forces escalation on next agent tick)",
+  { text: z.string().describe("The command text to inject into the next escalation") },
+  async ({ text }) => {
+    try {
+      const data = await coreRequest("POST", "/user/command", { text });
+      return textResult(JSON.stringify(data, null, 2));
+    } catch (err: any) {
+      return textResult(`Error queuing user command: ${err.message}`);
+    }
+  },
+);
+
+// 11. sinain_module_guidance
 server.tool(
   "sinain_module_guidance",
   "Read guidance from all active modules in the workspace",

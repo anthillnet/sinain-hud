@@ -34,6 +34,7 @@ export interface ServerDeps {
   getTraces: (after: number, limit: number) => unknown[];
   reconnectGateway: () => void;
   feedbackStore?: FeedbackStore;
+  setUserCommand?: (text: string) => void;
   getEscalationPending?: () => any;
   respondEscalation?: (id: string, response: string) => any;
   getKnowledgeDocPath?: () => string | null;
@@ -302,6 +303,20 @@ export function createAppServer(deps: ServerDeps) {
           overlayClients: wsHandler.clientCount,
           ...deps.getHealthPayload(),
         }));
+        return;
+      }
+
+      // ── /user/command ──
+      if (req.method === "POST" && url.pathname === "/user/command") {
+        const body = await readBody(req, 4096);
+        const { text } = JSON.parse(body);
+        if (!text) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing text" }));
+          return;
+        }
+        deps.setUserCommand?.(text);
+        res.end(JSON.stringify({ ok: true, message: "Command queued for next escalation" }));
         return;
       }
 

@@ -60,6 +60,24 @@ class WindowService {
     }
   }
 
+  /// Activate command input: disable click-through and make key window.
+  Future<void> activateCommandInput() async {
+    try {
+      await _channel.invokeMethod('activateCommandInput');
+    } catch (e) {
+      _log('activateCommandInput failed: $e');
+    }
+  }
+
+  /// Dismiss command input: restore click-through and resign key window.
+  Future<void> dismissCommandInput() async {
+    try {
+      await _channel.invokeMethod('dismissCommandInput');
+    } catch (e) {
+      _log('dismissCommandInput failed: $e');
+    }
+  }
+
   void _log(String msg) {
     // ignore: avoid_print
     print('[WindowService] $msg');

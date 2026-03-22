@@ -13,6 +13,8 @@ export interface CommandDeps {
   micPipeline: AudioPipeline | null;
   config: CoreConfig;
   onUserMessage: (text: string) => Promise<void>;
+  /** Queue a user command to augment the next escalation */
+  onUserCommand: (text: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle trait voices — returns new enabled state */
@@ -35,6 +37,11 @@ export function setupCommands(deps: CommandDeps): void {
         } catch {
           wsHandler.broadcast("\u26a0 Failed to reach Sinain. Check gateway connection.", "high");
         }
+        break;
+      }
+      case "user_command": {
+        log(TAG, `user command received: "${msg.text.slice(0, 60)}"`);
+        deps.onUserCommand(msg.text);
         break;
       }
       case "command": {
