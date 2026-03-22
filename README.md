@@ -273,11 +273,10 @@ This will:
 | Shortcut | Action |
 |---|---|
 | `Cmd+Shift+Space` | Toggle overlay visibility |
-| `Cmd+Shift+H` | **Panic hide** — instant stealth + click-through + privacy |
-| `Cmd+Shift+C` | Toggle click-through mode |
+| `Cmd+Shift+H` | Quit overlay |
+| `Cmd+Shift+/` | Open command input (type commands to sinain-core) |
 | `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
 | `Cmd+Shift+T` | Toggle audio capture (mute/unmute transcription) |
-| `Cmd+Shift+D` | Switch audio device (primary ↔ alt) |
 | `Cmd+Shift+A` | Toggle audio feed on HUD (show/hide transcript items) |
 | `Cmd+Shift+S` | Toggle screen capture pipeline |
 | `Cmd+Shift+V` | Toggle screen feed on HUD (show/hide sense items) |
@@ -365,7 +364,6 @@ See [docs/OPENCLAW-SETUP.md](docs/OPENCLAW-SETUP.md) for the full gateway deploy
   it client-side; the sinain-hud plugin strips any remainder server-side before persistence
 - **Auto-redaction** — sense_client automatically redacts credit cards, API keys, bearer tokens,
   AWS keys, and passwords from OCR text
-- **Panic hotkey** — `Cmd+Shift+H`: instant stealth + click-through + privacy mode in one keystroke
 - **Local-first** — sinain-core ↔ overlay traffic stays on localhost; audio is transcribed
   in-memory and never written to disk
 

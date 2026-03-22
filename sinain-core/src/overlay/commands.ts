@@ -54,7 +54,7 @@ export function setupCommands(deps: CommandDeps): void {
 }
 
 function handleCommand(action: string, deps: CommandDeps): void {
-  const { wsHandler, systemAudioPipeline, micPipeline, config } = deps;
+  const { wsHandler, systemAudioPipeline, micPipeline } = deps;
 
   switch (action) {
     case "toggle_audio": {
@@ -105,15 +105,6 @@ function handleCommand(action: string, deps: CommandDeps): void {
         "normal"
       );
       log(TAG, `screen toggled ${nowActive ? "ON" : "OFF"}`);
-      break;
-    }
-    case "switch_device": {
-      const current = systemAudioPipeline.getDevice();
-      const alt = config.audioAltDevice;
-      const next = current === config.audioConfig.device ? alt : config.audioConfig.device;
-      systemAudioPipeline.switchDevice(next);
-      wsHandler.broadcast(`Audio device \u2192 ${next}`, "normal");
-      log(TAG, `audio device switched: ${current} \u2192 ${next}`);
       break;
     }
     case "toggle_traits": {

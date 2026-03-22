@@ -128,16 +128,12 @@ class AppDelegate: FlutterAppDelegate {
         // Register hotkeys:
         // ID 1: Cmd+Shift+Space → toggle visibility
         registerHotKey(id: 1, keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 2: Cmd+Shift+C → toggle click-through
-        registerHotKey(id: 2, keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey | shiftKey))
         // ID 3: Cmd+Shift+M → cycle display mode
         registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(cmdKey | shiftKey))
         // ID 4: Cmd+Shift+H → quit overlay
         registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey))
         // ID 5: Cmd+Shift+T → toggle audio capture
         registerHotKey(id: 5, keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 6: Cmd+Shift+D → switch audio device
-        registerHotKey(id: 6, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
         // ID 7: Cmd+Shift+A → toggle audio feed on HUD
         registerHotKey(id: 7, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey))
         // ID 8: Cmd+Shift+Up → scroll feed up
@@ -216,11 +212,6 @@ class AppDelegate: FlutterAppDelegate {
             }
             hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: isVisible)
 
-        case 2: // Cmd+Shift+C → toggle click-through
-            isClickThrough.toggle()
-            window.ignoresMouseEvents = isClickThrough
-            hotkeyChannel?.invokeMethod("onToggleClickThrough", arguments: isClickThrough)
-
         case 3: // Cmd+Shift+M → cycle display mode
             currentModeIndex = (currentModeIndex + 1) % modeNames.count
             hotkeyChannel?.invokeMethod("onCycleMode", arguments: modeNames[currentModeIndex])
@@ -233,9 +224,6 @@ class AppDelegate: FlutterAppDelegate {
 
         case 5: // Cmd+Shift+T → toggle audio capture (routed to bridge via Flutter→WebSocket)
             hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
-
-        case 6: // Cmd+Shift+D → switch audio device
-            hotkeyChannel?.invokeMethod("onSwitchAudioDevice", arguments: nil)
 
         case 7: // Cmd+Shift+A → toggle audio feed on HUD
             hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)

@@ -41,8 +41,6 @@ void main() async {
         } else if (settingsService.settings.displayMode == DisplayMode.hidden) {
           await settingsService.setDisplayMode(DisplayMode.feed);
         }
-      case 'onToggleClickThrough':
-        await settingsService.toggleClickThrough();
       case 'onCycleMode':
         final modeName = call.arguments as String;
         final mode = DisplayMode.values.firstWhere(
@@ -54,8 +52,6 @@ void main() async {
         wsService.disconnect();
       case 'onToggleAudio':
         wsService.sendCommand('toggle_audio');
-      case 'onSwitchAudioDevice':
-        wsService.sendCommand('switch_device');
       case 'onToggleAudioFeed':
         wsService.toggleAudioFeed();
       case 'onScrollFeed':
