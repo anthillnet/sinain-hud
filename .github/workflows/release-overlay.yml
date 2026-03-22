@@ -5,6 +5,9 @@ on:
     tags:
       - 'overlay-v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     name: Build & Release Overlay
