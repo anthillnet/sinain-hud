@@ -8,7 +8,7 @@ All global hotkeys use the **Cmd+Shift** prefix and are registered via Carbon's 
 |---|---|
 | `Cmd+Shift+Space` | Toggle overlay visibility |
 | `Cmd+Shift+M` | Cycle display mode (feed → alert → minimal → hidden) |
-| `Cmd+Shift+E` | Cycle HUD tab (Stream ↔ Agent) |
+| `Cmd+Shift+E` | Cycle HUD tab (Agent ↔ Tasks) |
 | `Cmd+Shift+P` | Toggle position (bottom-right ↔ top-right) |
 | `Cmd+Shift+R` | Toggle demo mode (privacy off — visible to screen capture) |
 | `Cmd+Shift+H` | Quit overlay |
