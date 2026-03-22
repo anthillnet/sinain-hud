@@ -162,19 +162,16 @@ class StatusBar extends StatelessWidget {
   }
 
   String _tabLabel(HudTab tab) => switch (tab) {
-    HudTab.stream => 'STR',
     HudTab.agent  => 'AGT',
     HudTab.tasks  => 'TSK',
   };
 
   Color _tabColor(HudTab tab) => switch (tab) {
-    HudTab.stream => Colors.white.withValues(alpha: 0.4),
     HudTab.agent  => const Color(0xFF00FF88).withValues(alpha: 0.8),
     HudTab.tasks  => const Color(0xFF88CCFF).withValues(alpha: 0.8),
   };
 
   Color _tabBg(HudTab tab) => switch (tab) {
-    HudTab.stream => Colors.transparent,
     HudTab.agent  => const Color(0xFF00FF88).withValues(alpha: 0.12),
     HudTab.tasks  => const Color(0xFF88CCFF).withValues(alpha: 0.12),
   };
