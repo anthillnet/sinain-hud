@@ -117,7 +117,7 @@ All config via environment variables or `.env` file. Key vars:
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
 - `AUDIO_DEVICE` — macOS audio device for sox/ffmpeg fallback (default: `BlackHole 2ch`)
 
-See `sinain-core/.env.example` for the complete list.
+See `.env.example` for the complete list.
 
 ## Architectural Patterns
 

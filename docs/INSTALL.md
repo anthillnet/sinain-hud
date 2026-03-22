@@ -175,7 +175,7 @@ OPENCLAW_SESSION_KEY=agent:main:sinain
 
 > `OPENCLAW_SESSION_KEY` must be exactly `agent:main:sinain` — the sinain plugin on the server is registered under this key.
 
-See `sinain-core/.env.example` for the full list of available variables.
+See `.env.example` for the full list of available variables.
 
 ---
 
