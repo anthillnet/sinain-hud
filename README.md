@@ -60,12 +60,24 @@ mkdir -p ~/.sinain
 nano ~/.sinain/.env
 ```
 
-Add this line (paste your actual key):
+Add these lines (paste your actual key):
 ```
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
+PRIVACY_MODE=standard
 ```
 
 Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X` in nano).
+
+**Privacy modes** control what data is sent where. Pick one:
+
+| Mode | What it does |
+|---|---|
+| `off` | **Default.** All data flows freely — maximum insight quality, no filtering |
+| `standard` | Auto-redacts credentials (API keys, passwords, card numbers). Screen text and audio are redacted before being sent to cloud APIs. Good balance of privacy and functionality |
+| `strict` | Only summaries leave your machine — no raw text sent to cloud. Screen images blocked entirely |
+| `paranoid` | Almost nothing leaves your machine. Cloud APIs receive no data. Very limited functionality |
+
+We recommend `standard` for most users. See [Privacy Threat Model](docs/privacy-protection-design.md) for full details on what data goes where.
 
 ### Step 4: Install the overlay
 
@@ -186,7 +198,9 @@ See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
   by sense_client and server-side by the plugin before persistence
 - **Auto-redaction** — credit cards, API keys, bearer tokens, AWS keys, passwords
 - **Local-first** — all traffic stays on localhost; audio transcribed in-memory, never persisted
-- **Privacy modes** — configurable levels: off, standard, strict, paranoid
+- **Privacy modes** — 4 levels (`off`, `standard`, `strict`, `paranoid`) configured via
+  `PRIVACY_MODE` in `~/.sinain/.env`. Default is `off` (no filtering). Set to `standard`
+  for auto-redaction of sensitive data before it reaches cloud APIs. See [Step 3](#step-3-configure-sinain) in Quick Start.
 
 See [Privacy Threat Model](docs/privacy-protection-design.md) for the full design.
 
