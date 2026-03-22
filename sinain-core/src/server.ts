@@ -39,6 +39,7 @@ export interface ServerDeps {
   respondEscalation?: (id: string, response: string) => any;
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
+  onSpawnCommand?: (text: string) => void;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -338,6 +339,24 @@ export function createAppServer(deps: ServerDeps) {
         }
         const result = deps.respondEscalation?.(id, response) ?? { ok: false, error: "escalation not configured" };
         res.end(JSON.stringify(result));
+        return;
+      }
+
+      // ── /spawn ──
+      if (req.method === "POST" && url.pathname === "/spawn") {
+        const body = await readBody(req, 65536);
+        const { text, label } = JSON.parse(body);
+        if (!text) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing text" }));
+          return;
+        }
+        if (deps.onSpawnCommand) {
+          deps.onSpawnCommand(text);
+          res.end(JSON.stringify({ ok: true, spawned: true }));
+        } else {
+          res.end(JSON.stringify({ ok: false, error: "spawn not configured" }));
+        }
         return;
       }
 

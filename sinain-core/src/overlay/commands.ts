@@ -15,6 +15,8 @@ export interface CommandDeps {
   onUserMessage: (text: string) => Promise<void>;
   /** Queue a user command to augment the next escalation */
   onUserCommand: (text: string) => void;
+  /** Spawn a background agent task */
+  onSpawnCommand?: (text: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle trait voices — returns new enabled state */
@@ -42,6 +44,17 @@ export function setupCommands(deps: CommandDeps): void {
       case "user_command": {
         log(TAG, `user command received: "${msg.text.slice(0, 60)}"`);
         deps.onUserCommand(msg.text);
+        break;
+      }
+      case "spawn_command": {
+        const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
+        log(TAG, `spawn command received: "${preview}"`);
+        if (deps.onSpawnCommand) {
+          deps.onSpawnCommand(msg.text);
+        } else {
+          log(TAG, `spawn command ignored — no handler configured`);
+          wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");
+        }
         break;
       }
       case "command": {
