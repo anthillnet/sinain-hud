@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sinain setup-overlay — clone and build the Flutter overlay app
+// sinain setup-overlay — download pre-built overlay app (or build from source)
 
 import { execSync } from "child_process";
 import fs from "fs";
@@ -8,75 +8,227 @@ import os from "os";
 
 const HOME = os.homedir();
 const SINAIN_DIR = path.join(HOME, ".sinain");
+const APP_DIR = path.join(SINAIN_DIR, "overlay-app");
+const APP_PATH = path.join(APP_DIR, "sinain_hud.app");
+const VERSION_FILE = path.join(APP_DIR, "version.json");
+
+const REPO = "anthillnet/sinain-hud";
+const RELEASES_API = `https://api.github.com/repos/${REPO}/releases`;
+
+// Legacy source-build paths
 const REPO_DIR = path.join(SINAIN_DIR, "overlay-repo");
 const OVERLAY_LINK = path.join(SINAIN_DIR, "overlay");
 
 const BOLD  = "\x1b[1m";
 const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
 const RED   = "\x1b[31m";
+const DIM   = "\x1b[2m";
 const RESET = "\x1b[0m";
 
-function log(msg) { console.log(`${BOLD}[setup-overlay]${RESET} ${msg}`); }
-function ok(msg)  { console.log(`${BOLD}[setup-overlay]${RESET} ${GREEN}✓${RESET} ${msg}`); }
+function log(msg)  { console.log(`${BOLD}[setup-overlay]${RESET} ${msg}`); }
+function ok(msg)   { console.log(`${BOLD}[setup-overlay]${RESET} ${GREEN}✓${RESET} ${msg}`); }
+function warn(msg) { console.log(`${BOLD}[setup-overlay]${RESET} ${YELLOW}⚠${RESET} ${msg}`); }
 function fail(msg) { console.error(`${BOLD}[setup-overlay]${RESET} ${RED}✗${RESET} ${msg}`); process.exit(1); }
 
-// Check flutter
-try {
-  execSync("which flutter", { stdio: "pipe" });
-} catch {
-  fail("flutter not found. Install it: https://docs.flutter.dev/get-started/install");
-}
+// ── Parse flags ──────────────────────────────────────────────────────────────
 
-const flutterVer = execSync("flutter --version 2>&1", { encoding: "utf-8" }).split("\n")[0];
-ok(`flutter: ${flutterVer}`);
+const args = process.argv.slice(2);
+const fromSource = args.includes("--from-source");
+const forceUpdate = args.includes("--update");
 
-fs.mkdirSync(SINAIN_DIR, { recursive: true });
-
-// Clone or update
-if (fs.existsSync(path.join(REPO_DIR, ".git"))) {
-  log("Updating existing overlay repo...");
-  execSync("git pull --ff-only", { cwd: REPO_DIR, stdio: "inherit" });
-  ok("Repository updated");
+if (fromSource) {
+  await buildFromSource();
 } else {
-  log("Cloning overlay (sparse checkout — only overlay/ directory)...");
-  if (fs.existsSync(REPO_DIR)) {
-    fs.rmSync(REPO_DIR, { recursive: true, force: true });
+  await downloadPrebuilt();
+}
+
+// ── Download pre-built .app ──────────────────────────────────────────────────
+
+async function downloadPrebuilt() {
+  fs.mkdirSync(APP_DIR, { recursive: true });
+
+  // Find latest overlay release
+  log("Checking for latest overlay release...");
+  let release;
+  try {
+    const res = await fetch(`${RELEASES_API}?per_page=20`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { "Accept": "application/vnd.github+json" },
+    });
+    if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
+    const releases = await res.json();
+    release = releases.find(r => r.tag_name?.startsWith("overlay-v"));
+    if (!release) throw new Error("No overlay release found");
+  } catch (e) {
+    fail(`Failed to fetch releases: ${e.message}\n  Try: sinain setup-overlay --from-source`);
   }
-  execSync(
-    `git clone --depth 1 --filter=blob:none --sparse https://github.com/anthillnet/sinain-hud.git "${REPO_DIR}"`,
-    { stdio: "inherit" }
-  );
-  execSync("git sparse-checkout set overlay", { cwd: REPO_DIR, stdio: "inherit" });
-  ok("Repository cloned");
-}
 
-// Build
-const overlayDir = path.join(REPO_DIR, "overlay");
-if (!fs.existsSync(path.join(overlayDir, "pubspec.yaml"))) {
-  fail("overlay/pubspec.yaml not found — sparse checkout may have failed");
-}
+  const tag = release.tag_name;
+  const version = tag.replace("overlay-v", "");
 
-log("Installing Flutter dependencies...");
-execSync("flutter pub get", { cwd: overlayDir, stdio: "inherit" });
-
-log("Building overlay (this may take a few minutes)...");
-execSync("flutter build macos", { cwd: overlayDir, stdio: "inherit" });
-ok("Overlay built successfully");
-
-// Symlink ~/.sinain/overlay → the overlay source dir
-try {
-  if (fs.existsSync(OVERLAY_LINK)) {
-    fs.unlinkSync(OVERLAY_LINK);
+  // Check if already up-to-date
+  if (!forceUpdate && fs.existsSync(VERSION_FILE) && fs.existsSync(APP_PATH)) {
+    try {
+      const local = JSON.parse(fs.readFileSync(VERSION_FILE, "utf-8"));
+      if (local.tag === tag) {
+        ok(`Overlay already up-to-date (${version})`);
+        return;
+      }
+      log(`Updating: ${local.tag} → ${tag}`);
+    } catch { /* corrupt version file — re-download */ }
   }
-  fs.symlinkSync(overlayDir, OVERLAY_LINK);
-  ok(`Symlinked: ${OVERLAY_LINK} → ${overlayDir}`);
-} catch (e) {
-  // Symlink may fail on some systems — fall back to just noting the path
-  log(`Overlay built at: ${overlayDir}`);
+
+  // Find the .zip asset
+  const zipAsset = release.assets?.find(a => a.name === "sinain_hud.app.zip");
+  if (!zipAsset) {
+    fail(`Release ${tag} has no sinain_hud.app.zip asset.\n  Try: sinain setup-overlay --from-source`);
+  }
+
+  // Download with progress
+  log(`Downloading overlay ${version} (${formatBytes(zipAsset.size)})...`);
+  const zipPath = path.join(APP_DIR, "sinain_hud.app.zip");
+
+  try {
+    const res = await fetch(zipAsset.browser_download_url, {
+      signal: AbortSignal.timeout(120000),
+      redirect: "follow",
+    });
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+
+    const total = parseInt(res.headers.get("content-length") || "0");
+    const chunks = [];
+    let downloaded = 0;
+
+    const reader = res.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      downloaded += value.length;
+      if (total > 0) {
+        const pct = Math.round((downloaded / total) * 100);
+        process.stdout.write(`\r${BOLD}[setup-overlay]${RESET} ${DIM}${pct}% (${formatBytes(downloaded)} / ${formatBytes(total)})${RESET}`);
+      }
+    }
+    process.stdout.write("\n");
+
+    const buffer = Buffer.concat(chunks);
+    fs.writeFileSync(zipPath, buffer);
+    ok(`Downloaded ${formatBytes(buffer.length)}`);
+  } catch (e) {
+    fail(`Download failed: ${e.message}`);
+  }
+
+  // Remove old app if present
+  if (fs.existsSync(APP_PATH)) {
+    fs.rmSync(APP_PATH, { recursive: true, force: true });
+  }
+
+  // Extract — ditto preserves macOS extended attributes (critical for code signing)
+  log("Extracting...");
+  try {
+    execSync(`ditto -x -k "${zipPath}" "${APP_DIR}"`, { stdio: "pipe" });
+  } catch {
+    // Fallback to unzip
+    try {
+      execSync(`unzip -o -q "${zipPath}" -d "${APP_DIR}"`, { stdio: "pipe" });
+    } catch (e) {
+      fail(`Extraction failed: ${e.message}`);
+    }
+  }
+
+  // Remove quarantine attribute (ad-hoc signed app downloaded from internet)
+  try {
+    execSync(`xattr -cr "${APP_PATH}"`, { stdio: "pipe" });
+  } catch { /* xattr may not be needed */ }
+
+  // Write version marker
+  fs.writeFileSync(VERSION_FILE, JSON.stringify({
+    tag,
+    version,
+    installedAt: new Date().toISOString(),
+  }, null, 2));
+
+  // Clean up zip
+  fs.unlinkSync(zipPath);
+
+  ok(`Overlay ${version} installed`);
+  console.log(`
+${GREEN}✓${RESET} Overlay ready!
+  Location: ${APP_PATH}
+  The overlay will auto-start with: ${BOLD}sinain start${RESET}
+`);
 }
 
-console.log(`
+// ── Build from source (legacy) ───────────────────────────────────────────────
+
+async function buildFromSource() {
+  // Check flutter
+  try {
+    execSync("which flutter", { stdio: "pipe" });
+  } catch {
+    fail("flutter not found. Install it: https://docs.flutter.dev/get-started/install");
+  }
+
+  const flutterVer = execSync("flutter --version 2>&1", { encoding: "utf-8" }).split("\n")[0];
+  ok(`flutter: ${flutterVer}`);
+
+  fs.mkdirSync(SINAIN_DIR, { recursive: true });
+
+  // Clone or update
+  if (fs.existsSync(path.join(REPO_DIR, ".git"))) {
+    log("Updating existing overlay repo...");
+    execSync("git pull --ff-only", { cwd: REPO_DIR, stdio: "inherit" });
+    ok("Repository updated");
+  } else {
+    log("Cloning overlay (sparse checkout — only overlay/ directory)...");
+    if (fs.existsSync(REPO_DIR)) {
+      fs.rmSync(REPO_DIR, { recursive: true, force: true });
+    }
+    execSync(
+      `git clone --depth 1 --filter=blob:none --sparse https://github.com/${REPO}.git "${REPO_DIR}"`,
+      { stdio: "inherit" }
+    );
+    execSync("git sparse-checkout set overlay", { cwd: REPO_DIR, stdio: "inherit" });
+    ok("Repository cloned");
+  }
+
+  // Build
+  const overlayDir = path.join(REPO_DIR, "overlay");
+  if (!fs.existsSync(path.join(overlayDir, "pubspec.yaml"))) {
+    fail("overlay/pubspec.yaml not found — sparse checkout may have failed");
+  }
+
+  log("Installing Flutter dependencies...");
+  execSync("flutter pub get", { cwd: overlayDir, stdio: "inherit" });
+
+  log("Building overlay (this may take a few minutes)...");
+  execSync("flutter build macos", { cwd: overlayDir, stdio: "inherit" });
+  ok("Overlay built successfully");
+
+  // Symlink ~/.sinain/overlay → the overlay source dir
+  try {
+    if (fs.existsSync(OVERLAY_LINK)) {
+      fs.unlinkSync(OVERLAY_LINK);
+    }
+    fs.symlinkSync(overlayDir, OVERLAY_LINK);
+    ok(`Symlinked: ${OVERLAY_LINK} → ${overlayDir}`);
+  } catch (e) {
+    log(`Overlay built at: ${overlayDir}`);
+  }
+
+  console.log(`
 ${GREEN}✓${RESET} Overlay setup complete!
   The overlay will auto-start with: ${BOLD}sinain start${RESET}
   Or run manually: cd ${overlayDir} && flutter run -d macos
 `);
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

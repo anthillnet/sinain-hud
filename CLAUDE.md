@@ -32,13 +32,19 @@ npm run eval:quick             # Quick evaluation (1 run, stdout)
 npx tsc --noEmit               # Type-check only (used in CI)
 ```
 
-### overlay (from `overlay/`)
+### overlay
 ```bash
+# Pre-built (users — no Flutter needed):
+npx @geravant/sinain setup-overlay    # Downloads .app from GitHub Releases
+npx @geravant/sinain setup-overlay --update  # Force re-download
+
+# From source (developers, from overlay/):
 flutter pub get                # Install dependencies
 flutter run -d macos --debug   # Run in debug mode
 flutter build macos            # Production build
 flutter analyze                # Dart static analysis
 flutter test                   # Run widget tests
+npx @geravant/sinain setup-overlay --from-source  # Clone + build
 ```
 
 ### sense_client (from project root)
@@ -55,9 +61,12 @@ python -m sense_client         # Run screen capture pipeline
 
 ## CI Pipeline (`.github/workflows/ci.yml`)
 
-Two jobs:
+CI (`ci.yml`) — two jobs:
 1. **sinain-core-typecheck** — Node 22, `npm ci` + `npx tsc --noEmit`
 2. **overlay-analyze** — Flutter 3.27.x, `flutter pub get` + `flutter analyze` + `flutter test`
+
+Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
+- Builds Flutter macOS release on `macos-latest`, zips with `ditto`, uploads to GitHub Releases
 
 ## Key Source Locations
 
