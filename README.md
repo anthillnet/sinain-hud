@@ -133,7 +133,7 @@ npx @geravant/sinain start --no-overlay  # headless (no HUD window)
 ```bash
 git clone https://github.com/anthillnet/sinain-hud
 cd sinain-hud
-cp sinain-core/.env.example sinain-core/.env
+cp .env.example ~/.sinain/.env
 # Edit .env — set OPENROUTER_API_KEY at minimum
 ./start.sh                   # full system
 ./start.sh --no-sense        # skip screen capture
