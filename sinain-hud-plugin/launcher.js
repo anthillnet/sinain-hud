@@ -25,7 +25,8 @@ const RESET   = "\x1b[0m";
 const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 const HOME = os.homedir();
 const SINAIN_DIR = path.join(HOME, ".sinain");
-const PID_FILE = "/tmp/sinain-pids.txt";
+const PID_FILE = path.join(os.tmpdir(), "sinain-pids.txt");
+const IS_WINDOWS = os.platform() === "win32";
 
 // ── Parse flags ─────────────────────────────────────────────────────────────
 
@@ -58,6 +59,12 @@ async function main() {
   log("Preflight checks...");
   await preflight();
   console.log();
+
+  // Run setup wizard on first launch (no ~/.sinain/.env)
+  const userEnvPath = path.join(SINAIN_DIR, ".env");
+  if (!fs.existsSync(userEnvPath)) {
+    await setupWizard(userEnvPath);
+  }
 
   // Load user config
   loadUserEnv();
@@ -141,16 +148,20 @@ async function main() {
   if (!skipOverlay) {
     const overlay = findOverlay();
     if (overlay?.type === "prebuilt") {
-      // Remove quarantine if present (ad-hoc signed app)
-      try {
-        const xattrs = execSync(`xattr "${overlay.path}"`, { encoding: "utf-8" });
-        if (xattrs.includes("com.apple.quarantine")) {
-          execSync(`xattr -dr com.apple.quarantine "${overlay.path}"`, { stdio: "pipe" });
-        }
-      } catch { /* no quarantine or xattr failed — try launching anyway */ }
+      // Remove macOS quarantine if present (ad-hoc signed app)
+      if (!IS_WINDOWS) {
+        try {
+          const xattrs = execSync(`xattr "${overlay.path}"`, { encoding: "utf-8" });
+          if (xattrs.includes("com.apple.quarantine")) {
+            execSync(`xattr -dr com.apple.quarantine "${overlay.path}"`, { stdio: "pipe" });
+          }
+        } catch { /* no quarantine or xattr failed — try launching anyway */ }
+      }
 
       log("Starting overlay (pre-built)...");
-      const binary = path.join(overlay.path, "Contents/MacOS/sinain_hud");
+      const binary = IS_WINDOWS
+        ? overlay.path  // sinain_hud.exe
+        : path.join(overlay.path, "Contents/MacOS/sinain_hud");
       startProcess("overlay", binary, [], { color: MAGENTA });
       await sleep(2000);
       const overlayChild = children.find(c => c.name === "overlay");
@@ -165,7 +176,8 @@ async function main() {
       const hasFlutter = commandExists("flutter");
       if (hasFlutter) {
         log("Starting overlay (flutter run)...");
-        startProcess("overlay", "flutter", ["run", "-d", "macos"], {
+        const device = IS_WINDOWS ? "windows" : "macos";
+        startProcess("overlay", "flutter", ["run", "-d", device], {
           cwd: overlay.path,
           color: MAGENTA,
         });
@@ -259,7 +271,8 @@ async function preflight() {
       ok("flutter (version unknown)");
     }
   } else {
-    const prebuiltApp = path.join(SINAIN_DIR, "overlay-app", "sinain_hud.app");
+    const prebuiltName = IS_WINDOWS ? "sinain_hud.exe" : "sinain_hud.app";
+    const prebuiltApp = path.join(SINAIN_DIR, "overlay-app", prebuiltName);
     if (fs.existsSync(prebuiltApp)) {
       ok("overlay: pre-built app");
     } else {
@@ -278,12 +291,148 @@ async function preflight() {
   }
 }
 
+// ── Setup wizard ─────────────────────────────────────────────────────────────
+
+async function setupWizard(envPath) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
+
+  console.log();
+  console.log(`${BOLD}── First-time setup ────────────────────${RESET}`);
+  console.log(`  Configuring ${DIM}~/.sinain/.env${RESET}`);
+  console.log();
+
+  const vars = {};
+
+  // 1. Transcription backend — auto-detect whisper-cli
+  let transcriptionBackend = "openrouter";
+  const hasWhisper = !IS_WINDOWS && commandExists("whisper-cli");
+
+  if (IS_WINDOWS) {
+    console.log(`  ${DIM}(Local whisper not available on Windows — using OpenRouter)${RESET}`);
+  } else if (hasWhisper) {
+    const choice = await ask(`  Transcription backend? [${BOLD}local${RESET}/cloud] (local = whisper-cli, no API key): `);
+    if (choice.trim().toLowerCase() === "cloud") {
+      transcriptionBackend = "openrouter";
+    } else {
+      transcriptionBackend = "local";
+    }
+  } else {
+    const installWhisper = await ask(`  whisper-cli not found. Install via Homebrew? [Y/n]: `);
+    if (!installWhisper.trim() || installWhisper.trim().toLowerCase() === "y") {
+      try {
+        console.log(`  ${DIM}Installing whisper-cpp...${RESET}`);
+        execSync("brew install whisper-cpp", { stdio: "inherit" });
+
+        // Download model
+        const modelDir = path.join(HOME, "models");
+        const modelPath = path.join(modelDir, "ggml-large-v3-turbo.bin");
+        if (!fs.existsSync(modelPath)) {
+          console.log(`  ${DIM}Downloading ggml-large-v3-turbo (~1.5 GB)...${RESET}`);
+          fs.mkdirSync(modelDir, { recursive: true });
+          execSync(
+            `curl -L --progress-bar -o "${modelPath}" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"`,
+            { stdio: "inherit" }
+          );
+        }
+
+        transcriptionBackend = "local";
+        vars.LOCAL_WHISPER_MODEL = modelPath;
+        ok("whisper-cpp installed");
+      } catch {
+        warn("whisper-cpp install failed — falling back to OpenRouter");
+        transcriptionBackend = "openrouter";
+      }
+    } else {
+      transcriptionBackend = "openrouter";
+    }
+  }
+  vars.TRANSCRIPTION_BACKEND = transcriptionBackend;
+
+  // 2. OpenRouter API key (if cloud backend or for vision/OCR)
+  if (transcriptionBackend === "openrouter") {
+    let key = "";
+    while (!key) {
+      key = await ask(`  OpenRouter API key (sk-or-...): `);
+      key = key.trim();
+      if (key && !key.startsWith("sk-or-")) {
+        console.log(`  ${YELLOW}⚠${RESET} Key should start with sk-or-. Try again or press Enter to skip.`);
+        const retry = await ask(`  Use this key anyway? [y/N]: `);
+        if (retry.trim().toLowerCase() !== "y") { key = ""; continue; }
+      }
+      if (!key) {
+        console.log(`  ${DIM}You can set OPENROUTER_API_KEY later in ~/.sinain/.env${RESET}`);
+        break;
+      }
+    }
+    if (key) vars.OPENROUTER_API_KEY = key;
+  } else {
+    // Still ask for OpenRouter key (needed for vision/OCR)
+    const key = await ask(`  OpenRouter API key for vision/OCR (optional, Enter to skip): `);
+    if (key.trim()) vars.OPENROUTER_API_KEY = key.trim();
+  }
+
+  // 3. Agent selection
+  const agentChoice = await ask(`  Agent? [${BOLD}claude${RESET}/codex/goose/junie/aider]: `);
+  vars.SINAIN_AGENT = agentChoice.trim().toLowerCase() || "claude";
+
+  // 4. Escalation mode
+  console.log();
+  console.log(`  ${DIM}Escalation modes:${RESET}`);
+  console.log(`    off       — no escalation to gateway`);
+  console.log(`    selective — score-based (errors, questions trigger it)`);
+  console.log(`    focus     — always escalate every tick`);
+  console.log(`    rich      — always escalate with maximum context`);
+  const escMode = await ask(`  Escalation mode? [off/${BOLD}selective${RESET}/focus/rich]: `);
+  vars.ESCALATION_MODE = escMode.trim().toLowerCase() || "selective";
+
+  // 5. OpenClaw gateway
+  const hasGateway = await ask(`  Do you have an OpenClaw gateway? [y/N]: `);
+  if (hasGateway.trim().toLowerCase() === "y") {
+    const wsUrl = await ask(`  Gateway WebSocket URL [ws://localhost:18789]: `);
+    vars.OPENCLAW_WS_URL = wsUrl.trim() || "ws://localhost:18789";
+
+    const wsToken = await ask(`  Gateway auth token (48-char hex): `);
+    if (wsToken.trim()) {
+      vars.OPENCLAW_WS_TOKEN = wsToken.trim();
+      vars.OPENCLAW_HTTP_TOKEN = wsToken.trim();
+    }
+
+    // Derive HTTP URL from WS URL
+    const httpBase = vars.OPENCLAW_WS_URL.replace(/^ws/, "http");
+    vars.OPENCLAW_HTTP_URL = `${httpBase}/hooks/agent`;
+    vars.OPENCLAW_SESSION_KEY = "agent:main:sinain";
+  }
+
+  // 6. Agent-specific defaults
+  vars.SINAIN_POLL_INTERVAL = "5";
+  vars.SINAIN_HEARTBEAT_INTERVAL = "900";
+  vars.PRIVACY_MODE = "standard";
+
+  // Write .env
+  fs.mkdirSync(path.dirname(envPath), { recursive: true });
+  const lines = [];
+  lines.push("# sinain configuration — generated by setup wizard");
+  lines.push(`# ${new Date().toISOString()}`);
+  lines.push("");
+  for (const [key, val] of Object.entries(vars)) {
+    lines.push(`${key}=${val}`);
+  }
+  lines.push("");
+  fs.writeFileSync(envPath, lines.join("\n"));
+
+  rl.close();
+
+  console.log();
+  ok(`Config written to ${envPath}`);
+  console.log();
+}
+
 // ── User environment ────────────────────────────────────────────────────────
 
 function loadUserEnv() {
   const envPaths = [
     path.join(SINAIN_DIR, ".env"),
-    path.join(PKG_DIR, "sinain-core/.env"),
   ];
 
   for (const envPath of envPaths) {
@@ -373,31 +522,51 @@ async function installDeps() {
 
 function killStale() {
   let killed = false;
-  const patterns = [
-    "sinain_hud.app/Contents/MacOS/sinain_hud",
-    "flutter run -d macos",
-    "python3 -m sense_client",
-    "Python -m sense_client",
-    "tsx.*src/index.ts",
-    "tsx watch src/index.ts",
-    "sinain-agent/run.sh",
-  ];
 
-  for (const pat of patterns) {
-    try {
-      execSync(`pkill -f "${pat}"`, { stdio: "pipe" });
-      killed = true;
-    } catch { /* not running */ }
-  }
-
-  // Free port 9500
-  try {
-    const pid = execSync("lsof -i :9500 -sTCP:LISTEN -t", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-    if (pid) {
-      execSync(`kill ${pid}`, { stdio: "pipe" });
-      killed = true;
+  if (IS_WINDOWS) {
+    const exes = ["sinain_hud.exe", "tsx.cmd"];
+    for (const exe of exes) {
+      try {
+        execSync(`taskkill /F /IM "${exe}" 2>NUL`, { stdio: "pipe" });
+        killed = true;
+      } catch { /* not running */ }
     }
-  } catch { /* already free */ }
+    // Free port 9500
+    try {
+      const out = execSync('netstat -ano | findstr ":9500" | findstr "LISTENING"', { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+      const pid = out.split(/\s+/).pop();
+      if (pid && pid !== "0") {
+        execSync(`taskkill /F /PID ${pid}`, { stdio: "pipe" });
+        killed = true;
+      }
+    } catch { /* already free */ }
+  } else {
+    const patterns = [
+      "sinain_hud.app/Contents/MacOS/sinain_hud",
+      "flutter run -d macos",
+      "python3 -m sense_client",
+      "Python -m sense_client",
+      "tsx.*src/index.ts",
+      "tsx watch src/index.ts",
+      "sinain-agent/run.sh",
+    ];
+
+    for (const pat of patterns) {
+      try {
+        execSync(`pkill -f "${pat}"`, { stdio: "pipe" });
+        killed = true;
+      } catch { /* not running */ }
+    }
+
+    // Free port 9500
+    try {
+      const pid = execSync("lsof -i :9500 -sTCP:LISTEN -t", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+      if (pid) {
+        execSync(`kill ${pid}`, { stdio: "pipe" });
+        killed = true;
+      }
+    } catch { /* already free */ }
+  }
 
   // Clean old PID file
   if (fs.existsSync(PID_FILE)) {
@@ -496,8 +665,9 @@ function findOverlay() {
     return { type: "source", path: siblingOverlay };
   }
 
-  // 2. Pre-built .app bundle (downloaded by setup-overlay)
-  const prebuiltApp = path.join(SINAIN_DIR, "overlay-app", "sinain_hud.app");
+  // 2. Pre-built app (downloaded by setup-overlay)
+  const prebuiltName = IS_WINDOWS ? "sinain_hud.exe" : "sinain_hud.app";
+  const prebuiltApp = path.join(SINAIN_DIR, "overlay-app", prebuiltName);
   if (fs.existsSync(prebuiltApp)) {
     return { type: "prebuilt", path: prebuiltApp };
   }

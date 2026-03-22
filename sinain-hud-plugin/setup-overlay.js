@@ -9,8 +9,14 @@ import os from "os";
 const HOME = os.homedir();
 const SINAIN_DIR = path.join(HOME, ".sinain");
 const APP_DIR = path.join(SINAIN_DIR, "overlay-app");
-const APP_PATH = path.join(APP_DIR, "sinain_hud.app");
 const VERSION_FILE = path.join(APP_DIR, "version.json");
+const IS_WINDOWS = os.platform() === "win32";
+
+// Platform-specific asset and app path
+const ASSET_NAME = IS_WINDOWS ? "sinain_hud_windows.zip" : "sinain_hud.app.zip";
+const APP_PATH = IS_WINDOWS
+  ? path.join(APP_DIR, "sinain_hud.exe")
+  : path.join(APP_DIR, "sinain_hud.app");
 
 const REPO = "anthillnet/sinain-hud";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases`;
@@ -79,15 +85,15 @@ async function downloadPrebuilt() {
     } catch { /* corrupt version file — re-download */ }
   }
 
-  // Find the .zip asset
-  const zipAsset = release.assets?.find(a => a.name === "sinain_hud.app.zip");
+  // Find the .zip asset for this platform
+  const zipAsset = release.assets?.find(a => a.name === ASSET_NAME);
   if (!zipAsset) {
-    fail(`Release ${tag} has no sinain_hud.app.zip asset.\n  Try: sinain setup-overlay --from-source`);
+    fail(`Release ${tag} has no ${ASSET_NAME} asset.\n  Try: sinain setup-overlay --from-source`);
   }
 
   // Download with progress
-  log(`Downloading overlay ${version} (${formatBytes(zipAsset.size)})...`);
-  const zipPath = path.join(APP_DIR, "sinain_hud.app.zip");
+  log(`Downloading overlay ${version} for ${IS_WINDOWS ? "Windows" : "macOS"} (${formatBytes(zipAsset.size)})...`);
+  const zipPath = path.join(APP_DIR, ASSET_NAME);
 
   try {
     const res = await fetch(zipAsset.browser_download_url, {
@@ -125,23 +131,34 @@ async function downloadPrebuilt() {
     fs.rmSync(APP_PATH, { recursive: true, force: true });
   }
 
-  // Extract — ditto preserves macOS extended attributes (critical for code signing)
+  // Extract
   log("Extracting...");
-  try {
-    execSync(`ditto -x -k "${zipPath}" "${APP_DIR}"`, { stdio: "pipe" });
-  } catch {
-    // Fallback to unzip
+  if (IS_WINDOWS) {
     try {
-      execSync(`unzip -o -q "${zipPath}" -d "${APP_DIR}"`, { stdio: "pipe" });
+      execSync(
+        `powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${APP_DIR}' -Force"`,
+        { stdio: "pipe" }
+      );
     } catch (e) {
       fail(`Extraction failed: ${e.message}`);
     }
-  }
+  } else {
+    // ditto preserves macOS extended attributes (critical for code signing)
+    try {
+      execSync(`ditto -x -k "${zipPath}" "${APP_DIR}"`, { stdio: "pipe" });
+    } catch {
+      try {
+        execSync(`unzip -o -q "${zipPath}" -d "${APP_DIR}"`, { stdio: "pipe" });
+      } catch (e) {
+        fail(`Extraction failed: ${e.message}`);
+      }
+    }
 
-  // Remove quarantine attribute (ad-hoc signed app downloaded from internet)
-  try {
-    execSync(`xattr -cr "${APP_PATH}"`, { stdio: "pipe" });
-  } catch { /* xattr may not be needed */ }
+    // Remove quarantine attribute (ad-hoc signed app downloaded from internet)
+    try {
+      execSync(`xattr -cr "${APP_PATH}"`, { stdio: "pipe" });
+    } catch { /* xattr may not be needed */ }
+  }
 
   // Write version marker
   fs.writeFileSync(VERSION_FILE, JSON.stringify({
@@ -203,8 +220,9 @@ async function buildFromSource() {
   log("Installing Flutter dependencies...");
   execSync("flutter pub get", { cwd: overlayDir, stdio: "inherit" });
 
-  log("Building overlay (this may take a few minutes)...");
-  execSync("flutter build macos", { cwd: overlayDir, stdio: "inherit" });
+  const buildTarget = IS_WINDOWS ? "windows" : "macos";
+  log(`Building overlay for ${buildTarget} (this may take a few minutes)...`);
+  execSync(`flutter build ${buildTarget}`, { cwd: overlayDir, stdio: "inherit" });
   ok("Overlay built successfully");
 
   // Symlink ~/.sinain/overlay → the overlay source dir
@@ -221,7 +239,7 @@ async function buildFromSource() {
   console.log(`
 ${GREEN}✓${RESET} Overlay setup complete!
   The overlay will auto-start with: ${BOLD}sinain start${RESET}
-  Or run manually: cd ${overlayDir} && flutter run -d macos
+  Or run manually: cd ${overlayDir} && flutter run -d ${IS_WINDOWS ? "windows" : "macos"}
 `);
 }
 
