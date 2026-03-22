@@ -228,7 +228,6 @@ export function loadConfig(): CoreConfig {
   return {
     port: intEnv("PORT", 9500),
     audioConfig,
-    audioAltDevice: env("AUDIO_ALT_DEVICE", "BlackHole 2ch"),
     micConfig,
     micEnabled,
     transcriptionConfig,
