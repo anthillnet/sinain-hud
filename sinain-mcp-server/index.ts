@@ -152,6 +152,24 @@ server.tool(
 );
 
 // 6. sinain_post_feed
+// 6b. sinain_spawn
+server.tool(
+  "sinain_spawn",
+  "Spawn a background agent task via sinain-core",
+  {
+    task: z.string(),
+    label: z.string().optional().default("background-task"),
+  },
+  async ({ task, label }) => {
+    try {
+      const data = await coreRequest("POST", "/spawn", { text: task, label });
+      return textResult(JSON.stringify(data, null, 2));
+    } catch (err: any) {
+      return textResult(`Error spawning task: ${err.message}`);
+    }
+  },
+);
+
 server.tool(
   "sinain_post_feed",
   "Post a message to the sinain-core HUD feed",

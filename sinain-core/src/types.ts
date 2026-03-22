@@ -72,8 +72,14 @@ export interface UserCommandMessage {
   text: string;
 }
 
+/** Overlay → sinain-core: spawn a background agent task */
+export interface SpawnCommandMessage {
+  type: "spawn_command";
+  text: string;
+}
+
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {

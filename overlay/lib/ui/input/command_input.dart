@@ -3,14 +3,17 @@ import 'package:flutter/services.dart';
 import '../../core/constants.dart';
 
 /// Compact command input field for injecting user commands into escalation context.
-/// Auto-focuses on mount. Enter sends, Escape dismisses.
+/// Auto-focuses on mount. Enter sends to main session, Shift+Enter spawns background agent.
+/// Escape dismisses.
 class CommandInput extends StatefulWidget {
   final void Function(String text) onSubmit;
+  final void Function(String text)? onSpawn;
   final VoidCallback onDismiss;
 
   const CommandInput({
     super.key,
     required this.onSubmit,
+    this.onSpawn,
     required this.onDismiss,
   });
 
@@ -47,14 +50,26 @@ class _CommandInputState extends State<CommandInput> {
     widget.onDismiss();
   }
 
+  void _spawn() {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty && widget.onSpawn != null) {
+      widget.onSpawn!(text);
+    }
+    widget.onDismiss();
+  }
+
   @override
   Widget build(BuildContext context) {
     return KeyboardListener(
-      focusNode: FocusNode(), // outer listener for Escape
+      focusNode: FocusNode(), // outer listener for Escape + Shift+Enter
       onKeyEvent: (event) {
-        if (event is KeyDownEvent &&
-            event.logicalKey == LogicalKeyboardKey.escape) {
-          widget.onDismiss();
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.escape) {
+            widget.onDismiss();
+          } else if (event.logicalKey == LogicalKeyboardKey.enter &&
+              HardwareKeyboard.instance.isShiftPressed) {
+            _spawn();
+          }
         }
       },
       child: Container(
@@ -92,7 +107,9 @@ class _CommandInputState extends State<CommandInput> {
                 ),
                 cursorColor: const Color(0xFF00FF88),
                 decoration: InputDecoration(
-                  hintText: 'command for next escalation…',
+                  hintText: widget.onSpawn != null
+                      ? 'Enter = send  |  Shift+Enter = spawn agent'
+                      : 'command for next escalation…',
                   hintStyle: TextStyle(
                     fontFamily: HudConstants.monoFont,
                     fontFamilyFallback: HudConstants.monoFontFallbacks,
