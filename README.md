@@ -1,42 +1,67 @@
-# SinainHUD
+# Sinain
 
-Ambient AI overlay for macOS and Windows — invisible to screen capture, surfacing real-time
-insights from audio and screen context via an LLM agent loop. A ghost window
-(`NSWindow.sharingType = .none`) whispers advice only you can see, while a portable knowledge
-system curates your accumulated context into a living playbook.
+Always-on ambient intelligence that watches your workflow and proactively whispers the next step.
+
+Sinain is three things:
+
+1. **Universal Sensory & Context Layer** — eyes and ears for your existing agents (Claude, Codex, Goose, Junie). ScreenCaptureKit audio + screen capture + OCR builds rich, real-time context from everything happening on your machine.
+2. **Private HUD** — an invisible overlay (`NSWindow.sharingType = .none` on macOS, `WDA_EXCLUDEFROMCAPTURE` on Windows) that only you can see. 4 display modes, client-side credential redaction, never captured in screen shares or recordings.
+3. **Always Aware, Always With You** — a living playbook, four-layer memory, and portable knowledge modules that follow you across machines and sessions.
 
 ## Architecture
 
 ```
-Audio (ScreenCaptureKit) ──┐
-                           ├─► sinain-core :9500 ──► OpenClaw Gateway ──► AI Agent
-Screen (SCKit / OCR) ──────┘         │                      │
-                                     │ WebSocket feed        │ [HUD:feed] responses
-                                     ▼                       ▼
-                                Overlay (Flutter)       Telegram alerts
-                                     │
-                                SITUATION.md ──► sinain-memory (30-min reflection)
-                                                     │
-                                            triplestore.db (Graph RAG)
+┌─── Your Device ─────────────────────────────────────────────────────┐
+│                                                                     │
+│  sck-capture (Swift)                                                │
+│    ├─ system audio (PCM) ──► sinain-core :9500                      │
+│    └─ screen frames (JPEG) ──► sense_client ─── POST /sense ──►    │
+│                                                      │              │
+│                              ┌────────────────────────┘              │
+│                              │                                      │
+│                         sinain-core                                 │
+│                           ├─ audio pipeline → transcription         │
+│                           ├─ agent loop → digest + HUD text         │
+│                           ├─ escalation ──► OpenClaw Gateway (WS)   │
+│                           │                  or sinain-agent (poll)  │
+│                           └─ WebSocket feed                         │
+│                                  │                                  │
+│                                  ▼                                  │
+│                           overlay (Flutter)                         │
+│                           private, invisible to screen capture      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                          ┌────────┴─────────┐
+                          ▼                  ▼
+                   OpenClaw Gateway    sinain-agent
+                   (server or local)   (bare agent, no gateway)
+                     ├─ sinain-hud plugin
+                     │   └─ sinain-knowledge (curation, playbook, eval)
+                     └─ SITUATION.md, Telegram alerts
 ```
 
 | Component | Language | Purpose |
 |---|---|---|
-| **overlay/** | Dart / Swift | Ghost window HUD, 4 display modes, global hotkeys |
-| **sinain-core/** | Node.js (TypeScript) | Audio transcription, agent loop, escalation, WS feed |
+| **sinain-core/** | Node.js (TypeScript) | Central hub: audio pipeline, agent loop, escalation, WS feed |
+| **overlay/** | Dart / Swift / C++ | Private overlay HUD (macOS + Windows), 4 display modes, global hotkeys |
 | **sense_client/** | Python | ScreenCaptureKit capture, SSIM diff, OCR, privacy filter |
-| **sinain-memory/** | Python | Reflection pipeline: signal analysis, memory mining, playbook curation, triplestore |
-| **sinain-hud-plugin/** | TypeScript | OpenClaw plugin: lifecycle hooks, auto-deploy, heartbeat, overflow watchdog |
+| **tools/sck-capture/** | Swift | Unified ScreenCaptureKit binary: system audio + screen frames |
+| **sinain-agent/** | Bash | Bare agent runner: polls sinain-core, invokes Claude/Codex/Goose/Junie/Aider |
+| **sinain-mcp-server/** | TypeScript | MCP server exposing sinain tools to agents |
+| **sinain-hud-plugin/** | TypeScript | OpenClaw plugin: lifecycle hooks, knowledge curation, overflow watchdog |
 | **modules/** | JSON + Markdown | Hot-swappable knowledge modules with priority-based stacking |
 
 ## System Requirements
 
-- **macOS 12.3+** (primary — ScreenCaptureKit) or **Windows** (native, with win-audio-capture)
+- **macOS 12.3+** (ScreenCaptureKit) or **Windows 10 2004+** (private overlay via WDA_EXCLUDEFROMCAPTURE)
 - Node.js 18+, Python 3.10+
 - OpenRouter API key (free tier works) or local whisper.cpp for offline transcription
 - macOS: Screen Recording + Microphone permissions
-- Windows: cmake + C++ compiler (MinGW/MSVC) for win-audio-capture build
+- Windows: Microphone permission (private overlay works out of the box)
 - Flutter 3.10+ only needed for development (`sinain setup-overlay --from-source`)
+
+> **Windows hotkeys** use `Ctrl+Shift` instead of `Cmd+Shift`. See [Hotkeys](docs/HOTKEYS.md).
 
 ## Quick Start
 
@@ -53,33 +78,7 @@ Verify with: `node -v` and `python3 --version`
 1. Go to [openrouter.ai](https://openrouter.ai) and sign up (free tier works)
 2. Create an API key from the dashboard — it starts with `sk-or-...`
 
-### Step 3: Configure sinain
-
-```bash
-mkdir -p ~/.sinain
-nano ~/.sinain/.env
-```
-
-Add these lines (paste your actual key):
-```
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
-PRIVACY_MODE=standard
-```
-
-Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X` in nano).
-
-**Privacy modes** control what data is sent where. Pick one:
-
-| Mode | What it does |
-|---|---|
-| `off` | **Default.** All data flows freely — maximum insight quality, no filtering |
-| `standard` | Auto-redacts credentials (API keys, passwords, card numbers). Screen text and audio are redacted before being sent to cloud APIs. Good balance of privacy and functionality |
-| `strict` | Only summaries leave your machine — no raw text sent to cloud. Screen images blocked entirely |
-| `paranoid` | Almost nothing leaves your machine. Cloud APIs receive no data. Very limited functionality |
-
-We recommend `standard` for most users. See [Privacy Threat Model](docs/privacy-protection-design.md) for full details on what data goes where.
-
-### Step 4: Install the overlay
+### Step 3: Install the overlay
 
 This downloads the pre-built HUD app (~20 MB). No Flutter or Xcode needed.
 
@@ -87,7 +86,7 @@ This downloads the pre-built HUD app (~20 MB). No Flutter or Xcode needed.
 npx @geravant/sinain setup-overlay
 ```
 
-### Step 5: Grant macOS permissions
+### Step 4: Grant macOS permissions
 
 sinain needs two permissions. macOS will prompt you on first run, but you can set them up in advance:
 
@@ -96,13 +95,29 @@ sinain needs two permissions. macOS will prompt you on first run, but you can se
 
 > You may need to restart your Terminal after granting permissions.
 
-### Step 6: Start sinain
+### Step 5: Start sinain
 
 ```bash
 npx @geravant/sinain start
 ```
 
-You should see a status banner showing all services running. The HUD overlay appears as a small window on your screen — it's invisible to screen capture and recording.
+On first run, an interactive setup wizard configures `~/.sinain/.env` — it asks for your
+transcription backend (local whisper or OpenRouter), API key, agent, escalation mode, and
+optional OpenClaw gateway. To re-run the wizard later: `npx @geravant/sinain setup`.
+
+You should see a status banner showing all services running. The HUD overlay appears as a
+small window on your screen — it's invisible to screen capture and recording.
+
+**Privacy modes** control what data is sent where (configured in `~/.sinain/.env`):
+
+| Mode | What it does |
+|---|---|
+| `off` | All data flows freely — maximum insight quality, no filtering |
+| `standard` | **Default (wizard).** Auto-redacts credentials before cloud APIs |
+| `strict` | Only summaries leave your machine — no raw text sent to cloud |
+| `paranoid` | Almost nothing leaves your machine. Very limited functionality |
+
+See [Privacy Threat Model](docs/privacy-protection-design.md) for full details.
 
 ### Managing sinain
 
@@ -139,35 +154,47 @@ For local transcription (no API key needed for audio): `./setup-local-stt.sh`, t
 
 ## Components
 
-### overlay/
-Flutter macOS ghost window (`NSWindow.sharingType = .none`) — invisible to all screen sharing
-and recording. 4 display modes: Feed, Alert, Minimal, Hidden. See [Hotkeys](docs/HOTKEYS.md).
-
 ### sinain-core/
 Node.js hub on `:9500` — audio pipeline, agent analysis loop, escalation orchestration, WebSocket
 feed to overlay, SITUATION.md sync via RPC. See [sinain-core/README.md](sinain-core/README.md).
+
+### overlay/
+Flutter private overlay (`NSWindow.sharingType = .none` on macOS, `WDA_EXCLUDEFROMCAPTURE` on
+Windows) — invisible to all screen sharing and recording. 4 display modes: Feed, Alert, Minimal,
+Hidden. See [Hotkeys](docs/HOTKEYS.md).
 
 ### sense_client/
 Python screen capture with three backends: SCKCapture (ScreenCaptureKit, primary), ScreenKitCapture
 (IPC fallback), ScreenCapture (CGDisplayCreateImage legacy). SSIM change detection, OCR via
 OpenRouter vision, privacy auto-redaction.
 
-### sinain-memory/
-Reflection pipeline triggered every 30 minutes: signal analysis, feedback mining, playbook
-curation, tick evaluation, triplestore ingestion. See [Knowledge System](docs/knowledge-system.md).
+### tools/sck-capture/
+Swift binary using ScreenCaptureKit — single `SCStream` captures both system audio (raw PCM →
+stdout → sinain-core AudioPipeline) and screen frames (JPEG → IPC → sense_client). Zero-setup
+on macOS 13+, replaces the old sox/BlackHole audio path.
+
+### sinain-agent/
+Bare agent runner for use without an OpenClaw gateway. Polls sinain-core for pending escalations,
+invokes the selected agent (Claude, Codex, Goose, Junie, or Aider), and posts responses back.
+MCP-capable agents call sinain tools directly; others use pipe mode.
+
+### sinain-mcp-server/
+MCP server that exposes sinain tools (`sinain_get_escalation`, `sinain_respond`, `sinain_get_context`,
+etc.) to any MCP-compatible agent. Started automatically by the launcher.
 
 ### sinain-hud-plugin/
-OpenClaw server plugin — auto-deploys workspace files, runs curation pipeline, context overflow
+OpenClaw server plugin — auto-deploys workspace files, runs the knowledge curation pipeline
+(signal analysis, feedback mining, playbook curation, tick evaluation), context overflow
 watchdog, privacy stripping, `/sinain_status` and `/sinain_modules` commands.
+Includes `sinain-knowledge/` engine for portable knowledge and snapshot management.
 
 ### modules/
 Hot-swappable knowledge packages with priority-based stacking. Each module has a `manifest.json`
-and `patterns.md`. Managed via `sinain-memory/module_manager.py`.
-See [Knowledge System](docs/knowledge-system.md).
+and `patterns.md`. See [Knowledge System](docs/knowledge-system.md).
 
 ## Configuration
 
-All config via environment variables in `sinain-core/.env`. Essential variables:
+All config via environment variables in `~/.sinain/.env` (created by the setup wizard). Essential variables:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -192,7 +219,7 @@ See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
 
 ## Privacy
 
-- **Ghost overlay** — `NSWindow.sharingType = .none`: invisible to screen share, recording,
+- **Invisible overlay** — `NSWindow.sharingType = .none`: invisible to screen share, recording,
   and screenshots
 - **`<private>` tags** — wrap on-screen text in `<private>...</private>`; stripped client-side
   by sense_client and server-side by the plugin before persistence
