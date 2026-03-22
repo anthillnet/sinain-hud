@@ -45,7 +45,7 @@ macos/Runner/
   - `⌘⇧↓` — Scroll feed down
   - `⌘⇧S` — Toggle screen capture pipeline
   - `⌘⇧V` — Toggle screen feed on HUD
-  - `⌘⇧E` — Cycle HUD tab (Stream ↔ Agent)
+  - `⌘⇧E` — Cycle HUD tab (Agent ↔ Tasks)
   - `⌘⇧P` — Toggle position (bottom-right ↔ top-right)
   - `⌘⇧Y` — Copy target message to clipboard
 - **WebSocket bridge** — Connects to `ws://localhost:9500` with auto-reconnect

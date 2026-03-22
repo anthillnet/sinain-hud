@@ -1,6 +1,6 @@
 enum DisplayMode { feed, alert, minimal, hidden }
 
-enum HudTab { stream, agent, tasks }
+enum HudTab { agent, tasks }
 
 class HudSettings {
   DisplayMode displayMode;
@@ -12,7 +12,7 @@ class HudSettings {
 
   HudSettings({
     this.displayMode = DisplayMode.feed,
-    this.activeTab = HudTab.stream,
+    this.activeTab = HudTab.agent,
     this.clickThrough = true,
     this.privacyMode = true,
     this.topPosition = false,
