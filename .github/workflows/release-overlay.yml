@@ -34,8 +34,38 @@ jobs:
           cd build/macos/Build/Products/Release
           ditto -c -k --sequesterRsrc --keepParent sinain_hud.app sinain_hud.app.zip
 
-      - name: Create GitHub Release
+      - name: Upload macOS asset
         uses: softprops/action-gh-release@v2
         with:
           files: overlay/build/macos/Build/Products/Release/sinain_hud.app.zip
           generate_release_notes: true
+
+  build-windows:
+    name: Build & Release Overlay (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: overlay
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Zip Windows build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath sinain_hud_windows.zip
+
+      - name: Upload Windows asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: overlay/sinain_hud_windows.zip
