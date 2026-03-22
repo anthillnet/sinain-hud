@@ -40,6 +40,8 @@ export interface ServerDeps {
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   onSpawnCommand?: (text: string) => void;
+  getSpawnPending?: () => { id: string; task: string; label: string; ts: number } | null;
+  respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -357,6 +359,27 @@ export function createAppServer(deps: ServerDeps) {
         } else {
           res.end(JSON.stringify({ ok: false, error: "spawn not configured" }));
         }
+        return;
+      }
+
+      // ── /spawn/pending (bare agent polls for queued tasks) ──
+      if (req.method === "GET" && url.pathname === "/spawn/pending") {
+        const task = deps.getSpawnPending?.() ?? null;
+        res.end(JSON.stringify({ ok: true, task }));
+        return;
+      }
+
+      // ── /spawn/respond (bare agent returns task result) ──
+      if (req.method === "POST" && url.pathname === "/spawn/respond") {
+        const body = await readBody(req, 65536);
+        const { id, result } = JSON.parse(body);
+        if (!id || !result) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing id or result" }));
+          return;
+        }
+        const resp = deps.respondSpawn?.(id, result) ?? { ok: false, error: "spawn not configured" };
+        res.end(JSON.stringify(resp));
         return;
       }
 
