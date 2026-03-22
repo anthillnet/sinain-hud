@@ -11,7 +11,7 @@ sinain is a privacy-first AI overlay for macOS that watches your screen and audi
 | macOS 13+ (Ventura) | Required for ScreenCaptureKit screen capture |
 | Node.js 18+ | For sinain-core runtime |
 | Python 3.9+ | For sense_client screen pipeline |
-| Flutter 3.27+ | To build the overlay (or use a prebuilt binary) |
+| Flutter 3.27+ | Only for development — pre-built overlay available via `sinain setup-overlay` |
 | NemoClaw instance on Brev | NVIDIA Brev account with a running OpenClaw container ([NemoClaw README](https://github.com/NVIDIA/NemoClaw)) |
 | NemoClaw onboarded | `nemoclaw onboard` completed (part of NemoClaw initial setup) |
 | OpenRouter API key | Free at [openrouter.ai](https://openrouter.ai) — used for screen OCR and audio transcription |

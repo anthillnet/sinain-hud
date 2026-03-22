@@ -32,10 +32,11 @@ Screen (SCKit / OCR) ──────┘         │                      │
 ## System Requirements
 
 - **macOS 12.3+** (primary — ScreenCaptureKit) or **Windows** (native, with win-audio-capture)
-- Node.js 18+, Python 3.10+, Flutter 3.10+ (overlay only)
+- Node.js 18+, Python 3.10+
 - OpenRouter API key (free tier works) or local whisper.cpp for offline transcription
 - macOS: Screen Recording + Microphone permissions
 - Windows: cmake + C++ compiler (MinGW/MSVC) for win-audio-capture build
+- Flutter 3.10+ only needed for development (`sinain setup-overlay --from-source`)
 
 ## Quick Start
 
@@ -53,7 +54,12 @@ echo "OPENROUTER_API_KEY=sk-or-..." > ~/.sinain/.env
 
 Optional flags: `--no-sense`, `--no-overlay`, `--no-agent`, `--agent=codex`
 
-Other commands: `npx @geravant/sinain stop | status | setup-overlay`
+To install the overlay (pre-built, no Flutter needed):
+```bash
+npx @geravant/sinain setup-overlay
+```
+
+Other commands: `npx @geravant/sinain stop | status`
 
 ### From source
 
