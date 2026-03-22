@@ -1,6 +1,6 @@
 # Installing sinain with NemoClaw
 
-sinain is a privacy-first AI overlay for macOS that watches your screen and audio and surfaces real-time advice in a ghost overlay invisible to screen capture. It connects to a **NemoClaw** instance (NVIDIA Brev cloud) which runs the OpenClaw agent that provides the actual intelligence.
+sinain is a privacy-first AI overlay for macOS that watches your screen and audio and surfaces real-time advice in an invisible overlay hidden from screen capture. It connects to a **NemoClaw** instance (NVIDIA Brev cloud) which runs the OpenClaw agent that provides the actual intelligence.
 
 ---
 
@@ -28,13 +28,13 @@ sck-capture   ← audio + screen       OpenClaw gateway (port 18789)
      ↓                                    ↑ WebSocket
 sinain-core ←→ WebSocket ─────────────────┘
      ↓                               sinain plugin (agent loop)
-overlay (ghost window)               sinain-memory (playbook, eval)
+overlay (private HUD)               sinain-memory (playbook, eval)
      ↓
 sense_client (OCR pipeline)
 ```
 
 - **sinain-core** — central hub on your Mac (port 9500); manages audio, screen context, and the agent connection
-- **overlay** — macOS ghost window; invisible to screen capture via `NSWindow.sharingType = .none`
+- **overlay** — macOS private HUD; invisible to screen capture via `NSWindow.sharingType = .none`
 - **sense_client** — Python pipeline that detects screen changes and sends OCR'd text to sinain-core
 - **sck-capture** — Swift binary (ScreenCaptureKit); captures screen frames and system audio simultaneously
 - **NemoClaw agent** — OpenClaw instance running in Brev cloud; receives context, runs analysis, sends advice back
