@@ -144,7 +144,7 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey))
         // ID 11: Cmd+Shift+V → toggle screen feed on HUD
         registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 12: Cmd+Shift+E → cycle HUD tab (Stream / Agent)
+        // ID 12: Cmd+Shift+E → cycle HUD tab (Agent / Tasks)
         registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E), modifiers: UInt32(cmdKey | shiftKey))
         // ID 13: Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
         registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey))
@@ -240,7 +240,7 @@ class AppDelegate: FlutterAppDelegate {
         case 11: // Cmd+Shift+V → toggle screen feed on HUD
             hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
 
-        case 12: // Cmd+Shift+E → cycle HUD tab (Stream / Agent)
+        case 12: // Cmd+Shift+E → cycle HUD tab (Agent / Tasks)
             hotkeyChannel?.invokeMethod("onCycleTab", arguments: nil)
 
         case 13: // Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
