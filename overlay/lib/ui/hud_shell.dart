@@ -43,6 +43,11 @@ class HudShellState extends State<HudShell> {
     wsService.sendUserCommand(text);
   }
 
+  void _onSpawnCommand(String text) {
+    final wsService = context.read<WebSocketService>();
+    wsService.sendSpawnCommand(text);
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>().settings;
@@ -69,6 +74,7 @@ class HudShellState extends State<HudShell> {
           if (_commandInputVisible)
             CommandInput(
               onSubmit: _onCommandSubmit,
+              onSpawn: _onSpawnCommand,
               onDismiss: _dismissCommandInput,
             ),
         ],

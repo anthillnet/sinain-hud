@@ -416,6 +416,15 @@ async function main() {
         return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
       } catch { return ""; }
     },
+
+    // Spawn background agent task (from HUD Shift+Enter or bare agent POST /spawn)
+    onSpawnCommand: (text: string) => {
+      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+        log("srv", `spawn via HTTP failed: ${err}`);
+      });
+    },
+    getSpawnPending: () => escalator.getSpawnPending(),
+    respondSpawn: (id: string, result: string) => escalator.respondSpawn(id, result),
   });
 
   // ── Wire overlay profiling ──
@@ -434,6 +443,12 @@ async function main() {
     },
     onUserCommand: (text) => {
       escalator.setUserCommand(text);
+    },
+    onSpawnCommand: (text) => {
+      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+        log("cmd", `spawn command failed: ${err}`);
+        wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
+      });
     },
     onToggleScreen: () => {
       screenActive = !screenActive;
