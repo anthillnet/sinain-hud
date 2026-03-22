@@ -5,6 +5,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
+import 'idle_animation.dart';
 
 class FeedView extends StatefulWidget {
   final FeedChannel channel;
@@ -156,16 +157,7 @@ class _FeedViewState extends State<FeedView> {
   @override
   Widget build(BuildContext context) {
     if (_items.isEmpty) {
-      return Center(
-        child: Text(
-          widget.emptyLabel,
-          style: TextStyle(
-            fontFamily: 'JetBrainsMono',
-            fontSize: 11,
-            color: Colors.white.withValues(alpha: 0.2),
-          ),
-        ),
-      );
+      return IdleAnimation(label: widget.emptyLabel);
     }
 
     return ListView.builder(
