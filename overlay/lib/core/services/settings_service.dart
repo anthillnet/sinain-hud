@@ -41,7 +41,7 @@ class SettingsService extends ChangeNotifier {
     final val = _prefs.getString(_keyActiveTab);
     return HudTab.values.firstWhere(
       (t) => t.name == val,
-      orElse: () => HudTab.stream,
+      orElse: () => HudTab.agent,
     );
   }
 
