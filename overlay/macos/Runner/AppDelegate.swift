@@ -158,6 +158,8 @@ class AppDelegate: FlutterAppDelegate {
         registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(cmdKey | shiftKey))
         // ID 17: Cmd+Shift+B → toggle trait voices
         registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_B), modifiers: UInt32(cmdKey | shiftKey))
+        // ID 18: Cmd+Shift+/ → open command input
+        registerHotKey(id: 18, keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(cmdKey | shiftKey))
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -279,6 +281,11 @@ class AppDelegate: FlutterAppDelegate {
         case 17: // Cmd+Shift+B → toggle trait voices
             hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
 
+        case 18: // Cmd+Shift+/ → open command input
+            // Disable click-through and make key window so TextField receives keyboard events
+            window.ignoresMouseEvents = false
+            window.makeKeyAndOrderFront(nil)
+            hotkeyChannel?.invokeMethod("onOpenCommandInput", arguments: nil)
 
         default:
             break

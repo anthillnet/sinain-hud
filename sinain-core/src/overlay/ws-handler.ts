@@ -194,6 +194,9 @@ export class WsHandler {
       case "command":
         log(TAG, `\u2190 command: ${msg.action}`);
         break;
+      case "user_command":
+        log(TAG, `\u2190 user command: ${msg.text.slice(0, 100)}`);
+        break;
       case "profiling":
         if (this.onProfilingCb) this.onProfilingCb(msg);
         return;

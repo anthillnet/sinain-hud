@@ -1,4 +1,4 @@
-import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord } from "../types.js";
+import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord, UserCommand } from "../types.js";
 import { normalizeAppName } from "../agent/context-window.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 
@@ -142,11 +142,17 @@ export function buildEscalationMessage(
   mode: EscalationMode,
   escalationReason?: string,
   recentFeedback?: FeedbackRecord[],
+  userCommand?: UserCommand,
 ): string {
   const sections: string[] = [];
 
   // Header with tick metadata
   sections.push(`[sinain-hud live context — tick #${entry.id}]`);
+
+  // User command — placed at the top so the agent sees it first
+  if (userCommand) {
+    sections.push(`## User Command\n> ${userCommand.text}\n\nThe user has explicitly asked you to address the above command. Prioritize it in your response.`);
+  }
 
   // Digest (always full)
   sections.push(`## Digest\n${digest}`);
