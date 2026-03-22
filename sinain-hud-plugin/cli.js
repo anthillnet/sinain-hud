@@ -164,13 +164,18 @@ Usage:
   sinain start [options]       Launch sinain services
   sinain stop                  Stop all sinain services
   sinain status                Check what's running
-  sinain setup-overlay         Clone and build the overlay app
+  sinain setup-overlay         Download pre-built overlay app
   sinain install               Install OpenClaw plugin (server-side)
 
 Start options:
   --no-sense                   Skip screen capture (sense_client)
-  --no-overlay                 Skip Flutter overlay
+  --no-overlay                 Skip overlay
   --no-agent                   Skip agent poll loop
   --agent=<name>               Agent to use: claude, codex, goose, aider (default: claude)
+
+Setup-overlay options:
+  --from-source                Build from Flutter source instead of downloading
+  --update                     Force re-download even if version matches
 `);
+
 }
