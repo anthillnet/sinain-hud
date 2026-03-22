@@ -91,7 +91,6 @@ All configuration is via environment variables (or `.env` file). Variables are g
 | `AUDIO_CAPTURE_CMD` | `sox` | Capture backend: `sox` or `ffmpeg` |
 | `AUDIO_AUTO_START` | `true` | Auto-start audio capture on boot |
 | `AUDIO_GAIN_DB` | `20` | Gain in decibels |
-| `AUDIO_ALT_DEVICE` | `BlackHole 2ch` | Alternate device for `switch_device` command |
 
 ### Transcription
 
@@ -337,7 +336,7 @@ The overlay WebSocket runs on the same port as HTTP.
 | Type | Fields | Description |
 |------|--------|-------------|
 | `message` | `text` | User message (forwarded to OpenClaw) |
-| `command` | `action` | Command: `toggle_audio`, `toggle_screen`, `switch_device` |
+| `command` | `action` | Command: `toggle_audio`, `toggle_screen` |
 | `pong` | `ts` | Heartbeat response |
 
 ### Heartbeat
@@ -373,7 +372,7 @@ sinain-core/src/
 │   └── openclaw-ws.ts        — WebSocket client to OpenClaw gateway
 ├── overlay/
 │   ├── ws-handler.ts         — overlay WS connections + replay
-│   └── commands.ts           — toggle_audio, toggle_screen, switch_device
+│   └── commands.ts           — toggle_audio, toggle_screen
 └── trace/
     ├── tracer.ts             — instrumentation + metrics
     └── trace-store.ts        — trace file persistence

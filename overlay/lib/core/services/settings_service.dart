@@ -71,10 +71,6 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> toggleClickThrough() async {
-    await setClickThrough(!_settings.clickThrough);
-  }
-
   Future<void> setPrivacyMode(bool value) async {
     _settings.privacyMode = value;
     await _prefs.setBool(_keyPrivacyMode, value);

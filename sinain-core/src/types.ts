@@ -424,7 +424,6 @@ export interface PrivacyConfig {
 export interface CoreConfig {
   port: number;
   audioConfig: AudioPipelineConfig;
-  audioAltDevice: string;
   micConfig: AudioPipelineConfig;
   micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;
