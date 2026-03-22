@@ -66,8 +66,21 @@ export interface ProfilingMessage {
   ts: number;
 }
 
+/** Overlay → sinain-core: user command to augment next escalation */
+export interface UserCommandMessage {
+  type: "user_command";
+  text: string;
+}
+
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage;
+
+/** Abstraction for user commands (text now, voice later). */
+export interface UserCommand {
+  text: string;
+  ts: number;
+  source: "text" | "voice";
+}
 
 // ── Feed buffer types ──
 

@@ -1,4 +1,4 @@
-import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, SpawnTaskMessage, SpawnTaskStatus } from "../types.js";
+import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, SpawnTaskMessage, SpawnTaskStatus, UserCommand } from "../types.js";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { WsHandler } from "../overlay/ws-handler.js";
 import type { Profiler } from "../profiler.js";
@@ -74,6 +74,10 @@ export class Escalator {
   // Store context from last escalation for response handling
   private lastEscalationContext: ContextWindow | null = null;
 
+  // User command to inject into the next escalation
+  private pendingUserCommand: UserCommand | null = null;
+  private static readonly USER_COMMAND_EXPIRY_MS = 120_000; // 2 minutes
+
   private stats = {
     totalEscalations: 0,
     totalResponses: 0,
@@ -123,6 +127,15 @@ export class Escalator {
     this.deps.signalCollector = sc;
   }
 
+  /** Queue a user command to inject into the next escalation. */
+  setUserCommand(text: string, source: "text" | "voice" = "text"): void {
+    this.pendingUserCommand = { text, ts: Date.now(), source };
+    const preview = text.length > 60 ? text.slice(0, 60) + "…" : text;
+    this.deps.feedBuffer.push(`⌘ Command queued: ${preview}`, "normal", "system", "stream");
+    this.deps.wsHandler.broadcast(`⌘ Command queued: ${preview}`, "normal");
+    log(TAG, `user command set: "${preview}"`);
+  }
+
   /** Start the WS connection to OpenClaw (skipped when transport=http). */
   start(): void {
     if (this.deps.escalationConfig.mode !== "off" && this.deps.escalationConfig.transport !== "http") {
@@ -161,12 +174,23 @@ export class Escalator {
    * Decides whether to escalate and enqueues the message for delivery.
    */
   async onAgentAnalysis(entry: AgentEntry, contextWindow: ContextWindow): Promise<void> {
+    // Expire stale user commands (safety net — 120s is generous)
+    if (this.pendingUserCommand && Date.now() - this.pendingUserCommand.ts > Escalator.USER_COMMAND_EXPIRY_MS) {
+      warn(TAG, `user command expired after ${Escalator.USER_COMMAND_EXPIRY_MS / 1000}s — no escalation occurred`);
+      this.deps.feedBuffer.push("⚠ Command expired — no escalation occurred", "normal", "system", "stream");
+      this.deps.wsHandler.broadcast("⚠ Command expired — no escalation occurred", "normal");
+      this.pendingUserCommand = null;
+    }
+
     // Skip WS escalations when circuit is open (HTTP transport bypasses this)
     const transport = this.deps.escalationConfig.transport;
     if (this.wsClient.isCircuitOpen && transport !== "http") {
       log(TAG, `tick #${entry.id}: skipped — circuit breaker open`);
       return;
     }
+
+    // If user command is pending, force escalation (bypass score + cooldown)
+    const hasUserCommand = this.pendingUserCommand !== null;
 
     const { escalate, score, stale } = shouldEscalate(
       entry.digest,
@@ -179,7 +203,7 @@ export class Escalator {
       this.deps.escalationConfig.staleMs,
     );
 
-    if (!escalate) {
+    if (!escalate && !hasUserCommand) {
       log(TAG, `tick #${entry.id}: not escalating (mode=${this.deps.escalationConfig.mode}, score=${score.total}, hud="${entry.hud.slice(0, 40)}")`);
       return;
     }
@@ -192,20 +216,28 @@ export class Escalator {
     this.lastEscalatedDigest = entry.digest;
 
     const staleTag = stale ? ", STALE" : "";
+    const cmdTag = hasUserCommand ? ", USER_CMD" : "";
     const wsState = this.wsClient.isConnected ? "ws=connected" : "ws=disconnected";
-    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag}, ${wsState})`);
+    log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag}${cmdTag}, ${wsState})`);
 
     // Store context for response handling (used in pushResponse for coding-context max-length)
     this.lastEscalationContext = contextWindow;
 
-    const escalationReason = score.reasons.join(", ");
+    const escalationReason = hasUserCommand
+      ? `user_command: ${this.pendingUserCommand!.text.slice(0, 80)}`
+      : score.reasons.join(", ");
     let message = buildEscalationMessage(
       entry.digest,
       contextWindow,
       entry,
       this.deps.escalationConfig.mode,
       escalationReason,
+      undefined,
+      this.pendingUserCommand ?? undefined,
     );
+
+    // Clear user command after building the message (consumed once)
+    this.pendingUserCommand = null;
 
     // Enrich with long-term knowledge facts (best-effort, 5s max)
     if (this.deps.queryKnowledgeFacts) {
@@ -389,6 +421,7 @@ ${recentLines.join("\n")}`;
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
+      pendingUserCommand: this.pendingUserCommand ? this.pendingUserCommand.text.slice(0, 80) : null,
       ...this.stats,
     };
   }

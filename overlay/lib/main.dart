@@ -8,6 +8,9 @@ import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
 import 'ui/hud_shell.dart';
 
+/// Global key for HudShell so hotkey handler can trigger command input.
+final hudShellKey = GlobalKey<HudShellState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -70,6 +73,8 @@ void main() async {
         await settingsService.setTopPosition(top);
       case 'onToggleTraits':
         wsService.sendCommand('toggle_traits');
+      case 'onOpenCommandInput':
+        hudShellKey.currentState?.showCommandInput();
       case 'onTogglePrivacy':
         final privacyMode = call.arguments as bool;
         settingsService.setPrivacyModeTransient(privacyMode);
@@ -115,9 +120,9 @@ class SinainHudApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const Scaffold(
+      home: Scaffold(
         backgroundColor: Colors.transparent,
-        body: HudShell(),
+        body: HudShell(key: hudShellKey),
       ),
     );
   }
