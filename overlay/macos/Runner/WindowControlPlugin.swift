@@ -75,6 +75,18 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             )
             result(nil)
 
+        case "activateCommandInput":
+            // Make panel the key window so it receives keyboard events
+            window.ignoresMouseEvents = false
+            window.makeKeyAndOrderFront(nil)
+            result(nil)
+
+        case "dismissCommandInput":
+            // Restore click-through and resign key window to return focus to previous app
+            window.ignoresMouseEvents = true
+            window.resignKey()
+            result(nil)
+
         default:
             result(FlutterMethodNotImplemented)
         }

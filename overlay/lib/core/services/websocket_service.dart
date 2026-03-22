@@ -222,6 +222,11 @@ class WebSocketService extends ChangeNotifier {
     });
   }
 
+  void sendUserCommand(String text) {
+    send({'type': 'user_command', 'text': text});
+    _log('User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+  }
+
   void disconnect() {
     _profilingTimer?.cancel();
     _profilingTimer = null;

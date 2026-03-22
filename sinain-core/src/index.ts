@@ -391,6 +391,9 @@ async function main() {
     getTraces: (after, limit) => tracer ? tracer.getTraces(after, limit) : [],
     reconnectGateway: () => escalator.reconnectGateway(),
 
+    // User command injection (bare agent / HTTP)
+    setUserCommand: (text: string) => escalator.setUserCommand(text),
+
     // Bare agent HTTP escalation bridge
     getEscalationPending: () => escalator.getPendingHttp(),
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
@@ -428,6 +431,9 @@ async function main() {
     config,
     onUserMessage: async (text) => {
       await escalator.sendDirect(text);
+    },
+    onUserCommand: (text) => {
+      escalator.setUserCommand(text);
     },
     onToggleScreen: () => {
       screenActive = !screenActive;
