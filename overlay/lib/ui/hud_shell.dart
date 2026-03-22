@@ -89,10 +89,6 @@ class HudShellState extends State<HudShell> {
           index: settings.activeTab.index,
           children: const [
             FeedView(
-              channel: FeedChannel.stream,
-              emptyLabel: 'awaiting feed…',
-            ),
-            FeedView(
               channel: FeedChannel.agent,
               emptyLabel: 'awaiting sinain…',
             ),
