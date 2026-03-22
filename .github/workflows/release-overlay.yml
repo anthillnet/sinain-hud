@@ -1,0 +1,38 @@
+name: Release Overlay
+
+on:
+  push:
+    tags:
+      - 'overlay-v*'
+
+jobs:
+  build-and-release:
+    name: Build & Release Overlay
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: overlay
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build macOS release
+        run: flutter build macos --release
+
+      - name: Zip app bundle
+        run: |
+          cd build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent sinain_hud.app sinain_hud.app.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: overlay/build/macos/Build/Products/Release/sinain_hud.app.zip
+          generate_release_notes: true
