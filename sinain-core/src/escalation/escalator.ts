@@ -78,6 +78,9 @@ export class Escalator {
   private pendingUserCommand: UserCommand | null = null;
   private static readonly USER_COMMAND_EXPIRY_MS = 120_000; // 2 minutes
 
+  // HTTP spawn queue — for bare agents that poll (mirrors httpPending for escalation)
+  private spawnHttpPending: { id: string; task: string; label: string; ts: number } | null = null;
+
   private stats = {
     totalEscalations: 0,
     totalResponses: 0,
@@ -397,6 +400,37 @@ ${recentLines.join("\n")}`;
     return { ok: true };
   }
 
+  /** Return the current HTTP pending spawn task (or null). */
+  getSpawnPending(): { id: string; task: string; label: string; ts: number } | null {
+    return this.spawnHttpPending;
+  }
+
+  /** Respond to a pending spawn task from a bare agent. */
+  respondSpawn(id: string, result: string): { ok: boolean; error?: string } {
+    if (!this.spawnHttpPending) {
+      return { ok: false, error: "no pending spawn task" };
+    }
+    if (this.spawnHttpPending.id !== id) {
+      return { ok: false, error: `id mismatch: expected ${this.spawnHttpPending.id}` };
+    }
+
+    const label = this.spawnHttpPending.label;
+    const startedAt = this.spawnHttpPending.ts;
+
+    // Push result to HUD feed
+    const maxLen = 3000;
+    const text = `[🔧 ${label}] ${result.trim().slice(0, maxLen)}`;
+    this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
+    this.deps.wsHandler.broadcast(text, "high", "agent");
+
+    // Broadcast completion
+    this.broadcastTaskEvent(id, "completed", label, startedAt, result.slice(0, 200));
+
+    log(TAG, `spawn ${id} responded (${result.length} chars)`);
+    this.spawnHttpPending = null;
+    return { ok: true };
+  }
+
   /** Whether the gateway WS client is currently connected. */
   get isGatewayConnected(): boolean {
     return this.wsClient.isConnected;
@@ -468,8 +502,12 @@ ${recentLines.join("\n")}`;
     this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
 
     if (!this.wsClient.isConnected) {
-      warn(TAG, `spawn-task ${taskId}: WS disconnected — cannot dispatch`);
-      this.broadcastTaskEvent(taskId, "failed", label, startedAt);
+      // No OpenClaw gateway — queue for bare agent HTTP polling
+      this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
+      const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
+      this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
+      this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
+      log(TAG, `spawn-task ${taskId}: WS disconnected — queued for bare agent polling`);
       return;
     }
 
