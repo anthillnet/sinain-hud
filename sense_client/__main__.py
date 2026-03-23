@@ -33,6 +33,7 @@ from .sender import SenseSender, package_full_frame, package_roi
 from .app_detector import AppDetector
 from .config import load_config
 from .privacy import apply_privacy
+from .ollama_vision import OllamaVision
 
 if sys.platform == "win32":
     CONTROL_FILE = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "sinain-sense-control.json")
@@ -127,6 +128,25 @@ def main():
     )
     app_detector = AppDetector()
     ocr_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+    # Local vision (Ollama) — optional scene understanding
+    vision_cfg = config.get("vision", {})
+    vision_enabled = vision_cfg.get("enabled", False) or os.environ.get("LOCAL_VISION_ENABLED", "").lower() == "true"
+    ollama_vision = None
+    vision_throttle_s = vision_cfg.get("throttleSeconds", 5)
+    last_vision_time = 0.0
+    vision_prompt = vision_cfg.get("prompt", "")
+    if vision_enabled:
+        ollama_vision = OllamaVision(
+            model=os.environ.get("LOCAL_VISION_MODEL", vision_cfg.get("model", "llava")),
+            base_url=vision_cfg.get("ollamaUrl", "http://localhost:11434"),
+            timeout=vision_cfg.get("timeout", 10.0),
+        )
+        if ollama_vision.is_available():
+            log(f"  vision: Ollama ({ollama_vision.model}) enabled")
+        else:
+            log("  vision: Ollama not available — scene descriptions disabled")
+            ollama_vision = None
 
     # Adaptive SSIM threshold state
     ssim_stable_threshold = config["detection"]["ssimThreshold"]  # 0.92
@@ -342,6 +362,19 @@ def main():
         event.observation = SenseObservation(
             title=title, subtitle=subtitle, facts=facts,
         )
+
+        # Local vision scene analysis (throttled, non-blocking on failure)
+        if ollama_vision and time.time() - last_vision_time >= vision_throttle_s:
+            try:
+                from PIL import Image as PILImage
+                pil_frame = PILImage.fromarray(use_frame) if isinstance(use_frame, np.ndarray) else use_frame
+                scene = ollama_vision.describe(pil_frame, prompt=vision_prompt or None)
+                if scene:
+                    event.observation.scene = scene
+                    last_vision_time = time.time()
+                    log(f"vision: {scene[:80]}...")
+            except Exception as e:
+                log(f"vision error: {e}")
 
         # Send small thumbnail for ALL event types (agent uses vision)
         # Privacy matrix: gate image sending based on PRIVACY_IMAGES_OPENROUTER

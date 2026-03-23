@@ -38,6 +38,15 @@ DEFAULTS = {
         "sendThumbnails": True,
         "maxImageKB": 500,
     },
+    "vision": {
+        "enabled": False,
+        "backend": "ollama",
+        "model": "llava",
+        "ollamaUrl": "http://localhost:11434",
+        "timeout": 10.0,
+        "throttleSeconds": 5,
+        "prompt": "Describe what's on this screen: the application, UI state, any errors or notable content. Be concise (2-3 sentences).",
+    },
     "optimization": {
         "backpressure": False,
         "textDedup": False,
