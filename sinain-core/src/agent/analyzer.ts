@@ -223,6 +223,17 @@ export async function analyzeContext(
   } catch { /* privacy not initialized, keep images */ }
   const systemPrompt = traitSystemPrompt ?? SYSTEM_PROMPT;
 
+  // Try local Ollama vision first when enabled and images are present
+  if (config.localVisionEnabled && images.length > 0) {
+    try {
+      const result = await callOllamaVision(systemPrompt, userPrompt, images, config);
+      log(TAG, `local vision (${config.localVisionModel}): success`);
+      return result;
+    } catch (err: any) {
+      log(TAG, `local vision failed: ${err.message || err}, falling back to OpenRouter`);
+    }
+  }
+
   const models = [config.model, ...config.fallbackModels];
 
   // Auto-upgrade: use vision model when images are present
@@ -357,6 +368,104 @@ async function callModel(
         tokensIn: data.usage?.prompt_tokens || 0,
         tokensOut: data.usage?.completion_tokens || 0,
         model,
+        parsedOk: false,
+      };
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Call Ollama local vision model for image analysis.
+ * Uses the /api/chat endpoint with base64 images.
+ * Falls back to OpenRouter on any failure.
+ */
+async function callOllamaVision(
+  systemPrompt: string,
+  userPrompt: string,
+  images: ContextWindow["images"],
+  config: AgentConfig,
+): Promise<AgentResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.localVisionTimeout);
+
+  try {
+    const imageB64List = (images || []).map((img) => img.data);
+
+    const response = await fetch(`${config.localVisionUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.localVisionModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt, images: imageB64List },
+        ],
+        stream: false,
+        options: { num_predict: config.maxTokens },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama ${response.status}: ${await response.text()}`);
+    }
+
+    const data = await response.json() as {
+      message?: { content?: string };
+      eval_count?: number;
+      prompt_eval_count?: number;
+    };
+
+    const content = data.message?.content?.trim() || "";
+    const latencyMs = Date.now() - start;
+    const tokensIn = data.prompt_eval_count || 0;
+    const tokensOut = data.eval_count || 0;
+
+    log(TAG, `ollama vision: model=${config.localVisionModel} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
+
+    // Parse the response (same format as OpenRouter)
+    // Parse JSON response (same logic as callModel)
+    try {
+      const jsonStr = content.replace(/^```\w*\s*\n?/, "").replace(/\n?\s*```\s*$/, "").trim();
+      const parsed = JSON.parse(jsonStr);
+      return {
+        hud: parsed.hud || "\u2014",
+        digest: parsed.digest || "\u2014",
+        record: parseRecord(parsed),
+        task: parseTask(parsed),
+        latencyMs,
+        tokensIn, tokensOut,
+        model: config.localVisionModel,
+        parsedOk: true,
+      };
+    } catch {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.hud) {
+            return {
+              hud: parsed.hud,
+              digest: parsed.digest || "\u2014",
+              record: parseRecord(parsed),
+              task: parseTask(parsed),
+              latencyMs,
+              tokensIn, tokensOut,
+              model: config.localVisionModel,
+              parsedOk: true,
+            };
+          }
+        } catch {}
+      }
+      return {
+        hud: content.slice(0, 160) || "\u2014",
+        digest: content || "\u2014",
+        latencyMs,
+        tokensIn, tokensOut,
+        model: config.localVisionModel,
         parsedOk: false,
       };
     }
