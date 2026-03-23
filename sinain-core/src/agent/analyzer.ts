@@ -241,6 +241,14 @@ export async function analyzeContext(
     }
   }
 
+  // Skip OpenRouter entirely if no API key (local-only mode)
+  if (!config.openrouterApiKey) {
+    if (config.localVisionEnabled) {
+      throw new Error("local vision failed and no OpenRouter API key — cannot analyze");
+    }
+    throw new Error("no OpenRouter API key configured");
+  }
+
   const models = [config.model, ...config.fallbackModels];
 
   // Auto-upgrade: use vision model when images are present
