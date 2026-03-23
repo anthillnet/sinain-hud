@@ -33,6 +33,7 @@ from .sender import SenseSender, package_full_frame, package_roi
 from .app_detector import AppDetector
 from .config import load_config
 from .privacy import apply_privacy
+from .vision import create_vision
 
 if sys.platform == "win32":
     CONTROL_FILE = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "sinain-sense-control.json")
@@ -127,6 +128,17 @@ def main():
     )
     app_detector = AppDetector()
     ocr_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+    # Vision provider — routes to Ollama (local) or OpenRouter (cloud) based on config/privacy
+    vision_cfg = config.get("vision", {})
+    vision_provider = create_vision(config)
+    vision_throttle_s = vision_cfg.get("throttleSeconds", 5)
+    last_vision_time = 0.0
+    vision_prompt = vision_cfg.get("prompt", "")
+    if vision_provider:
+        log(f"  vision: {vision_provider.name}")
+    else:
+        log("  vision: disabled (no provider available)")
 
     # Adaptive SSIM threshold state
     ssim_stable_threshold = config["detection"]["ssimThreshold"]  # 0.92
@@ -342,6 +354,19 @@ def main():
         event.observation = SenseObservation(
             title=title, subtitle=subtitle, facts=facts,
         )
+
+        # Vision scene analysis (throttled, non-blocking on failure)
+        if vision_provider and time.time() - last_vision_time >= vision_throttle_s:
+            try:
+                from PIL import Image as PILImage
+                pil_frame = PILImage.fromarray(use_frame) if isinstance(use_frame, np.ndarray) else use_frame
+                scene = vision_provider.describe(pil_frame, prompt=vision_prompt or None)
+                if scene:
+                    event.observation.scene = scene
+                    last_vision_time = time.time()
+                    log(f"vision: {scene[:80]}...")
+            except Exception as e:
+                log(f"vision error: {e}")
 
         # Send small thumbnail for ALL event types (agent uses vision)
         # Privacy matrix: gate image sending based on PRIVACY_IMAGES_OPENROUTER

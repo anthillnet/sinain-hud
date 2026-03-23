@@ -308,6 +308,27 @@ async function preflight() {
   } else {
     ok("port 9500 free");
   }
+
+  // Ollama (if local vision enabled)
+  if (process.env.LOCAL_VISION_ENABLED === "true") {
+    try {
+      const resp = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(2000) });
+      if (resp.ok) {
+        ok("ollama server running");
+      } else {
+        warn("ollama server not responding — local vision will be unavailable");
+      }
+    } catch {
+      // Try to start Ollama in background
+      try {
+        const { spawn: spawnProc } = await import("child_process");
+        spawnProc("ollama", ["serve"], { detached: true, stdio: "ignore" }).unref();
+        ok("ollama server started in background");
+      } catch {
+        warn("ollama not running and could not auto-start — local vision disabled");
+      }
+    }
+  }
 }
 
 // ── Setup wizard ─────────────────────────────────────────────────────────────
@@ -394,6 +415,52 @@ async function setupWizard(envPath) {
   // 3. Agent selection
   const agentChoice = await ask(`  Agent? [${BOLD}claude${RESET}/codex/goose/junie/aider]: `);
   vars.SINAIN_AGENT = agentChoice.trim().toLowerCase() || "claude";
+
+  // 3b. Local vision (Ollama)
+  const IS_MACOS = os.platform() === "darwin";
+  const hasOllama = commandExists("ollama");
+  if (hasOllama) {
+    const useVision = await ask(`  Enable local vision AI? [Y/n] (Ollama — screen understanding without cloud API): `);
+    if (!useVision.trim() || useVision.trim().toLowerCase() === "y") {
+      vars.LOCAL_VISION_ENABLED = "true";
+      try {
+        const models = execSync("ollama list 2>/dev/null", { encoding: "utf-8" });
+        if (!models.includes("llava")) {
+          const pull = await ask(`  Pull llava vision model (~4GB)? [Y/n]: `);
+          if (!pull.trim() || pull.trim().toLowerCase() === "y") {
+            console.log(`  ${DIM}Pulling llava...${RESET}`);
+            execSync("ollama pull llava", { stdio: "inherit" });
+            ok("llava model pulled");
+          }
+        } else {
+          ok("llava model already available");
+        }
+      } catch {
+        warn("Could not check Ollama models");
+      }
+      vars.LOCAL_VISION_MODEL = "llava";
+    }
+  } else {
+    const installOllama = await ask(`  Install Ollama for local vision AI? [y/N]: `);
+    if (installOllama.trim().toLowerCase() === "y") {
+      try {
+        if (IS_MACOS) {
+          console.log(`  ${DIM}Installing Ollama via Homebrew...${RESET}`);
+          execSync("brew install ollama", { stdio: "inherit" });
+        } else {
+          console.log(`  ${DIM}Installing Ollama...${RESET}`);
+          execSync("curl -fsSL https://ollama.com/install.sh | sh", { stdio: "inherit" });
+        }
+        console.log(`  ${DIM}Pulling llava vision model...${RESET}`);
+        execSync("ollama pull llava", { stdio: "inherit" });
+        vars.LOCAL_VISION_ENABLED = "true";
+        vars.LOCAL_VISION_MODEL = "llava";
+        ok("Ollama + llava installed");
+      } catch {
+        warn("Ollama installation failed — local vision disabled");
+      }
+    }
+  }
 
   // 4. Escalation mode
   console.log();

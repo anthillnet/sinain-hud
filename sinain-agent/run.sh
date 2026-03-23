@@ -11,6 +11,10 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
     key=$(echo "$key" | xargs)  # trim whitespace
     val=$(echo "$val" | xargs)
+    # Strip inline comments (e.g. "5 # seconds" → "5")
+    val="${val%%#*}"
+    val=$(echo "$val" | xargs)  # re-trim after comment strip
+    [[ -z "$val" ]] && continue
     # Only set if not already in environment
     if [ -z "${!key+x}" ]; then
       export "$key=$val"
