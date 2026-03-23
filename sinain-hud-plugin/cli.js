@@ -29,6 +29,17 @@ switch (cmd) {
     await import("./setup-overlay.js");
     break;
 
+  case "setup-sck-capture": {
+    const { downloadBinary } = await import("./setup-sck-capture.js");
+    if (os.platform() === "win32") {
+      console.log("sck-capture is macOS-only (Windows uses win-audio-capture.exe)");
+    } else {
+      const forceUpdate = process.argv.includes("--update");
+      await downloadBinary({ forceUpdate });
+    }
+    break;
+  }
+
   case "install":
     // --if-openclaw: only run if OpenClaw is installed (for postinstall)
     if (process.argv.includes("--if-openclaw")) {
@@ -156,6 +167,10 @@ async function runSetupWizard() {
     }
     vars.OPENCLAW_HTTP_URL = vars.OPENCLAW_WS_URL.replace(/^ws/, "http") + "/hooks/agent";
     vars.OPENCLAW_SESSION_KEY = "agent:main:sinain";
+  } else {
+    // No gateway — disable WS connection attempts
+    vars.OPENCLAW_WS_URL = "";
+    vars.OPENCLAW_HTTP_URL = "";
   }
 
   vars.SINAIN_POLL_INTERVAL = "5";
@@ -346,6 +361,7 @@ Usage:
   sinain status                Check what's running
   sinain setup                 Run interactive setup wizard (~/.sinain/.env)
   sinain setup-overlay         Download pre-built overlay app
+  sinain setup-sck-capture     Download sck-capture audio binary (macOS)
   sinain install               Install OpenClaw plugin (server-side)
 
 Start options:

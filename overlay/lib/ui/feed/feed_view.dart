@@ -23,7 +23,7 @@ class FeedView extends StatefulWidget {
 
 class _FeedViewState extends State<FeedView> {
   static const _maxItems = 50;
-  static const _scrollStep = 80.0;
+  static const _selectionColor = Color(0xFF00E5FF);
   final List<FeedItem> _items = [];
   final ScrollController _scrollController = ScrollController();
   StreamSubscription<FeedItem>? _feedSub;
@@ -31,6 +31,10 @@ class _FeedViewState extends State<FeedView> {
   StreamSubscription<String>? _copySub;
   Timer? _fadeTimer;
   bool _autoScroll = true;
+
+  /// Index of the selected message, or null when in auto-scroll mode
+  /// (last message is implicitly selected).
+  int? _selectedIndex;
 
   @override
   void initState() {
@@ -51,10 +55,19 @@ class _FeedViewState extends State<FeedView> {
   }
 
   void _onFeedItem(FeedItem item) {
+    final trimCount = _items.length + 1 > _maxItems
+        ? _items.length + 1 - _maxItems
+        : 0;
+
     setState(() {
       _items.add(item);
-      if (_items.length > _maxItems) {
-        _items.removeRange(0, _items.length - _maxItems);
+      if (trimCount > 0) {
+        _items.removeRange(0, trimCount);
+        // Adjust selection to track the same message after trim
+        if (_selectedIndex != null) {
+          _selectedIndex = _selectedIndex! - trimCount;
+          if (_selectedIndex! < 0) _selectedIndex = null;
+        }
       }
     });
     if (_autoScroll) {
@@ -66,31 +79,62 @@ class _FeedViewState extends State<FeedView> {
   }
 
   void _onScrollCommand(String direction) {
-    if (!_scrollController.hasClients) return;
-    final pos = _scrollController.position;
+    if (!_scrollController.hasClients || _items.isEmpty) return;
     switch (direction) {
       case 'up':
-        _autoScroll = false;
-        _scrollController.animateTo(
-          (pos.pixels - _scrollStep).clamp(0.0, pos.maxScrollExtent),
-          duration: const Duration(milliseconds: 100),
-          curve: Curves.easeOut,
-        );
+        setState(() {
+          _autoScroll = false;
+          if (_selectedIndex == null) {
+            // First scroll up: select second-to-last (one above newest)
+            _selectedIndex = (_items.length - 2).clamp(0, _items.length - 1);
+          } else if (_selectedIndex! > 0) {
+            _selectedIndex = _selectedIndex! - 1;
+          }
+        });
+        _scrollToSelected();
       case 'down':
-        final target = (pos.pixels + _scrollStep).clamp(0.0, pos.maxScrollExtent);
-        _scrollController.animateTo(
-          target,
-          duration: const Duration(milliseconds: 100),
-          curve: Curves.easeOut,
-        );
-        // Re-enable auto-scroll when reaching bottom
-        if (target >= pos.maxScrollExtent - 20) {
-          _autoScroll = true;
+        setState(() {
+          if (_selectedIndex == null) return;
+          if (_selectedIndex! < _items.length - 1) {
+            _selectedIndex = _selectedIndex! + 1;
+          }
+          // Reaching the last item: return to auto-scroll
+          if (_selectedIndex == _items.length - 1) {
+            _selectedIndex = null;
+            _autoScroll = true;
+          }
+        });
+        if (_autoScroll) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 100),
+            curve: Curves.easeOut,
+          );
+        } else {
+          _scrollToSelected();
         }
       case 'bottom':
-        _autoScroll = true;
-        _scrollController.jumpTo(pos.maxScrollExtent);
+        setState(() {
+          _selectedIndex = null;
+          _autoScroll = true;
+        });
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
     }
+  }
+
+  void _scrollToSelected() {
+    if (_selectedIndex == null || !_scrollController.hasClients) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients || _items.isEmpty) return;
+      // Proportional scroll: estimate position based on index ratio
+      final fraction = _selectedIndex! / (_items.length - 1).clamp(1, _items.length);
+      final target = fraction * _scrollController.position.maxScrollExtent;
+      _scrollController.animateTo(
+        target.clamp(0.0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _onCopyCommand(String activeTab) {
@@ -98,17 +142,9 @@ class _FeedViewState extends State<FeedView> {
     if (activeTab != widget.channel.name) return;
     if (_items.isEmpty) return;
 
-    String targetText;
-    if (_autoScroll || !_scrollController.hasClients) {
-      // Auto-scroll mode: copy the last (newest) message
-      targetText = _items.last.text;
-    } else {
-      // Manual scroll: estimate the topmost visible item from scroll offset
-      final offset = _scrollController.offset;
-      const estimatedItemHeight = 20.0;
-      final index = (offset / estimatedItemHeight).floor().clamp(0, _items.length - 1);
-      targetText = _items[index].text;
-    }
+    final targetText = _selectedIndex != null
+        ? _items[_selectedIndex!].text
+        : _items.last.text;
 
     Clipboard.setData(ClipboardData(text: targetText));
   }
@@ -129,7 +165,13 @@ class _FeedViewState extends State<FeedView> {
     }
     final countBefore = _items.length;
     _items.removeWhere((i) => i.opacity <= 0.15 && _items.length > 10);
-    if (_items.length != countBefore) changed = true;
+    if (_items.length != countBefore) {
+      // Adjust selection after fade removal
+      if (_selectedIndex != null && _selectedIndex! >= _items.length) {
+        _selectedIndex = _items.isNotEmpty ? _items.length - 1 : null;
+      }
+      changed = true;
+    }
     if (changed) setState(() {});
   }
 
@@ -167,10 +209,25 @@ class _FeedViewState extends State<FeedView> {
       itemBuilder: (context, index) {
         final item = _items[index];
         final color = _priorityColor(item.priority);
+        final isSelected = index == _selectedIndex;
         return Opacity(
           opacity: item.opacity,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1),
+          child: Container(
+            decoration: isSelected
+                ? BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: _selectionColor.withValues(alpha: 0.6),
+                        width: 2,
+                      ),
+                    ),
+                  )
+                : null,
+            padding: EdgeInsets.only(
+              left: isSelected ? 4 : 0,
+              top: 1,
+              bottom: 1,
+            ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -180,7 +237,9 @@ class _FeedViewState extends State<FeedView> {
                   style: TextStyle(
                     fontFamily: 'JetBrainsMono',
                     fontSize: 10,
-                    color: Colors.white.withValues(alpha: 0.25),
+                    color: isSelected
+                        ? _selectionColor.withValues(alpha: 0.5)
+                        : Colors.white.withValues(alpha: 0.25),
                   ),
                 ),
                 const SizedBox(width: 6),
