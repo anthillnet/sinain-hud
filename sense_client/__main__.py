@@ -129,24 +129,16 @@ def main():
     app_detector = AppDetector()
     ocr_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    # Local vision (Ollama) — optional scene understanding
+    # Vision provider — routes to Ollama (local) or OpenRouter (cloud) based on config/privacy
     vision_cfg = config.get("vision", {})
-    vision_enabled = vision_cfg.get("enabled", False) or os.environ.get("LOCAL_VISION_ENABLED", "").lower() == "true"
-    ollama_vision = None
+    vision_provider = create_vision(config)
     vision_throttle_s = vision_cfg.get("throttleSeconds", 5)
     last_vision_time = 0.0
     vision_prompt = vision_cfg.get("prompt", "")
-    if vision_enabled:
-        ollama_vision = OllamaVision(
-            model=os.environ.get("LOCAL_VISION_MODEL", vision_cfg.get("model", "llava")),
-            base_url=vision_cfg.get("ollamaUrl", "http://localhost:11434"),
-            timeout=vision_cfg.get("timeout", 10.0),
-        )
-        if ollama_vision.is_available():
-            log(f"  vision: Ollama ({ollama_vision.model}) enabled")
-        else:
-            log("  vision: Ollama not available — scene descriptions disabled")
-            ollama_vision = None
+    if vision_provider:
+        log(f"  vision: {vision_provider.name}")
+    else:
+        log("  vision: disabled (no provider available)")
 
     # Adaptive SSIM threshold state
     ssim_stable_threshold = config["detection"]["ssimThreshold"]  # 0.92
@@ -363,12 +355,12 @@ def main():
             title=title, subtitle=subtitle, facts=facts,
         )
 
-        # Local vision scene analysis (throttled, non-blocking on failure)
-        if ollama_vision and time.time() - last_vision_time >= vision_throttle_s:
+        # Vision scene analysis (throttled, non-blocking on failure)
+        if vision_provider and time.time() - last_vision_time >= vision_throttle_s:
             try:
                 from PIL import Image as PILImage
                 pil_frame = PILImage.fromarray(use_frame) if isinstance(use_frame, np.ndarray) else use_frame
-                scene = ollama_vision.describe(pil_frame, prompt=vision_prompt or None)
+                scene = vision_provider.describe(pil_frame, prompt=vision_prompt or None)
                 if scene:
                     event.observation.scene = scene
                     last_vision_time = time.time()
