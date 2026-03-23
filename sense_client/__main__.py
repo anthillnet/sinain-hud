@@ -33,7 +33,7 @@ from .sender import SenseSender, package_full_frame, package_roi
 from .app_detector import AppDetector
 from .config import load_config
 from .privacy import apply_privacy
-from .ollama_vision import OllamaVision
+from .vision import create_vision
 
 if sys.platform == "win32":
     CONTROL_FILE = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "sinain-sense-control.json")
