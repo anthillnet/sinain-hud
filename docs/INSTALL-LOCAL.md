@@ -14,7 +14,8 @@ Run the entire sinain stack — including the OpenClaw agent gateway — on your
 | Python 3.9+ | For sense_client screen pipeline |
 | Flutter 3.27+ | Only for development — pre-built overlay available via `sinain setup-overlay` |
 | Anthropic API key | Used by OpenClaw gateway for the agent — configured in `auth-profiles.json` |
-| OpenRouter API key | Free at [openrouter.ai](https://openrouter.ai) — used for screen OCR and audio transcription |
+| OpenRouter API key | Free at [openrouter.ai](https://openrouter.ai) — optional if using local vision (Ollama) + local whisper |
+| Ollama | Optional — for local vision AI without cloud API. Install: `brew install ollama && ollama pull llava` |
 | Microphone + Screen Recording permissions | System Settings → Privacy & Security → Microphone / Screen Recording |
 
 ---
@@ -33,6 +34,9 @@ sinain-core (port 9500) ←→ ws://localhost:18789
 overlay (private HUD)
 sense_client (OCR pipeline)
 sck-capture (audio + screen)
+
+Ollama (port 11434, optional)
+  └─ llava / moondream (local vision + text analysis)
 ```
 
 - **OpenClaw gateway** — native Node.js process on port 18789; runs the Claude agent with sinain plugin, memory, playbook, and evaluation
@@ -57,14 +61,70 @@ The wizard asks 6 things:
 
 | Prompt | What to enter |
 |---|---|
-| **[1/6] OpenRouter API key** | Your key from [openrouter.ai](https://openrouter.ai) — used for screen OCR and transcription |
+| **[1/6] OpenRouter API key** | Your key from [openrouter.ai](https://openrouter.ai) — optional if using local vision + whisper |
 | **[2/6] Audio transcription** | `a` for cloud (OpenRouter), `b` for local Whisper (~1.5 GB download) |
+| **[2b/6] Local vision** | Optional — detects/installs Ollama + pulls llava model for local screen understanding |
 | **[3/6] Install & start gateway** | Automatic — installs `openclaw` via npm if needed, starts the gateway, installs the sinain plugin |
 | **[4/6] Verify Anthropic auth** | Checks if your Anthropic API key is configured in `auth-profiles.json` |
 | **[5/6] Snapshot backup repo** | Optional — private GitHub repo URL to backup knowledge snapshots (playbook, modules, eval). Leave blank to skip. |
 | **[6/6] Restore snapshot** | If you have a knowledge snapshot at `~/.sinain/knowledge-snapshots/`, optionally restore it |
 
 After the wizard completes, sinain launches automatically.
+
+---
+
+---
+
+## Local Vision (Ollama)
+
+sinain can use [Ollama](https://ollama.com) for local vision AI instead of OpenRouter. This enables fully private operation — no screen data leaves your machine.
+
+### Automatic (via setup wizard)
+
+The `setup-local.sh` wizard detects Ollama and offers to enable local vision automatically. If Ollama isn't installed, it offers to install it via Homebrew.
+
+### Manual setup
+
+```bash
+# 1. Install Ollama
+brew install ollama
+
+# 2. Pull a vision model
+ollama pull llava
+
+# 3. Add to your .env
+echo "LOCAL_VISION_ENABLED=true" >> .env
+echo "LOCAL_VISION_MODEL=llava" >> .env
+
+# 4. Start with local transcription + local vision
+./start-local.sh
+```
+
+Startup confirms local vision:
+```
+[local]   vision:   Ollama (llava) — local
+```
+
+### Available models
+
+| Model | Size | Speed (warm) | Quality | Best for |
+|-------|------|-------------|---------|----------|
+| `llava` | 4.7 GB | ~2s/frame | Good | General use (recommended) |
+| `llama3.2-vision` | 7.9 GB | ~4s/frame | Best | Maximum accuracy |
+| `moondream` | 1.7 GB | ~1s/frame | Fair | Low-memory machines |
+
+### Privacy mode compatibility
+
+When local vision is enabled, sinain routes **all** agent analysis through Ollama — both vision (with images) and text-only ticks. OpenRouter is only used as a fallback when Ollama fails.
+
+| Privacy Mode | Vision source | Fallback |
+|-------------|---------------|----------|
+| `off` | OpenRouter (cloud) | — |
+| `standard` | OpenRouter (cloud) | — |
+| `strict` | Ollama if enabled, else OpenRouter | OpenRouter |
+| `paranoid` | **Ollama only** (cloud blocked) | None — fully local |
+
+With `PRIVACY_MODE=paranoid` and `LOCAL_VISION_ENABLED=true`, zero data leaves your machine.
 
 ---
 
@@ -248,3 +308,7 @@ openclaw gateway --bind loopback --port 18789 --force &
 | `agent:main:sinain` session key mismatch | Verify `OPENCLAW_SESSION_KEY=agent:main:sinain` in `sinain-core/.env` |
 | Camera blocked in Google Meet | Ensure you're using the `ffmpeg`-based audio path (not `sox rec`) — see `start.sh` |
 | sinain-core not picking up `.env` changes | Touch any source file (`touch sinain-core/src/index.ts`) or restart the process |
+| `Ollama 500: no slots available` | Ollama is busy processing a previous frame. sinain auto-skips and retries next tick. Normal at high FPS. |
+| Vision shows "cloud (OpenRouter)" at startup | Set `LOCAL_VISION_ENABLED=true` in `.env` and restart |
+| `local ollama failed` then falls back to OpenRouter | Ollama server may not be running. Start it: `ollama serve` |
+| 401 "User not found" in paranoid mode | OpenRouter API key is invalid or revoked. With `LOCAL_VISION_ENABLED=true`, this is expected — Ollama handles everything. |

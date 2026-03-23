@@ -223,6 +223,10 @@ export interface AgentConfig {
   model: string;
   visionModel: string;
   visionEnabled: boolean;
+  localVisionEnabled: boolean;
+  localVisionModel: string;
+  localVisionUrl: string;
+  localVisionTimeout: number;
   openrouterApiKey: string;
   maxTokens: number;
   temperature: number;

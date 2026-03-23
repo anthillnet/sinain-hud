@@ -31,6 +31,7 @@ class SenseObservation:
     facts: list[str] = field(default_factory=list)
     narrative: str = ""
     concepts: list[str] = field(default_factory=list)
+    scene: str = ""  # Local vision model scene description (Ollama)
 
 
 @dataclass
