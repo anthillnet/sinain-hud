@@ -56,7 +56,8 @@ Sinain is three things:
 
 - **macOS 12.3+** (ScreenCaptureKit) or **Windows 10 2004+** (private overlay via WDA_EXCLUDEFROMCAPTURE)
 - Node.js 18+, Python 3.10+
-- OpenRouter API key (free tier works) or local whisper.cpp for offline transcription
+- OpenRouter API key (free tier works) — or run fully local with whisper.cpp + Ollama (no cloud needed)
+- **Optional:** [Ollama](https://ollama.com) for local vision AI (screen understanding without cloud APIs)
 - macOS: Screen Recording + Microphone permissions
 - Windows: Microphone permission (private overlay works out of the box)
 - Flutter 3.10+ only needed for development (`sinain setup-overlay --from-source`)
@@ -73,7 +74,9 @@ If you don't have them yet:
 
 Verify with: `node -v` and `python3 --version`
 
-### Step 2: Get an OpenRouter API key
+### Step 2: Get an OpenRouter API key (optional for local-only mode)
+
+> **Running fully local?** Skip this step. If you have Ollama + whisper-cli, sinain works without any cloud API. See [Running Fully Local](#running-fully-local-no-cloud-apis) below.
 
 1. Go to [openrouter.ai](https://openrouter.ai) and sign up (free tier works)
 2. Create an API key from the dashboard — it starts with `sk-or-...`
@@ -102,8 +105,8 @@ npx @geravant/sinain start
 ```
 
 On first run, an interactive setup wizard configures `~/.sinain/.env` — it asks for your
-transcription backend (local whisper or OpenRouter), API key, agent, escalation mode, and
-optional OpenClaw gateway. To re-run the wizard later: `npx @geravant/sinain setup`.
+transcription backend (local whisper or OpenRouter), API key, agent, local vision (Ollama),
+escalation mode, and optional OpenClaw gateway. To re-run the wizard later: `npx @geravant/sinain setup`.
 
 You should see a status banner showing all services running. The HUD overlay appears as a
 small window on your screen — it's invisible to screen capture and recording.
@@ -115,7 +118,7 @@ small window on your screen — it's invisible to screen capture and recording.
 | `off` | All data flows freely — maximum insight quality, no filtering |
 | `standard` | **Default (wizard).** Auto-redacts credentials before cloud APIs |
 | `strict` | Only summaries leave your machine — no raw text sent to cloud |
-| `paranoid` | Almost nothing leaves your machine. Very limited functionality |
+| `paranoid` | Fully local with Ollama. No cloud API calls. Requires `LOCAL_VISION_ENABLED=true`. |
 
 See [Privacy Threat Model](docs/privacy-protection-design.md) for full details.
 
@@ -127,6 +130,48 @@ npx @geravant/sinain status     # check what's running
 npx @geravant/sinain start --no-sense    # skip screen capture
 npx @geravant/sinain start --no-overlay  # headless (no HUD window)
 ```
+
+### Running Fully Local (No Cloud APIs)
+
+sinain can run without any cloud API keys using local models:
+
+- **Audio**: whisper-cli (local transcription, ~1.5 GB model)
+- **Vision**: Ollama with llava (local screen understanding, ~4.7 GB model)
+- **Agent analysis**: Ollama handles both text and vision ticks locally
+- **Agent**: Any MCP-capable agent (Claude, Codex, Junie, Goose) for escalation responses
+
+```bash
+# 1. Install local transcription
+./setup-local-stt.sh
+
+# 2. Install Ollama + vision model
+brew install ollama
+ollama pull llava
+
+# 3. Configure .env (or let the setup wizard handle it)
+echo "LOCAL_VISION_ENABLED=true" >> ~/.sinain/.env
+echo "LOCAL_VISION_MODEL=llava" >> ~/.sinain/.env
+echo "PRIVACY_MODE=paranoid" >> ~/.sinain/.env
+
+# 4. Start
+./start-local.sh
+```
+
+Startup confirms local mode:
+```
+[local] Starting SinainHUD with local transcription...
+[local]   backend:  whisper-cpp
+[local]   vision:   Ollama (llava) — local
+[local]   agent:    claude (transport=http) — start with: sinain-agent/run.sh
+```
+
+Available local vision models:
+
+| Model | Size | Speed (warm) | Best for |
+|-------|------|-------------|----------|
+| `llava` | 4.7 GB | ~2s/frame | General use (recommended) |
+| `llama3.2-vision` | 7.9 GB | ~4s/frame | Best accuracy |
+| `moondream` | 1.7 GB | ~1s/frame | Fastest, lower quality |
 
 ### From source (for developers)
 
@@ -140,7 +185,8 @@ cp .env.example ~/.sinain/.env
 ./start.sh --no-overlay      # headless mode
 ```
 
-For local transcription (no API key needed for audio): `./setup-local-stt.sh`, then `./start-local.sh`
+For local transcription: `./setup-local-stt.sh`, then `./start-local.sh`
+For fully local (no cloud APIs): also set `LOCAL_VISION_ENABLED=true` in `.env` — see [Running Fully Local](#running-fully-local-no-cloud-apis)
 
 ## Setup Guides
 
