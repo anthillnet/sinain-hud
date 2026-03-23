@@ -5,6 +5,9 @@ import { levelFor, applyLevel } from "../privacy/index.js";
 
 const TAG = "agent";
 
+/** Guard: only one Ollama vision call at a time (latest-wins, skip if busy). */
+let ollamaInFlight = false;
+
 /**
  * Model-specific timeouts in milliseconds.
  * Only increases timeouts for slow models to avoid false timeouts.
@@ -224,13 +227,17 @@ export async function analyzeContext(
   const systemPrompt = traitSystemPrompt ?? SYSTEM_PROMPT;
 
   // Try local Ollama vision first when enabled and images are present
-  if (config.localVisionEnabled && images.length > 0) {
+  // Guard: skip if a previous Ollama call is still in-flight (avoids "no slots available")
+  if (config.localVisionEnabled && images.length > 0 && !ollamaInFlight) {
+    ollamaInFlight = true;
     try {
       const result = await callOllamaVision(systemPrompt, userPrompt, images, config);
       log(TAG, `local vision (${config.localVisionModel}): success`);
       return result;
     } catch (err: any) {
       log(TAG, `local vision failed: ${err.message || err}, falling back to OpenRouter`);
+    } finally {
+      ollamaInFlight = false;
     }
   }
 
