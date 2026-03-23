@@ -5,7 +5,7 @@
 import fs from "fs";
 import path from "path";
 
-const LINKS = ["sinain-core", "sinain-mcp-server", "sinain-agent", "sense_client"];
+const LINKS = ["sinain-core", "sinain-mcp-server", "sinain-agent", "sense_client", ".env.example"];
 const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 
 const action = process.argv[2]; // "pre" or "post"
@@ -18,7 +18,12 @@ if (action === "pre") {
     if (!stat.isSymbolicLink()) continue;
     const target = fs.realpathSync(linkPath);
     fs.unlinkSync(linkPath);
-    copyDir(target, linkPath);
+    const targetStat = fs.statSync(target);
+    if (targetStat.isDirectory()) {
+      copyDir(target, linkPath);
+    } else {
+      fs.copyFileSync(target, linkPath);
+    }
   }
   console.log("prepack: symlinks → copies");
 } else if (action === "post") {
