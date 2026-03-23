@@ -161,6 +161,10 @@ export class OpenClawWsClient extends EventEmitter {
 
   /** Connect to the OpenClaw gateway. */
   connect(): void {
+    if (!this.config.gatewayWsUrl) {
+      log(TAG, "connect: no gateway URL configured — skipping");
+      return;
+    }
     if (!this.config.gatewayToken && !this.config.hookUrl) {
       log(TAG, "connect: no gateway token or hookUrl — skipping");
       return;
