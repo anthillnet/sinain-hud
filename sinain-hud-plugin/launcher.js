@@ -78,6 +78,25 @@ async function main() {
   // Install deps if needed
   await installDeps();
 
+  // Auto-download sck-capture binary if missing (macOS only)
+  if (!IS_WINDOWS) {
+    const sckBinary = path.join(SINAIN_DIR, "sck-capture", "sck-capture");
+    if (!fs.existsSync(sckBinary)) {
+      log("sck-capture not found — downloading from GitHub Releases...");
+      try {
+        const { downloadBinary } = await import("./setup-sck-capture.js");
+        const success = await downloadBinary({ silent: true });
+        if (success) {
+          ok("sck-capture downloaded");
+        } else {
+          warn("sck-capture download failed — audio capture may not work");
+        }
+      } catch (e) {
+        warn(`sck-capture auto-download failed: ${e.message}`);
+      }
+    }
+  }
+
   // Start core
   log("Starting sinain-core...");
   const coreDir = path.join(PKG_DIR, "sinain-core");
@@ -108,7 +127,7 @@ async function main() {
         const scDir = path.join(PKG_DIR, "sense_client");
         // Check if key package is importable to skip pip
         try {
-          execSync('python3 -c "import cv2; import skimage"', { stdio: "pipe" });
+          execSync('python3 -c "import PIL; import skimage"', { stdio: "pipe" });
         } catch {
           log("Installing sense_client Python dependencies...");
           try {
@@ -402,6 +421,10 @@ async function setupWizard(envPath) {
     const httpBase = vars.OPENCLAW_WS_URL.replace(/^ws/, "http");
     vars.OPENCLAW_HTTP_URL = `${httpBase}/hooks/agent`;
     vars.OPENCLAW_SESSION_KEY = "agent:main:sinain";
+  } else {
+    // No gateway — disable WS connection attempts
+    vars.OPENCLAW_WS_URL = "";
+    vars.OPENCLAW_HTTP_URL = "";
   }
 
   // 6. Agent-specific defaults
