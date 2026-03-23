@@ -226,16 +226,17 @@ export async function analyzeContext(
   } catch { /* privacy not initialized, keep images */ }
   const systemPrompt = traitSystemPrompt ?? SYSTEM_PROMPT;
 
-  // Try local Ollama vision first when enabled and images are present
+  // Try local Ollama first when enabled (handles both vision and text-only ticks)
   // Guard: skip if a previous Ollama call is still in-flight (avoids "no slots available")
-  if (config.localVisionEnabled && images.length > 0 && !ollamaInFlight) {
+  if (config.localVisionEnabled && !ollamaInFlight) {
     ollamaInFlight = true;
     try {
       const result = await callOllamaVision(systemPrompt, userPrompt, images, config);
-      log(TAG, `local vision (${config.localVisionModel}): success`);
+      const mode = images.length > 0 ? "vision" : "text";
+      log(TAG, `local ollama (${config.localVisionModel}, ${mode}): success`);
       return result;
     } catch (err: any) {
-      log(TAG, `local vision failed: ${err.message || err}, falling back to OpenRouter`);
+      log(TAG, `local ollama failed: ${err.message || err}, falling back to OpenRouter`);
     } finally {
       ollamaInFlight = false;
     }
@@ -244,7 +245,7 @@ export async function analyzeContext(
   // Skip OpenRouter entirely if no API key (local-only mode)
   if (!config.openrouterApiKey) {
     if (config.localVisionEnabled) {
-      throw new Error("local vision failed and no OpenRouter API key — cannot analyze");
+      throw new Error("local ollama failed and no OpenRouter API key — cannot analyze");
     }
     throw new Error("no OpenRouter API key configured");
   }
