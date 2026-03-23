@@ -63,6 +63,13 @@ function boolEnv(key: string, fallback: boolean): boolean {
   return v === "true";
 }
 
+/** Like env() but treats a defined-but-empty value as "" instead of falling through to fallback. */
+function envAllowEmpty(key: string, fallbackKey?: string, defaultVal = ""): string {
+  if (process.env[key] !== undefined) return process.env[key]!;
+  if (fallbackKey && process.env[fallbackKey] !== undefined) return process.env[fallbackKey]!;
+  return defaultVal;
+}
+
 function resolvePath(p: string): string {
   if (process.platform === "win32") {
     // Expand %APPDATA%, %USERPROFILE%, %TEMP% etc.
@@ -194,9 +201,9 @@ export function loadConfig(): CoreConfig {
   };
 
   const openclawConfig: OpenClawConfig = {
-    gatewayWsUrl: env("OPENCLAW_WS_URL", env("OPENCLAW_GATEWAY_WS_URL", "ws://localhost:18789")),
+    gatewayWsUrl: envAllowEmpty("OPENCLAW_WS_URL", "OPENCLAW_GATEWAY_WS_URL", "ws://localhost:18789"),
     gatewayToken: env("OPENCLAW_WS_TOKEN", env("OPENCLAW_GATEWAY_TOKEN", "")),
-    hookUrl: env("OPENCLAW_HTTP_URL", env("OPENCLAW_HOOK_URL", "http://localhost:18789/hooks/agent")),
+    hookUrl: envAllowEmpty("OPENCLAW_HTTP_URL", "OPENCLAW_HOOK_URL", "http://localhost:18789/hooks/agent"),
     hookToken: env("OPENCLAW_HTTP_TOKEN", env("OPENCLAW_HOOK_TOKEN", "")),
     sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:sinain"),
     phase1TimeoutMs: intEnv("OPENCLAW_PHASE1_TIMEOUT_MS", 30_000),

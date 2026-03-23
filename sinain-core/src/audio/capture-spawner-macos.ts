@@ -2,6 +2,7 @@ import os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import type { AudioPipelineConfig, AudioSourceTag } from "../types.js";
 import type { CaptureSpawner } from "./capture-spawner.js";
 import { log } from "../log.js";
@@ -16,7 +17,18 @@ const TAG = "audio";
  */
 export class MacOSCaptureSpawner implements CaptureSpawner {
   spawn(config: AudioPipelineConfig, source: AudioSourceTag): ChildProcess {
-    const binaryPath = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
+    // Check ~/.sinain/sck-capture/ first (npx install), then dev path
+    const homeBinary = resolve(os.homedir(), ".sinain", "sck-capture", "sck-capture");
+    const devBinary = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
+    const binaryPath = existsSync(homeBinary) ? homeBinary : devBinary;
+
+    if (!existsSync(binaryPath)) {
+      throw new Error(
+        `sck-capture binary not found at ${binaryPath}. ` +
+        `Run: npx @geravant/sinain setup-sck-capture`
+      );
+    }
+
     const args = [
       "--sample-rate", String(config.sampleRate),
       "--channels", String(config.channels),
