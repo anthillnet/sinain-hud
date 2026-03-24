@@ -7,6 +7,9 @@ import path from "path";
 
 const cmd = process.argv[2];
 const IS_WINDOWS = os.platform() === "win32";
+const HOME = os.homedir();
+const SINAIN_DIR = path.join(HOME, ".sinain");
+const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 
 switch (cmd) {
   case "start":
@@ -50,6 +53,14 @@ switch (cmd) {
       }
     }
     await import("./install.js");
+    break;
+
+  case "export-knowledge":
+    await exportKnowledge();
+    break;
+
+  case "import-knowledge":
+    await importKnowledge();
     break;
 
   default:
@@ -349,6 +360,152 @@ function isProcessRunning(pattern) {
   }
 }
 
+// ── Knowledge export/import ──────────────────────────────────────────────────
+
+function findWorkspace() {
+  const candidates = [
+    process.env.SINAIN_WORKSPACE,
+    path.join(HOME, ".openclaw/workspace"),
+    path.join(HOME, ".sinain/workspace"),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    const resolved = dir.replace(/^~/, HOME);
+    if (fs.existsSync(resolved)) return resolved;
+  }
+  return null;
+}
+
+async function exportKnowledge() {
+  const BOLD = "\x1b[1m", GREEN = "\x1b[32m", RED = "\x1b[31m", DIM = "\x1b[2m", RESET = "\x1b[0m";
+
+  const workspace = findWorkspace();
+  if (!workspace) {
+    console.error(`${RED}✗${RESET} No knowledge workspace found.`);
+    console.error(`  Checked: SINAIN_WORKSPACE env, ~/.openclaw/workspace, ~/.sinain/workspace`);
+    process.exit(1);
+  }
+
+  const outputIdx = process.argv.indexOf("--output");
+  const outputPath = outputIdx !== -1 && process.argv[outputIdx + 1]
+    ? path.resolve(process.argv[outputIdx + 1])
+    : path.join(HOME, "sinain-knowledge-export.tar.gz");
+
+  // Collect files that exist
+  const includes = [];
+  const check = (rel) => {
+    const full = path.join(workspace, rel);
+    if (fs.existsSync(full)) { includes.push(rel); return true; }
+    return false;
+  };
+
+  check("modules");
+  check("memory/sinain-playbook.md");
+  check("memory/knowledge-graph.db");
+  check("memory/playbook-base.md");
+  check("memory/playbook.md");
+  check("memory/sinain-knowledge.md");
+
+  if (includes.length === 0) {
+    console.error(`${RED}✗${RESET} No knowledge files found in ${workspace}`);
+    process.exit(1);
+  }
+
+  console.log(`${BOLD}[export]${RESET} Exporting from ${DIM}${workspace}${RESET}`);
+  for (const inc of includes) {
+    console.log(`  ${GREEN}+${RESET} ${inc}`);
+  }
+
+  try {
+    execSync(
+      `tar czf "${outputPath}" --exclude="memory/triplestore.db" ${includes.map(i => `"${i}"`).join(" ")}`,
+      { cwd: workspace, stdio: "pipe" }
+    );
+  } catch (e) {
+    console.error(`${RED}✗${RESET} tar failed: ${e.message}`);
+    process.exit(1);
+  }
+
+  const size = fs.statSync(outputPath).size;
+  const sizeStr = size < 1024 * 1024
+    ? `${(size / 1024).toFixed(1)} KB`
+    : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+
+  console.log(`\n${GREEN}✓${RESET} Exported to ${BOLD}${outputPath}${RESET} (${sizeStr})`);
+  console.log(`  Transfer to another machine and run: ${BOLD}sinain import-knowledge ${path.basename(outputPath)}${RESET}`);
+}
+
+async function importKnowledge() {
+  const BOLD = "\x1b[1m", GREEN = "\x1b[32m", RED = "\x1b[31m", YELLOW = "\x1b[33m", DIM = "\x1b[2m", RESET = "\x1b[0m";
+
+  const filePath = process.argv[3];
+  if (!filePath) {
+    console.error(`${RED}✗${RESET} Usage: sinain import-knowledge <file.tar.gz>`);
+    process.exit(1);
+  }
+
+  const resolved = path.resolve(filePath.replace(/^~/, HOME));
+  if (!fs.existsSync(resolved)) {
+    console.error(`${RED}✗${RESET} File not found: ${resolved}`);
+    process.exit(1);
+  }
+
+  const targetWorkspace = path.join(HOME, ".sinain/workspace");
+  fs.mkdirSync(targetWorkspace, { recursive: true });
+
+  console.log(`${BOLD}[import]${RESET} Importing to ${DIM}${targetWorkspace}${RESET}`);
+
+  // Extract
+  try {
+    execSync(`tar xzf "${resolved}" -C "${targetWorkspace}"`, { stdio: "inherit" });
+  } catch (e) {
+    console.error(`${RED}✗${RESET} Extraction failed: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Symlink sinain-memory scripts from npm package
+  const srcMemory = path.join(PKG_DIR, "sinain-memory");
+  const dstMemory = path.join(targetWorkspace, "sinain-memory");
+  if (fs.existsSync(srcMemory)) {
+    try { fs.rmSync(dstMemory, { recursive: true, force: true }); } catch {}
+    fs.symlinkSync(srcMemory, dstMemory, IS_WINDOWS ? "junction" : undefined);
+    console.log(`  ${GREEN}✓${RESET} sinain-memory scripts linked`);
+  }
+
+  // Update ~/.sinain/.env
+  const envPath = path.join(SINAIN_DIR, ".env");
+  const envVars = {
+    SINAIN_WORKSPACE: targetWorkspace,
+    OPENCLAW_WORKSPACE_DIR: targetWorkspace,
+  };
+
+  if (fs.existsSync(envPath)) {
+    let content = fs.readFileSync(envPath, "utf-8");
+    for (const [key, val] of Object.entries(envVars)) {
+      const regex = new RegExp(`^#?\\s*${key}=.*$`, "m");
+      if (regex.test(content)) {
+        content = content.replace(regex, `${key}=${val}`);
+      } else {
+        content += `\n${key}=${val}`;
+      }
+    }
+    fs.writeFileSync(envPath, content);
+  } else {
+    fs.mkdirSync(SINAIN_DIR, { recursive: true });
+    const lines = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
+    fs.writeFileSync(envPath, lines.join("\n") + "\n");
+  }
+  console.log(`  ${GREEN}✓${RESET} SINAIN_WORKSPACE set in ${DIM}~/.sinain/.env${RESET}`);
+
+  // Summary
+  const items = [];
+  if (fs.existsSync(path.join(targetWorkspace, "modules"))) items.push("modules");
+  if (fs.existsSync(path.join(targetWorkspace, "memory/sinain-playbook.md"))) items.push("playbook");
+  if (fs.existsSync(path.join(targetWorkspace, "memory/knowledge-graph.db"))) items.push("knowledge graph");
+
+  console.log(`\n${GREEN}✓${RESET} Knowledge imported: ${items.join(", ")}`);
+  console.log(`  Workspace: ${BOLD}${targetWorkspace}${RESET}`);
+}
+
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
 function printUsage() {
@@ -362,6 +519,8 @@ Usage:
   sinain setup                 Run interactive setup wizard (~/.sinain/.env)
   sinain setup-overlay         Download pre-built overlay app
   sinain setup-sck-capture     Download sck-capture audio binary (macOS)
+  sinain export-knowledge      Export knowledge for transfer to another machine
+  sinain import-knowledge <file>  Import knowledge from export file
   sinain install               Install OpenClaw plugin (server-side)
 
 Start options:
