@@ -66,30 +66,40 @@ Sinain is three things:
 
 ## Quick Start
 
-### Step 1: Install Node.js and Python
+### Step 1: Start sinain
 
-If you don't have them yet:
+```bash
+npx @geravant/sinain start
+```
+
+That's it. On first run, sinain will:
+1. Run an **interactive setup wizard** — configures transcription backend (local whisper or OpenRouter), API key, agent, local vision (Ollama), escalation mode, and optional OpenClaw gateway
+2. **Auto-download** the overlay app, sck-capture binary, and Python dependencies
+3. **Start all services** — sinain-core, sense_client, overlay, and agent
+
+You should see a status banner showing all services running. The HUD overlay appears as a
+small window on your screen — invisible to screen capture and recording.
+
+> **Re-run the wizard** anytime to change settings:
+> ```bash
+> npx @geravant/sinain start --setup    # re-configure and start
+> npx @geravant/sinain setup            # re-configure only (no start)
+> ```
+
+### Step 2: Prerequisites
+
+If `start` reports missing dependencies:
+
 - **Node.js 18+** — download from [nodejs.org](https://nodejs.org/) (LTS recommended)
-- **Python 3.10+** — download from [python.org](https://www.python.org/downloads/) or run `brew install python3`
+- **Python 3.10+** — `brew install python3` (macOS) or [python.org](https://www.python.org/downloads/)
+  - macOS ships Python 3.9 which is too old — install via Homebrew
+- **OpenRouter API key** (optional for local-only mode) — sign up at [openrouter.ai](https://openrouter.ai), create a key starting with `sk-or-...`
+
+> **Running fully local?** No API key needed. If you have Ollama + whisper-cli, sinain works without any cloud API. See [Running Fully Local](#running-fully-local-no-cloud-apis) below.
 
 Verify with: `node -v` and `python3 --version`
 
-### Step 2: Get an OpenRouter API key (optional for local-only mode)
-
-> **Running fully local?** Skip this step. If you have Ollama + whisper-cli, sinain works without any cloud API. See [Running Fully Local](#running-fully-local-no-cloud-apis) below.
-
-1. Go to [openrouter.ai](https://openrouter.ai) and sign up (free tier works)
-2. Create an API key from the dashboard — it starts with `sk-or-...`
-
-### Step 3: Install the overlay
-
-This downloads the pre-built HUD app (~20 MB). No Flutter or Xcode needed.
-
-```bash
-npx @geravant/sinain setup-overlay
-```
-
-### Step 4: Grant macOS permissions
+### Step 3: Grant macOS permissions
 
 sinain needs two permissions. macOS will prompt you on first run, but you can set them up in advance:
 
@@ -98,20 +108,9 @@ sinain needs two permissions. macOS will prompt you on first run, but you can se
 
 > You may need to restart your Terminal after granting permissions.
 
-### Step 5: Start sinain
+### Privacy modes
 
-```bash
-npx @geravant/sinain start
-```
-
-On first run, an interactive setup wizard configures `~/.sinain/.env` — it asks for your
-transcription backend (local whisper or OpenRouter), API key, agent, local vision (Ollama),
-escalation mode, and optional OpenClaw gateway. To re-run the wizard later: `npx @geravant/sinain setup`.
-
-You should see a status banner showing all services running. The HUD overlay appears as a
-small window on your screen — it's invisible to screen capture and recording.
-
-**Privacy modes** control what data is sent where (configured in `~/.sinain/.env`):
+Privacy modes control what data is sent where (configured in `~/.sinain/.env`):
 
 | Mode | What it does |
 |---|---|
@@ -127,6 +126,7 @@ See [Privacy Threat Model](docs/privacy-protection-design.md) for full details.
 ```bash
 npx @geravant/sinain stop       # stop all services
 npx @geravant/sinain status     # check what's running
+npx @geravant/sinain start --setup       # re-run setup wizard, then start
 npx @geravant/sinain start --no-sense    # skip screen capture
 npx @geravant/sinain start --no-overlay  # headless (no HUD window)
 ```

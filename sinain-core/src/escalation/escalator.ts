@@ -52,7 +52,7 @@ export class Escalator {
   private slot: EscalationSlot;
   private httpPending: HttpPendingEscalation | null = null;
 
-  private lastEscalationTs = Date.now();
+  private lastEscalationTs = 0;
   private lastEscalatedDigest = "";
 
   // Spawn deduplication state
