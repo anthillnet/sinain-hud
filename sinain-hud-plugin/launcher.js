@@ -35,11 +35,13 @@ let skipSense = false;
 let skipOverlay = false;
 let skipAgent = false;
 let agentName = null;
+let forceSetup = false;
 
 for (const arg of args) {
   if (arg === "--no-sense")   { skipSense = true; continue; }
   if (arg === "--no-overlay") { skipOverlay = true; continue; }
   if (arg === "--no-agent")   { skipAgent = true; continue; }
+  if (arg === "--setup")      { forceSetup = true; continue; }
   if (arg.startsWith("--agent=")) { agentName = arg.split("=")[1]; continue; }
   console.error(`Unknown flag: ${arg}`);
   process.exit(1);
@@ -60,14 +62,19 @@ async function main() {
   await preflight();
   console.log();
 
-  // Run setup wizard on first launch (no ~/.sinain/.env)
+  // Run setup wizard on first launch (no ~/.sinain/.env) or when --setup flag is passed
   const userEnvPath = path.join(SINAIN_DIR, ".env");
-  if (!fs.existsSync(userEnvPath)) {
+  if (forceSetup || !fs.existsSync(userEnvPath)) {
     await setupWizard(userEnvPath);
   }
 
   // Load user config
   loadUserEnv();
+
+  // Ensure Ollama is running (if local vision enabled)
+  if (process.env.LOCAL_VISION_ENABLED === "true") {
+    await ensureOllama();
+  }
 
   // Auto-detect transcription backend
   detectTranscription();
@@ -127,7 +134,10 @@ async function main() {
         const scDir = path.join(PKG_DIR, "sense_client");
         // Check if key package is importable to skip pip
         try {
-          execSync('python3 -c "import PIL; import skimage"', { stdio: "pipe" });
+          const depCheck = IS_WINDOWS
+            ? 'python3 -c "import PIL; import skimage"'
+            : 'python3 -c "import PIL; import skimage; import Quartz; import Vision"';
+          execSync(depCheck, { stdio: "pipe" });
         } catch {
           log("Installing sense_client Python dependencies...");
           try {
@@ -213,7 +223,41 @@ async function main() {
         warn("flutter not found — overlay source found but can't build");
       }
     } else {
-      warn("overlay not found — run: sinain setup-overlay");
+      // Auto-download overlay if not found
+      log("overlay not found — downloading from GitHub Releases...");
+      try {
+        const { downloadOverlay } = await import("./setup-overlay.js");
+        const success = await downloadOverlay({ silent: false });
+        if (success) {
+          // Re-find and launch the freshly downloaded overlay
+          const freshOverlay = findOverlay();
+          if (freshOverlay?.type === "prebuilt") {
+            if (!IS_WINDOWS) {
+              try {
+                execSync(`xattr -cr "${freshOverlay.path}"`, { stdio: "pipe" });
+              } catch { /* no quarantine */ }
+            }
+            log("Starting overlay (pre-built)...");
+            const binary = IS_WINDOWS
+              ? freshOverlay.path
+              : path.join(freshOverlay.path, "Contents/MacOS/sinain_hud");
+            startProcess("overlay", binary, [], { color: MAGENTA });
+            await sleep(2000);
+            const overlayChild = children.find(c => c.name === "overlay");
+            if (overlayChild && !overlayChild.proc.killed && overlayChild.proc.exitCode === null) {
+              ok(`overlay running (pid:${overlayChild.pid})`);
+              overlayStatus = "running";
+            } else {
+              warn("overlay exited early — check logs above");
+              overlayStatus = "failed";
+            }
+          }
+        } else {
+          warn("overlay auto-download failed — run: sinain setup-overlay");
+        }
+      } catch (e) {
+        warn(`overlay auto-download failed: ${e.message}`);
+      }
     }
   }
 
@@ -309,25 +353,38 @@ async function preflight() {
     ok("port 9500 free");
   }
 
-  // Ollama (if local vision enabled)
-  if (process.env.LOCAL_VISION_ENABLED === "true") {
-    try {
-      const resp = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(2000) });
-      if (resp.ok) {
-        ok("ollama server running");
-      } else {
-        warn("ollama server not responding — local vision will be unavailable");
-      }
-    } catch {
-      // Try to start Ollama in background
-      try {
-        const { spawn: spawnProc } = await import("child_process");
-        spawnProc("ollama", ["serve"], { detached: true, stdio: "ignore" }).unref();
-        ok("ollama server started in background");
-      } catch {
-        warn("ollama not running and could not auto-start — local vision disabled");
-      }
+}
+
+async function ensureOllama() {
+  try {
+    const resp = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(2000) });
+    if (resp.ok) {
+      ok("ollama server running");
+      return true;
     }
+  } catch { /* not running */ }
+
+  // Try to start Ollama in background
+  log("Starting ollama server...");
+  try {
+    const { spawn: spawnProc } = await import("child_process");
+    spawnProc("ollama", ["serve"], { detached: true, stdio: "ignore" }).unref();
+    // Wait for it to become ready
+    for (let i = 0; i < 10; i++) {
+      await sleep(500);
+      try {
+        const resp = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(1000) });
+        if (resp.ok) {
+          ok("ollama server started");
+          return true;
+        }
+      } catch { /* not ready yet */ }
+    }
+    warn("ollama started but not responding — local vision may not work");
+    return false;
+  } catch {
+    warn("ollama not found — local vision disabled. Install: brew install ollama");
+    return false;
   }
 }
 
@@ -337,9 +394,20 @@ async function setupWizard(envPath) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
 
+  // Load existing .env values as defaults (for re-configuration)
+  const existing = {};
+  if (fs.existsSync(envPath)) {
+    for (const line of fs.readFileSync(envPath, "utf-8").split("\n")) {
+      const m = line.match(/^([A-Z_]+)=(.*)$/);
+      if (m) existing[m[1]] = m[2];
+    }
+  }
+  const hasExisting = Object.keys(existing).length > 0;
+
   console.log();
-  console.log(`${BOLD}── First-time setup ────────────────────${RESET}`);
+  console.log(`${BOLD}── ${hasExisting ? "Re-configure" : "First-time setup"} ────────────────────${RESET}`);
   console.log(`  Configuring ${DIM}~/.sinain/.env${RESET}`);
+  if (hasExisting) console.log(`  ${DIM}Press Enter to keep current values shown in [brackets]${RESET}`);
   console.log();
 
   const vars = {};
@@ -391,10 +459,13 @@ async function setupWizard(envPath) {
 
   // 2. OpenRouter API key (if cloud backend or for vision/OCR)
   if (transcriptionBackend === "openrouter") {
+    const existingKey = existing.OPENROUTER_API_KEY;
+    const keyHint = existingKey ? ` [${existingKey.slice(0, 8)}...${existingKey.slice(-4)}]` : "";
     let key = "";
     while (!key) {
-      key = await ask(`  OpenRouter API key (sk-or-...): `);
+      key = await ask(`  OpenRouter API key (sk-or-...)${keyHint}: `);
       key = key.trim();
+      if (!key && existingKey) { key = existingKey; break; }
       if (key && !key.startsWith("sk-or-")) {
         console.log(`  ${YELLOW}⚠${RESET} Key should start with sk-or-. Try again or press Enter to skip.`);
         const retry = await ask(`  Use this key anyway? [y/N]: `);
@@ -408,13 +479,17 @@ async function setupWizard(envPath) {
     if (key) vars.OPENROUTER_API_KEY = key;
   } else {
     // Still ask for OpenRouter key (needed for vision/OCR)
-    const key = await ask(`  OpenRouter API key for vision/OCR (optional, Enter to skip): `);
+    const existingKey = existing.OPENROUTER_API_KEY;
+    const keyHint = existingKey ? ` [${existingKey.slice(0, 8)}...${existingKey.slice(-4)}]` : "";
+    const key = await ask(`  OpenRouter API key for vision/OCR (optional, Enter to skip)${keyHint}: `);
     if (key.trim()) vars.OPENROUTER_API_KEY = key.trim();
+    else if (existingKey) vars.OPENROUTER_API_KEY = existingKey;
   }
 
   // 3. Agent selection
-  const agentChoice = await ask(`  Agent? [${BOLD}claude${RESET}/codex/goose/junie/aider]: `);
-  vars.SINAIN_AGENT = agentChoice.trim().toLowerCase() || "claude";
+  const defaultAgent = existing.SINAIN_AGENT || "claude";
+  const agentChoice = await ask(`  Agent? [${BOLD}${defaultAgent}${RESET}/claude/codex/goose/junie/aider]: `);
+  vars.SINAIN_AGENT = agentChoice.trim().toLowerCase() || defaultAgent;
 
   // 3b. Local vision (Ollama)
   const IS_MACOS = os.platform() === "darwin";
@@ -423,20 +498,24 @@ async function setupWizard(envPath) {
     const useVision = await ask(`  Enable local vision AI? [Y/n] (Ollama — screen understanding without cloud API): `);
     if (!useVision.trim() || useVision.trim().toLowerCase() === "y") {
       vars.LOCAL_VISION_ENABLED = "true";
-      try {
-        const models = execSync("ollama list 2>/dev/null", { encoding: "utf-8" });
-        if (!models.includes("llava")) {
-          const pull = await ask(`  Pull llava vision model (~4GB)? [Y/n]: `);
-          if (!pull.trim() || pull.trim().toLowerCase() === "y") {
-            console.log(`  ${DIM}Pulling llava...${RESET}`);
-            execSync("ollama pull llava", { stdio: "inherit" });
-            ok("llava model pulled");
+      // Ensure ollama serve is running before list/pull
+      const ollamaReady = await ensureOllama();
+      if (ollamaReady) {
+        try {
+          const models = execSync("ollama list 2>/dev/null", { encoding: "utf-8" });
+          if (!models.includes("llava")) {
+            const pull = await ask(`  Pull llava vision model (~4GB)? [Y/n]: `);
+            if (!pull.trim() || pull.trim().toLowerCase() === "y") {
+              console.log(`  ${DIM}Pulling llava...${RESET}`);
+              execSync("ollama pull llava", { stdio: "inherit" });
+              ok("llava model pulled");
+            }
+          } else {
+            ok("llava model already available");
           }
-        } else {
-          ok("llava model already available");
+        } catch {
+          warn("Could not check Ollama models");
         }
-      } catch {
-        warn("Could not check Ollama models");
       }
       vars.LOCAL_VISION_MODEL = "llava";
     }
@@ -451,6 +530,8 @@ async function setupWizard(envPath) {
           console.log(`  ${DIM}Installing Ollama...${RESET}`);
           execSync("curl -fsSL https://ollama.com/install.sh | sh", { stdio: "inherit" });
         }
+        // Start ollama serve before pulling
+        await ensureOllama();
         console.log(`  ${DIM}Pulling llava vision model...${RESET}`);
         execSync("ollama pull llava", { stdio: "inherit" });
         vars.LOCAL_VISION_ENABLED = "true";
@@ -469,25 +550,37 @@ async function setupWizard(envPath) {
   console.log(`    selective — score-based (errors, questions trigger it)`);
   console.log(`    focus     — always escalate every tick`);
   console.log(`    rich      — always escalate with maximum context`);
-  const escMode = await ask(`  Escalation mode? [off/${BOLD}selective${RESET}/focus/rich]: `);
-  vars.ESCALATION_MODE = escMode.trim().toLowerCase() || "selective";
+  const defaultEsc = existing.ESCALATION_MODE || "selective";
+  const escMode = await ask(`  Escalation mode? [off/${BOLD}${defaultEsc}${RESET}/selective/focus/rich]: `);
+  vars.ESCALATION_MODE = escMode.trim().toLowerCase() || defaultEsc;
 
   // 5. OpenClaw gateway
-  const hasGateway = await ask(`  Do you have an OpenClaw gateway? [y/N]: `);
-  if (hasGateway.trim().toLowerCase() === "y") {
-    const wsUrl = await ask(`  Gateway WebSocket URL [ws://localhost:18789]: `);
-    vars.OPENCLAW_WS_URL = wsUrl.trim() || "ws://localhost:18789";
+  const hadGateway = !!(existing.OPENCLAW_WS_URL);
+  const gatewayDefault = hadGateway ? "Y" : "N";
+  const hasGateway = await ask(`  Do you have an OpenClaw gateway? [${gatewayDefault === "Y" ? "Y/n" : "y/N"}]: `);
+  const wantsGateway = hasGateway.trim()
+    ? hasGateway.trim().toLowerCase() === "y"
+    : hadGateway;
+  if (wantsGateway) {
+    const defaultWs = existing.OPENCLAW_WS_URL || "ws://localhost:18789";
+    const wsUrl = await ask(`  Gateway WebSocket URL [${defaultWs}]: `);
+    vars.OPENCLAW_WS_URL = wsUrl.trim() || defaultWs;
 
-    const wsToken = await ask(`  Gateway auth token (48-char hex): `);
+    const existingToken = existing.OPENCLAW_WS_TOKEN;
+    const tokenHint = existingToken ? ` [${existingToken.slice(0, 6)}...${existingToken.slice(-4)}]` : "";
+    const wsToken = await ask(`  Gateway auth token (48-char hex)${tokenHint}: `);
     if (wsToken.trim()) {
       vars.OPENCLAW_WS_TOKEN = wsToken.trim();
       vars.OPENCLAW_HTTP_TOKEN = wsToken.trim();
+    } else if (existingToken) {
+      vars.OPENCLAW_WS_TOKEN = existingToken;
+      vars.OPENCLAW_HTTP_TOKEN = existing.OPENCLAW_HTTP_TOKEN || existingToken;
     }
 
     // Derive HTTP URL from WS URL
     const httpBase = vars.OPENCLAW_WS_URL.replace(/^ws/, "http");
     vars.OPENCLAW_HTTP_URL = `${httpBase}/hooks/agent`;
-    vars.OPENCLAW_SESSION_KEY = "agent:main:sinain";
+    vars.OPENCLAW_SESSION_KEY = existing.OPENCLAW_SESSION_KEY || "agent:main:sinain";
   } else {
     // No gateway — disable WS connection attempts
     vars.OPENCLAW_WS_URL = "";

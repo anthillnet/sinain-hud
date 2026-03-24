@@ -37,25 +37,36 @@ function ok(msg)   { console.log(`${BOLD}[setup-overlay]${RESET} ${GREEN}✓${RE
 function warn(msg) { console.log(`${BOLD}[setup-overlay]${RESET} ${YELLOW}⚠${RESET} ${msg}`); }
 function fail(msg) { console.error(`${BOLD}[setup-overlay]${RESET} ${RED}✗${RESET} ${msg}`); process.exit(1); }
 
-// ── Parse flags ──────────────────────────────────────────────────────────────
+// ── Entry point (only when run directly, not when imported) ──────────────────
 
-const args = process.argv.slice(2);
-const fromSource = args.includes("--from-source");
-const forceUpdate = args.includes("--update");
+const isMain = process.argv[1] && (
+  import.meta.url === `file://${process.argv[1]}` ||
+  import.meta.url === new URL(process.argv[1], "file://").href
+);
 
-if (fromSource) {
-  await buildFromSource();
-} else {
-  await downloadPrebuilt();
+if (isMain) {
+  const args = process.argv.slice(2);
+  const fromSource = args.includes("--from-source");
+  const forceUpdate = args.includes("--update");
+
+  if (fromSource) {
+    await buildFromSource();
+  } else {
+    await downloadOverlay({ forceUpdate });
+  }
 }
 
 // ── Download pre-built .app ──────────────────────────────────────────────────
 
-async function downloadPrebuilt() {
+export async function downloadOverlay({ silent = false, forceUpdate = false } = {}) {
+  const _log = silent ? () => {} : log;
+  const _ok = silent ? () => {} : ok;
+  const _warn = silent ? () => {} : warn;
+
   fs.mkdirSync(APP_DIR, { recursive: true });
 
   // Find latest overlay release
-  log("Checking for latest overlay release...");
+  _log("Checking for latest overlay release...");
   let release;
   try {
     const res = await fetch(`${RELEASES_API}?per_page=20`, {
@@ -67,6 +78,7 @@ async function downloadPrebuilt() {
     release = releases.find(r => r.tag_name?.startsWith("overlay-v"));
     if (!release) throw new Error("No overlay release found");
   } catch (e) {
+    if (silent) return false;
     fail(`Failed to fetch releases: ${e.message}\n  Try: sinain setup-overlay --from-source`);
   }
 
@@ -78,21 +90,22 @@ async function downloadPrebuilt() {
     try {
       const local = JSON.parse(fs.readFileSync(VERSION_FILE, "utf-8"));
       if (local.tag === tag) {
-        ok(`Overlay already up-to-date (${version})`);
-        return;
+        _ok(`Overlay already up-to-date (${version})`);
+        return true;
       }
-      log(`Updating: ${local.tag} → ${tag}`);
+      _log(`Updating: ${local.tag} → ${tag}`);
     } catch { /* corrupt version file — re-download */ }
   }
 
   // Find the .zip asset for this platform
   const zipAsset = release.assets?.find(a => a.name === ASSET_NAME);
   if (!zipAsset) {
+    if (silent) return false;
     fail(`Release ${tag} has no ${ASSET_NAME} asset.\n  Try: sinain setup-overlay --from-source`);
   }
 
   // Download with progress
-  log(`Downloading overlay ${version} for ${IS_WINDOWS ? "Windows" : "macOS"} (${formatBytes(zipAsset.size)})...`);
+  _log(`Downloading overlay ${version} for ${IS_WINDOWS ? "Windows" : "macOS"} (${formatBytes(zipAsset.size)})...`);
   const zipPath = path.join(APP_DIR, ASSET_NAME);
 
   try {
@@ -112,17 +125,18 @@ async function downloadPrebuilt() {
       if (done) break;
       chunks.push(value);
       downloaded += value.length;
-      if (total > 0) {
+      if (total > 0 && !silent) {
         const pct = Math.round((downloaded / total) * 100);
         process.stdout.write(`\r${BOLD}[setup-overlay]${RESET} ${DIM}${pct}% (${formatBytes(downloaded)} / ${formatBytes(total)})${RESET}`);
       }
     }
-    process.stdout.write("\n");
+    if (!silent) process.stdout.write("\n");
 
     const buffer = Buffer.concat(chunks);
     fs.writeFileSync(zipPath, buffer);
-    ok(`Downloaded ${formatBytes(buffer.length)}`);
+    _ok(`Downloaded ${formatBytes(buffer.length)}`);
   } catch (e) {
+    if (silent) return false;
     fail(`Download failed: ${e.message}`);
   }
 
@@ -132,7 +146,7 @@ async function downloadPrebuilt() {
   }
 
   // Extract
-  log("Extracting...");
+  _log("Extracting...");
   if (IS_WINDOWS) {
     try {
       execSync(
@@ -140,6 +154,7 @@ async function downloadPrebuilt() {
         { stdio: "pipe" }
       );
     } catch (e) {
+      if (silent) return false;
       fail(`Extraction failed: ${e.message}`);
     }
   } else {
@@ -150,6 +165,7 @@ async function downloadPrebuilt() {
       try {
         execSync(`unzip -o -q "${zipPath}" -d "${APP_DIR}"`, { stdio: "pipe" });
       } catch (e) {
+        if (silent) return false;
         fail(`Extraction failed: ${e.message}`);
       }
     }
@@ -170,12 +186,15 @@ async function downloadPrebuilt() {
   // Clean up zip
   fs.unlinkSync(zipPath);
 
-  ok(`Overlay ${version} installed`);
-  console.log(`
+  _ok(`Overlay ${version} installed`);
+  if (!silent) {
+    console.log(`
 ${GREEN}✓${RESET} Overlay ready!
   Location: ${APP_PATH}
   The overlay will auto-start with: ${BOLD}sinain start${RESET}
 `);
+  }
+  return true;
 }
 
 // ── Build from source (legacy) ───────────────────────────────────────────────
