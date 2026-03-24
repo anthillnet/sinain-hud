@@ -492,7 +492,6 @@ ${recentLines.join("\n")}`;
 
     // Generate a unique child session key — bypasses the main agent entirely
     const childSessionKey = `agent:main:subagent:${randomUUID()}`;
-    const mainSessionKey = this.deps.openclawConfig.sessionKey;
 
     this.outboundBytes += Buffer.byteLength(task);
     this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
@@ -523,7 +522,6 @@ ${recentLines.join("\n")}`;
         lane: "subagent",
         extraSystemPrompt: this.buildChildSystemPrompt(task, label),
         deliver: false,
-        spawnedBy: mainSessionKey,
         idempotencyKey: idemKey,
         label: label || undefined,
       }, 45_000, { expectFinal: true });
