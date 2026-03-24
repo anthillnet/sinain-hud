@@ -99,7 +99,7 @@ export class AudioPipeline extends EventEmitter {
       return;
     }
 
-    log(TAG, `starting capture: device=${this.config.device} cmd=${this.config.captureCommand} rate=${this.config.sampleRate}`);
+    log(TAG, `starting capture: device=${this.config.device} cmd=${this.config.captureCommand} rate=${this.config.sampleRate}${this.config.gainDb ? ` gain=${this.config.gainDb}dB` : ""}`);
 
     try {
       this.spawnCaptureProcess();
@@ -294,6 +294,16 @@ export class AudioPipeline extends EventEmitter {
     const alignedPcm = Buffer.from(pcmData.subarray(0, alignedLength));
 
     if (alignedPcm.length === 0) return;
+
+    // Apply gain (amplify quiet ScreenCaptureKit audio before VAD + transcription)
+    if (this.config.gainDb !== 0) {
+      const multiplier = Math.pow(10, this.config.gainDb / 20);
+      for (let i = 0; i < alignedPcm.length - 1; i += 2) {
+        const sample = alignedPcm.readInt16LE(i);
+        const amplified = Math.max(-32768, Math.min(32767, Math.round(sample * multiplier)));
+        alignedPcm.writeInt16LE(amplified, i);
+      }
+    }
 
     const energy = calculateRmsEnergy(alignedPcm);
     this.profiler?.gauge("audio.lastChunkKb", Math.round(alignedPcm.length / 1024));
