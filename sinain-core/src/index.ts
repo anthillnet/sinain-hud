@@ -25,6 +25,12 @@ import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
 
+/** Resolve workspace path, expanding leading ~ to HOME. */
+function resolveWorkspace(): string {
+  const raw = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+  return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
+}
+
 async function main() {
   log(TAG, "sinain-core starting...");
 
@@ -80,7 +86,7 @@ async function main() {
     profiler,
     feedbackStore: feedbackStore ?? undefined,
     queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
-      const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+      const workspace = resolveWorkspace();
       const dbPath = `${workspace}/memory/knowledge-graph.db`;
       const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
       try {
@@ -156,6 +162,13 @@ async function main() {
     } : undefined,
     traitEngine,
     traitLogDir: config.traitConfig.logDir,
+    getKnowledgeDocPath: () => {
+      const workspace = resolveWorkspace();
+      const p = `${workspace}/memory/sinain-knowledge.md`;
+      try { if (existsSync(p)) return p; } catch {}
+      return null;
+    },
+    feedbackStore: feedbackStore ?? undefined,
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
@@ -400,13 +413,13 @@ async function main() {
 
     // Knowledge graph integration
     getKnowledgeDocPath: () => {
-      const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+      const workspace = resolveWorkspace();
       const p = `${workspace}/memory/sinain-knowledge.md`;
       try { if (existsSync(p)) return p; } catch {}
       return null;
     },
     queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
-      const workspace = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+      const workspace = resolveWorkspace();
       const dbPath = `${workspace}/memory/knowledge-graph.db`;
       const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
       try {
