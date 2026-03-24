@@ -131,6 +131,20 @@ npx @geravant/sinain start --no-sense    # skip screen capture
 npx @geravant/sinain start --no-overlay  # headless (no HUD window)
 ```
 
+### Transferring Knowledge Between Machines
+
+Export your learned knowledge (playbook, modules, knowledge graph) to set up another machine:
+
+```bash
+# On the source machine — export (excludes large triplestore, ~50 KB)
+npx @geravant/sinain export-knowledge
+
+# Transfer the file, then on the target machine:
+npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
+```
+
+Or import during first-time setup — the wizard asks "Import knowledge from another machine?"
+
 ### Running Fully Local (No Cloud APIs)
 
 sinain can run without any cloud API keys using local models:
