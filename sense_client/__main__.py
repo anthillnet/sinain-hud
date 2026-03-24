@@ -12,6 +12,7 @@ if sys.platform == "win32":
 
 import argparse
 import concurrent.futures
+import copy
 import json
 import os
 import time
@@ -28,7 +29,7 @@ from .capture import ScreenCapture, create_capture
 from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
 from .ocr import OCRResult, create_ocr
-from .gate import DecisionGate, SenseObservation
+from .gate import DecisionGate, SenseEvent, SenseObservation, SenseMeta
 from .sender import SenseSender, package_full_frame, package_roi
 from .app_detector import AppDetector
 from .config import load_config
@@ -128,6 +129,7 @@ def main():
     )
     app_detector = AppDetector()
     ocr_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    vision_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="vision")
 
     # Vision provider — routes to Ollama (local) or OpenRouter (cloud) based on config/privacy
     vision_cfg = config.get("vision", {})
@@ -196,13 +198,16 @@ def main():
             time.sleep(1)
             continue
 
-        # First-frame log
+        # First-frame log + force initial context event
+        _is_first_frame = not _logged_first_frame
         if not _logged_first_frame:
             log(f"first frame: {frame.size[0]}x{frame.size[1]} (scale={config['capture']['scale']})")
             _logged_first_frame = True
 
-        # 1. Check app/window change
+        # 1. Check app/window change (first frame always treated as app change)
         app_changed, window_changed, app_name, window_title = app_detector.detect_change()
+        if _is_first_frame:
+            app_changed = True  # force context event on startup
 
         # Adaptive SSIM threshold
         now_sec = time.time()
@@ -355,18 +360,28 @@ def main():
             title=title, subtitle=subtitle, facts=facts,
         )
 
-        # Vision scene analysis (throttled, non-blocking on failure)
+        # Vision scene analysis — async: send text event immediately, vision follows
         if vision_provider and time.time() - last_vision_time >= vision_throttle_s:
-            try:
-                from PIL import Image as PILImage
-                pil_frame = PILImage.fromarray(use_frame) if isinstance(use_frame, np.ndarray) else use_frame
-                scene = vision_provider.describe(pil_frame, prompt=vision_prompt or None)
-                if scene:
-                    event.observation.scene = scene
-                    last_vision_time = time.time()
-                    log(f"vision: {scene[:80]}...")
-            except Exception as e:
-                log(f"vision error: {e}")
+            last_vision_time = time.time()  # claim slot immediately to prevent concurrent calls
+            _v_frame = use_frame.copy() if isinstance(use_frame, np.ndarray) else use_frame.copy()
+            _v_meta = copy.copy(event.meta)
+            _v_ts = event.ts
+            _v_prompt = vision_prompt
+            def _do_vision(frame, meta, ts, prompt):
+                try:
+                    from PIL import Image as PILImage
+                    pil = PILImage.fromarray(frame) if isinstance(frame, np.ndarray) else frame
+                    scene = vision_provider.describe(pil, prompt=prompt or None)
+                    if scene:
+                        log(f"vision: {scene[:80]}...")
+                        ctx_ev = SenseEvent(type="context", ts=ts)
+                        ctx_ev.observation = SenseObservation(scene=scene)
+                        ctx_ev.meta = meta
+                        ctx_ev.roi = package_full_frame(frame)
+                        sender.send(ctx_ev)
+                except Exception as e:
+                    log(f"vision error: {e}")
+            vision_pool.submit(_do_vision, _v_frame, _v_meta, _v_ts, _v_prompt)
 
         # Send small thumbnail for ALL event types (agent uses vision)
         # Privacy matrix: gate image sending based on PRIVACY_IMAGES_OPENROUTER

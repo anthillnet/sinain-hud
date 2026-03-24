@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
-import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus } from "../types.js";
+import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus, SenseEvent, FeedbackRecord } from "../types.js";
 import type { Profiler } from "../profiler.js";
-import { buildContextWindow } from "./context-window.js";
+import { buildContextWindow, RICHNESS_PRESETS } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
@@ -35,6 +36,10 @@ export interface AgentLoopDeps {
   traitEngine?: TraitEngine;
   /** Directory to write per-day trait log JSONL files. */
   traitLogDir?: string;
+  /** Optional: path to sinain-knowledge.md for startup recap. */
+  getKnowledgeDocPath?: () => string | null;
+  /** Optional: feedback store for startup recap context. */
+  feedbackStore?: { queryRecent(n: number): FeedbackRecord[] };
 }
 
 export interface TraceContext {
@@ -69,6 +74,7 @@ export class AgentLoop extends EventEmitter {
   private lastRunTs = 0;
   private running = false;
   private started = false;
+  private firstTick = true;
 
   private lastPushedHud = "";
   private agentNextId = 1;
@@ -112,6 +118,9 @@ export class AgentLoop extends EventEmitter {
     }, this.deps.agentConfig.maxIntervalMs);
 
     log(TAG, `loop started (debounce=${this.deps.agentConfig.debounceMs}ms, max=${this.deps.agentConfig.maxIntervalMs}ms, cooldown=${this.deps.agentConfig.cooldownMs}ms, model=${this.deps.agentConfig.model})`);
+
+    // Fire recap tick: immediate HUD from persistent knowledge (no sense data needed)
+    this.fireRecapTick().catch(e => debug(TAG, "recap skipped:", String(e)));
   }
 
   /** Stop the agent loop. */
@@ -131,12 +140,13 @@ export class AgentLoop extends EventEmitter {
   onNewContext(): void {
     if (!this.started) return;
 
-    // Debounce: wait N ms after last event before running
+    // Fast first tick: 500ms debounce on startup, normal debounce after
+    const delay = this.firstTick ? 500 : this.deps.agentConfig.debounceMs;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       this.run().catch(err => error(TAG, "debounce tick error:", err.message));
-    }, this.deps.agentConfig.debounceMs);
+    }, delay);
   }
 
   /** Get agent results history (newest first). */
@@ -398,7 +408,80 @@ export class AgentLoop extends EventEmitter {
       traceCtx?.finish({ totalLatencyMs: Date.now() - Date.now(), llmLatencyMs: 0, llmInputTokens: 0, llmOutputTokens: 0, llmCost: 0, escalated: false, escalationScore: 0, contextScreenEvents: 0, contextAudioEntries: 0, contextRichness: richness, digestLength: 0, hudChanged: false });
     } finally {
       this.running = false;
+      this.firstTick = false;
       this.lastRunTs = Date.now();
+    }
+  }
+
+  // ── Private: startup recap tick from persistent knowledge ──
+
+  private async fireRecapTick(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+
+    try {
+      const sections: string[] = [];
+      const startTs = Date.now();
+
+      // 1. sinain-knowledge.md (established patterns, user preferences)
+      const knowledgePath = this.deps.getKnowledgeDocPath?.();
+      if (knowledgePath) {
+        const content = await fs.promises.readFile(knowledgePath, "utf-8").catch(() => "");
+        if (content.length > 50) sections.push(content.slice(0, 2000));
+      }
+
+      // 2. SITUATION.md digest (if fresh — less than 5 minutes old)
+      try {
+        const stat = await fs.promises.stat(this.deps.situationMdPath);
+        if (Date.now() - stat.mtimeMs < 5 * 60_000) {
+          const sit = await fs.promises.readFile(this.deps.situationMdPath, "utf-8");
+          const digestMatch = sit.match(/## Digest\n([\s\S]*?)(?=\n##|$)/);
+          if (digestMatch?.[1]?.trim()) {
+            sections.push(`Last session digest:\n${digestMatch[1].trim()}`);
+          }
+        }
+      } catch { /* SITUATION.md missing — fine */ }
+
+      // 3. Recent feedback records (last 5 escalation summaries)
+      const records = this.deps.feedbackStore?.queryRecent(5) ?? [];
+      if (records.length > 0) {
+        const recaps = records.slice(0, 5).map(r => `- ${r.currentApp}: ${r.hud}`).join("\n");
+        sections.push(`Recent activity:\n${recaps}`);
+      }
+
+      if (sections.length === 0) { return; }
+
+      const recapContext = sections.join("\n\n");
+
+      // Build synthetic ContextWindow with knowledge as screen entry
+      const recapWindow: ContextWindow = {
+        audio: [],
+        screen: [{
+          ts: Date.now(),
+          ocr: recapContext,
+          meta: { app: "sinain-recap", windowTitle: "startup" },
+          type: "context",
+        } as unknown as SenseEvent],
+        images: [],
+        currentApp: "sinain-recap",
+        appHistory: [],
+        audioCount: 0,
+        screenCount: 1,
+        windowMs: 0,
+        newestEventTs: Date.now(),
+        preset: RICHNESS_PRESETS.lean,
+      };
+
+      const result = await analyzeContext(recapWindow, this.deps.agentConfig, null);
+      if (result?.hud && result.hud !== "—" && result.hud !== "Idle") {
+        this.deps.onHudUpdate(result.hud);
+        log(TAG, `recap tick (${Date.now() - startTs}ms, ${result.tokensIn}in+${result.tokensOut}out tok) hud="${result.hud}"`);
+      }
+    } catch (err: any) {
+      debug(TAG, "recap tick error:", err.message || err);
+    } finally {
+      this.running = false;
+      // Do NOT update lastRunTs — normal cooldown should not be affected by recap
     }
   }
 }

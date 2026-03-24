@@ -264,16 +264,32 @@ case "$_privacy_mode" in
 esac
 log "Privacy: mode=${_privacy_mode} ocr_openrouter=${PRIVACY_OCR_OPENROUTER} images_openrouter=${PRIVACY_IMAGES_OPENROUTER}"
 
-# ── 4. Start sense_client ───────────────────────────────────────────────────
+# ── 4. Start sense_client + overlay in parallel ─────────────────────────────
 SENSE_PID=""
-if $SKIP_SENSE; then
-  warn "sense_client skipped"
-else
+OVERLAY_PID=""
+
+if ! $SKIP_SENSE; then
   log "Starting sense_client..."
   (cd "$SCRIPT_DIR" && python3 -m sense_client) 2>&1 | sed -u "s/^/$(printf "${YELLOW}[sense]${RESET}   ")/" &
   SENSE_PID=$!
   PIDS+=("$SENSE_PID")
-  sleep 1
+else
+  warn "sense_client skipped"
+fi
+
+if ! $SKIP_OVERLAY; then
+  log "Starting overlay..."
+  (cd "$SCRIPT_DIR/overlay" && flutter run -d macos 2>&1) | sed -u "s/^/$(printf "${MAGENTA}[overlay]${RESET} ")/" &
+  OVERLAY_PID=$!
+  PIDS+=("$OVERLAY_PID")
+else
+  warn "overlay skipped"
+fi
+
+# Brief pause then verify both launched
+sleep 1
+
+if [ -n "$SENSE_PID" ]; then
   if kill -0 "$SENSE_PID" 2>/dev/null; then
     ok "sense_client running (pid:$SENSE_PID)"
   else
@@ -282,16 +298,7 @@ else
   fi
 fi
 
-# ── 5. Start overlay ────────────────────────────────────────────────────────
-OVERLAY_PID=""
-if $SKIP_OVERLAY; then
-  warn "overlay skipped"
-else
-  log "Starting overlay..."
-  (cd "$SCRIPT_DIR/overlay" && flutter run -d macos 2>&1) | sed -u "s/^/$(printf "${MAGENTA}[overlay]${RESET} ")/" &
-  OVERLAY_PID=$!
-  PIDS+=("$OVERLAY_PID")
-  sleep 2
+if [ -n "$OVERLAY_PID" ]; then
   if kill -0 "$OVERLAY_PID" 2>/dev/null; then
     ok "overlay running (pid:$OVERLAY_PID)"
   else
