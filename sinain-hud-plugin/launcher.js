@@ -587,7 +587,34 @@ async function setupWizard(envPath) {
     vars.OPENCLAW_HTTP_URL = "";
   }
 
-  // 6. Agent-specific defaults
+  // 6. Knowledge import (for standalone machines)
+  console.log();
+  const wantImport = await ask(`  Import knowledge from another machine? [y/N]: `);
+  if (wantImport.trim().toLowerCase() === "y") {
+    const filePath = await ask(`  Path to knowledge export (.tar.gz): `);
+    const resolved = filePath.trim().replace(/^~/, HOME);
+    if (resolved && fs.existsSync(resolved)) {
+      const targetWorkspace = path.join(HOME, ".sinain/workspace");
+      fs.mkdirSync(targetWorkspace, { recursive: true });
+      try {
+        execSync(`tar xzf "${resolved}" -C "${targetWorkspace}"`, { stdio: "inherit" });
+        // Symlink sinain-memory scripts from npm package
+        const srcMemory = path.join(PKG_DIR, "sinain-memory");
+        const dstMemory = path.join(targetWorkspace, "sinain-memory");
+        try { fs.rmSync(dstMemory, { recursive: true }); } catch {}
+        fs.symlinkSync(srcMemory, dstMemory);
+        vars.SINAIN_WORKSPACE = targetWorkspace;
+        vars.OPENCLAW_WORKSPACE_DIR = targetWorkspace;
+        ok(`Knowledge imported to ${targetWorkspace}`);
+      } catch (e) {
+        warn(`Import failed: ${e.message}`);
+      }
+    } else if (resolved) {
+      warn(`File not found: ${resolved}`);
+    }
+  }
+
+  // 7. Agent-specific defaults
   vars.SINAIN_POLL_INTERVAL = "5";
   vars.SINAIN_HEARTBEAT_INTERVAL = "900";
   vars.PRIVACY_MODE = "standard";
