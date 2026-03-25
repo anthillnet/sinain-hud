@@ -22,12 +22,16 @@ void main() {
   });
 
   group('HudSettings', () {
-    test('cycles display modes', () {
-      final settings = HudSettings(displayMode: DisplayMode.feed);
-      expect(settings.nextDisplayMode, DisplayMode.alert);
+    test('defaults to eye state', () {
+      final settings = HudSettings();
+      expect(settings.overlayState, HudState.eye);
+      expect(settings.eyeX, -1);
+      expect(settings.chatWidth, 427);
+    });
 
-      settings.displayMode = DisplayMode.hidden;
-      expect(settings.nextDisplayMode, DisplayMode.feed);
+    test('cycles tabs', () {
+      final settings = HudSettings(activeTab: HudTab.agent);
+      expect(settings.nextTab, HudTab.tasks);
     });
   });
 }

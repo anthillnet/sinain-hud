@@ -1,29 +1,32 @@
-enum DisplayMode { feed, alert, minimal, hidden }
+/// The 3 visible states of the overlay widget (plus hidden).
+enum HudState { eye, controls, chat, hidden }
 
 enum HudTab { agent, tasks }
 
 class HudSettings {
-  DisplayMode displayMode;
+  HudState overlayState;
   HudTab activeTab;
-  bool clickThrough;
   bool privacyMode;
-  bool topPosition;
   String wsUrl;
 
-  HudSettings({
-    this.displayMode = DisplayMode.feed,
-    this.activeTab = HudTab.agent,
-    this.clickThrough = true,
-    this.privacyMode = true,
-    this.topPosition = false,
-    this.wsUrl = 'ws://localhost:9500',
-  });
+  /// Persisted eye position (screen coordinates, bottom-left origin on macOS).
+  double eyeX;
+  double eyeY;
 
-  DisplayMode get nextDisplayMode {
-    const modes = DisplayMode.values;
-    final idx = modes.indexOf(displayMode);
-    return modes[(idx + 1) % modes.length];
-  }
+  /// Persisted chat panel size.
+  double chatWidth;
+  double chatHeight;
+
+  HudSettings({
+    this.overlayState = HudState.eye,
+    this.activeTab = HudTab.agent,
+    this.privacyMode = true,
+    this.wsUrl = 'ws://localhost:9500',
+    this.eyeX = -1, // -1 means "use default position"
+    this.eyeY = -1,
+    this.chatWidth = 427,
+    this.chatHeight = 293,
+  });
 
   HudTab get nextTab {
     const tabs = HudTab.values;
@@ -32,20 +35,24 @@ class HudSettings {
   }
 
   HudSettings copyWith({
-    DisplayMode? displayMode,
+    HudState? overlayState,
     HudTab? activeTab,
-    bool? clickThrough,
     bool? privacyMode,
-    bool? topPosition,
     String? wsUrl,
+    double? eyeX,
+    double? eyeY,
+    double? chatWidth,
+    double? chatHeight,
   }) {
     return HudSettings(
-      displayMode: displayMode ?? this.displayMode,
+      overlayState: overlayState ?? this.overlayState,
       activeTab: activeTab ?? this.activeTab,
-      clickThrough: clickThrough ?? this.clickThrough,
       privacyMode: privacyMode ?? this.privacyMode,
-      topPosition: topPosition ?? this.topPosition,
       wsUrl: wsUrl ?? this.wsUrl,
+      eyeX: eyeX ?? this.eyeX,
+      eyeY: eyeY ?? this.eyeY,
+      chatWidth: chatWidth ?? this.chatWidth,
+      chatHeight: chatHeight ?? this.chatHeight,
     );
   }
 }

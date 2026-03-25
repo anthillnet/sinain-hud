@@ -20,14 +20,6 @@ class WindowService {
     }
   }
 
-  Future<void> setClickThrough(bool enabled) async {
-    try {
-      await _channel.invokeMethod('setClickThrough', {'enabled': enabled});
-    } catch (e) {
-      _log('setClickThrough failed: $e');
-    }
-  }
-
   Future<void> setAlwaysOnTop(bool enabled) async {
     try {
       await _channel.invokeMethod('setAlwaysOnTop', {'enabled': enabled});
@@ -52,29 +44,53 @@ class WindowService {
     }
   }
 
-  Future<void> setPosition({required bool top}) async {
+  /// Set the window frame (position + size).
+  Future<void> setWindowFrame(double x, double y, double w, double h) async {
     try {
-      await _channel.invokeMethod('setPosition', {'top': top});
+      await _channel.invokeMethod('setWindowFrame', {
+        'x': x,
+        'y': y,
+        'w': w,
+        'h': h,
+      });
     } catch (e) {
-      _log('setPosition failed: $e');
+      _log('setWindowFrame failed: $e');
     }
   }
 
-  /// Activate command input: disable click-through and make key window.
-  Future<void> activateCommandInput() async {
+  /// Get the current window frame.
+  Future<Map<String, double>?> getWindowFrame() async {
     try {
-      await _channel.invokeMethod('activateCommandInput');
+      final result = await _channel.invokeMethod('getWindowFrame');
+      if (result is Map) {
+        return {
+          'x': (result['x'] as num).toDouble(),
+          'y': (result['y'] as num).toDouble(),
+          'w': (result['w'] as num).toDouble(),
+          'h': (result['h'] as num).toDouble(),
+        };
+      }
     } catch (e) {
-      _log('activateCommandInput failed: $e');
+      _log('getWindowFrame failed: $e');
+    }
+    return null;
+  }
+
+  /// Make the panel the key window (for text input in chat state).
+  Future<void> makeKeyWindow() async {
+    try {
+      await _channel.invokeMethod('makeKeyWindow');
+    } catch (e) {
+      _log('makeKeyWindow failed: $e');
     }
   }
 
-  /// Dismiss command input: restore click-through and resign key window.
-  Future<void> dismissCommandInput() async {
+  /// Resign key window status (return focus to previous app).
+  Future<void> resignKeyWindow() async {
     try {
-      await _channel.invokeMethod('dismissCommandInput');
+      await _channel.invokeMethod('resignKeyWindow');
     } catch (e) {
-      _log('dismissCommandInput failed: $e');
+      _log('resignKeyWindow failed: $e');
     }
   }
 
