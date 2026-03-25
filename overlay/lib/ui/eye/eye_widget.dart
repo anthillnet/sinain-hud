@@ -4,14 +4,18 @@ import '../../core/services/window_service.dart';
 import '../feed/idle_animation.dart';
 
 /// State 1: The Sinain eye — a 48px circle with the pulsing eye animation.
-/// Click → expand to controls. Drag → reposition window.
+/// Click → expand to controls. Drag → reposition window. Long-press → hide.
 class EyeWidget extends StatefulWidget {
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onDragEnd;
   final double pupilDilation;
 
   const EyeWidget({
     super.key,
     required this.onTap,
+    this.onLongPress,
+    this.onDragEnd,
     this.pupilDilation = 0.0,
   });
 
@@ -20,15 +24,20 @@ class EyeWidget extends StatefulWidget {
 }
 
 class _EyeWidgetState extends State<EyeWidget> {
-  Offset? _dragStartGlobal;
-  Map<String, double>? _dragStartFrame;
   bool _isDragging = false;
+  late final WindowService _windowService;
+
+  @override
+  void initState() {
+    super.initState();
+    _windowService = context.read<WindowService>();
+  }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: _isDragging ? null : widget.onTap,
-      onPanStart: _onDragStart,
+      onLongPress: widget.onLongPress,
       onPanUpdate: _onDragUpdate,
       onPanEnd: _onDragEnd,
       child: Container(
@@ -46,38 +55,16 @@ class _EyeWidgetState extends State<EyeWidget> {
     );
   }
 
-  void _onDragStart(DragStartDetails details) async {
-    _isDragging = false;
-    _dragStartGlobal = details.globalPosition;
-    _dragStartFrame = await context.read<WindowService>().getWindowFrame();
-  }
-
   void _onDragUpdate(DragUpdateDetails details) {
-    if (_dragStartGlobal == null || _dragStartFrame == null) return;
     _isDragging = true;
-    final dx = details.globalPosition.dx - _dragStartGlobal!.dx;
-    final dy = details.globalPosition.dy - _dragStartGlobal!.dy;
-    final frame = _dragStartFrame!;
-    // macOS y-axis is inverted (origin at bottom-left)
-    context.read<WindowService>().setWindowFrame(
-          frame['x']! + dx,
-          frame['y']! - dy,
-          frame['w']!,
-          frame['h']!,
-        );
+    // Fire and forget — don't await to avoid async buildup
+    _windowService.moveWindowBy(details.delta.dx, -details.delta.dy);
   }
 
-  void _onDragEnd(DragEndDetails details) async {
+  void _onDragEnd(DragEndDetails details) {
     if (_isDragging) {
-      // Persist the new position
-      final frame = await context.read<WindowService>().getWindowFrame();
-      if (frame != null) {
-        // Save via settings service — import here to avoid circular
-        // We'll use a callback instead
-      }
+      widget.onDragEnd?.call();
     }
-    _isDragging = false;
-    _dragStartGlobal = null;
-    _dragStartFrame = null;
+    Future.microtask(() => _isDragging = false);
   }
 }

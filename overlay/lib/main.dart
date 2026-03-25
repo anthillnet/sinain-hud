@@ -25,6 +25,16 @@ void main() async {
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
 
+  // Restore persisted eye position (if saved)
+  if (settingsService.settings.eyeX >= 0) {
+    await windowService.setWindowFrame(
+      settingsService.settings.eyeX,
+      settingsService.settings.eyeY,
+      48,
+      48,
+    );
+  }
+
   // Listen for hotkey events from native side
   const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
   hotkeyChannel.setMethodCallHandler((call) async {

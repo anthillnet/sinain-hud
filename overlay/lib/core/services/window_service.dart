@@ -76,6 +76,15 @@ class WindowService {
     return null;
   }
 
+  /// Move window by delta (screen points). Synchronous native call — no frame fetch needed.
+  Future<void> moveWindowBy(double dx, double dy) async {
+    try {
+      await _channel.invokeMethod('moveWindowBy', {'dx': dx, 'dy': dy});
+    } catch (e) {
+      _log('moveWindowBy failed: $e');
+    }
+  }
+
   /// Make the panel the key window (for text input in chat state).
   Future<void> makeKeyWindow() async {
     try {
@@ -91,6 +100,15 @@ class WindowService {
       await _channel.invokeMethod('resignKeyWindow');
     } catch (e) {
       _log('resignKeyWindow failed: $e');
+    }
+  }
+
+  /// Open a file in the system default editor.
+  Future<void> openFile(String path) async {
+    try {
+      await _channel.invokeMethod('openFile', {'path': path});
+    } catch (e) {
+      _log('openFile failed: $e');
     }
   }
 

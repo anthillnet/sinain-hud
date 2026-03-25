@@ -72,6 +72,15 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 "h": frame.size.height,
             ])
 
+        case "moveWindowBy":
+            let dx = args?["dx"] as? Double ?? 0
+            let dy = args?["dy"] as? Double ?? 0
+            var origin = window.frame.origin
+            origin.x += CGFloat(dx)
+            origin.y += CGFloat(dy)
+            window.setFrameOrigin(origin)
+            result(nil)
+
         case "makeKeyWindow":
             // Make panel key window for text input in chat state
             window.makeKeyAndOrderFront(nil)
@@ -84,6 +93,13 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.resignKey()
             if let panel = window as? NSPanel {
                 panel.becomesKeyOnlyIfNeeded = true
+            }
+            result(nil)
+
+        case "openFile":
+            let path = args?["path"] as? String ?? ""
+            if !path.isEmpty {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
             }
             result(nil)
 

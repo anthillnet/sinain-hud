@@ -21,6 +21,7 @@ class WebSocketService extends ChangeNotifier {
   String _audioState = 'muted';
   String _micState = 'muted';
   String _screenState = 'off';
+  String _envPath = '';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
 
@@ -41,6 +42,7 @@ class WebSocketService extends ChangeNotifier {
   String get audioState => _audioState;
   String get micState => _micState;
   String get screenState => _screenState;
+  String get envPath => _envPath;
   bool get audioFeedEnabled => _audioFeedEnabled;
   bool get screenFeedEnabled => _screenFeedEnabled;
 
@@ -153,6 +155,10 @@ class WebSocketService extends ChangeNotifier {
           if (screen != null && screen != _screenState) {
             _screenState = screen;
             notifyListeners();
+          }
+          final envPath = statusData['envPath'] as String?;
+          if (envPath != null && envPath.isNotEmpty) {
+            _envPath = envPath;
           }
           _statusController.add(statusData);
           break;

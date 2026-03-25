@@ -7,6 +7,9 @@ import { PRESETS } from "./privacy/presets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/** The .env file path that was actually loaded (if any). */
+export let loadedEnvPath: string | undefined;
+
 function loadDotEnv(): void {
   // Try sinain-core/.env first, then project root .env
   const candidates = [
@@ -35,6 +38,7 @@ function loadDotEnv(): void {
           process.env[key] = val;
         }
       }
+      loadedEnvPath = envPath;
       console.log(`[config] loaded ${envPath}`);
       return;
     } catch { /* ignore */ }
