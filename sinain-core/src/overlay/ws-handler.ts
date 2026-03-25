@@ -11,6 +11,7 @@ import type {
   FeedChannel,
 } from "../types.js";
 import { log, warn } from "../log.js";
+import { loadedEnvPath } from "../config.js";
 
 const TAG = "ws";
 const HEARTBEAT_INTERVAL_MS = 10_000;
@@ -135,13 +136,14 @@ export class WsHandler {
 
   /** Send a status update to all connected overlays. */
   broadcastStatus(): void {
-    const msg: StatusMessage = {
+    const msg: StatusMessage & { envPath?: string } = {
       type: "status",
       audio: this.state.audio,
       mic: this.state.mic,
       screen: this.state.screen,
       connection: this.state.connection,
     };
+    if (loadedEnvPath) msg.envPath = loadedEnvPath;
     this.broadcastMessage(msg);
   }
 
