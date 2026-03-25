@@ -2,7 +2,6 @@ import Cocoa
 import FlutterMacOS
 
 /// Native NSWindow control via Flutter platform channel.
-/// Provides privacy mode, click-through, always-on-top, transparency, and show/hide.
 class WindowControlPlugin: NSObject, FlutterPlugin {
     static let channelName = "sinain_hud/window"
 
@@ -33,11 +32,6 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             }
             result(nil)
 
-        case "setClickThrough":
-            let enabled = args?["enabled"] as? Bool ?? true
-            window.ignoresMouseEvents = enabled
-            result(nil)
-
         case "setAlwaysOnTop":
             let enabled = args?["enabled"] as? Bool ?? true
             window.level = enabled ? .floating : .normal
@@ -47,7 +41,6 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.isOpaque = false
             window.backgroundColor = .clear
             window.hasShadow = false
-            // Make the content view layer-backed and transparent
             if let contentView = window.contentView {
                 contentView.wantsLayer = true
                 contentView.layer?.backgroundColor = CGColor.clear
@@ -62,29 +55,36 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.orderFront(nil)
             result(nil)
 
-        case "setPosition":
-            let top = args?["top"] as? Bool ?? false
-            let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
-            let windowX = screenFrame.maxX - HUDConfig.windowWidth - HUDConfig.margin
-            let windowY = top
-                ? screenFrame.maxY - HUDConfig.windowHeight - HUDConfig.margin
-                : screenFrame.minY + HUDConfig.margin
-            window.setFrame(
-                NSRect(x: windowX, y: windowY, width: HUDConfig.windowWidth, height: HUDConfig.windowHeight),
-                display: true
-            )
+        case "setWindowFrame":
+            let x = args?["x"] as? Double ?? 0
+            let y = args?["y"] as? Double ?? 0
+            let w = args?["w"] as? Double ?? Double(HUDConfig.eyeSize)
+            let h = args?["h"] as? Double ?? Double(HUDConfig.eyeSize)
+            window.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
             result(nil)
 
-        case "activateCommandInput":
-            // Make panel the key window so it receives keyboard events
-            window.ignoresMouseEvents = false
+        case "getWindowFrame":
+            let frame = window.frame
+            result([
+                "x": frame.origin.x,
+                "y": frame.origin.y,
+                "w": frame.size.width,
+                "h": frame.size.height,
+            ])
+
+        case "makeKeyWindow":
+            // Make panel key window for text input in chat state
             window.makeKeyAndOrderFront(nil)
+            if let panel = window as? NSPanel {
+                panel.becomesKeyOnlyIfNeeded = false
+            }
             result(nil)
 
-        case "dismissCommandInput":
-            // Restore click-through and resign key window to return focus to previous app
-            window.ignoresMouseEvents = true
+        case "resignKeyWindow":
             window.resignKey()
+            if let panel = window as? NSPanel {
+                panel.becomesKeyOnlyIfNeeded = true
+            }
             result(nil)
 
         default:
