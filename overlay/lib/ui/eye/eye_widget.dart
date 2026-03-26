@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/services/window_service.dart';
@@ -26,6 +27,7 @@ class EyeWidget extends StatefulWidget {
 class _EyeWidgetState extends State<EyeWidget> {
   bool _isDragging = false;
   late final WindowService _windowService;
+  static final bool _isMacOS = Platform.isMacOS;
 
   @override
   void initState() {
@@ -38,6 +40,7 @@ class _EyeWidgetState extends State<EyeWidget> {
     return GestureDetector(
       onTap: _isDragging ? null : widget.onTap,
       onLongPress: widget.onLongPress,
+      onPanStart: _onDragStart,
       onPanUpdate: _onDragUpdate,
       onPanEnd: _onDragEnd,
       child: Container(
@@ -55,14 +58,23 @@ class _EyeWidgetState extends State<EyeWidget> {
     );
   }
 
-  void _onDragUpdate(DragUpdateDetails details) {
+  void _onDragStart(DragStartDetails details) {
     _isDragging = true;
-    // Fire and forget — don't await to avoid async buildup
+    if (_isMacOS) {
+      // Hand off to native — NSEvent monitor handles all tracking
+      _windowService.beginNativeDrag();
+    }
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (_isMacOS) return; // native is handling it
+    _isDragging = true;
     _windowService.moveWindowBy(details.delta.dx, -details.delta.dy);
   }
 
   void _onDragEnd(DragEndDetails details) {
-    if (_isDragging) {
+    if (!_isMacOS && _isDragging) {
+      // Windows: persist position from Flutter side
       widget.onDragEnd?.call();
     }
     Future.microtask(() => _isDragging = false);

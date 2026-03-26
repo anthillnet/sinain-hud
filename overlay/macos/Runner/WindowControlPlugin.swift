@@ -5,12 +5,18 @@ import FlutterMacOS
 class WindowControlPlugin: NSObject, FlutterPlugin {
     static let channelName = "sinain_hud/window"
 
+    /// Channel reference for invoking Dart callbacks (drag/resize complete).
+    private var channel: FlutterMethodChannel?
+    private var dragMonitor: Any?
+    private var resizeMonitor: Any?
+
     static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: channelName,
             binaryMessenger: registrar.messenger
         )
         let instance = WindowControlPlugin()
+        instance.channel = channel
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
@@ -148,8 +154,154 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             }
             result(nil)
 
+        case "beginNativeDrag":
+            beginNativeDrag(window: window)
+            result(nil)
+
+        case "beginNativeResize":
+            let edge = args?["edge"] as? String ?? "right"
+            beginNativeResize(window: window, edge: edge)
+            result(nil)
+
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    // MARK: - Native Drag
+
+    private func beginNativeDrag(window: NSWindow) {
+        guard dragMonitor == nil else { return } // re-entrancy guard
+
+        let startMouse = NSEvent.mouseLocation
+        let startOrigin = window.frame.origin
+        // Offset from mouse to window origin — kept constant throughout drag
+        let offsetX = startMouse.x - startOrigin.x
+        let offsetY = startMouse.y - startOrigin.y
+
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            guard let self = self else { return event }
+
+            if event.type == .leftMouseUp {
+                self.endDragMonitor(window: window)
+                return event
+            }
+
+            // .leftMouseDragged
+            let mouse = NSEvent.mouseLocation
+            var newOrigin = NSPoint(x: mouse.x - offsetX, y: mouse.y - offsetY)
+            newOrigin = self.snapToEdges(newOrigin, windowSize: window.frame.size)
+            window.setFrameOrigin(newOrigin)
+            return event
+        }
+    }
+
+    private func endDragMonitor(window: NSWindow) {
+        if let monitor = dragMonitor {
+            NSEvent.removeMonitor(monitor)
+            dragMonitor = nil
+        }
+        let frame = window.frame
+        channel?.invokeMethod("onNativeDragComplete", arguments: [
+            "x": frame.origin.x,
+            "y": frame.origin.y,
+        ])
+    }
+
+    // MARK: - Native Resize
+
+    private func beginNativeResize(window: NSWindow, edge: String) {
+        guard resizeMonitor == nil else { return }
+
+        let startMouse = NSEvent.mouseLocation
+        let startFrame = window.frame
+        let initialRight = startFrame.origin.x + startFrame.size.width
+        let initialTop = startFrame.origin.y + startFrame.size.height
+
+        resizeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            guard let self = self else { return event }
+
+            if event.type == .leftMouseUp {
+                self.endResizeMonitor(window: window)
+                return event
+            }
+
+            let mouse = NSEvent.mouseLocation
+            let deltaX = mouse.x - startMouse.x
+            let deltaY = mouse.y - startMouse.y
+            var frame = startFrame
+
+            switch edge {
+            case "right":
+                // Grow right, left edge stays
+                frame.size.width = Self.clampW(startFrame.size.width + deltaX)
+            case "left":
+                // Grow left, right edge stays
+                let newW = Self.clampW(startFrame.size.width - deltaX)
+                frame.origin.x = initialRight - newW
+                frame.size.width = newW
+            case "top":
+                // macOS: drag up = +deltaY. Grow upward, bottom stays.
+                frame.size.height = Self.clampH(startFrame.size.height + deltaY)
+            case "bottom":
+                // macOS: drag down = -deltaY. Grow downward, top stays.
+                let newH = Self.clampH(startFrame.size.height - deltaY)
+                frame.origin.y = initialTop - newH
+                frame.size.height = newH
+            default:
+                break
+            }
+
+            window.setFrame(frame, display: true)
+            return event
+        }
+    }
+
+    private func endResizeMonitor(window: NSWindow) {
+        if let monitor = resizeMonitor {
+            NSEvent.removeMonitor(monitor)
+            resizeMonitor = nil
+        }
+        let frame = window.frame
+        channel?.invokeMethod("onNativeResizeComplete", arguments: [
+            "w": frame.size.width,
+            "h": frame.size.height,
+        ])
+    }
+
+    // MARK: - Helpers
+
+    private static func clampW(_ w: CGFloat) -> CGFloat {
+        min(max(w, HUDConfig.minChatWidth), HUDConfig.maxChatWidth)
+    }
+
+    private static func clampH(_ h: CGFloat) -> CGFloat {
+        min(max(h, HUDConfig.minChatHeight), HUDConfig.maxChatHeight)
+    }
+
+    private func snapToEdges(_ origin: NSPoint, windowSize: NSSize) -> NSPoint {
+        let screen = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+        let snap = HUDConfig.snapThreshold
+        let margin = HUDConfig.margin
+        var p = origin
+
+        // Left edge
+        if abs(p.x - screen.minX) < snap {
+            p.x = screen.minX + margin
+        }
+        // Right edge
+        if abs((p.x + windowSize.width) - screen.maxX) < snap {
+            p.x = screen.maxX - windowSize.width - margin
+        }
+        // Bottom edge
+        if abs(p.y - screen.minY) < snap {
+            p.y = screen.minY + margin
+        }
+        // Top edge
+        if abs((p.y + windowSize.height) - screen.maxY) < snap {
+            p.y = screen.maxY - windowSize.height - margin
+        }
+
+        return p
     }
 }

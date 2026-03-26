@@ -135,6 +135,49 @@ class WindowService {
     }
   }
 
+  /// Start native drag tracking (macOS only). Native handles all mouse events
+  /// and calls back onNativeDragComplete when done.
+  Future<void> beginNativeDrag() async {
+    try {
+      await _channel.invokeMethod('beginNativeDrag');
+    } catch (e) {
+      _log('beginNativeDrag failed: $e');
+    }
+  }
+
+  /// Start native resize tracking (macOS only).
+  Future<void> beginNativeResize(String edge) async {
+    try {
+      await _channel.invokeMethod('beginNativeResize', {'edge': edge});
+    } catch (e) {
+      _log('beginNativeResize failed: $e');
+    }
+  }
+
+  /// Register callbacks for native drag/resize completion (macOS).
+  /// Native sends final position/size on mouse-up.
+  void setupNativeCallbacks({
+    required void Function(double x, double y) onDragDone,
+    required void Function(double w, double h) onResizeDone,
+  }) {
+    _channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onNativeDragComplete':
+          final args = call.arguments as Map;
+          onDragDone(
+            (args['x'] as num).toDouble(),
+            (args['y'] as num).toDouble(),
+          );
+        case 'onNativeResizeComplete':
+          final args = call.arguments as Map;
+          onResizeDone(
+            (args['w'] as num).toDouble(),
+            (args['h'] as num).toDouble(),
+          );
+      }
+    });
+  }
+
   void _log(String msg) {
     // ignore: avoid_print
     print('[WindowService] $msg');

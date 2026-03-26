@@ -22,6 +22,8 @@ class OverlayShell extends StatefulWidget {
 }
 
 class OverlayShellState extends State<OverlayShell> {
+  static final bool _isMacOS = Platform.isMacOS;
+
   HudState _state = HudState.eye;
   HudState _lastVisibleState = HudState.eye;
 
@@ -43,6 +45,14 @@ class OverlayShellState extends State<OverlayShell> {
     super.initState();
     _windowService = context.read<WindowService>();
     _settingsService = context.read<SettingsService>();
+
+    // Native drag/resize callbacks (macOS only)
+    if (_isMacOS) {
+      _windowService.setupNativeCallbacks(
+        onDragDone: (x, y) => _settingsService.setEyePosition(x, y),
+        onResizeDone: (w, h) => _settingsService.setChatSize(w, h),
+      );
+    }
 
     final ws = context.read<WebSocketService>();
     _thinkingSub = ws.thinkingStream.listen((active) {
@@ -174,7 +184,12 @@ class OverlayShellState extends State<OverlayShell> {
     super.dispose();
   }
 
-  void _onDrag(DragUpdateDetails details) {
+  void _onDragStart(DragStartDetails details) {
+    if (_isMacOS) _windowService.beginNativeDrag();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (_isMacOS) return; // native handles it
     _windowService.moveWindowBy(details.delta.dx, -details.delta.dy);
   }
 
@@ -215,8 +230,9 @@ class OverlayShellState extends State<OverlayShell> {
     final ws = context.watch<WebSocketService>();
 
     return GestureDetector(
-      onPanUpdate: _onDrag,
-      onPanEnd: (_) => _persistEyePosition(),
+      onPanStart: _onDragStart,
+      onPanUpdate: _onDragUpdate,
+      onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
       child: Container(
         height: 48,
         decoration: BoxDecoration(
@@ -289,8 +305,9 @@ class OverlayShellState extends State<OverlayShell> {
         children: [
           // Header — draggable, with controls
           GestureDetector(
-            onPanUpdate: _onDrag,
-            onPanEnd: (_) => _persistEyePosition(),
+            onPanStart: _onDragStart,
+            onPanUpdate: _onDragUpdate,
+            onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
             child: Container(
               height: 36,
               padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -410,17 +427,13 @@ class OverlayShellState extends State<OverlayShell> {
     return Stack(
       children: [
         chatContent,
-        // Left edge resize — grow left, anchor right edge
-        _resizeHandle(Alignment.centerLeft, SystemMouseCursors.resizeLeft,
+        _resizeHandle(Alignment.centerLeft, SystemMouseCursors.resizeLeft, 'left',
             (dx, dy) => _windowService.resizeWindowBy(-dx, 0, anchorRight: true)),
-        // Right edge resize — grow right, anchor left edge
-        _resizeHandle(Alignment.centerRight, SystemMouseCursors.resizeRight,
+        _resizeHandle(Alignment.centerRight, SystemMouseCursors.resizeRight, 'right',
             (dx, dy) => _windowService.resizeWindowBy(dx, 0)),
-        // Top edge resize — drag up grows upward (macOS: origin stays, height increases = grows up)
-        _resizeHandle(Alignment.topCenter, SystemMouseCursors.resizeUp,
+        _resizeHandle(Alignment.topCenter, SystemMouseCursors.resizeUp, 'top',
             (dx, dy) => _windowService.resizeWindowBy(0, -dy)),
-        // Bottom edge resize — drag down grows downward (macOS: keep top fixed via anchorTop)
-        _resizeHandle(Alignment.bottomCenter, SystemMouseCursors.resizeDown,
+        _resizeHandle(Alignment.bottomCenter, SystemMouseCursors.resizeDown, 'bottom',
             (dx, dy) => _windowService.resizeWindowBy(0, dy, anchorTop: true)),
       ],
     );
@@ -429,7 +442,8 @@ class OverlayShellState extends State<OverlayShell> {
   Widget _resizeHandle(
     Alignment alignment,
     MouseCursor cursor,
-    void Function(double dx, double dy) onDrag,
+    String nativeEdge,
+    void Function(double dx, double dy) onDragFallback,
   ) {
     final isHorizontal =
         alignment == Alignment.centerLeft || alignment == Alignment.centerRight;
@@ -438,12 +452,16 @@ class OverlayShellState extends State<OverlayShell> {
       child: MouseRegion(
         cursor: cursor,
         child: GestureDetector(
-          onPanUpdate: (details) {
-            // Dead zone: sub-pixel deltas cause Flutter↔native feedback oscillation
-            if (details.delta.dx.abs() < 1.0 && details.delta.dy.abs() < 1.0) return;
-            onDrag(details.delta.dx, details.delta.dy);
-          },
-          onPanEnd: (_) => _persistChatSize(),
+          onPanStart: _isMacOS
+              ? (_) => _windowService.beginNativeResize(nativeEdge)
+              : null,
+          onPanUpdate: _isMacOS
+              ? (_) {} // keep alive for gesture arena, native handles tracking
+              : (details) {
+                  if (details.delta.dx.abs() < 1.0 && details.delta.dy.abs() < 1.0) return;
+                  onDragFallback(details.delta.dx, details.delta.dy);
+                },
+          onPanEnd: _isMacOS ? null : (_) => _persistChatSize(),
           child: Container(
             width: isHorizontal ? 6 : double.infinity,
             height: isHorizontal ? double.infinity : 6,
