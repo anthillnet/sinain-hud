@@ -438,7 +438,11 @@ class OverlayShellState extends State<OverlayShell> {
       child: MouseRegion(
         cursor: cursor,
         child: GestureDetector(
-          onPanUpdate: (details) => onDrag(details.delta.dx, details.delta.dy),
+          onPanUpdate: (details) {
+            // Dead zone: sub-pixel deltas cause Flutter↔native feedback oscillation
+            if (details.delta.dx.abs() < 1.0 && details.delta.dy.abs() < 1.0) return;
+            onDrag(details.delta.dx, details.delta.dy);
+          },
           onPanEnd: (_) => _persistChatSize(),
           child: Container(
             width: isHorizontal ? 6 : double.infinity,
