@@ -1,12 +1,79 @@
 # Sinain
 
-Always-on ambient intelligence that watches your workflow and proactively whispers the next step.
+Ambient intelligence that sees what you see, hears what you hear, and acts on your behalf.
 
-Sinain is three things:
+<p align="center">
+  <img src="media/screen-recording-2026-03-26.gif" alt="Sinain HUD overlay" width="346">
+</p>
 
-1. **Universal Sensory & Context Layer** — eyes and ears for your existing agents (Claude, Codex, Goose, Junie). ScreenCaptureKit audio + screen capture + OCR builds rich, real-time context from everything happening on your machine.
-2. **Private HUD** — an invisible overlay (`NSWindow.sharingType = .none` on macOS, `WDA_EXCLUDEFROMCAPTURE` on Windows) that only you can see. 4 display modes, client-side credential redaction, never captured in screen shares or recordings.
-3. **Always Aware, Always With You** — a living playbook, four-layer memory, and portable knowledge modules that follow you across machines and sessions.
+---
+
+### You, Augmented
+
+AI tools today make you work for *them*. You copy context into chat windows, alt-tab to paste stack traces, explain what you're looking at. You are the middleware.
+
+Sinain inverts this. Your screen, audio, clipboard — one continuous stream feeding your agent. Answers appear in a private HUD overlay, right where you work. When something needs doing, your agent acts — with tools, subagents, and the full power of Claude, Codex, or whatever you're running.
+
+- Screen → OCR → context digest, continuous. Audio → transcription → awareness, real-time.
+- HUD overlay: insights and actions appear *where you work*, not in a separate window.
+- No copy-paste. No alt-tab. Your agent already has the context — and the tools to act on it.
+
+### Your Agents. Your Stack. Your Rules.
+
+Claude Code for deep reasoning. Codex for async tasks. Goose for local exploration. Junie for JetBrains. Every developer has a different stack — and it changes monthly.
+
+Sinain doesn't pick a side. It's the nervous system that connects them all.
+
+- Claude, Codex, Goose, Junie, Aider — they all get the same eyes and ears.
+- Hot-swappable knowledge modules, portable across machines and sessions.
+- OpenClaw gateway, sinain-agent standalone, MCP/ACP — your deployment, your choice.
+
+### Cloud by Default. Local When It Matters.
+
+Most days, cloud APIs are fast and practical. But when the stakes change — NDA project, client audit, classified codebase — you flip one switch and everything goes local. Same tool. Same workflow. Zero cloud.
+
+- `off → standard → strict → paranoid` — four privacy modes, one config line.
+- Paranoid: Ollama + whisper.cpp, zero network calls. Pull the ethernet cable. Still works.
+- HUD invisible to screen capture (`NSWindow.sharingType = .none` on macOS, `WDA_EXCLUDEFROMCAPTURE` on Windows).
+- BYOK, BYOM, BYOI — Bring Your Own Keys, Models, Infrastructure.
+
+> Full messaging framework: [MESSAGING.md](https://github.com/Geravant/sinain/blob/main/projects/sinain-trailer/MESSAGING.md)
+
+## Quick Start
+
+```bash
+npx @geravant/sinain start
+```
+
+That's it. On first run, sinain will:
+1. Run an **interactive setup wizard** — transcription backend, API key, agent, privacy mode
+2. **Auto-download** the overlay app, sck-capture binary, and Python dependencies
+3. **Start all services** — sinain-core, sense_client, overlay, and agent
+
+> **Re-run the wizard** anytime: `npx @geravant/sinain start --setup`
+
+### Prerequisites
+
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/) (LTS recommended)
+- **Python 3.10+** — `brew install python3` (macOS) or [python.org](https://www.python.org/downloads/)
+- **OpenRouter API key** (optional for local-only mode) — [openrouter.ai](https://openrouter.ai)
+
+> **Fully local?** No API key needed. Ollama + whisper-cli = zero cloud. See [Running Fully Local](#running-fully-local).
+
+### macOS Permissions
+
+1. **System Settings → Privacy & Security → Screen Recording** — add your Terminal
+2. **System Settings → Privacy & Security → Microphone** — add your Terminal
+
+### Managing sinain
+
+```bash
+npx @geravant/sinain stop             # stop all services
+npx @geravant/sinain status           # check what's running
+npx @geravant/sinain start --setup    # re-run setup wizard
+npx @geravant/sinain start --no-sense # skip screen capture
+npx @geravant/sinain start --no-overlay  # headless mode
+```
 
 ## Architecture
 
@@ -41,255 +108,94 @@ Sinain is three things:
                      └─ SITUATION.md, Telegram alerts
 ```
 
-| Component | Language | Purpose |
+## Components
+
+| Component | Language | What it does | Docs |
+|---|---|---|---|
+| **sinain-core** | TypeScript | Central hub: audio pipeline, agent loop, escalation, WS feed | [README](sinain-core/README.md) |
+| **overlay** | Dart / Swift / C++ | Private HUD (macOS + Windows), 4 display modes, hotkeys | [Hotkeys](docs/HOTKEYS.md) |
+| **sense_client** | Python | Screen capture, SSIM diff, OCR, privacy filter | [sense_client/](sense_client/) |
+| **sck-capture** | Swift | ScreenCaptureKit: system audio + screen frames | [tools/sck-capture/](tools/sck-capture/) |
+| **sinain-agent** | Bash | Bare agent runner for Claude/Codex/Goose/Junie/Aider | [sinain-agent/](sinain-agent/) |
+| **sinain-knowledge** | TypeScript | Curation, playbook, eval, portable knowledge modules | [Knowledge System](docs/knowledge-system.md) |
+| **sinain-hud-plugin** | TypeScript | OpenClaw plugin: lifecycle, curation, overflow watchdog | [sinain-hud-plugin/](sinain-hud-plugin/) |
+| **sinain-mcp-server** | TypeScript | MCP server exposing sinain tools to agents | [sinain-mcp-server/](sinain-mcp-server/) |
+
+## Configuration
+
+All config via `~/.sinain/.env` (created by the setup wizard).
+
+| Variable | Default | Description |
 |---|---|---|
-| **sinain-core/** | Node.js (TypeScript) | Central hub: audio pipeline, agent loop, escalation, WS feed |
-| **overlay/** | Dart / Swift / C++ | Private overlay HUD (macOS + Windows), 4 display modes, global hotkeys |
-| **sense_client/** | Python | ScreenCaptureKit capture, SSIM diff, OCR, privacy filter |
-| **tools/sck-capture/** | Swift | Unified ScreenCaptureKit binary: system audio + screen frames |
-| **sinain-agent/** | Bash | Bare agent runner: polls sinain-core, invokes Claude/Codex/Goose/Junie/Aider |
-| **sinain-mcp-server/** | TypeScript | MCP server exposing sinain tools to agents |
-| **sinain-hud-plugin/** | TypeScript | OpenClaw plugin: lifecycle hooks, knowledge curation, overflow watchdog |
-| **modules/** | JSON + Markdown | Hot-swappable knowledge modules with priority-based stacking |
+| `OPENROUTER_API_KEY` | — | Required (unless fully local) |
+| `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` / `rich` |
+| `OPENCLAW_WS_URL` | `ws://localhost:18789` | Gateway WebSocket endpoint |
+| `PRIVACY_MODE` | `off` | `off` / `standard` / `strict` / `paranoid` |
 
-## System Requirements
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference (30+ variables).
 
-- **macOS 12.3+** (ScreenCaptureKit) or **Windows 10 2004+** (private overlay via WDA_EXCLUDEFROMCAPTURE)
-- Node.js 18+, Python 3.10+
-- OpenRouter API key (free tier works) — or run fully local with whisper.cpp + Ollama (no cloud needed)
-- **Optional:** [Ollama](https://ollama.com) for local vision AI (screen understanding without cloud APIs)
-- macOS: Screen Recording + Microphone permissions
-- Windows: Microphone permission (private overlay works out of the box)
-- Flutter 3.10+ only needed for development (`sinain setup-overlay --from-source`)
-
-> **Windows hotkeys** use `Ctrl+Shift` instead of `Cmd+Shift`. See [Hotkeys](docs/HOTKEYS.md).
-
-## Quick Start
-
-### Step 1: Start sinain
-
-```bash
-npx @geravant/sinain start
-```
-
-That's it. On first run, sinain will:
-1. Run an **interactive setup wizard** — configures transcription backend (local whisper or OpenRouter), API key, agent, local vision (Ollama), escalation mode, and optional OpenClaw gateway
-2. **Auto-download** the overlay app, sck-capture binary, and Python dependencies
-3. **Start all services** — sinain-core, sense_client, overlay, and agent
-
-You should see a status banner showing all services running. The HUD overlay appears as a
-small window on your screen — invisible to screen capture and recording.
-
-> **Re-run the wizard** anytime to change settings:
-> ```bash
-> npx @geravant/sinain start --setup    # re-configure and start
-> npx @geravant/sinain setup            # re-configure only (no start)
-> ```
-
-### Step 2: Prerequisites
-
-If `start` reports missing dependencies:
-
-- **Node.js 18+** — download from [nodejs.org](https://nodejs.org/) (LTS recommended)
-- **Python 3.10+** — `brew install python3` (macOS) or [python.org](https://www.python.org/downloads/)
-  - macOS ships Python 3.9 which is too old — install via Homebrew
-- **OpenRouter API key** (optional for local-only mode) — sign up at [openrouter.ai](https://openrouter.ai), create a key starting with `sk-or-...`
-
-> **Running fully local?** No API key needed. If you have Ollama + whisper-cli, sinain works without any cloud API. See [Running Fully Local](#running-fully-local-no-cloud-apis) below.
-
-Verify with: `node -v` and `python3 --version`
-
-### Step 3: Grant macOS permissions
-
-sinain needs two permissions. macOS will prompt you on first run, but you can set them up in advance:
-
-1. Open **System Settings → Privacy & Security → Screen Recording** — add your Terminal app
-2. Open **System Settings → Privacy & Security → Microphone** — add your Terminal app
-
-> You may need to restart your Terminal after granting permissions.
-
-### Privacy modes
-
-Privacy modes control what data is sent where (configured in `~/.sinain/.env`):
+## Privacy Modes
 
 | Mode | What it does |
 |---|---|
-| `off` | All data flows freely — maximum insight quality, no filtering |
-| `standard` | **Default (wizard).** Auto-redacts credentials before cloud APIs |
+| `off` | All data flows freely — maximum insight quality |
+| `standard` | Auto-redacts credentials before cloud APIs (wizard default) |
 | `strict` | Only summaries leave your machine — no raw text sent to cloud |
-| `paranoid` | Fully local with Ollama. No cloud API calls. Requires `LOCAL_VISION_ENABLED=true`. |
+| `paranoid` | Fully local: Ollama + whisper.cpp. Zero network calls. |
 
-See [Privacy Threat Model](docs/privacy-protection-design.md) for full details.
+See [Privacy Threat Model](docs/privacy-protection-design.md) for the full design.
 
-### Managing sinain
+## Hotkeys
 
-```bash
-npx @geravant/sinain stop       # stop all services
-npx @geravant/sinain status     # check what's running
-npx @geravant/sinain start --setup       # re-run setup wizard, then start
-npx @geravant/sinain start --no-sense    # skip screen capture
-npx @geravant/sinain start --no-overlay  # headless (no HUD window)
-```
+Global hotkeys use **Cmd+Shift** (macOS) or **Ctrl+Shift** (Windows):
 
-### Transferring Knowledge Between Machines
+| Shortcut | Action |
+|---|---|
+| `Cmd+Shift+Space` | Toggle overlay visibility |
+| `Cmd+Shift+M` | Cycle display mode |
+| `Cmd+Shift+/` | Open command input |
+| `Cmd+Shift+H` | Quit overlay |
 
-Export your learned knowledge (playbook, modules, knowledge graph) to set up another machine:
+See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
 
-```bash
-# On the source machine — export (excludes large triplestore, ~50 KB)
-npx @geravant/sinain export-knowledge
+## Running Fully Local
 
-# Transfer the file, then on the target machine:
-npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
-```
-
-Or import during first-time setup — the wizard asks "Import knowledge from another machine?"
-
-### Running Fully Local (No Cloud APIs)
-
-sinain can run without any cloud API keys using local models:
-
-- **Audio**: whisper-cli (local transcription, ~1.5 GB model)
-- **Vision**: Ollama with llava (local screen understanding, ~4.7 GB model)
-- **Agent analysis**: Ollama handles both text and vision ticks locally
-- **Agent**: Any MCP-capable agent (Claude, Codex, Junie, Goose) for escalation responses
+No cloud APIs needed. Local models handle everything:
 
 ```bash
 # 1. Install local transcription
 ./setup-local-stt.sh
 
 # 2. Install Ollama + vision model
-brew install ollama
-ollama pull llava
+brew install ollama && ollama pull llava
 
-# 3. Configure .env (or let the setup wizard handle it)
-echo "LOCAL_VISION_ENABLED=true" >> ~/.sinain/.env
-echo "LOCAL_VISION_MODEL=llava" >> ~/.sinain/.env
-echo "PRIVACY_MODE=paranoid" >> ~/.sinain/.env
-
-# 4. Start
+# 3. Start in local mode
 ./start-local.sh
 ```
 
-Startup confirms local mode:
-```
-[local] Starting SinainHUD with local transcription...
-[local]   backend:  whisper-cpp
-[local]   vision:   Ollama (llava) — local
-[local]   agent:    claude (transport=http) — start with: sinain-agent/run.sh
-```
-
-Available local vision models:
-
-| Model | Size | Speed (warm) | Best for |
-|-------|------|-------------|----------|
+| Model | Size | Speed | Best for |
+|---|---|---|---|
 | `llava` | 4.7 GB | ~2s/frame | General use (recommended) |
 | `llama3.2-vision` | 7.9 GB | ~4s/frame | Best accuracy |
 | `moondream` | 1.7 GB | ~1s/frame | Fastest, lower quality |
 
-### From source (for developers)
-
-```bash
-git clone https://github.com/anthillnet/sinain-hud
-cd sinain-hud
-cp .env.example ~/.sinain/.env
-# Edit .env — set OPENROUTER_API_KEY at minimum
-./start.sh                   # full system
-./start.sh --no-sense        # skip screen capture
-./start.sh --no-overlay      # headless mode
-```
-
-For local transcription: `./setup-local-stt.sh`, then `./start-local.sh`
-For fully local (no cloud APIs): also set `LOCAL_VISION_ENABLED=true` in `.env` — see [Running Fully Local](#running-fully-local-no-cloud-apis)
-
 ## Setup Guides
 
-| Setup | Description | Guide |
-|---|---|---|
-| Local OpenClaw | Gateway on your Mac | [docs/INSTALL-LOCAL.md](docs/INSTALL-LOCAL.md) |
-| Remote OpenClaw | Gateway on a Linux server | [docs/INSTALL-REMOTE.md](docs/INSTALL-REMOTE.md) |
-| NemoClaw (Brev) | NVIDIA cloud with NIM models | [docs/INSTALL.md](docs/INSTALL.md) |
-| Bare Agent | Any coding agent, no gateway | [docs/INSTALL-BARE-AGENT.md](docs/INSTALL-BARE-AGENT.md) |
-| Windows | Native setup (no WSL2 needed) | [setup-windows.sh](setup-windows.sh) |
-
-## Components
-
-### sinain-core/
-Node.js hub on `:9500` — audio pipeline, agent analysis loop, escalation orchestration, WebSocket
-feed to overlay, SITUATION.md sync via RPC. See [sinain-core/README.md](sinain-core/README.md).
-
-### overlay/
-Flutter private overlay (`NSWindow.sharingType = .none` on macOS, `WDA_EXCLUDEFROMCAPTURE` on
-Windows) — invisible to all screen sharing and recording. 4 display modes: Feed, Alert, Minimal,
-Hidden. See [Hotkeys](docs/HOTKEYS.md).
-
-### sense_client/
-Python screen capture with three backends: SCKCapture (ScreenCaptureKit, primary), ScreenKitCapture
-(IPC fallback), ScreenCapture (CGDisplayCreateImage legacy). SSIM change detection, OCR via
-OpenRouter vision, privacy auto-redaction.
-
-### tools/sck-capture/
-Swift binary using ScreenCaptureKit — single `SCStream` captures both system audio (raw PCM →
-stdout → sinain-core AudioPipeline) and screen frames (JPEG → IPC → sense_client). Zero-setup
-on macOS 13+, replaces the old sox/BlackHole audio path.
-
-### sinain-agent/
-Bare agent runner for use without an OpenClaw gateway. Polls sinain-core for pending escalations,
-invokes the selected agent (Claude, Codex, Goose, Junie, or Aider), and posts responses back.
-MCP-capable agents call sinain tools directly; others use pipe mode.
-
-### sinain-mcp-server/
-MCP server that exposes sinain tools (`sinain_get_escalation`, `sinain_respond`, `sinain_get_context`,
-etc.) to any MCP-compatible agent. Started automatically by the launcher.
-
-### sinain-hud-plugin/
-OpenClaw server plugin — auto-deploys workspace files, runs the knowledge curation pipeline
-(signal analysis, feedback mining, playbook curation, tick evaluation), context overflow
-watchdog, privacy stripping, `/sinain_status` and `/sinain_modules` commands.
-Includes `sinain-knowledge/` engine for portable knowledge and snapshot management.
-
-### modules/
-Hot-swappable knowledge packages with priority-based stacking. Each module has a `manifest.json`
-and `patterns.md`. See [Knowledge System](docs/knowledge-system.md).
-
-## Configuration
-
-All config via environment variables in `~/.sinain/.env` (created by the setup wizard). Essential variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `OPENROUTER_API_KEY` | — | **Required** (unless using local transcription) |
-| `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` / `rich` |
-| `OPENCLAW_WS_URL` | `ws://localhost:18789` | Gateway WebSocket endpoint |
-
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference (30+ variables).
-
-## Hotkeys
-
-Global hotkeys use the **Cmd+Shift** prefix. Essential shortcuts:
-
-| Shortcut | Action |
+| Setup | Guide |
 |---|---|
-| `Cmd+Shift+Space` | Toggle overlay visibility |
-| `Cmd+Shift+M` | Cycle display mode |
-| `Cmd+Shift+H` | Quit overlay |
-| `Cmd+Shift+/` | Open command input |
+| Local OpenClaw | [docs/INSTALL-LOCAL.md](docs/INSTALL-LOCAL.md) |
+| Remote OpenClaw | [docs/INSTALL-REMOTE.md](docs/INSTALL-REMOTE.md) |
+| NemoClaw (Brev) | [docs/INSTALL.md](docs/INSTALL.md) |
+| Bare Agent | [docs/INSTALL-BARE-AGENT.md](docs/INSTALL-BARE-AGENT.md) |
+| Windows | [setup-windows.sh](setup-windows.sh) |
+| From Source | `git clone`, `cp .env.example ~/.sinain/.env`, `./start.sh` |
 
-See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
+## Knowledge Transfer
 
-## Privacy
-
-- **Invisible overlay** — `NSWindow.sharingType = .none`: invisible to screen share, recording,
-  and screenshots
-- **`<private>` tags** — wrap on-screen text in `<private>...</private>`; stripped client-side
-  by sense_client and server-side by the plugin before persistence
-- **Auto-redaction** — credit cards, API keys, bearer tokens, AWS keys, passwords
-- **Local-first** — all traffic stays on localhost; audio transcribed in-memory, never persisted
-- **Privacy modes** — 4 levels (`off`, `standard`, `strict`, `paranoid`) configured via
-  `PRIVACY_MODE` in `~/.sinain/.env`. Default is `off` (no filtering). Set to `standard`
-  for auto-redaction of sensitive data before it reaches cloud APIs. See [Step 3](#step-3-configure-sinain) in Quick Start.
-
-See [Privacy Threat Model](docs/privacy-protection-design.md) for the full design.
+```bash
+npx @geravant/sinain export-knowledge   # export playbook, modules, graph
+npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
+```
 
 ## Deep Dives
 
@@ -300,9 +206,6 @@ See [Privacy Threat Model](docs/privacy-protection-design.md) for the full desig
 | Personality Traits | [docs/PERSONALITY-TRAITS-SYSTEM.md](docs/PERSONALITY-TRAITS-SYSTEM.md) |
 | Privacy Threat Model | [docs/privacy-protection-design.md](docs/privacy-protection-design.md) |
 | HUD Skill Protocol | [docs/HUD-SKILL-PROTOCOL.md](docs/HUD-SKILL-PROTOCOL.md) |
-| Profiling & Metrics | [sinain-core/docs/PROFILING.md](sinain-core/docs/PROFILING.md) |
-| sinain-core Reference | [sinain-core/README.md](sinain-core/README.md) |
-| NemoClaw Spec | [docs/nemoclaw-setup-spec.md](docs/nemoclaw-setup-spec.md) |
 | Full Configuration | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 | All Hotkeys | [docs/HOTKEYS.md](docs/HOTKEYS.md) |
 
