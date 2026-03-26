@@ -51,6 +51,7 @@ invoke_agent() {
     claude)
       claude --dangerously-skip-permissions \
         --mcp-config "$MCP_CONFIG" \
+        --allowedTools "mcp__sinain" \
         --max-turns 5 --output-format text \
         -p "$prompt"
       ;;
