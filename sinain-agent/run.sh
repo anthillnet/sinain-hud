@@ -49,7 +49,7 @@ invoke_agent() {
   local prompt="$1"
   case "$AGENT" in
     claude)
-      claude --dangerously-skip-permissions \
+      claude --enable-auto-mode \
         --mcp-config "$MCP_CONFIG" \
         --max-turns 5 --output-format text \
         -p "$prompt"

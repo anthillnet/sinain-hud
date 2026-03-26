@@ -201,7 +201,7 @@ SINAIN_AGENT=claude|codex|junie|goose|aider|<command>   # default: claude
 
 | Agent | Mode | One-shot flag | MCP config | Auto-approve |
 |-------|------|---------------|------------|--------------|
-| `claude` | MCP | `-p "$prompt"` | `--mcp-config file.json` | `--dangerously-skip-permissions` |
+| `claude` | MCP | `-p "$prompt"` | `--mcp-config file.json` | `--enable-auto-mode` |
 | `codex` | MCP | `exec "$prompt"` | `codex mcp add` (persistent) | `-s danger-full-access` |
 | `junie` | MCP | `--task "$prompt"` | `--mcp-location dir` (auto-configured) | N/A |
 | `goose` | MCP | `run --text "$prompt"` | `goose configure` (persistent) | N/A |
