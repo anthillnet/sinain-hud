@@ -38,9 +38,6 @@ class HotkeyHandler {
 
   // State tracking (mirrors AppDelegate.swift)
   bool is_visible_ = true;
-  bool is_top_position_ = false;
-  int current_mode_index_ = 0;
-  std::vector<std::string> mode_names_ = {"feed", "alert", "minimal", "hidden"};
 };
 
 #endif  // RUNNER_HOTKEY_HANDLER_H_

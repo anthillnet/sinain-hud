@@ -117,6 +117,15 @@ class WindowService {
     }
   }
 
+  /// Reset window to default position (bottom-right corner, eye size).
+  Future<void> resetToDefaultPosition() async {
+    try {
+      await _channel.invokeMethod('resetToDefaultPosition');
+    } catch (e) {
+      _log('resetToDefaultPosition failed: $e');
+    }
+  }
+
   /// Open a file in the system default editor.
   Future<void> openFile(String path) async {
     try {
