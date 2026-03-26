@@ -52,17 +52,17 @@ invoke_agent() {
       claude --dangerously-skip-permissions \
         --mcp-config "$MCP_CONFIG" \
         --max-turns 5 --output-format text \
-        -p "$prompt" 2>/dev/null
+        -p "$prompt"
       ;;
     codex)
       codex exec -s danger-full-access \
-        "$prompt" 2>/dev/null
+        "$prompt"
       ;;
     junie)
       if $JUNIE_HAS_MCP; then
         junie --output-format text \
           --mcp-location "$JUNIE_MCP_DIR" \
-          --task "$prompt" 2>/dev/null
+          --task "$prompt"
       else
         return 1
       fi
@@ -70,7 +70,7 @@ invoke_agent() {
     goose)
       goose run --text "$prompt" \
         --output-format text \
-        --max-turns 10 2>/dev/null
+        --max-turns 10
       ;;
     aider)
       # No MCP support — signal pipe mode
@@ -104,10 +104,10 @@ invoke_pipe() {
   local msg="$1"
   case "$AGENT" in
     junie)
-      junie --output-format text --task "$msg" 2>/dev/null
+      junie --output-format text --task "$msg"
       ;;
     aider)
-      aider --yes -m "$msg" 2>/dev/null
+      aider --yes -m "$msg"
       ;;
     *)
       # Generic: pipe message to stdin
@@ -131,7 +131,9 @@ if [ "$AGENT" = "junie" ]; then
   if junie --help 2>&1 | grep -q "mcp-location"; then
     JUNIE_HAS_MCP=true
     mkdir -p "$JUNIE_MCP_DIR"
-    cp "$MCP_CONFIG" "$JUNIE_MCP_DIR/mcp.json"
+    # Junie expects relative paths from the config file location.
+    # Since we moved the config into a sub-directory, we need to adjust ../ to ../../
+    sed 's|"\.\./|"../../|g' "$MCP_CONFIG" > "$JUNIE_MCP_DIR/mcp.json"
   else
     echo "NOTE: junie $(junie --version 2>&1 | grep -oE '[0-9.]+' | head -1) lacks --mcp-location, using pipe mode"
     echo "  Upgrade junie for MCP support: brew upgrade junie"
