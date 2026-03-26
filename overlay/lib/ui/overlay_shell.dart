@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +10,7 @@ import 'eye/eye_widget.dart';
 import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
 import 'input/command_input.dart';
+import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
@@ -26,11 +28,40 @@ class OverlayShellState extends State<OverlayShell> {
   late final WindowService _windowService;
   late final SettingsService _settingsService;
 
+  // Contextual eye animation state
+  bool _isThinking = false;
+  bool _hasNewContent = false;
+  Timer? _contentResetTimer;
+  StreamSubscription<bool>? _thinkingSub;
+  StreamSubscription<FeedItem>? _contentSub;
+
+  // Command input focus
+  final _commandFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _windowService = context.read<WindowService>();
     _settingsService = context.read<SettingsService>();
+
+    final ws = context.read<WebSocketService>();
+    _thinkingSub = ws.thinkingStream.listen((active) {
+      if (mounted) setState(() => _isThinking = active);
+    });
+    _contentSub = ws.agentFeedStream.listen((_) {
+      if (!mounted) return;
+      setState(() => _hasNewContent = true);
+      _contentResetTimer?.cancel();
+      _contentResetTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _hasNewContent = false);
+      });
+    });
+  }
+
+  double get _pupilDilation {
+    if (_isThinking) return 0.3;
+    if (_hasNewContent) return 0.6;
+    return 0.0;
   }
 
   void toggleVisibility(bool visible) {
@@ -54,6 +85,42 @@ class OverlayShellState extends State<OverlayShell> {
     } else {
       _transitionTo(HudState.chat);
     }
+  }
+
+  /// Cycle through visible states: Eye → Controls → Chat → Eye.
+  void cycleState() {
+    switch (_state) {
+      case HudState.eye:
+        _transitionTo(HudState.controls);
+      case HudState.controls:
+        _transitionTo(HudState.chat);
+      case HudState.chat:
+        _transitionTo(HudState.eye);
+      case HudState.hidden:
+        // Unhide to eye first
+        toggleVisibility(true);
+    }
+  }
+
+  /// Reset window position to default bottom-right corner.
+  /// Clears persisted position so next launch uses native default.
+  void resetPosition() {
+    _settingsService.setEyePosition(-1, -1);
+    if (_state != HudState.eye) _transitionTo(HudState.eye);
+    // The native AppDelegate sets default position on launch.
+    // For runtime reset, we ask native to re-position via a special method.
+    _windowService.resetToDefaultPosition();
+  }
+
+  /// Transition to Chat state and focus the command input.
+  void focusInput() {
+    if (_state != HudState.chat) {
+      _transitionTo(HudState.chat);
+    }
+    // Delay to let the widget tree rebuild before requesting focus
+    Future.delayed(const Duration(milliseconds: 200), () {
+      _commandFocusNode.requestFocus();
+    });
   }
 
   Future<void> _persistEyePosition() async {
@@ -98,6 +165,15 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
+  @override
+  void dispose() {
+    _thinkingSub?.cancel();
+    _contentSub?.cancel();
+    _contentResetTimer?.cancel();
+    _commandFocusNode.dispose();
+    super.dispose();
+  }
+
   void _onDrag(DragUpdateDetails details) {
     _windowService.moveWindowBy(details.delta.dx, -details.delta.dy);
   }
@@ -122,6 +198,7 @@ class OverlayShellState extends State<OverlayShell> {
           onTap: () => _transitionTo(HudState.controls),
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
+          pupilDilation: _pupilDilation,
         );
       case HudState.controls:
         return _buildControlsBar();
@@ -165,9 +242,18 @@ class OverlayShellState extends State<OverlayShell> {
               onTap: () => ws.sendCommand('toggle_mic'),
             ),
             const Spacer(),
-            _actionIcon(Icons.settings, 'settings', _openSettings),
-            _actionIcon(Icons.chevron_right, 'collapse', () => _transitionTo(HudState.eye)),
-            _actionIcon(Icons.open_in_full, 'expand', () => _transitionTo(HudState.chat)),
+            // Demo badge
+            if (!_settingsService.settings.privacyMode)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text('DEMO', style: TextStyle(
+                  fontFamily: 'JetBrainsMono', fontSize: 9, fontWeight: FontWeight.bold,
+                  color: const Color(0xFFFF3344).withValues(alpha: 0.8),
+                )),
+              ),
+            _plainIcon(Icons.settings, _openSettings),
+            _plainIcon(Icons.chevron_right, () => _transitionTo(HudState.eye)),
+            _plainIcon(Icons.open_in_full, () => _transitionTo(HudState.chat)),
             const SizedBox(width: 4),
             // Eye animation
             GestureDetector(
@@ -179,7 +265,7 @@ class OverlayShellState extends State<OverlayShell> {
                   shape: BoxShape.circle,
                   color: Colors.black.withValues(alpha: 0.3),
                 ),
-                child: const IdleAnimation(size: 32),
+                child: IdleAnimation(size: 32, pupilDilation: _pupilDilation),
               ),
             ),
             const SizedBox(width: 4),
@@ -215,7 +301,7 @@ class OverlayShellState extends State<OverlayShell> {
               child: Row(
                 children: [
                   // Collapse
-                  _actionIcon(Icons.expand_more, 'collapse', () => _transitionTo(HudState.controls)),
+                  _plainIcon(Icons.expand_more, () => _transitionTo(HudState.controls), small: true),
                   const SizedBox(width: 2),
                   // Capture toggles
                   _toggleIcon(
@@ -236,9 +322,42 @@ class OverlayShellState extends State<OverlayShell> {
                     onTap: () => ws.sendCommand('toggle_mic'),
                     small: true,
                   ),
+                  const SizedBox(width: 4),
+                  // Tab indicator (clickable)
+                  Consumer<SettingsService>(
+                    builder: (_, settings, __) => GestureDetector(
+                      onTap: () => _settingsService.cycleTab(),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(3),
+                            color: Colors.white.withValues(alpha: 0.06),
+                          ),
+                          child: Text(
+                            settings.settings.activeTab == HudTab.agent ? 'AGT' : 'TSK',
+                            style: TextStyle(
+                              fontFamily: 'JetBrainsMono', fontSize: 9,
+                              color: Colors.white.withValues(alpha: 0.4),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                   const Spacer(),
+                  // Demo badge
+                  if (!_settingsService.settings.privacyMode)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Text('DEMO', style: TextStyle(
+                        fontFamily: 'JetBrainsMono', fontSize: 8, fontWeight: FontWeight.bold,
+                        color: const Color(0xFFFF3344).withValues(alpha: 0.8),
+                      )),
+                    ),
                   // Settings
-                  _actionIcon(Icons.settings, 'settings', _openSettings, small: true),
+                  _plainIcon(Icons.settings, _openSettings, small: true),
                   const SizedBox(width: 4),
                   // Eye — collapses all the way to State 1
                   GestureDetector(
@@ -250,7 +369,7 @@ class OverlayShellState extends State<OverlayShell> {
                         shape: BoxShape.circle,
                         color: Colors.black.withValues(alpha: 0.3),
                       ),
-                      child: const IdleAnimation(size: 20),
+                      child: IdleAnimation(size: 20, pupilDilation: _pupilDilation),
                     ),
                   ),
                   const SizedBox(width: 2),
@@ -258,15 +377,24 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             ),
           ),
-          // Feed content
-          const Expanded(
-            child: FeedView(
-              channel: FeedChannel.agent,
-              emptyLabel: 'awaiting context…',
+          // Tab content (Agent feed / Tasks)
+          Expanded(
+            child: Consumer<SettingsService>(
+              builder: (_, settings, __) => IndexedStack(
+                index: settings.settings.activeTab == HudTab.agent ? 0 : 1,
+                children: const [
+                  FeedView(
+                    channel: FeedChannel.agent,
+                    emptyLabel: 'awaiting context…',
+                  ),
+                  TasksView(),
+                ],
+              ),
             ),
           ),
           // Command input
           CommandInput(
+            externalFocusNode: _commandFocusNode,
             onSubmit: (text) {
               context.read<WebSocketService>().sendUserCommand(text);
             },
@@ -288,12 +416,12 @@ class OverlayShellState extends State<OverlayShell> {
         // Right edge resize — grow right, anchor left edge
         _resizeHandle(Alignment.centerRight, SystemMouseCursors.resizeRight,
             (dx, dy) => _windowService.resizeWindowBy(dx, 0)),
-        // Top edge resize — grow up, anchor top (macOS: keep top edge fixed)
+        // Top edge resize — drag up grows upward (macOS: origin stays, height increases = grows up)
         _resizeHandle(Alignment.topCenter, SystemMouseCursors.resizeUp,
-            (dx, dy) => _windowService.resizeWindowBy(0, -dy, anchorTop: true)),
-        // Bottom edge resize — grow down, anchor bottom (macOS: origin stays)
+            (dx, dy) => _windowService.resizeWindowBy(0, -dy)),
+        // Bottom edge resize — drag down grows downward (macOS: keep top fixed via anchorTop)
         _resizeHandle(Alignment.bottomCenter, SystemMouseCursors.resizeDown,
-            (dx, dy) => _windowService.resizeWindowBy(0, dy)),
+            (dx, dy) => _windowService.resizeWindowBy(0, dy, anchorTop: true)),
       ],
     );
   }
@@ -358,20 +486,17 @@ class OverlayShellState extends State<OverlayShell> {
     );
   }
 
-  Widget _actionIcon(IconData icon, String tooltip, VoidCallback onTap, {bool small = false}) {
+  Widget _plainIcon(IconData icon, VoidCallback onTap, {bool small = false}) {
     final size = small ? 12.0 : 16.0;
     final pad = small ? 4.0 : 8.0;
-    return Tooltip(
-      message: tooltip,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: EdgeInsets.all(pad),
-            child: Icon(icon, size: size, color: Colors.white.withValues(alpha: 0.5)),
-          ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: EdgeInsets.all(pad),
+          child: Icon(icon, size: size, color: Colors.white.withValues(alpha: 0.5)),
         ),
       ),
     );

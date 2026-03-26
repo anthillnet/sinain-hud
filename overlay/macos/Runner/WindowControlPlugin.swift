@@ -82,8 +82,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             result(nil)
 
         case "resizeWindowBy":
-            // Delta-based resize. anchorTop=true means the top edge stays fixed (grow downward on screen).
-            // On macOS, y is from bottom, so keeping the top fixed means adjusting y when height changes.
+            // Delta-based resize with anchor control.
+            // anchorTop=true keeps the TOP edge fixed (macOS: adjusts origin.y so top = origin.y + height stays constant).
+            // Without anchorTop, origin.y stays fixed = bottom edge stays fixed, window grows upward.
             let dw = args?["dw"] as? Double ?? 0
             let dh = args?["dh"] as? Double ?? 0
             let anchorRight = args?["anchorRight"] as? Bool ?? false
@@ -94,6 +95,8 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             let oldH = frame.size.height
             let newW = min(max(frame.size.width + CGFloat(dw), 300), 800)
             let newH = min(max(frame.size.height + CGFloat(dh), 200), 900)
+
+            let oldTop = frame.origin.y + frame.size.height
 
             // Adjust origin to keep the anchored edge fixed
             if anchorRight {
@@ -106,6 +109,11 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             }
             frame.size.width = newW
             frame.size.height = newH
+
+            NSLog("[WCP] resizeWindowBy dw=\(dw) dh=\(dh) anchorRight=\(anchorRight) anchorTop=\(anchorTop)")
+            NSLog("[WCP]   old: origin=(\(window.frame.origin.x),\(window.frame.origin.y)) size=(\(oldW)x\(oldH)) top=\(oldTop)")
+            NSLog("[WCP]   new: origin=(\(frame.origin.x),\(frame.origin.y)) size=(\(frame.size.width)x\(frame.size.height)) top=\(frame.origin.y + frame.size.height)")
+
             window.setFrame(frame, display: true)
             result(nil)
 
@@ -122,6 +130,13 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             if let panel = window as? NSPanel {
                 panel.becomesKeyOnlyIfNeeded = true
             }
+            result(nil)
+
+        case "resetToDefaultPosition":
+            let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            let x = screenFrame.maxX - HUDConfig.eyeSize - HUDConfig.margin
+            let y = screenFrame.minY + HUDConfig.margin
+            window.setFrame(NSRect(x: x, y: y, width: HUDConfig.eyeSize, height: HUDConfig.eyeSize), display: true)
             result(nil)
 
         case "openFile":

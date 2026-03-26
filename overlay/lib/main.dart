@@ -39,13 +39,41 @@ void main() async {
   const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
   hotkeyChannel.setMethodCallHandler((call) async {
     switch (call.method) {
+      // Navigation
       case 'onToggleVisibility':
-        final visible = call.arguments as bool;
-        overlayShellKey.currentState?.toggleVisibility(visible);
+        overlayShellKey.currentState?.toggleVisibility(call.arguments as bool);
+      case 'onCycleState':
+        overlayShellKey.currentState?.cycleState();
       case 'onQuit':
         wsService.disconnect();
       case 'onToggleChat':
         overlayShellKey.currentState?.toggleChat();
+      case 'onCycleTab':
+        settingsService.cycleTab();
+      case 'onResetPosition':
+        overlayShellKey.currentState?.resetPosition();
+      case 'onFocusInput':
+        overlayShellKey.currentState?.focusInput();
+
+      // Capture toggles
+      case 'onToggleAudio':
+        wsService.sendCommand('toggle_audio');
+      case 'onToggleScreen':
+        wsService.sendCommand('toggle_screen');
+      case 'onToggleTraits':
+        wsService.sendCommand('toggle_traits');
+      case 'onTogglePrivacy':
+        settingsService.setPrivacyModeTransient(call.arguments as bool);
+
+      // Feed display
+      case 'onToggleAudioFeed':
+        wsService.toggleAudioFeed();
+      case 'onToggleScreenFeed':
+        wsService.toggleScreenFeed();
+      case 'onScrollFeed':
+        wsService.scrollFeed(call.arguments as String);
+      case 'onCopyMessage':
+        wsService.requestCopy(settingsService.settings.activeTab.name);
     }
   });
 

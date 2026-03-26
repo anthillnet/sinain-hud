@@ -111,12 +111,27 @@ class AppDelegate: FlutterAppDelegate {
             nil
         )
 
-        // ID 1: Cmd+Shift+Space → toggle visibility (hidden state)
-        registerHotKey(id: 1, keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 4: Cmd+Shift+H → quit overlay
-        registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 19: Cmd+Shift+F → jump Eye ↔ Chat
-        registerHotKey(id: 19, keyCode: UInt32(kVK_ANSI_F), modifiers: UInt32(cmdKey | shiftKey))
+        // Navigation
+        registerHotKey(id: 1,  keyCode: UInt32(kVK_Space),      modifiers: UInt32(cmdKey | shiftKey)) // toggle visibility
+        registerHotKey(id: 3,  keyCode: UInt32(kVK_ANSI_M),     modifiers: UInt32(cmdKey | shiftKey)) // cycle state
+        registerHotKey(id: 4,  keyCode: UInt32(kVK_ANSI_H),     modifiers: UInt32(cmdKey | shiftKey)) // quit
+        registerHotKey(id: 19, keyCode: UInt32(kVK_ANSI_F),     modifiers: UInt32(cmdKey | shiftKey)) // toggle chat
+        registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E),     modifiers: UInt32(cmdKey | shiftKey)) // cycle tab
+        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P),     modifiers: UInt32(cmdKey | shiftKey)) // reset position
+        registerHotKey(id: 18, keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(cmdKey | shiftKey)) // focus input
+
+        // Capture toggles
+        registerHotKey(id: 5,  keyCode: UInt32(kVK_ANSI_T),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio capture
+        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen capture
+        registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_B),     modifiers: UInt32(cmdKey | shiftKey)) // toggle traits
+        registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R),     modifiers: UInt32(cmdKey | shiftKey)) // toggle demo/privacy
+
+        // Feed display
+        registerHotKey(id: 7,  keyCode: UInt32(kVK_ANSI_A),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio feed
+        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen feed
+        registerHotKey(id: 8,  keyCode: UInt32(kVK_UpArrow),    modifiers: UInt32(cmdKey | shiftKey)) // scroll up
+        registerHotKey(id: 9,  keyCode: UInt32(kVK_DownArrow),  modifiers: UInt32(cmdKey | shiftKey)) // scroll down
+        registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_Y),     modifiers: UInt32(cmdKey | shiftKey)) // copy message
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -164,25 +179,50 @@ class AppDelegate: FlutterAppDelegate {
         guard let window = mainFlutterWindow else { return }
 
         switch id {
-        case 1: // Cmd+Shift+Space → toggle visibility
-            // Check actual window visibility (not a cached flag) to stay in sync
-            // with Flutter-initiated hide (long-press)
+        // ── Navigation ──
+        case 1: // Space → toggle visibility
             let wasVisible = window.isVisible
-            if wasVisible {
-                window.orderOut(nil)
-            } else {
-                window.orderFront(nil)
-            }
+            if wasVisible { window.orderOut(nil) } else { window.orderFront(nil) }
             hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: !wasVisible)
-
-        case 4: // Cmd+Shift+H → quit overlay
+        case 3: // M → cycle state (Eye → Controls → Chat → Eye)
+            hotkeyChannel?.invokeMethod("onCycleState", arguments: nil)
+        case 4: // H → quit
             hotkeyChannel?.invokeMethod("onQuit", arguments: nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                NSApp.terminate(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
+        case 19: // F → toggle Eye ↔ Chat
+            hotkeyChannel?.invokeMethod("onToggleChat", arguments: nil)
+        case 12: // E → cycle tab (Agent ↔ Tasks)
+            hotkeyChannel?.invokeMethod("onCycleTab", arguments: nil)
+        case 13: // P → reset position to default
+            hotkeyChannel?.invokeMethod("onResetPosition", arguments: nil)
+        case 18: // / → focus command input (transition to Chat if needed)
+            hotkeyChannel?.invokeMethod("onFocusInput", arguments: nil)
+
+        // ── Capture toggles ──
+        case 5: // T → toggle audio capture
+            hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
+        case 10: // S → toggle screen capture
+            hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
+        case 17: // B → toggle trait voices
+            hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
+        case 15: // R → toggle demo/privacy mode
+            if #available(macOS 12.0, *) {
+                let currentlyPrivate = window.sharingType == .none
+                window.sharingType = currentlyPrivate ? .readOnly : .none
+                hotkeyChannel?.invokeMethod("onTogglePrivacy", arguments: !currentlyPrivate)
             }
 
-        case 19: // Cmd+Shift+F → jump Eye ↔ Chat
-            hotkeyChannel?.invokeMethod("onToggleChat", arguments: nil)
+        // ── Feed display ──
+        case 7: // A → toggle audio feed filter
+            hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
+        case 11: // V → toggle screen feed filter
+            hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
+        case 8: // Up → scroll feed up
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "up")
+        case 9: // Down → scroll feed down
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
+        case 14: // Y → copy selected message
+            hotkeyChannel?.invokeMethod("onCopyMessage", arguments: nil)
 
         default:
             break

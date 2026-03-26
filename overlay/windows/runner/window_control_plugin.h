@@ -30,6 +30,13 @@ class WindowControlPlugin {
   void ActivateCommandInput();
   void DismissCommandInput();
 
+  // New methods (parity with macOS WindowControlPlugin)
+  void SetWindowFrame(double x, double y, double w, double h);
+  void MoveWindowBy(double dx, double dy);
+  void ResizeWindowBy(double dw, double dh, bool anchor_right, bool anchor_top);
+  void ResetToDefaultPosition();
+  void OpenFile(const std::string& path);
+
   HWND hwnd_;
   bool click_through_ = true;
 };
