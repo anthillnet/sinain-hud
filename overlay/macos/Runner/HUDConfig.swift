@@ -15,5 +15,6 @@ struct HUDConfig {
     static let maxChatHeight: CGFloat = 900
 
     static let margin: CGFloat = 16
+    static let snapThreshold: CGFloat = 20
     static let fallbackScreenRect = NSRect(x: 0, y: 0, width: 1920, height: 1080)
 }
