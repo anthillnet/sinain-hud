@@ -29,6 +29,21 @@ HEARTBEAT_INTERVAL="${SINAIN_HEARTBEAT_INTERVAL:-900}" # 15 minutes
 AGENT="${SINAIN_AGENT:-claude}"
 WORKSPACE="${SINAIN_WORKSPACE:-$HOME/.openclaw/workspace}"
 
+# Build allowed tools list for Claude's --allowedTools flag.
+# SINAIN_ALLOWED_TOOLS in .env overrides; otherwise auto-derive from MCP config.
+if [ -n "${SINAIN_ALLOWED_TOOLS:-}" ]; then
+  ALLOWED_TOOLS="$SINAIN_ALLOWED_TOOLS"
+elif [ -f "$MCP_CONFIG" ]; then
+  ALLOWED_TOOLS=$(python3 -c "
+import json
+with open('$MCP_CONFIG') as f:
+    cfg = json.load(f)
+print(' '.join('mcp__' + s for s in cfg.get('mcpServers', {})))
+" 2>/dev/null || echo "mcp__sinain")
+else
+  ALLOWED_TOOLS="mcp__sinain"
+fi
+
 # --- Agent profiles ---
 
 # Returns 0 if the selected agent supports MCP tools natively.
@@ -49,9 +64,9 @@ invoke_agent() {
   local prompt="$1"
   case "$AGENT" in
     claude)
-      claude --dangerously-skip-permissions \
+      claude --enable-auto-mode \
         --mcp-config "$MCP_CONFIG" \
-        --allowedTools "mcp__sinain" \
+        ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
         --max-turns 5 --output-format text \
         -p "$prompt"
       ;;
@@ -170,6 +185,7 @@ fi
 echo "sinain bare agent started"
 echo "  Agent: $AGENT ($AGENT_MODE)"
 echo "  Core: $CORE_URL"
+echo "  Allowed: ${ALLOWED_TOOLS:-<none>}"
 echo "  Poll: every ${POLL_INTERVAL}s"
 echo "  Heartbeat: every ${HEARTBEAT_INTERVAL}s"
 echo "  Press Ctrl+C to stop"
