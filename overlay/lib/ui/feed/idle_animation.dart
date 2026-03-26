@@ -15,6 +15,7 @@ class IdleAnimation extends StatefulWidget {
   final double alphaMin;
   final double alphaMax;
   final double size;
+  final Color color;
 
   const IdleAnimation({
     super.key,
@@ -24,6 +25,7 @@ class IdleAnimation extends StatefulWidget {
     this.alphaMin = 0.30,
     this.alphaMax = 0.55,
     this.size = 80,
+    this.color = const Color(0xFF00FF88),
   });
 
   @override
@@ -79,6 +81,7 @@ class _IdleAnimationState extends State<IdleAnimation>
                     pupilDilation: widget.pupilDilation,
                     alphaMin: widget.alphaMin,
                     alphaMax: widget.alphaMax,
+                    color: widget.color,
                   ),
                 ),
               ),
@@ -108,15 +111,15 @@ class _PulseRingPainter extends CustomPainter {
   final double pupilDilation;
   final double alphaMin;
   final double alphaMax;
+  final Color color;
 
   _PulseRingPainter(
     this.t, {
     this.pupilDilation = 0.0,
     this.alphaMin = 0.15,
     this.alphaMax = 0.35,
+    this.color = const Color(0xFF00FF88),
   });
-
-  static const _color = Color(0xFF00FF88);
   static const _lineCount = 8;
 
   @override
@@ -129,7 +132,7 @@ class _PulseRingPainter extends CustomPainter {
 
     // Ring
     final ringPaint = Paint()
-      ..color = _color.withValues(alpha: alpha)
+      ..color = color.withValues(alpha: alpha)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
     canvas.drawCircle(center, radius, ringPaint);
@@ -158,13 +161,13 @@ class _PulseRingPainter extends CustomPainter {
       ..close();
 
     final pupilPaint = Paint()
-      ..color = _color.withValues(alpha: alpha * 0.8)
+      ..color = color.withValues(alpha: alpha * 0.8)
       ..style = PaintingStyle.fill;
     canvas.drawPath(pupilPath, pupilPaint);
 
     // Radial spike lines
     final linePaint = Paint()
-      ..color = _color.withValues(alpha: alpha * 0.5)
+      ..color = color.withValues(alpha: alpha * 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
