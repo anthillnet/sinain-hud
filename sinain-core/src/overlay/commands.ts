@@ -43,6 +43,17 @@ export function setupCommands(deps: CommandDeps): void {
       }
       case "user_command": {
         log(TAG, `user command received: "${msg.text.slice(0, 60)}"`);
+        // Echo user message to all overlay clients as a feed item
+        wsHandler.broadcastRaw({
+          type: "feed",
+          text: msg.text,
+          priority: "normal",
+          ts: Date.now(),
+          channel: "agent",
+          sender: "user",
+        } as any);
+        // Show thinking indicator
+        wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
         deps.onUserCommand(msg.text);
         break;
       }

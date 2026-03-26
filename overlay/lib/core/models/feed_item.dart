@@ -2,11 +2,14 @@ enum FeedPriority { normal, high, urgent }
 
 enum FeedChannel { stream, agent }
 
+enum FeedSender { agent, user }
+
 class FeedItem {
   final String id;
   final String text;
   final FeedPriority priority;
   final FeedChannel channel;
+  final FeedSender sender;
   final DateTime timestamp;
   double opacity;
 
@@ -15,9 +18,12 @@ class FeedItem {
     required this.text,
     this.priority = FeedPriority.normal,
     this.channel = FeedChannel.stream,
+    this.sender = FeedSender.agent,
     DateTime? timestamp,
     this.opacity = 1.0,
   }) : timestamp = timestamp ?? DateTime.now();
+
+  bool get isUser => sender == FeedSender.user;
 
   factory FeedItem.fromJson(Map<String, dynamic> json) {
     return FeedItem(
@@ -25,6 +31,7 @@ class FeedItem {
       text: json['text'] as String? ?? '',
       priority: _parsePriority(json['priority'] as String?),
       channel: _parseChannel(json['channel'] as String?),
+      sender: (json['sender'] as String?) == 'user' ? FeedSender.user : FeedSender.agent,
       timestamp: json['timestamp'] != null
           ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
           : DateTime.now(),

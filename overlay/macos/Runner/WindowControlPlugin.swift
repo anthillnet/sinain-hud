@@ -81,6 +81,34 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.setFrameOrigin(origin)
             result(nil)
 
+        case "resizeWindowBy":
+            // Delta-based resize. anchorTop=true means the top edge stays fixed (grow downward on screen).
+            // On macOS, y is from bottom, so keeping the top fixed means adjusting y when height changes.
+            let dw = args?["dw"] as? Double ?? 0
+            let dh = args?["dh"] as? Double ?? 0
+            let anchorRight = args?["anchorRight"] as? Bool ?? false
+            let anchorTop = args?["anchorTop"] as? Bool ?? false
+
+            var frame = window.frame
+            let oldW = frame.size.width
+            let oldH = frame.size.height
+            let newW = min(max(frame.size.width + CGFloat(dw), 300), 800)
+            let newH = min(max(frame.size.height + CGFloat(dh), 200), 900)
+
+            // Adjust origin to keep the anchored edge fixed
+            if anchorRight {
+                frame.origin.x += (oldW - newW)
+            }
+            if anchorTop {
+                // macOS: top edge = origin.y + height. To keep it fixed:
+                // newOriginY = oldOriginY + oldH - newH
+                frame.origin.y += (oldH - newH)
+            }
+            frame.size.width = newW
+            frame.size.height = newH
+            window.setFrame(frame, display: true)
+            result(nil)
+
         case "makeKeyWindow":
             // Make panel key window for text input in chat state
             window.makeKeyAndOrderFront(nil)

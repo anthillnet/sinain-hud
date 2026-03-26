@@ -145,6 +145,7 @@ async function main() {
       escalator.pushSituationMd(content);
     },
     onHudUpdate: (text) => {
+      wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
       wsHandler.broadcast(text, "normal", "stream");
     },
     onTraceStart: tracer ? (tickId) => {
