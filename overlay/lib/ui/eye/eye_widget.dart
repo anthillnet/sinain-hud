@@ -11,6 +11,7 @@ class EyeWidget extends StatefulWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onDragEnd;
   final double pupilDilation;
+  final Color eyeColor;
 
   const EyeWidget({
     super.key,
@@ -18,6 +19,7 @@ class EyeWidget extends StatefulWidget {
     this.onLongPress,
     this.onDragEnd,
     this.pupilDilation = 0.0,
+    this.eyeColor = const Color(0xFF00FF88),
   });
 
   @override
@@ -53,6 +55,7 @@ class _EyeWidgetState extends State<EyeWidget> {
         child: IdleAnimation(
           size: 40,
           pupilDilation: widget.pupilDilation,
+          color: widget.eyeColor,
         ),
       ),
     );

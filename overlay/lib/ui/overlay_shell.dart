@@ -68,11 +68,17 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
+  static const _greenEye = Color(0xFF00FF88);
+  static const _redEye = Color(0xFFFF3344);
+
   double get _pupilDilation {
     if (_isThinking) return 0.3;
     if (_hasNewContent) return 0.6;
     return 0.0;
   }
+
+  Color get _eyeColor =>
+      _settingsService.settings.privacyMode ? _greenEye : _redEye;
 
   void toggleVisibility(bool visible) {
     if (visible) {
@@ -193,6 +199,12 @@ class OverlayShellState extends State<OverlayShell> {
     _windowService.moveWindowBy(details.delta.dx, -details.delta.dy);
   }
 
+  void _toggleDemoMode() {
+    final nowPrivate = !_settingsService.settings.privacyMode;
+    _settingsService.setPrivacyModeTransient(nowPrivate);
+    _windowService.setPrivacyMode(nowPrivate);
+  }
+
   void _openSettings() {
     final ws = context.read<WebSocketService>();
     final path = ws.envPath.isNotEmpty
@@ -203,6 +215,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<SettingsService>(); // rebuild on privacy mode change (eye color)
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
     }
@@ -214,6 +227,7 @@ class OverlayShellState extends State<OverlayShell> {
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
+          eyeColor: _eyeColor,
         );
       case HudState.controls:
         return _buildControlsBar();
@@ -258,14 +272,20 @@ class OverlayShellState extends State<OverlayShell> {
               onTap: () => ws.sendCommand('toggle_mic'),
             ),
             const Spacer(),
-            // Demo badge
+            // Demo badge (clickable — toggles privacy mode)
             if (!_settingsService.settings.privacyMode)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text('DEMO', style: TextStyle(
-                  fontFamily: 'JetBrainsMono', fontSize: 9, fontWeight: FontWeight.bold,
-                  color: const Color(0xFFFF3344).withValues(alpha: 0.8),
-                )),
+              GestureDetector(
+                onTap: _toggleDemoMode,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Text('DEMO', style: TextStyle(
+                      fontFamily: 'JetBrainsMono', fontSize: 9, fontWeight: FontWeight.bold,
+                      color: _redEye.withValues(alpha: 0.8),
+                    )),
+                  ),
+                ),
               ),
             _plainIcon(Icons.settings, _openSettings),
             _plainIcon(Icons.chevron_right, () => _transitionTo(HudState.eye)),
@@ -281,7 +301,7 @@ class OverlayShellState extends State<OverlayShell> {
                   shape: BoxShape.circle,
                   color: Colors.black.withValues(alpha: 0.3),
                 ),
-                child: IdleAnimation(size: 32, pupilDilation: _pupilDilation),
+                child: IdleAnimation(size: 32, pupilDilation: _pupilDilation, color: _eyeColor),
               ),
             ),
             const SizedBox(width: 4),
@@ -364,15 +384,24 @@ class OverlayShellState extends State<OverlayShell> {
                     ),
                   ),
                   const Spacer(),
-                  // Demo badge
-                  if (!_settingsService.settings.privacyMode)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Text('DEMO', style: TextStyle(
-                        fontFamily: 'JetBrainsMono', fontSize: 8, fontWeight: FontWeight.bold,
-                        color: const Color(0xFFFF3344).withValues(alpha: 0.8),
-                      )),
+                  // Demo toggle (clickable in both states)
+                  GestureDetector(
+                    onTap: _toggleDemoMode,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: _settingsService.settings.privacyMode
+                            ? Icon(Icons.videocam_off, size: 12,
+                                color: Colors.white.withValues(alpha: 0.3))
+                            : Text('DEMO', style: TextStyle(
+                                fontFamily: 'JetBrainsMono', fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                                color: _redEye.withValues(alpha: 0.8),
+                              )),
+                      ),
                     ),
+                  ),
                   // Settings
                   _plainIcon(Icons.settings, _openSettings, small: true),
                   const SizedBox(width: 4),
@@ -386,7 +415,7 @@ class OverlayShellState extends State<OverlayShell> {
                         shape: BoxShape.circle,
                         color: Colors.black.withValues(alpha: 0.3),
                       ),
-                      child: IdleAnimation(size: 20, pupilDilation: _pupilDilation),
+                      child: IdleAnimation(size: 20, pupilDilation: _pupilDilation, color: _eyeColor),
                     ),
                   ),
                   const SizedBox(width: 2),
