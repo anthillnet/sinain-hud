@@ -8,13 +8,13 @@ import '../../core/constants.dart';
 class CommandInput extends StatefulWidget {
   final void Function(String text) onSubmit;
   final void Function(String text)? onSpawn;
-  final VoidCallback onDismiss;
+  final VoidCallback? onDismiss;
 
   const CommandInput({
     super.key,
     required this.onSubmit,
     this.onSpawn,
-    required this.onDismiss,
+    this.onDismiss,
   });
 
   @override
@@ -47,7 +47,8 @@ class _CommandInputState extends State<CommandInput> {
     if (text.isNotEmpty) {
       widget.onSubmit(text);
     }
-    widget.onDismiss();
+    _controller.clear();
+    widget.onDismiss?.call();
   }
 
   void _spawn() {
@@ -55,7 +56,8 @@ class _CommandInputState extends State<CommandInput> {
     if (text.isNotEmpty && widget.onSpawn != null) {
       widget.onSpawn!(text);
     }
-    widget.onDismiss();
+    _controller.clear();
+    widget.onDismiss?.call();
   }
 
   @override
@@ -65,7 +67,7 @@ class _CommandInputState extends State<CommandInput> {
       onKeyEvent: (event) {
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.escape) {
-            widget.onDismiss();
+            widget.onDismiss?.call();
           } else if (event.logicalKey == LogicalKeyboardKey.enter &&
               HardwareKeyboard.instance.isShiftPressed) {
             _spawn();

@@ -165,13 +165,15 @@ class AppDelegate: FlutterAppDelegate {
 
         switch id {
         case 1: // Cmd+Shift+Space → toggle visibility
-            isVisible.toggle()
-            if isVisible {
-                window.orderFront(nil)
-            } else {
+            // Check actual window visibility (not a cached flag) to stay in sync
+            // with Flutter-initiated hide (long-press)
+            let wasVisible = window.isVisible
+            if wasVisible {
                 window.orderOut(nil)
+            } else {
+                window.orderFront(nil)
             }
-            hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: isVisible)
+            hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: !wasVisible)
 
         case 4: // Cmd+Shift+H → quit overlay
             hotkeyChannel?.invokeMethod("onQuit", arguments: nil)

@@ -6,7 +6,10 @@ import '../core/services/settings_service.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/window_service.dart';
 import 'eye/eye_widget.dart';
+import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
+import 'input/command_input.dart';
+import '../core/models/feed_item.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -32,9 +35,11 @@ class OverlayShellState extends State<OverlayShell> {
 
   void toggleVisibility(bool visible) {
     if (visible) {
+      // Restore to last visible state and resize window accordingly
       setState(() => _state = _lastVisibleState);
       _settingsService.setHudState(_lastVisibleState);
       _windowService.showWindow();
+      _resizeWindowForState(_lastVisibleState);
     } else {
       _lastVisibleState = _state;
       setState(() => _state = HudState.hidden);
@@ -189,7 +194,7 @@ class OverlayShellState extends State<OverlayShell> {
   Widget _buildChatPanel() {
     final ws = context.watch<WebSocketService>();
 
-    return Container(
+    final chatContent = Container(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(8),
@@ -253,20 +258,75 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             ),
           ),
-          // Content area — FeedView in Phase 3
-          Expanded(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const IdleAnimation(size: 60, label: 'awaiting context…'),
-                ],
-              ),
+          // Feed content
+          const Expanded(
+            child: FeedView(
+              channel: FeedChannel.agent,
+              emptyLabel: 'awaiting context…',
             ),
+          ),
+          // Command input
+          CommandInput(
+            onSubmit: (text) {
+              context.read<WebSocketService>().sendUserCommand(text);
+            },
+            onSpawn: (text) {
+              context.read<WebSocketService>().sendSpawnCommand(text);
+            },
           ),
         ],
       ),
     );
+
+    // Wrap in a Stack with resize handles on edges
+    return Stack(
+      children: [
+        chatContent,
+        // Left edge resize — grow left, anchor right edge
+        _resizeHandle(Alignment.centerLeft, SystemMouseCursors.resizeLeft,
+            (dx, dy) => _windowService.resizeWindowBy(-dx, 0, anchorRight: true)),
+        // Right edge resize — grow right, anchor left edge
+        _resizeHandle(Alignment.centerRight, SystemMouseCursors.resizeRight,
+            (dx, dy) => _windowService.resizeWindowBy(dx, 0)),
+        // Top edge resize — grow up, anchor top (macOS: keep top edge fixed)
+        _resizeHandle(Alignment.topCenter, SystemMouseCursors.resizeUp,
+            (dx, dy) => _windowService.resizeWindowBy(0, -dy, anchorTop: true)),
+        // Bottom edge resize — grow down, anchor bottom (macOS: origin stays)
+        _resizeHandle(Alignment.bottomCenter, SystemMouseCursors.resizeDown,
+            (dx, dy) => _windowService.resizeWindowBy(0, dy)),
+      ],
+    );
+  }
+
+  Widget _resizeHandle(
+    Alignment alignment,
+    MouseCursor cursor,
+    void Function(double dx, double dy) onDrag,
+  ) {
+    final isHorizontal =
+        alignment == Alignment.centerLeft || alignment == Alignment.centerRight;
+    return Align(
+      alignment: alignment,
+      child: MouseRegion(
+        cursor: cursor,
+        child: GestureDetector(
+          onPanUpdate: (details) => onDrag(details.delta.dx, details.delta.dy),
+          onPanEnd: (_) => _persistChatSize(),
+          child: Container(
+            width: isHorizontal ? 6 : double.infinity,
+            height: isHorizontal ? double.infinity : 6,
+            color: Colors.transparent,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _persistChatSize() async {
+    final frame = await _windowService.getWindowFrame();
+    if (frame != null && mounted) {
+      _settingsService.setChatSize(frame['w']!, frame['h']!);
+    }
   }
 
   // ── Shared icon helpers ────────────────────────────────────────────────────

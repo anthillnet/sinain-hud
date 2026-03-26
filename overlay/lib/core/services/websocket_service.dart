@@ -31,9 +31,11 @@ class WebSocketService extends ChangeNotifier {
   final _scrollController = StreamController<String>.broadcast();
   final _spawnTaskController = StreamController<SpawnTask>.broadcast();
   final _copyController = StreamController<String>.broadcast();
+  final _thinkingController = StreamController<bool>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
+  Stream<bool> get thinkingStream => _thinkingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
@@ -43,6 +45,11 @@ class WebSocketService extends ChangeNotifier {
   String get micState => _micState;
   String get screenState => _screenState;
   String get envPath => _envPath;
+
+  /// Persistent feed items that survive widget rebuilds.
+  /// FeedView can read from this on mount to restore state.
+  final List<FeedItem> agentFeedItems = [];
+  static const _maxFeedItems = 50;
   bool get audioFeedEnabled => _audioFeedEnabled;
   bool get screenFeedEnabled => _screenFeedEnabled;
 
@@ -134,6 +141,10 @@ class WebSocketService extends ChangeNotifier {
           if (!_audioFeedEnabled && (item.text.startsWith('[📝]') || item.text.startsWith('[🔊]') || item.text.startsWith('[🎤]'))) break;
           if (!_screenFeedEnabled && item.text.startsWith('[👁]')) break;
           if (item.channel == FeedChannel.agent) {
+            agentFeedItems.add(item);
+            if (agentFeedItems.length > _maxFeedItems) {
+              agentFeedItems.removeRange(0, agentFeedItems.length - _maxFeedItems);
+            }
             _agentFeedController.add(item);
           } else {
             _feedController.add(item);
@@ -166,6 +177,9 @@ class WebSocketService extends ChangeNotifier {
           final task = SpawnTask.fromJson(json);
           _log('SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
           _spawnTaskController.add(task);
+          break;
+        case 'thinking':
+          _thinkingController.add(json['active'] as bool? ?? false);
           break;
         case 'ping':
           // Respond to app-level ping with pong

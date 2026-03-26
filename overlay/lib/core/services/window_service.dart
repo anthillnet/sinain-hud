@@ -85,6 +85,20 @@ class WindowService {
     }
   }
 
+  /// Delta-based resize with anchor control. No async frame fetch needed.
+  Future<void> resizeWindowBy(double dw, double dh, {bool anchorRight = false, bool anchorTop = false}) async {
+    try {
+      await _channel.invokeMethod('resizeWindowBy', {
+        'dw': dw,
+        'dh': dh,
+        'anchorRight': anchorRight,
+        'anchorTop': anchorTop,
+      });
+    } catch (e) {
+      _log('resizeWindowBy failed: $e');
+    }
+  }
+
   /// Make the panel the key window (for text input in chat state).
   Future<void> makeKeyWindow() async {
     try {
