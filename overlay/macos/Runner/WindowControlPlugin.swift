@@ -110,9 +110,11 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             frame.size.width = newW
             frame.size.height = newH
 
+            #if DEBUG
             NSLog("[WCP] resizeWindowBy dw=\(dw) dh=\(dh) anchorRight=\(anchorRight) anchorTop=\(anchorTop)")
             NSLog("[WCP]   old: origin=(\(window.frame.origin.x),\(window.frame.origin.y)) size=(\(oldW)x\(oldH)) top=\(oldTop)")
             NSLog("[WCP]   new: origin=(\(frame.origin.x),\(frame.origin.y)) size=(\(frame.size.width)x\(frame.size.height)) top=\(frame.origin.y + frame.size.height)")
+            #endif
 
             window.setFrame(frame, display: true)
             result(nil)
