@@ -72,10 +72,14 @@ invoke_agent() {
       ;;
     codex)
       codex exec -s danger-full-access \
+        --dangerously-bypass-approvals-and-sandbox \
         "$prompt"
       ;;
     junie)
       if $JUNIE_HAS_MCP; then
+        if [ ! -f "$HOME/.junie/allowlist.json" ]; then
+          echo "  ⚠ Junie: no allowlist.json — MCP tools may prompt. Run junie --brave once to create it." >&2
+        fi
         junie --output-format text \
           --mcp-location "$JUNIE_MCP_DIR" \
           --task "$prompt"
@@ -84,7 +88,7 @@ invoke_agent() {
       fi
       ;;
     goose)
-      goose run --text "$prompt" \
+      GOOSE_MODE=auto goose run --text "$prompt" \
         --output-format text \
         --max-turns 10
       ;;
