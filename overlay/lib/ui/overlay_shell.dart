@@ -431,7 +431,7 @@ class OverlayShellState extends State<OverlayShell> {
                 children: const [
                   FeedView(
                     channel: FeedChannel.agent,
-                    emptyLabel: 'awaiting context…',
+                    emptyLabel: 'awaiting sinain…',
                   ),
                   TasksView(),
                 ],
