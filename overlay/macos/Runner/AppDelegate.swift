@@ -5,12 +5,7 @@ import Carbon.HIToolbox
 @main
 class AppDelegate: FlutterAppDelegate {
 
-    // Track state for hotkey toggles
     private var isVisible = true
-    private var isClickThrough = true
-    private var isTopPosition = false
-    private var currentModeIndex = 0
-    private let modeNames = ["feed", "alert", "minimal", "hidden"]
 
     // Flutter method channel for sending hotkey events to Dart
     private var hotkeyChannel: FlutterMethodChannel?
@@ -20,7 +15,6 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationWillTerminate(_ notification: Notification) {
-        // Unregister all hotkeys
         for ref in hotKeyRefs {
             if let ref = ref {
                 UnregisterEventHotKey(ref)
@@ -30,21 +24,16 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
-        // Register the window control plugin
         let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
         let registrar = controller.registrar(forPlugin: "WindowControlPlugin")
         WindowControlPlugin.register(with: registrar)
 
-        // Set up hotkey channel
         hotkeyChannel = FlutterMethodChannel(
             name: "sinain_hud/hotkeys",
             binaryMessenger: controller.engine.binaryMessenger
         )
 
-        // Configure the window
         configureWindow()
-
-        // Register global hotkeys
         registerHotkeys()
 
         super.applicationDidFinishLaunching(notification)
@@ -58,41 +47,39 @@ class AppDelegate: FlutterAppDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
+        // Flutter handles drag — don't let NSWindow do it
         window.isMovableByWindowBackground = false
 
-        // Don't appear in Mission Control / Exposé
         window.collectionBehavior = [
-            .canJoinAllSpaces,       // Visible on all spaces
-            .stationary,             // Don't move with spaces
-            .fullScreenAuxiliary,    // Allow alongside fullscreen
-            .ignoresCycle            // Skip in Cmd+Tab
+            .canJoinAllSpaces,
+            .stationary,
+            .fullScreenAuxiliary,
+            .ignoresCycle
         ]
 
-        // Floating level (above normal windows)
         window.level = .floating
 
-        // Non-activating — clicking won't steal focus from other apps
+        // Non-activating panel — won't steal focus from other apps on click
         window.styleMask.insert(.nonactivatingPanel)
 
-        // Initial click-through
-        window.ignoresMouseEvents = true
+        // Always interactive — overlay is clickable in all states
+        window.ignoresMouseEvents = false
 
         // Privacy mode (macOS 12+)
         if #available(macOS 12.0, *) {
             window.sharingType = .none
         }
 
-        // Position at bottom-right corner
+        // Start as eye-sized window at bottom-right
         let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
-        let windowX = screenFrame.maxX - HUDConfig.windowWidth - HUDConfig.margin
+        let windowX = screenFrame.maxX - HUDConfig.eyeSize - HUDConfig.margin
         let windowY = screenFrame.minY + HUDConfig.margin
 
         window.setFrame(
-            NSRect(x: windowX, y: windowY, width: HUDConfig.windowWidth, height: HUDConfig.windowHeight),
+            NSRect(x: windowX, y: windowY, width: HUDConfig.eyeSize, height: HUDConfig.eyeSize),
             display: true
         )
 
-        // Make content view transparent
         if let contentView = window.contentView {
             contentView.wantsLayer = true
             contentView.layer?.backgroundColor = CGColor.clear
@@ -106,7 +93,6 @@ class AppDelegate: FlutterAppDelegate {
     private var hotKeyRefs: [EventHotKeyRef?] = []
 
     private func registerHotkeys() {
-        // Install Carbon event handler
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -125,37 +111,27 @@ class AppDelegate: FlutterAppDelegate {
             nil
         )
 
-        // Register hotkeys:
-        // ID 1: Cmd+Shift+Space → toggle visibility
-        registerHotKey(id: 1, keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 3: Cmd+Shift+M → cycle display mode
-        registerHotKey(id: 3, keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 4: Cmd+Shift+H → quit overlay
-        registerHotKey(id: 4, keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 5: Cmd+Shift+T → toggle audio capture
-        registerHotKey(id: 5, keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 7: Cmd+Shift+A → toggle audio feed on HUD
-        registerHotKey(id: 7, keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 8: Cmd+Shift+Up → scroll feed up
-        registerHotKey(id: 8, keyCode: UInt32(kVK_UpArrow), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 9: Cmd+Shift+Down → scroll feed down
-        registerHotKey(id: 9, keyCode: UInt32(kVK_DownArrow), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 10: Cmd+Shift+S → toggle screen capture pipeline
-        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 11: Cmd+Shift+V → toggle screen feed on HUD
-        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 12: Cmd+Shift+E → cycle HUD tab (Agent / Tasks)
-        registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 13: Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
-        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 14: Cmd+Shift+Y → copy target message to clipboard
-        registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 15: Cmd+Shift+R → toggle demo mode (privacy off = visible to screencapture)
-        registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 17: Cmd+Shift+B → toggle trait voices
-        registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_B), modifiers: UInt32(cmdKey | shiftKey))
-        // ID 18: Cmd+Shift+/ → open command input
-        registerHotKey(id: 18, keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(cmdKey | shiftKey))
+        // Navigation
+        registerHotKey(id: 1,  keyCode: UInt32(kVK_Space),      modifiers: UInt32(cmdKey | shiftKey)) // toggle visibility
+        registerHotKey(id: 3,  keyCode: UInt32(kVK_ANSI_M),     modifiers: UInt32(cmdKey | shiftKey)) // cycle state
+        registerHotKey(id: 4,  keyCode: UInt32(kVK_ANSI_H),     modifiers: UInt32(cmdKey | shiftKey)) // quit
+        registerHotKey(id: 19, keyCode: UInt32(kVK_ANSI_F),     modifiers: UInt32(cmdKey | shiftKey)) // toggle chat
+        registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E),     modifiers: UInt32(cmdKey | shiftKey)) // cycle tab
+        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P),     modifiers: UInt32(cmdKey | shiftKey)) // reset position
+        registerHotKey(id: 18, keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(cmdKey | shiftKey)) // focus input
+
+        // Capture toggles
+        registerHotKey(id: 5,  keyCode: UInt32(kVK_ANSI_T),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio capture
+        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen capture
+        registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_B),     modifiers: UInt32(cmdKey | shiftKey)) // toggle traits
+        registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R),     modifiers: UInt32(cmdKey | shiftKey)) // toggle demo/privacy
+
+        // Feed display
+        registerHotKey(id: 7,  keyCode: UInt32(kVK_ANSI_A),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio feed
+        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen feed
+        registerHotKey(id: 8,  keyCode: UInt32(kVK_UpArrow),    modifiers: UInt32(cmdKey | shiftKey)) // scroll up
+        registerHotKey(id: 9,  keyCode: UInt32(kVK_DownArrow),  modifiers: UInt32(cmdKey | shiftKey)) // scroll down
+        registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_Y),     modifiers: UInt32(cmdKey | shiftKey)) // copy message
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -203,77 +179,50 @@ class AppDelegate: FlutterAppDelegate {
         guard let window = mainFlutterWindow else { return }
 
         switch id {
-        case 1: // Cmd+Shift+Space → toggle visibility
-            isVisible.toggle()
-            if isVisible {
-                window.orderFront(nil)
-            } else {
-                window.orderOut(nil)
-            }
-            hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: isVisible)
-
-        case 3: // Cmd+Shift+M → cycle display mode
-            currentModeIndex = (currentModeIndex + 1) % modeNames.count
-            hotkeyChannel?.invokeMethod("onCycleMode", arguments: modeNames[currentModeIndex])
-
-        case 4: // Cmd+Shift+H → quit overlay
+        // ── Navigation ──
+        case 1: // Space → toggle visibility
+            let wasVisible = window.isVisible
+            if wasVisible { window.orderOut(nil) } else { window.orderFront(nil) }
+            hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: !wasVisible)
+        case 3: // M → cycle state (Eye → Controls → Chat → Eye)
+            hotkeyChannel?.invokeMethod("onCycleState", arguments: nil)
+        case 4: // H → quit
             hotkeyChannel?.invokeMethod("onQuit", arguments: nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                NSApp.terminate(nil)
-            }
-
-        case 5: // Cmd+Shift+T → toggle audio capture (routed to bridge via Flutter→WebSocket)
-            hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
-
-        case 7: // Cmd+Shift+A → toggle audio feed on HUD
-            hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
-
-        case 8: // Cmd+Shift+Up → scroll feed up
-            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "up")
-
-        case 9: // Cmd+Shift+Down → scroll feed down
-            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
-
-        case 10: // Cmd+Shift+S → toggle screen capture pipeline
-            hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
-
-        case 11: // Cmd+Shift+V → toggle screen feed on HUD
-            hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
-
-        case 12: // Cmd+Shift+E → cycle HUD tab (Agent / Tasks)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
+        case 19: // F → toggle Eye ↔ Chat
+            hotkeyChannel?.invokeMethod("onToggleChat", arguments: nil)
+        case 12: // E → cycle tab (Agent ↔ Tasks)
             hotkeyChannel?.invokeMethod("onCycleTab", arguments: nil)
+        case 13: // P → reset position to default
+            hotkeyChannel?.invokeMethod("onResetPosition", arguments: nil)
+        case 18: // / → focus command input (transition to Chat if needed)
+            hotkeyChannel?.invokeMethod("onFocusInput", arguments: nil)
 
-        case 13: // Cmd+Shift+P → toggle position (bottom-right ↔ top-right)
-            isTopPosition.toggle()
-            let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
-            let windowX = screenFrame.maxX - HUDConfig.windowWidth - HUDConfig.margin
-            let windowY = isTopPosition
-                ? screenFrame.maxY - HUDConfig.windowHeight - HUDConfig.margin
-                : screenFrame.minY + HUDConfig.margin
-            window.setFrame(
-                NSRect(x: windowX, y: windowY, width: HUDConfig.windowWidth, height: HUDConfig.windowHeight),
-                display: true
-            )
-            hotkeyChannel?.invokeMethod("onTogglePosition", arguments: isTopPosition)
-
-        case 14: // Cmd+Shift+Y → copy target message
-            hotkeyChannel?.invokeMethod("onCopyMessage", arguments: nil)
-
-        case 15: // Cmd+Shift+R → toggle demo mode
+        // ── Capture toggles ──
+        case 5: // T → toggle audio capture
+            hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
+        case 10: // S → toggle screen capture
+            hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
+        case 17: // B → toggle trait voices
+            hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
+        case 15: // R → toggle demo/privacy mode
             if #available(macOS 12.0, *) {
                 let currentlyPrivate = window.sharingType == .none
                 window.sharingType = currentlyPrivate ? .readOnly : .none
                 hotkeyChannel?.invokeMethod("onTogglePrivacy", arguments: !currentlyPrivate)
             }
 
-        case 17: // Cmd+Shift+B → toggle trait voices
-            hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
-
-        case 18: // Cmd+Shift+/ → open command input
-            // Disable click-through and make key window so TextField receives keyboard events
-            window.ignoresMouseEvents = false
-            window.makeKeyAndOrderFront(nil)
-            hotkeyChannel?.invokeMethod("onOpenCommandInput", arguments: nil)
+        // ── Feed display ──
+        case 7: // A → toggle audio feed filter
+            hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
+        case 11: // V → toggle screen feed filter
+            hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
+        case 8: // Up → scroll feed up
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "up")
+        case 9: // Down → scroll feed down
+            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
+        case 14: // Y → copy selected message
+            hotkeyChannel?.invokeMethod("onCopyMessage", arguments: nil)
 
         default:
             break

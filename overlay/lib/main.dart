@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/constants.dart';
-import 'core/models/hud_settings.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
-import 'ui/hud_shell.dart';
+import 'ui/overlay_shell.dart';
 
-/// Global key for HudShell so hotkey handler can trigger command input.
-final hudShellKey = GlobalKey<HudShellState>();
+/// Global key for OverlayShell so hotkey handler can trigger state changes.
+final overlayShellKey = GlobalKey<OverlayShellState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,56 +24,56 @@ void main() async {
   await windowService.setTransparent();
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
-  await windowService.setClickThrough(true);
-  await windowService.setPosition(top: settingsService.settings.topPosition);
+
+  // Restore persisted eye position (if saved)
+  if (settingsService.settings.eyeX >= 0) {
+    await windowService.setWindowFrame(
+      settingsService.settings.eyeX,
+      settingsService.settings.eyeY,
+      48,
+      48,
+    );
+  }
 
   // Listen for hotkey events from native side
   const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
   hotkeyChannel.setMethodCallHandler((call) async {
     switch (call.method) {
+      // Navigation
       case 'onToggleVisibility':
-        // Visibility is handled natively via orderFront/orderOut.
-        // Sync the display mode so the UI can reflect it.
-        final visible = call.arguments as bool;
-        if (!visible) {
-          await settingsService.setDisplayMode(DisplayMode.hidden);
-        } else if (settingsService.settings.displayMode == DisplayMode.hidden) {
-          await settingsService.setDisplayMode(DisplayMode.feed);
-        }
-      case 'onCycleMode':
-        final modeName = call.arguments as String;
-        final mode = DisplayMode.values.firstWhere(
-          (m) => m.name == modeName,
-          orElse: () => DisplayMode.feed,
-        );
-        await settingsService.setDisplayMode(mode);
+        overlayShellKey.currentState?.toggleVisibility(call.arguments as bool);
+      case 'onCycleState':
+        overlayShellKey.currentState?.cycleState();
       case 'onQuit':
         wsService.disconnect();
-      case 'onToggleAudio':
-        wsService.sendCommand('toggle_audio');
-      case 'onToggleAudioFeed':
-        wsService.toggleAudioFeed();
-      case 'onScrollFeed':
-        wsService.scrollFeed(call.arguments as String);
-      case 'onToggleScreen':
-        wsService.sendCommand('toggle_screen');
-      case 'onToggleScreenFeed':
-        wsService.toggleScreenFeed();
-      case 'onCopyMessage':
-        wsService.requestCopy(settingsService.settings.activeTab.name);
+      case 'onToggleChat':
+        overlayShellKey.currentState?.toggleChat();
       case 'onCycleTab':
         settingsService.cycleTab();
-      case 'onTogglePosition':
-        final top = call.arguments as bool;
-        await settingsService.setTopPosition(top);
+      case 'onResetPosition':
+        overlayShellKey.currentState?.resetPosition();
+      case 'onFocusInput':
+        overlayShellKey.currentState?.focusInput();
+
+      // Capture toggles
+      case 'onToggleAudio':
+        wsService.sendCommand('toggle_audio');
+      case 'onToggleScreen':
+        wsService.sendCommand('toggle_screen');
       case 'onToggleTraits':
         wsService.sendCommand('toggle_traits');
-      case 'onOpenCommandInput':
-        hudShellKey.currentState?.showCommandInput();
       case 'onTogglePrivacy':
-        final privacyMode = call.arguments as bool;
-        settingsService.setPrivacyModeTransient(privacyMode);
-        await windowService.setPrivacyMode(privacyMode);
+        settingsService.setPrivacyModeTransient(call.arguments as bool);
+
+      // Feed display
+      case 'onToggleAudioFeed':
+        wsService.toggleAudioFeed();
+      case 'onToggleScreenFeed':
+        wsService.toggleScreenFeed();
+      case 'onScrollFeed':
+        wsService.scrollFeed(call.arguments as String);
+      case 'onCopyMessage':
+        wsService.requestCopy(settingsService.settings.activeTab.name);
     }
   });
 
@@ -118,7 +117,7 @@ class SinainHudApp extends StatelessWidget {
       ),
       home: Scaffold(
         backgroundColor: Colors.transparent,
-        body: HudShell(key: hudShellKey),
+        body: OverlayShell(key: overlayShellKey),
       ),
     );
   }

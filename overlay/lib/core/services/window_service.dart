@@ -20,14 +20,6 @@ class WindowService {
     }
   }
 
-  Future<void> setClickThrough(bool enabled) async {
-    try {
-      await _channel.invokeMethod('setClickThrough', {'enabled': enabled});
-    } catch (e) {
-      _log('setClickThrough failed: $e');
-    }
-  }
-
   Future<void> setAlwaysOnTop(bool enabled) async {
     try {
       await _channel.invokeMethod('setAlwaysOnTop', {'enabled': enabled});
@@ -52,30 +44,138 @@ class WindowService {
     }
   }
 
-  Future<void> setPosition({required bool top}) async {
+  /// Set the window frame (position + size).
+  Future<void> setWindowFrame(double x, double y, double w, double h) async {
     try {
-      await _channel.invokeMethod('setPosition', {'top': top});
+      await _channel.invokeMethod('setWindowFrame', {
+        'x': x,
+        'y': y,
+        'w': w,
+        'h': h,
+      });
     } catch (e) {
-      _log('setPosition failed: $e');
+      _log('setWindowFrame failed: $e');
     }
   }
 
-  /// Activate command input: disable click-through and make key window.
-  Future<void> activateCommandInput() async {
+  /// Get the current window frame.
+  Future<Map<String, double>?> getWindowFrame() async {
     try {
-      await _channel.invokeMethod('activateCommandInput');
+      final result = await _channel.invokeMethod('getWindowFrame');
+      if (result is Map) {
+        return {
+          'x': (result['x'] as num).toDouble(),
+          'y': (result['y'] as num).toDouble(),
+          'w': (result['w'] as num).toDouble(),
+          'h': (result['h'] as num).toDouble(),
+        };
+      }
     } catch (e) {
-      _log('activateCommandInput failed: $e');
+      _log('getWindowFrame failed: $e');
+    }
+    return null;
+  }
+
+  /// Move window by delta (screen points). Synchronous native call — no frame fetch needed.
+  Future<void> moveWindowBy(double dx, double dy) async {
+    try {
+      await _channel.invokeMethod('moveWindowBy', {'dx': dx, 'dy': dy});
+    } catch (e) {
+      _log('moveWindowBy failed: $e');
     }
   }
 
-  /// Dismiss command input: restore click-through and resign key window.
-  Future<void> dismissCommandInput() async {
+  /// Delta-based resize with anchor control. No async frame fetch needed.
+  Future<void> resizeWindowBy(double dw, double dh, {bool anchorRight = false, bool anchorTop = false}) async {
     try {
-      await _channel.invokeMethod('dismissCommandInput');
+      await _channel.invokeMethod('resizeWindowBy', {
+        'dw': dw,
+        'dh': dh,
+        'anchorRight': anchorRight,
+        'anchorTop': anchorTop,
+      });
     } catch (e) {
-      _log('dismissCommandInput failed: $e');
+      _log('resizeWindowBy failed: $e');
     }
+  }
+
+  /// Make the panel the key window (for text input in chat state).
+  Future<void> makeKeyWindow() async {
+    try {
+      await _channel.invokeMethod('makeKeyWindow');
+    } catch (e) {
+      _log('makeKeyWindow failed: $e');
+    }
+  }
+
+  /// Resign key window status (return focus to previous app).
+  Future<void> resignKeyWindow() async {
+    try {
+      await _channel.invokeMethod('resignKeyWindow');
+    } catch (e) {
+      _log('resignKeyWindow failed: $e');
+    }
+  }
+
+  /// Reset window to default position (bottom-right corner, eye size).
+  Future<void> resetToDefaultPosition() async {
+    try {
+      await _channel.invokeMethod('resetToDefaultPosition');
+    } catch (e) {
+      _log('resetToDefaultPosition failed: $e');
+    }
+  }
+
+  /// Open a file in the system default editor.
+  Future<void> openFile(String path) async {
+    try {
+      await _channel.invokeMethod('openFile', {'path': path});
+    } catch (e) {
+      _log('openFile failed: $e');
+    }
+  }
+
+  /// Start native drag tracking (macOS only). Native handles all mouse events
+  /// and calls back onNativeDragComplete when done.
+  Future<void> beginNativeDrag() async {
+    try {
+      await _channel.invokeMethod('beginNativeDrag');
+    } catch (e) {
+      _log('beginNativeDrag failed: $e');
+    }
+  }
+
+  /// Start native resize tracking (macOS only).
+  Future<void> beginNativeResize(String edge) async {
+    try {
+      await _channel.invokeMethod('beginNativeResize', {'edge': edge});
+    } catch (e) {
+      _log('beginNativeResize failed: $e');
+    }
+  }
+
+  /// Register callbacks for native drag/resize completion (macOS).
+  /// Native sends final position/size on mouse-up.
+  void setupNativeCallbacks({
+    required void Function(double x, double y) onDragDone,
+    required void Function(double w, double h) onResizeDone,
+  }) {
+    _channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onNativeDragComplete':
+          final args = call.arguments as Map;
+          onDragDone(
+            (args['x'] as num).toDouble(),
+            (args['y'] as num).toDouble(),
+          );
+        case 'onNativeResizeComplete':
+          final args = call.arguments as Map;
+          onResizeDone(
+            (args['w'] as num).toDouble(),
+            (args['h'] as num).toDouble(),
+          );
+      }
+    });
   }
 
   void _log(String msg) {

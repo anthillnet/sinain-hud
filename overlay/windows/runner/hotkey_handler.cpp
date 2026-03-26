@@ -5,7 +5,7 @@
 // Hotkey IDs — same as macOS AppDelegate.swift
 enum HotkeyId {
   kToggleVisibility = 1,
-  kCycleMode = 3,
+  kCycleState = 3,
   kQuit = 4,
   kToggleAudio = 5,
   kToggleAudioFeed = 7,
@@ -14,11 +14,12 @@ enum HotkeyId {
   kToggleScreen = 10,
   kToggleScreenFeed = 11,
   kCycleTab = 12,
-  kTogglePosition = 13,
+  kResetPosition = 13,
   kCopyMessage = 14,
   kTogglePrivacy = 15,
   kToggleTraits = 17,
-  kOpenCommandInput = 18,
+  kFocusInput = 18,
+  kToggleChat = 19,
 };
 
 // HUD layout constants (for position toggle)
@@ -51,8 +52,9 @@ void HotkeyHandler::RegisterHotkeys() {
 
   // Failures are non-fatal — hotkey may be registered by another app.
   RegisterHotKey(hwnd_, kToggleVisibility, mod, VK_SPACE);
-  RegisterHotKey(hwnd_, kCycleMode,        mod, 'M');
+  RegisterHotKey(hwnd_, kCycleState,       mod, 'M');
   RegisterHotKey(hwnd_, kQuit,             mod, 'H');
+  RegisterHotKey(hwnd_, kToggleChat,       mod, 'F');
   RegisterHotKey(hwnd_, kToggleAudio,      mod, 'T');
   RegisterHotKey(hwnd_, kToggleAudioFeed,  mod, 'A');
   RegisterHotKey(hwnd_, kScrollUp,         mod, VK_UP);
@@ -60,16 +62,16 @@ void HotkeyHandler::RegisterHotkeys() {
   RegisterHotKey(hwnd_, kToggleScreen,     mod, 'S');
   RegisterHotKey(hwnd_, kToggleScreenFeed, mod, 'V');
   RegisterHotKey(hwnd_, kCycleTab,         mod, 'E');
-  RegisterHotKey(hwnd_, kTogglePosition,   mod, 'P');
+  RegisterHotKey(hwnd_, kResetPosition,    mod, 'P');
   RegisterHotKey(hwnd_, kCopyMessage,      mod, 'Y');
   RegisterHotKey(hwnd_, kTogglePrivacy,    mod, 'R');
   RegisterHotKey(hwnd_, kToggleTraits,     mod, 'B');
-  RegisterHotKey(hwnd_, kOpenCommandInput, mod, VK_OEM_2);  // '/' key
+  RegisterHotKey(hwnd_, kFocusInput,       mod, VK_OEM_2);  // '/' key
 }
 
 void HotkeyHandler::UnregisterHotkeys() {
   if (!hwnd_) return;
-  int ids[] = {1, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18};
+  int ids[] = {1, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19};
   for (int id : ids) {
     UnregisterHotKey(hwnd_, id);
   }
@@ -90,11 +92,9 @@ void HotkeyHandler::ProcessHotkey(int id) {
       break;
     }
 
-    case kCycleMode: {
-      current_mode_index_ = (current_mode_index_ + 1) % mode_names_.size();
-      InvokeMethod("onCycleMode", mode_names_[current_mode_index_]);
+    case kCycleState:
+      InvokeMethod("onCycleState");
       break;
-    }
 
     case kQuit: {
       InvokeMethod("onQuit");
@@ -134,19 +134,9 @@ void HotkeyHandler::ProcessHotkey(int id) {
       InvokeMethod("onCycleTab");
       break;
 
-    case kTogglePosition: {
-      is_top_position_ = !is_top_position_;
-      RECT work_area;
-      SystemParametersInfo(SPI_GETWORKAREA, 0, &work_area, 0);
-      int x = work_area.right - kHudWidth - kHudMargin;
-      int y = is_top_position_
-          ? work_area.top + kHudMargin
-          : work_area.bottom - kHudHeight - kHudMargin;
-      SetWindowPos(hwnd_, nullptr, x, y, kHudWidth, kHudHeight,
-                   SWP_NOZORDER | SWP_NOACTIVATE);
-      InvokeMethod("onTogglePosition", is_top_position_);
+    case kResetPosition:
+      InvokeMethod("onResetPosition");
       break;
-    }
 
     case kCopyMessage:
       InvokeMethod("onCopyMessage");
@@ -174,25 +164,13 @@ void HotkeyHandler::ProcessHotkey(int id) {
       InvokeMethod("onToggleTraits");
       break;
 
-    case kOpenCommandInput: {
-      // Disable click-through and bring to front for keyboard input
-      LONG_PTR ex_style = GetWindowLongPtr(hwnd_, GWL_EXSTYLE);
-      ex_style &= ~WS_EX_TRANSPARENT;
-      SetWindowLongPtr(hwnd_, GWL_EXSTYLE, ex_style);
-
-      DWORD fore_thread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
-      DWORD this_thread = GetCurrentThreadId();
-      if (fore_thread != this_thread) {
-        AttachThreadInput(fore_thread, this_thread, TRUE);
-        SetForegroundWindow(hwnd_);
-        AttachThreadInput(fore_thread, this_thread, FALSE);
-      } else {
-        SetForegroundWindow(hwnd_);
-      }
-
-      InvokeMethod("onOpenCommandInput");
+    case kFocusInput:
+      InvokeMethod("onFocusInput");
       break;
-    }
+
+    case kToggleChat:
+      InvokeMethod("onToggleChat");
+      break;
   }
 }
 

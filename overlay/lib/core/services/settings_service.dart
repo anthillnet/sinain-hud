@@ -4,12 +4,14 @@ import '../models/hud_settings.dart';
 
 /// Persists HUD settings using shared_preferences.
 class SettingsService extends ChangeNotifier {
-  static const _keyDisplayMode = 'display_mode';
+  static const _keyHudState = 'overlay_state';
   static const _keyActiveTab = 'active_tab';
-  static const _keyClickThrough = 'click_through';
   static const _keyPrivacyMode = 'privacy_mode';
-  static const _keyTopPosition = 'top_position';
   static const _keyWsUrl = 'ws_url';
+  static const _keyEyeX = 'eye_x';
+  static const _keyEyeY = 'eye_y';
+  static const _keyChatWidth = 'chat_width';
+  static const _keyChatHeight = 'chat_height';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -19,21 +21,23 @@ class SettingsService extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     _settings = HudSettings(
-      displayMode: _loadDisplayMode(),
+      overlayState: _loadHudState(),
       activeTab: _loadActiveTab(),
-      clickThrough: _prefs.getBool(_keyClickThrough) ?? true,
       privacyMode: _prefs.getBool(_keyPrivacyMode) ?? true,
-      topPosition: _prefs.getBool(_keyTopPosition) ?? false,
       wsUrl: _prefs.getString(_keyWsUrl) ?? 'ws://localhost:9500',
+      eyeX: _prefs.getDouble(_keyEyeX) ?? -1,
+      eyeY: _prefs.getDouble(_keyEyeY) ?? -1,
+      chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
+      chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
     );
     notifyListeners();
   }
 
-  DisplayMode _loadDisplayMode() {
-    final val = _prefs.getString(_keyDisplayMode);
-    return DisplayMode.values.firstWhere(
-      (m) => m.name == val,
-      orElse: () => DisplayMode.feed,
+  HudState _loadHudState() {
+    final val = _prefs.getString(_keyHudState);
+    return HudState.values.firstWhere(
+      (s) => s.name == val,
+      orElse: () => HudState.eye,
     );
   }
 
@@ -45,14 +49,10 @@ class SettingsService extends ChangeNotifier {
     );
   }
 
-  Future<void> setDisplayMode(DisplayMode mode) async {
-    _settings.displayMode = mode;
-    await _prefs.setString(_keyDisplayMode, mode.name);
+  Future<void> setHudState(HudState state) async {
+    _settings.overlayState = state;
+    await _prefs.setString(_keyHudState, state.name);
     notifyListeners();
-  }
-
-  Future<void> cycleDisplayMode() async {
-    await setDisplayMode(_settings.nextDisplayMode);
   }
 
   Future<void> setActiveTab(HudTab tab) async {
@@ -63,12 +63,6 @@ class SettingsService extends ChangeNotifier {
 
   Future<void> cycleTab() async {
     await setActiveTab(_settings.nextTab);
-  }
-
-  Future<void> setClickThrough(bool value) async {
-    _settings.clickThrough = value;
-    await _prefs.setBool(_keyClickThrough, value);
-    notifyListeners();
   }
 
   Future<void> setPrivacyMode(bool value) async {
@@ -82,14 +76,19 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setTopPosition(bool value) async {
-    _settings.topPosition = value;
-    await _prefs.setBool(_keyTopPosition, value);
-    notifyListeners();
+  Future<void> setEyePosition(double x, double y) async {
+    _settings.eyeX = x;
+    _settings.eyeY = y;
+    await _prefs.setDouble(_keyEyeX, x);
+    await _prefs.setDouble(_keyEyeY, y);
+    // Don't notify — position updates are high frequency during drag
   }
 
-  Future<void> toggleTopPosition() async {
-    await setTopPosition(!_settings.topPosition);
+  Future<void> setChatSize(double w, double h) async {
+    _settings.chatWidth = w;
+    _settings.chatHeight = h;
+    await _prefs.setDouble(_keyChatWidth, w);
+    await _prefs.setDouble(_keyChatHeight, h);
   }
 
   Future<void> setWsUrl(String url) async {

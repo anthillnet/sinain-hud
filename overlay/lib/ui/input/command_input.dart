@@ -8,13 +8,15 @@ import '../../core/constants.dart';
 class CommandInput extends StatefulWidget {
   final void Function(String text) onSubmit;
   final void Function(String text)? onSpawn;
-  final VoidCallback onDismiss;
+  final VoidCallback? onDismiss;
+  final FocusNode? externalFocusNode;
 
   const CommandInput({
     super.key,
     required this.onSubmit,
     this.onSpawn,
-    required this.onDismiss,
+    this.onDismiss,
+    this.externalFocusNode,
   });
 
   @override
@@ -23,11 +25,12 @@ class CommandInput extends StatefulWidget {
 
 class _CommandInputState extends State<CommandInput> {
   final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  late final FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
+    _focusNode = widget.externalFocusNode ?? FocusNode();
     // Delay focus request to ensure the native window is key before Flutter
     // tries to route keyboard events to this TextField.
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -38,7 +41,7 @@ class _CommandInputState extends State<CommandInput> {
   @override
   void dispose() {
     _controller.dispose();
-    _focusNode.dispose();
+    if (widget.externalFocusNode == null) _focusNode.dispose();
     super.dispose();
   }
 
@@ -47,7 +50,8 @@ class _CommandInputState extends State<CommandInput> {
     if (text.isNotEmpty) {
       widget.onSubmit(text);
     }
-    widget.onDismiss();
+    _controller.clear();
+    widget.onDismiss?.call();
   }
 
   void _spawn() {
@@ -55,7 +59,8 @@ class _CommandInputState extends State<CommandInput> {
     if (text.isNotEmpty && widget.onSpawn != null) {
       widget.onSpawn!(text);
     }
-    widget.onDismiss();
+    _controller.clear();
+    widget.onDismiss?.call();
   }
 
   @override
@@ -65,7 +70,7 @@ class _CommandInputState extends State<CommandInput> {
       onKeyEvent: (event) {
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.escape) {
-            widget.onDismiss();
+            widget.onDismiss?.call();
           } else if (event.logicalKey == LogicalKeyboardKey.enter &&
               HardwareKeyboard.instance.isShiftPressed) {
             _spawn();
