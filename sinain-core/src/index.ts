@@ -457,6 +457,8 @@ async function main() {
     },
     onUserCommand: (text) => {
       escalator.setUserCommand(text);
+      // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
+      agentLoop.onNewContext(true);
     },
     onSpawnCommand: (text) => {
       escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
