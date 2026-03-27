@@ -75,6 +75,7 @@ export class AgentLoop extends EventEmitter {
   private running = false;
   private started = false;
   private firstTick = true;
+  private urgentPending = false;
 
   private lastPushedHud = "";
   private agentNextId = 1;
@@ -137,11 +138,12 @@ export class AgentLoop extends EventEmitter {
    * Called by sense POST handler and transcription callback.
    * Triggers debounced analysis.
    */
-  onNewContext(): void {
+  onNewContext(urgent = false): void {
     if (!this.started) return;
 
-    // Fast first tick: 500ms debounce on startup, normal debounce after
-    const delay = this.firstTick ? 500 : this.deps.agentConfig.debounceMs;
+    // Urgent: user command — minimal debounce, bypass cooldown
+    const delay = urgent ? 200 : this.firstTick ? 500 : this.deps.agentConfig.debounceMs;
+    if (urgent) this.urgentPending = true;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
@@ -235,8 +237,10 @@ export class AgentLoop extends EventEmitter {
     if (this.running) return;
     if (!this.deps.agentConfig.openrouterApiKey) return;
 
-    // Cooldown: don't re-analyze within cooldownMs of last run
-    if (Date.now() - this.lastRunTs < this.deps.agentConfig.cooldownMs) return;
+    // Cooldown: don't re-analyze within cooldownMs of last run (unless urgent)
+    const isUrgent = this.urgentPending;
+    this.urgentPending = false;
+    if (!isUrgent && Date.now() - this.lastRunTs < this.deps.agentConfig.cooldownMs) return;
 
     // Idle suppression: skip if no new events since last tick
     const { feedBuffer, senseBuffer } = this.deps;
