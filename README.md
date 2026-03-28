@@ -1,4 +1,4 @@
-# Sinain
+# Sinain <img src="media/screen-recording-2026-03-26.gif" alt="Sinain HUD" width="120" align="right">
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml/badge.svg)](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml)
@@ -9,7 +9,7 @@
 Ambient intelligence that sees what you see, hears what you hear, and acts on your behalf.
 
 <p align="center">
-  <img src="media/screen-recording-2026-03-26.gif" alt="Sinain HUD overlay" width="346">
+  <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
 </p>
 
 **[Quick Start](#quick-start)** · **[Docs](docs/)** · **[Privacy](docs/privacy-protection-design.md)** · **[Configuration](docs/CONFIGURATION.md)** · **[Contributing](CONTRIBUTING.md)**
@@ -18,34 +18,27 @@ Ambient intelligence that sees what you see, hears what you hear, and acts on yo
 
 ### You, Augmented
 
-AI tools today make you work for *them*. You copy context into chat windows, alt-tab to paste stack traces, explain what you're looking at. You are the middleware.
+Sinain captures your screen and audio continuously, runs OCR and transcription, and feeds a rolling context window to your agent. The agent analyzes what's happening, surfaces advice on a private HUD overlay, and can act on its own — fixing code, running commands, or spawning background tasks.
 
-Sinain inverts this. Your screen, audio, clipboard — one continuous stream feeding your agent. Answers appear in a private HUD overlay, right where you work. When something needs doing, your agent acts — with tools, subagents, and the full power of Claude, Codex, or whatever you're running.
+- Screen capture → OCR → context digest, updated every few seconds.
+- System audio → transcription (local whisper.cpp or cloud) → real-time awareness.
+- Private overlay: only you see it. Never in screenshots, recordings, or screen shares.
 
-- Screen → OCR → context digest, continuous. Audio → transcription → awareness, real-time.
-- HUD overlay: insights and actions appear *where you work*, not in a separate window.
-- No copy-paste. No alt-tab. Your agent already has the context — and the tools to act on it.
+### Agent-Agnostic
 
-### Your Agents. Your Stack. Your Rules.
+Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents without losing context. Add new ones without reconfiguring.
 
-Claude Code for deep reasoning. Codex for async tasks. Goose for local exploration. Junie for JetBrains. Every developer has a different stack — and it changes monthly.
+- Tested with Claude Code, Codex, Goose, Junie, and Aider. Any MCP-compatible agent works.
+- Knowledge modules travel with you — export from one machine, import on another.
+- Run with an OpenClaw gateway, or use the shell harness (`sinain-agent/run.sh`) to connect your own agent.
 
-Sinain doesn't pick a side. It's the nervous system that connects them all.
+### Privacy Controls
 
-- Claude, Codex, Goose, Junie, Aider — they all get the same eyes and ears.
-- Hot-swappable knowledge modules, portable across machines and sessions.
-- OpenClaw gateway, sinain-agent standalone, MCP/ACP — your deployment, your choice.
+By default, sinain uses cloud APIs (OpenRouter) for transcription and analysis. When you need tighter control, switch privacy modes — no code changes, one env var.
 
-### Cloud by Default. Local When It Matters.
-
-Most days, cloud APIs are fast and practical. But when the stakes change — NDA project, client audit, classified codebase — you flip one switch and everything goes local. Same tool. Same workflow. Zero cloud.
-
-- `off → standard → strict → paranoid` — four privacy modes, one config line.
-- Paranoid: Ollama + whisper.cpp, zero network calls. Pull the ethernet cable. Still works.
-- HUD invisible to screen capture (`NSWindow.sharingType = .none` on macOS, `WDA_EXCLUDEFROMCAPTURE` on Windows).
-- BYOK, BYOM, BYOI — Bring Your Own Keys, Models, Infrastructure.
-
-> Full messaging framework: [MESSAGING.md](https://github.com/Geravant/sinain/blob/main/projects/sinain-trailer/MESSAGING.md)
+- `off` → `standard` → `strict` → `paranoid` — four modes in `~/.sinain/.env`.
+- `paranoid` mode: Ollama + whisper.cpp, fully offline. No network calls.
+- HUD overlay is invisible to screen capture (`NSWindow.sharingType = .none`).
 
 ## Quick Start
 
@@ -124,7 +117,7 @@ npx @geravant/sinain start --no-overlay  # headless mode
 | **overlay** | Dart / Swift / C++ | Private HUD (macOS + Windows), 4 display modes, hotkeys | [Hotkeys](docs/HOTKEYS.md) |
 | **sense_client** | Python | Screen capture, SSIM diff, OCR, privacy filter | [sense_client/](sense_client/) |
 | **sck-capture** | Swift | ScreenCaptureKit: system audio + screen frames | [tools/sck-capture/](tools/sck-capture/) |
-| **sinain-agent** | Bash | Bare agent runner for Claude/Codex/Goose/Junie/Aider | [sinain-agent/](sinain-agent/) |
+| **sinain-agent** | Bash | Shell harness that connects any agent to sinain-core | [sinain-agent/](sinain-agent/) |
 | **sinain-knowledge** | TypeScript | Curation, playbook, eval, portable knowledge modules | [Knowledge System](docs/knowledge-system.md) |
 | **sinain-hud-plugin** | TypeScript | OpenClaw plugin: lifecycle, curation, overflow watchdog | [sinain-hud-plugin/](sinain-hud-plugin/) |
 | **sinain-mcp-server** | TypeScript | MCP server exposing sinain tools to agents | [sinain-mcp-server/](sinain-mcp-server/) |
