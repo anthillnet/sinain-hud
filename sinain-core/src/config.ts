@@ -11,10 +11,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export let loadedEnvPath: string | undefined;
 
 function loadDotEnv(): void {
-  // Try sinain-core/.env first, then project root .env
+  // Try project root .env first, then sinain-core/.env fallback
   const candidates = [
-    resolve(__dirname, "..", ".env"),
     resolve(__dirname, "..", "..", ".env"),
+    resolve(__dirname, "..", ".env"),
   ];
   for (const envPath of candidates) {
     if (!existsSync(envPath)) continue;

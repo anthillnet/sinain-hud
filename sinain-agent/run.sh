@@ -5,7 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load .env as fallback — does NOT override vars already in the environment
 # (e.g. vars set by the launcher from ~/.sinain/.env)
-if [ -f "$SCRIPT_DIR/.env" ]; then
+# Load project root .env (single config for all subsystems)
+ENV_FILE="$SCRIPT_DIR/../.env"
+if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r key val; do
     # Skip comments and blank lines
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
@@ -19,7 +21,7 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     if [ -z "${!key+x}" ]; then
       export "$key=$val"
     fi
-  done < "$SCRIPT_DIR/.env"
+  done < "$ENV_FILE"
 fi
 
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
