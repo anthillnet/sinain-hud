@@ -10,7 +10,7 @@ import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { TraitEngine, loadTraitRoster } from "./agent/traits.js";
 import { shortAppName } from "./agent/context-window.js";
-import { Escalator } from "./escalation/escalator.js";
+import { Escalator, type SpawnContext } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
 import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
@@ -24,6 +24,41 @@ import { log, warn, error } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
+
+/** Build context snapshot for user-initiated spawn tasks. */
+function buildSpawnContext(
+  entry: { digest: string; context: { currentApp: string } },
+  feedBuffer: FeedBuffer,
+  senseBuffer: SenseBuffer,
+): SpawnContext {
+  const cutoff = Date.now() - 60_000;
+
+  // Recent audio: last ~60s of transcripts
+  const recentAudio = feedBuffer.queryByTime(cutoff)
+    .filter(m => m.channel === "stream" && (m.text.startsWith("[🔊]") || m.text.startsWith("[🎙]")))
+    .map(m => m.text)
+    .join("\n")
+    .slice(0, 2000);
+
+  // Recent screen: last ~60s of deduped OCR text
+  const screenEvents = senseBuffer.queryByTime(cutoff);
+  const seenOcr = new Set<string>();
+  const screenLines: string[] = [];
+  for (const e of screenEvents) {
+    if (e.ocr && !seenOcr.has(e.ocr)) {
+      seenOcr.add(e.ocr);
+      screenLines.push(`[${e.meta.app}] ${e.ocr}`);
+    }
+  }
+  const recentScreen = screenLines.join("\n").slice(0, 3000);
+
+  return {
+    currentApp: entry.context.currentApp,
+    digest: entry.digest,
+    recentAudio: recentAudio || undefined,
+    recentScreen: recentScreen || undefined,
+  };
+}
 
 /** Resolve workspace path, expanding leading ~ to HOME. */
 function resolveWorkspace(): string {
@@ -64,6 +99,9 @@ async function main() {
 
   // ── Initialize recorder ──
   const recorder = new Recorder();
+
+  // ── Spawn context cache — updated every agent tick for user-initiated spawns ──
+  let lastSpawnContext: SpawnContext | null = null;
 
   // ── Initialize profiler ──
   const profiler = new Profiler();
@@ -108,35 +146,11 @@ async function main() {
     getRecorderStatus: () => recorder.getStatus(),
     profiler,
     onAnalysis: (entry, contextWindow) => {
-      // Handle recorder commands
-      const stopResult = recorder.handleCommand(entry.record);
+      // Handle recorder commands (recording start/stop still works)
+      recorder.handleCommand(entry.record);
 
-      // Dispatch task via subagent spawn
-      if (entry.task || stopResult) {
-        let task: string;
-        let label: string | undefined;
-
-        if (stopResult && stopResult.segments > 0 && entry.task) {
-          // Recording stopped with explicit task instruction
-          task = `${entry.task}\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
-          label = stopResult.title;
-        } else if (stopResult && stopResult.segments > 0) {
-          // Recording stopped without explicit task — default to cleanup/summarize
-          task = `Clean up and summarize this recording transcript:\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
-          label = stopResult.title;
-        } else if (entry.task) {
-          // Standalone task without recording
-          task = entry.task;
-        } else {
-          task = "";
-        }
-
-        if (task) {
-          escalator.dispatchSpawnTask(task, label).catch(err => {
-            error(TAG, "spawn task dispatch error:", err);
-          });
-        }
-      }
+      // Cache context for user-initiated spawn commands (Shift+Enter)
+      lastSpawnContext = buildSpawnContext(entry, feedBuffer, senseBuffer);
 
       // Escalation continues as normal
       escalator.onAgentAnalysis(entry, contextWindow);
@@ -433,7 +447,7 @@ async function main() {
 
     // Spawn background agent task (from HUD Shift+Enter or bare agent POST /spawn)
     onSpawnCommand: (text: string) => {
-      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+      escalator.dispatchSpawnTask(text, text.slice(0, 64), lastSpawnContext ?? undefined).catch((err) => {
         log("srv", `spawn via HTTP failed: ${err}`);
       });
     },
@@ -461,7 +475,7 @@ async function main() {
       agentLoop.onNewContext(true);
     },
     onSpawnCommand: (text) => {
-      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+      escalator.dispatchSpawnTask(text, text.slice(0, 64), lastSpawnContext ?? undefined).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
         wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
       });
