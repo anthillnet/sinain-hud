@@ -51,6 +51,8 @@ class SenseSender:
                 "narrative": event.observation.narrative,
                 "concepts": event.observation.concepts,
             }
+        if event.vision_cost:
+            payload["vision_cost"] = event.vision_cost
 
         for attempt in range(_MAX_RETRIES):
             try:

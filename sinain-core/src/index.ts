@@ -18,6 +18,7 @@ import { FeedbackStore } from "./learning/feedback-store.js";
 import { SignalCollector } from "./learning/signal-collector.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
+import { CostTracker } from "./cost/tracker.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
@@ -92,6 +93,10 @@ async function main() {
 
   // ── Initialize overlay WS handler ──
   const wsHandler = new WsHandler();
+
+  // ── Initialize cost tracker ──
+  const costTracker = new CostTracker((snapshot) => wsHandler.broadcastCost(snapshot));
+  costTracker.startPeriodicLog(60_000);
 
   // ── Initialize tracing ──
   const tracer = config.traceEnabled ? new Tracer() : null;
@@ -184,6 +189,7 @@ async function main() {
       return null;
     },
     feedbackStore: feedbackStore ?? undefined,
+    costTracker,
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
@@ -211,6 +217,7 @@ async function main() {
   systemAudioPipeline.setProfiler(profiler);
   if (micPipeline) micPipeline.setProfiler(profiler);
   transcription.setProfiler(profiler);
+  transcription.setCostTracker(costTracker);
 
   // Wire: audio chunks → transcription (both pipelines share the same transcription service)
   systemAudioPipeline.on("chunk", (chunk) => {
@@ -322,6 +329,7 @@ async function main() {
     senseBuffer,
     wsHandler,
     profiler,
+    costTracker,
     feedbackStore: feedbackStore ?? undefined,
     isScreenActive: () => screenActive,
 
@@ -557,6 +565,7 @@ async function main() {
     log(TAG, `${signal} received, shutting down...`);
     clearInterval(bufferGaugeTimer);
     if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
+    costTracker.stop();
     profiler.stop();
     recorder.forceStop(); // Stop any active recording
     agentLoop.stop();

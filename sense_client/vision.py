@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
@@ -27,14 +28,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger("sinain.vision")
 
 
+class VisionResult:
+    """Result of a vision call: text + optional cost info."""
+    __slots__ = ("text", "cost")
+
+    def __init__(self, text: Optional[str], cost: Optional[dict] = None):
+        self.text = text
+        self.cost = cost  # {cost, tokens_in, tokens_out, model, cost_id}
+
+
 class VisionProvider(ABC):
     """Abstract base for vision inference backends."""
 
     name: str = "unknown"
 
     @abstractmethod
-    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> Optional[str]:
-        """Describe image content. Returns None on failure."""
+    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> VisionResult:
+        """Describe image content. Returns VisionResult (text may be None on failure)."""
         ...
 
     @abstractmethod
@@ -53,8 +63,8 @@ class OllamaVisionProvider(VisionProvider):
                                      timeout=timeout, max_tokens=max_tokens)
         self.name = f"ollama ({model})"
 
-    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> Optional[str]:
-        return self._client.describe(image, prompt)
+    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> VisionResult:
+        return VisionResult(self._client.describe(image, prompt))
 
     def is_available(self) -> bool:
         return self._client.is_available()
@@ -73,9 +83,9 @@ class OpenRouterVisionProvider(VisionProvider):
         self._max_tokens = max_tokens
         self.name = f"openrouter ({model})"
 
-    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> Optional[str]:
+    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> VisionResult:
         if not self._api_key:
-            return None
+            return VisionResult(None)
 
         try:
             import requests
@@ -83,7 +93,7 @@ class OpenRouterVisionProvider(VisionProvider):
             # Encode image
             img_b64 = self._encode(image)
             if not img_b64:
-                return None
+                return VisionResult(None)
 
             prompt_text = prompt or "Describe what's on this screen concisely (2-3 sentences)."
 
@@ -112,13 +122,23 @@ class OpenRouterVisionProvider(VisionProvider):
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"].strip()
-            logger.debug("openrouter vision: model=%s tokens=%s",
-                         self._model, data.get("usage", {}).get("total_tokens", "?"))
-            return content if content else None
+            usage = data.get("usage", {})
+            logger.debug("openrouter vision: model=%s tokens=%s cost=%s",
+                         self._model, usage.get("total_tokens", "?"), usage.get("cost", "?"))
+            cost_info = None
+            if usage.get("cost") is not None:
+                cost_info = {
+                    "cost": usage["cost"],
+                    "tokens_in": usage.get("prompt_tokens", 0),
+                    "tokens_out": usage.get("completion_tokens", 0),
+                    "model": self._model,
+                    "cost_id": uuid.uuid4().hex[:16],
+                }
+            return VisionResult(content if content else None, cost_info)
 
         except Exception as e:
             logger.debug("openrouter vision failed: %s", e)
-            return None
+            return VisionResult(None)
 
     def is_available(self) -> bool:
         return bool(self._api_key)

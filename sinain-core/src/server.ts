@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { WebSocketServer, WebSocket } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
 import type { Profiler } from "./profiler.js";
+import type { CostTracker } from "./cost/tracker.js";
 import type { FeedbackStore } from "./learning/feedback-store.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer, type SemanticSenseEvent, type TextDelta } from "./buffers/sense-buffer.js";
@@ -20,6 +21,7 @@ export interface ServerDeps {
   senseBuffer: SenseBuffer;
   wsHandler: WsHandler;
   profiler?: Profiler;
+  costTracker?: CostTracker;
   onSenseEvent: (event: SenseEvent) => void;
   onSenseDelta?: (data: { app: string; activity: string; changes: TextDelta[]; priority?: string; ts: number }) => void;
   onFeedPost: (text: string, priority: string) => void;
@@ -65,6 +67,8 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
 export function createAppServer(deps: ServerDeps) {
   const { config, feedBuffer, senseBuffer, wsHandler } = deps;
   let senseInBytes = 0;
+  const seenVisionCostIds = new Set<string>();
+  const visionCostCleanup = setInterval(() => seenVisionCostIds.clear(), 60_000);
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -91,6 +95,24 @@ export function createAppServer(deps: ServerDeps) {
         senseInBytes += Buffer.byteLength(body);
         deps.profiler?.gauge("network.senseInBytes", senseInBytes);
         const data = JSON.parse(body);
+
+        // Record vision API cost before dedup — the call is already billed.
+        // Dedup by cost_id to avoid double-counting on sender retries.
+        const vc = data.vision_cost;
+        if (vc && typeof vc.cost === "number" && vc.cost > 0) {
+          const costId = vc.cost_id as string | undefined;
+          if (!costId || !seenVisionCostIds.has(costId)) {
+            if (costId) seenVisionCostIds.add(costId);
+            deps.costTracker?.record({
+              source: "vision",
+              model: vc.model || "unknown",
+              cost: vc.cost,
+              tokensIn: vc.tokens_in || 0,
+              tokensOut: vc.tokens_out || 0,
+              ts: Date.now(),
+            });
+          }
+        }
         if (!data.type || data.ts === undefined) {
           res.writeHead(400);
           res.end(JSON.stringify({ ok: false, error: "missing type or ts" }));
@@ -504,6 +526,7 @@ export function createAppServer(deps: ServerDeps) {
       });
     },
     async destroy(): Promise<void> {
+      clearInterval(visionCostCleanup);
       wsHandler.destroy();
       wss.close();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));

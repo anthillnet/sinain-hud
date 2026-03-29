@@ -15,7 +15,7 @@ Three main processes communicate over localhost:
 - **sense_client** (Python) — Reads screen frames from sck-capture IPC (`~/.sinain/capture/frame.jpg`), SSIM change detection, OCR via OpenRouter vision API, privacy stripping. POSTs to sinain-core `/sense`.
 - **sck-capture** (Swift, `tools/sck-capture/`) — Unified ScreenCaptureKit binary. Single `SCStream` captures both system audio (raw PCM → stdout → sinain-core AudioPipeline) and screen frames (JPEG → IPC → sense_client). Replaces separate Python SCKCapture + old sck-audio.
 
-Data flow: `sck-capture → stdout PCM → sinain-core AudioPipeline → VAD → transcription → feed buffer → WebSocket → overlay`. Screen: `sck-capture → IPC JPEG → sense_client → OCR → POST /sense → sinain-core`.
+Data flow: `sck-capture → stdout PCM → sinain-core AudioPipeline → VAD → transcription → feed buffer → WebSocket → overlay`. Screen: `sck-capture → IPC JPEG → sense_client → OCR → POST /sense → sinain-core`. Cost: `OpenRouter usage.cost → analyzer/transcription/vision → CostTracker → WebSocket → overlay`.
 
 Escalation: Agent loop scores digests against patterns. If score >= threshold (or rich/focus mode), escalates to OpenClaw gateway via HTTP+WebSocket.
 
@@ -90,6 +90,7 @@ Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
 - `escalation/scorer.ts` — Pattern-based scoring for escalation decisions
 - `buffers/feed-buffer.ts` — Ring buffer for feed items
 - `buffers/sense-buffer.ts` — Ring buffer for screen events
+- `cost/tracker.ts` — CostTracker: in-memory LLM cost accumulator, periodic logging, WS broadcast
 - `eval/` — Evaluation framework with LLM-as-Judge, JSONL scenarios
 
 ### overlay (`overlay/lib/`)
@@ -105,6 +106,7 @@ Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
 - `ocr.py` — OpenRouter vision OCR pipeline
 - `change_detector.py` — SSIM-based frame change detection
 - `privacy.py` — `<private>` tag stripping, auto-redaction (credit cards, API keys, tokens)
+- `vision.py` — OpenRouter vision provider for screen analysis, extracts `usage.cost` for cost tracking
 
 ## Configuration
 
@@ -127,6 +129,7 @@ See `.env.example` for the complete list.
 - **SITUATION.md** — Atomic file writes (tmp → rename) to `~/.openclaw/workspace/SITUATION.md` for safe concurrent reads by OpenClaw
 - **Privacy layering** — Client-side `<private>` tag stripping in sense_client, plus server-side stripping in OpenClaw plugin
 - **Fallback models** — Agent retries with configurable fallback model chain on failure
+- **Cost tracking** — CostTracker accumulates `usage.cost` from OpenRouter responses across analyzer, transcription, and vision. Vision costs piped from sense_client via POST `/sense` with retry dedup (`cost_id`). In-memory (resets on restart), broadcasts to overlay via WebSocket, logs breakdown by source/model every 60s
 
 ## Privacy Design
 
