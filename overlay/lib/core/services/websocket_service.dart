@@ -24,6 +24,8 @@ class WebSocketService extends ChangeNotifier {
   String _envPath = '';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
+  double _totalCost = 0.0;
+  int _costCallCount = 0;
 
   final _feedController = StreamController<FeedItem>.broadcast();
   final _agentFeedController = StreamController<FeedItem>.broadcast();
@@ -45,6 +47,8 @@ class WebSocketService extends ChangeNotifier {
   String get micState => _micState;
   String get screenState => _screenState;
   String get envPath => _envPath;
+  double get totalCost => _totalCost;
+  int get costCallCount => _costCallCount;
 
   /// Persistent feed items that survive widget rebuilds.
   /// FeedView can read from this on mount to restore state.
@@ -180,6 +184,11 @@ class WebSocketService extends ChangeNotifier {
           break;
         case 'thinking':
           _thinkingController.add(json['active'] as bool? ?? false);
+          break;
+        case 'cost':
+          _totalCost = (json['totalCost'] as num?)?.toDouble() ?? 0.0;
+          _costCallCount = (json['callCount'] as num?)?.toInt() ?? 0;
+          notifyListeners();
           break;
         case 'ping':
           // Respond to app-level ping with pong

@@ -43,6 +43,7 @@ class SenseEvent:
     diff: dict | None = None
     meta: SenseMeta = field(default_factory=SenseMeta)
     observation: SenseObservation = field(default_factory=SenseObservation)
+    vision_cost: dict | None = None  # {cost, tokens_in, tokens_out, model}
 
 
 class DecisionGate:

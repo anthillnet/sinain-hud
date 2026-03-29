@@ -272,6 +272,18 @@ class OverlayShellState extends State<OverlayShell> {
               onTap: () => ws.sendCommand('toggle_mic'),
             ),
             const Spacer(),
+            // Cost counter
+            if (ws.totalCost > 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(
+                  '\$${ws.totalCost < 0.01 ? ws.totalCost.toStringAsFixed(4) : ws.totalCost.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontFamily: 'JetBrainsMono', fontSize: 9,
+                    color: Colors.white.withValues(alpha: 0.35),
+                  ),
+                ),
+              ),
             // Demo badge (clickable — toggles privacy mode)
             if (!_settingsService.settings.privacyMode)
               GestureDetector(
