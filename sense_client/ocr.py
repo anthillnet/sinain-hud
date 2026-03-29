@@ -1,4 +1,5 @@
 """OCR backends for UI text extraction: macOS Vision, Windows.Media.Ocr, and Tesseract."""
+
 from __future__ import annotations
 
 import io
@@ -24,8 +25,13 @@ class OCRResult:
 class LocalOCR:
     """Tesseract OCR wrapper for UI text extraction."""
 
-    def __init__(self, lang: str = "eng", psm: int = 11,
-                 min_confidence: int = 30, enabled: bool = True):
+    def __init__(
+        self,
+        lang: str = "eng",
+        psm: int = 11,
+        min_confidence: int = 30,
+        enabled: bool = True,
+    ):
         self.lang = lang
         self.psm = psm
         self.min_confidence = min_confidence
@@ -87,8 +93,12 @@ class LocalOCR:
 class VisionOCR:
     """macOS Vision framework OCR using pyobjc."""
 
-    def __init__(self, languages: list[str] | None = None,
-                 min_confidence: float = 0.5, enabled: bool = True):
+    def __init__(
+        self,
+        languages: list[str] | None = None,
+        min_confidence: float = 0.5,
+        enabled: bool = True,
+    ):
         self.languages = languages or ["en", "ru"]
         self.min_confidence = min_confidence
         self.enabled = enabled
@@ -101,8 +111,12 @@ class VisionOCR:
             import objc  # noqa: F401
             import Quartz  # noqa: F401
             from Foundation import NSURL, NSData  # noqa: F401
-            objc.loadBundle('Vision', bundle_path='/System/Library/Frameworks/Vision.framework',
-                            module_globals=globals())
+
+            objc.loadBundle(
+                "Vision",
+                bundle_path="/System/Library/Frameworks/Vision.framework",
+                module_globals=globals(),
+            )
             self._available = True
         except Exception as e:
             print(f"[ocr] Vision framework unavailable: {e}", flush=True)
@@ -120,9 +134,8 @@ class VisionOCR:
 
     def _do_extract(self, image: Image.Image) -> OCRResult:
         import objc
-        import Vision
-        from Foundation import NSData
         import Quartz
+        from Foundation import NSData
 
         # Convert PIL Image to CGImage via PNG bytes
         buf = io.BytesIO()
@@ -138,13 +151,13 @@ class VisionOCR:
             return OCRResult(text="", confidence=0, word_count=0)
 
         # Create and configure request
-        request = Vision.VNRecognizeTextRequest.alloc().init()
-        request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+        request = VNRecognizeTextRequest.alloc().init()
+        request.setRecognitionLevel_(0)  # VNRequestTextRecognitionLevelAccurate
         request.setRecognitionLanguages_(self.languages)
         request.setUsesLanguageCorrection_(True)
 
         # Execute
-        handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
+        handler = VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
         success = handler.performRequests_error_([request], objc.nil)
         if not success[0]:
             return OCRResult(text="", confidence=0, word_count=0)
@@ -197,8 +210,9 @@ class VisionOCR:
 class WinOCR:
     """Windows.Media.Ocr backend via winrt-python (Windows 10+)."""
 
-    def __init__(self, language: str = "en", min_confidence: float = 0.5,
-                 enabled: bool = True):
+    def __init__(
+        self, language: str = "en", min_confidence: float = 0.5, enabled: bool = True
+    ):
         self.language = language
         self.min_confidence = min_confidence
         self.enabled = enabled
@@ -209,8 +223,8 @@ class WinOCR:
             return
 
         try:
-            from winrt.windows.media.ocr import OcrEngine
             from winrt.windows.globalization import Language
+            from winrt.windows.media.ocr import OcrEngine
 
             lang = Language(language)
             if OcrEngine.is_language_supported(lang):
@@ -234,11 +248,15 @@ class WinOCR:
 
     def _do_extract(self, image: Image.Image) -> OCRResult:
         import asyncio
+
         from winrt.windows.graphics.imaging import (
-            SoftwareBitmap, BitmapPixelFormat, BitmapAlphaMode,
+            BitmapAlphaMode,
+            BitmapPixelFormat,
+            SoftwareBitmap,
         )
         from winrt.windows.storage.streams import (
-            InMemoryRandomAccessStream, DataWriter,
+            DataWriter,
+            InMemoryRandomAccessStream,
         )
 
         # Convert PIL to BMP bytes and load as SoftwareBitmap
@@ -254,13 +272,15 @@ class WinOCR:
             stream.seek(0)
 
             from winrt.windows.graphics.imaging import BitmapDecoder
+
             decoder = await BitmapDecoder.create_async(stream)
             bitmap = await decoder.get_software_bitmap_async()
 
             # Convert to supported pixel format if needed
             if bitmap.bitmap_pixel_format != BitmapPixelFormat.BGRA8:
-                bitmap = SoftwareBitmap.convert(bitmap, BitmapPixelFormat.BGRA8,
-                                                 BitmapAlphaMode.PREMULTIPLIED)
+                bitmap = SoftwareBitmap.convert(
+                    bitmap, BitmapPixelFormat.BGRA8, BitmapAlphaMode.PREMULTIPLIED
+                )
 
             result = await self._engine.recognize_async(bitmap)
             return result
@@ -318,10 +338,15 @@ def create_ocr(config: dict):
             enabled=enabled,
         )
         if vision._available:
-            print(f"[ocr] using Vision backend (languages={vision.languages})", flush=True)
+            print(
+                f"[ocr] using Vision backend (languages={vision.languages})", flush=True
+            )
             return vision
         if backend == "vision":
-            print("[ocr] Vision requested but unavailable, falling back to Tesseract", flush=True)
+            print(
+                "[ocr] Vision requested but unavailable, falling back to Tesseract",
+                flush=True,
+            )
 
     # Windows: try Windows.Media.Ocr
     if sys.platform == "win32" and backend in ("auto", "winocr"):
@@ -332,10 +357,15 @@ def create_ocr(config: dict):
             enabled=enabled,
         )
         if winocr._available:
-            print(f"[ocr] using WinOCR backend (language={winocr.language})", flush=True)
+            print(
+                f"[ocr] using WinOCR backend (language={winocr.language})", flush=True
+            )
             return winocr
         if backend == "winocr":
-            print("[ocr] WinOCR requested but unavailable, falling back to Tesseract", flush=True)
+            print(
+                "[ocr] WinOCR requested but unavailable, falling back to Tesseract",
+                flush=True,
+            )
 
     # Fallback to Tesseract (cross-platform)
     print("[ocr] using Tesseract backend", flush=True)

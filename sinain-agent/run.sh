@@ -78,6 +78,7 @@ invoke_agent() {
     codex)
       codex exec -s danger-full-access \
         --dangerously-bypass-approvals-and-sandbox \
+        --skip-git-repo-check \
         "$prompt"
       ;;
     junie)
