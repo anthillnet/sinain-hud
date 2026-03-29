@@ -324,6 +324,7 @@ async function callModel(
     try {
       const jsonStr = raw.replace(/^```\w*\s*\n?/, "").replace(/\n?\s*```\s*$/, "").trim();
       const parsed = JSON.parse(jsonStr);
+      const apiCost = typeof data.usage?.cost === "number" ? data.usage.cost : undefined;
       return {
         hud: parsed.hud || "\u2014",
         digest: parsed.digest || "\u2014",
@@ -334,10 +335,12 @@ async function callModel(
         tokensOut: data.usage?.completion_tokens || 0,
         model,
         parsedOk: true,
+        cost: apiCost,
       };
     } catch {
       // Second chance: extract embedded JSON object
       const match = raw.match(/\{[\s\S]*\}/);
+      const apiCost = typeof data.usage?.cost === "number" ? data.usage.cost : undefined;
       if (match) {
         try {
           const parsed = JSON.parse(match[0]);
@@ -352,6 +355,7 @@ async function callModel(
               tokensOut: data.usage?.completion_tokens || 0,
               model,
               parsedOk: true,
+              cost: apiCost,
             };
           }
         } catch { /* fall through */ }
@@ -367,6 +371,7 @@ async function callModel(
         tokensOut: data.usage?.completion_tokens || 0,
         model,
         parsedOk: false,
+        cost: apiCost,
       };
     }
   } finally {
