@@ -371,13 +371,17 @@ def main():
                 try:
                     from PIL import Image as PILImage
                     pil = PILImage.fromarray(frame) if isinstance(frame, np.ndarray) else frame
-                    scene = vision_provider.describe(pil, prompt=prompt or None)
-                    if scene:
-                        log(f"vision: {scene[:80]}...")
+                    result = vision_provider.describe(pil, prompt=prompt or None)
+                    scene = result.text
+                    v_cost = result.cost
+                    if scene or v_cost:
+                        if scene:
+                            log(f"vision: {scene[:80]}...")
                         ctx_ev = SenseEvent(type="context", ts=ts)
-                        ctx_ev.observation = SenseObservation(scene=scene)
+                        ctx_ev.observation = SenseObservation(scene=scene or "")
                         ctx_ev.meta = meta
                         ctx_ev.roi = package_full_frame(frame)
+                        ctx_ev.vision_cost = v_cost
                         sender.send(ctx_ev)
                 except Exception as e:
                     log(f"vision error: {e}")

@@ -7,6 +7,8 @@ import type {
   FeedMessage,
   StatusMessage,
   SpawnTaskMessage,
+  CostMessage,
+  CostSnapshot,
   Priority,
   FeedChannel,
 } from "../types.js";
@@ -39,6 +41,7 @@ export class WsHandler {
   };
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
+  private latestCostMsg: CostMessage | null = null;
 
   constructor() {
     this.startHeartbeat();
@@ -88,6 +91,15 @@ export class WsHandler {
     if (this.spawnTaskBuffer.size > 0) {
       log(TAG, `replayed ${this.spawnTaskBuffer.size} spawn tasks to new client`);
     }
+
+    // Replay current cost snapshot (or send zeroed snapshot so client resets)
+    this.sendTo(ws, this.latestCostMsg ?? {
+      type: "cost" as const,
+      totalCost: 0,
+      costBySource: {},
+      callCount: 0,
+      startedAt: Date.now(),
+    });
 
     ws.on("message", (raw) => {
       try {
@@ -155,6 +167,19 @@ export class WsHandler {
       this.pruneSpawnTasks();
       log(TAG, `spawn_task buffered: taskId=${taskMsg.taskId}, status=${taskMsg.status}, buffer=${this.spawnTaskBuffer.size}, clients=${this.clients.size}`);
     }
+    this.broadcastMessage(msg);
+  }
+
+  /** Broadcast cost snapshot to all connected overlays. */
+  broadcastCost(snapshot: CostSnapshot): void {
+    const msg: CostMessage = {
+      type: "cost",
+      totalCost: snapshot.totalCost,
+      costBySource: snapshot.costBySource,
+      callCount: snapshot.callCount,
+      startedAt: snapshot.startedAt,
+    };
+    this.latestCostMsg = msg;
     this.broadcastMessage(msg);
   }
 

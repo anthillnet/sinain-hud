@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { TranscriptionConfig, AudioChunk, TranscriptResult } from "../types.js";
 import type { Profiler } from "../profiler.js";
+import type { CostTracker } from "../cost/tracker.js";
 import { LocalTranscriptionBackend } from "./transcription-local.js";
 import { log, warn, error, debug } from "../log.js";
 
@@ -41,7 +42,10 @@ export class TranscriptionService extends EventEmitter {
   private dropCount: number = 0;
   private totalCalls: number = 0;
 
+  private costTracker: CostTracker | null = null;
+
   setProfiler(p: Profiler): void { this.profiler = p; }
+  setCostTracker(ct: CostTracker): void { this.costTracker = ct; }
 
   constructor(config: TranscriptionConfig) {
     super();
@@ -219,7 +223,7 @@ export class TranscriptionService extends EventEmitter {
 
       const data = await response.json() as {
         choices?: Array<{ message?: { content?: string } }>;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
+        usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
       };
 
       const text = data.choices?.[0]?.message?.content?.trim();
@@ -230,6 +234,21 @@ export class TranscriptionService extends EventEmitter {
       if (this.cumulativeLatencies.length > 1_000) this.cumulativeLatencies.shift();
       this.profiler?.timerRecord("transcription.call", elapsed);
       this.totalAudioDurationMs += chunk.durationMs;
+
+      // Track tokens and cost before any early returns — the API call is already billed
+      if (data.usage) {
+        this.totalTokensConsumed += (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0);
+      }
+      if (typeof data.usage?.cost === "number" && data.usage.cost > 0) {
+        this.costTracker?.record({
+          source: "transcription",
+          model: this.config.geminiModel,
+          cost: data.usage.cost,
+          tokensIn: data.usage?.prompt_tokens || 0,
+          tokensOut: data.usage?.completion_tokens || 0,
+          ts: Date.now(),
+        });
+      }
 
       if (!text) {
         warn(TAG, `OpenRouter returned empty transcript (${elapsed}ms)`);
@@ -247,10 +266,6 @@ export class TranscriptionService extends EventEmitter {
       }
 
       log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
-
-      if (data.usage) {
-        this.totalTokensConsumed += (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0);
-      }
 
       const result: TranscriptResult = {
         text,

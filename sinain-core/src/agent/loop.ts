@@ -4,6 +4,7 @@ import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus, SenseEvent, FeedbackRecord } from "../types.js";
 import type { Profiler } from "../profiler.js";
+import type { CostTracker } from "../cost/tracker.js";
 import { buildContextWindow, RICHNESS_PRESETS } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
@@ -40,6 +41,8 @@ export interface AgentLoopDeps {
   getKnowledgeDocPath?: () => string | null;
   /** Optional: feedback store for startup recap context. */
   feedbackStore?: { queryRecent(n: number): FeedbackRecord[] };
+  /** Optional: cost tracker for LLM cost accumulation. */
+  costTracker?: CostTracker;
 }
 
 export interface TraceContext {
@@ -317,6 +320,17 @@ export class AgentLoop extends EventEmitter {
       this.deps.profiler?.gauge("agent.parseSuccesses", this.stats.parseSuccesses);
       this.deps.profiler?.gauge("agent.parseFailures", this.stats.parseFailures);
 
+      if (typeof result.cost === "number" && result.cost > 0) {
+        this.deps.costTracker?.record({
+          source: "analyzer",
+          model: usedModel,
+          cost: result.cost,
+          tokensIn,
+          tokensOut,
+          ts: Date.now(),
+        });
+      }
+
       // Build entry
       const entry: AgentEntry = {
         ...result,
@@ -375,12 +389,13 @@ export class AgentLoop extends EventEmitter {
 
       // Finish trace
       const costPerToken = { in: 0.075 / 1_000_000, out: 0.3 / 1_000_000 };
+      const estimatedCost = tokensIn * costPerToken.in + tokensOut * costPerToken.out;
       traceCtx?.finish({
         totalLatencyMs: Date.now() - entry.ts + latencyMs,
         llmLatencyMs: latencyMs,
         llmInputTokens: tokensIn,
         llmOutputTokens: tokensOut,
-        llmCost: tokensIn * costPerToken.in + tokensOut * costPerToken.out,
+        llmCost: result.cost ?? estimatedCost,
         escalated: false, // Updated by escalator
         escalationScore: 0,
         contextScreenEvents: contextWindow.screenCount,
@@ -477,6 +492,16 @@ export class AgentLoop extends EventEmitter {
       };
 
       const result = await analyzeContext(recapWindow, this.deps.agentConfig, null);
+      if (typeof result.cost === "number" && result.cost > 0) {
+        this.deps.costTracker?.record({
+          source: "analyzer",
+          model: result.model,
+          cost: result.cost,
+          tokensIn: result.tokensIn,
+          tokensOut: result.tokensOut,
+          ts: Date.now(),
+        });
+      }
       if (result?.hud && result.hud !== "—" && result.hud !== "Idle") {
         this.deps.onHudUpdate(result.hud);
         log(TAG, `recap tick (${Date.now() - startTs}ms, ${result.tokensIn}in+${result.tokensOut}out tok) hud="${result.hud}"`);

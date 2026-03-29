@@ -78,7 +78,35 @@ export interface SpawnCommandMessage {
   text: string;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage;
+/** Cost update broadcast to overlay. */
+export interface CostMessage {
+  type: "cost";
+  totalCost: number;
+  costBySource: Record<string, number>;
+  callCount: number;
+  startedAt: number;
+}
+
+/** Entry recorded by CostTracker for each LLM call. */
+export interface CostEntry {
+  source: "analyzer" | "transcription" | "vision";
+  model: string;
+  cost: number;
+  tokensIn: number;
+  tokensOut: number;
+  ts: number;
+}
+
+/** Snapshot of accumulated cost state. */
+export interface CostSnapshot {
+  totalCost: number;
+  costBySource: Record<string, number>;
+  costByModel: Record<string, number>;
+  callCount: number;
+  startedAt: number;
+}
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -253,6 +281,8 @@ export interface AgentResult {
   voice?: string;
   voice_stat?: number;
   voice_confidence?: number;
+  /** Actual USD cost returned by OpenRouter (undefined if not available). */
+  cost?: number;
 }
 
 export interface AgentEntry extends AgentResult {
