@@ -99,6 +99,7 @@ export class WsHandler {
       costBySource: {},
       callCount: 0,
       startedAt: Date.now(),
+      displayEnabled: false,
     });
 
     ws.on("message", (raw) => {
@@ -171,13 +172,14 @@ export class WsHandler {
   }
 
   /** Broadcast cost snapshot to all connected overlays. */
-  broadcastCost(snapshot: CostSnapshot): void {
+  broadcastCost(snapshot: CostSnapshot, displayEnabled: boolean): void {
     const msg: CostMessage = {
       type: "cost",
       totalCost: snapshot.totalCost,
       costBySource: snapshot.costBySource,
       callCount: snapshot.callCount,
       startedAt: snapshot.startedAt,
+      displayEnabled,
     };
     this.latestCostMsg = msg;
     this.broadcastMessage(msg);
@@ -223,9 +225,6 @@ export class WsHandler {
         break;
       case "user_command":
         log(TAG, `\u2190 user command: ${msg.text.slice(0, 100)}`);
-        break;
-      case "spawn_command":
-        log(TAG, `\u2190 spawn command: ${msg.text.slice(0, 100)}`);
         break;
       case "profiling":
         if (this.onProfilingCb) this.onProfilingCb(msg);

@@ -85,6 +85,7 @@ export interface CostMessage {
   costBySource: Record<string, number>;
   callCount: number;
   startedAt: number;
+  displayEnabled: boolean;
 }
 
 /** Entry recorded by CostTracker for each LLM call. */
@@ -472,6 +473,7 @@ export interface CoreConfig {
   openclawConfig: OpenClawConfig;
   situationMdPath: string;
   traceEnabled: boolean;
+  costDisplayEnabled: boolean;
   traceDir: string;
   learningConfig: LearningConfig;
   traitConfig: TraitConfig;

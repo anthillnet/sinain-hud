@@ -118,6 +118,7 @@ All config via environment variables or `.env` file. Key vars:
 - `ESCALATION_MODE` — `off | selective | focus | rich` (default: `rich`)
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
 - `AUDIO_DEVICE` — macOS audio device for sox/ffmpeg fallback (default: `BlackHole 2ch`)
+- `COST_DISPLAY_ENABLED` — Show LLM cost counter in overlay (default: `false`, costs always logged to stdout)
 
 See `.env.example` for the complete list.
 

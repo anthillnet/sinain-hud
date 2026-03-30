@@ -117,13 +117,13 @@ Responses appear on the HUD overlay as `[🤖]` messages, identical to OpenClaw 
 
 ## Configuration
 
-All configuration lives in the project root `.env` (copy from `.env.example`):
+Agent config lives in `sinain-agent/.env` (copy from `.env.example`):
 
 ```bash
-cp .env.example .env
+cd sinain-agent && cp .env.example .env
 ```
 
-### Agent Environment Variables (in project root `.env`)
+### Agent Environment Variables (`sinain-agent/.env`)
 
 | Variable | Default | Description |
 |---|---|---|
@@ -132,9 +132,8 @@ cp .env.example .env
 | `SINAIN_POLL_INTERVAL` | `5` | Seconds between escalation polls |
 | `SINAIN_HEARTBEAT_INTERVAL` | `900` | Seconds between heartbeat ticks (15 min) |
 | `SINAIN_WORKSPACE` | `~/.openclaw/workspace` | Workspace directory for knowledge files |
-| `SINAIN_ALLOWED_TOOLS` | (auto-derived) | MCP tools auto-approved for bare agent. Auto-derived from `mcp-config.json` if unset. |
 
-### Escalation Variables (in project root `.env`)
+### Core Environment Variables (`sinain-core/.env`)
 
 | Variable | Default | Description |
 |---|---|---|
@@ -202,7 +201,7 @@ SINAIN_AGENT=claude|codex|junie|goose|aider|<command>   # default: claude
 
 | Agent | Mode | One-shot flag | MCP config | Auto-approve |
 |-------|------|---------------|------------|--------------|
-| `claude` | MCP | `-p "$prompt"` | `--mcp-config file.json` | `--enable-auto-mode` |
+| `claude` | MCP | `-p "$prompt"` | `--mcp-config file.json` | `--dangerously-skip-permissions` |
 | `codex` | MCP | `exec "$prompt"` | `codex mcp add` (persistent) | `-s danger-full-access` |
 | `junie` | MCP | `--task "$prompt"` | `--mcp-location dir` (auto-configured) | N/A |
 | `goose` | MCP | `run --text "$prompt"` | `goose configure` (persistent) | N/A |

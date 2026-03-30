@@ -243,11 +243,7 @@ class _FeedViewState extends State<FeedView> {
               // Copy message text to clipboard on long-press
               Clipboard.setData(ClipboardData(text: item.text));
             },
-            child: item.isUser
-                ? _buildUserMessage(item)
-                : item.isSpawn
-                    ? _buildSpawnMessage(item)
-                    : _buildAgentMessage(item, index),
+            child: item.isUser ? _buildUserMessage(item) : _buildAgentMessage(item, index),
           ),
         );
       },
@@ -272,32 +268,6 @@ class _FeedViewState extends State<FeedView> {
               fontFamily: 'JetBrainsMono',
               fontSize: 12,
               color: Color(0xFF00E5FF),
-              height: 1.3,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSpawnMessage(FeedItem item) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 40, top: 2, bottom: 2),
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A3A2A),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFF00E676).withValues(alpha: 0.3)),
-          ),
-          child: Text(
-            item.text,
-            style: const TextStyle(
-              fontFamily: 'JetBrainsMono',
-              fontSize: 12,
-              color: Color(0xFF00E676),
               height: 1.3,
             ),
           ),

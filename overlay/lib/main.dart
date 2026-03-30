@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/constants.dart';
+import 'core/services/onboarding_service.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
@@ -18,12 +19,20 @@ void main() async {
   final settingsService = SettingsService();
   await settingsService.init();
 
+  final onboardingService = OnboardingService();
+  await onboardingService.init();
+
   final wsService = WebSocketService(url: settingsService.settings.wsUrl);
 
   // Configure native window
   await windowService.setTransparent();
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
+
+  // During onboarding, resize window for the wizard panel
+  if (!onboardingService.isComplete) {
+    await windowService.setWindowFrame(100, 200, 320, 380);
+  }
 
   // Restore persisted eye position (if saved)
   if (settingsService.settings.eyeX >= 0) {
@@ -83,6 +92,7 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider.value(value: onboardingService),
         ChangeNotifierProvider.value(value: settingsService),
         ChangeNotifierProvider.value(value: wsService),
         Provider.value(value: windowService),

@@ -24,8 +24,19 @@ switch (cmd) {
     await showStatus();
     break;
 
+  case "onboard":
+    await import("./onboard.js");
+    break;
+
+  case "config":
+    await import("./config.js");
+    break;
+
   case "setup":
-    await runSetupWizard();
+    // Legacy — redirect to onboard
+    console.log("\x1b[33m  ⚠ `sinain setup` is deprecated. Use: sinain onboard\x1b[0m");
+    console.log("\x1b[2m    Or: sinain onboard --advanced for full options\x1b[0m\n");
+    await import("./onboard.js");
     break;
 
   case "setup-overlay":
@@ -513,10 +524,13 @@ function printUsage() {
 sinain — AI overlay system for macOS and Windows
 
 Usage:
+  sinain onboard               Interactive setup wizard (recommended)
+  sinain onboard --advanced    Full setup with privacy, models, gateway options
+  sinain onboard --reset       Reset config and start fresh
   sinain start [options]       Launch sinain services
   sinain stop                  Stop all sinain services
   sinain status                Check what's running
-  sinain setup                 Run interactive setup wizard (~/.sinain/.env)
+  sinain setup                 (deprecated — use onboard)
   sinain setup-overlay         Download pre-built overlay app
   sinain setup-sck-capture     Download sck-capture audio binary (macOS)
   sinain export-knowledge      Export knowledge for transfer to another machine
