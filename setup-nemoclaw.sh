@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -e
 
+echo ""
+echo -e "\033[33m  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[33m  This script is deprecated.\033[0m"
+echo -e "\033[2m  Use: npx @geravant/sinain onboard\033[0m"
+echo -e "\033[2m  Or:  npx @geravant/sinain onboard --advanced\033[0m"
+echo -e "\033[33m  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+
 SINAIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$SINAIN_DIR/sinain-core/.env"
 

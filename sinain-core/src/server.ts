@@ -331,6 +331,24 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
+      // ── /setup/status ── (used by overlay onboarding wizard)
+      if (req.method === "GET" && url.pathname === "/setup/status") {
+        const health = deps.getHealthPayload();
+        res.end(JSON.stringify({
+          ok: true,
+          setup: {
+            openrouterKey: !!config.transcriptionConfig.openrouterApiKey,
+            gatewayConfigured: !!config.openclawConfig.gatewayToken,
+            gatewayConnected: !!(health as Record<string, any>)?.escalation?.gatewayConnected,
+            audioActive: (health as Record<string, any>)?.audio?.state === "active" || (health as Record<string, any>)?.audioPipeline?.state === "running",
+            screenActive: deps.isScreenActive(),
+            transcriptionBackend: config.transcriptionConfig.backend,
+            escalationMode: config.escalationConfig.mode,
+          },
+        }));
+        return;
+      }
+
       // ── /user/command ──
       if (req.method === "POST" && url.pathname === "/user/command") {
         const body = await readBody(req, 4096);

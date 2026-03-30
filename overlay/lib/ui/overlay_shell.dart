@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/models/hud_settings.dart';
+import '../core/services/onboarding_service.dart';
 import '../core/services/settings_service.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/window_service.dart';
@@ -10,6 +11,7 @@ import 'eye/eye_widget.dart';
 import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
 import 'input/command_input.dart';
+import 'onboarding/onboarding_view.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
 
@@ -212,6 +214,16 @@ class OverlayShellState extends State<OverlayShell> {
 
   @override
   Widget build(BuildContext context) {
+    // Show onboarding if not complete
+    final onboarding = context.watch<OnboardingService>();
+    if (!onboarding.isComplete) {
+      return const SizedBox(
+        width: 320,
+        height: 380,
+        child: OnboardingView(),
+      );
+    }
+
     context.watch<SettingsService>(); // rebuild on privacy mode change (eye color)
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
