@@ -10,10 +10,10 @@ export class CostTracker {
   private callCount = 0;
   private startedAt = Date.now();
   private timer: ReturnType<typeof setInterval> | null = null;
-  private broadcastCost: (snapshot: CostSnapshot) => void;
+  private onCostUpdate: (snapshot: CostSnapshot) => void;
 
-  constructor(broadcastCost: (snapshot: CostSnapshot) => void) {
-    this.broadcastCost = broadcastCost;
+  constructor(onCostUpdate: (snapshot: CostSnapshot) => void) {
+    this.onCostUpdate = onCostUpdate;
   }
 
   record(entry: CostEntry): void {
@@ -28,7 +28,7 @@ export class CostTracker {
       entry.model,
       (this.costByModel.get(entry.model) || 0) + entry.cost,
     );
-    this.broadcastCost(this.getSnapshot());
+    this.onCostUpdate(this.getSnapshot());
   }
 
   getSnapshot(): CostSnapshot {

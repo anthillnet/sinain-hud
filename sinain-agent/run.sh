@@ -5,9 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load .env as fallback — does NOT override vars already in the environment
 # (e.g. vars set by the launcher from ~/.sinain/.env)
-# Load project root .env (single config for all subsystems)
-ENV_FILE="$SCRIPT_DIR/../.env"
-if [ -f "$ENV_FILE" ]; then
+if [ -f "$SCRIPT_DIR/.env" ]; then
   while IFS='=' read -r key val; do
     # Skip comments and blank lines
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
@@ -21,7 +19,7 @@ if [ -f "$ENV_FILE" ]; then
     if [ -z "${!key+x}" ]; then
       export "$key=$val"
     fi
-  done < "$ENV_FILE"
+  done < "$SCRIPT_DIR/.env"
 fi
 
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
@@ -30,8 +28,6 @@ POLL_INTERVAL="${SINAIN_POLL_INTERVAL:-2}"
 HEARTBEAT_INTERVAL="${SINAIN_HEARTBEAT_INTERVAL:-900}" # 15 minutes
 AGENT="${SINAIN_AGENT:-claude}"
 WORKSPACE="${SINAIN_WORKSPACE:-$HOME/.openclaw/workspace}"
-AGENT_MAX_TURNS="${SINAIN_AGENT_MAX_TURNS:-5}"
-SPAWN_MAX_TURNS="${SINAIN_SPAWN_MAX_TURNS:-25}"
 
 # Build allowed tools list for Claude's --allowedTools flag.
 # SINAIN_ALLOWED_TOOLS in .env overrides; otherwise auto-derive from MCP config.
@@ -68,11 +64,10 @@ invoke_agent() {
   local prompt="$1"
   case "$AGENT" in
     claude)
-      local turns="${2:-$AGENT_MAX_TURNS}"
       claude --enable-auto-mode \
         --mcp-config "$MCP_CONFIG" \
         ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-        --max-turns "$turns" --output-format text \
+        --max-turns 5 --output-format text \
         -p "$prompt"
       ;;
     codex)
@@ -93,10 +88,9 @@ invoke_agent() {
       fi
       ;;
     goose)
-      local turns="${2:-$AGENT_MAX_TURNS}"
       GOOSE_MODE=auto goose run --text "$prompt" \
         --output-format text \
-        --max-turns "$turns"
+        --max-turns 10
       ;;
     aider)
       # No MCP support — signal pipe mode
@@ -271,8 +265,8 @@ while true; do
       # MCP path: agent runs task with sinain tools available
       SPAWN_PROMPT="You have a background task to complete. Task: $SPAWN_TASK
 
-Complete this task thoroughly. Use sinain_get_knowledge and sinain_knowledge_query if you need context from past sessions. Use web search, file operations, and code execution as needed. Create end-to-end artifacts. Summarize your findings concisely."
-      SPAWN_RESULT=$(invoke_agent "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: agent invocation failed")
+Complete this task thoroughly. Use sinain_get_knowledge and sinain_knowledge_query if you need context from past sessions. Summarize your findings concisely."
+      SPAWN_RESULT=$(invoke_agent "$SPAWN_PROMPT" || echo "ERROR: agent invocation failed")
     else
       # Pipe path: agent gets task text directly
       SPAWN_RESULT=$(invoke_pipe "Background task: $SPAWN_TASK" || echo "No output")
