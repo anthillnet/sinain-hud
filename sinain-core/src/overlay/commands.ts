@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import type { InboundMessage } from "../types.js";
 import type { WsHandler } from "./ws-handler.js";
 import type { AudioPipeline } from "../audio/pipeline.js";
 import type { CoreConfig } from "../types.js";
 import { WebSocket } from "ws";
+import { loadedEnvPath } from "../config.js";
 import { log } from "../log.js";
 
 const TAG = "cmd";
@@ -60,15 +62,6 @@ export function setupCommands(deps: CommandDeps): void {
       case "spawn_command": {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
         log(TAG, `spawn command received: "${preview}"`);
-        // Echo spawn command to all overlay clients as a feed item (green in UI)
-        wsHandler.broadcastRaw({
-          type: "feed",
-          text: `⚡ ${msg.text}`,
-          priority: "normal",
-          ts: Date.now(),
-          channel: "agent",
-          sender: "spawn",
-        } as any);
         if (deps.onSpawnCommand) {
           deps.onSpawnCommand(msg.text);
         } else {
@@ -149,6 +142,16 @@ function handleCommand(action: string, deps: CommandDeps): void {
       wsHandler.updateState({ traits: nowEnabled ? "active" : "off" });
       wsHandler.broadcast(`Trait voices ${nowEnabled ? "on" : "off"}`, "normal");
       log(TAG, `traits toggled ${nowEnabled ? "ON" : "OFF"}`);
+      break;
+    }
+    case "open_settings": {
+      const envPath = loadedEnvPath || `${process.env.HOME || process.env.USERPROFILE}/.sinain/.env`;
+      const cmd = process.platform === "win32" ? "notepad" : "open";
+      const args = process.platform === "win32" ? [envPath] : ["-t", envPath];
+      execFile(cmd, args, (err) => {
+        if (err) log(TAG, `open_settings failed: ${err.message}`);
+      });
+      log(TAG, `open_settings: ${envPath}`);
       break;
     }
     default:

@@ -11,10 +11,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export let loadedEnvPath: string | undefined;
 
 function loadDotEnv(): void {
-  // Try project root .env first, then sinain-core/.env fallback
+  // Try sinain-core/.env first, then project root .env
   const candidates = [
-    resolve(__dirname, "..", "..", ".env"),
     resolve(__dirname, "..", ".env"),
+    resolve(__dirname, "..", "..", ".env"),
   ];
   for (const envPath of candidates) {
     if (!existsSync(envPath)) continue;
@@ -252,6 +252,7 @@ export function loadConfig(): CoreConfig {
     situationMdPath,
     traceEnabled: boolEnv("TRACE_ENABLED", true),
     traceDir: resolvePath(env("TRACE_DIR", resolve(sinainDataDir(), "traces"))),
+    costDisplayEnabled: boolEnv("COST_DISPLAY_ENABLED", false),
     learningConfig,
     traitConfig,
     privacyConfig,

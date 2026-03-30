@@ -13,14 +13,6 @@ import { isCodingContext, buildEscalationMessage, fetchKnowledgeFacts } from "./
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
 import { log, warn, error } from "../log.js";
 
-/** Context passed to spawn subagents so they can act on the user's current situation. */
-export interface SpawnContext {
-  currentApp?: string;
-  digest?: string;
-  recentAudio?: string;
-  recentScreen?: string;
-}
-
 export interface HttpPendingEscalation {
   id: string;
   message: string;
@@ -473,7 +465,7 @@ ${recentLines.join("\n")}`;
    * Creates a unique child session key and sends the task directly to the gateway
    * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
-  async dispatchSpawnTask(task: string, label?: string, context?: SpawnContext): Promise<void> {
+  async dispatchSpawnTask(task: string, label?: string): Promise<void> {
     // Prevent sibling spawn RPCs from piling up (independent from escalation queue)
     if (this.spawnInFlight) {
       log(TAG, `spawn-task skipped — spawn RPC already in-flight`);
@@ -493,12 +485,9 @@ ${recentLines.join("\n")}`;
     this.lastSpawnFingerprint = fingerprint;
     this.lastSpawnTs = now;
 
-    // Truncate label to gateway's 64-char limit
-    const safeLabel = label?.slice(0, 64);
-
     const taskId = `spawn-${Date.now()}`;
     const startedAt = Date.now();
-    const labelStr = safeLabel ? ` (label: "${safeLabel}")` : "";
+    const labelStr = label ? ` (label: "${label}")` : "";
     const idemKey = `spawn-task-${Date.now()}`;
 
     // Generate a unique child session key — bypasses the main agent entirely
@@ -509,21 +498,17 @@ ${recentLines.join("\n")}`;
     log(TAG, `dispatching spawn-task${labelStr} → child=${childSessionKey}: "${task.slice(0, 80)}..."`);
 
     // ★ Broadcast "spawned" BEFORE the RPC — TSK tab shows ··· immediately
-    this.broadcastTaskEvent(taskId, "spawned", safeLabel, startedAt);
+    this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
 
     if (!this.wsClient.isConnected) {
       // No OpenClaw gateway — queue for bare agent HTTP polling
-      this.spawnHttpPending = { id: taskId, task, label: safeLabel || "background-task", ts: startedAt };
+      this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
       this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
       log(TAG, `spawn-task ${taskId}: WS disconnected — queued for bare agent polling`);
       return;
     }
-
-    // Dynamic timeout: scale with task length (long transcripts need more time)
-    // Base 30s + 1s per 200 chars, min 45s, max 180s
-    const timeoutMs = Math.min(180_000, Math.max(45_000, Math.ceil(task.length / 200) * 1000 + 30_000));
 
     // ★ Set spawnInFlight BEFORE first await — cleared in finally regardless of outcome.
     // Dedicated lane flag: never touches the escalation queue so regular escalations
@@ -535,11 +520,11 @@ ${recentLines.join("\n")}`;
         message: task,
         sessionKey: childSessionKey,
         lane: "subagent",
-        extraSystemPrompt: this.buildChildSystemPrompt(context),
+        extraSystemPrompt: this.buildChildSystemPrompt(task, label),
         deliver: false,
         idempotencyKey: idemKey,
-        label: safeLabel || undefined,
-      }, timeoutMs, { expectFinal: true });
+        label: label || undefined,
+      }, 45_000, { expectFinal: true });
 
       log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
       this.stats.totalSpawnResponses++;
@@ -551,15 +536,15 @@ ${recentLines.join("\n")}`;
       if (Array.isArray(payloads) && payloads.length > 0) {
         const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
         if (output) {
-          this.pushResponse(`${safeLabel || "Background task"}:\n${output}`);
-          this.broadcastTaskEvent(taskId, "completed", safeLabel, startedAt, output);
+          this.pushResponse(`${label || "Background task"}:\n${output}`);
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt, output);
         } else {
           log(TAG, `spawn-task: ${payloads.length} payloads but empty text, trying chat.history`);
           const historyText = await this.fetchChildResult(childSessionKey);
-          this.broadcastTaskEvent(taskId, "completed", safeLabel, startedAt,
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt,
             historyText || "task completed (no output)");
           if (historyText) {
-            this.pushResponse(`${safeLabel || "Background task"}:\n${historyText}`);
+            this.pushResponse(`${label || "Background task"}:\n${historyText}`);
           }
         }
       } else {
@@ -567,10 +552,10 @@ ${recentLines.join("\n")}`;
         log(TAG, `spawn-task: no payloads, fetching chat.history for child=${childSessionKey}`);
         const historyText = await this.fetchChildResult(childSessionKey);
         if (historyText) {
-          this.pushResponse(`${safeLabel || "Background task"}:\n${historyText}`);
-          this.broadcastTaskEvent(taskId, "completed", safeLabel, startedAt, historyText);
+          this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt, historyText);
         } else {
-          this.broadcastTaskEvent(taskId, "completed", safeLabel, startedAt,
+          this.broadcastTaskEvent(taskId, "completed", label, startedAt,
             "task completed (no output captured)");
         }
       }
@@ -579,7 +564,7 @@ ${recentLines.join("\n")}`;
       this.pendingSpawnTasks.set(taskId, {
         runId,
         childSessionKey,
-        label: safeLabel,
+        label,
         startedAt,
         pollingEmitted: false,
       });
@@ -590,43 +575,30 @@ ${recentLines.join("\n")}`;
       savePendingTasks(this.pendingSpawnTasks);
     } catch (err: any) {
       error(TAG, `spawn-task failed: ${err.message}`);
-      this.broadcastTaskEvent(taskId, "failed", safeLabel, startedAt);
+      this.broadcastTaskEvent(taskId, "failed", label, startedAt);
     } finally {
       this.spawnInFlight = false;
     }
   }
 
-  /** Build a context-rich system prompt for the child subagent. */
-  private buildChildSystemPrompt(context?: SpawnContext): string {
-    const parts = [
-      "# Background Agent",
+  /** Build a focused system prompt for the child subagent. */
+  private buildChildSystemPrompt(task: string, label?: string): string {
+    return [
+      "# Subagent Context",
       "",
-      "You are a background agent spawned by the user to complete a specific task.",
-      "You have full tool access: file operations, web search, code execution.",
-      "Create end-to-end valuable artifacts — summaries, code files, emails, analysis docs.",
+      "You are a **subagent** spawned for a specific task.",
+      "",
+      "## Your Role",
+      `- Task: ${task.replace(/\s+/g, " ").trim().slice(0, 500)}`,
+      "- Complete this task. That's your entire purpose.",
       "",
       "## Rules",
-      "1. Complete the task fully — actually do it, don't just describe what you'd do",
-      "2. Use your tools: search the web, write files, run code as needed",
-      "3. Your final message is shown in a small overlay — keep it concise (1-3 sentences + key links/paths)",
-      "4. For substantial output, write to a file and report the path",
-    ];
-
-    if (context?.currentApp || context?.digest) {
-      parts.push("", "## User Context");
-      if (context.currentApp) parts.push(`- Current app: ${context.currentApp}`);
-      if (context.digest) parts.push(`- Situation: ${context.digest.slice(0, 500)}`);
-    }
-
-    if (context?.recentScreen) {
-      parts.push("", "## Recent Screen (OCR, last ~60s)", context.recentScreen);
-    }
-
-    if (context?.recentAudio) {
-      parts.push("", "## Recent Audio (last ~60s)", context.recentAudio);
-    }
-
-    return parts.join("\n");
+      "1. Stay focused — do your assigned task, nothing else",
+      "2. Your final message will be reported to the requester",
+      "3. Be concise but informative",
+      "",
+      label ? `Label: ${label}` : "",
+    ].filter(Boolean).join("\n");
   }
 
   /** Fetch the latest assistant reply from a child session's chat history. */
