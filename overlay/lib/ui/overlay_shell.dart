@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/models/hud_settings.dart';
+import '../core/services/onboarding_service.dart';
 import '../core/services/settings_service.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/window_service.dart';
@@ -10,6 +11,7 @@ import 'eye/eye_widget.dart';
 import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
 import 'input/command_input.dart';
+import 'onboarding/onboarding_view.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
 
@@ -170,7 +172,7 @@ class OverlayShellState extends State<OverlayShell> {
       case HudState.eye:
         _windowService.setWindowFrame(eyeRight - 48, eyeBottom, 48, 48);
       case HudState.controls:
-        const controlsW = 280.0;
+        const controlsW = 320.0;
         _windowService.setWindowFrame(eyeRight - controlsW, eyeBottom, controlsW, 48);
       case HudState.chat:
         final chatW = _settingsService.settings.chatWidth;
@@ -207,14 +209,21 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _openSettings() {
     final ws = context.read<WebSocketService>();
-    final path = ws.envPath.isNotEmpty
-        ? ws.envPath
-        : '${Platform.environment['HOME'] ?? '/tmp'}/.sinain/.env';
-    _windowService.openFile(path);
+    ws.sendCommand('open_settings');
   }
 
   @override
   Widget build(BuildContext context) {
+    // Show onboarding if not complete
+    final onboarding = context.watch<OnboardingService>();
+    if (!onboarding.isComplete) {
+      return const SizedBox(
+        width: 320,
+        height: 380,
+        child: OnboardingView(),
+      );
+    }
+
     context.watch<SettingsService>(); // rebuild on privacy mode change (eye color)
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
@@ -272,20 +281,11 @@ class OverlayShellState extends State<OverlayShell> {
               onTap: () => ws.sendCommand('toggle_mic'),
             ),
             const Spacer(),
-            // Cost counter
+            // Cost counter (replaces DEMO badge when cost > 0)
             if (ws.totalCost > 0)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text(
-                  '\$${ws.totalCost < 0.01 ? ws.totalCost.toStringAsFixed(4) : ws.totalCost.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontFamily: 'JetBrainsMono', fontSize: 9,
-                    color: Colors.white.withValues(alpha: 0.35),
-                  ),
-                ),
-              ),
-            // Demo badge (clickable — toggles privacy mode)
-            if (!_settingsService.settings.privacyMode)
+              _costText(ws.totalCost)
+            // Demo badge (only when no cost data yet)
+            else if (!_settingsService.settings.privacyMode)
               GestureDetector(
                 onTap: _toggleDemoMode,
                 child: MouseRegion(
@@ -300,7 +300,7 @@ class OverlayShellState extends State<OverlayShell> {
                 ),
               ),
             _plainIcon(Icons.settings, _openSettings),
-            _plainIcon(Icons.chevron_right, () => _transitionTo(HudState.eye)),
+            _plainIcon(Icons.chevron_left, () => _transitionTo(HudState.eye)),
             _plainIcon(Icons.open_in_full, () => _transitionTo(HudState.chat)),
             const SizedBox(width: 4),
             // Eye animation
@@ -341,7 +341,7 @@ class OverlayShellState extends State<OverlayShell> {
             onPanUpdate: _onDragUpdate,
             onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
             child: Container(
-              height: 36,
+              height: 40,
               padding: const EdgeInsets.symmetric(horizontal: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.03),
@@ -396,6 +396,8 @@ class OverlayShellState extends State<OverlayShell> {
                     ),
                   ),
                   const Spacer(),
+                  // Cost counter
+                  _costText(ws.totalCost),
                   // Demo toggle (clickable in both states)
                   GestureDetector(
                     onTap: _toggleDemoMode,
@@ -421,13 +423,13 @@ class OverlayShellState extends State<OverlayShell> {
                   GestureDetector(
                     onTap: () => _transitionTo(HudState.eye),
                     child: Container(
-                      width: 24,
-                      height: 24,
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: Colors.black.withValues(alpha: 0.3),
                       ),
-                      child: IdleAnimation(size: 20, pupilDilation: _pupilDilation, color: _eyeColor),
+                      child: IdleAnimation(size: 28, pupilDilation: _pupilDilation, color: _eyeColor),
                     ),
                   ),
                   const SizedBox(width: 2),
@@ -544,6 +546,20 @@ class OverlayShellState extends State<OverlayShell> {
                 ? const Color(0xFF00FF88)
                 : Colors.white.withValues(alpha: 0.3),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _costText(double cost) {
+    if (cost <= 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Text(
+        '\$${cost.toStringAsFixed(4)}',
+        style: TextStyle(
+          fontFamily: 'JetBrainsMono', fontSize: 9,
+          color: Colors.white.withValues(alpha: 0.35),
         ),
       ),
     );

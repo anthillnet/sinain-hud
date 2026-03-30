@@ -148,10 +148,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             result(nil)
 
         case "openFile":
-            let path = args?["path"] as? String ?? ""
-            if !path.isEmpty {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
-            }
+            // Delegate to sinain-core via WS command — overlay is sandboxed
             result(nil)
 
         case "beginNativeDrag":
