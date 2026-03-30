@@ -1,0 +1,33 @@
+name: Release sck-capture
+
+on:
+  push:
+    tags:
+      - 'sck-capture-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release sck-capture
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tools/sck-capture
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sck-capture
+        run: bash build.sh
+
+      - name: Zip binary
+        run: |
+          ditto -c -k --sequesterRsrc sck-capture sck-capture-macos.zip
+
+      - name: Upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tools/sck-capture/sck-capture-macos.zip
+          generate_release_notes: true
