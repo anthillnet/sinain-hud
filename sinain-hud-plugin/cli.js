@@ -28,6 +28,10 @@ switch (cmd) {
     await import("./onboard.js");
     break;
 
+  case "config":
+    await import("./config.js");
+    break;
+
   case "setup":
     // Legacy — redirect to onboard
     console.log("\x1b[33m  ⚠ `sinain setup` is deprecated. Use: sinain onboard\x1b[0m");
