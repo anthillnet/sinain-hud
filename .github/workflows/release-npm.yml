@@ -26,7 +26,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#npm-v}" >> "$GITHUB_OUTPUT"
 
       - name: Set package version from tag
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Publish to npm
         run: npm publish --access public
