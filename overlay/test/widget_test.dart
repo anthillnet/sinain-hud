@@ -22,9 +22,9 @@ void main() {
   });
 
   group('HudSettings', () {
-    test('defaults to eye state', () {
+    test('defaults to chat state', () {
       final settings = HudSettings();
-      expect(settings.overlayState, HudState.eye);
+      expect(settings.overlayState, HudState.chat);
       expect(settings.eyeX, -1);
       expect(settings.chatWidth, 427);
     });
