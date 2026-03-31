@@ -247,27 +247,30 @@ export interface StopResult {
 export type EscalationMode = "off" | "selective" | "focus" | "rich";
 export type ContextRichness = "lean" | "standard" | "rich";
 
-export interface AgentConfig {
+export type AnalysisProvider = "openrouter" | "ollama";
+
+export interface AnalysisConfig {
   enabled: boolean;
+  provider: AnalysisProvider;
   model: string;
   visionModel: string;
-  visionEnabled: boolean;
-  localVisionEnabled: boolean;
-  localVisionModel: string;
-  localVisionUrl: string;
-  localVisionTimeout: number;
-  openrouterApiKey: string;
+  endpoint: string;
+  apiKey: string;
   maxTokens: number;
   temperature: number;
+  fallbackModels: string[];
+  timeout: number;
+  // Loop timing
   pushToFeed: boolean;
   debounceMs: number;
   maxIntervalMs: number;
   cooldownMs: number;
   maxAgeMs: number;
-  fallbackModels: string[];
-  /** Maximum entries to keep in agent history buffer (default: 50) */
   historyLimit: number;
 }
+
+/** @deprecated Use AnalysisConfig */
+export type AgentConfig = AnalysisConfig;
 
 export interface AgentResult {
   hud: string;
@@ -468,7 +471,7 @@ export interface CoreConfig {
   micConfig: AudioPipelineConfig;
   micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;
-  agentConfig: AgentConfig;
+  agentConfig: AnalysisConfig;
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
   situationMdPath: string;

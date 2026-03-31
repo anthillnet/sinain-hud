@@ -110,17 +110,17 @@ Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
 
 ## Configuration
 
-All config via environment variables or `.env` file. Key vars:
-- `OPENROUTER_API_KEY` — Required. Used for all LLM calls.
-- `PORT` — sinain-core port (default: 9500)
-- `AGENT_MODEL` — Analysis model (default: `google/gemini-2.5-flash-lite`)
-- `AGENT_VISION_MODEL` — Vision model (default: `google/gemini-2.5-flash`)
+All config via environment variables or `.env` file at project root. Key vars:
+- `OPENROUTER_API_KEY` — Required (unless `ANALYSIS_PROVIDER=ollama`). Used for analysis + transcription.
+- `ANALYSIS_PROVIDER` — `openrouter` (cloud) or `ollama` (local). Default: `openrouter`.
+- `ANALYSIS_MODEL` — Context analysis model (default: `google/gemini-2.5-flash-lite`)
+- `ANALYSIS_VISION_MODEL` — Vision model for image ticks (default: `google/gemini-2.5-flash`)
+- `ANALYSIS_ENDPOINT` — Auto-set per provider. Override for custom OpenAI-compatible endpoints.
 - `ESCALATION_MODE` — `off | selective | focus | rich` (default: `rich`)
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
 - `AUDIO_DEVICE` — macOS audio device for sox/ffmpeg fallback (default: `BlackHole 2ch`)
-- `COST_DISPLAY_ENABLED` — Show LLM cost counter in overlay (default: `false`, costs always logged to stdout)
 
-See `.env.example` for the complete list.
+See `.env.example` for the complete list and [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 
 ## Architectural Patterns
 
