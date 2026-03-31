@@ -18,7 +18,7 @@ class HudSettings {
   double chatHeight;
 
   HudSettings({
-    this.overlayState = HudState.eye,
+    this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
     this.privacyMode = true,
     this.wsUrl = 'ws://localhost:9500',

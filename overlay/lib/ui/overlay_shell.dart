@@ -26,8 +26,8 @@ class OverlayShell extends StatefulWidget {
 class OverlayShellState extends State<OverlayShell> {
   static final bool _isMacOS = Platform.isMacOS;
 
-  HudState _state = HudState.eye;
-  HudState _lastVisibleState = HudState.eye;
+  late HudState _state;
+  late HudState _lastVisibleState;
 
   late final WindowService _windowService;
   late final SettingsService _settingsService;
@@ -47,6 +47,16 @@ class OverlayShellState extends State<OverlayShell> {
     super.initState();
     _windowService = context.read<WindowService>();
     _settingsService = context.read<SettingsService>();
+
+    // Restore persisted state (defaults to chat for new installs)
+    _state = _settingsService.settings.overlayState;
+    _lastVisibleState = _state == HudState.hidden ? HudState.chat : _state;
+
+    // Ensure window size matches restored state (may differ from native default)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _resizeWindowForState(_state);
+      if (_state == HudState.chat) _windowService.makeKeyWindow();
+    });
 
     // Native drag/resize callbacks (macOS only)
     if (_isMacOS) {
