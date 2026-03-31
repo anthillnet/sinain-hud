@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/constants.dart';
 import 'core/services/onboarding_service.dart';
+import 'core/models/hud_settings.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
@@ -34,14 +35,20 @@ void main() async {
     await windowService.setWindowFrame(100, 200, 320, 380);
   }
 
-  // Restore persisted eye position (if saved)
+  // Restore persisted position (if saved)
   if (settingsService.settings.eyeX >= 0) {
-    await windowService.setWindowFrame(
-      settingsService.settings.eyeX,
-      settingsService.settings.eyeY,
-      48,
-      48,
-    );
+    final s = settingsService.settings;
+    // Size depends on saved state
+    final w = s.overlayState == HudState.chat ? s.chatWidth
+        : s.overlayState == HudState.controls ? 280.0
+        : 48.0;
+    final h = s.overlayState == HudState.chat ? s.chatHeight : 48.0;
+    await windowService.setWindowFrame(s.eyeX, s.eyeY, w, h);
+  }
+
+  // Default state is chat — make key window so text input works immediately
+  if (settingsService.settings.overlayState == HudState.chat) {
+    await windowService.makeKeyWindow();
   }
 
   // Listen for hotkey events from native side

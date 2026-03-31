@@ -70,13 +70,13 @@ class AppDelegate: FlutterAppDelegate {
             window.sharingType = .none
         }
 
-        // Start as eye-sized window at bottom-right
+        // Start at chat size (bottom-right corner) so the feed is immediately visible
         let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
-        let windowX = screenFrame.maxX - HUDConfig.eyeSize - HUDConfig.margin
+        let windowX = screenFrame.maxX - HUDConfig.defaultChatWidth - HUDConfig.margin
         let windowY = screenFrame.minY + HUDConfig.margin
 
         window.setFrame(
-            NSRect(x: windowX, y: windowY, width: HUDConfig.eyeSize, height: HUDConfig.eyeSize),
+            NSRect(x: windowX, y: windowY, width: HUDConfig.defaultChatWidth, height: HUDConfig.defaultChatHeight),
             display: true
         )
 
