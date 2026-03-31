@@ -1,12 +1,9 @@
-import type { AgentConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand } from "../types.js";
+import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
 import { log, error } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 
 const TAG = "agent";
-
-/** Guard: only one Ollama vision call at a time (latest-wins, skip if busy). */
-let ollamaInFlight = false;
 
 /**
  * Model-specific timeouts in milliseconds.
@@ -211,75 +208,54 @@ function parseTask(parsed: any): string | undefined {
  */
 export async function analyzeContext(
   contextWindow: ContextWindow,
-  config: AgentConfig,
+  config: AnalysisConfig,
   recorderStatus: RecorderStatus | null = null,
   traitSystemPrompt?: string,
 ): Promise<AgentResult> {
   const userPrompt = buildUserPrompt(contextWindow, recorderStatus);
-  // Apply privacy gating for images sent to OpenRouter
+
+  // Apply privacy gating for images based on provider
   let images = contextWindow.images || [];
+  const privacyDest = config.provider === "ollama" ? "local_llm" : "openrouter";
   try {
-    const imgLevel = levelFor("screen_images", "openrouter");
-    if (imgLevel === "none") {
-      images = [];
-    }
+    if (levelFor("screen_images", privacyDest) === "none") images = [];
   } catch { /* privacy not initialized, keep images */ }
+
   const systemPrompt = traitSystemPrompt ?? SYSTEM_PROMPT;
 
-  // Try local Ollama first when enabled (handles both vision and text-only ticks)
-  // Guard: skip if a previous Ollama call is still in-flight (avoids "no slots available")
-  if (config.localVisionEnabled && !ollamaInFlight) {
-    ollamaInFlight = true;
-    try {
-      const result = await callOllamaVision(systemPrompt, userPrompt, images, config);
-      const mode = images.length > 0 ? "vision" : "text";
-      log(TAG, `local ollama (${config.localVisionModel}, ${mode}): success`);
-      return result;
-    } catch (err: any) {
-      log(TAG, `local ollama failed: ${err.message || err}, falling back to OpenRouter`);
-    } finally {
-      ollamaInFlight = false;
-    }
+  if (config.provider === "ollama") {
+    return await callOllama(systemPrompt, userPrompt, images, config);
   }
 
-  // Skip OpenRouter entirely if no API key (local-only mode)
-  if (!config.openrouterApiKey) {
-    if (config.localVisionEnabled) {
-      throw new Error("local ollama failed and no OpenRouter API key — cannot analyze");
-    }
-    throw new Error("no OpenRouter API key configured");
+  // OpenRouter path: model chain with fallbacks
+  if (!config.apiKey) {
+    throw new Error("ANALYSIS_API_KEY / OPENROUTER_API_KEY not set");
   }
 
   const models = [config.model, ...config.fallbackModels];
-
-  // Auto-upgrade: use vision model when images are present
-  if (images.length > 0 && config.visionModel) {
-    // Insert vision model at the front if not already there
-    if (!models.includes(config.visionModel)) {
-      models.unshift(config.visionModel);
-    }
+  // Auto-upgrade to vision model when images are present
+  if (images.length > 0 && config.visionModel && !models.includes(config.visionModel)) {
+    models.unshift(config.visionModel);
   }
 
   let lastError: Error | null = null;
-
   for (const model of models) {
     try {
-      return await callModel(systemPrompt, userPrompt, images, model, config);
+      return await callOpenRouter(systemPrompt, userPrompt, images, model, config);
     } catch (err: any) {
       lastError = err;
       log(TAG, `model ${model} failed: ${err.message || err}, trying next...`);
     }
   }
-
   throw lastError || new Error("all models failed");
 }
 
-async function callModel(
+async function callOpenRouter(
   systemPrompt: string,
   userPrompt: string,
   images: ContextWindow["images"],
   model: string,
-  config: AgentConfig,
+  config: AnalysisConfig,
 ): Promise<AgentResult> {
   const start = Date.now();
   const controller = new AbortController();
@@ -307,10 +283,10 @@ async function callModel(
 
     const imageCount = images?.length || 0;
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(config.endpoint, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${config.openrouterApiKey}`,
+        "Authorization": `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -398,28 +374,27 @@ async function callModel(
 }
 
 /**
- * Call Ollama local vision model for image analysis.
- * Uses the /api/chat endpoint with base64 images.
- * Falls back to OpenRouter on any failure.
+ * Call Ollama local model for context analysis.
+ * Uses the /api/chat endpoint with optional base64 images.
  */
-async function callOllamaVision(
+async function callOllama(
   systemPrompt: string,
   userPrompt: string,
   images: ContextWindow["images"],
-  config: AgentConfig,
+  config: AnalysisConfig,
 ): Promise<AgentResult> {
   const start = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.localVisionTimeout);
+  const timeout = setTimeout(() => controller.abort(), config.timeout);
 
   try {
     const imageB64List = (images || []).map((img) => img.data);
 
-    const response = await fetch(`${config.localVisionUrl}/api/chat`, {
+    const response = await fetch(`${config.endpoint}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: config.localVisionModel,
+        model: config.model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt, images: imageB64List },
@@ -445,7 +420,7 @@ async function callOllamaVision(
     const tokensIn = data.prompt_eval_count || 0;
     const tokensOut = data.eval_count || 0;
 
-    log(TAG, `ollama vision: model=${config.localVisionModel} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
+    log(TAG, `ollama vision: model=${config.model} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
 
     // Parse the response (same format as OpenRouter)
     // Parse JSON response (same logic as callModel)
@@ -459,7 +434,7 @@ async function callOllamaVision(
         task: parseTask(parsed),
         latencyMs,
         tokensIn, tokensOut,
-        model: config.localVisionModel,
+        model: config.model,
         parsedOk: true,
       };
     } catch {
@@ -475,7 +450,7 @@ async function callOllamaVision(
               task: parseTask(parsed),
               latencyMs,
               tokensIn, tokensOut,
-              model: config.localVisionModel,
+              model: config.model,
               parsedOk: true,
             };
           }
@@ -486,7 +461,7 @@ async function callOllamaVision(
         digest: content || "\u2014",
         latencyMs,
         tokensIn, tokensOut,
-        model: config.localVisionModel,
+        model: config.model,
         parsedOk: false,
       };
     }

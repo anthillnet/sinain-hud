@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
-import type { AgentConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus, SenseEvent, FeedbackRecord } from "../types.js";
+import type { AnalysisConfig, AgentEntry, ContextWindow, EscalationMode, ContextRichness, RecorderStatus, SenseEvent, FeedbackRecord } from "../types.js";
 import type { Profiler } from "../profiler.js";
 import type { CostTracker } from "../cost/tracker.js";
 import { buildContextWindow, RICHNESS_PRESETS } from "./context-window.js";
@@ -18,7 +18,7 @@ const TAG = "agent";
 export interface AgentLoopDeps {
   feedBuffer: FeedBuffer;
   senseBuffer: SenseBuffer;
-  agentConfig: AgentConfig;
+  agentConfig: AnalysisConfig;
   escalationMode: EscalationMode;
   situationMdPath: string;
   /** Called after analysis with digest + context for escalation check. */
@@ -106,9 +106,10 @@ export class AgentLoop extends EventEmitter {
   /** Start the agent loop. */
   start(): void {
     if (this.started) return;
-    if (!this.deps.agentConfig.enabled || !this.deps.agentConfig.openrouterApiKey) {
-      if (this.deps.agentConfig.enabled) {
-        warn(TAG, "AGENT_ENABLED=true but OPENROUTER_API_KEY not set \u2014 agent disabled");
+    const ac = this.deps.agentConfig;
+    if (!ac.enabled || (ac.provider !== "ollama" && !ac.apiKey)) {
+      if (ac.enabled) {
+        warn(TAG, "AGENT_ENABLED=true but no API key and provider is not ollama \u2014 analysis disabled");
       }
       return;
     }
@@ -177,8 +178,8 @@ export class AgentLoop extends EventEmitter {
 
   /** Get config (safe — no API key). */
   getConfig(): Record<string, unknown> {
-    const { openrouterApiKey, ...safe } = this.deps.agentConfig;
-    return { ...safe, hasApiKey: !!openrouterApiKey, escalationMode: this.deps.escalationMode };
+    const { apiKey, ...safe } = this.deps.agentConfig;
+    return { ...safe, hasApiKey: !!apiKey, escalationMode: this.deps.escalationMode };
   }
 
   /** Get stats for /health. */
@@ -219,10 +220,10 @@ export class AgentLoop extends EventEmitter {
     if (updates.maxIntervalMs !== undefined) c.maxIntervalMs = Math.max(5000, parseInt(String(updates.maxIntervalMs)));
     if (updates.cooldownMs !== undefined) c.cooldownMs = Math.max(3000, parseInt(String(updates.cooldownMs)));
     if (updates.fallbackModels !== undefined) c.fallbackModels = Array.isArray(updates.fallbackModels) ? updates.fallbackModels : [];
-    if (updates.openrouterApiKey !== undefined) c.openrouterApiKey = String(updates.openrouterApiKey);
+    if (updates.apiKey !== undefined) c.apiKey = String(updates.apiKey);
 
     // Restart loop if needed
-    if (c.enabled && c.openrouterApiKey) {
+    if (c.enabled && (c.provider === "ollama" || c.apiKey)) {
       if (!this.started) this.start();
       else {
         // Reset max interval timer with new config
@@ -238,7 +239,7 @@ export class AgentLoop extends EventEmitter {
 
   private async run(): Promise<void> {
     if (this.running) return;
-    if (!this.deps.agentConfig.openrouterApiKey) return;
+    if (this.deps.agentConfig.provider !== "ollama" && !this.deps.agentConfig.apiKey) return;
 
     // Cooldown: don't re-analyze within cooldownMs of last run (unless urgent)
     const isUrgent = this.urgentPending;
