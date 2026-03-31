@@ -1,4 +1,4 @@
-# Sinain
+# Sinain <img src="media/screen-recording-2026-03-26.gif" alt="Sinain HUD" width="120" align="right">
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml/badge.svg)](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml)
@@ -9,7 +9,7 @@
 Ambient intelligence that sees what you see, hears what you hear, and acts on your behalf.
 
 <p align="center">
-  <img src="media/screen-recording-2026-03-26.gif" alt="Sinain HUD overlay" width="346">
+  <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
 </p>
 
 **[Quick Start](#quick-start)** · **[Docs](docs/)** · **[Privacy](docs/privacy-protection-design.md)** · **[Configuration](docs/CONFIGURATION.md)** · **[Contributing](CONTRIBUTING.md)**
