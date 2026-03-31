@@ -43,7 +43,6 @@ function writeDistillState(workspaceDir: string, state: DistillState): void {
 
 export type HeartbeatResult = {
   status: string;
-  gitBackup: string | null;
   signals: unknown[];
   recommendedAction: { action: string; task: string | null; confidence: number };
   output: unknown | null;
@@ -95,7 +94,6 @@ export class CurationEngine {
     const workspaceDir = this.store.getWorkspaceDir();
     const result: HeartbeatResult = {
       status: "ok",
-      gitBackup: null,
       signals: [],
       recommendedAction: { action: "skip", task: null, confidence: 0 },
       output: null,
@@ -130,20 +128,6 @@ export class CurationEngine {
 
     const latencyMs: Record<string, number> = {};
     const heartbeatStart = Date.now();
-
-    // 1. Git backup (30s timeout)
-    try {
-      const t0 = Date.now();
-      const gitOut = await this.runScript(
-        ["bash", "sinain-memory/git_backup.sh"],
-        { timeoutMs: 30_000, cwd: workspaceDir },
-      );
-      latencyMs.gitBackup = Date.now() - t0;
-      result.gitBackup = gitOut.stdout.trim() || "nothing to commit";
-    } catch (err) {
-      this.logger.warn(`sinain-hud: git backup error: ${String(err)}`);
-      result.gitBackup = `error: ${String(err)}`;
-    }
 
     // Current time string for memory scripts
     const hbTz = this.config.userTimezone;
@@ -291,7 +275,6 @@ export class CurationEngine {
         output: result.output,
         skipped: result.skipped,
         skipReason: result.skipReason,
-        gitBackup: result.gitBackup,
         latencyMs,
         totalLatencyMs,
       };

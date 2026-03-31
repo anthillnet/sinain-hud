@@ -29,13 +29,12 @@ Five lifecycle hooks, one tool, four commands, and a background service:
 
 | Tool | Purpose |
 |---|---|
-| `sinain_heartbeat_tick` | Executes all heartbeat mechanical work (git backup, signal analysis, insight synthesis, log writing). Returns structured JSON with results, recommended actions, and Telegram output. |
+| `sinain_heartbeat_tick` | Executes all heartbeat mechanical work (signal analysis, insight synthesis, log writing). Returns structured JSON with results, recommended actions, and Telegram output. |
 
 The heartbeat tool accepts `{ sessionSummary: string, idle: boolean }` and runs:
-1. `bash sinain-memory/git_backup.sh` (30s timeout)
-2. `uv run python3 sinain-memory/signal_analyzer.py` (60s timeout)
-3. `uv run python3 sinain-memory/insight_synthesizer.py` (60s timeout)
-4. Writes log entry to `memory/playbook-logs/YYYY-MM-DD.jsonl`
+1. `uv run python3 sinain-memory/signal_analyzer.py` (60s timeout)
+2. `uv run python3 sinain-memory/insight_synthesizer.py` (60s timeout)
+3. Writes log entry to `memory/playbook-logs/YYYY-MM-DD.jsonl`
 
 ### Commands
 
@@ -113,8 +112,6 @@ Only writes if content has actually changed (avoids unnecessary git diffs).
 Also ensures these directories exist:
 - `memory/`, `memory/playbook-archive/`, `memory/playbook-logs/`
 - `memory/eval-logs/`, `memory/eval-reports/`
-
-The `git_backup.sh` script is automatically made executable (chmod 755) after sync.
 
 After syncing modules, the plugin generates `memory/sinain-playbook-effective.md` — a merged view of active module patterns (sorted by priority) plus the base playbook.
 
