@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AgentConfig, EscalationConfig, OpenClawConfig, EscalationMode, EscalationTransport, LearningConfig, TraitConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AnalysisConfig, EscalationConfig, OpenClawConfig, EscalationMode, EscalationTransport, LearningConfig, TraitConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
 import { PRESETS } from "./privacy/presets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -178,25 +178,28 @@ export function loadConfig(): CoreConfig {
     },
   };
 
-  const agentConfig: AgentConfig = {
+  const analysisProvider = env("ANALYSIS_PROVIDER", "openrouter") as import("./types.js").AnalysisProvider;
+  const defaultEndpoint = analysisProvider === "ollama"
+    ? "http://localhost:11434"
+    : "https://openrouter.ai/api/v1/chat/completions";
+
+  const agentConfig: import("./types.js").AnalysisConfig = {
     enabled: boolEnv("AGENT_ENABLED", true),
-    model: env("AGENT_MODEL", "google/gemini-2.5-flash-lite"),
-    visionModel: env("AGENT_VISION_MODEL", "google/gemini-2.5-flash"),
-    visionEnabled: boolEnv("AGENT_VISION_ENABLED", true),
-    localVisionEnabled: boolEnv("LOCAL_VISION_ENABLED", false),
-    localVisionModel: env("LOCAL_VISION_MODEL", "llava"),
-    localVisionUrl: env("LOCAL_VISION_URL", "http://localhost:11434"),
-    localVisionTimeout: intEnv("LOCAL_VISION_TIMEOUT", 10000),
-    openrouterApiKey: env("OPENROUTER_API_KEY", ""),
-    maxTokens: intEnv("AGENT_MAX_TOKENS", 800),
-    temperature: floatEnv("AGENT_TEMPERATURE", 0.3),
+    provider: analysisProvider,
+    model: env("ANALYSIS_MODEL", "google/gemini-2.5-flash-lite"),
+    visionModel: env("ANALYSIS_VISION_MODEL", "google/gemini-2.5-flash"),
+    endpoint: env("ANALYSIS_ENDPOINT", defaultEndpoint),
+    apiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
+    maxTokens: intEnv("ANALYSIS_MAX_TOKENS", 800),
+    temperature: floatEnv("ANALYSIS_TEMPERATURE", 0.3),
+    fallbackModels: env("ANALYSIS_FALLBACK_MODELS", "google/gemini-2.5-flash,anthropic/claude-3.5-haiku")
+      .split(",").map(s => s.trim()).filter(Boolean),
+    timeout: intEnv("ANALYSIS_TIMEOUT", 15000),
     pushToFeed: boolEnv("AGENT_PUSH_TO_FEED", true),
     debounceMs: intEnv("AGENT_DEBOUNCE_MS", 3000),
     maxIntervalMs: intEnv("AGENT_MAX_INTERVAL_MS", 30000),
     cooldownMs: intEnv("AGENT_COOLDOWN_MS", 10000),
     maxAgeMs: intEnv("AGENT_MAX_AGE_MS", 120000),
-    fallbackModels: env("AGENT_FALLBACK_MODELS", "google/gemini-2.5-flash,anthropic/claude-3.5-haiku")
-      .split(",").map(s => s.trim()).filter(Boolean),
     historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
   };
 

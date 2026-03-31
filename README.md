@@ -131,16 +131,30 @@ npx @geravant/sinain start --no-overlay  # headless mode
 
 ## Configuration
 
-All config via `~/.sinain/.env` (created by the setup wizard).
+All config via `.env` at project root (created by the setup wizard or `cp .env.example .env`).
+
+### Context Analysis (HUD summarizer)
+
+The context analysis loop runs every 3–30 seconds, sending recent audio/screen context to an LLM. It produces a digest used for escalation scoring — when the score threshold is met (or always in `rich` mode), the digest is forwarded to the escalation agent for a full response.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | — | Required (unless fully local) |
+| `ANALYSIS_PROVIDER` | `openrouter` | `openrouter` (cloud) or `ollama` (local, free) |
+| `ANALYSIS_MODEL` | `google/gemini-2.5-flash-lite` | Primary model for text analysis |
+| `ANALYSIS_VISION_MODEL` | `google/gemini-2.5-flash` | Auto-selected when screen images are present |
+| `ANALYSIS_ENDPOINT` | *(auto per provider)* | Override for custom OpenAI-compatible endpoints |
+| `ANALYSIS_API_KEY` | *(from OPENROUTER_API_KEY)* | API key; not needed for ollama |
+| `ANALYSIS_FALLBACK_MODELS` | `gemini-2.5-flash,...` | Comma-separated fallback chain |
+
+### Other Key Settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENROUTER_API_KEY` | — | Required (unless `ANALYSIS_PROVIDER=ollama` + local transcription) |
 | `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` / `rich` |
-| `OPENCLAW_WS_URL` | `ws://localhost:18789` | Gateway WebSocket endpoint |
 | `PRIVACY_MODE` | `off` | `off` / `standard` / `strict` / `paranoid` |
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference (30+ variables).
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 
 ## Privacy Modes
 
