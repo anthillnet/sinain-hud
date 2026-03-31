@@ -62,6 +62,15 @@ export function setupCommands(deps: CommandDeps): void {
       case "spawn_command": {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
         log(TAG, `spawn command received: "${preview}"`);
+        // Echo spawn command to all overlay clients as a feed item (green in UI)
+        wsHandler.broadcastRaw({
+          type: "feed",
+          text: `⚡ ${msg.text}`,
+          priority: "normal",
+          ts: Date.now(),
+          channel: "agent",
+          sender: "spawn",
+        } as any);
         if (deps.onSpawnCommand) {
           deps.onSpawnCommand(msg.text);
         } else {
