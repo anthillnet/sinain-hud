@@ -59,4 +59,4 @@ SINAIN_BACKUP_REPO=<git-url> npx sinain
 - Token printed at end (or visible in Brev dashboard → Gateway Token)
 - Mac side: `./setup-nemoclaw.sh` → 5 prompts → overlay starts
 
-Memory is git-backed via `git_backup.sh` on every heartbeat tick. New instances restore instantly via `SINAIN_BACKUP_REPO`.
+Memory is backed up via knowledge snapshots to `~/.sinain/knowledge-snapshots/`. New instances restore instantly via `SINAIN_BACKUP_REPO`.

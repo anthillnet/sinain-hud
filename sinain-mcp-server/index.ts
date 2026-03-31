@@ -317,23 +317,7 @@ server.tool(
     const results: string[] = [];
     const now = new Date().toISOString();
 
-    // Step 1: git_backup.sh
-    const gitBackupPath = resolve(SCRIPTS_DIR, "git_backup.sh");
-    if (existsSync(gitBackupPath)) {
-      try {
-        const out = await new Promise<string>((res, rej) => {
-          execFile("bash", [gitBackupPath, MEMORY_DIR], { timeout: 30_000 }, (err, stdout, stderr) => {
-            if (err) rej(new Error(`git_backup failed: ${err.message}\n${stderr}`));
-            else res(stdout);
-          });
-        });
-        results.push(`[git_backup] ${out.trim() || "OK"}`);
-      } catch (err: any) {
-        results.push(`[git_backup] FAILED: ${err.message}`);
-      }
-    }
-
-    // Step 2: signal_analyzer.py
+    // Step 1: signal_analyzer.py
     try {
       const out = await runScript([
         resolve(SCRIPTS_DIR, "signal_analyzer.py"),
@@ -346,7 +330,7 @@ server.tool(
       results.push(`[signal_analyzer] FAILED: ${err.message}`);
     }
 
-    // Step 3: insight_synthesizer.py
+    // Step 2: insight_synthesizer.py
     try {
       const out = await runScript([
         resolve(SCRIPTS_DIR, "insight_synthesizer.py"),
@@ -358,7 +342,7 @@ server.tool(
       results.push(`[insight_synthesizer] FAILED: ${err.message}`);
     }
 
-    // Step 4: memory_miner.py
+    // Step 3: memory_miner.py
     try {
       const out = await runScript([
         resolve(SCRIPTS_DIR, "memory_miner.py"),
@@ -369,7 +353,7 @@ server.tool(
       results.push(`[memory_miner] FAILED: ${err.message}`);
     }
 
-    // Step 5: playbook_curator.py
+    // Step 4: playbook_curator.py
     try {
       const out = await runScript([
         resolve(SCRIPTS_DIR, "playbook_curator.py"),
