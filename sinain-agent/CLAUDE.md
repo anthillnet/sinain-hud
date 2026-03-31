@@ -47,7 +47,6 @@ When responding to escalations:
 
 1. Call `sinain_heartbeat_tick` with a brief session summary
 2. The tool runs the full pipeline automatically:
-   - Git backup of memory directory
    - Signal analysis (detects opportunities from session patterns)
    - **Session distillation** — fetches new feed items from sinain-core, distills patterns/learnings
    - **Knowledge integration** — updates playbook (working memory) and knowledge graph (long-term memory)

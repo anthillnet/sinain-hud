@@ -8,7 +8,7 @@
  * - Strips <private> tags from tool results before persistence
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, chmodSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
@@ -358,8 +358,6 @@ export default function sinainHudPlugin(api: OpenClawPluginApi): void {
       const memorySource = cfg.memoryPath ? api.resolvePath(cfg.memoryPath) : undefined;
       if (memorySource) {
         store.deployDir(memorySource, "sinain-memory");
-        const gbPath = join(workspaceDir, "sinain-memory", "git_backup.sh");
-        if (existsSync(gbPath)) try { chmodSync(gbPath, 0o755); } catch {}
       }
 
       const modulesSource = cfg.modulesPath ? api.resolvePath(cfg.modulesPath) : undefined;
