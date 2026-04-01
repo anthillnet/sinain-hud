@@ -14,6 +14,7 @@ import 'input/command_input.dart';
 import 'onboarding/onboarding_view.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
+import '../core/models/region_highlight.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -38,6 +39,8 @@ class OverlayShellState extends State<OverlayShell> {
   Timer? _contentResetTimer;
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription<FeedItem>? _contentSub;
+  StreamSubscription<List<RegionHighlight>>? _regionSub;
+  int _regionCount = 0;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -77,6 +80,9 @@ class OverlayShellState extends State<OverlayShell> {
       _contentResetTimer = Timer(const Duration(seconds: 5), () {
         if (mounted) setState(() => _hasNewContent = false);
       });
+    });
+    _regionSub = ws.regionHighlightStream.listen((regions) {
+      if (mounted) setState(() => _regionCount = regions.length);
     });
   }
 
@@ -197,6 +203,7 @@ class OverlayShellState extends State<OverlayShell> {
   void dispose() {
     _thinkingSub?.cancel();
     _contentSub?.cancel();
+    _regionSub?.cancel();
     _contentResetTimer?.cancel();
     _commandFocusNode.dispose();
     super.dispose();
@@ -241,13 +248,43 @@ class OverlayShellState extends State<OverlayShell> {
 
     switch (_state) {
       case HudState.eye:
-        return EyeWidget(
+        final eye = EyeWidget(
           onTap: () => _transitionTo(HudState.controls),
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
           eyeColor: _eyeColor,
         );
+        if (_regionCount > 0) {
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              eye,
+              Positioned(
+                top: -4,
+                right: -4,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF6600),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    '$_regionCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        return eye;
       case HudState.controls:
         return _buildControlsBar();
       case HudState.chat:
