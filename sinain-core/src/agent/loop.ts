@@ -25,6 +25,8 @@ export interface AgentLoopDeps {
   onAnalysis: (entry: AgentEntry, contextWindow: ContextWindow) => void;
   /** Called to broadcast HUD line to overlay. */
   onHudUpdate: (text: string) => void;
+  /** Called when agent identifies actionable screen regions (Grammarly mode). */
+  onRegionHighlight?: (regions: Array<{ issue: string; tip: string; action?: string }>) => void;
   /** Optional: tracer to record spans. */
   onTraceStart?: (tickId: number) => TraceContext | null;
   /** Optional: get current recorder status for prompt injection. */
@@ -382,6 +384,11 @@ export class AgentLoop extends EventEmitter {
       // Write SITUATION.md (enhanced with escalation context and recorder status)
       const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus, traitSelection);
       this.deps.onSituationUpdate?.(situationContent);
+
+      // Broadcast region highlights if detected (Grammarly mode)
+      if (result.regions?.length && this.deps.onRegionHighlight) {
+        this.deps.onRegionHighlight(result.regions);
+      }
 
       // Notify for escalation check
       traceCtx?.startSpan("escalation-check");

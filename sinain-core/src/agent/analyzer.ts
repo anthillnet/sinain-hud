@@ -53,13 +53,14 @@ You produce outputs as JSON.
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation.
 Your entire response must be parseable by JSON.parse().
 
-{"hud":"...","digest":"...","record":{"command":"start"|"stop","label":"..."},"task":"..."}
+{"hud":"...","digest":"...","record":{"command":"start"|"stop","label":"..."},"task":"...","regions":[...]}
 
 Output fields:
 - "hud" (required): max 60 words describing what user is doing NOW
 - "digest" (required): 5-8 sentences with detailed activity description
 - "record" (optional): control recording — {"command":"start","label":"Meeting name"} or {"command":"stop"}
 - "task" (optional): natural language instruction to spawn a background task
+- "regions" (optional): array of screen areas where you can help. Each: {"issue":"short label","tip":"actionable advice","action":"fix|explain|research"}
 
 When to use "record":
 - START when user begins a meeting, call, lecture, YouTube video, or important audio content
@@ -96,6 +97,13 @@ Rules:
 - Include specific filenames, URLs, error messages, UI text from OCR in digest.
 - Do NOT suggest actions in digest — just describe the situation factually.
 - Only include "record" or "task" when genuinely appropriate — most responses won't have them.
+
+When to include "regions":
+- You see an error, warning, or fixable issue on screen (terminal error, red underline, build failure)
+- You see something that could be improved (typo, inefficient code, missing import)
+- You see a question or form the user might need help with
+- Max 3 regions per response. Only include when you can offer concrete help.
+- Each region needs "issue" (what's wrong), "tip" (what to do), and "action" (fix/explain/research).
 - CRITICAL: Output ONLY the JSON object, nothing else.`;
 
 /**
@@ -199,6 +207,18 @@ function parseRecord(parsed: any): RecordCommand | undefined {
 function parseTask(parsed: any): string | undefined {
   if (typeof parsed.task !== "string" || !parsed.task.trim()) return undefined;
   return parsed.task.trim();
+}
+
+function parseRegions(parsed: any): Array<{ issue: string; tip: string; action?: string }> | undefined {
+  if (!Array.isArray(parsed.regions) || parsed.regions.length === 0) return undefined;
+  return parsed.regions
+    .filter((r: any) => typeof r.issue === "string" && typeof r.tip === "string")
+    .slice(0, 3)
+    .map((r: any) => ({
+      issue: r.issue,
+      tip: r.tip,
+      action: typeof r.action === "string" ? r.action : undefined,
+    }));
 }
 
 /**
@@ -324,6 +344,7 @@ async function callOpenRouter(
         digest: parsed.digest || "\u2014",
         record: parseRecord(parsed),
         task: parseTask(parsed),
+        regions: parseRegions(parsed),
         latencyMs,
         tokensIn: data.usage?.prompt_tokens || 0,
         tokensOut: data.usage?.completion_tokens || 0,

@@ -153,6 +153,13 @@ async function main() {
       wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
       wsHandler.broadcast(text, "normal", "stream");
     },
+    onRegionHighlight: (regions) => {
+      wsHandler.broadcastRaw({
+        type: "region_highlight",
+        regions: regions.map(r => ({ bbox: [0, 0, 0, 0] as [number, number, number, number], ...r })),
+        ts: Date.now(),
+      });
+    },
     onTraceStart: tracer ? (tickId) => {
       const ctx = tracer.startTrace(tickId);
       // Hook trace persistence
