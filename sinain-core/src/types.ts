@@ -76,6 +76,27 @@ export interface UserCommandMessage {
 export interface SpawnCommandMessage {
   type: "spawn_command";
   text: string;
+  roi?: SpawnROIContext;
+}
+
+/** sinain-core → Overlay: region highlights ("Grammarly mode") */
+export interface RegionHighlight {
+  bbox: [x: number, y: number, w: number, h: number];
+  issue: string;
+  tip: string;
+  action?: string;
+}
+
+export interface RegionHighlightMessage {
+  type: "region_highlight";
+  regions: RegionHighlight[];
+  ts: number;
+}
+
+/** Overlay → sinain-core: spawn command with optional ROI context */
+export interface SpawnROIContext {
+  bbox: [number, number, number, number];
+  ocr?: string;
 }
 
 /** Cost update broadcast to overlay. */
@@ -107,7 +128,7 @@ export interface CostSnapshot {
   startedAt: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage;
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage | RegionHighlightMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -277,6 +298,7 @@ export interface AgentResult {
   digest: string;
   record?: RecordCommand;
   task?: string;
+  regions?: Array<{ issue: string; tip: string; action?: string }>;
   latencyMs: number;
   tokensIn: number;
   tokensOut: number;
