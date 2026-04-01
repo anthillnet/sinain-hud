@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/feed_item.dart';
+import '../models/region_highlight.dart';
 import '../models/spawn_task.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
@@ -35,6 +36,7 @@ class WebSocketService extends ChangeNotifier {
   final _spawnTaskController = StreamController<SpawnTask>.broadcast();
   final _copyController = StreamController<String>.broadcast();
   final _thinkingController = StreamController<bool>.broadcast();
+  final _regionHighlightController = StreamController<List<RegionHighlight>>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
@@ -43,6 +45,10 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
+  Stream<List<RegionHighlight>> get regionHighlightStream => _regionHighlightController.stream;
+
+  /// Current region highlights (latest from server).
+  List<RegionHighlight> currentRegions = [];
   bool get connected => _connected;
   String get audioState => _audioState;
   String get micState => _micState;
@@ -186,6 +192,16 @@ class WebSocketService extends ChangeNotifier {
           break;
         case 'thinking':
           _thinkingController.add(json['active'] as bool? ?? false);
+          break;
+        case 'region_highlight':
+          final regions = (json['regions'] as List<dynamic>?)
+              ?.map((r) => RegionHighlight.fromJson(r as Map<String, dynamic>))
+              .toList() ?? [];
+          currentRegions = regions;
+          _regionHighlightController.add(regions);
+          if (regions.isNotEmpty) {
+            _log('REGIONS: ${regions.length} highlights');
+          }
           break;
         case 'cost':
           _totalCost = (json['totalCost'] as num?)?.toDouble() ?? 0.0;
