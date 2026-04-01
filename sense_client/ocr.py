@@ -158,8 +158,10 @@ class VisionOCR:
 
         # Execute
         handler = VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
-        success = handler.performRequests_error_([request], objc.nil)
-        if not success[0]:
+        result = handler.performRequests_error_([request], objc.nil)
+        # PyObjC may return (bool, error) tuple or just bool depending on version
+        success = result[0] if isinstance(result, tuple) else result
+        if not success:
             return OCRResult(text="", confidence=0, word_count=0)
 
         results = request.results()
