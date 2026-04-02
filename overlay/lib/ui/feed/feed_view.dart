@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/feed_item.dart';
+import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
 import 'idle_animation.dart';
 
@@ -223,6 +224,7 @@ class _FeedViewState extends State<FeedView> {
 
   @override
   Widget build(BuildContext context) {
+    final fs = context.watch<SettingsService>().settings.fontSize;
     if (_items.isEmpty) {
       return IdleAnimation(label: widget.emptyLabel);
     }
@@ -244,17 +246,17 @@ class _FeedViewState extends State<FeedView> {
               Clipboard.setData(ClipboardData(text: item.text));
             },
             child: item.isUser
-                ? _buildUserMessage(item)
+                ? _buildUserMessage(item, fs)
                 : item.isSpawn
-                    ? _buildSpawnMessage(item)
-                    : _buildAgentMessage(item, index),
+                    ? _buildSpawnMessage(item, fs)
+                    : _buildAgentMessage(item, index, fs),
           ),
         );
       },
     );
   }
 
-  Widget _buildUserMessage(FeedItem item) {
+  Widget _buildUserMessage(FeedItem item, double fs) {
     return Padding(
       padding: const EdgeInsets.only(left: 40, top: 2, bottom: 2),
       child: Align(
@@ -268,10 +270,10 @@ class _FeedViewState extends State<FeedView> {
           ),
           child: Text(
             item.text,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'JetBrainsMono',
-              fontSize: 12,
-              color: Color(0xFF00E5FF),
+              fontSize: fs,
+              color: const Color(0xFF00E5FF),
               height: 1.3,
             ),
           ),
@@ -280,7 +282,7 @@ class _FeedViewState extends State<FeedView> {
     );
   }
 
-  Widget _buildSpawnMessage(FeedItem item) {
+  Widget _buildSpawnMessage(FeedItem item, double fs) {
     return Padding(
       padding: const EdgeInsets.only(left: 40, top: 2, bottom: 2),
       child: Align(
@@ -294,10 +296,10 @@ class _FeedViewState extends State<FeedView> {
           ),
           child: Text(
             item.text,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'JetBrainsMono',
-              fontSize: 12,
-              color: Color(0xFF00E676),
+              fontSize: fs,
+              color: const Color(0xFF00E676),
               height: 1.3,
             ),
           ),
@@ -306,7 +308,7 @@ class _FeedViewState extends State<FeedView> {
     );
   }
 
-  Widget _buildAgentMessage(FeedItem item, int index) {
+  Widget _buildAgentMessage(FeedItem item, int index, double fs) {
     final color = _priorityColor(item.priority);
     final isSelected = index == _selectedIndex;
     return Container(
@@ -325,7 +327,7 @@ class _FeedViewState extends State<FeedView> {
             _formatTime(item.timestamp),
             style: TextStyle(
               fontFamily: 'JetBrainsMono',
-              fontSize: 10,
+              fontSize: (fs - 2).clamp(6.0, 20.0),
               color: isSelected
                   ? _selectionColor.withValues(alpha: 0.5)
                   : Colors.white.withValues(alpha: 0.25),
@@ -335,7 +337,7 @@ class _FeedViewState extends State<FeedView> {
           if (item.priority != FeedPriority.normal)
             Container(
               width: 3,
-              height: 12,
+              height: fs,
               margin: const EdgeInsets.only(right: 4, top: 1),
               decoration: BoxDecoration(
                 color: color,
@@ -349,10 +351,10 @@ class _FeedViewState extends State<FeedView> {
               shrinkWrap: true,
               softLineBreak: true,
               styleSheet: MarkdownStyleSheet(
-                p: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 12, color: color, height: 1.3),
+                p: TextStyle(fontFamily: 'JetBrainsMono', fontSize: fs, color: color, height: 1.3),
                 code: TextStyle(
                   fontFamily: 'JetBrainsMono',
-                  fontSize: 11,
+                  fontSize: (fs - 1).clamp(7.0, 22.0),
                   color: color,
                   backgroundColor: Colors.white.withValues(alpha: 0.1),
                 ),

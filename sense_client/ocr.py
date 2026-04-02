@@ -174,7 +174,8 @@ class VisionOCR:
 
         for observation in results:
             candidate = observation.topCandidates_(1)
-            if not candidate:
+            # PyObjC may return bool instead of list depending on version
+            if not candidate or isinstance(candidate, bool):
                 continue
             text = candidate[0].string()
             conf = candidate[0].confidence()
