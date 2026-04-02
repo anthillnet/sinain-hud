@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants.dart';
+import '../../core/services/settings_service.dart';
 
 /// Compact command input field for injecting user commands into escalation context.
 /// Auto-focuses on mount. Enter sends to main session, Shift+Enter spawns background agent.
@@ -65,6 +67,9 @@ class _CommandInputState extends State<CommandInput> {
 
   @override
   Widget build(BuildContext context) {
+    final s = context.watch<SettingsService>().settings;
+    final fs = s.fontSize;
+    final accent = Color(s.accentColor != 0 ? s.accentColor : 0xFF00FF88);
     return KeyboardListener(
       focusNode: FocusNode(), // outer listener for Escape + Shift+Enter
       onKeyEvent: (event) {
@@ -84,7 +89,7 @@ class _CommandInputState extends State<CommandInput> {
           color: Colors.black.withValues(alpha: 0.95),
           border: Border(
             top: BorderSide(
-              color: const Color(0xFF00FF88).withValues(alpha: 0.4),
+              color: accent.withValues(alpha: 0.4),
               width: 1,
             ),
           ),
@@ -96,21 +101,21 @@ class _CommandInputState extends State<CommandInput> {
               style: TextStyle(
                 fontFamily: HudConstants.monoFont,
                 fontFamilyFallback: HudConstants.monoFontFallbacks,
-                fontSize: 12,
-                color: const Color(0xFF00FF88).withValues(alpha: 0.6),
+                fontSize: fs,
+                color: accent.withValues(alpha: 0.6),
               ),
             ),
             Expanded(
               child: TextField(
                 controller: _controller,
                 focusNode: _focusNode,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: HudConstants.monoFont,
                   fontFamilyFallback: HudConstants.monoFontFallbacks,
-                  fontSize: 12,
+                  fontSize: fs,
                   color: Colors.white,
                 ),
-                cursorColor: const Color(0xFF00FF88),
+                cursorColor: accent,
                 decoration: InputDecoration(
                   hintText: widget.onSpawn != null
                       ? 'Enter = send  |  Shift+Enter = spawn agent'
@@ -118,7 +123,7 @@ class _CommandInputState extends State<CommandInput> {
                   hintStyle: TextStyle(
                     fontFamily: HudConstants.monoFont,
                     fontFamilyFallback: HudConstants.monoFontFallbacks,
-                    fontSize: 12,
+                    fontSize: fs,
                     color: Colors.white.withValues(alpha: 0.3),
                   ),
                   border: InputBorder.none,

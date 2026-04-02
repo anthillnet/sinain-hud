@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/spawn_task.dart';
+import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
 
 class TasksView extends StatefulWidget {
@@ -117,13 +118,15 @@ class _TasksViewState extends State<TasksView> {
 
   @override
   Widget build(BuildContext context) {
+    final fs = context.watch<SettingsService>().settings.fontSize;
+
     if (_tasks.isEmpty) {
       return Center(
         child: Text(
           'no active tasks',
           style: TextStyle(
             fontFamily: 'JetBrainsMono',
-            fontSize: 11,
+            fontSize: (fs - 1).clamp(7.0, 22.0),
             color: Colors.white.withValues(alpha: 0.2),
           ),
         ),
@@ -155,7 +158,7 @@ class _TasksViewState extends State<TasksView> {
                         _statusIndicator(task),
                         style: TextStyle(
                           fontFamily: 'JetBrainsMono',
-                          fontSize: 11,
+                          fontSize: (fs - 1).clamp(7.0, 22.0),
                           color: sColor,
                           fontWeight: FontWeight.bold,
                         ),
@@ -168,9 +171,9 @@ class _TasksViewState extends State<TasksView> {
                         task.label.length > 35
                             ? '${task.label.substring(0, 35)}…'
                             : task.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'JetBrainsMono',
-                          fontSize: 12,
+                          fontSize: fs,
                           color: Colors.white,
                         ),
                         maxLines: 1,
@@ -183,7 +186,7 @@ class _TasksViewState extends State<TasksView> {
                       _formatElapsed(task.elapsed),
                       style: TextStyle(
                         fontFamily: 'JetBrainsMono',
-                        fontSize: 10,
+                        fontSize: (fs - 2).clamp(6.0, 20.0),
                         color: Colors.white.withValues(alpha: 0.4),
                       ),
                     ),
@@ -202,7 +205,7 @@ class _TasksViewState extends State<TasksView> {
                                   : 'done'),
                       style: TextStyle(
                         fontFamily: 'JetBrainsMono',
-                        fontSize: 10,
+                        fontSize: (fs - 2).clamp(6.0, 20.0),
                         color: task.status == SpawnTaskStatus.completed
                             ? Colors.white.withValues(alpha: 0.4)
                             : const Color(0xFFFF3344).withValues(alpha: 0.5),

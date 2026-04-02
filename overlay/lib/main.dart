@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -13,12 +14,33 @@ import 'ui/overlay_shell.dart';
 final overlayShellKey = GlobalKey<OverlayShellState>();
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Catch Flutter rendering errors
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('[overlay] ⚠ FlutterError: ${details.exceptionAsString()}');
+    if (details.stack != null) {
+      debugPrint('[overlay] ${details.stack.toString().split('\n').take(5).join('\n')}');
+    }
+  };
 
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await _startApp();
+  }, (error, stack) {
+    debugPrint('[overlay] ⚠ Unhandled error: $error');
+    debugPrint('[overlay] ${stack.toString().split('\n').take(5).join('\n')}');
+  });
+}
+
+Future<void> _startApp() async {
   // Initialize services
   final windowService = WindowService();
   final settingsService = SettingsService();
   await settingsService.init();
+
+  debugPrint('[overlay] settings loaded: state=${settingsService.settings.overlayState.name} '
+      'fontSize=${settingsService.settings.fontSize} '
+      'accentColor=0x${settingsService.settings.accentColor.toRadixString(16)}');
 
   final onboardingService = OnboardingService();
   await onboardingService.init();

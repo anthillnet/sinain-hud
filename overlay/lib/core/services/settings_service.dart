@@ -12,6 +12,8 @@ class SettingsService extends ChangeNotifier {
   static const _keyEyeY = 'eye_y';
   static const _keyChatWidth = 'chat_width';
   static const _keyChatHeight = 'chat_height';
+  static const _keyFontSize = 'font_size';
+  static const _keyAccentColor = 'accent_color';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -29,6 +31,8 @@ class SettingsService extends ChangeNotifier {
       eyeY: _prefs.getDouble(_keyEyeY) ?? -1,
       chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
       chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
+      fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
+      accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
     );
     notifyListeners();
   }
@@ -94,6 +98,18 @@ class SettingsService extends ChangeNotifier {
   Future<void> setWsUrl(String url) async {
     _settings.wsUrl = url;
     await _prefs.setString(_keyWsUrl, url);
+    notifyListeners();
+  }
+
+  Future<void> setFontSize(double size) async {
+    _settings.fontSize = size.clamp(8.0, 24.0);
+    await _prefs.setDouble(_keyFontSize, _settings.fontSize);
+    notifyListeners();
+  }
+
+  Future<void> setAccentColor(int argb) async {
+    _settings.accentColor = argb;
+    await _prefs.setInt(_keyAccentColor, argb);
     notifyListeners();
   }
 }
