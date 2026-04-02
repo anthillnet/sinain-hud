@@ -12,6 +12,7 @@ import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
 import 'input/command_input.dart';
 import 'onboarding/onboarding_view.dart';
+import 'settings/display_settings_panel.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
 
@@ -38,6 +39,9 @@ class OverlayShellState extends State<OverlayShell> {
   Timer? _contentResetTimer;
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription<FeedItem>? _contentSub;
+
+  // Display settings panel
+  bool _showDisplaySettings = false;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -80,7 +84,6 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
-  static const _greenEye = Color(0xFF00FF88);
   static const _redEye = Color(0xFFFF3344);
 
   double get _pupilDilation {
@@ -89,8 +92,13 @@ class OverlayShellState extends State<OverlayShell> {
     return 0.0;
   }
 
+  Color get _accentColor {
+    final c = _settingsService.settings.accentColor;
+    return Color(c != 0 ? c : 0xFF00FF88);
+  }
+
   Color get _eyeColor =>
-      _settingsService.settings.privacyMode ? _greenEye : _redEye;
+      _settingsService.settings.privacyMode ? _accentColor : _redEye;
 
   void toggleVisibility(bool visible) {
     if (visible) {
@@ -426,8 +434,22 @@ class OverlayShellState extends State<OverlayShell> {
                       ),
                     ),
                   ),
-                  // Settings
-                  _plainIcon(Icons.settings, _openSettings, small: true),
+                  // Settings — tap toggles display panel, long-press opens .env
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _showDisplaySettings = !_showDisplaySettings),
+                      onLongPress: _openSettings,
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(Icons.settings, size: 12,
+                            color: _showDisplaySettings
+                                ? _accentColor
+                                : Colors.white.withValues(alpha: 0.5)),
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 4),
                   // Eye — collapses all the way to State 1
                   GestureDetector(
@@ -447,6 +469,11 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             ),
           ),
+          // Display settings panel
+          if (_showDisplaySettings)
+            DisplaySettingsPanel(
+              onClose: () => setState(() => _showDisplaySettings = false),
+            ),
           // Tab content (Agent feed / Tasks)
           Expanded(
             child: Consumer<SettingsService>(
@@ -553,7 +580,7 @@ class OverlayShellState extends State<OverlayShell> {
             icon,
             size: size,
             color: active
-                ? const Color(0xFF00FF88)
+                ? _accentColor
                 : Colors.white.withValues(alpha: 0.3),
           ),
         ),

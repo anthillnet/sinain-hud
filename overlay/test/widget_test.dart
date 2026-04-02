@@ -29,6 +29,27 @@ void main() {
       expect(settings.chatWidth, 427);
     });
 
+    test('has default display settings', () {
+      final settings = HudSettings();
+      expect(settings.fontSize, 12.0);
+      expect(settings.accentColor, 0xFF00FF88);
+    });
+
+    test('copyWith preserves display settings', () {
+      final original = HudSettings(fontSize: 16.0, accentColor: 0xFF00E5FF);
+      final copied = original.copyWith(overlayState: HudState.eye);
+      expect(copied.fontSize, 16.0);
+      expect(copied.accentColor, 0xFF00E5FF);
+      expect(copied.overlayState, HudState.eye);
+    });
+
+    test('copyWith overrides display settings', () {
+      final original = HudSettings();
+      final copied = original.copyWith(fontSize: 18.0, accentColor: 0xFFFF3344);
+      expect(copied.fontSize, 18.0);
+      expect(copied.accentColor, 0xFFFF3344);
+    });
+
     test('cycles tabs', () {
       final settings = HudSettings(activeTab: HudTab.agent);
       expect(settings.nextTab, HudTab.tasks);

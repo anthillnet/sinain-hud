@@ -17,6 +17,10 @@ class HudSettings {
   double chatWidth;
   double chatHeight;
 
+  /// Display settings.
+  double fontSize;
+  int accentColor;
+
   HudSettings({
     this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
@@ -26,6 +30,8 @@ class HudSettings {
     this.eyeY = -1,
     this.chatWidth = 427,
     this.chatHeight = 293,
+    this.fontSize = 12.0,
+    this.accentColor = 0xFF00FF88,
   });
 
   HudTab get nextTab {
@@ -43,6 +49,8 @@ class HudSettings {
     double? eyeY,
     double? chatWidth,
     double? chatHeight,
+    double? fontSize,
+    int? accentColor,
   }) {
     return HudSettings(
       overlayState: overlayState ?? this.overlayState,
@@ -53,6 +61,8 @@ class HudSettings {
       eyeY: eyeY ?? this.eyeY,
       chatWidth: chatWidth ?? this.chatWidth,
       chatHeight: chatHeight ?? this.chatHeight,
+      fontSize: fontSize ?? this.fontSize,
+      accentColor: accentColor ?? this.accentColor,
     );
   }
 }
