@@ -98,19 +98,25 @@ class OverlayShellState extends State<OverlayShell> {
         _windowService.createRegionWindow('region-$i', x, y);
       }
     });
-    // Region tap → spawn command with full context
+    // Region tap → user command (gets full context in next escalation)
+    // + spawn command (detached agent with context embedded in text)
     _regionTapSub = _windowService.regionTapStream.listen((id) {
       final idx = int.tryParse(id.replaceFirst('region-', '')) ?? -1;
       if (idx >= 0 && idx < _activeRegions.length) {
         final r = _activeRegions[idx];
-        // Build contextual command: issue + tip + request for full context
-        final command = '[Region highlight — ${r.action ?? "help"}]\n'
+        // Get latest agent digest for context
+        final latestDigest = ws.agentFeedItems.isNotEmpty
+            ? ws.agentFeedItems.last.text
+            : '';
+        // Spawn detached task with embedded context
+        final spawnText = '[Region highlight — ${r.action ?? "help"}]\n'
             'Issue: ${r.issue}\n'
-            'Tip: ${r.tip}\n'
-            'Please use sinain_get_context to see the full screen and act on this specific issue.';
+            'Tip: ${r.tip}\n\n'
+            'Current situation:\n$latestDigest\n\n'
+            'Use sinain_get_context for full screen OCR. Act on the specific issue above.';
         ws.send({
-          'type': 'user_command',
-          'text': command,
+          'type': 'spawn_command',
+          'text': spawnText,
         });
       }
     });
