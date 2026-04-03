@@ -9,6 +9,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
     private var channel: FlutterMethodChannel?
     private var dragMonitor: Any?
     private var resizeMonitor: Any?
+    private let regionPool = RegionWindowPool()
 
     static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
@@ -17,6 +18,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         )
         let instance = WindowControlPlugin()
         instance.channel = channel
+        instance.regionPool.setChannel(channel)
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
@@ -145,6 +147,25 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             let x = screenFrame.maxX - HUDConfig.eyeSize - HUDConfig.margin
             let y = screenFrame.minY + HUDConfig.margin
             window.setFrame(NSRect(x: x, y: y, width: HUDConfig.eyeSize, height: HUDConfig.eyeSize), display: true)
+            result(nil)
+
+        case "createRegionWindow":
+            let id = args?["id"] as? String ?? "unknown"
+            let x = args?["x"] as? Double ?? 0
+            let y = args?["y"] as? Double ?? 0
+            NSLog("[WCP] createRegionWindow id=\(id) x=\(x) y=\(y)")
+            regionPool.create(id: id, x: CGFloat(x), y: CGFloat(y))
+            result(nil)
+
+        case "removeRegionWindow":
+            let id = args?["id"] as? String ?? "unknown"
+            NSLog("[WCP] removeRegionWindow id=\(id)")
+            regionPool.remove(id: id)
+            result(nil)
+
+        case "removeAllRegionWindows":
+            NSLog("[WCP] removeAllRegionWindows")
+            regionPool.removeAll()
             result(nil)
 
         case "openFile":

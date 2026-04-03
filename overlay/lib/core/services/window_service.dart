@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'package:flutter/services.dart';
 
 /// Platform channel wrapper for the native Swift WindowControlPlugin.
 class WindowService {
   static const _channel = MethodChannel('sinain_hud/window');
+
+  final _regionTapController = StreamController<String>.broadcast();
+  /// Stream of region IDs tapped by user (from native eye windows).
+  Stream<String> get regionTapStream => _regionTapController.stream;
 
   Future<void> setTransparent() async {
     try {
@@ -117,6 +122,38 @@ class WindowService {
     }
   }
 
+  // ── Region Window Pool (Grammarly mode) ──
+
+  /// Create a small eye window at screen coordinates.
+  Future<void> createRegionWindow(String id, double x, double y) async {
+    try {
+      _log('createRegionWindow id=$id x=$x y=$y');
+      await _channel.invokeMethod('createRegionWindow', {'id': id, 'x': x, 'y': y});
+    } catch (e) {
+      _log('createRegionWindow failed: $e');
+    }
+  }
+
+  /// Remove a specific region window.
+  Future<void> removeRegionWindow(String id) async {
+    try {
+      _log('removeRegionWindow id=$id');
+      await _channel.invokeMethod('removeRegionWindow', {'id': id});
+    } catch (e) {
+      _log('removeRegionWindow failed: $e');
+    }
+  }
+
+  /// Remove all region windows.
+  Future<void> removeAllRegionWindows() async {
+    try {
+      _log('removeAllRegionWindows');
+      await _channel.invokeMethod('removeAllRegionWindows');
+    } catch (e) {
+      _log('removeAllRegionWindows failed: $e');
+    }
+  }
+
   /// Reset window to default position (bottom-right corner, eye size).
   Future<void> resetToDefaultPosition() async {
     try {
@@ -174,6 +211,11 @@ class WindowService {
             (args['w'] as num).toDouble(),
             (args['h'] as num).toDouble(),
           );
+        case 'onRegionTap':
+          final args = call.arguments as Map;
+          final id = args['id'] as String? ?? '';
+          _log('onRegionTap callback: id=$id');
+          _regionTapController.add(id);
       }
     });
   }

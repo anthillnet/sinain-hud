@@ -15,6 +15,7 @@ import 'onboarding/onboarding_view.dart';
 import 'settings/display_settings_panel.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
+import '../core/models/region_highlight.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -39,6 +40,7 @@ class OverlayShellState extends State<OverlayShell> {
   Timer? _contentResetTimer;
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription<FeedItem>? _contentSub;
+  StreamSubscription<List<RegionHighlight>>? _regionSub;
 
   // Display settings panel
   bool _showDisplaySettings = false;
@@ -81,6 +83,18 @@ class OverlayShellState extends State<OverlayShell> {
       _contentResetTimer = Timer(const Duration(seconds: 5), () {
         if (mounted) setState(() => _hasNewContent = false);
       });
+    });
+    // Region highlights → spawn native eye windows
+    _regionSub = ws.regionHighlightStream.listen((regions) {
+      _windowService.removeAllRegionWindows();
+      for (var i = 0; i < regions.length; i++) {
+        final r = regions[i];
+        // Position: top-right corner, spaced vertically
+        // TODO: use actual bbox from sense ROI when wired
+        final x = 1400.0 - (i * 60);
+        final y = 80.0;
+        _windowService.createRegionWindow('region-$i', x, y);
+      }
     });
   }
 
@@ -205,6 +219,8 @@ class OverlayShellState extends State<OverlayShell> {
   void dispose() {
     _thinkingSub?.cancel();
     _contentSub?.cancel();
+    _regionSub?.cancel();
+    _windowService.removeAllRegionWindows();
     _contentResetTimer?.cancel();
     _commandFocusNode.dispose();
     super.dispose();
