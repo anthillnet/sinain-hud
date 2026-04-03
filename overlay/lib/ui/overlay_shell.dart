@@ -41,6 +41,8 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription<FeedItem>? _contentSub;
   StreamSubscription<List<RegionHighlight>>? _regionSub;
+  StreamSubscription<String>? _regionTapSub;
+  List<RegionHighlight> _activeRegions = [];
 
   // Display settings panel
   bool _showDisplaySettings = false;
@@ -86,14 +88,26 @@ class OverlayShellState extends State<OverlayShell> {
     });
     // Region highlights → spawn native eye windows
     _regionSub = ws.regionHighlightStream.listen((regions) {
+      _activeRegions = regions;
       _windowService.removeAllRegionWindows();
       for (var i = 0; i < regions.length; i++) {
-        final r = regions[i];
-        // Position: top-right corner, spaced vertically
+        // Position: top-right corner, spaced horizontally
         // TODO: use actual bbox from sense ROI when wired
         final x = 1400.0 - (i * 60);
         final y = 80.0;
         _windowService.createRegionWindow('region-$i', x, y);
+      }
+    });
+    // Region tap → post issue to feed + spawn command
+    _regionTapSub = _windowService.regionTapStream.listen((id) {
+      final idx = int.tryParse(id.replaceFirst('region-', '')) ?? -1;
+      if (idx >= 0 && idx < _activeRegions.length) {
+        final r = _activeRegions[idx];
+        // Post to HUD feed
+        ws.send({
+          'type': 'spawn_command',
+          'text': '${r.action ?? "help"}: ${r.tip}',
+        });
       }
     });
   }
@@ -220,6 +234,7 @@ class OverlayShellState extends State<OverlayShell> {
     _thinkingSub?.cancel();
     _contentSub?.cancel();
     _regionSub?.cancel();
+    _regionTapSub?.cancel();
     _windowService.removeAllRegionWindows();
     _contentResetTimer?.cancel();
     _commandFocusNode.dispose();
