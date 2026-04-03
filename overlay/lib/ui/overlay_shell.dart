@@ -98,15 +98,19 @@ class OverlayShellState extends State<OverlayShell> {
         _windowService.createRegionWindow('region-$i', x, y);
       }
     });
-    // Region tap → post issue to feed + spawn command
+    // Region tap → spawn command with full context
     _regionTapSub = _windowService.regionTapStream.listen((id) {
       final idx = int.tryParse(id.replaceFirst('region-', '')) ?? -1;
       if (idx >= 0 && idx < _activeRegions.length) {
         final r = _activeRegions[idx];
-        // Post to HUD feed
+        // Build contextual command: issue + tip + request for full context
+        final command = '[Region highlight — ${r.action ?? "help"}]\n'
+            'Issue: ${r.issue}\n'
+            'Tip: ${r.tip}\n'
+            'Please use sinain_get_context to see the full screen and act on this specific issue.';
         ws.send({
-          'type': 'spawn_command',
-          'text': '${r.action ?? "help"}: ${r.tip}',
+          'type': 'user_command',
+          'text': command,
         });
       }
     });
