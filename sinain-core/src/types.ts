@@ -90,6 +90,7 @@ export interface RegionHighlight {
 export interface RegionHighlightMessage {
   type: "region_highlight";
   regions: RegionHighlight[];
+  frameSize?: number[]; // [w, h] of capture frame for coordinate scaling
   ts: number;
 }
 

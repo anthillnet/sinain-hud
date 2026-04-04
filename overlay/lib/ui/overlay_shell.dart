@@ -222,16 +222,27 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   Future<void> _createRegionWindows(List<RegionHighlight> regions) async {
+    // Compute scale: capture frame pixels → macOS screen points
+    double scaleX = 1.0, scaleY = 1.0;
+    if (regions.isNotEmpty && regions.first.frameSize != null && regions.first.frameSize!.length >= 2) {
+      final fs = regions.first.frameSize!;
+      if (fs[0] > 0 && fs[1] > 0) {
+        final screen = await _windowService.getScreenSize();
+        if (screen != null) {
+          scaleX = screen['w']! / fs[0];
+          scaleY = screen['h']! / fs[1];
+          debugPrint('[overlay] region scale: frame=${fs[0]}x${fs[1]} screen=${screen['w']}x${screen['h']} → ${scaleX.toStringAsFixed(2)}x${scaleY.toStringAsFixed(2)}');
+        }
+      }
+    }
+
     for (var i = 0; i < regions.length; i++) {
       final r = regions[i];
       try {
-        // Use bbox center if available, otherwise stack top-right
-        final x = (r.bbox.length >= 2 && r.bbox[0] > 0)
-            ? r.bbox[0]
-            : 1400.0 - (i * 60);
-        final y = (r.bbox.length >= 2 && r.bbox[1] > 0)
-            ? r.bbox[1]
-            : 80.0;
+        // Use bbox if available, scale from capture to screen coordinates
+        final hasBbox = r.bbox.length >= 4 && (r.bbox[0] > 0 || r.bbox[1] > 0);
+        final x = hasBbox ? r.bbox[0] * scaleX : 1400.0 - (i * 60);
+        final y = hasBbox ? r.bbox[1] * scaleY : 80.0;
         final args = jsonEncode({
           'id': 'region-$i',
           'issue': r.issue,

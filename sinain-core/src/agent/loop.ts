@@ -26,7 +26,7 @@ export interface AgentLoopDeps {
   /** Called to broadcast HUD line to overlay. */
   onHudUpdate: (text: string) => void;
   /** Called when agent identifies actionable screen regions (Grammarly mode). */
-  onRegionHighlight?: (regions: Array<{ issue: string; tip: string; action?: string }>) => void;
+  onRegionHighlight?: (regions: Array<{ issue: string; tip: string; action?: string; bbox?: number[]; frameSize?: number[] }>) => void;
   /** Optional: tracer to record spans. */
   onTraceStart?: (tickId: number) => TraceContext | null;
   /** Optional: get current recorder status for prompt injection. */
@@ -386,8 +386,23 @@ export class AgentLoop extends EventEmitter {
       this.deps.onSituationUpdate?.(situationContent);
 
       // Broadcast region highlights if detected (Grammarly mode)
+      // Attach real screen bboxes from sense events (LLM doesn't know coordinates)
       if (result.regions?.length && this.deps.onRegionHighlight) {
-        this.deps.onRegionHighlight(result.regions);
+        // Collect ROI bboxes (non-zero, non-full-frame ones from text/visual events)
+        const roiBboxes = contextWindow.screen
+          .filter(e => e.imageBbox && e.imageBbox[2] > 0 && e.imageBbox[3] > 0)
+          .filter(e => e.type !== "context") // context events have full-frame bbox
+          .map(e => e.imageBbox!);
+        // Get frame size from a context event (full-frame bbox = [0, 0, frameW, frameH])
+        const ctxEvent = [...contextWindow.screen].reverse().find(e => e.type === "context" && e.imageBbox);
+        const frameSize = ctxEvent?.imageBbox ? [ctxEvent.imageBbox[2], ctxEvent.imageBbox[3]] : undefined;
+
+        const regionsWithBbox = result.regions.map((r, i) => ({
+          ...r,
+          bbox: roiBboxes.length > 0 ? roiBboxes[i % roiBboxes.length] : undefined,
+          frameSize,
+        }));
+        this.deps.onRegionHighlight(regionsWithBbox);
       }
 
       // Notify for escalation check

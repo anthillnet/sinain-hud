@@ -194,8 +194,10 @@ class WebSocketService extends ChangeNotifier {
           _thinkingController.add(json['active'] as bool? ?? false);
           break;
         case 'region_highlight':
+          final rawFrameSize = json['frameSize'] as List<dynamic>?;
+          final frameSize = rawFrameSize?.map((e) => (e as num).toDouble()).toList();
           final regions = (json['regions'] as List<dynamic>?)
-              ?.map((r) => RegionHighlight.fromJson(r as Map<String, dynamic>))
+              ?.map((r) => RegionHighlight.fromJson(r as Map<String, dynamic>, frameSize: frameSize))
               .toList() ?? [];
           currentRegions = regions;
           _regionHighlightController.add(regions);

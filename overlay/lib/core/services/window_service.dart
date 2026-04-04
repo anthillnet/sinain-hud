@@ -154,6 +154,22 @@ class WindowService {
     }
   }
 
+  /// Get the macOS screen size in points.
+  Future<Map<String, double>?> getScreenSize() async {
+    try {
+      final result = await _channel.invokeMethod('getScreenSize');
+      if (result is Map) {
+        return {
+          'w': (result['w'] as num).toDouble(),
+          'h': (result['h'] as num).toDouble(),
+        };
+      }
+    } catch (e) {
+      _log('getScreenSize failed: $e');
+    }
+    return null;
+  }
+
   /// Reset window to default position (bottom-right corner, eye size).
   Future<void> resetToDefaultPosition() async {
     try {

@@ -149,6 +149,13 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.setFrame(NSRect(x: x, y: y, width: HUDConfig.eyeSize, height: HUDConfig.eyeSize), display: true)
             result(nil)
 
+        case "getScreenSize":
+            let screenFrame = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
+            result([
+                "w": screenFrame.size.width,
+                "h": screenFrame.size.height,
+            ])
+
         case "createRegionWindow":
             let id = args?["id"] as? String ?? "unknown"
             let x = args?["x"] as? Double ?? 0

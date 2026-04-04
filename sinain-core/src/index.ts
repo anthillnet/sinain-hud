@@ -154,9 +154,16 @@ async function main() {
       wsHandler.broadcast(text, "normal", "stream");
     },
     onRegionHighlight: (regions) => {
+      const frameSize = regions[0]?.frameSize;
       wsHandler.broadcastRaw({
         type: "region_highlight",
-        regions: regions.map(r => ({ bbox: [0, 0, 0, 0] as [number, number, number, number], ...r })),
+        regions: regions.map(r => ({
+          bbox: (r.bbox && r.bbox.some(v => v > 0)) ? r.bbox as [number, number, number, number] : [0, 0, 0, 0] as [number, number, number, number],
+          issue: r.issue,
+          tip: r.tip,
+          action: r.action,
+        })),
+        frameSize, // capture frame dimensions for coordinate scaling
         ts: Date.now(),
       });
     },
