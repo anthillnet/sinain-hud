@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 import Carbon.HIToolbox
+import desktop_multi_window
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -9,6 +10,9 @@ class AppDelegate: FlutterAppDelegate {
 
     // Flutter method channel for sending hotkey events to Dart
     private var hotkeyChannel: FlutterMethodChannel?
+
+    // Main window's channel for forwarding region taps from secondary windows
+    private var mainWindowChannel: FlutterMethodChannel?
 
     override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
@@ -32,6 +36,17 @@ class AppDelegate: FlutterAppDelegate {
             name: "sinain_hud/hotkeys",
             binaryMessenger: controller.engine.binaryMessenger
         )
+
+        // Keep reference to main window channel for forwarding region taps
+        mainWindowChannel = FlutterMethodChannel(
+            name: "sinain_hud/window",
+            binaryMessenger: controller.engine.binaryMessenger
+        )
+
+        // Configure secondary windows created by desktop_multi_window
+        FlutterMultiWindowPlugin.setOnWindowCreatedCallback { [weak self] flutterViewController in
+            self?.configureRegionWindow(flutterViewController)
+        }
 
         configureWindow()
         registerHotkeys()
@@ -86,6 +101,103 @@ class AppDelegate: FlutterAppDelegate {
         }
 
         window.orderFront(nil)
+    }
+
+    // MARK: - Secondary Window Configuration (Region Eyes)
+
+    private func configureRegionWindow(_ controller: FlutterViewController) {
+        guard let window = controller.view.window else {
+            NSLog("[RegionWindow] no window on FlutterViewController")
+            return
+        }
+
+        // Configure as small transparent floating panel (same as main HUD)
+        window.styleMask = [.borderless, .nonactivatingPanel]
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.level = .floating
+        window.ignoresMouseEvents = false
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+
+        // Privacy mode (macOS 12+)
+        if #available(macOS 12.0, *) {
+            window.sharingType = .none
+        }
+
+        // Initial 48×48 (position set from Dart via channel)
+        window.setFrame(NSRect(x: 0, y: 0, width: 48, height: 48), display: false)
+
+        if let contentView = window.contentView {
+            contentView.wantsLayer = true
+            contentView.layer?.backgroundColor = CGColor.clear
+        }
+
+        // Set up method channel on this secondary engine for position/tap
+        let channel = FlutterMethodChannel(
+            name: "sinain_hud/region_window",
+            binaryMessenger: controller.engine.binaryMessenger
+        )
+
+        var dragMonitor: Any?
+
+        channel.setMethodCallHandler { [weak self, weak window] call, result in
+            switch call.method {
+            case "setPosition":
+                if let args = call.arguments as? [String: Any],
+                   let x = args["x"] as? Double,
+                   let y = args["y"] as? Double {
+                    // Convert from top-left (Dart) to bottom-left (macOS) coordinates
+                    let screenHeight = NSScreen.main?.frame.height ?? 900
+                    let macY = screenHeight - y - 48
+                    window?.setFrameOrigin(NSPoint(x: x, y: macY))
+                    NSLog("[RegionWindow] setPosition x=\(x) y=\(y) → macY=\(macY)")
+                }
+                result(nil)
+
+            case "show":
+                window?.orderFront(nil)
+                NSLog("[RegionWindow] show")
+                result(nil)
+
+            case "beginDrag":
+                guard let window = window, dragMonitor == nil else {
+                    result(nil)
+                    return
+                }
+                let startMouse = NSEvent.mouseLocation
+                let startOrigin = window.frame.origin
+                let offsetX = startMouse.x - startOrigin.x
+                let offsetY = startMouse.y - startOrigin.y
+
+                dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { event in
+                    if event.type == .leftMouseUp {
+                        if let monitor = dragMonitor {
+                            NSEvent.removeMonitor(monitor)
+                            dragMonitor = nil
+                        }
+                        return event
+                    }
+                    let mouse = NSEvent.mouseLocation
+                    window.setFrameOrigin(NSPoint(x: mouse.x - offsetX, y: mouse.y - offsetY))
+                    return event
+                }
+                result(nil)
+
+            case "onTap":
+                // Forward tap event to main Flutter engine
+                if let args = call.arguments as? [String: Any] {
+                    NSLog("[RegionWindow] tap → forwarding to main engine: \(args)")
+                    self?.mainWindowChannel?.invokeMethod("onRegionTap", arguments: args)
+                }
+                result(nil)
+
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
+        NSLog("[RegionWindow] configured secondary window")
     }
 
     // MARK: - Global Hotkeys (Carbon API)

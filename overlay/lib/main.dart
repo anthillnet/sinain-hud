@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ui';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -9,12 +11,20 @@ import 'core/services/settings_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
 import 'ui/overlay_shell.dart';
+import 'ui/regions/region_eye_app.dart';
 
 /// Global key for OverlayShell so hotkey handler can trigger state changes.
 final overlayShellKey = GlobalKey<OverlayShellState>();
 
-void main() async {
-  // Catch Flutter rendering errors
+void main(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Multi-window: check if this is a secondary window (region eye).
+  // Secondary windows are spawned by desktop_multi_window with JSON args.
+  // They run a minimal Flutter app — no providers, no zone guard needed.
+  if (await _tryLaunchSecondaryWindow()) return;
+
+  // Primary window — existing HUD with error handling
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('[overlay] ⚠ FlutterError: ${details.exceptionAsString()}');
@@ -23,13 +33,35 @@ void main() async {
     }
   };
 
-  runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    await _startApp();
-  }, (error, stack) {
+  // Use PlatformDispatcher for uncaught async errors (avoids zone mismatch)
+  PlatformDispatcher.instance.onError = (error, stack) {
     debugPrint('[overlay] ⚠ Unhandled error: $error');
     debugPrint('[overlay] ${stack.toString().split('\n').take(5).join('\n')}');
-  });
+    return true;
+  };
+
+  await _startApp();
+}
+
+/// Returns true if this is a secondary window and was launched successfully.
+Future<bool> _tryLaunchSecondaryWindow() async {
+  try {
+    final controller = await WindowController.fromCurrentEngine();
+    final windowArgs = controller.arguments;
+    debugPrint('[main] window args: $windowArgs');
+
+    if (windowArgs.isNotEmpty && windowArgs.startsWith('{')) {
+      // Secondary window — native side configures NSWindow via callback.
+      // Just run the Flutter UI; position/show handled via sinain_hud/region_window channel.
+      debugPrint('[main] launching region eye window');
+      runApp(RegionEyeApp(args: windowArgs));
+      return true;
+    }
+  } catch (e) {
+    // Main window — fromCurrentEngine throws on the primary window
+    debugPrint('[main] primary window (fromCurrentEngine: $e)');
+  }
+  return false;
 }
 
 Future<void> _startApp() async {

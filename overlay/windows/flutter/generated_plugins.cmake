@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  desktop_multi_window
   flutter_acrylic
   hotkey_manager_windows
   screen_retriever

@@ -14,6 +14,8 @@ import 'input/command_input.dart';
 import 'onboarding/onboarding_view.dart';
 import 'settings/display_settings_panel.dart';
 import 'tasks/tasks_view.dart';
+import 'dart:convert';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 
@@ -43,6 +45,7 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<List<RegionHighlight>>? _regionSub;
   StreamSubscription<String>? _regionTapSub;
   List<RegionHighlight> _activeRegions = [];
+  List<WindowController> _regionWindows = [];
 
   // Display settings panel
   bool _showDisplaySettings = false;
@@ -86,39 +89,18 @@ class OverlayShellState extends State<OverlayShell> {
         if (mounted) setState(() => _hasNewContent = false);
       });
     });
-    // Region highlights → spawn native eye windows
+    // Region highlights → spawn Flutter eye windows via desktop_multi_window
     _regionSub = ws.regionHighlightStream.listen((regions) {
       _activeRegions = regions;
-      _windowService.removeAllRegionWindows();
-      for (var i = 0; i < regions.length; i++) {
-        // Position: top-right corner, spaced horizontally
-        // TODO: use actual bbox from sense ROI when wired
-        final x = 1400.0 - (i * 60);
-        final y = 80.0;
-        _windowService.createRegionWindow('region-$i', x, y);
-      }
+      _closeAllRegionWindows();
+      _createRegionWindows(regions);
     });
-    // Region tap → user command (gets full context in next escalation)
-    // + spawn command (detached agent with context embedded in text)
+    // Region tap events (forwarded from secondary windows via native Swift)
     _regionTapSub = _windowService.regionTapStream.listen((id) {
+      debugPrint('[overlay] region tap received: id=$id');
+      // Find index from id (format: "region-N")
       final idx = int.tryParse(id.replaceFirst('region-', '')) ?? -1;
-      if (idx >= 0 && idx < _activeRegions.length) {
-        final r = _activeRegions[idx];
-        // Get latest agent digest for context
-        final latestDigest = ws.agentFeedItems.isNotEmpty
-            ? ws.agentFeedItems.last.text
-            : '';
-        // Spawn detached task with embedded context
-        final spawnText = '[Region highlight — ${r.action ?? "help"}]\n'
-            'Issue: ${r.issue}\n'
-            'Tip: ${r.tip}\n\n'
-            'Current situation:\n$latestDigest\n\n'
-            'Use sinain_get_context for full screen OCR. Act on the specific issue above.';
-        ws.send({
-          'type': 'spawn_command',
-          'text': spawnText,
-        });
-      }
+      _handleRegionTap(idx);
     });
   }
 
@@ -239,13 +221,74 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
+  Future<void> _createRegionWindows(List<RegionHighlight> regions) async {
+    for (var i = 0; i < regions.length; i++) {
+      final r = regions[i];
+      try {
+        // Use bbox center if available, otherwise stack top-right
+        final x = (r.bbox.length >= 2 && r.bbox[0] > 0)
+            ? r.bbox[0]
+            : 1400.0 - (i * 60);
+        final y = (r.bbox.length >= 2 && r.bbox[1] > 0)
+            ? r.bbox[1]
+            : 80.0;
+        final args = jsonEncode({
+          'id': 'region-$i',
+          'issue': r.issue,
+          'tip': r.tip,
+          'action': r.action ?? 'help',
+          'x': x,
+          'y': y,
+        });
+        debugPrint('[overlay] creating region window $i: ${r.issue} at ($x, $y)');
+        final controller = await WindowController.create(
+          WindowConfiguration(arguments: args),
+        );
+        // Tap events arrive via native channel → WindowService.regionTapStream
+        // (Swift's configureRegionWindow forwards onTap to main engine)
+        _regionWindows.add(controller);
+      } catch (e) {
+        debugPrint('[overlay] failed to create region window $i: $e');
+      }
+    }
+  }
+
+  void _closeAllRegionWindows() {
+    for (final controller in _regionWindows) {
+      try {
+        controller.hide();
+      } catch (e) {
+        debugPrint('[overlay] failed to hide region window: $e');
+      }
+    }
+    _regionWindows = [];
+  }
+
+  void _handleRegionTap(int idx) {
+    if (idx < 0 || idx >= _activeRegions.length) return;
+    final r = _activeRegions[idx];
+    final ws = context.read<WebSocketService>();
+    final latestDigest = ws.agentFeedItems.isNotEmpty
+        ? ws.agentFeedItems.last.text
+        : '';
+    final spawnText = '[Region highlight — ${r.action ?? "help"}]\n'
+        'Issue: ${r.issue}\n'
+        'Tip: ${r.tip}\n\n'
+        'Current situation:\n$latestDigest\n\n'
+        'Use sinain_get_context for full screen OCR. Act on the specific issue above.';
+    ws.send({
+      'type': 'spawn_command',
+      'text': spawnText,
+    });
+  }
+
   @override
   void dispose() {
     _thinkingSub?.cancel();
     _contentSub?.cancel();
     _regionSub?.cancel();
     _regionTapSub?.cancel();
-    _windowService.removeAllRegionWindows();
+    _closeAllRegionWindows();
     _contentResetTimer?.cancel();
     _commandFocusNode.dispose();
     super.dispose();

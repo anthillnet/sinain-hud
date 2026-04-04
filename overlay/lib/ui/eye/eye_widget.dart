@@ -10,6 +10,7 @@ class EyeWidget extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onDragEnd;
+  final VoidCallback? onDragStart;
   final double pupilDilation;
   final Color eyeColor;
 
@@ -18,6 +19,7 @@ class EyeWidget extends StatefulWidget {
     required this.onTap,
     this.onLongPress,
     this.onDragEnd,
+    this.onDragStart,
     this.pupilDilation = 0.0,
     this.eyeColor = const Color(0xFF00FF88),
   });
@@ -28,13 +30,17 @@ class EyeWidget extends StatefulWidget {
 
 class _EyeWidgetState extends State<EyeWidget> {
   bool _isDragging = false;
-  late final WindowService _windowService;
+  WindowService? _windowService;
   static final bool _isMacOS = Platform.isMacOS;
 
   @override
   void initState() {
     super.initState();
-    _windowService = context.read<WindowService>();
+    try {
+      _windowService = context.read<WindowService>();
+    } catch (_) {
+      // WindowService not available (e.g., region eye secondary window)
+    }
   }
 
   @override
@@ -65,14 +71,18 @@ class _EyeWidgetState extends State<EyeWidget> {
     _isDragging = true;
     if (_isMacOS) {
       // Hand off to native — NSEvent monitor handles all tracking
-      _windowService.beginNativeDrag();
+      if (widget.onDragStart != null) {
+        widget.onDragStart!();
+      } else {
+        _windowService?.beginNativeDrag();
+      }
     }
   }
 
   void _onDragUpdate(DragUpdateDetails details) {
     if (_isMacOS) return; // native is handling it
     _isDragging = true;
-    _windowService.moveWindowBy(details.delta.dx, -details.delta.dy);
+    _windowService?.moveWindowBy(details.delta.dx, -details.delta.dy);
   }
 
   void _onDragEnd(DragEndDetails details) {
