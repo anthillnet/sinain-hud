@@ -95,8 +95,13 @@ invoke_agent() {
       ;;
     goose)
       local turns="${2:-$AGENT_MAX_TURNS}"
+      local tsx_bin="$SCRIPT_DIR/../sinain-core/node_modules/.bin/tsx"
+      local mcp_entry="$SCRIPT_DIR/../sinain-mcp-server/index.ts"
       GOOSE_MODE=auto goose run --text "$prompt" \
+        --with-extension "SINAIN_CORE_URL=$CORE_URL SINAIN_WORKSPACE=$WORKSPACE $tsx_bin $mcp_entry" \
         --output-format text \
+        --quiet \
+        --resume --name sinain \
         --max-turns "$turns"
       ;;
     aider)
