@@ -162,8 +162,9 @@ async function main() {
           issue: r.issue,
           tip: r.tip,
           action: r.action,
+          spawnContext: r.spawnContext,
         })),
-        frameSize, // capture frame dimensions for coordinate scaling
+        frameSize,
         ts: Date.now(),
       });
     },
@@ -482,8 +483,8 @@ async function main() {
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
     },
-    onSpawnCommand: (text) => {
-      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+    onSpawnCommand: (text, regionId) => {
+      escalator.dispatchSpawnTask(text, "user-command", regionId).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
         wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
       });

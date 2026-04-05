@@ -14,6 +14,7 @@ export interface SpawnEntry {
   task: string;
   label: string;
   roi?: { bbox: [number, number, number, number]; ocr?: string };
+  regionId?: string;
   ts: number;
 }
 

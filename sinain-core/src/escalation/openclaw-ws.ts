@@ -278,6 +278,7 @@ export class OpenClawWsClient extends EventEmitter {
     message: string,
     idemKey: string,
     sessionKey: string,
+    extraParams?: Record<string, unknown>,
   ): { acceptedPromise: Promise<void>; finalPromise: Promise<any> } {
     let acceptedResolve!: () => void;
     let acceptedReject!: (err: any) => void;
@@ -348,6 +349,7 @@ export class OpenClawWsClient extends EventEmitter {
           idempotencyKey: idemKey,
           sessionKey,
           deliver: false,
+          ...extraParams,
         },
       }));
     } catch (err: any) {

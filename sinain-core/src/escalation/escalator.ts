@@ -7,6 +7,7 @@ import type { SignalCollector } from "../learning/signal-collector.js";
 import { randomUUID, createHash } from "node:crypto";
 import { OpenClawWsClient } from "./openclaw-ws.js";
 import { EscalationSlot } from "./escalation-slot.js";
+import { SpawnQueue, type SpawnEntry } from "./spawn-queue.js";
 import type { SlotEntry, QueueFeedbackCtx } from "./escalation-slot.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { isCodingContext, buildEscalationMessage, fetchKnowledgeFacts } from "./message-builder.js";
@@ -60,8 +61,8 @@ export class Escalator {
   private lastSpawnTs = 0;
   private static readonly SPAWN_COOLDOWN_MS = 60_000; // 60 seconds between duplicate spawns
 
-  // Prevent concurrent spawn RPCs (sibling spawns only — never blocks regular escalations)
-  private spawnInFlight = false;
+  // Parallel spawn support — SpawnQueue replaces the old boolean spawnInFlight flag
+  private spawnQueue = new SpawnQueue({ maxConcurrent: 5, maxQueued: 10 });
 
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
@@ -451,7 +452,8 @@ ${recentLines.join("\n")}`;
       slotDepth: this.slot.depth,
       slotInFlight: this.slot.inFlightId,
       httpPendingId: this.httpPending?.id ?? null,
-      spawnInFlight: this.spawnInFlight,
+      spawnQueueActive: this.spawnQueue.running,
+      spawnQueuePending: this.spawnQueue.pending,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
@@ -465,13 +467,7 @@ ${recentLines.join("\n")}`;
    * Creates a unique child session key and sends the task directly to the gateway
    * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
-  async dispatchSpawnTask(task: string, label?: string): Promise<void> {
-    // Prevent sibling spawn RPCs from piling up (independent from escalation queue)
-    if (this.spawnInFlight) {
-      log(TAG, `spawn-task skipped — spawn RPC already in-flight`);
-      return;
-    }
-
+  async dispatchSpawnTask(task: string, label?: string, regionId?: string): Promise<void> {
     // --- Fingerprint dedup — hash the task content ---
     const fingerprint = createHash("sha256").update(task.trim()).digest("hex").slice(0, 16);
     const now = Date.now();
@@ -489,19 +485,16 @@ ${recentLines.join("\n")}`;
     const startedAt = Date.now();
     const labelStr = label ? ` (label: "${label}")` : "";
     const idemKey = `spawn-task-${Date.now()}`;
-
-    // Generate a unique child session key — bypasses the main agent entirely
     const childSessionKey = `agent:main:subagent:${randomUUID()}`;
 
     this.outboundBytes += Buffer.byteLength(task);
     this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
-    log(TAG, `dispatching spawn-task${labelStr} → child=${childSessionKey}: "${task.slice(0, 80)}..."`);
+    log(TAG, `dispatching spawn-task${labelStr}${regionId ? ` region=${regionId}` : ""} → child=${childSessionKey}: "${task.slice(0, 80)}..."`);
 
     // ★ Broadcast "spawned" BEFORE the RPC — TSK tab shows ··· immediately
-    this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
+    this.broadcastTaskEvent(taskId, "spawned", label, startedAt, undefined, regionId);
 
     if (!this.wsClient.isConnected) {
-      // No OpenClaw gateway — queue for bare agent HTTP polling
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
@@ -510,74 +503,92 @@ ${recentLines.join("\n")}`;
       return;
     }
 
-    // ★ Set spawnInFlight BEFORE first await — cleared in finally regardless of outcome.
-    // Dedicated lane flag: never touches the escalation queue so regular escalations
-    // continue unblocked while this spawn RPC is pending.
-    this.spawnInFlight = true;
+    // Enqueue — SpawnQueue handles concurrency (maxConcurrent=5)
+    const enqueued = this.spawnQueue.enqueue({
+      id: taskId, task, label: label || "user-command", regionId, ts: startedAt,
+    });
+    if (!enqueued) {
+      this.broadcastTaskEvent(taskId, "failed", label, startedAt, undefined, regionId);
+      return;
+    }
+
+    // Drain queue — process all available entries
+    this.drainSpawnQueue();
+  }
+
+  /** Process spawn queue entries using async two-phase RPC. */
+  private drainSpawnQueue(): void {
+    let entry: SpawnEntry | null;
+    while ((entry = this.spawnQueue.take()) !== null) {
+      this.executeSpawnEntry(entry);
+    }
+  }
+
+  /** Execute a single spawn entry with non-blocking Phase 2. */
+  private async executeSpawnEntry(entry: SpawnEntry): Promise<void> {
+    const { id: taskId, task, label, regionId, ts: startedAt } = entry;
+    const idemKey = `spawn-task-${taskId}`;
+    const childSessionKey = `agent:main:subagent:${randomUUID()}`;
+
     try {
-      // Send directly to a new child session via the gateway agent RPC
-      const result = await this.wsClient.sendRpc("agent", {
-        message: task,
-        sessionKey: childSessionKey,
-        lane: "subagent",
-        extraSystemPrompt: this.buildChildSystemPrompt(task, label),
-        deliver: false,
-        idempotencyKey: idemKey,
-        label: label || undefined,
-      }, 45_000, { expectFinal: true });
+      // ★ Non-blocking two-phase RPC:
+      // Phase 1 (~200ms): gateway accepts delivery
+      // Phase 2 (5-45s): agent processes, handled async
+      const { acceptedPromise, finalPromise } = this.wsClient.sendAgentRpcSplit(
+        task, idemKey, childSessionKey, {
+          lane: "subagent",
+          extraSystemPrompt: this.buildChildSystemPrompt(task, label),
+          label: label || undefined,
+        },
+      );
 
-      log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
-      this.stats.totalSpawnResponses++;
+      await acceptedPromise; // ~200ms — delivery confirmed
+      log(TAG, `spawn-task ${taskId} Phase 1 accepted`);
 
-      // Extract result — child agent actually ran the task and returned content
-      const payloads = result?.payload?.result?.payloads;
-      const runId = result?.payload?.runId || taskId;
+      // Free the queue slot immediately — don't wait for Phase 2
+      this.spawnQueue.complete(entry.id);
+      this.drainSpawnQueue(); // process next queued entry if any
 
-      if (Array.isArray(payloads) && payloads.length > 0) {
-        const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
-        if (output) {
-          this.pushResponse(`${label || "Background task"}:\n${output}`);
-          this.broadcastTaskEvent(taskId, "completed", label, startedAt, output);
-        } else {
-          log(TAG, `spawn-task: ${payloads.length} payloads but empty text, trying chat.history`);
-          const historyText = await this.fetchChildResult(childSessionKey);
-          this.broadcastTaskEvent(taskId, "completed", label, startedAt,
-            historyText || "task completed (no output)");
-          if (historyText) {
-            this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+      // Phase 2: handle result async (never blocks the queue)
+      finalPromise.then((result: any) => {
+        log(TAG, `spawn-task ${taskId} Phase 2 complete`);
+        this.stats.totalSpawnResponses++;
+        const payloads = result?.payload?.result?.payloads;
+
+        if (Array.isArray(payloads) && payloads.length > 0) {
+          const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
+          if (output) {
+            this.pushResponse(`${label || "Background task"}:\n${output}`);
+            this.broadcastTaskEvent(taskId, "completed", label, startedAt, output, regionId);
+          } else {
+            this.fetchChildResult(childSessionKey).then(historyText => {
+              this.broadcastTaskEvent(taskId, "completed", label, startedAt,
+                historyText || "task completed (no output)", regionId);
+              if (historyText) this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+            });
           }
-        }
-      } else {
-        // No payloads — fallback: fetch from chat.history on child session
-        log(TAG, `spawn-task: no payloads, fetching chat.history for child=${childSessionKey}`);
-        const historyText = await this.fetchChildResult(childSessionKey);
-        if (historyText) {
-          this.pushResponse(`${label || "Background task"}:\n${historyText}`);
-          this.broadcastTaskEvent(taskId, "completed", label, startedAt, historyText);
         } else {
-          this.broadcastTaskEvent(taskId, "completed", label, startedAt,
-            "task completed (no output captured)");
+          this.fetchChildResult(childSessionKey).then(historyText => {
+            if (historyText) {
+              this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+              this.broadcastTaskEvent(taskId, "completed", label, startedAt, historyText, regionId);
+            } else {
+              this.broadcastTaskEvent(taskId, "completed", label, startedAt,
+                "task completed (no output captured)", regionId);
+            }
+          });
         }
-      }
-
-      // Persist for crash recovery (no polling needed — result already in hand)
-      this.pendingSpawnTasks.set(taskId, {
-        runId,
-        childSessionKey,
-        label,
-        startedAt,
-        pollingEmitted: false,
+      }).catch((err: any) => {
+        error(TAG, `spawn-task ${taskId} Phase 2 failed: ${err.message}`);
+        this.broadcastTaskEvent(taskId, "failed", label, startedAt, undefined, regionId);
+        this.spawnQueue.complete(entry.id);
       });
-      savePendingTasks(this.pendingSpawnTasks);
-
-      // Clean up immediately since we already have the result
-      this.pendingSpawnTasks.delete(taskId);
-      savePendingTasks(this.pendingSpawnTasks);
     } catch (err: any) {
-      error(TAG, `spawn-task failed: ${err.message}`);
-      this.broadcastTaskEvent(taskId, "failed", label, startedAt);
-    } finally {
-      this.spawnInFlight = false;
+      // Phase 1 failed
+      error(TAG, `spawn-task ${taskId} failed: ${err.message}`);
+      this.broadcastTaskEvent(taskId, "failed", label, startedAt, undefined, regionId);
+      this.spawnQueue.complete(entry.id);
+      this.drainSpawnQueue();
     }
   }
 
@@ -831,6 +842,7 @@ ${recentLines.join("\n")}`;
     label?: string,
     startedAt?: number,
     resultPreview?: string,
+    regionId?: string,
   ): void {
     const now = Date.now();
     const isTerminal = status === "completed" || status === "failed" || status === "timeout";
@@ -842,6 +854,7 @@ ${recentLines.join("\n")}`;
       startedAt: startedAt || now,
       ...(isTerminal ? { completedAt: now } : {}),
       ...(resultPreview ? { resultPreview: resultPreview.slice(0, 200) } : {}),
+      ...(regionId ? { regionId } : {}),
     };
     log(TAG, `broadcast spawn_task: taskId=${taskId}, status=${status}, clients=${this.deps.wsHandler.clientCount}`);
     this.deps.wsHandler.broadcastRaw(msg);

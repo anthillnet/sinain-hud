@@ -26,7 +26,7 @@ export interface AgentLoopDeps {
   /** Called to broadcast HUD line to overlay. */
   onHudUpdate: (text: string) => void;
   /** Called when agent identifies actionable screen regions (Grammarly mode). */
-  onRegionHighlight?: (regions: Array<{ issue: string; tip: string; action?: string; bbox?: number[]; frameSize?: number[] }>) => void;
+  onRegionHighlight?: (regions: Array<{ issue: string; tip: string; action?: string; bbox?: number[]; frameSize?: number[]; spawnContext?: string }>) => void;
   /** Optional: tracer to record spans. */
   onTraceStart?: (tickId: number) => TraceContext | null;
   /** Optional: get current recorder status for prompt injection. */
@@ -401,6 +401,8 @@ export class AgentLoop extends EventEmitter {
           ...r,
           bbox: roiBboxes.length > 0 ? roiBboxes[i % roiBboxes.length] : undefined,
           frameSize,
+          // Pre-build spawn context so tap dispatches instantly (no context assembly needed)
+          spawnContext: `[Region highlight — ${r.action ?? "help"}]\nIssue: ${r.issue}\nTip: ${r.tip}\n\nCurrent situation:\n${digest}\n\nUse sinain_get_context for full screen OCR. Act on the specific issue above.`,
         }));
         this.deps.onRegionHighlight(regionsWithBbox);
       }

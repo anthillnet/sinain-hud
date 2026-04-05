@@ -18,7 +18,7 @@ export interface CommandDeps {
   /** Queue a user command to augment the next escalation */
   onUserCommand: (text: string) => void;
   /** Spawn a background agent task */
-  onSpawnCommand?: (text: string) => void;
+  onSpawnCommand?: (text: string, regionId?: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle trait voices — returns new enabled state */
@@ -72,7 +72,7 @@ export function setupCommands(deps: CommandDeps): void {
           sender: "spawn",
         } as any);
         if (deps.onSpawnCommand) {
-          deps.onSpawnCommand(msg.text);
+          deps.onSpawnCommand(msg.text, msg.regionId);
         } else {
           log(TAG, `spawn command ignored — no handler configured`);
           wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");

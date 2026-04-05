@@ -38,6 +38,7 @@ export interface SpawnTaskMessage {
   startedAt: number;
   completedAt?: number;
   resultPreview?: string;
+  regionId?: string; // route result to specific region eye window
 }
 
 /** Overlay → sinain-core: user typed a message */
@@ -77,6 +78,7 @@ export interface SpawnCommandMessage {
   type: "spawn_command";
   text: string;
   roi?: SpawnROIContext;
+  regionId?: string; // originating region eye window ID
 }
 
 /** sinain-core → Overlay: region highlights ("Grammarly mode") */
@@ -85,6 +87,7 @@ export interface RegionHighlight {
   issue: string;
   tip: string;
   action?: string;
+  spawnContext?: string; // pre-assembled spawn message for instant dispatch on tap
 }
 
 export interface RegionHighlightMessage {
