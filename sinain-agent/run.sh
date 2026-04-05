@@ -95,13 +95,10 @@ invoke_agent() {
       ;;
     goose)
       local turns="${2:-$AGENT_MAX_TURNS}"
-      local tsx_bin="$SCRIPT_DIR/../sinain-core/node_modules/.bin/tsx"
-      local mcp_entry="$SCRIPT_DIR/../sinain-mcp-server/index.ts"
       GOOSE_MODE=auto goose run --text "$prompt" \
-        --with-extension "SINAIN_CORE_URL=$CORE_URL SINAIN_WORKSPACE=$WORKSPACE $tsx_bin $mcp_entry" \
         --output-format text \
         --quiet \
-        --resume --name sinain \
+        --no-session \
         --max-turns "$turns"
       ;;
     aider)
@@ -188,6 +185,34 @@ if [ "$AGENT" = "codex" ]; then
       --env "SINAIN_CORE_URL=$CORE_URL" \
       --env "SINAIN_WORKSPACE=$WORKSPACE" \
       -- "$TSX_BIN" "$MCP_ENTRY"
+  fi
+fi
+
+# Goose: auto-register sinain MCP server in config.yaml if not present
+if [ "$AGENT" = "goose" ]; then
+  TSX_BIN="$(cd "$SCRIPT_DIR/.." && pwd)/sinain-core/node_modules/.bin/tsx"
+  MCP_ENTRY="$(cd "$SCRIPT_DIR/.." && pwd)/sinain-mcp-server/index.ts"
+  GOOSE_CONFIG="${HOME}/.config/goose/config.yaml"
+  if [ -f "$GOOSE_CONFIG" ] && ! grep -q "sinain:" "$GOOSE_CONFIG" 2>/dev/null; then
+    echo "Registering sinain MCP server with goose..."
+    python3 -c "
+import yaml, os, sys
+config_path = sys.argv[1]
+with open(config_path) as f:
+    cfg = yaml.safe_load(f) or {}
+cfg.setdefault('extensions', {})['sinain'] = {
+    'name': 'Sinain MCP Server',
+    'cmd': sys.argv[2],
+    'args': [sys.argv[3]],
+    'enabled': True,
+    'envs': {'SINAIN_CORE_URL': sys.argv[4], 'SINAIN_WORKSPACE': sys.argv[5]},
+    'type': 'stdio',
+    'timeout': 300,
+}
+with open(config_path, 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False)
+print('  sinain extension added to ' + config_path)
+" "$GOOSE_CONFIG" "$TSX_BIN" "$MCP_ENTRY" "$CORE_URL" "$WORKSPACE"
   fi
 fi
 
