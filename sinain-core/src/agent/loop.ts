@@ -9,6 +9,7 @@ import { buildContextWindow, RICHNESS_PRESETS } from "./context-window.js";
 import { analyzeContext } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
+import { buildEscalationMessage } from "../escalation/message-builder.js";
 import { log, warn, error, debug } from "../log.js";
 import type { TraitEngine, TraitSelection } from "./traits.js";
 import { writeTraitLog } from "./traits.js";
@@ -397,12 +398,15 @@ export class AgentLoop extends EventEmitter {
         const ctxEvent = [...contextWindow.screen].reverse().find(e => e.type === "context" && e.imageBbox);
         const frameSize = ctxEvent?.imageBbox ? [ctxEvent.imageBbox[2], ctxEvent.imageBbox[3]] : undefined;
 
+        // Build full context for spawn (screen OCR, audio, errors — not just digest)
+        const fullContext = buildEscalationMessage(digest, contextWindow, entry, "rich");
+
         const regionsWithBbox = result.regions.map((r, i) => ({
           ...r,
           bbox: roiBboxes.length > 0 ? roiBboxes[i % roiBboxes.length] : undefined,
           frameSize,
-          // Pre-build spawn context so tap dispatches instantly (no context assembly needed)
-          spawnContext: `[Region highlight — ${r.action ?? "help"}]\nIssue: ${r.issue}\nTip: ${r.tip}\n\nCurrent situation:\n${digest}\n\nUse sinain_get_context for full screen OCR. Act on the specific issue above.`,
+          // Pre-build spawn context with full screen/audio context for instant dispatch
+          spawnContext: `[Region highlight — ${r.action ?? "help"}]\nIssue: ${r.issue}\nTip: ${r.tip}\n\n${fullContext}\n\nAct on the specific issue above.`,
         }));
         this.deps.onRegionHighlight(regionsWithBbox);
       }

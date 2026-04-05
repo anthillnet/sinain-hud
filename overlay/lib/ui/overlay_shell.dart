@@ -286,7 +286,7 @@ class OverlayShellState extends State<OverlayShell> {
         'Issue: ${r.issue}\n'
         'Tip: ${r.tip}\n\n'
         'Current situation:\n$latestDigest\n\n'
-        'Use sinain_get_context for full screen OCR. Act on the specific issue above.';
+        'Act on the specific issue above.';
     ws.send({
       'type': 'spawn_command',
       'text': spawnText,
