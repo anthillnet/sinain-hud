@@ -106,28 +106,42 @@ async function exportDomain() {
 }
 
 async function importKnowledge() {
+  const el = document.getElementById('status');
   const data = document.getElementById('importData').value.trim();
-  if (!data) { alert('Paste JSON to import'); return; }
+  if (!data) { el.textContent = 'Error: paste JSON data first'; return; }
+  el.textContent = 'Importing...';
   try {
-    const res = await fetch('/knowledge/import', { method: 'POST', body: data, headers: {'Content-Type':'application/json'} });
-    const result = await res.json();
-    document.getElementById('status').textContent = result.ok ? 'Imported: ' + (result.stats||JSON.stringify(result)) : 'Error: ' + result.error;
-    if (result.ok) loadFacts();
-  } catch (e) { document.getElementById('status').textContent = 'Import error: ' + e.message; }
+    JSON.parse(data); // validate JSON first
+  } catch(e) { el.textContent = 'Error: invalid JSON — ' + e.message; return; }
+  try {
+    const res = await fetch('/knowledge/import', { method: 'POST', body: data });
+    const text = await res.text();
+    console.log('Import response:', text);
+    const result = JSON.parse(text);
+    el.textContent = result.ok
+      ? 'Imported ' + (result.imported||0) + ' facts, skipped ' + (result.skipped||0)
+      : 'Error: ' + (result.error||'unknown');
+    if (result.ok) { document.getElementById('importData').value = ''; loadFacts(); }
+  } catch (e) { el.textContent = 'Import failed: ' + e.message; console.error(e); }
 }
 
 async function importFromUrl() {
-  const url = document.getElementById('importData').value.trim();
-  if (!url.startsWith('http')) { alert('Enter a URL (e.g., http://other-sinain:9500/knowledge/export)'); return; }
+  const el = document.getElementById('status');
+  const input = document.getElementById('importData').value.trim();
+  if (!input.startsWith('http')) { el.textContent = 'Error: enter a URL starting with http'; return; }
+  el.textContent = 'Fetching from ' + input + '...';
   try {
-    document.getElementById('status').textContent = 'Fetching from ' + url + '...';
-    const res = await fetch(url);
+    const res = await fetch(input);
+    if (!res.ok) { el.textContent = 'Fetch failed: HTTP ' + res.status; return; }
     const data = await res.text();
-    const importRes = await fetch('/knowledge/import', { method: 'POST', body: data, headers: {'Content-Type':'application/json'} });
+    el.textContent = 'Fetched ' + data.length + ' bytes, importing...';
+    const importRes = await fetch('/knowledge/import', { method: 'POST', body: data });
     const result = await importRes.json();
-    document.getElementById('status').textContent = result.ok ? 'Imported from URL: ' + (result.stats||JSON.stringify(result)) : 'Error: ' + result.error;
-    if (result.ok) loadFacts();
-  } catch (e) { document.getElementById('status').textContent = 'Fetch error: ' + e.message; }
+    el.textContent = result.ok
+      ? 'Imported ' + (result.imported||0) + ' facts from URL, skipped ' + (result.skipped||0)
+      : 'Error: ' + (result.error||'unknown');
+    if (result.ok) { document.getElementById('importData').value = ''; loadFacts(); }
+  } catch (e) { el.textContent = 'Fetch error: ' + e.message + ' (CORS may block cross-origin URLs — use export file instead)'; console.error(e); }
 }
 
 loadFacts();
