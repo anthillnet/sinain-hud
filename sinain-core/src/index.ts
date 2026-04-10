@@ -33,6 +33,69 @@ function resolveWorkspace(): string {
   return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
 }
 
+/** Resolve the local memory directory (independent of OpenClaw workspace). */
+function resolveLocalMemoryDir(): string {
+  const raw = process.env.SINAIN_MEMORY_DIR || `${process.env.HOME}/.sinain/memory`;
+  return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
+}
+
+/**
+ * Query knowledge facts from both local and workspace databases.
+ * Checks local (~/.sinain/memory) first, then workspace (~/.openclaw/workspace/memory).
+ * Merges results, deduplicates, returns up to maxFacts.
+ */
+async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve } = await import("node:path");
+  const { dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  // Candidate database paths (local first, then workspace)
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  // Candidate script paths
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptCandidates = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
+    resolve(__dir, "..", "sinain-memory", "graph_query.py"),
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+
+  const results: string[] = [];
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
+      if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
+      const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
+      if (out) results.push(out);
+    } catch { /* skip failed db */ }
+  }
+
+  if (results.length === 0) return "";
+  if (results.length === 1) return results[0];
+
+  // Merge and deduplicate lines from both sources
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const block of results) {
+    for (const line of block.split("\n")) {
+      const key = line.replace(/\(confidence:.*$/, "").trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        merged.push(line);
+      }
+    }
+  }
+  return merged.slice(0, maxFacts).join("\n");
+}
+
 async function main() {
   log(TAG, "sinain-core starting...");
 
@@ -95,17 +158,7 @@ async function main() {
     openclawConfig: config.openclawConfig,
     profiler,
     feedbackStore: feedbackStore ?? undefined,
-    queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
-      const workspace = resolveWorkspace();
-      const dbPath = `${workspace}/memory/knowledge-graph.db`;
-      const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
-      try {
-        const { execFileSync } = await import("node:child_process");
-        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
-        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-        return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
-      } catch { return ""; }
-    },
+    queryKnowledgeFacts: queryKnowledgeFactsMulti,
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -425,24 +478,16 @@ async function main() {
     getEscalationPending: () => escalator.getPendingHttp(),
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
 
-    // Knowledge graph integration
+    // Knowledge graph integration (checks both local and workspace DBs)
     getKnowledgeDocPath: () => {
-      const workspace = resolveWorkspace();
-      const p = `${workspace}/memory/sinain-knowledge.md`;
-      try { if (existsSync(p)) return p; } catch {}
+      // Check local first, then workspace
+      const localPath = `${resolveLocalMemoryDir()}/sinain-knowledge.md`;
+      const workspacePath = `${resolveWorkspace()}/memory/sinain-knowledge.md`;
+      try { if (existsSync(localPath)) return localPath; } catch {}
+      try { if (existsSync(workspacePath)) return workspacePath; } catch {}
       return null;
     },
-    queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
-      const workspace = resolveWorkspace();
-      const dbPath = `${workspace}/memory/knowledge-graph.db`;
-      const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
-      try {
-        const { execFileSync } = await import("node:child_process");
-        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
-        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-        return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
-      } catch { return ""; }
-    },
+    queryKnowledgeFacts: queryKnowledgeFactsMulti,
 
     // Spawn background agent task (from HUD Shift+Enter or bare agent POST /spawn)
     onSpawnCommand: (text: string) => {
