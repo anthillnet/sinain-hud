@@ -1,4 +1,4 @@
-import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord, UserCommand } from "../types.js";
+import type { ContextWindow, AgentEntry, EscalationMode, FeedbackRecord, UserCommand, ResponseSize } from "../types.js";
 import { normalizeAppName } from "../agent/context-window.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 
@@ -67,11 +67,18 @@ export function isCodingContext(context: ContextWindow): CodingContextResult {
   };
 }
 
-function getInstructions(mode: EscalationMode, context: ContextWindow): string {
+function sizeInstruction(size: ResponseSize): string {
+  switch (size) {
+    case "small": return "1-2 sentences";
+    case "large": return "3-5 sentences";
+    default: return "2-3 sentences";
+  }
+}
+
+function getInstructions(context: ContextWindow): string {
   const { coding, needsSolution } = isCodingContext(context);
 
   if (needsSolution) {
-    // Coding challenge/problem - be very action-oriented
     return `The user is working on a coding problem. Be PROACTIVE and SOLVE IT:
 
 1. Provide a solution approach and working code based on what you can see
@@ -92,13 +99,10 @@ Response should be actionable: working code with brief explanation.`;
 - If it's a non-code file (config, markdown, email): share a relevant insight, action item, or connection to their current project
 - If context is minimal: tell a short clever joke (tech humor — never repeat recent ones)
 
-NEVER just describe what the user is doing. Every response must teach, suggest, or connect dots.
-(2-5 sentences, or more + code if there's an error or code question).`;
+NEVER just describe what the user is doing. Every response must teach, suggest, or connect dots.`;
   }
 
-  // Non-coding context — proactive insights instead of activity descriptions
-  if (mode === "focus" || mode === "rich") {
-    return `Based on the above, ALWAYS provide a useful response for the user's HUD.
+  return `Based on the above, ALWAYS provide a useful response for the user's HUD.
 Important: Do NOT respond with NO_REPLY — a response is always required.
 
 - If there's an error: investigate and suggest a fix
@@ -109,40 +113,25 @@ Important: Do NOT respond with NO_REPLY — a response is always required.
 
 NEVER just describe what the user is doing — they can see their own screen.
 NEVER respond with "standing by", "monitoring", or similar filler.
-Every response must teach something, suggest something, or connect dots the user hasn't noticed.
-(2-5 sentences). Be specific and actionable.`;
-  }
-
-  return `Based on the above, proactively help the user:
-- If there's an error: investigate and suggest a fix
-- If they seem stuck: offer guidance
-- If they're coding: provide relevant insights
-- Keep your response concise and actionable (2-5 sentences)`;
+Every response must teach something, suggest something, or connect dots the user hasn't noticed.`;
 }
 
 /**
- * Build a structured escalation message with richness proportional to the context window preset.
+ * Build a structured escalation message with full context (rich mode).
  *
- * Expected message sizes:
- *   lean (selective):  ~7 KB  / ~1,700 tokens
- *   standard (focus):  ~25 KB / ~6,000 tokens
- *   rich:              ~111 KB / ~28,000 tokens
- *
- * All fit within the 256 KB HTTP hooks limit and 200K+ model context.
- *
- * In selective mode, sections are prioritized by relevance:
- * - Error escalations prioritize error sections
- * - Question escalations prioritize audio sections
- * - App context is always included
+ * Always includes all sections (screen, audio, errors).
+ * Response length is controlled by the `responseSize` parameter (small/medium/large)
+ * which is set by the user via the HUD overlay slider.
  */
 export function buildEscalationMessage(
   digest: string,
   context: ContextWindow,
   entry: AgentEntry,
-  mode: EscalationMode,
+  _mode: EscalationMode,
   escalationReason?: string,
   recentFeedback?: FeedbackRecord[],
   userCommand?: UserCommand,
+  responseSize: ResponseSize = "medium",
 ): string {
   const sections: string[] = [];
 
@@ -167,7 +156,6 @@ export function buildEscalationMessage(
   // Errors — extracted from OCR, full stack traces in rich mode
   const errors = context.screen.filter(e => hasErrorPattern(e.ocr));
   const hasErrors = errors.length > 0;
-  const hasQuestion = escalationReason?.startsWith("question:");
 
   // Privacy levels for agent_gateway destination
   let ocrLevel: import("../types.js").PrivacyLevel = "full";
@@ -183,99 +171,35 @@ export function buildEscalationMessage(
   const applyAudio = (text: string) => applyLevel(text.slice(0, context.preset.maxTranscriptChars), audioLevel, "audio");
   const applyTitle = (title: string | undefined) => title ? applyLevel(title, titlesLevel, "titles") : "";
 
-  // In selective mode, prioritize sections based on escalation reason
-  // In focus/rich modes, include everything
-  if (mode === "selective") {
-    // Error-triggered: prioritize errors, then screen
-    if (hasErrors) {
-      sections.push("## Errors (high priority)");
-      for (const e of errors) {
-        sections.push(`\`\`\`\n${applyOcr(e.ocr)}\n\`\`\``);
-      }
-      // Include screen context (reduced)
-      if (context.screen.length > 0) {
-        sections.push("## Screen (recent OCR)");
-        for (const e of context.screen.slice(0, 5)) { // Limit in selective mode
-          const ago = Math.round((Date.now() - e.ts) / 1000);
-          const app = normalizeAppName(e.meta.app);
-          const title = applyTitle(e.meta.windowTitle);
-          const titlePart = title ? ` [${title}]` : "";
-          sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
-        }
-      }
-    }
-    // Question-triggered: prioritize audio, then screen
-    else if (hasQuestion) {
-      if (context.audio.length > 0) {
-        sections.push("## Audio (recent transcripts)");
-        for (const e of context.audio) {
-          const ago = Math.round((Date.now() - e.ts) / 1000);
-          sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
-        }
-      }
-      // Include screen context (reduced)
-      if (context.screen.length > 0) {
-        sections.push("## Screen (recent OCR)");
-        for (const e of context.screen.slice(0, 5)) {
-          const ago = Math.round((Date.now() - e.ts) / 1000);
-          const app = normalizeAppName(e.meta.app);
-          const title = applyTitle(e.meta.windowTitle);
-          const titlePart = title ? ` [${title}]` : "";
-          sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
-        }
-      }
-    }
-    // Other triggers: balanced sections
-    else {
-      if (context.screen.length > 0) {
-        sections.push("## Screen (recent OCR)");
-        for (const e of context.screen) {
-          const ago = Math.round((Date.now() - e.ts) / 1000);
-          const app = normalizeAppName(e.meta.app);
-          const title = applyTitle(e.meta.windowTitle);
-          const titlePart = title ? ` [${title}]` : "";
-          sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
-        }
-      }
-      if (context.audio.length > 0) {
-        sections.push("## Audio (recent transcripts)");
-        for (const e of context.audio) {
-          const ago = Math.round((Date.now() - e.ts) / 1000);
-          sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
-        }
-      }
-    }
-  } else {
-    // Focus/rich mode: include all sections
-    if (hasErrors) {
-      sections.push("## Errors (high priority)");
-      for (const e of errors) {
-        sections.push(`\`\`\`\n${applyOcr(e.ocr)}\n\`\`\``);
-      }
-    }
-
-    if (context.screen.length > 0) {
-      sections.push("## Screen (recent OCR)");
-      for (const e of context.screen) {
-        const ago = Math.round((Date.now() - e.ts) / 1000);
-        const app = normalizeAppName(e.meta.app);
-        const title = applyTitle(e.meta.windowTitle);
-        const titlePart = title ? ` [${title}]` : "";
-        sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
-      }
-    }
-
-    if (context.audio.length > 0) {
-      sections.push("## Audio (recent transcripts)");
-      for (const e of context.audio) {
-        const ago = Math.round((Date.now() - e.ts) / 1000);
-        sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
-      }
+  // Always include all sections (rich mode)
+  if (hasErrors) {
+    sections.push("## Errors (high priority)");
+    for (const e of errors) {
+      sections.push(`\`\`\`\n${applyOcr(e.ocr)}\n\`\`\``);
     }
   }
 
-  // Mode-specific instructions (now context-aware)
-  sections.push(getInstructions(mode, context));
+  if (context.screen.length > 0) {
+    sections.push("## Screen (recent OCR)");
+    for (const e of context.screen) {
+      const ago = Math.round((Date.now() - e.ts) / 1000);
+      const app = normalizeAppName(e.meta.app);
+      const title = applyTitle(e.meta.windowTitle);
+      const titlePart = title ? ` [${title}]` : "";
+      sections.push(`- [${ago}s ago] [${app}]${titlePart} ${applyOcr(e.ocr)}`);
+    }
+  }
+
+  if (context.audio.length > 0) {
+    sections.push("## Audio (recent transcripts)");
+    for (const e of context.audio) {
+      const ago = Math.round((Date.now() - e.ts) / 1000);
+      sections.push(`- [${ago}s ago] "${applyAudio(e.text)}"`);
+    }
+  }
+
+  // Context-aware instructions (no size — that's in the response length section below)
+  sections.push(getInstructions(context));
 
   // Stale escalation hint — forces a proactive response after prolonged silence
   if (escalationReason === "stale") {
@@ -293,7 +217,10 @@ the local analyzer reported idle/no-change. Provide a PROACTIVE response:
     sections.push(formatInlineFeedback(recentFeedback));
   }
 
-  sections.push("Respond naturally — this will appear on the user's HUD overlay.");
+  // Response length — single authoritative size instruction, placed last for salience
+  const limit = sizeInstruction(responseSize);
+  sections.push(`## Response Length
+Your response MUST be ${limit}. This appears on the user's HUD overlay — be specific and actionable.`);
 
   return sections.join("\n\n");
 }
