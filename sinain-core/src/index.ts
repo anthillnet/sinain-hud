@@ -8,7 +8,6 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
-import { TraitEngine, loadTraitRoster } from "./agent/traits.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -344,10 +343,6 @@ async function main() {
   localCuration.distillPendingSession(); // Recover any session saved before a force-kill
   localCuration.startPeriodicCuration();
 
-  // ── Initialize trait engine ──
-  const traitRoster = loadTraitRoster(config.traitConfig.configPath);
-  const traitEngine = new TraitEngine(traitRoster, config.traitConfig);
-
   // ── Initialize escalation ──
   const escalator = new Escalator({
     feedBuffer,
@@ -395,8 +390,6 @@ async function main() {
       };
       return ctx;
     } : undefined,
-    traitEngine,
-    traitLogDir: config.traitConfig.logDir,
     getKnowledgeDocPath: () => {
       const workspace = resolveWorkspace();
       const p = `${workspace}/memory/sinain-knowledge.md`;
@@ -706,7 +699,6 @@ async function main() {
       wsHandler.updateState({ screen: screenActive ? "active" : "off" });
       return screenActive;
     },
-    onToggleTraits: () => traitEngine.toggle(),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
@@ -768,7 +760,6 @@ async function main() {
   log(TAG, `  mic:     ${config.micEnabled ? (config.micConfig.autoStart ? "active" : "standby") : "disabled"}`);
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
-  log(TAG, `  traits:  ${config.traitConfig.enabled ? "enabled" : "disabled"} (${traitRoster.length} traits)`);
   log(TAG, `  cost:    display=${config.costDisplayEnabled ? "on" : "off"} (always logged)`);
 
   // ── Graceful shutdown ──

@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AnalysisConfig, EscalationConfig, OpenClawConfig, EscalationMode, EscalationTransport, LearningConfig, TraitConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AnalysisConfig, EscalationConfig, OpenClawConfig, EscalationMode, EscalationTransport, LearningConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
 import { PRESETS } from "./privacy/presets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -234,13 +234,6 @@ export function loadConfig(): CoreConfig {
     retentionDays: intEnv("FEEDBACK_RETENTION_DAYS", 30),
   };
 
-  const traitConfig: TraitConfig = {
-    enabled: boolEnv("TRAITS_ENABLED", false),
-    configPath: resolvePath(env("TRAITS_CONFIG", "~/.sinain/traits.json")),
-    entropyHigh: boolEnv("TRAIT_ENTROPY_HIGH", false),
-    logDir: resolvePath(env("TRAIT_LOG_DIR", "~/.sinain-core/traits")),
-  };
-
   const privacyConfig = loadPrivacyConfig();
 
   return {
@@ -257,7 +250,6 @@ export function loadConfig(): CoreConfig {
     traceDir: resolvePath(env("TRACE_DIR", resolve(sinainDataDir(), "traces"))),
     costDisplayEnabled: boolEnv("COST_DISPLAY_ENABLED", false),
     learningConfig,
-    traitConfig,
     privacyConfig,
   };
 }
