@@ -275,6 +275,11 @@ Knowledge context: sinain-core maintains two knowledge databases — local (sess
 while true; do
   # Poll for pending escalation
   ESC=$(curl -sf "$CORE_URL/escalation/pending" 2>/dev/null || echo '{"ok":false}')
+  ESC_PAUSED=$(echo "$ESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d.get('paused') else '')" 2>/dev/null || true)
+  if [ -n "$ESC_PAUSED" ]; then
+    sleep 10  # Slow polling when paused
+    continue
+  fi
   ESC_ID=$(echo "$ESC" | python3 -c "import sys,json; d=json.load(sys.stdin); e=d.get('escalation'); print(e['id'] if e else '')" 2>/dev/null || true)
 
   if [ -n "$ESC_ID" ]; then

@@ -298,6 +298,11 @@ class OverlayShellState extends State<OverlayShell> {
               active: ws.micState == 'active',
               onTap: () => ws.sendCommand('toggle_mic'),
             ),
+            _toggleIcon(
+              icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
+              active: ws.escalationState == 'active',
+              onTap: () => ws.sendCommand('toggle_escalation'),
+            ),
             const Spacer(),
             // Cost counter (replaces DEMO badge when cost > 0)
             if (ws.totalCost > 0)
@@ -387,6 +392,12 @@ class OverlayShellState extends State<OverlayShell> {
                     icon: ws.micState == 'active' ? Icons.mic : Icons.mic_off,
                     active: ws.micState == 'active',
                     onTap: () => ws.sendCommand('toggle_mic'),
+                    small: true,
+                  ),
+                  _toggleIcon(
+                    icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
+                    active: ws.escalationState == 'active',
+                    onTap: () => ws.sendCommand('toggle_escalation'),
                     small: true,
                   ),
                   const SizedBox(width: 4),
