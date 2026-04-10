@@ -69,11 +69,23 @@ invoke_agent() {
   case "$AGENT" in
     claude)
       local turns="${2:-$AGENT_MAX_TURNS}"
-      claude --enable-auto-mode \
-        --mcp-config "$MCP_CONFIG" \
-        ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-        --max-turns "$turns" --output-format text \
-        -p "$prompt"
+      if [ -n "${SINAIN_SPAWN:-}" ]; then
+        # Spawn: permissions routed via PreToolUse hook → overlay HUD
+        claude --permission-mode default \
+          --mcp-config "$MCP_CONFIG" \
+          --add-dir "$SCRIPT_DIR/.." \
+          --settings "$SCRIPT_DIR/.claude/settings.json" \
+          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+          --max-turns "$turns" --output-format text \
+          -p "$prompt"
+      else
+        # Escalation: auto-approve for speed (short-lived, read-heavy)
+        claude --enable-auto-mode \
+          --mcp-config "$MCP_CONFIG" \
+          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+          --max-turns "$turns" --output-format text \
+          -p "$prompt"
+      fi
       ;;
     codex)
       codex exec -s danger-full-access \
