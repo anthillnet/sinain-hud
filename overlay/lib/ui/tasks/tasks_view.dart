@@ -69,6 +69,8 @@ class _TasksViewState extends State<TasksView> {
     });
   }
 
+  final Map<String, TextEditingController> _replyControllers = {};
+
   String _statusIndicator(SpawnTask task) {
     if (task.status == SpawnTaskStatus.spawned ||
         task.status == SpawnTaskStatus.polling) {
@@ -76,6 +78,8 @@ class _TasksViewState extends State<TasksView> {
       return dots[_dotCycle];
     }
     if (task.status == SpawnTaskStatus.completed) return 'OK';
+    if (task.status == SpawnTaskStatus.awaitingInput) return '?';
+    if (task.status == SpawnTaskStatus.awaitingPermission) return '⚠';
     return 'ERR'; // failed or timeout
   }
 
@@ -85,7 +89,30 @@ class _TasksViewState extends State<TasksView> {
       return const Color(0xFF88CCFF);
     }
     if (task.status == SpawnTaskStatus.completed) return const Color(0xFF00FF88);
+    if (task.status == SpawnTaskStatus.awaitingInput) return const Color(0xFFFFCC00);
+    if (task.status == SpawnTaskStatus.awaitingPermission) return const Color(0xFFFF8800);
     return const Color(0xFFFF3344);
+  }
+
+  void _sendReply(String taskId) {
+    final controller = _replyControllers[taskId];
+    if (controller == null || controller.text.trim().isEmpty) return;
+    final ws = context.read<WebSocketService>();
+    ws.send({'type': 'spawn_reply', 'taskId': taskId, 'text': controller.text.trim()});
+    controller.clear();
+    setState(() {
+      final task = _tasks.firstWhere((t) => t.taskId == taskId, orElse: () => _tasks.first);
+      task.status = SpawnTaskStatus.polling; // back to running
+      task.question = null;
+    });
+  }
+
+  void _sendPermissionDecision(String taskId, String decision) {
+    final ws = context.read<WebSocketService>();
+    ws.send({'type': 'spawn_permission_reply', 'taskId': taskId, 'decision': decision});
+    setState(() {
+      _tasks.removeWhere((t) => t.taskId == taskId);
+    });
   }
 
   String _formatElapsed(Duration d) {
@@ -113,6 +140,9 @@ class _TasksViewState extends State<TasksView> {
     _taskSub?.cancel();
     _tickTimer?.cancel();
     _fadeTimer?.cancel();
+    for (final c in _replyControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -212,6 +242,106 @@ class _TasksViewState extends State<TasksView> {
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                // Question from spawn — show input field
+                if (task.status == SpawnTaskStatus.awaitingInput && task.question != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 32, top: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          task.question!,
+                          style: TextStyle(
+                            fontFamily: 'JetBrainsMono',
+                            fontSize: (fs - 1).clamp(7.0, 22.0),
+                            color: const Color(0xFFFFCC00),
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        SizedBox(
+                          height: 28,
+                          child: TextField(
+                            controller: _replyControllers.putIfAbsent(
+                              task.taskId, () => TextEditingController(),
+                            ),
+                            style: TextStyle(
+                              fontFamily: 'JetBrainsMono',
+                              fontSize: (fs - 1).clamp(7.0, 22.0),
+                              color: Colors.white,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Reply...',
+                              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4),
+                                borderSide: BorderSide(color: const Color(0xFFFFCC00).withValues(alpha: 0.3)),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4),
+                                borderSide: BorderSide(color: const Color(0xFFFFCC00).withValues(alpha: 0.3)),
+                              ),
+                            ),
+                            onSubmitted: (_) => _sendReply(task.taskId),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Permission request — show Allow/Deny buttons
+                if (task.status == SpawnTaskStatus.awaitingPermission && task.permission != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 32, top: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            task.permission!.preview,
+                            style: TextStyle(
+                              fontFamily: 'JetBrainsMono',
+                              fontSize: (fs - 2).clamp(6.0, 20.0),
+                              color: const Color(0xFFFF8800),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => _sendPermissionDecision(task.taskId, 'allow'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF00FF88).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text('Allow', style: TextStyle(
+                              fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
+                              color: const Color(0xFF00FF88),
+                            )),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () => _sendPermissionDecision(task.taskId, 'deny'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFF3344).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text('Deny', style: TextStyle(
+                              fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
+                              color: const Color(0xFFFF3344),
+                            )),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],

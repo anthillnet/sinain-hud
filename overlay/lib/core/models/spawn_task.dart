@@ -1,4 +1,4 @@
-enum SpawnTaskStatus { spawned, polling, completed, failed, timeout }
+enum SpawnTaskStatus { spawned, polling, completed, failed, timeout, awaitingInput, awaitingPermission }
 
 class SpawnTask {
   final String taskId;
@@ -8,6 +8,10 @@ class SpawnTask {
   DateTime? completedAt;
   String? resultPreview;
   double opacity;
+  /// Question the spawn is asking the user (status=awaitingInput)
+  String? question;
+  /// Tool permission request (status=awaitingPermission)
+  SpawnPermission? permission;
 
   SpawnTask({
     required this.taskId,
@@ -17,6 +21,8 @@ class SpawnTask {
     this.completedAt,
     this.resultPreview,
     this.opacity = 1.0,
+    this.question,
+    this.permission,
   });
 
   factory SpawnTask.fromJson(Map<String, dynamic> json) {
@@ -31,6 +37,10 @@ class SpawnTask {
           ? DateTime.fromMillisecondsSinceEpoch((json['completedAt'] as num).toInt())
           : null,
       resultPreview: json['resultPreview'] as String?,
+      question: json['question'] as String?,
+      permission: json['permission'] is Map
+          ? SpawnPermission.fromJson(json['permission'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -38,6 +48,10 @@ class SpawnTask {
       status == SpawnTaskStatus.completed ||
       status == SpawnTaskStatus.failed ||
       status == SpawnTaskStatus.timeout;
+
+  bool get needsInput =>
+      status == SpawnTaskStatus.awaitingInput ||
+      status == SpawnTaskStatus.awaitingPermission;
 
   Duration get elapsed =>
       (completedAt ?? DateTime.now()).difference(startedAt);
@@ -54,8 +68,33 @@ class SpawnTask {
         return SpawnTaskStatus.failed;
       case 'timeout':
         return SpawnTaskStatus.timeout;
+      case 'awaiting_input':
+        return SpawnTaskStatus.awaitingInput;
+      case 'awaiting_permission':
+        return SpawnTaskStatus.awaitingPermission;
       default:
         return SpawnTaskStatus.spawned;
     }
+  }
+}
+
+class SpawnPermission {
+  final String tool;
+  final Map<String, dynamic> input;
+
+  SpawnPermission({required this.tool, required this.input});
+
+  factory SpawnPermission.fromJson(Map<String, dynamic> json) {
+    return SpawnPermission(
+      tool: json['tool'] as String? ?? 'unknown',
+      input: json['input'] is Map ? Map<String, dynamic>.from(json['input'] as Map) : {},
+    );
+  }
+
+  String get preview {
+    if (tool == 'Bash') return 'Bash: ${input['command'] ?? ''}';
+    if (tool == 'Edit') return 'Edit: ${input['file_path'] ?? ''}';
+    if (tool == 'Write') return 'Write: ${input['file_path'] ?? ''}';
+    return '$tool: ${input.toString().substring(0, 80)}';
   }
 }

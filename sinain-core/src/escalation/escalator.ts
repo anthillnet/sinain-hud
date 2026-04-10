@@ -520,11 +520,11 @@ ${recentLines.join("\n")}`;
         message: task,
         sessionKey: childSessionKey,
         lane: "subagent",
-        extraSystemPrompt: this.buildChildSystemPrompt(task, label),
+        extraSystemPrompt: await this.buildChildSystemPrompt(task, label),
         deliver: false,
         idempotencyKey: idemKey,
         label: label || undefined,
-      }, 45_000, { expectFinal: true });
+      }, 10 * 60_000, { expectFinal: true });
 
       log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
       this.stats.totalSpawnResponses++;
@@ -581,8 +581,44 @@ ${recentLines.join("\n")}`;
     }
   }
 
-  /** Build a focused system prompt for the child subagent. */
-  private buildChildSystemPrompt(task: string, label?: string): string {
+  /** Build a focused system prompt for the child subagent, enriched with knowledge. */
+  private async buildChildSystemPrompt(task: string, label?: string): Promise<string> {
+    // Fetch relevant knowledge facts (same enrichment as escalations)
+    let knowledgeSection = "";
+    if (this.deps.queryKnowledgeFacts) {
+      try {
+        const entities: string[] = [];
+        // Extract keywords from task text for entity matching
+        const techKeywords = [
+          "react-native", "react", "flutter", "swift", "kotlin", "python",
+          "typescript", "node", "docker", "sinain", "openclaw", "overlay",
+          "sense", "audio", "transcription", "escalation", "knowledge",
+        ];
+        const lower = task.toLowerCase();
+        for (const kw of techKeywords) {
+          if (lower.includes(kw)) entities.push(kw);
+        }
+        // Also extract capitalized proper nouns (file names, project names)
+        const nouns = task.match(/\b[A-Z][a-z]{2,}\b/g);
+        if (nouns) entities.push(...nouns.map(n => n.toLowerCase()).slice(0, 3));
+
+        if (entities.length > 0) {
+          const facts = await this.deps.queryKnowledgeFacts(entities.slice(0, 5), 5);
+          if (facts && facts.trim().length > 20) {
+            knowledgeSection = `\n## Relevant Knowledge\n${facts.trim()}`;
+          }
+        }
+      } catch (err) {
+        log(TAG, `spawn knowledge enrichment failed: ${String(err)}`);
+      }
+    }
+
+    // Include latest digest for screen/audio context
+    const latestDigest = this.deps.feedBuffer.latest()?.text;
+    const contextSection = latestDigest
+      ? `\n## Current User Context\n${latestDigest.slice(0, 500)}`
+      : "";
+
     return [
       "# Subagent Context",
       "",
@@ -596,8 +632,9 @@ ${recentLines.join("\n")}`;
       "1. Stay focused — do your assigned task, nothing else",
       "2. Your final message will be reported to the requester",
       "3. Be concise but informative",
-      "",
-      label ? `Label: ${label}` : "",
+      label ? `\nLabel: ${label}` : "",
+      knowledgeSection,
+      contextSection,
     ].filter(Boolean).join("\n");
   }
 
@@ -633,19 +670,9 @@ ${recentLines.join("\n")}`;
       return;
     }
 
-    const maxWaitMs = 5 * 60 * 1000; // 5 minutes
     const pollIntervalMs = 5000; // 5 seconds
 
     const poll = async (): Promise<void> => {
-      const elapsed = Date.now() - task.startedAt;
-      if (elapsed > maxWaitMs) {
-        log(TAG, `spawn-task timeout: taskId=${taskId}`);
-        this.broadcastTaskEvent(taskId, "timeout", task.label, task.startedAt);
-        this.pendingSpawnTasks.delete(taskId);
-        savePendingTasks(this.pendingSpawnTasks);
-        this.finishPoll();
-        return;
-      }
 
       if (!this.wsClient.isConnected) {
         // Retry later
