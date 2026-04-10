@@ -203,6 +203,9 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
   });
 }
 
+/** Pending spawn questions/permissions — resolve callbacks keyed by "ask:{taskId}" or "perm:{taskId}" */
+const pendingSpawnQuestions = new Map<string, (answer: string) => void>();
+
 export function createAppServer(deps: ServerDeps) {
   const { config, feedBuffer, senseBuffer, wsHandler } = deps;
   let senseInBytes = 0;
@@ -617,6 +620,118 @@ export function createAppServer(deps: ServerDeps) {
         }
         const resp = deps.respondSpawn?.(id, result) ?? { ok: false, error: "spawn not configured" };
         res.end(JSON.stringify(resp));
+        return;
+      }
+
+      // ── /spawn/ask (MCP tool posts question, blocks until user replies) ──
+      if (req.method === "POST" && url.pathname === "/spawn/ask") {
+        const body = await readBody(req, 8192);
+        const { taskId, question } = JSON.parse(body);
+        if (!taskId || !question) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing taskId or question" }));
+          return;
+        }
+        // Broadcast question to overlay
+        deps.wsHandler?.broadcastRaw({
+          type: "spawn_task",
+          taskId,
+          label: "user-command",
+          status: "awaiting_input",
+          startedAt: Date.now(),
+          question,
+        });
+        // Hold response open until user replies (or timeout after 5 min)
+        const answer = await new Promise<string>((resolve) => {
+          const key = `ask:${taskId}`;
+          pendingSpawnQuestions.set(key, resolve);
+          setTimeout(() => {
+            if (pendingSpawnQuestions.has(key)) {
+              pendingSpawnQuestions.delete(key);
+              resolve("(no reply — user did not respond within 5 minutes)");
+            }
+          }, 5 * 60_000);
+        });
+        res.end(JSON.stringify({ ok: true, answer }));
+        return;
+      }
+
+      // ── /spawn/reply (overlay sends answer to a spawn question) ──
+      if (req.method === "POST" && url.pathname === "/spawn/reply") {
+        const body = await readBody(req, 8192);
+        const { taskId, text } = JSON.parse(body);
+        const key = `ask:${taskId}`;
+        const resolve = pendingSpawnQuestions.get(key);
+        if (resolve) {
+          pendingSpawnQuestions.delete(key);
+          resolve(text || "(empty reply)");
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.end(JSON.stringify({ ok: false, error: "no pending question for this task" }));
+        }
+        return;
+      }
+
+      // ── /spawn/approve (Claude hook posts tool permission, blocks until user decides) ──
+      if (req.method === "POST" && url.pathname === "/spawn/approve") {
+        const body = await readBody(req, 16384);
+        const hookInput = JSON.parse(body);
+        const tool = hookInput?.tool_name || hookInput?.toolName || "unknown";
+        const input = hookInput?.tool_input || hookInput?.input || {};
+
+        // Auto-approve safe read-only tools
+        const safeTools = ["Read", "Glob", "Grep", "Ls", "Cat"];
+        if (safeTools.includes(tool) || tool.startsWith("mcp__sinain")) {
+          res.end(JSON.stringify({
+            hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
+          }));
+          return;
+        }
+
+        const taskId = `perm-${Date.now()}`;
+        // Broadcast permission request to overlay
+        deps.wsHandler?.broadcastRaw({
+          type: "spawn_task",
+          taskId,
+          label: "permission",
+          status: "awaiting_permission",
+          startedAt: Date.now(),
+          permission: { tool, input },
+        });
+        // Hold response open until user decides
+        const decision = await new Promise<string>((resolve) => {
+          const key = `perm:${taskId}`;
+          pendingSpawnQuestions.set(key, resolve);
+          setTimeout(() => {
+            if (pendingSpawnQuestions.has(key)) {
+              pendingSpawnQuestions.delete(key);
+              resolve("deny"); // default deny on timeout
+            }
+          }, 2 * 60_000);
+        });
+        res.end(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: decision === "allow" ? "allow" : "deny",
+            permissionDecisionReason: decision === "allow" ? "User approved via HUD" : "User denied or timed out",
+          },
+        }));
+        return;
+      }
+
+      // ── /spawn/permission-reply (overlay sends allow/deny) ──
+      if (req.method === "POST" && url.pathname === "/spawn/permission-reply") {
+        const body = await readBody(req, 1024);
+        const { taskId, decision } = JSON.parse(body);
+        const key = `perm:${taskId}`;
+        const resolve = pendingSpawnQuestions.get(key);
+        if (resolve) {
+          pendingSpawnQuestions.delete(key);
+          resolve(decision || "deny");
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.end(JSON.stringify({ ok: false, error: "no pending permission for this task" }));
+        }
         return;
       }
 

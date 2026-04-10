@@ -28,7 +28,7 @@ export interface PingMessage {
 }
 
 /** sinain-core → Overlay: spawn task lifecycle update */
-export type SpawnTaskStatus = "spawned" | "polling" | "completed" | "failed" | "timeout";
+export type SpawnTaskStatus = "spawned" | "polling" | "completed" | "failed" | "timeout" | "awaiting_input" | "awaiting_permission";
 
 export interface SpawnTaskMessage {
   type: "spawn_task";
@@ -38,6 +38,10 @@ export interface SpawnTaskMessage {
   startedAt: number;
   completedAt?: number;
   resultPreview?: string;
+  /** Question the spawn is asking the user (status=awaiting_input) */
+  question?: string;
+  /** Tool permission request (status=awaiting_permission) */
+  permission?: { tool: string; input: Record<string, unknown> };
 }
 
 /** Overlay → sinain-core: user typed a message */
@@ -78,6 +82,20 @@ export interface SpawnCommandMessage {
   text: string;
 }
 
+/** Overlay → sinain-core: reply to a spawn question */
+export interface SpawnReplyMessage {
+  type: "spawn_reply";
+  taskId: string;
+  text: string;
+}
+
+/** Overlay → sinain-core: reply to a spawn permission request */
+export interface SpawnPermissionReplyMessage {
+  type: "spawn_permission_reply";
+  taskId: string;
+  decision: "allow" | "deny";
+}
+
 /** Cost update broadcast to overlay. */
 export interface CostMessage {
   type: "cost";
@@ -108,7 +126,7 @@ export interface CostSnapshot {
 }
 
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {
