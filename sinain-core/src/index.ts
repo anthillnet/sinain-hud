@@ -16,6 +16,7 @@ import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
 import { FeedbackStore } from "./learning/feedback-store.js";
 import { SignalCollector } from "./learning/signal-collector.js";
+import { LocalCurationService } from "./learning/local-curation.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
@@ -30,6 +31,266 @@ const TAG = "core";
 function resolveWorkspace(): string {
   const raw = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
   return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
+}
+
+/** Resolve the local memory directory (independent of OpenClaw workspace). */
+function resolveLocalMemoryDir(): string {
+  const raw = process.env.SINAIN_MEMORY_DIR || `${process.env.HOME}/.sinain/memory`;
+  return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
+}
+
+/**
+ * Query knowledge facts from both local and workspace databases.
+ * Checks local (~/.sinain/memory) first, then workspace (~/.openclaw/workspace/memory).
+ * Merges results, deduplicates, returns up to maxFacts.
+ */
+async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve } = await import("node:path");
+  const { dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  // Candidate database paths (local first, then workspace)
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  // Candidate script paths
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptCandidates = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
+    resolve(__dir, "..", "sinain-memory", "graph_query.py"),
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+
+  const results: string[] = [];
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
+      if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
+      const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
+      if (out) results.push(out);
+    } catch { /* skip failed db */ }
+  }
+
+  if (results.length === 0) return "";
+  if (results.length === 1) return results[0];
+
+  // Merge and deduplicate lines from both sources
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const block of results) {
+    for (const line of block.split("\n")) {
+      const key = line.replace(/\(confidence:.*$/, "").trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        merged.push(line);
+      }
+    }
+  }
+  return merged.slice(0, maxFacts).join("\n");
+}
+
+/** List all entities from both local and workspace knowledge graphs. */
+async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptCandidates = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
+    resolve(__dir, "..", "sinain-memory", "graph_query.py"),
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+
+  const allFacts: any[] = [];
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const out = execFileSync("python3", [
+        scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
+      ], { timeout: 5000, encoding: "utf-8" });
+      const parsed = JSON.parse(out);
+      if (parsed.facts) allFacts.push(...parsed.facts);
+    } catch { /* skip */ }
+  }
+
+  // Deduplicate by entityId, merge
+  const seen = new Set<string>();
+  const unique = allFacts.filter(f => {
+    const id = f.entityId || "";
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  return JSON.stringify(unique.slice(0, max));
+}
+
+/** Export knowledge facts as a portable JSON module. */
+async function exportKnowledgeMulti(domain: string | null, max: number): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptCandidates = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+
+  const allFacts: any[] = [];
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const out = execFileSync("python3", [
+        scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
+      ], { timeout: 5000, encoding: "utf-8" });
+      const parsed = JSON.parse(out);
+      if (parsed.facts) allFacts.push(...parsed.facts);
+    } catch { /* skip */ }
+  }
+
+  // Deduplicate
+  const seen = new Set<string>();
+  let facts = allFacts.filter(f => {
+    const id = f.entityId || "";
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  // Filter by domain if specified
+  if (domain) {
+    facts = facts.filter(f => f.domain === domain);
+  }
+
+  return JSON.stringify({
+    format: "sinain-knowledge-export",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    domain: domain || "all",
+    count: facts.length,
+    facts: facts.slice(0, max),
+  }, null, 2);
+}
+
+/** Import knowledge facts from a portable JSON module into the local graph. */
+async function importKnowledgeToLocal(data: string): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const { mkdirSync } = await import("node:fs");
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return JSON.stringify({ ok: false, error: "Invalid JSON" });
+  }
+
+  const facts = parsed.facts || (Array.isArray(parsed) ? parsed : null);
+  if (!facts || !Array.isArray(facts) || facts.length === 0) {
+    const keys = Object.keys(parsed).join(", ");
+    return JSON.stringify({ ok: false, error: `No 'facts' array found. Expected sinain knowledge export format: {"facts":[...]}. Got keys: ${keys}` });
+  }
+
+  const localDir = resolveLocalMemoryDir();
+  mkdirSync(localDir, { recursive: true });
+  const dbPath = `${localDir}/knowledge-graph.db`;
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptsDir = resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory");
+
+  // Convert facts to graph ops for knowledge_integrator
+  const graphOps = facts.map((f: any) => ({
+    op: "assert",
+    entity: f.entity || f.entityId?.replace(/^fact:/, "").replace(/-[a-f0-9]{12}$/, "") || "unknown",
+    attribute: f.attribute || "value",
+    value: f.value || "",
+    confidence: parseFloat(f.confidence || "0.7"),
+    domain: f.domain || "",
+  }));
+
+  try {
+    // Use triplestore directly via Python
+    const script = `
+import json, sys
+sys.path.insert(0, "${scriptsDir}")
+from triplestore import TripleStore
+import hashlib
+
+db_path = "${dbPath}"
+store = TripleStore(db_path)
+ops = json.loads(sys.stdin.read())
+stats = {"asserted": 0, "skipped": 0}
+
+for op in ops:
+    entity = op.get("entity", "")
+    value = op.get("value", "")
+    if not entity or not value:
+        stats["skipped"] += 1
+        continue
+
+    h = hashlib.sha256(f"{entity}:{op.get('attribute','')}:{value}".encode()).hexdigest()[:12]
+    slug = entity.replace(" ", "-").lower()[:30]
+    entity_id = f"fact:{slug}-{h}"
+
+    # Check if already exists
+    existing = store.entity(entity_id)
+    if existing:
+        stats["skipped"] += 1
+        continue
+
+    tx = store.begin_tx("import", metadata=json.dumps({"source": "web-import"}))
+    store.assert_triple(tx, entity_id, "entity", entity)
+    store.assert_triple(tx, entity_id, "attribute", op.get("attribute", "value"))
+    store.assert_triple(tx, entity_id, "value", value)
+    store.assert_triple(tx, entity_id, "confidence", str(op.get("confidence", 0.7)))
+    store.assert_triple(tx, entity_id, "first_seen", "${new Date().toISOString()}")
+    store.assert_triple(tx, entity_id, "last_reinforced", "${new Date().toISOString()}")
+    store.assert_triple(tx, entity_id, "reinforce_count", "1")
+    if op.get("domain"):
+        store.assert_triple(tx, entity_id, "domain", op["domain"])
+    stats["asserted"] += 1
+
+store.close()
+print(json.dumps(stats))
+`;
+
+    const result = execFileSync("python3", ["-c", script], {
+      input: JSON.stringify(graphOps),
+      timeout: 10_000,
+      encoding: "utf-8",
+    });
+
+    const stats = JSON.parse(result.trim());
+    return JSON.stringify({ ok: true, stats, imported: stats.asserted, skipped: stats.skipped });
+  } catch (err: any) {
+    return JSON.stringify({ ok: false, error: err.message?.slice(0, 200) });
+  }
 }
 
 async function main() {
@@ -78,6 +339,11 @@ async function main() {
     ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
     : null;
 
+  // ── Initialize local knowledge pipeline ──
+  const localCuration = new LocalCurationService();
+  localCuration.distillPendingSession(); // Recover any session saved before a force-kill
+  localCuration.startPeriodicCuration();
+
   // ── Initialize trait engine ──
   const traitRoster = loadTraitRoster(config.traitConfig.configPath);
   const traitEngine = new TraitEngine(traitRoster, config.traitConfig);
@@ -90,17 +356,7 @@ async function main() {
     openclawConfig: config.openclawConfig,
     profiler,
     feedbackStore: feedbackStore ?? undefined,
-    queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
-      const workspace = resolveWorkspace();
-      const dbPath = `${workspace}/memory/knowledge-graph.db`;
-      const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
-      try {
-        const { execFileSync } = await import("node:child_process");
-        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
-        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-        return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
-      } catch { return ""; }
-    },
+    queryKnowledgeFacts: queryKnowledgeFactsMulti,
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -420,24 +676,19 @@ async function main() {
     getEscalationPending: () => escalator.getPendingHttp(),
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
 
-    // Knowledge graph integration
+    // Knowledge graph integration (checks both local and workspace DBs)
     getKnowledgeDocPath: () => {
-      const workspace = resolveWorkspace();
-      const p = `${workspace}/memory/sinain-knowledge.md`;
-      try { if (existsSync(p)) return p; } catch {}
+      // Check local first, then workspace
+      const localPath = `${resolveLocalMemoryDir()}/sinain-knowledge.md`;
+      const workspacePath = `${resolveWorkspace()}/memory/sinain-knowledge.md`;
+      try { if (existsSync(localPath)) return localPath; } catch {}
+      try { if (existsSync(workspacePath)) return workspacePath; } catch {}
       return null;
     },
-    queryKnowledgeFacts: async (entities: string[], maxFacts: number) => {
-      const workspace = resolveWorkspace();
-      const dbPath = `${workspace}/memory/knowledge-graph.db`;
-      const scriptPath = `${workspace}/sinain-memory/graph_query.py`;
-      try {
-        const { execFileSync } = await import("node:child_process");
-        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
-        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-        return execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" });
-      } catch { return ""; }
-    },
+    queryKnowledgeFacts: queryKnowledgeFactsMulti,
+    listKnowledgeEntities: listKnowledgeEntitiesMulti,
+    exportKnowledge: exportKnowledgeMulti,
+    importKnowledge: importKnowledgeToLocal,
 
     // Spawn background agent task (from HUD Shift+Enter or bare agent POST /spawn)
     onSpawnCommand: (text: string) => {
@@ -563,6 +814,26 @@ async function main() {
     signalCollector?.destroy();
     feedbackStore?.destroy();
     traceStore?.destroy();
+
+    // Save session knowledge — write feed items to disk FIRST (instant),
+    // then attempt LLM distillation. If tsx force-kills before distillation
+    // finishes, the saved file is recovered on next startup.
+    localCuration.stop();
+    const feedItems = feedBuffer.query(0);
+    try {
+      localCuration.savePendingSession(feedItems);
+    } catch (err: any) {
+      warn(TAG, `failed to save pending session: ${err.message?.slice(0, 100)}`);
+    }
+    try {
+      if (feedItems.length >= 3) {
+        log(TAG, `distilling session (${feedItems.length} feed items)...`);
+        await localCuration.distillSession(feedItems);
+      }
+    } catch (err: any) {
+      warn(TAG, `session distillation failed (will retry on next startup): ${err.message?.slice(0, 100)}`);
+    }
+
     await server.destroy();
     log(TAG, "goodbye");
     process.exit(0);

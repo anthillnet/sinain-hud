@@ -221,9 +221,13 @@ Call sinain_get_escalation to see the full context, then call sinain_respond wit
 Response guidelines: 5-10 sentences, address errors first, reference specific screen/audio context, never NO_REPLY. Max 4000 chars for coding context, 3000 otherwise.'
 
 HEARTBEAT_PROMPT='You are the sinain HUD agent. Run the heartbeat cycle:
-1. Call sinain_heartbeat_tick with a brief session summary
-2. If the result contains a suggestion, post it to HUD via sinain_post_feed
-3. Call sinain_get_feedback to review recent scores'
+1. Call sinain_heartbeat_tick with a brief session summary (runs signal analysis, session distillation, knowledge integration, insight synthesis)
+2. If the result contains a suggestion or insight, post it to HUD via sinain_post_feed
+3. Call sinain_get_knowledge to review the merged knowledge document (draws from both local and workspace databases)
+4. Optionally call sinain_knowledge_query with relevant entities to check long-term knowledge state
+5. Call sinain_get_feedback to review recent escalation scores
+
+Knowledge context: sinain-core maintains two knowledge databases — local (session distillation) and workspace (heartbeat curation). The knowledge tools query both via the sinain-core API. Facts have confidence decay (60-day half-life).'
 
 # --- Main loop ---
 
