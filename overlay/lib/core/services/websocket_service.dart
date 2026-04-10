@@ -21,6 +21,7 @@ class WebSocketService extends ChangeNotifier {
   String _audioState = 'muted';
   String _micState = 'muted';
   String _screenState = 'off';
+  String _escalationState = 'active';
   String _envPath = '';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
@@ -47,6 +48,7 @@ class WebSocketService extends ChangeNotifier {
   String get audioState => _audioState;
   String get micState => _micState;
   String get screenState => _screenState;
+  String get escalationState => _escalationState;
   String get envPath => _envPath;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
@@ -171,6 +173,11 @@ class WebSocketService extends ChangeNotifier {
           final screen = statusData['screen'] as String?;
           if (screen != null && screen != _screenState) {
             _screenState = screen;
+            notifyListeners();
+          }
+          final escalation = statusData['escalation'] as String?;
+          if (escalation != null && escalation != _escalationState) {
+            _escalationState = escalation;
             notifyListeners();
           }
           final envPath = statusData['envPath'] as String?;
