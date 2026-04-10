@@ -21,6 +21,8 @@ export interface CommandDeps {
   onSpawnCommand?: (text: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
+  /** Toggle escalation pause/resume — returns true if now active */
+  onToggleEscalation: () => boolean;
 }
 
 /**
@@ -159,6 +161,16 @@ function handleCommand(action: string, deps: CommandDeps): void {
         "normal"
       );
       log(TAG, `screen toggled ${nowActive ? "ON" : "OFF"}`);
+      break;
+    }
+    case "toggle_escalation": {
+      const nowActive = deps.onToggleEscalation();
+      wsHandler.updateState({ escalation: nowActive ? "active" : "paused" });
+      wsHandler.broadcast(
+        nowActive ? "Escalations resumed" : "Escalations paused — context still accumulating",
+        "normal"
+      );
+      log(TAG, `escalation toggled ${nowActive ? "ON" : "OFF"}`);
       break;
     }
     case "open_settings": {

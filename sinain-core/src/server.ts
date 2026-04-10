@@ -174,6 +174,7 @@ export interface ServerDeps {
   feedbackStore?: FeedbackStore;
   setUserCommand?: (text: string) => void;
   getEscalationPending?: () => any;
+  isEscalationPaused?: () => boolean;
   respondEscalation?: (id: string, response: string) => any;
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
@@ -565,6 +566,11 @@ export function createAppServer(deps: ServerDeps) {
 
       // ── /escalation/pending ──
       if (req.method === "GET" && url.pathname === "/escalation/pending") {
+        const paused = deps.isEscalationPaused?.() ?? false;
+        if (paused) {
+          res.end(JSON.stringify({ ok: true, escalation: null, paused: true }));
+          return;
+        }
         const pending = deps.getEscalationPending?.();
         res.end(JSON.stringify({ ok: true, escalation: pending ?? null }));
         return;
