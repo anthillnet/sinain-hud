@@ -21,6 +21,7 @@ Self-test:
 """
 
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS triples (
     value_type    TEXT    NOT NULL DEFAULT 'string',
     retracted     INTEGER NOT NULL DEFAULT 0,
     retracted_tx  INTEGER,
+    valid_to      TEXT,
     created_at    TEXT    NOT NULL
 );
 
@@ -88,6 +90,24 @@ def _entity_type(entity_id: str) -> str:
     return entity_id[:colon] if colon > 0 else "unknown"
 
 
+def decayed_confidence(
+    confidence: float, created_at: str, half_life_days: int = 60
+) -> float:
+    """Apply exponential time-decay to a confidence score.
+
+    Facts lose half their confidence every `half_life_days` without reinforcement.
+    Inspired by mempalace's temporal validity model.
+    """
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - created).days
+        if age_days <= 0:
+            return confidence
+        return confidence * math.exp(-0.693 * age_days / half_life_days)
+    except (ValueError, TypeError):
+        return confidence
+
+
 class TripleStore:
     """SQLite-backed EAV triple store with WAL mode and 4 covering indexes."""
 
@@ -99,7 +119,15 @@ class TripleStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.executescript(_SCHEMA_SQL)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Run schema migrations for existing databases."""
+        # Add valid_to column if missing (added in memory-improvements)
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(triples)").fetchall()]
+        if "valid_to" not in cols:
+            self._conn.execute("ALTER TABLE triples ADD COLUMN valid_to TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -173,21 +201,22 @@ class TripleStore:
     ) -> int:
         """Retract triples matching entity+attribute (and optionally value).
 
-        Sets retracted=1 and retracted_tx to the retraction transaction.
+        Sets retracted=1, retracted_tx, and valid_to (temporal closure).
         The original tx_id is preserved for temporal (as_of_tx) queries.
         Returns the count of triples retracted.
         """
+        now = _now_iso()
         if value is not None:
             cur = self._conn.execute(
-                "UPDATE triples SET retracted = 1, retracted_tx = ? "
+                "UPDATE triples SET retracted = 1, retracted_tx = ?, valid_to = ? "
                 "WHERE entity_id = ? AND attribute = ? AND value = ? AND retracted = 0",
-                (tx_id, entity_id, attribute, value),
+                (tx_id, now, entity_id, attribute, value),
             )
         else:
             cur = self._conn.execute(
-                "UPDATE triples SET retracted = 1, retracted_tx = ? "
+                "UPDATE triples SET retracted = 1, retracted_tx = ?, valid_to = ? "
                 "WHERE entity_id = ? AND attribute = ? AND retracted = 0",
-                (tx_id, entity_id, attribute),
+                (tx_id, now, entity_id, attribute),
             )
         self._conn.commit()
         return cur.rowcount
@@ -215,6 +244,26 @@ class TripleStore:
                 "ORDER BY attribute, id",
                 (entity_id,),
             ).fetchall()
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(row["attribute"], []).append(row["value"])
+        return result
+
+    def entity_as_of(self, entity_id: str, date: datetime) -> dict[str, list[str]]:
+        """Return entity attributes as they were on a specific date.
+
+        Uses created_at and valid_to for date-based temporal queries
+        (vs as_of_tx which uses transaction ordering).
+        """
+        date_iso = date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        rows = self._conn.execute(
+            "SELECT attribute, value FROM triples "
+            "WHERE entity_id = ? AND created_at <= ? "
+            "AND (valid_to IS NULL OR valid_to > ?) "
+            "AND retracted = 0 "
+            "ORDER BY attribute, id",
+            (entity_id, date_iso, date_iso),
+        ).fetchall()
         result: dict[str, list[str]] = {}
         for row in rows:
             result.setdefault(row["attribute"], []).append(row["value"])
@@ -472,6 +521,28 @@ def _self_test() -> None:
         ent_before = store.entity("signal:2026-03-01", as_of_tx=tx1)
         assert "priority" in ent_before, "as_of_tx should see pre-retraction state"
         print("  [OK] as_of_tx isolation")
+
+        # valid_to set on retraction
+        retracted_row = store._conn.execute(
+            "SELECT valid_to FROM triples WHERE entity_id = 'signal:2026-03-01' AND attribute = 'priority'"
+        ).fetchone()
+        assert retracted_row and retracted_row["valid_to"] is not None, "valid_to should be set on retraction"
+        print("  [OK] valid_to set on retraction")
+
+        # entity_as_of
+        future = datetime.now(timezone.utc) + timedelta(days=1)
+        ent_future = store.entity_as_of("signal:2026-03-01", future)
+        assert "description" in ent_future, "entity_as_of should find active triples"
+        assert "priority" not in ent_future, "entity_as_of should exclude retracted triples"
+        print("  [OK] entity_as_of temporal query")
+
+        # Confidence decay utility
+        fresh_conf = decayed_confidence(0.8, _now_iso())
+        assert abs(fresh_conf - 0.8) < 0.01, f"Fresh fact should keep confidence: {fresh_conf}"
+        old_date = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        old_conf = decayed_confidence(0.8, old_date)
+        assert 0.35 < old_conf < 0.45, f"60-day-old fact should decay to ~0.4: {old_conf}"
+        print(f"  [OK] Confidence decay: fresh=0.8→{fresh_conf:.2f}, 60d=0.8→{old_conf:.2f}")
 
         # GC (retracted triples are fresh, so gc with 0 days should get them)
         gc_count = store.gc(older_than_days=0)

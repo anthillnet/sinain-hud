@@ -55,6 +55,56 @@ When responding to escalations:
 4. Optionally call `sinain_get_knowledge` to review the portable knowledge document
 5. Optionally call `sinain_get_feedback` to review recent escalation scores
 
+## Knowledge System
+
+Knowledge is stored in a **dual-database** architecture with two SQLite triplestore databases:
+
+| Database | Path | Written by |
+|----------|------|------------|
+| **Local** | `~/.sinain/memory/knowledge-graph.db` | `LocalCurationService` (session distillation on shutdown, periodic curation every 30 min) |
+| **Workspace** | `~/.openclaw/workspace/memory/knowledge-graph.db` | Heartbeat curation scripts (`sinain_heartbeat_tick`) |
+
+### Knowledge Tools
+
+| Tool | What it does |
+|------|-------------|
+| `sinain_get_knowledge` | Read the portable knowledge document (playbook + top facts) from workspace |
+| `sinain_knowledge_query` | Query facts by entity/keyword — queries **both** DBs via sinain-core API |
+| `sinain_distill_session` | Explicitly distill current session into knowledge updates |
+
+### HTTP Knowledge API (sinain-core, port 9500)
+
+These endpoints query **both** databases and merge results:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /knowledge` | Portable knowledge document |
+| `GET /knowledge/facts?entities=X&max=N` | Query facts by keyword tags |
+| `GET /knowledge/entities?max=N` | List all entities with attributes |
+| `GET /knowledge/export?domain=X&max=N` | Export facts as portable JSON |
+| `POST /knowledge/import` | Import facts (deduplicates automatically) |
+| `GET /knowledge/ui` | Web UI for browsing/managing knowledge |
+
+### How Knowledge Flows
+
+```
+Session (screen + audio) → LocalCurationService → Local DB
+                                                      ↓ (queried together)
+Heartbeat tick → curation scripts ──────────→ Workspace DB
+                                                      ↓
+Knowledge API (localhost:9500) ← merges both DBs ← queries
+```
+
+- **Local DB** gets real-time session knowledge (audio transcripts, screen patterns, German lessons, etc.)
+- **Workspace DB** gets heartbeat-curated knowledge (playbook patterns, feedback analysis)
+- The Knowledge API merges both — use `sinain_knowledge_query` for combined results
+- Facts have confidence decay (60-day half-life) — reinforcement resets the clock
+- Export/import via `/knowledge/export` → `/knowledge/import` enables cross-instance transfer
+
+### Using Knowledge in Escalation Responses
+
+When responding to escalations, call `sinain_knowledge_query` with relevant entities to enrich your response with long-term knowledge. Example: if the user is working on German grammar, query `sinain_knowledge_query({ entities: ["german", "grammar"] })` to retrieve previously learned patterns.
+
 ## Spawning Background Tasks
 
 When an escalation suggests deeper research would help:

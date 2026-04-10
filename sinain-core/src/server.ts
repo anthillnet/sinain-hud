@@ -12,6 +12,142 @@ import { log, error } from "./log.js";
 const TAG = "server";
 const MAX_SENSE_BODY = 2 * 1024 * 1024;
 
+const KNOWLEDGE_UI_HTML = `<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><title>Sinain Knowledge</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 20px; }
+  h1 { color: #00ff88; font-size: 18px; }
+  h2 { color: #00cc66; font-size: 14px; margin-top: 20px; }
+  .card { background: #16213e; border-radius: 8px; padding: 12px; margin: 8px 0; border-left: 3px solid #00ff88; }
+  .card .domain { color: #00ff88; font-size: 11px; text-transform: uppercase; }
+  .card .value { margin-top: 4px; }
+  .card .meta { color: #888; font-size: 11px; margin-top: 4px; }
+  .controls { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+  button { background: #00ff88; color: #1a1a2e; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+  button:hover { background: #00cc66; }
+  button.secondary { background: #333; color: #ccc; }
+  input, select { background: #16213e; color: #e0e0e0; border: 1px solid #333; padding: 8px; border-radius: 4px; }
+  #status { color: #00ff88; font-size: 12px; margin: 8px 0; }
+  #facts { max-height: 70vh; overflow-y: auto; }
+  .import-area { margin: 16px 0; }
+  textarea { width: 100%; height: 100px; background: #16213e; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 12px; }
+</style>
+</head><body>
+<h1>Sinain Knowledge Graph</h1>
+<div class="controls">
+  <input id="search" type="text" placeholder="Search entities..." oninput="filterFacts()">
+  <select id="domainFilter" onchange="filterFacts()"><option value="">All domains</option></select>
+  <button onclick="loadFacts()">Refresh</button>
+  <button onclick="exportKnowledge()" class="secondary">Export</button>
+  <button onclick="exportDomain()" class="secondary">Export Domain</button>
+</div>
+<div id="status">Loading...</div>
+<div id="facts"></div>
+
+<h2>Import Knowledge</h2>
+<div class="import-area">
+  <textarea id="importData" placeholder="Paste exported JSON here, or enter a URL to fetch from another sinain instance..."></textarea>
+  <div class="controls">
+    <button onclick="importKnowledge()">Import</button>
+    <button onclick="importFromUrl()" class="secondary">Import from URL</button>
+  </div>
+</div>
+
+<script>
+let allFacts = [];
+
+async function loadFacts() {
+  document.getElementById('status').textContent = 'Loading...';
+  try {
+    const res = await fetch('/knowledge/entities?max=200');
+    const data = await res.json();
+    allFacts = typeof data.entities === 'string' ? JSON.parse(data.entities) : data.entities;
+    const domains = [...new Set(allFacts.map(f => f.domain).filter(Boolean))].sort();
+    const sel = document.getElementById('domainFilter');
+    sel.innerHTML = '<option value="">All domains (' + allFacts.length + ')</option>' +
+      domains.map(d => '<option value="' + d + '">' + d + ' (' + allFacts.filter(f=>f.domain===d).length + ')</option>').join('');
+    document.getElementById('status').textContent = allFacts.length + ' entities loaded';
+    filterFacts();
+  } catch (e) { document.getElementById('status').textContent = 'Error: ' + e.message; }
+}
+
+function filterFacts() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const domain = document.getElementById('domainFilter').value;
+  const filtered = allFacts.filter(f => {
+    if (domain && f.domain !== domain) return false;
+    if (q) {
+      const text = JSON.stringify(f).toLowerCase();
+      return text.includes(q);
+    }
+    return true;
+  });
+  document.getElementById('facts').innerHTML = filtered.map(f =>
+    '<div class="card">' +
+    '<span class="domain">' + (f.domain||'general') + '</span>' +
+    '<div class="value">' + esc(f.entity || f.entityId || '?') + ': ' + esc(f.value||'') + '</div>' +
+    '<div class="meta">confidence: ' + (f.confidence||'?') + ' | confirmed: ' + (f.reinforce_count||1) + 'x | id: ' + esc(f.entityId||'') + '</div>' +
+    '</div>'
+  ).join('');
+  document.getElementById('status').textContent = filtered.length + ' of ' + allFacts.length + ' entities';
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function exportKnowledge() {
+  window.open('/knowledge/export?max=500', '_blank');
+}
+
+async function exportDomain() {
+  const domain = document.getElementById('domainFilter').value;
+  if (!domain) { alert('Select a domain first'); return; }
+  window.open('/knowledge/export?domain=' + encodeURIComponent(domain) + '&max=500', '_blank');
+}
+
+async function importKnowledge() {
+  const el = document.getElementById('status');
+  const data = document.getElementById('importData').value.trim();
+  if (!data) { el.textContent = 'Error: paste JSON data first'; return; }
+  el.textContent = 'Importing...';
+  try {
+    JSON.parse(data); // validate JSON first
+  } catch(e) { el.textContent = 'Error: invalid JSON — ' + e.message; return; }
+  try {
+    const res = await fetch('/knowledge/import', { method: 'POST', body: data });
+    const text = await res.text();
+    console.log('Import response:', text);
+    const result = JSON.parse(text);
+    el.textContent = result.ok
+      ? 'Imported ' + (result.imported||0) + ' facts, skipped ' + (result.skipped||0)
+      : 'Error: ' + (result.error||'unknown');
+    if (result.ok) { document.getElementById('importData').value = ''; loadFacts(); }
+  } catch (e) { el.textContent = 'Import failed: ' + e.message; console.error(e); }
+}
+
+async function importFromUrl() {
+  const el = document.getElementById('status');
+  const input = document.getElementById('importData').value.trim();
+  if (!input.startsWith('http')) { el.textContent = 'Error: enter a URL starting with http'; return; }
+  el.textContent = 'Fetching from ' + input + '...';
+  try {
+    const res = await fetch(input);
+    if (!res.ok) { el.textContent = 'Fetch failed: HTTP ' + res.status; return; }
+    const data = await res.text();
+    el.textContent = 'Fetched ' + data.length + ' bytes, importing...';
+    const importRes = await fetch('/knowledge/import', { method: 'POST', body: data });
+    const result = await importRes.json();
+    el.textContent = result.ok
+      ? 'Imported ' + (result.imported||0) + ' facts from URL, skipped ' + (result.skipped||0)
+      : 'Error: ' + (result.error||'unknown');
+    if (result.ok) { document.getElementById('importData').value = ''; loadFacts(); }
+  } catch (e) { el.textContent = 'Fetch error: ' + e.message + ' (CORS may block cross-origin URLs — use export file instead)'; console.error(e); }
+}
+
+loadFacts();
+</script>
+</body></html>`;
+
 /** Server epoch — lets clients detect restarts. */
 const serverEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -41,6 +177,9 @@ export interface ServerDeps {
   respondEscalation?: (id: string, response: string) => any;
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
+  listKnowledgeEntities?: (max: number) => Promise<string>;
+  exportKnowledge?: (domain: string | null, max: number) => Promise<string>;
+  importKnowledge?: (data: string) => Promise<string>;
   onSpawnCommand?: (text: string) => void;
   getSpawnPending?: () => { id: string; task: string; label: string; ts: number } | null;
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
@@ -269,6 +408,64 @@ export function createAppServer(deps: ServerDeps) {
         } else {
           res.end(JSON.stringify({ ok: true, facts: [] }));
         }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/knowledge/entities") {
+        // List all entities in the knowledge graph
+        const max = Math.min(parseInt(url.searchParams.get("max") || "50"), 200);
+        if (deps.listKnowledgeEntities) {
+          try {
+            const entities = await deps.listKnowledgeEntities(max);
+            res.end(JSON.stringify({ ok: true, entities }));
+          } catch (err) {
+            res.end(JSON.stringify({ ok: true, entities: [], error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: true, entities: [] }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/knowledge/export") {
+        // Export knowledge module (filterable by domain)
+        const domain = url.searchParams.get("domain") || null;
+        const max = Math.min(parseInt(url.searchParams.get("max") || "100"), 500);
+        if (deps.exportKnowledge) {
+          try {
+            const data = await deps.exportKnowledge(domain, max);
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Content-Disposition", `attachment; filename="sinain-knowledge-${domain || "all"}.json"`);
+            res.end(data);
+          } catch (err) {
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: false, error: "export not available" }));
+        }
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/knowledge/import") {
+        // Import knowledge module
+        const body = await readBody(req, 1_000_000); // 1MB max
+        if (deps.importKnowledge) {
+          try {
+            const result = await deps.importKnowledge(body);
+            res.end(result);
+          } catch (err) {
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: false, error: "import not available" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/knowledge/ui") {
+        // Simple web UI for browsing and transferring knowledge
+        res.setHeader("Content-Type", "text/html");
+        res.end(KNOWLEDGE_UI_HTML);
         return;
       }
 
