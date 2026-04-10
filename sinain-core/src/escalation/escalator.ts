@@ -524,7 +524,7 @@ ${recentLines.join("\n")}`;
         deliver: false,
         idempotencyKey: idemKey,
         label: label || undefined,
-      }, 45_000, { expectFinal: true });
+      }, 10 * 60_000, { expectFinal: true });
 
       log(TAG, `spawn-task RPC response: ${JSON.stringify(result).slice(0, 500)}`);
       this.stats.totalSpawnResponses++;
@@ -633,19 +633,9 @@ ${recentLines.join("\n")}`;
       return;
     }
 
-    const maxWaitMs = 5 * 60 * 1000; // 5 minutes
     const pollIntervalMs = 5000; // 5 seconds
 
     const poll = async (): Promise<void> => {
-      const elapsed = Date.now() - task.startedAt;
-      if (elapsed > maxWaitMs) {
-        log(TAG, `spawn-task timeout: taskId=${taskId}`);
-        this.broadcastTaskEvent(taskId, "timeout", task.label, task.startedAt);
-        this.pendingSpawnTasks.delete(taskId);
-        savePendingTasks(this.pendingSpawnTasks);
-        this.finishPoll();
-        return;
-      }
 
       if (!this.wsClient.isConnected) {
         // Retry later
