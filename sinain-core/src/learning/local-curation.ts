@@ -95,7 +95,7 @@ export class LocalCurationService {
    * Called during shutdown — instant (no LLM), survives tsx force-kill.
    */
   savePendingSession(feedItems: FeedItem[]): void {
-    if (feedItems.length < 3) {
+    if (feedItems.length < 1) {
       log(TAG, `skipping save — only ${feedItems.length} feed items`);
       return;
     }
@@ -135,7 +135,7 @@ export class LocalCurationService {
     }
 
     const items: FeedItem[] = data.items || [];
-    if (items.length < 3) {
+    if (items.length < 1) {
       log(TAG, `pending session too small (${items.length} items) — removing`);
       unlinkSync(pendingPath);
       return;
@@ -160,7 +160,7 @@ export class LocalCurationService {
    * picked up on next startup via distillPendingSession().
    */
   async distillSession(feedItems: FeedItem[]): Promise<void> {
-    if (feedItems.length < 3) {
+    if (feedItems.length < 1) {
       log(TAG, `skipping distillation — only ${feedItems.length} feed items`);
       return;
     }
@@ -332,7 +332,7 @@ export class LocalCurationService {
 
   /** Fallback: write raw feed summary when distillation fails. */
   private writeDailyNotesFallback(feedItems: FeedItem[]): void {
-    if (feedItems.length < 3) return;
+    if (feedItems.length < 1) return;
 
     const date = new Date().toISOString().slice(0, 10);
     const notesPath = resolve(this.memoryDir, `${date}.md`);
