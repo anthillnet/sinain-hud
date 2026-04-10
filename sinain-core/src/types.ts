@@ -18,6 +18,7 @@ export interface StatusMessage {
   audio: string;
   mic: string;
   screen: string;
+  escalation?: string;
   connection: string;
 }
 
@@ -390,6 +391,7 @@ export interface BridgeState {
   audio: "active" | "muted";
   mic: "active" | "muted";
   screen: "active" | "off";
+  escalation: "active" | "paused";
   connection: "connected" | "disconnected" | "connecting";
 }
 

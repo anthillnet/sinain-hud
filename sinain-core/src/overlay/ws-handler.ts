@@ -37,6 +37,7 @@ export class WsHandler {
     audio: "muted",
     mic: "muted",
     screen: "off",
+    escalation: "active",
     connection: "disconnected",
   };
   private replayBuffer: FeedMessage[] = [];
@@ -72,6 +73,7 @@ export class WsHandler {
       audio: this.state.audio,
       mic: this.state.mic,
       screen: this.state.screen,
+      escalation: this.state.escalation,
       connection: this.state.connection,
     });
 
@@ -149,11 +151,12 @@ export class WsHandler {
 
   /** Send a status update to all connected overlays. */
   broadcastStatus(): void {
-    const msg: StatusMessage & { envPath?: string } = {
+    const msg: StatusMessage & { envPath?: string; escalation?: string } = {
       type: "status",
       audio: this.state.audio,
       mic: this.state.mic,
       screen: this.state.screen,
+      escalation: this.state.escalation,
       connection: this.state.connection,
     };
     if (loadedEnvPath) msg.envPath = loadedEnvPath;

@@ -530,6 +530,9 @@ async function main() {
   // ── Screen capture active flag ──
   let screenActive = true;
 
+  // ── Escalation pause/resume state ──
+  let savedEscalationMode: typeof config.escalationConfig.mode | null = null;
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
@@ -640,6 +643,7 @@ async function main() {
 
     // Bare agent HTTP escalation bridge
     getEscalationPending: () => escalator.getPendingHttp(),
+    isEscalationPaused: () => savedEscalationMode !== null,
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
 
     // Knowledge graph integration (checks both local and workspace DBs)
@@ -698,6 +702,22 @@ async function main() {
       }
       wsHandler.updateState({ screen: screenActive ? "active" : "off" });
       return screenActive;
+    },
+    onToggleEscalation: () => {
+      if (savedEscalationMode === null) {
+        // Pause: save current mode, switch to off
+        savedEscalationMode = config.escalationConfig.mode;
+        escalator.setMode("off");
+        log(TAG, `escalation paused (was: ${savedEscalationMode})`);
+        return false;
+      } else {
+        // Resume: restore saved mode
+        const mode = savedEscalationMode;
+        savedEscalationMode = null;
+        escalator.setMode(mode);
+        log(TAG, `escalation resumed (mode: ${mode})`);
+        return true;
+      }
     },
   });
 
