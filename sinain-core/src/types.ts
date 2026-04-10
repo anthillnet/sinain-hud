@@ -181,27 +181,6 @@ export interface AudioPipelineConfig {
   gainDb: number;
 }
 
-export interface TraitConfig {
-  enabled: boolean;
-  configPath: string;   // path to ~/.sinain/traits.json
-  entropyHigh: boolean; // Phase 2: boosts entropy roll to 15%
-  logDir: string;       // path to ~/.sinain-core/traits/
-}
-
-export interface TraitLogEntry {
-  ts: string;
-  tickId: number;
-  enabled: boolean;
-  voice: string;
-  voice_stat: number;
-  voice_confidence: number;
-  activation_scores: Record<string, number>;
-  context_app: string;
-  hud_length: number;
-  synthesis: boolean;
-}
-
-
 export interface AudioChunk {
   buffer: Buffer;
   source: string;
@@ -300,9 +279,6 @@ export interface AgentResult {
   tokensOut: number;
   model: string;
   parsedOk: boolean;
-  voice?: string;
-  voice_stat?: number;
-  voice_confidence?: number;
   /** Actual USD cost returned by OpenRouter (undefined if not available). */
   cost?: number;
 }
@@ -414,7 +390,6 @@ export interface BridgeState {
   audio: "active" | "muted";
   mic: "active" | "muted";
   screen: "active" | "off";
-  traits?: "active" | "off";
   connection: "connected" | "disconnected" | "connecting";
 }
 
@@ -497,6 +472,5 @@ export interface CoreConfig {
   costDisplayEnabled: boolean;
   traceDir: string;
   learningConfig: LearningConfig;
-  traitConfig: TraitConfig;
   privacyConfig: PrivacyConfig;
 }
