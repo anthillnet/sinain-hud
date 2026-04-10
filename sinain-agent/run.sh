@@ -70,10 +70,9 @@ invoke_agent() {
     claude)
       local turns="${2:-$AGENT_MAX_TURNS}"
       if [ -n "${SINAIN_SPAWN:-}" ]; then
-        # Spawn: permissions routed via PreToolUse hook → overlay HUD
-        claude --permission-mode default \
+        # Spawn: PreToolUse hook routes permission prompts to overlay HUD
+        claude \
           --mcp-config "$MCP_CONFIG" \
-          --add-dir "$SCRIPT_DIR/.." \
           --settings "$SCRIPT_DIR/.claude/settings.json" \
           ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
           --max-turns "$turns" --output-format text \
@@ -300,7 +299,9 @@ ${SPAWN_KNOWLEDGE:+
 $SPAWN_KNOWLEDGE
 }
 Complete this task thoroughly. You also have sinain_get_knowledge and sinain_knowledge_query tools available for additional context. Summarize your findings concisely."
-      SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID" SPAWN_RESULT=$(invoke_agent "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: agent invocation failed")
+      export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
+      SPAWN_RESULT=$(invoke_agent "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: agent invocation failed")
+      unset SINAIN_SPAWN SINAIN_SPAWN_TASK_ID
     else
       # Pipe path: agent gets task text directly
       SPAWN_RESULT=$(invoke_pipe "Background task: $SPAWN_TASK" || echo "No output")
