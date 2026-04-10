@@ -125,7 +125,6 @@ All hotkeys use **Cmd+Shift** (macOS) / **Ctrl+Shift** (Windows).
 | **13** | P | Reset position | Window | Dart: reset eye position to default (bottom-right, 16px margin) |
 | **14** | Y | Copy message | Feed | Dart: `ws.requestCopy(activeTab)` → FeedView: clipboard |
 | **15** | R | Toggle demo mode | Privacy | Native: `sharingType` toggle → Dart: `onTogglePrivacy(isPrivate)` |
-| **17** | B | Toggle trait voices | Capture | Dart: `ws.sendCommand('toggle_traits')` |
 | **18** | / | Focus command input | Input | Dart: transition to Chat if not already → focus TextField |
 | **19** | F | Toggle Eye ↔ Chat | Navigation | Dart: `toggleChat()` — direct jump, no Controls intermediate |
 
@@ -177,8 +176,6 @@ private func processHotKey(id: UInt32) {
             window.sharingType = currentlyPrivate ? .readOnly : .none
             hotkeyChannel?.invokeMethod("onTogglePrivacy", arguments: !currentlyPrivate)
         }
-    case 17: // B — toggle traits
-        hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
     case 18: // / — command input
         hotkeyChannel?.invokeMethod("onFocusInput", arguments: nil)
     case 19: // F — toggle chat
@@ -217,8 +214,6 @@ hotkeyChannel.setMethodCallHandler((call) async {
       wsService.requestCopy(settingsService.settings.activeTab.name);
     case 'onTogglePrivacy':
       settingsService.setPrivacyModeTransient(call.arguments as bool);
-    case 'onToggleTraits':
-      wsService.sendCommand('toggle_traits');
     case 'onFocusInput':
       overlayShellKey.currentState?.focusInput();
     case 'onToggleChat':
@@ -552,7 +547,7 @@ Core receives:
 
 | Type | Key Fields | Purpose |
 |------|-----------|---------|
-| `command` | `action` | Toggle audio/mic/screen/traits |
+| `command` | `action` | Toggle audio/mic/screen |
 | `user_command` | `text` | Augment next escalation |
 | `spawn_command` | `text` | Launch background agent |
 | `message` | `text` | Direct message to gateway |
@@ -566,7 +561,6 @@ interface BridgeState {
   audio: "active" | "muted";
   mic: "active" | "muted";
   screen: "active" | "off";
-  traits?: "active" | "off";
   connection: "connected" | "disconnected" | "connecting";
   envPath?: string;  // Path to loaded .env file
 }

@@ -35,4 +35,3 @@ All global hotkeys use the **Cmd+Shift** prefix and are registered via Carbon's 
 |---|---|
 | `Cmd+Shift+/` | Open command input (type commands to sinain-core) |
 | `Cmd+Shift+Y` | Copy target message to clipboard |
-| `Cmd+Shift+B` | Toggle trait voices |

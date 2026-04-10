@@ -207,27 +207,6 @@ def assert_playbook_header_footer_intact(playbook_text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Trait voice assertions (sinain-core wiring verification)
-# ---------------------------------------------------------------------------
-
-def assert_situation_has_active_voice(
-    situation_content: str, expected_trait: str | None = None
-) -> dict:
-    """Check SITUATION.md contains an Active Voice section (after trait wiring).
-
-    Called by tick_evaluator.py when processing live ticks that have SITUATION.md
-    content and a trait was selected for that tick.
-    """
-    has_section = "## Active Voice" in situation_content
-    if not has_section:
-        return _result("situation_has_active_voice", False, "no '## Active Voice' section")
-    if expected_trait and expected_trait not in situation_content:
-        return _result("situation_has_active_voice", False,
-                       f"section present but '{expected_trait}' not found")
-    return _result("situation_has_active_voice", True, "Active Voice section present")
-
-
-# ---------------------------------------------------------------------------
 # Runner: execute all applicable assertions for a tick
 # ---------------------------------------------------------------------------
 
