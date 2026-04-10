@@ -211,9 +211,10 @@ async function importKnowledgeToLocal(data: string): Promise<string> {
     return JSON.stringify({ ok: false, error: "Invalid JSON" });
   }
 
-  const facts = parsed.facts || parsed;
-  if (!Array.isArray(facts) || facts.length === 0) {
-    return JSON.stringify({ ok: false, error: "No facts found in import data" });
+  const facts = parsed.facts || (Array.isArray(parsed) ? parsed : null);
+  if (!facts || !Array.isArray(facts) || facts.length === 0) {
+    const keys = Object.keys(parsed).join(", ");
+    return JSON.stringify({ ok: false, error: `No 'facts' array found. Expected sinain knowledge export format: {"facts":[...]}. Got keys: ${keys}` });
   }
 
   const localDir = resolveLocalMemoryDir();
