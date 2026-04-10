@@ -123,7 +123,6 @@ class AppDelegate: FlutterAppDelegate {
         // Capture toggles
         registerHotKey(id: 5,  keyCode: UInt32(kVK_ANSI_T),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio capture
         registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen capture
-        registerHotKey(id: 17, keyCode: UInt32(kVK_ANSI_B),     modifiers: UInt32(cmdKey | shiftKey)) // toggle traits
         registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R),     modifiers: UInt32(cmdKey | shiftKey)) // toggle demo/privacy
 
         // Feed display
@@ -203,8 +202,6 @@ class AppDelegate: FlutterAppDelegate {
             hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
         case 10: // S → toggle screen capture
             hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
-        case 17: // B → toggle trait voices
-            hotkeyChannel?.invokeMethod("onToggleTraits", arguments: nil)
         case 15: // R → toggle demo/privacy mode
             if #available(macOS 12.0, *) {
                 let currentlyPrivate = window.sharingType == .none

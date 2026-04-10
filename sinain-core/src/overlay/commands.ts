@@ -21,8 +21,6 @@ export interface CommandDeps {
   onSpawnCommand?: (text: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
-  /** Toggle trait voices — returns new enabled state */
-  onToggleTraits?: () => boolean;
 }
 
 /**
@@ -161,17 +159,6 @@ function handleCommand(action: string, deps: CommandDeps): void {
         "normal"
       );
       log(TAG, `screen toggled ${nowActive ? "ON" : "OFF"}`);
-      break;
-    }
-    case "toggle_traits": {
-      if (!deps.onToggleTraits) {
-        wsHandler.broadcast("Trait voices not configured", "normal");
-        break;
-      }
-      const nowEnabled = deps.onToggleTraits();
-      wsHandler.updateState({ traits: nowEnabled ? "active" : "off" });
-      wsHandler.broadcast(`Trait voices ${nowEnabled ? "on" : "off"}`, "normal");
-      log(TAG, `traits toggled ${nowEnabled ? "ON" : "OFF"}`);
       break;
     }
     case "open_settings": {

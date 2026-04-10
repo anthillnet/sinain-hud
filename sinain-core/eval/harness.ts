@@ -4,8 +4,6 @@ import { tmpdir } from "node:os";
 import { analyzeContext } from "../src/agent/analyzer.js";
 import { calculateEscalationScore, ESCALATION_THRESHOLD } from "../src/escalation/scorer.js";
 import { writeSituationMd } from "../src/agent/situation-writer.js";
-import { TraitEngine, loadTraitRoster } from "../src/agent/traits.js";
-import type { TraitSelection } from "../src/agent/traits.js";
 import type { AgentConfig, AgentEntry, ContextWindow, FeedItem, SenseEvent, ContextRichness } from "../src/types.js";
 import { RICHNESS_PRESETS } from "../src/agent/context-window.js";
 import { computeMetrics } from "./metrics.js";
@@ -32,8 +30,6 @@ export interface EvalScenario {
     escalationScoreMax?: number;
     maxLatencyMs?: number;
     maxCost?: number;
-    /** Expected trait name fired for this context, or "none" if no trait should fire. */
-    traitExpected?: string;
     /** Substrings that must appear in the SITUATION.md content. */
     situationShouldContain?: string[];
   };
@@ -58,7 +54,6 @@ export interface EvalResult {
   digest: string;
   escalationScore: number;
   llmJudgeScore?: number;
-  traitName?: string;
   situationContent?: string;
 }
 
@@ -102,7 +97,6 @@ function checkAssertions(
   shouldEscalate: boolean,
   latencyMs: number,
   cost: number,
-  traitName?: string,
   situationContent?: string,
 ): AssertionResult[] {
   const results: AssertionResult[] = [];
@@ -184,25 +178,6 @@ function checkAssertions(
     });
   }
 
-  // Trait assertions
-  if (exp.traitExpected !== undefined) {
-    if (exp.traitExpected === "none") {
-      results.push({
-        name: "trait expected none",
-        passed: !traitName,
-        expected: "none",
-        actual: traitName || "none",
-      });
-    } else {
-      results.push({
-        name: `trait expected "${exp.traitExpected}"`,
-        passed: traitName === exp.traitExpected,
-        expected: exp.traitExpected,
-        actual: traitName || "none",
-      });
-    }
-  }
-
   if (exp.situationShouldContain && situationContent !== undefined) {
     for (const keyword of exp.situationShouldContain) {
       results.push({
@@ -249,12 +224,6 @@ async function runScenario(
   const costPerToken = { in: 0.075 / 1_000_000, out: 0.3 / 1_000_000 };
   const cost = result.tokensIn * costPerToken.in + result.tokensOut * costPerToken.out;
 
-  // Trait selection (deterministic — no LLM call)
-  const engine = new TraitEngine(loadTraitRoster(), { enabled: true, configPath: "", entropyHigh: false, logDir: "" });
-  const ocrText = scenario.context.screen.map(e => e.ocr ?? "").join(" ");
-  const audioText = scenario.context.audio.map(e => (e as any).text ?? "").join(" ");
-  const traitSel: TraitSelection | null = engine.selectTrait(ocrText, audioText);
-
   // Build a minimal AgentEntry for writeSituationMd
   const fakeEntry: AgentEntry = {
     id: 0,
@@ -276,16 +245,13 @@ async function runScenario(
     },
   };
 
-  // Write to a temp file to get the situation content with trait voice injected
+  // Write to a temp file to get the situation content
   const evalSituationPath = join(tmpdir(), `sinain-eval-${Date.now()}-${runId}.md`);
   const situationContent = writeSituationMd(
     evalSituationPath,
     contextWindow,
     result.digest,
     fakeEntry,
-    undefined,
-    null,
-    traitSel,
   );
   try { unlinkSync(evalSituationPath); } catch { /* ignore */ }
   try { unlinkSync(evalSituationPath + ".tmp"); } catch { /* ignore */ }
@@ -298,7 +264,6 @@ async function runScenario(
     shouldEscalate,
     result.latencyMs,
     cost,
-    traitSel?.trait.name,
     situationContent,
   );
 
@@ -312,7 +277,6 @@ async function runScenario(
     hud: result.hud,
     digest: result.digest,
     escalationScore: score.total,
-    traitName: traitSel?.trait.name,
     situationContent: situationContent.slice(0, 500),
   };
 }
@@ -366,8 +330,7 @@ async function main() {
         results.push(result);
 
         const status = result.passed ? "✓" : "✗";
-        const traitInfo = result.traitName ? ` trait=${result.traitName}` : "";
-        console.log(`  ${status} ${scenario.id} (run ${run}): ${result.latencyMs}ms, score=${result.escalationScore}${traitInfo}`);
+        console.log(`  ${status} ${scenario.id} (run ${run}): ${result.latencyMs}ms, score=${result.escalationScore}`);
 
         if (!result.passed) {
           for (const a of result.assertions) {
