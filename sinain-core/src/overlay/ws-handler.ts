@@ -229,6 +229,12 @@ export class WsHandler {
       case "spawn_command":
         log(TAG, `\u2190 spawn command: ${msg.text.slice(0, 100)}`);
         break;
+      case "spawn_reply":
+        log(TAG, `\u2190 spawn reply: taskId=${(msg as any).taskId}`);
+        break;
+      case "spawn_permission_reply":
+        log(TAG, `\u2190 spawn permission reply: taskId=${(msg as any).taskId} decision=${(msg as any).decision}`);
+        break;
       case "profiling":
         if (this.onProfilingCb) this.onProfilingCb(msg);
         return;
