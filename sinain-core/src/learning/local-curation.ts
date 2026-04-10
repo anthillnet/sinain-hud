@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, appendFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeedItem } from "../types.js";
@@ -91,20 +91,82 @@ export class LocalCurationService {
   }
 
   /**
-   * Distill the current session on shutdown.
-   * Extracts feed items, calls session_distiller + knowledge_integrator.
+   * Save feed items to disk for deferred distillation.
+   * Called during shutdown — instant (no LLM), survives tsx force-kill.
    */
-  async distillSession(feedItems: FeedItem[]): Promise<void> {
-    if (!existsSync(resolve(this.scriptsDir, "session_distiller.py"))) {
-      warn(TAG, "session_distiller.py not found — skipping distillation");
-      this.writeDailyNotesFallback(feedItems);
+  savePendingSession(feedItems: FeedItem[]): void {
+    if (feedItems.length < 3) {
+      log(TAG, `skipping save — only ${feedItems.length} feed items`);
       return;
     }
 
+    const pendingPath = resolve(this.memoryDir, "pending-session.json");
+    const data = {
+      ts: new Date().toISOString(),
+      sessionKey: "local-session",
+      durationMs: Date.now() - this.sessionStartTs,
+      items: feedItems.map(item => ({
+        text: item.text,
+        ts: item.ts,
+        source: item.source || "unknown",
+        channel: item.channel || "agent",
+      })),
+    };
+
+    writeFileSync(pendingPath, JSON.stringify(data), "utf-8");
+    log(TAG, `saved ${feedItems.length} feed items to pending-session.json`);
+  }
+
+  /**
+   * Distill a previously saved pending session (from a prior shutdown).
+   * Called on startup — runs LLM distillation when there's no time pressure.
+   */
+  distillPendingSession(): void {
+    const pendingPath = resolve(this.memoryDir, "pending-session.json");
+    if (!existsSync(pendingPath)) return;
+
+    let data: any;
+    try {
+      data = JSON.parse(readFileSync(pendingPath, "utf-8"));
+    } catch {
+      warn(TAG, "corrupt pending-session.json — removing");
+      unlinkSync(pendingPath);
+      return;
+    }
+
+    const items: FeedItem[] = data.items || [];
+    if (items.length < 3) {
+      log(TAG, `pending session too small (${items.length} items) — removing`);
+      unlinkSync(pendingPath);
+      return;
+    }
+
+    log(TAG, `distilling pending session: ${items.length} items from ${data.ts}`);
+
+    // Remove pending file first so a crash here doesn't loop
+    unlinkSync(pendingPath);
+
+    this.runDistillation(items, {
+      ts: data.ts,
+      sessionKey: data.sessionKey || "local-session",
+      durationMs: data.durationMs || 0,
+    });
+  }
+
+  /**
+   * Distill the current session on shutdown.
+   * First saves feed items to disk (instant), then attempts LLM distillation.
+   * If tsx kills the process before LLM finishes, the saved file will be
+   * picked up on next startup via distillPendingSession().
+   */
+  async distillSession(feedItems: FeedItem[]): Promise<void> {
     if (feedItems.length < 3) {
       log(TAG, `skipping distillation — only ${feedItems.length} feed items`);
       return;
     }
+
+    // Step 0: Save to disk FIRST — survives force-kill
+    this.savePendingSession(feedItems);
 
     const sessionMeta = {
       ts: new Date().toISOString(),
@@ -112,7 +174,6 @@ export class LocalCurationService {
       durationMs: Date.now() - this.sessionStartTs,
     };
 
-    // Format feed items for the distiller
     const transcript = feedItems.map(item => ({
       text: item.text,
       ts: item.ts,
@@ -120,7 +181,27 @@ export class LocalCurationService {
       channel: item.channel || "agent",
     }));
 
-    log(TAG, `distilling session: ${feedItems.length} items, ${Math.round(sessionMeta.durationMs / 60000)} min`);
+    // Step 1+2: Attempt LLM distillation (may be killed by tsx)
+    if (this.runDistillation(transcript, sessionMeta)) {
+      // Success — remove the pending file since we distilled in-place
+      const pendingPath = resolve(this.memoryDir, "pending-session.json");
+      try { unlinkSync(pendingPath); } catch { /* already gone */ }
+    }
+    // If killed here, pending-session.json remains for next startup
+  }
+
+  /**
+   * Run the actual distillation pipeline (session_distiller + knowledge_integrator).
+   * Returns true if distillation succeeded.
+   */
+  private runDistillation(transcript: any[], sessionMeta: { ts: string; sessionKey: string; durationMs: number }): boolean {
+    if (!existsSync(resolve(this.scriptsDir, "session_distiller.py"))) {
+      warn(TAG, "session_distiller.py not found — skipping distillation");
+      this.writeDailyNotesFallback(transcript as any);
+      return false;
+    }
+
+    log(TAG, `distilling session: ${transcript.length} items, ${Math.round(sessionMeta.durationMs / 60000)} min`);
 
     try {
       // Step 1: Distill session into a SessionDigest
@@ -139,14 +220,14 @@ export class LocalCurationService {
 
       if (digest.isEmpty || digest.error) {
         log(TAG, `distillation skipped: ${digest.error || "empty session"}`);
-        this.writeDailyNotesFallback(feedItems);
-        return;
+        this.writeDailyNotesFallback(transcript as any);
+        return false;
       }
 
       log(TAG, `distilled: "${(digest.whatHappened || "").slice(0, 80)}..."`);
 
       // Write daily session notes
-      this.writeDailyNotes(digest, feedItems);
+      this.writeDailyNotes(digest, transcript as any);
 
       // Step 2: Integrate into playbook + knowledge graph
       try {
@@ -165,9 +246,11 @@ export class LocalCurationService {
       } catch (err: any) {
         warn(TAG, `knowledge integration failed: ${err.message?.slice(0, 200)}`);
       }
+      return true;
     } catch (err: any) {
       warn(TAG, `distillation failed: ${err.message?.slice(0, 200)}`);
-      this.writeDailyNotesFallback(feedItems);
+      this.writeDailyNotesFallback(transcript as any);
+      return false;
     }
   }
 

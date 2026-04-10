@@ -341,6 +341,7 @@ async function main() {
 
   // ── Initialize local knowledge pipeline ──
   const localCuration = new LocalCurationService();
+  localCuration.distillPendingSession(); // Recover any session saved before a force-kill
   localCuration.startPeriodicCuration();
 
   // ── Initialize trait engine ──
@@ -814,16 +815,23 @@ async function main() {
     feedbackStore?.destroy();
     traceStore?.destroy();
 
-    // Distill session knowledge before exit
+    // Save session knowledge — write feed items to disk FIRST (instant),
+    // then attempt LLM distillation. If tsx force-kills before distillation
+    // finishes, the saved file is recovered on next startup.
+    localCuration.stop();
+    const feedItems = feedBuffer.query(0);
     try {
-      localCuration.stop();
-      const feedItems = feedBuffer.query(0);
+      localCuration.savePendingSession(feedItems);
+    } catch (err: any) {
+      warn(TAG, `failed to save pending session: ${err.message?.slice(0, 100)}`);
+    }
+    try {
       if (feedItems.length >= 3) {
         log(TAG, `distilling session (${feedItems.length} feed items)...`);
         await localCuration.distillSession(feedItems);
       }
     } catch (err: any) {
-      warn(TAG, `session distillation failed: ${err.message?.slice(0, 100)}`);
+      warn(TAG, `session distillation failed (will retry on next startup): ${err.message?.slice(0, 100)}`);
     }
 
     await server.destroy();
