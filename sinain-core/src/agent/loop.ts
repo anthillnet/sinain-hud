@@ -362,15 +362,20 @@ export class AgentLoop extends EventEmitter {
         debug(TAG, `#${entry.id} (${latencyMs}ms) hud unchanged`);
       }
 
-      // Push HUD line to feed (suppress "—", "Idle", and all in focus mode)
+      // Always push HUD to feed buffer for data capture (curation pipeline reads this)
       if (this.deps.agentConfig.pushToFeed &&
-          this.deps.escalationMode !== "focus" &&
-          this.deps.escalationMode !== "rich" &&
           hud !== "\u2014" && hud !== "Idle" && hud !== this.lastPushedHud) {
         feedBuffer.push(`[\ud83e\udde0] ${hud}`, "normal", "agent", "stream");
-        this.deps.onHudUpdate(`[\ud83e\udde0] ${hud}`);
         this.lastPushedHud = hud;
         entry.pushed = true;
+      }
+
+      // Broadcast to overlay only when NOT in focus/rich mode
+      // (in those modes, the overlay gets updates via escalation instead)
+      if (entry.pushed &&
+          this.deps.escalationMode !== "focus" &&
+          this.deps.escalationMode !== "rich") {
+        this.deps.onHudUpdate(`[\ud83e\udde0] ${hud}`);
       }
 
       // Store digest
