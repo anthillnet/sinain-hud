@@ -41,6 +41,7 @@ export interface ServerDeps {
   respondEscalation?: (id: string, response: string) => any;
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
+  listKnowledgeEntities?: (max: number) => Promise<string>;
   onSpawnCommand?: (text: string) => void;
   getSpawnPending?: () => { id: string; task: string; label: string; ts: number } | null;
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
@@ -268,6 +269,22 @@ export function createAppServer(deps: ServerDeps) {
           }
         } else {
           res.end(JSON.stringify({ ok: true, facts: [] }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/knowledge/entities") {
+        // List all entities in the knowledge graph
+        const max = Math.min(parseInt(url.searchParams.get("max") || "50"), 200);
+        if (deps.listKnowledgeEntities) {
+          try {
+            const entities = await deps.listKnowledgeEntities(max);
+            res.end(JSON.stringify({ ok: true, entities }));
+          } catch (err) {
+            res.end(JSON.stringify({ ok: true, entities: [], error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: true, entities: [] }));
         }
         return;
       }

@@ -96,6 +96,51 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
   return merged.slice(0, maxFacts).join("\n");
 }
 
+/** List all entities from both local and workspace knowledge graphs. */
+async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptCandidates = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
+    resolve(__dir, "..", "sinain-memory", "graph_query.py"),
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+
+  const allFacts: any[] = [];
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const out = execFileSync("python3", [
+        scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
+      ], { timeout: 5000, encoding: "utf-8" });
+      const parsed = JSON.parse(out);
+      if (parsed.facts) allFacts.push(...parsed.facts);
+    } catch { /* skip */ }
+  }
+
+  // Deduplicate by entityId, merge
+  const seen = new Set<string>();
+  const unique = allFacts.filter(f => {
+    const id = f.entityId || "";
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  return JSON.stringify(unique.slice(0, max));
+}
+
 async function main() {
   log(TAG, "sinain-core starting...");
 
@@ -488,6 +533,7 @@ async function main() {
       return null;
     },
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
+    listKnowledgeEntities: listKnowledgeEntitiesMulti,
 
     // Spawn background agent task (from HUD Shift+Enter or bare agent POST /spawn)
     onSpawnCommand: (text: string) => {
