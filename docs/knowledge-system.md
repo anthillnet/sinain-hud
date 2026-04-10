@@ -212,7 +212,7 @@ Available via `sinain-mcp-server` for any MCP-capable agent:
 
 ### Examples
 
-```bash
+```
 # Query graph for React Native knowledge
 sinain_knowledge_query(entities=["react-native", "metro", "gradle"], max_facts=5)
 
