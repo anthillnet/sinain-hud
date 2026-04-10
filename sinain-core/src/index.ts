@@ -16,6 +16,7 @@ import { Tracer } from "./trace/tracer.js";
 import { TraceStore } from "./trace/trace-store.js";
 import { FeedbackStore } from "./learning/feedback-store.js";
 import { SignalCollector } from "./learning/signal-collector.js";
+import { LocalCurationService } from "./learning/local-curation.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
@@ -77,6 +78,10 @@ async function main() {
   const feedbackStore = config.learningConfig.enabled
     ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
     : null;
+
+  // ── Initialize local knowledge pipeline ──
+  const localCuration = new LocalCurationService();
+  localCuration.startPeriodicCuration();
 
   // ── Initialize trait engine ──
   const traitRoster = loadTraitRoster(config.traitConfig.configPath);
@@ -563,6 +568,19 @@ async function main() {
     signalCollector?.destroy();
     feedbackStore?.destroy();
     traceStore?.destroy();
+
+    // Distill session knowledge before exit
+    try {
+      localCuration.stop();
+      const feedItems = feedBuffer.query(0);
+      if (feedItems.length >= 3) {
+        log(TAG, `distilling session (${feedItems.length} feed items)...`);
+        await localCuration.distillSession(feedItems);
+      }
+    } catch (err: any) {
+      warn(TAG, `session distillation failed: ${err.message?.slice(0, 100)}`);
+    }
+
     await server.destroy();
     log(TAG, "goodbye");
     process.exit(0);
