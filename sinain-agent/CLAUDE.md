@@ -103,7 +103,7 @@ Knowledge API (localhost:9500) ← merges both DBs ← queries
 
 ### Using Knowledge in Escalation Responses
 
-When responding to escalations, call `sinain_knowledge_query` with relevant entities to enrich your response with long-term knowledge. Example: if the user is working on German grammar, query `sinain_knowledge_query({ entities: ["german", "grammar"] })` to retrieve previously learned patterns.
+When responding to escalations, call `sinain_knowledge_query` with relevant entities to enrich your response with long-term knowledge. Example: if the user is working on German grammar, query `sinain_knowledge_query(entities=["german", "grammar"])` to retrieve previously learned patterns.
 
 ## Spawning Background Tasks
 

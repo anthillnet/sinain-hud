@@ -372,33 +372,6 @@ async function main() {
       // Handle recorder commands
       const stopResult = recorder.handleCommand(entry.record);
 
-      // Dispatch task via subagent spawn
-      if (entry.task || stopResult) {
-        let task: string;
-        let label: string | undefined;
-
-        if (stopResult && stopResult.segments > 0 && entry.task) {
-          // Recording stopped with explicit task instruction
-          task = `${entry.task}\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
-          label = stopResult.title;
-        } else if (stopResult && stopResult.segments > 0) {
-          // Recording stopped without explicit task — default to cleanup/summarize
-          task = `Clean up and summarize this recording transcript:\n\n[Recording: "${stopResult.title}", ${stopResult.durationS}s]\n${stopResult.transcript}`;
-          label = stopResult.title;
-        } else if (entry.task) {
-          // Standalone task without recording
-          task = entry.task;
-        } else {
-          task = "";
-        }
-
-        if (task) {
-          escalator.dispatchSpawnTask(task, label).catch(err => {
-            error(TAG, "spawn task dispatch error:", err);
-          });
-        }
-      }
-
       // Escalation continues as normal
       escalator.onAgentAnalysis(entry, contextWindow);
     },

@@ -69,11 +69,22 @@ invoke_agent() {
   case "$AGENT" in
     claude)
       local turns="${2:-$AGENT_MAX_TURNS}"
-      claude --enable-auto-mode \
-        --mcp-config "$MCP_CONFIG" \
-        ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-        --max-turns "$turns" --output-format text \
-        -p "$prompt"
+      if [ -n "${SINAIN_SPAWN:-}" ]; then
+        # Spawn: PreToolUse hook routes permission prompts to overlay HUD
+        claude \
+          --mcp-config "$MCP_CONFIG" \
+          --settings "$SCRIPT_DIR/.claude/settings.json" \
+          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+          --max-turns "$turns" --output-format text \
+          -p "$prompt"
+      else
+        # Escalation: auto-approve for speed (short-lived, read-heavy)
+        claude --enable-auto-mode \
+          --mcp-config "$MCP_CONFIG" \
+          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+          --max-turns "$turns" --output-format text \
+          -p "$prompt"
+      fi
       ;;
     codex)
       codex exec -s danger-full-access \
@@ -274,10 +285,23 @@ while true; do
 
     if agent_has_mcp; then
       # MCP path: agent runs task with sinain tools available
+      # Pre-fetch knowledge context so the spawn doesn't waste turns calling tools
+      SPAWN_KNOWLEDGE=$(curl -sf "$CORE_URL/knowledge" 2>/dev/null | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+k = d.get('knowledge', '')
+# Trim to 2000 chars to avoid prompt bloat
+print(k[:2000])
+" 2>/dev/null || true)
       SPAWN_PROMPT="You have a background task to complete. Task: $SPAWN_TASK
-
-Complete this task thoroughly. Use sinain_get_knowledge and sinain_knowledge_query if you need context from past sessions. Summarize your findings concisely."
+${SPAWN_KNOWLEDGE:+
+## Knowledge Context
+$SPAWN_KNOWLEDGE
+}
+Complete this task thoroughly. You also have sinain_get_knowledge and sinain_knowledge_query tools available for additional context. Summarize your findings concisely."
+      export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
       SPAWN_RESULT=$(invoke_agent "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: agent invocation failed")
+      unset SINAIN_SPAWN SINAIN_SPAWN_TASK_ID
     else
       # Pipe path: agent gets task text directly
       SPAWN_RESULT=$(invoke_pipe "Background task: $SPAWN_TASK" || echo "No output")

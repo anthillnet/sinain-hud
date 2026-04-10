@@ -451,6 +451,34 @@ server.tool(
   },
 );
 
+// 15. sinain_ask_user — blocking question to the user via overlay
+server.tool(
+  "sinain_ask_user",
+  "Ask the user a question and wait for their reply. Use when you need clarification, confirmation, or a decision. The question appears on the user's HUD overlay and blocks until they respond.",
+  {
+    question: z.string().describe("The question to ask the user"),
+  },
+  async ({ question }) => {
+    // Use the spawn task ID from the environment if available
+    const taskId = process.env.SINAIN_SPAWN_TASK_ID || `ask-${Date.now()}`;
+    try {
+      const resp = await fetch(`${SINAIN_CORE_URL}/spawn/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, question }),
+        signal: AbortSignal.timeout(6 * 60_000), // 6 min (server times out at 5)
+      });
+      const data = await resp.json() as { ok: boolean; answer?: string };
+      if (data.ok && data.answer) {
+        return textResult(`User replied: ${data.answer}`);
+      }
+      return textResult("User did not reply.");
+    } catch (err: any) {
+      return textResult(`Failed to ask user: ${err.message}`);
+    }
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------------
