@@ -141,6 +141,157 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
   return JSON.stringify(unique.slice(0, max));
 }
 
+/** Export knowledge facts as a portable JSON module. */
+async function exportKnowledgeMulti(domain: string | null, max: number): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptCandidates = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+
+  const allFacts: any[] = [];
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const out = execFileSync("python3", [
+        scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
+      ], { timeout: 5000, encoding: "utf-8" });
+      const parsed = JSON.parse(out);
+      if (parsed.facts) allFacts.push(...parsed.facts);
+    } catch { /* skip */ }
+  }
+
+  // Deduplicate
+  const seen = new Set<string>();
+  let facts = allFacts.filter(f => {
+    const id = f.entityId || "";
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  // Filter by domain if specified
+  if (domain) {
+    facts = facts.filter(f => f.domain === domain);
+  }
+
+  return JSON.stringify({
+    format: "sinain-knowledge-export",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    domain: domain || "all",
+    count: facts.length,
+    facts: facts.slice(0, max),
+  }, null, 2);
+}
+
+/** Import knowledge facts from a portable JSON module into the local graph. */
+async function importKnowledgeToLocal(data: string): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const { mkdirSync } = await import("node:fs");
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return JSON.stringify({ ok: false, error: "Invalid JSON" });
+  }
+
+  const facts = parsed.facts || parsed;
+  if (!Array.isArray(facts) || facts.length === 0) {
+    return JSON.stringify({ ok: false, error: "No facts found in import data" });
+  }
+
+  const localDir = resolveLocalMemoryDir();
+  mkdirSync(localDir, { recursive: true });
+  const dbPath = `${localDir}/knowledge-graph.db`;
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const scriptsDir = resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory");
+
+  // Convert facts to graph ops for knowledge_integrator
+  const graphOps = facts.map((f: any) => ({
+    op: "assert",
+    entity: f.entity || f.entityId?.replace(/^fact:/, "").replace(/-[a-f0-9]{12}$/, "") || "unknown",
+    attribute: f.attribute || "value",
+    value: f.value || "",
+    confidence: parseFloat(f.confidence || "0.7"),
+    domain: f.domain || "",
+  }));
+
+  try {
+    // Use triplestore directly via Python
+    const script = `
+import json, sys
+sys.path.insert(0, "${scriptsDir}")
+from triplestore import TripleStore
+import hashlib
+
+db_path = "${dbPath}"
+store = TripleStore(db_path)
+ops = json.loads(sys.stdin.read())
+stats = {"asserted": 0, "skipped": 0}
+
+for op in ops:
+    entity = op.get("entity", "")
+    value = op.get("value", "")
+    if not entity or not value:
+        stats["skipped"] += 1
+        continue
+
+    h = hashlib.sha256(f"{entity}:{op.get('attribute','')}:{value}".encode()).hexdigest()[:12]
+    slug = entity.replace(" ", "-").lower()[:30]
+    entity_id = f"fact:{slug}-{h}"
+
+    # Check if already exists
+    existing = store.entity(entity_id)
+    if existing:
+        stats["skipped"] += 1
+        continue
+
+    tx = store.begin_tx("import", metadata=json.dumps({"source": "web-import"}))
+    store.assert_triple(tx, entity_id, "entity", entity)
+    store.assert_triple(tx, entity_id, "attribute", op.get("attribute", "value"))
+    store.assert_triple(tx, entity_id, "value", value)
+    store.assert_triple(tx, entity_id, "confidence", str(op.get("confidence", 0.7)))
+    store.assert_triple(tx, entity_id, "first_seen", "${new Date().toISOString()}")
+    store.assert_triple(tx, entity_id, "last_reinforced", "${new Date().toISOString()}")
+    store.assert_triple(tx, entity_id, "reinforce_count", "1")
+    if op.get("domain"):
+        store.assert_triple(tx, entity_id, "domain", op["domain"])
+    stats["asserted"] += 1
+
+store.close()
+print(json.dumps(stats))
+`;
+
+    const result = execFileSync("python3", ["-c", script], {
+      input: JSON.stringify(graphOps),
+      timeout: 10_000,
+      encoding: "utf-8",
+    });
+
+    const stats = JSON.parse(result.trim());
+    return JSON.stringify({ ok: true, stats, imported: stats.asserted, skipped: stats.skipped });
+  } catch (err: any) {
+    return JSON.stringify({ ok: false, error: err.message?.slice(0, 200) });
+  }
+}
+
 async function main() {
   log(TAG, "sinain-core starting...");
 
@@ -534,6 +685,8 @@ async function main() {
     },
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
     listKnowledgeEntities: listKnowledgeEntitiesMulti,
+    exportKnowledge: exportKnowledgeMulti,
+    importKnowledge: importKnowledgeToLocal,
 
     // Spawn background agent task (from HUD Shift+Enter or bare agent POST /spawn)
     onSpawnCommand: (text: string) => {
