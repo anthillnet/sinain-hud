@@ -79,6 +79,27 @@ export function setupCommands(deps: CommandDeps): void {
         }
         break;
       }
+      case "spawn_reply": {
+        const { taskId, text } = msg as any;
+        log(TAG, `spawn reply for ${taskId}: "${(text || "").slice(0, 60)}"`);
+        // Forward to the /spawn/reply HTTP endpoint internally
+        fetch(`http://localhost:${deps.config.port}/spawn/reply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, text }),
+        }).catch(() => {});
+        break;
+      }
+      case "spawn_permission_reply": {
+        const { taskId, decision } = msg as any;
+        log(TAG, `spawn permission reply for ${taskId}: ${decision}`);
+        fetch(`http://localhost:${deps.config.port}/spawn/permission-reply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, decision }),
+        }).catch(() => {});
+        break;
+      }
       case "command": {
         handleCommand(msg.action, deps);
         log(TAG, `command processed: ${msg.action}`);
