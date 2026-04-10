@@ -98,8 +98,6 @@ Future<void> _startApp() async {
         wsService.sendCommand('toggle_audio');
       case 'onToggleScreen':
         wsService.sendCommand('toggle_screen');
-      case 'onToggleTraits':
-        wsService.sendCommand('toggle_traits');
       case 'onTogglePrivacy':
         settingsService.setPrivacyModeTransient(call.arguments as bool);
 
