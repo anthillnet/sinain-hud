@@ -190,7 +190,6 @@ export async function analyzeContext(
   contextWindow: ContextWindow,
   config: AnalysisConfig,
   recorderStatus: RecorderStatus | null = null,
-  traitSystemPrompt?: string,
 ): Promise<AgentResult> {
   const userPrompt = buildUserPrompt(contextWindow, recorderStatus);
 
@@ -201,10 +200,8 @@ export async function analyzeContext(
     if (levelFor("screen_images", privacyDest) === "none") images = [];
   } catch { /* privacy not initialized, keep images */ }
 
-  const systemPrompt = traitSystemPrompt ?? SYSTEM_PROMPT;
-
   if (config.provider === "ollama") {
-    return await callOllama(systemPrompt, userPrompt, images, config);
+    return await callOllama(SYSTEM_PROMPT, userPrompt, images, config);
   }
 
   // OpenRouter path: model chain with fallbacks
@@ -221,7 +218,7 @@ export async function analyzeContext(
   let lastError: Error | null = null;
   for (const model of models) {
     try {
-      return await callOpenRouter(systemPrompt, userPrompt, images, model, config);
+      return await callOpenRouter(SYSTEM_PROMPT, userPrompt, images, model, config);
     } catch (err: any) {
       lastError = err;
       log(TAG, `model ${model} failed: ${err.message || err}, trying next...`);
