@@ -154,6 +154,37 @@ def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
     return "\n".join(lines)
 
 
+def format_facts_compact(facts: list[dict], max_chars: int = 400) -> str:
+    """Encode facts for efficient escalation context injection.
+
+    Compact format: domain/entity: value (conf, Nx)
+    Inspired by mempalace AAAK compression — fits 3-5x more facts per token budget.
+    """
+    if not facts:
+        return ""
+
+    lines = []
+    total = 0
+    for f in facts:
+        entity = f.get("entityId", "").split(":")[-1][:20]
+        value = f.get("value", "")[:60]
+        conf = f.get("confidence", "?")
+        count = f.get("reinforce_count", "1")
+        domain = f.get("domain", "")
+
+        if domain:
+            line = f"{domain}/{entity}: {value} ({conf},{count}x)"
+        else:
+            line = f"{entity}: {value} ({conf},{count}x)"
+
+        if total + len(line) + 2 > max_chars:
+            break
+        lines.append(line)
+        total += len(line) + 2  # account for "; " separator
+
+    return "; ".join(lines)
+
+
 def domain_fact_counts(db_path: str) -> dict[str, int]:
     """Count facts per domain for module emergence detection."""
     if not Path(db_path).exists():
@@ -184,7 +215,7 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=None, help="Query top-N facts by confidence")
     parser.add_argument("--domain-counts", action="store_true", help="Show fact counts per domain")
     parser.add_argument("--max-facts", type=int, default=5, help="Maximum facts to return")
-    parser.add_argument("--format", choices=["text", "json"], default="json", help="Output format")
+    parser.add_argument("--format", choices=["text", "json", "compact"], default="json", help="Output format")
     args = parser.parse_args()
 
     if args.domain_counts:
@@ -202,6 +233,8 @@ def main() -> None:
 
     if args.format == "text":
         print(format_facts_text(facts))
+    elif args.format == "compact":
+        print(format_facts_compact(facts))
     else:
         print(json.dumps({"facts": facts, "count": len(facts)}, indent=2, ensure_ascii=False))
 

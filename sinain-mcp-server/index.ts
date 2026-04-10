@@ -203,19 +203,30 @@ server.tool(
 );
 
 // 8. sinain_get_knowledge
+// Queries sinain-core's /knowledge API which merges both local and workspace DBs.
+// Falls back to reading the workspace knowledge doc directly if sinain-core is unreachable.
 server.tool(
   "sinain_get_knowledge",
-  "Get the portable knowledge document (playbook + long-term facts + recent sessions)",
+  "Get the portable knowledge document (playbook + long-term facts from both local and workspace databases)",
   {},
   async () => {
+    // Try sinain-core API first (merges both DBs)
     try {
-      // Read pre-rendered knowledge doc (fast, no subprocess)
+      const data = await coreRequest("GET", "/knowledge");
+      if (data.ok && data.content) {
+        return textResult(stripPrivateTags(data.content));
+      }
+    } catch {
+      // sinain-core unreachable — fall through to local files
+    }
+
+    // Fallback: read workspace files directly
+    try {
       const docPath = resolve(MEMORY_DIR, "sinain-knowledge.md");
       if (existsSync(docPath)) {
         const content = readFileSync(docPath, "utf-8");
         return textResult(stripPrivateTags(content));
       }
-      // Fallback: read playbook directly
       const playbookPath = resolve(MEMORY_DIR, "sinain-playbook.md");
       if (existsSync(playbookPath)) {
         return textResult(stripPrivateTags(readFileSync(playbookPath, "utf-8")));
@@ -228,14 +239,33 @@ server.tool(
 );
 
 // 8b. sinain_knowledge_query (graph query — entity-based lookup)
+// Queries sinain-core's /knowledge/facts API which merges both local and workspace DBs.
+// Falls back to local graph_query.py (workspace DB only) if sinain-core is unreachable.
 server.tool(
   "sinain_knowledge_query",
-  "Query the knowledge graph for facts about specific entities/domains",
+  "Query the knowledge graph for facts about specific entities/domains (searches both local and workspace databases)",
   {
     entities: z.array(z.string()).optional().default([]),
     max_facts: z.number().optional().default(5),
   },
   async ({ entities, max_facts }) => {
+    // Try sinain-core API first (merges both local + workspace DBs)
+    if (entities.length > 0) {
+      try {
+        const params = new URLSearchParams({
+          entities: entities.join(","),
+          max: String(max_facts),
+        });
+        const data = await coreRequest("GET", `/knowledge/facts?${params}`);
+        if (data.ok && data.facts) {
+          return textResult(stripPrivateTags(data.facts));
+        }
+      } catch {
+        // sinain-core unreachable — fall through to local script
+      }
+    }
+
+    // Fallback: query workspace DB directly via graph_query.py
     try {
       const dbPath = resolve(MEMORY_DIR, "knowledge-graph.db");
       const scriptPath = resolve(SCRIPTS_DIR, "graph_query.py");

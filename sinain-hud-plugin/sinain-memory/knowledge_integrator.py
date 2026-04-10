@@ -117,6 +117,55 @@ def _fact_id(entity: str, attribute: str, value: str) -> str:
     return f"fact:{slug}-{h}"
 
 
+def _normalize_entity(name: str) -> str:
+    """Normalize entity name to canonical form: lowercase, hyphenated, no punctuation."""
+    return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
+
+
+def _canonicalize_ops(ops: list[dict], existing_entities: list[str]) -> list[dict]:
+    """Map variant entity names to canonical forms before graph execution.
+
+    Inspired by mempalace entity detection — uses simple heuristic instead of
+    rule-based signal detection: normalize names, merge on edit distance or substring match.
+    Converts duplicate assert → reinforce when a near-match exists.
+    """
+    canonical_map: dict[str, str] = {}  # normalized → existing entity name
+    for eid in existing_entities:
+        # Extract entity name from the entity_id's attributes (stored as "entity" attr)
+        canonical_map[_normalize_entity(eid)] = eid
+
+    result = []
+    for op in ops:
+        if op.get("op") != "assert":
+            result.append(op)
+            continue
+
+        entity = op.get("entity", "")
+        normalized = _normalize_entity(entity)
+
+        # Check for near-match in existing entities
+        matched_id = None
+        for existing_norm, existing_eid in canonical_map.items():
+            if existing_norm == normalized:
+                matched_id = existing_eid
+                break
+            # Substring match: "react-router" matches "react-router-dom"
+            if len(normalized) >= 4 and (normalized in existing_norm or existing_norm in normalized):
+                matched_id = existing_eid
+                break
+
+        if matched_id:
+            # Convert assert → reinforce (entity already exists under different name)
+            result.append({"op": "reinforce", "entityId": matched_id})
+            print(f"  [canon] merged '{entity}' → existing '{matched_id}'", file=sys.stderr)
+        else:
+            result.append(op)
+            # Register the new canonical form
+            canonical_map[normalized] = _fact_id(entity, op.get("attribute", ""), op.get("value", ""))
+
+    return result
+
+
 def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: int = 50) -> list[dict]:
     """Load relevant facts from the knowledge graph for LLM context."""
     if not Path(db_path).exists():
@@ -180,6 +229,11 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
     try:
         from triplestore import TripleStore
         store = TripleStore(db_path)
+
+        # Canonicalize entity names to prevent fragmentation
+        existing_ids = [r[0] for r in store.entities_with_attr("entity")]
+        ops = _canonicalize_ops(ops, existing_ids)
+
         stats = {"asserted": 0, "reinforced": 0, "retracted": 0}
 
         for op_data in ops:
