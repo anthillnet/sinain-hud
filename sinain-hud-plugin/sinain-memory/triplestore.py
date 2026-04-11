@@ -95,7 +95,7 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS triples_au AFTER UPDATE ON triples BEGIN
     INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES ('delete', old.id, old.entity_id, old.value);
-    INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES (new.id, new.entity_id, new.value);
+    INSERT INTO triples_fts(rowid, entity_id, value) VALUES (new.id, new.entity_id, new.value);
 END;
 """
 
