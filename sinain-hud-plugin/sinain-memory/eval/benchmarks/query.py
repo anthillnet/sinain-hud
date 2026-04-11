@@ -65,7 +65,18 @@ def _query_knowledge(db_path: str, question: str) -> str:
     if not candidates:
         return "(no knowledge available)"
 
-    # Re-rank by keyword overlap between question and fact value
+    # Re-rank by embedding similarity if available, fall back to keyword overlap
+    try:
+        from embed_client import rank_by_similarity
+        fact_texts = [str(f.get("value", "")) for f in candidates]
+        ranked_indices = rank_by_similarity(question, fact_texts)
+        if ranked_indices is not None:
+            ranked = [candidates[i] for i, _ in ranked_indices[:MAX_FACTS_PER_QUERY]]
+            return format_facts_text(ranked, max_chars=3000)
+    except Exception:
+        pass
+
+    # Fallback: keyword overlap ranking
     q_keywords = set(_extract_keywords(question))
     def _relevance(fact: dict) -> float:
         value = str(fact.get("value", "")).lower()
