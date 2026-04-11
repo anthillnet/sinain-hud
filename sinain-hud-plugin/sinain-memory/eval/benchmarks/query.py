@@ -52,17 +52,31 @@ def _get_all_facts_text(db_path: str) -> str:
 def _query_knowledge(db_path: str, question: str) -> str:
     """Query sinain knowledge graph for facts relevant to a question.
 
-    Strategy: hybrid retrieval (FTS5 → tags → graph traversal).
-    Falls back to full DB dump if nothing found.
+    Strategy: retrieve broadly, then re-rank by keyword overlap with the question.
+    This ensures specific facts (CTO background) beat generic ones (meeting schedule)
+    when the question asks about the CTO.
     """
-    from graph_query import query_facts_hybrid, format_facts_text
+    from graph_query import query_facts_hybrid, query_top_facts, format_facts_text
 
-    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY)
-    if facts:
-        return format_facts_text(facts, max_chars=3000)
+    # Retrieve a broad candidate set
+    candidates = query_facts_hybrid(db_path, question, max_facts=30)
+    if not candidates:
+        candidates = query_top_facts(db_path, limit=30)
+    if not candidates:
+        return "(no knowledge available)"
 
-    # Fallback: include all facts (DB is small, typically 10-30 facts)
-    return _get_all_facts_text(db_path)
+    # Re-rank by keyword overlap between question and fact value
+    q_keywords = set(_extract_keywords(question))
+    def _relevance(fact: dict) -> float:
+        value = str(fact.get("value", "")).lower()
+        entity = str(fact.get("entity", "")).lower()
+        fact_words = set(_extract_keywords(value + " " + entity))
+        if not q_keywords:
+            return 0.0
+        return len(q_keywords & fact_words) / len(q_keywords)
+
+    ranked = sorted(candidates, key=_relevance, reverse=True)
+    return format_facts_text(ranked[:MAX_FACTS_PER_QUERY], max_chars=3000)
 
 
 def _get_retrieved_facts(db_path: str, question: str, k: int = 10) -> list[dict]:
