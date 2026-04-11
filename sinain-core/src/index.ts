@@ -344,6 +344,7 @@ async function main() {
   localCuration.startPeriodicCuration();
 
   // Wire incremental distillation: when feed buffer fills, distill before items are lost
+  localCuration.setSenseBuffer(senseBuffer);
   localCuration.setRearmCallback(() => feedBuffer.rearmOnFull());
   feedBuffer.onFull((items) => {
     localCuration.distillIncremental(items);

@@ -40,6 +40,7 @@ def run_meeting_benchmark(
     conditions: list[str],
     *,
     subset: int | None = None,
+    meeting_filter: str | None = None,
     qa_model: str = QA_MODEL,
     judge_model: str = JUDGE_MODEL,
     output_dir: Path = RESULTS_DIR,
@@ -50,6 +51,10 @@ def run_meeting_benchmark(
 
     adapter = MeetingMemoryAdapter()
     instances = adapter.load_dataset(str(data_dir))
+
+    if meeting_filter:
+        instances = [i for i in instances if meeting_filter in i.id]
+        print(f"[meeting] filtered to {len(instances)} meeting(s) matching '{meeting_filter}'")
 
     if not instances:
         print("[meeting] no meeting data found — check data/meeting/ directory")
@@ -170,6 +175,8 @@ def main() -> None:
                         help="Comma-separated conditions (sinain-memory, full-context)")
     parser.add_argument("--subset", type=int, default=None,
                         help="Run only first N questions")
+    parser.add_argument("--meeting", default=None,
+                        help="Filter to specific meeting by stem (e.g. al-futaim-prep-5min)")
     parser.add_argument("--qa-model", default=QA_MODEL)
     parser.add_argument("--judge-model", default=JUDGE_MODEL)
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
@@ -184,6 +191,7 @@ def main() -> None:
     summary, details = run_meeting_benchmark(
         args.db, conditions,
         subset=args.subset,
+        meeting_filter=args.meeting,
         qa_model=args.qa_model,
         judge_model=args.judge_model,
         output_dir=args.output_dir,

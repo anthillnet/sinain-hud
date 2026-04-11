@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, appendF
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeedItem } from "../types.js";
+import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "local-curation";
@@ -58,6 +59,7 @@ export class LocalCurationService {
   private _lastDistilledTs = 0; // timestamp of last incremental distillation
   private _incrementalRunning = false;
   private _rearmCb: (() => void) | null = null; // callback to re-arm feed buffer onFull
+  private _senseBuffer: SenseBuffer | null = null;
 
   constructor() {
     this.memoryDir = resolveMemoryDir();
@@ -103,6 +105,40 @@ export class LocalCurationService {
     this._rearmCb = cb;
   }
 
+  /** Attach sense buffer for screen context in distillation. */
+  setSenseBuffer(sb: SenseBuffer): void {
+    this._senseBuffer = sb;
+  }
+
+  /** Extract screen context from sense buffer as feed-item-compatible entries. */
+  private getSenseContext(): Array<{ text: string; ts: number; source: string; channel: string }> {
+    if (!this._senseBuffer) return [];
+    const events = this._senseBuffer.queryByTime(this._lastDistilledTs || (Date.now() - 30 * 60 * 1000));
+    const items: Array<{ text: string; ts: number; source: string; channel: string }> = [];
+    for (const evt of events) {
+      // Include OCR text (what's visible on screen)
+      if (evt.ocr && evt.ocr.length > 20) {
+        const app = evt.semantic?.context?.app || "unknown";
+        items.push({
+          text: `[screen: ${app}] ${evt.ocr}`,
+          ts: evt.ts,
+          source: "sense",
+          channel: "screen",
+        });
+      }
+      // Include vision summaries (AI description of screen content)
+      if (evt.semantic?.visible?.summary) {
+        items.push({
+          text: `[screen-context] ${evt.semantic.visible.summary}`,
+          ts: evt.ts,
+          source: "sense",
+          channel: "screen",
+        });
+      }
+    }
+    return items;
+  }
+
   /**
    * Incremental distillation — called when the feed buffer reaches capacity.
    * Distills the current buffer contents before they fall off the ring buffer.
@@ -125,16 +161,24 @@ export class LocalCurationService {
         durationMs: Date.now() - this.sessionStartTs,
       };
 
-      const transcript = feedItems.map(item => ({
+      const audioItems = feedItems.map(item => ({
         text: item.text,
         ts: item.ts,
         source: item.source || "unknown",
         channel: item.channel || "agent",
       }));
 
+      // Merge screen context from sense buffer (OCR + vision summaries)
+      const senseItems = this.getSenseContext();
+      const transcript = [...audioItems, ...senseItems].sort((a, b) => a.ts - b.ts);
+
+      if (senseItems.length > 0) {
+        log(TAG, `including ${senseItems.length} screen context items in distillation`);
+      }
+
       if (this.runDistillation(transcript, sessionMeta)) {
         this._lastDistilledTs = Date.now();
-        log(TAG, `incremental distillation complete — ${itemCount} items processed`);
+        log(TAG, `incremental distillation complete — ${itemCount} audio + ${senseItems.length} screen items processed`);
       }
     } catch (err: any) {
       warn(TAG, `incremental distillation failed: ${err.message?.slice(0, 100)}`);

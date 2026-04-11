@@ -126,45 +126,38 @@ def _normalize_entity(name: str) -> str:
 
 
 def _canonicalize_ops(ops: list[dict], existing_entities: list[str]) -> list[dict]:
-    """Map variant entity names to canonical forms before graph execution.
+    """Deduplicate graph ops: merge only when entity+attribute+value match exactly.
 
-    Inspired by mempalace entity detection — uses simple heuristic instead of
-    rule-based signal detection: normalize names, merge on edit distance or substring match.
-    Converts duplicate assert → reinforce when a near-match exists.
+    Different facts about the same entity should be separate triples (that's how EAV
+    works). Only merge when the SAME fact is being asserted again (reinforce).
     """
-    canonical_map: dict[str, str] = {}  # normalized → existing entity name
-    for eid in existing_entities:
-        # Extract entity name from the entity_id's attributes (stored as "entity" attr)
-        canonical_map[_normalize_entity(eid)] = eid
+    # Build map of existing fact IDs by their content hash
+    existing_set = set(existing_entities)
 
     result = []
+    seen_fact_ids: set[str] = set()
     for op in ops:
         if op.get("op") != "assert":
             result.append(op)
             continue
 
         entity = op.get("entity", "")
-        normalized = _normalize_entity(entity)
+        attribute = op.get("attribute", "")
+        value = op.get("value", "")
 
-        # Check for near-match in existing entities
-        matched_id = None
-        for existing_norm, existing_eid in canonical_map.items():
-            if existing_norm == normalized:
-                matched_id = existing_eid
-                break
-            # Substring match: "react-router" matches "react-router-dom"
-            if len(normalized) >= 4 and (normalized in existing_norm or existing_norm in normalized):
-                matched_id = existing_eid
-                break
+        # Generate the deterministic fact ID
+        fact_id = _fact_id(entity, attribute, value)
 
-        if matched_id:
-            # Convert assert → reinforce (entity already exists under different name)
-            result.append({"op": "reinforce", "entityId": matched_id})
-            print(f"  [canon] merged '{entity}' → existing '{matched_id}'", file=sys.stderr)
+        # Only reinforce if this exact fact already exists in the DB
+        if fact_id in existing_set:
+            result.append({"op": "reinforce", "entityId": fact_id})
+            print(f"  [canon] reinforcing existing '{fact_id}'", file=sys.stderr)
+        elif fact_id in seen_fact_ids:
+            # Duplicate within this batch — skip
+            continue
         else:
             result.append(op)
-            # Register the new canonical form
-            canonical_map[normalized] = _fact_id(entity, op.get("attribute", ""), op.get("value", ""))
+            seen_fact_ids.add(fact_id)
 
     return result
 
@@ -182,7 +175,14 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
         if entities:
             # Tag-based search: find facts whose tags match any of the keywords
             # Normalize keywords to lowercase for tag matching
-            keywords = [e.lower().replace(" ", "-") for e in entities]
+            # Handle both old-style string entities and new-style dict entities
+            keywords = []
+            for e in entities:
+                if isinstance(e, dict):
+                    keywords.append(e.get("name", "").lower().replace(" ", "-"))
+                else:
+                    keywords.append(str(e).lower().replace(" ", "-"))
+            keywords = [k for k in keywords if k]
             placeholders = ",".join(["?" for _ in keywords])
             rows = store._conn.execute(
                 f"""SELECT entity_id, COUNT(*) as matches
@@ -328,7 +328,9 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
         store.close()
         return stats
     except Exception as e:
+        import traceback
         print(f"[warn] Failed to execute graph ops: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return {"asserted": 0, "reinforced": 0, "retracted": 0, "error": str(e)}
 
 

@@ -44,7 +44,7 @@ self-contained sentence that answers a question on its own.
    Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage, client since 2015"
    Bad: "client-understanding-key: True"
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
-4. entities: key people, organizations, tools, and topics — as objects with name and description
+4. entities: key people, organizations, tools, and topics mentioned (as lowercase-hyphenated slugs)
 5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
 6. preferences: up to 3 user preferences or habits observed
 
@@ -61,7 +61,7 @@ Respond with ONLY a JSON object:
   "whatHappened": "string",
   "facts": ["self-contained factual sentence", ...],
   "decisions": ["decision sentence with who/what/when", ...],
-  "entities": [{"name": "entity-slug", "type": "person|org|tool|topic", "description": "brief"}, ...],
+  "entities": ["citibank", "al-futaim-group", "artom", ...],
   "patterns": ["reusable technique or workflow", ...],
   "preferences": ["user preference or habit", ...],
   "isEmpty": false
