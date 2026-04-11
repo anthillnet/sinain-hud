@@ -16,6 +16,7 @@ import { TraceStore } from "./trace/trace-store.js";
 import { FeedbackStore } from "./learning/feedback-store.js";
 import { SignalCollector } from "./learning/signal-collector.js";
 import { LocalCurationService } from "./learning/local-curation.js";
+import { EmbeddingService } from "./embedding/service.js";
 import { createAppServer } from "./server.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
@@ -338,9 +339,16 @@ async function main() {
     ? new FeedbackStore(config.learningConfig.feedbackDir, config.learningConfig.retentionDays)
     : null;
 
+  // ── Initialize embedding service (non-blocking) ──
+  const embeddingService = new EmbeddingService();
+  embeddingService.loadAsync(); // ~9s background load, server starts immediately
+
   // ── Initialize local knowledge pipeline ──
   const localCuration = new LocalCurationService();
-  localCuration.distillPendingSession(); // Recover any session saved before a force-kill
+  // Distill pending session in background — don't block server startup
+  setImmediate(() => {
+    localCuration.distillPendingSession();
+  });
   localCuration.startPeriodicCuration();
 
   // Wire incremental distillation: when feed buffer fills, distill before items are lost
@@ -675,6 +683,8 @@ async function main() {
     },
     getSpawnPending: () => escalator.getSpawnPending(),
     respondSpawn: (id: string, result: string) => escalator.respondSpawn(id, result),
+    embedTexts: (texts: string[]) => embeddingService.embed(texts),
+    isEmbeddingReady: () => embeddingService.ready,
   });
 
   // ── Wire overlay profiling ──
