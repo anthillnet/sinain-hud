@@ -28,7 +28,7 @@ from common import (
 
 SYSTEM_PROMPT = """\
 You are a session distiller for a personal AI overlay system (sinain).
-Your job: analyze a session transcript and extract structured knowledge.
+Your job: analyze a session transcript and extract ALL knowledge worth remembering.
 
 The transcript contains feed items from sinain-core:
 - audio: transcribed speech from the user's environment
@@ -37,24 +37,33 @@ The transcript contains feed items from sinain-core:
 - system: system events and status messages
 
 Extract:
-1. whatHappened: 2-3 sentences summarizing what was accomplished in this session
-2. patterns: up to 5 reusable patterns discovered (things that worked, techniques used)
-3. antiPatterns: up to 3 things that failed and why
-4. preferences: up to 3 user preferences or workflow habits observed
-5. entities: key domains, tools, technologies, or topics worked with (for graph linking)
-6. toolInsights: tool usage insights (e.g., "grep before read reduces misses")
+1. whatHappened: 2-3 sentences summarizing what occurred in this session
+2. facts: up to 10 concrete factual claims stated in the session — names, numbers, dates, \
+properties, relationships, anything someone might ask about later. Each fact must be a \
+self-contained sentence that answers a question on its own.
+   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage, client since 2015"
+   Bad: "client-understanding-key: True"
+3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
+4. entities: key people, organizations, tools, and topics — as objects with name and description
+5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
+6. preferences: up to 3 user preferences or habits observed
 
-Focus on ACTIONABLE knowledge that would help a future agent in similar contexts.
-Skip trivial observations. If the session was idle or empty, say so briefly.
+Entity naming: use actual names from the conversation, not abstract categories.
+   Good: "citibank", "al-futaim-group", "artom", "intellij"
+   Bad: "ai-solutions", "client-understanding", "tool-usage"
+
+If existing entities are provided, reference them by name to enable reinforcement.
+Focus on CONCRETE, SPECIFIC knowledge. Skip vague observations.
+If the session was idle or empty, say so briefly.
 
 Respond with ONLY a JSON object:
 {
   "whatHappened": "string",
-  "patterns": ["string", ...],
-  "antiPatterns": ["string", ...],
-  "preferences": ["string", ...],
-  "entities": ["string", ...],
-  "toolInsights": ["string", ...],
+  "facts": ["self-contained factual sentence", ...],
+  "decisions": ["decision sentence with who/what/when", ...],
+  "entities": [{"name": "entity-slug", "type": "person|org|tool|topic", "description": "brief"}, ...],
+  "patterns": ["reusable technique or workflow", ...],
+  "preferences": ["user preference or habit", ...],
   "isEmpty": false
 }"""
 
@@ -95,6 +104,7 @@ def main() -> None:
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--transcript", required=True, help="JSON array of feed items")
     parser.add_argument("--session-meta", default="{}", help="JSON session metadata")
+    parser.add_argument("--existing-entities", default="", help="Compact summary of existing knowledge graph entities")
     args = parser.parse_args()
 
     # Parse inputs
@@ -111,11 +121,11 @@ def main() -> None:
     if not items or len(items) < 2:
         output_json({
             "whatHappened": "Empty or trivial session",
-            "patterns": [],
-            "antiPatterns": [],
-            "preferences": [],
+            "facts": [],
+            "decisions": [],
             "entities": [],
-            "toolInsights": [],
+            "patterns": [],
+            "preferences": [],
             "isEmpty": True,
         })
         return
@@ -130,11 +140,16 @@ def main() -> None:
         lines = [l for l in playbook.splitlines() if l.strip() and not l.startswith("<!--")]
         playbook_summary = f"\n\n## Current Playbook (for reference — don't repeat known patterns)\n{chr(10).join(lines[:30])}"
 
+    # Include existing entities for retrieve-before-extract (Mem0 pattern)
+    existing_section = ""
+    if args.existing_entities and args.existing_entities.strip():
+        existing_section = f"\n\n## Existing Knowledge (reinforce or update these if the session confirms/changes them)\n{args.existing_entities}"
+
     user_prompt = f"""## Session Transcript ({len(items)} items)
 {transcript_text}
 
 ## Session Metadata
-{json.dumps(meta, indent=2)}{playbook_summary}"""
+{json.dumps(meta, indent=2)}{playbook_summary}{existing_section}"""
 
     try:
         raw = call_llm_with_fallback(

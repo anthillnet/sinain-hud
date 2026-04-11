@@ -52,16 +52,14 @@ def _get_all_facts_text(db_path: str) -> str:
 def _query_knowledge(db_path: str, question: str) -> str:
     """Query sinain knowledge graph for facts relevant to a question.
 
-    Strategy: first try tag-based retrieval (targeted). If nothing found,
-    fall back to full DB dump (sinain stores are small enough).
+    Strategy: hybrid retrieval (FTS5 → tags → graph traversal).
+    Falls back to full DB dump if nothing found.
     """
-    from graph_query import query_facts_by_entities, format_facts_text
+    from graph_query import query_facts_hybrid, format_facts_text
 
-    keywords = _extract_keywords(question)
-    if keywords:
-        facts = query_facts_by_entities(db_path, keywords, max_facts=MAX_FACTS_PER_QUERY)
-        if facts:
-            return format_facts_text(facts, max_chars=3000)
+    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY)
+    if facts:
+        return format_facts_text(facts, max_chars=3000)
 
     # Fallback: include all facts (DB is small, typically 10-30 facts)
     return _get_all_facts_text(db_path)
@@ -69,13 +67,11 @@ def _query_knowledge(db_path: str, question: str) -> str:
 
 def _get_retrieved_facts(db_path: str, question: str, k: int = 10) -> list[dict]:
     """Get facts retrieved for a question (for retrieval evaluation)."""
-    from graph_query import query_facts_by_entities, query_top_facts
+    from graph_query import query_facts_hybrid, query_top_facts
 
-    keywords = _extract_keywords(question)
-    if keywords:
-        facts = query_facts_by_entities(db_path, keywords, max_facts=k)
-        if facts:
-            return facts
+    facts = query_facts_hybrid(db_path, question, max_facts=k)
+    if facts:
+        return facts
 
     # Fallback: top facts by confidence
     return query_top_facts(db_path, limit=k)

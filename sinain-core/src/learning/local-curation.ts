@@ -55,6 +55,9 @@ export class LocalCurationService {
   private scriptsDir: string;
   private sessionStartTs: number;
   private curationTimer: ReturnType<typeof setInterval> | null = null;
+  private _lastDistilledTs = 0; // timestamp of last incremental distillation
+  private _incrementalRunning = false;
+  private _rearmCb: (() => void) | null = null; // callback to re-arm feed buffer onFull
 
   constructor() {
     this.memoryDir = resolveMemoryDir();
@@ -87,6 +90,58 @@ export class LocalCurationService {
     if (this.curationTimer) {
       clearInterval(this.curationTimer);
       this.curationTimer = null;
+    }
+  }
+
+  /** Timestamp of last incremental distillation (items before this are already distilled). */
+  get lastDistilledTs(): number {
+    return this._lastDistilledTs;
+  }
+
+  /** Set the callback to re-arm the feed buffer's onFull trigger after distillation. */
+  setRearmCallback(cb: () => void): void {
+    this._rearmCb = cb;
+  }
+
+  /**
+   * Incremental distillation — called when the feed buffer reaches capacity.
+   * Distills the current buffer contents before they fall off the ring buffer.
+   * Runs async so it doesn't block new items from arriving.
+   */
+  async distillIncremental(feedItems: FeedItem[]): Promise<void> {
+    if (this._incrementalRunning) {
+      log(TAG, "incremental distillation already running — skipping");
+      return;
+    }
+    this._incrementalRunning = true;
+
+    try {
+      const itemCount = feedItems.length;
+      log(TAG, `incremental distillation: ${itemCount} items (buffer full)`);
+
+      const sessionMeta = {
+        ts: new Date().toISOString(),
+        sessionKey: "local-incremental",
+        durationMs: Date.now() - this.sessionStartTs,
+      };
+
+      const transcript = feedItems.map(item => ({
+        text: item.text,
+        ts: item.ts,
+        source: item.source || "unknown",
+        channel: item.channel || "agent",
+      }));
+
+      if (this.runDistillation(transcript, sessionMeta)) {
+        this._lastDistilledTs = Date.now();
+        log(TAG, `incremental distillation complete — ${itemCount} items processed`);
+      }
+    } catch (err: any) {
+      warn(TAG, `incremental distillation failed: ${err.message?.slice(0, 100)}`);
+    } finally {
+      this._incrementalRunning = false;
+      // Re-arm the buffer callback so next fill triggers another distillation
+      this._rearmCb?.();
     }
   }
 
@@ -160,13 +215,20 @@ export class LocalCurationService {
    * picked up on next startup via distillPendingSession().
    */
   async distillSession(feedItems: FeedItem[]): Promise<void> {
-    if (feedItems.length < 1) {
-      log(TAG, `skipping distillation — only ${feedItems.length} feed items`);
+    // Filter to only items not yet covered by incremental distillation
+    const items = this._lastDistilledTs > 0
+      ? feedItems.filter(i => i.ts > this._lastDistilledTs)
+      : feedItems;
+
+    if (items.length < 1) {
+      log(TAG, `skipping shutdown distillation — all ${feedItems.length} items already distilled incrementally`);
       return;
     }
 
+    log(TAG, `shutdown distillation: ${items.length} items (${feedItems.length - items.length} already distilled incrementally)`);
+
     // Step 0: Save to disk FIRST — survives force-kill
-    this.savePendingSession(feedItems);
+    this.savePendingSession(items);
 
     const sessionMeta = {
       ts: new Date().toISOString(),
@@ -174,7 +236,7 @@ export class LocalCurationService {
       durationMs: Date.now() - this.sessionStartTs,
     };
 
-    const transcript = feedItems.map(item => ({
+    const transcript = items.map(item => ({
       text: item.text,
       ts: item.ts,
       source: item.source || "unknown",
@@ -204,13 +266,37 @@ export class LocalCurationService {
     log(TAG, `distilling session: ${transcript.length} items, ${Math.round(sessionMeta.durationMs / 60000)} min`);
 
     try {
+      // Step 0.5: Retrieve existing entities for context (Mem0 retrieve-before-extract pattern)
+      let existingEntities = "";
+      const dbPath = resolve(this.memoryDir, "knowledge-graph.db");
+      if (existsSync(dbPath)) {
+        try {
+          existingEntities = execFileSync("python3", [
+            resolve(this.scriptsDir, "graph_query.py"),
+            "--db", dbPath,
+            "--top", "20",
+            "--format", "compact",
+          ], {
+            timeout: 5_000,
+            encoding: "utf-8",
+            env: { ...process.env, PYTHONPATH: this.scriptsDir },
+          }).trim();
+        } catch {
+          // Non-fatal — distillation works without existing entities
+        }
+      }
+
       // Step 1: Distill session into a SessionDigest
-      const digestJson = execFileSync("python3", [
+      const distillerArgs = [
         resolve(this.scriptsDir, "session_distiller.py"),
         "--memory-dir", this.memoryDir,
         "--transcript", JSON.stringify(transcript),
         "--session-meta", JSON.stringify(sessionMeta),
-      ], {
+      ];
+      if (existingEntities) {
+        distillerArgs.push("--existing-entities", existingEntities);
+      }
+      const digestJson = execFileSync("python3", distillerArgs, {
         timeout: 30_000,
         encoding: "utf-8",
         env: { ...process.env, PYTHONPATH: this.scriptsDir },

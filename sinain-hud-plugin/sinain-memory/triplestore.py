@@ -79,6 +79,26 @@ CREATE INDEX IF NOT EXISTS idx_avet
     ON triples(attribute, value, entity_id, tx_id);
 """
 
+_FTS_SQL = """
+-- Full-text search on fact values (for hybrid retrieval)
+CREATE VIRTUAL TABLE IF NOT EXISTS triples_fts
+    USING fts5(entity_id, value, content=triples, content_rowid=id);
+
+-- Triggers to keep FTS in sync with triples table
+CREATE TRIGGER IF NOT EXISTS triples_ai AFTER INSERT ON triples BEGIN
+    INSERT INTO triples_fts(rowid, entity_id, value) VALUES (new.id, new.entity_id, new.value);
+END;
+
+CREATE TRIGGER IF NOT EXISTS triples_ad AFTER DELETE ON triples BEGIN
+    INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES ('delete', old.id, old.entity_id, old.value);
+END;
+
+CREATE TRIGGER IF NOT EXISTS triples_au AFTER UPDATE ON triples BEGIN
+    INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES ('delete', old.id, old.entity_id, old.value);
+    INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES (new.id, new.entity_id, new.value);
+END;
+"""
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -119,6 +139,10 @@ class TripleStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.executescript(_SCHEMA_SQL)
+        try:
+            self._conn.executescript(_FTS_SQL)
+        except sqlite3.OperationalError:
+            pass  # FTS5 not available on this Python build — degrade gracefully
         self._migrate()
         self._conn.commit()
 
