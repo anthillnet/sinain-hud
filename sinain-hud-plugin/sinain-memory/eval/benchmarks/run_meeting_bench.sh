@@ -270,13 +270,8 @@ for i in $(seq 1 120); do
   sleep 5
 done
 
-# Stop core
-pkill -INT -f "tsx src/index.ts" 2>/dev/null || true
-sleep 3
-pkill -9 -f "tsx src/index.ts" 2>/dev/null || true
-kill -9 "$CORE_PID" 2>/dev/null || true
-CORE_PID=""
-lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+# Keep core running for /embed endpoint during evaluation
+log "Keeping sinain-core running for embedding service during evaluation..."
 
 # ── Phase 2: Evaluate ────────────────────────────────────────────────────────
 log ""
