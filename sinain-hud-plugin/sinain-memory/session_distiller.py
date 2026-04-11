@@ -38,10 +38,12 @@ The transcript contains feed items from sinain-core:
 
 Extract:
 1. whatHappened: 2-3 sentences summarizing what occurred in this session
-2. facts: up to 10 concrete factual claims stated in the session — names, numbers, dates, \
-properties, relationships, anything someone might ask about later. Each fact must be a \
-self-contained sentence that answers a question on its own.
-   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage, client since 2015"
+2. facts: up to 15 concrete factual claims stated in the session. Each fact must be a \
+self-contained sentence. Cover ALL types: people and their roles/backgrounds, \
+organizations and their properties, numbers/quantities/dates, relationships between \
+entities, technical details. Prioritize facts someone might ask about later.
+   Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
+   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
    Bad: "client-understanding-key: True"
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
 4. entities: key people, organizations, tools, and topics mentioned (as lowercase-hyphenated slugs)
