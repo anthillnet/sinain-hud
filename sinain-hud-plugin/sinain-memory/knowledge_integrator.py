@@ -125,17 +125,29 @@ def _normalize_entity(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
 
 
-def _canonicalize_ops(ops: list[dict], existing_entities: list[str]) -> list[dict]:
-    """Deduplicate graph ops: merge only when entity+attribute+value match exactly.
+def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_facts: list[dict]) -> list[dict]:
+    """Deduplicate graph ops via embedding similarity (Mem0 pattern).
 
-    Different facts about the same entity should be separate triples (that's how EAV
-    works). Only merge when the SAME fact is being asserted again (reinforce).
+    For each new assertion, check if a semantically equivalent fact already exists
+    using cosine similarity (threshold 0.78). If so, reinforce instead of asserting.
+    Falls back to exact hash matching if embedding service is unavailable.
     """
-    # Build map of existing fact IDs by their content hash
-    existing_set = set(existing_entities)
+    existing_id_set = set(existing_entities)
+
+    # Build text→entity_id map for existing facts (for embedding-based dedup)
+    existing_texts: list[str] = []
+    existing_ids: list[str] = []
+    for f in existing_facts:
+        val = f.get("value", "")
+        eid = f.get("entityId", f.get("entity_id", ""))
+        if val and eid:
+            existing_texts.append(val)
+            existing_ids.append(eid)
 
     result = []
     seen_fact_ids: set[str] = set()
+    seen_values: list[str] = []  # for intra-batch dedup
+
     for op in ops:
         if op.get("op") != "assert":
             result.append(op)
@@ -144,20 +156,37 @@ def _canonicalize_ops(ops: list[dict], existing_entities: list[str]) -> list[dic
         entity = op.get("entity", "")
         attribute = op.get("attribute", "")
         value = op.get("value", "")
-
-        # Generate the deterministic fact ID
         fact_id = _fact_id(entity, attribute, value)
 
-        # Only reinforce if this exact fact already exists in the DB
-        if fact_id in existing_set:
-            result.append({"op": "reinforce", "entityId": fact_id})
-            print(f"  [canon] reinforcing existing '{fact_id}'", file=sys.stderr)
-        elif fact_id in seen_fact_ids:
-            # Duplicate within this batch — skip
+        # Exact hash match
+        if fact_id in existing_id_set or fact_id in seen_fact_ids:
+            if fact_id in existing_id_set:
+                result.append({"op": "reinforce", "entityId": fact_id})
+                print(f"  [dedup] exact match → reinforce '{fact_id}'", file=sys.stderr)
             continue
-        else:
-            result.append(op)
-            seen_fact_ids.add(fact_id)
+
+        # Embedding-based semantic dedup (if service available)
+        try:
+            from embed_client import find_duplicate
+            # Check against existing DB facts
+            dup_idx = find_duplicate(value, existing_texts)
+            if dup_idx is not None:
+                result.append({"op": "reinforce", "entityId": existing_ids[dup_idx]})
+                print(f"  [dedup] semantic match → reinforce '{existing_ids[dup_idx]}'", file=sys.stderr)
+                continue
+            # Check against facts in this batch
+            dup_batch = find_duplicate(value, seen_values)
+            if dup_batch is not None:
+                continue  # skip intra-batch duplicate
+        except Exception:
+            pass  # embedding unavailable, proceed with assert
+
+        result.append(op)
+        seen_fact_ids.add(fact_id)
+        seen_values.append(value)
+        # Register for future dedup
+        existing_texts.append(value)
+        existing_ids.append(fact_id)
 
     return result
 
@@ -233,9 +262,18 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Canonicalize entity names to prevent fragmentation
+        # Deduplicate via embedding similarity (Mem0 pattern)
         existing_ids = [r[0] for r in store.entities_with_attr("entity")]
-        ops = _canonicalize_ops(ops, existing_ids)
+        # Load existing fact values for semantic comparison
+        existing_facts_for_dedup = []
+        for eid in existing_ids:
+            attrs = store.entity(eid)
+            if attrs and "value" in attrs:
+                existing_facts_for_dedup.append({
+                    "entity_id": eid,
+                    "value": attrs["value"][0] if attrs["value"] else "",
+                })
+        ops = _canonicalize_ops(ops, existing_ids, existing_facts_for_dedup)
 
         stats = {"asserted": 0, "reinforced": 0, "retracted": 0}
 
