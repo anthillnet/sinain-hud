@@ -129,6 +129,127 @@ def query_top_facts(db_path: str, limit: int = 30) -> list[dict]:
         return []
 
 
+def query_facts_fts(db_path: str, query: str, max_facts: int = 10) -> list[dict]:
+    """Full-text search on fact values via FTS5 index.
+
+    Returns facts whose value field matches the query keywords.
+    Falls back to LIKE search if FTS5 is not available.
+    """
+    if not Path(db_path).exists():
+        return []
+
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+
+        # Try FTS5 first
+        try:
+            rows = store._conn.execute(
+                """SELECT DISTINCT t.entity_id
+                   FROM triples_fts fts
+                   JOIN triples t ON fts.rowid = t.id
+                   WHERE triples_fts MATCH ?
+                     AND t.attribute = 'value'
+                     AND NOT t.retracted
+                   LIMIT ?""",
+                (query, max_facts),
+            ).fetchall()
+        except Exception:
+            # FTS5 not available — fall back to LIKE search
+            keywords = [w.lower() for w in query.split() if len(w) > 2]
+            if not keywords:
+                store.close()
+                return []
+            # Match any keyword in value
+            conditions = " OR ".join(["LOWER(value) LIKE ?"] * len(keywords))
+            params = [f"%{k}%" for k in keywords] + [max_facts]
+            rows = store._conn.execute(
+                f"""SELECT DISTINCT entity_id
+                    FROM triples
+                    WHERE attribute = 'value'
+                      AND NOT retracted
+                      AND ({conditions})
+                    LIMIT ?""",
+                params,
+            ).fetchall()
+
+        entity_ids = [r["entity_id"] for r in rows]
+        if not entity_ids:
+            store.close()
+            return []
+
+        # Fetch full attributes for matched entities
+        facts = []
+        for eid in entity_ids:
+            attrs = store.entity(eid)
+            fact = {"entity_id": eid, "entity": eid.split(":")[-1].rsplit("-", 1)[0] if ":" in eid else eid}
+            for attr, values in attrs.items():
+                if attr == "tag":
+                    continue
+                fact[attr] = values[0] if len(values) == 1 else values
+            facts.append(fact)
+
+        store.close()
+        return facts[:max_facts]
+    except Exception:
+        return []
+
+
+def query_facts_hybrid(
+    db_path: str,
+    query: str,
+    max_facts: int = 10,
+) -> list[dict]:
+    """Hybrid retrieval: FTS5 → tag-based → 1-hop graph traversal.
+
+    Combines full-text search on fact values, tag-based entity matching,
+    and 1-hop graph traversal for relationship discovery.
+    Inspired by Zep/Graphiti (+18.5% on LongMemEval).
+    """
+    import re
+    keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
+    seen_ids: set[str] = set()
+    results: list[dict] = []
+
+    def _add(facts: list[dict]) -> None:
+        for f in facts:
+            eid = f.get("entity_id", "")
+            if eid not in seen_ids and len(results) < max_facts:
+                seen_ids.add(eid)
+                results.append(f)
+
+    # Tier 1: FTS5 keyword match on fact values
+    _add(query_facts_fts(db_path, query, max_facts=max_facts))
+
+    # Tier 2: Tag-based (existing)
+    if len(results) < max_facts and keywords:
+        _add(query_facts_by_entities(db_path, keywords, max_facts=max_facts - len(results)))
+
+    # Tier 3: 1-hop graph traversal — expand found entities via ref edges
+    if results and len(results) < max_facts:
+        try:
+            from triplestore import TripleStore
+            store = TripleStore(db_path)
+            for fact in list(results):
+                eid = fact.get("entity_id", "")
+                if not eid:
+                    continue
+                neighbors = store.neighbors(eid, depth=1)
+                for nid, nattrs in neighbors.items():
+                    if nid not in seen_ids and len(results) < max_facts:
+                        seen_ids.add(nid)
+                        nfact = {"entity_id": nid, "entity": nid.split(":")[-1].rsplit("-", 1)[0] if ":" in nid else nid}
+                        for attr, values in nattrs.items():
+                            if attr != "tag":
+                                nfact[attr] = values[0] if len(values) == 1 else values
+                        results.append(nfact)
+            store.close()
+        except Exception:
+            pass
+
+    return results[:max_facts]
+
+
 def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
     """Format facts as human-readable text for escalation message injection."""
     if not facts:

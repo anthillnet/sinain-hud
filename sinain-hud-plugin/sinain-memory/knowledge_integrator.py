@@ -55,12 +55,15 @@ FOR THE PLAYBOOK:
 - Three Laws: (1) don't remove error-prevention patterns, (2) preserve high-scoring approaches, (3) then evolve
 
 FOR THE KNOWLEDGE GRAPH:
-- ASSERT new durable facts (error→fix mappings, domain knowledge, user expertise)
+- ASSERT every concrete fact from the digest: factual claims, decisions, relationships, numbers
 - REINFORCE existing facts confirmed by the session (list their entity_ids)
 - RETRACT facts contradicted by session evidence (list their entity_ids)
-- Each fact needs: entity (domain/tool/workflow), attribute (relationship type), value (the knowledge), confidence (0.0-1.0), domain (for module scoping)
-- Entity naming: use lowercase-hyphenated slugs (e.g., "react-native", "metro-bundler")
-- Only assert DURABLE facts — not ephemeral session details
+- Each fact needs: entity (real name from content), attribute (relationship type), value (self-contained sentence), confidence (0.0-1.0), domain (for scoping)
+- Entity naming: use actual names as lowercase-hyphenated slugs
+    Good: "citibank", "al-futaim-group", "artom", "intellij-idea"
+    Bad: "ai-solutions", "client-understanding", "tool-usage"
+- The value field must be a complete, self-contained sentence that answers a question on its own
+- Assert BOTH durable facts AND time-bound decisions/action items (mark decisions with confidence 0.7)
 
 If the session was empty/idle, return minimal changes.
 

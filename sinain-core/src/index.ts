@@ -343,6 +343,12 @@ async function main() {
   localCuration.distillPendingSession(); // Recover any session saved before a force-kill
   localCuration.startPeriodicCuration();
 
+  // Wire incremental distillation: when feed buffer fills, distill before items are lost
+  localCuration.setRearmCallback(() => feedBuffer.rearmOnFull());
+  feedBuffer.onFull((items) => {
+    localCuration.distillIncremental(items);
+  });
+
   // ── Initialize escalation ──
   const escalator = new Escalator({
     feedBuffer,
