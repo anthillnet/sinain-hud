@@ -38,13 +38,20 @@ The transcript contains feed items from sinain-core:
 
 Extract:
 1. whatHappened: 2-3 sentences summarizing what occurred in this session
-2. facts: up to 15 concrete factual claims stated in the session. Each fact must be a \
-self-contained sentence. Cover ALL types: people and their roles/backgrounds, \
-organizations and their properties, numbers/quantities/dates, relationships between \
-entities, technical details. Prioritize facts someone might ask about later.
+2. facts: up to 15 concrete factual claims. Each must be a self-contained sentence. \
+IMPORTANT — spread across these dimensions (do not let one theme dominate):
+   - WHO: people mentioned, their roles, backgrounds, relationships to each other
+   - WHAT: specific claims, properties, descriptions of things discussed
+   - HOW MUCH: any numbers, quantities, dates, durations, counts stated
+   - WHAT CHANGED: decisions made, agreements reached, state changes
+   - WHAT'S NEXT: commitments, action items, plans, deadlines
+   If you have 5+ facts about one dimension and 0 about another that was discussed, \
+you are missing something. Breadth over depth.
    Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
    Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
+   Good: "The meeting is 45 minutes, scheduled for Tuesday"
    Bad: "client-understanding-key: True"
+   Bad: five variations of "Al-Futaim is moving to the cloud"
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
 4. entities: key people, organizations, tools, and topics mentioned (as lowercase-hyphenated slugs)
 5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
