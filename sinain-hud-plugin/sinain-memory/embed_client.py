@@ -47,34 +47,49 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot  # vectors are pre-normalized by the model
 
 
+def find_duplicates_batch(
+    new_texts: list[str],
+    existing_texts: list[str],
+    threshold: float = SIMILARITY_THRESHOLD,
+) -> dict[int, int]:
+    """Find duplicates for multiple new texts against existing texts in one batch.
+
+    Returns {new_index: existing_index} for texts with similarity >= threshold.
+    Single HTTP call for all texts — avoids per-fact round trips.
+    """
+    if not existing_texts or not new_texts:
+        return {}
+
+    all_texts = new_texts + existing_texts
+    embeddings = embed(all_texts)
+    if embeddings is None:
+        return {}
+
+    n_new = len(new_texts)
+    result = {}
+
+    for i in range(n_new):
+        best_idx = None
+        best_sim = threshold
+        for j in range(n_new, len(embeddings)):
+            sim = cosine(embeddings[i], embeddings[j])
+            if sim > best_sim:
+                best_sim = sim
+                best_idx = j - n_new
+        if best_idx is not None:
+            result[i] = best_idx
+
+    return result
+
+
 def find_duplicate(
     new_text: str,
     existing_texts: list[str],
     threshold: float = SIMILARITY_THRESHOLD,
 ) -> int | None:
-    """Find the index of the most similar existing text, or None if no match.
-
-    Returns the index into existing_texts if similarity >= threshold.
-    """
-    if not existing_texts:
-        return None
-
-    all_texts = [new_text] + existing_texts
-    embeddings = embed(all_texts)
-    if embeddings is None:
-        return None
-
-    new_emb = embeddings[0]
-    best_idx = None
-    best_sim = threshold
-
-    for i, emb in enumerate(embeddings[1:]):
-        sim = cosine(new_emb, emb)
-        if sim > best_sim:
-            best_sim = sim
-            best_idx = i
-
-    return best_idx
+    """Find the index of the most similar existing text, or None if no match."""
+    result = find_duplicates_batch([new_text], existing_texts, threshold)
+    return result.get(0)
 
 
 def rank_by_similarity(

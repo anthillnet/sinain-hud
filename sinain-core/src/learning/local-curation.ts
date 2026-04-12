@@ -366,7 +366,7 @@ export class LocalCurationService {
           "--memory-dir", this.memoryDir,
           "--digest", JSON.stringify(digest),
         ], {
-          timeout: 30_000,
+          timeout: 60_000, // 60s: LLM call (~10s) + embedding dedup (~5s) + graph ops
           encoding: "utf-8",
           env: { ...process.env, PYTHONPATH: this.scriptsDir },
         });

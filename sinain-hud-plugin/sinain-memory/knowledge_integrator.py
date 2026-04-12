@@ -144,11 +144,31 @@ def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_fa
             existing_texts.append(val)
             existing_ids.append(eid)
 
+    # Separate assert ops for batch dedup
+    assert_ops = [(i, op) for i, op in enumerate(ops) if op.get("op") == "assert"]
+    non_assert_ops = [(i, op) for i, op in enumerate(ops) if op.get("op") != "assert"]
+
+    # Batch embedding dedup: single HTTP call for all new facts
+    dedup_map: dict[int, int] = {}  # assert_index → existing_index
+    if assert_ops and existing_texts:
+        try:
+            from embed_client import find_duplicates_batch
+            new_values = [op.get("value", "") for _, op in assert_ops]
+            dedup_map = find_duplicates_batch(new_values, existing_texts)
+            if dedup_map:
+                print(f"  [dedup] found {len(dedup_map)} semantic duplicates in batch", file=sys.stderr)
+        except Exception:
+            pass  # embedding unavailable, fall through to exact matching
+
     result = []
     seen_fact_ids: set[str] = set()
-    seen_values: list[str] = []  # for intra-batch dedup
+    seen_values_set: set[str] = set()
 
-    for op in ops:
+    # Re-merge in original order
+    all_indexed = non_assert_ops + assert_ops
+    all_indexed.sort(key=lambda x: x[0])
+
+    for orig_idx, op in all_indexed:
         if op.get("op") != "assert":
             result.append(op)
             continue
@@ -162,31 +182,24 @@ def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_fa
         if fact_id in existing_id_set or fact_id in seen_fact_ids:
             if fact_id in existing_id_set:
                 result.append({"op": "reinforce", "entityId": fact_id})
-                print(f"  [dedup] exact match → reinforce '{fact_id}'", file=sys.stderr)
+                print(f"  [dedup] exact → reinforce '{fact_id}'", file=sys.stderr)
             continue
 
-        # Embedding-based semantic dedup (if service available)
-        try:
-            from embed_client import find_duplicate
-            # Check against existing DB facts
-            dup_idx = find_duplicate(value, existing_texts)
-            if dup_idx is not None:
-                result.append({"op": "reinforce", "entityId": existing_ids[dup_idx]})
-                print(f"  [dedup] semantic match → reinforce '{existing_ids[dup_idx]}'", file=sys.stderr)
-                continue
-            # Check against facts in this batch
-            dup_batch = find_duplicate(value, seen_values)
-            if dup_batch is not None:
-                continue  # skip intra-batch duplicate
-        except Exception:
-            pass  # embedding unavailable, proceed with assert
+        # Check batch embedding dedup results
+        assert_idx = [i for i, (oi, _) in enumerate(assert_ops) if oi == orig_idx]
+        if assert_idx and assert_idx[0] in dedup_map:
+            dup_existing_idx = dedup_map[assert_idx[0]]
+            result.append({"op": "reinforce", "entityId": existing_ids[dup_existing_idx]})
+            print(f"  [dedup] semantic → reinforce '{existing_ids[dup_existing_idx]}'", file=sys.stderr)
+            continue
+
+        # Intra-batch dedup (by value text)
+        if value in seen_values_set:
+            continue
 
         result.append(op)
         seen_fact_ids.add(fact_id)
-        seen_values.append(value)
-        # Register for future dedup
-        existing_texts.append(value)
-        existing_ids.append(fact_id)
+        seen_values_set.add(value)
 
     return result
 
@@ -269,10 +282,10 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
         for eid in existing_ids:
             attrs = store.entity(eid)
             if attrs and "value" in attrs:
-                existing_facts_for_dedup.append({
-                    "entity_id": eid,
-                    "value": attrs["value"][0] if attrs["value"] else "",
-                })
+                vals = attrs["value"]
+                val = vals[0] if isinstance(vals, list) and vals else str(vals) if vals else ""
+                if val:
+                    existing_facts_for_dedup.append({"entity_id": eid, "value": val})
         ops = _canonicalize_ops(ops, existing_ids, existing_facts_for_dedup)
 
         stats = {"asserted": 0, "reinforced": 0, "retracted": 0}
