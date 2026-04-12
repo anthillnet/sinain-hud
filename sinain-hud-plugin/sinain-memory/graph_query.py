@@ -200,33 +200,58 @@ def query_facts_hybrid(
     query: str,
     max_facts: int = 10,
 ) -> list[dict]:
-    """Hybrid retrieval: FTS5 → tag-based → 1-hop graph traversal.
+    """Hybrid retrieval with Reciprocal Rank Fusion (Graphiti pattern).
 
-    Combines full-text search on fact values, tag-based entity matching,
-    and 1-hop graph traversal for relationship discovery.
-    Inspired by Zep/Graphiti (+18.5% on LongMemEval).
+    Runs three independent retrieval methods, fuses via RRF, then
+    expands top results with 1-hop graph neighbors.
     """
     import re
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
-    seen_ids: set[str] = set()
-    results: list[dict] = []
 
-    def _add(facts: list[dict]) -> None:
+    # Run all three retrieval methods independently (broader candidate set)
+    candidate_limit = max_facts * 3
+    fts_results = query_facts_fts(db_path, query, max_facts=candidate_limit)
+    tag_results = query_facts_by_entities(db_path, keywords, max_facts=candidate_limit) if keywords else []
+    top_results = query_top_facts(db_path, limit=candidate_limit)
+
+    # Build ranked lists by entity_id
+    def _ranked_ids(facts: list[dict]) -> list[str]:
+        seen = set()
+        out = []
         for f in facts:
             eid = f.get("entity_id", "")
-            if eid not in seen_ids and len(results) < max_facts:
-                seen_ids.add(eid)
-                results.append(f)
+            if eid and eid not in seen:
+                seen.add(eid)
+                out.append(eid)
+        return out
 
-    # Tier 1: FTS5 keyword match on fact values
-    _add(query_facts_fts(db_path, query, max_facts=max_facts))
+    fts_ranked = _ranked_ids(fts_results)
+    tag_ranked = _ranked_ids(tag_results)
+    top_ranked = _ranked_ids(top_results)
 
-    # Tier 2: Tag-based (existing)
-    if len(results) < max_facts and keywords:
-        _add(query_facts_by_entities(db_path, keywords, max_facts=max_facts - len(results)))
+    # Reciprocal Rank Fusion: RRF(d) = Σ 1/(k + rank_i(d))
+    K = 60  # standard RRF constant
+    rrf_scores: dict[str, float] = {}
+    for ranked_list in [fts_ranked, tag_ranked, top_ranked]:
+        for rank, eid in enumerate(ranked_list):
+            rrf_scores[eid] = rrf_scores.get(eid, 0.0) + 1.0 / (K + rank)
 
-    # Tier 3: 1-hop graph traversal — expand found entities via ref edges
+    # Sort by RRF score descending
+    sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)
+
+    # Build fact lookup from all candidates
+    fact_map: dict[str, dict] = {}
+    for facts in [fts_results, tag_results, top_results]:
+        for f in facts:
+            eid = f.get("entity_id", "")
+            if eid and eid not in fact_map:
+                fact_map[eid] = f
+
+    results = [fact_map[eid] for eid in sorted_ids[:max_facts] if eid in fact_map]
+
+    # Expand top results with 1-hop graph neighbors
     if results and len(results) < max_facts:
+        seen_ids = {f.get("entity_id", "") for f in results}
         try:
             from triplestore import TripleStore
             store = TripleStore(db_path)
@@ -251,26 +276,37 @@ def query_facts_hybrid(
 
 
 def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
-    """Format facts as human-readable text for escalation message injection."""
+    """Format facts grouped by entity for better cross-fact reasoning.
+
+    Groups related facts under entity headers so the QA model sees
+    connected context (e.g., all Citibank facts together).
+    """
     if not facts:
         return ""
 
+    # Group by entity name (strip fact: prefix and hash suffix)
+    from collections import OrderedDict
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for f in facts:
+        entity = f.get("entity", "")
+        if not entity:
+            eid = f.get("entity_id", "")
+            entity = eid.split(":")[-1].rsplit("-", 1)[0] if ":" in eid else eid
+        groups.setdefault(entity, []).append(f)
+
     lines = []
     total = 0
-    for f in facts:
-        value = f.get("value", "")
-        conf = f.get("confidence", "?")
-        count = f.get("reinforce_count", "1")
-        domain = f.get("domain", "")
+    for entity, group_facts in groups.items():
+        for f in group_facts:
+            value = f.get("value", "")
+            conf = f.get("confidence", "?")
+            count = f.get("reinforce_count", "1")
 
-        line = f"- {value} (confidence: {conf}, confirmed {count}x)"
-        if domain:
-            line = f"- [{domain}] {value} (confidence: {conf}, confirmed {count}x)"
-
-        if total + len(line) > max_chars:
-            break
-        lines.append(line)
-        total += len(line)
+            line = f"- [{entity}] {value} (conf: {conf}, {count}x)"
+            if total + len(line) > max_chars:
+                return "\n".join(lines)
+            lines.append(line)
+            total += len(line)
 
     return "\n".join(lines)
 
