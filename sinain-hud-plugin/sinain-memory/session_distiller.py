@@ -53,13 +53,13 @@ you are missing something. Breadth over depth.
    Bad: "client-understanding-key: True"
    Bad: five variations of "Al-Futaim is moving to the cloud"
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
-4. entities: key people, organizations, tools, and topics mentioned (as lowercase-hyphenated slugs)
+4. entities: named things discussed or interacted with — as objects with name \
+(lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
+service, framework, error, whatever fits the context).
+   Examples: {"name": "citibank", "type": "org"}, {"name": "auth-module", "type": "file"}, \
+{"name": "react-native", "type": "framework"}
 5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
 6. preferences: up to 3 user preferences or habits observed
-
-Entity naming: use actual names from the conversation, not abstract categories.
-   Good: "citibank", "al-futaim-group", "artom", "intellij"
-   Bad: "ai-solutions", "client-understanding", "tool-usage"
 
 If existing entities are provided, reference them by name to enable reinforcement.
 Focus on CONCRETE, SPECIFIC knowledge. Skip vague observations.
@@ -70,7 +70,7 @@ Respond with ONLY a JSON object:
   "whatHappened": "string",
   "facts": ["self-contained factual sentence", ...],
   "decisions": ["decision sentence with who/what/when", ...],
-  "entities": ["citibank", "al-futaim-group", "artom", ...],
+  "entities": [{"name": "citibank", "type": "org"}, {"name": "artom", "type": "person"}, ...],
   "patterns": ["reusable technique or workflow", ...],
   "preferences": ["user preference or habit", ...],
   "isEmpty": false
