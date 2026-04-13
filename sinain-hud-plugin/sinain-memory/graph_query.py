@@ -289,10 +289,12 @@ def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
     groups: OrderedDict[str, list[dict]] = OrderedDict()
     for f in facts:
         entity = f.get("entity", "")
+        if isinstance(entity, list):
+            entity = entity[0] if entity else ""
         if not entity:
-            eid = f.get("entity_id", "")
+            eid = str(f.get("entity_id", ""))
             entity = eid.split(":")[-1].rsplit("-", 1)[0] if ":" in eid else eid
-        groups.setdefault(entity, []).append(f)
+        groups.setdefault(str(entity), []).append(f)
 
     lines = []
     total = 0
