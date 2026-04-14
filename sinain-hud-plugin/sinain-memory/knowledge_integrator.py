@@ -267,6 +267,82 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
         return []
 
 
+def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
+    """Merge multiple facts about the same entity into consolidated facts.
+
+    Pure code — no LLM. Concatenates fact values with "; " separator.
+    Runs at shutdown only (not incremental passes).
+    """
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+
+        # Group facts by entity name
+        entity_facts: dict[str, list[tuple[str, str]]] = {}  # entity → [(fact_id, value)]
+        for r in store.entities_with_attr("entity"):
+            fact_id, entity_name = r[0], r[1]
+            if not fact_id.startswith("fact:") or isinstance(entity_name, list):
+                continue
+            attrs = store.entity(fact_id)
+            if attrs and "value" in attrs:
+                val = attrs["value"][0] if isinstance(attrs["value"], list) else str(attrs["value"])
+                entity_facts.setdefault(entity_name, []).append((fact_id, val))
+
+        consolidated = 0
+        for entity_name, facts in entity_facts.items():
+            if len(facts) < min_facts:
+                continue
+
+            # Check if a consolidated fact already exists
+            if any(";" in val and len(val) > 100 for _, val in facts):
+                continue  # already consolidated
+
+            # Deduplicate values (same fact stated differently)
+            seen_values: list[str] = []
+            for _, val in facts:
+                # Skip if very similar to an already-seen value
+                if not any(len(set(val.lower().split()) & set(sv.lower().split())) / max(len(val.split()), 1) > 0.7 for sv in seen_values):
+                    seen_values.append(val)
+
+            if len(seen_values) < 2:
+                continue  # nothing to consolidate after dedup
+
+            merged_value = "; ".join(seen_values)
+            if len(merged_value) > 500:
+                merged_value = merged_value[:500] + "..."
+
+            # Create consolidated fact, retract originals
+            tx = store.begin_tx("consolidation")
+            new_eid = _fact_id(entity_name, "consolidated", merged_value)
+            store.assert_triple(tx, new_eid, "entity", entity_name)
+            store.assert_triple(tx, new_eid, "attribute", "consolidated")
+            store.assert_triple(tx, new_eid, "value", merged_value)
+            store.assert_triple(tx, new_eid, "confidence", "0.95")
+            store.assert_triple(tx, new_eid, "first_seen", _now_iso())
+            store.assert_triple(tx, new_eid, "reinforce_count", str(len(facts)))
+            for tag in _extract_tags(merged_value):
+                store.assert_triple(tx, new_eid, "tag", tag)
+
+            # Retract original individual facts
+            for old_eid, _ in facts:
+                for attr_name in list(store.entity(old_eid).keys()):
+                    store.retract_triple(tx, old_eid, attr_name)
+
+            consolidated += 1
+            print(f"  [consolidate] {entity_name}: {len(facts)} facts → 1 ({len(merged_value)} chars)", file=sys.stderr)
+
+        store.close()
+        return consolidated
+    except Exception as e:
+        print(f"  [consolidate] failed: {e}", file=sys.stderr)
+        return 0
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
     """Extract the most relevant entity name from a fact sentence.
 
@@ -708,6 +784,10 @@ def main() -> None:
 
     # Dedup + execute
     graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts, digest_entities=digest_entities)
+
+    # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
+    # at our scale (<200 facts). Individual facts are more retrievable than merged ones.
+    # Keep facts separate — dedup handles true duplicates, different facts stay distinct.
 
     # ── Step 2: Automated playbook curation (tag overlap, no LLM) ──
     archive_path = _archive_playbook(memory_dir)
