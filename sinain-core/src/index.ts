@@ -71,7 +71,7 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "text"];
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "compact"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
       const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
       if (out) results.push(out);
