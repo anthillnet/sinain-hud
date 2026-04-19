@@ -17,6 +17,8 @@ Three main processes communicate over localhost:
 
 Data flow: `sck-capture → stdout PCM → sinain-core AudioPipeline → VAD → transcription → feed buffer → WebSocket → overlay`. Screen: `sck-capture → IPC JPEG → sense_client → OCR → POST /sense → sinain-core`. Cost: `OpenRouter usage.cost → analyzer/transcription/vision → CostTracker → WebSocket → overlay`.
 
+Knowledge: When feed buffer reaches capacity, `LocalCurationService` triggers incremental distillation: `feed items + screen OCR → session_distiller.py (LLM) → {facts, entities, decisions} → knowledge_integrator.py (code) → triplestore + entity graph`. On shutdown, remaining items are saved to `pending-session.json` and distilled on next startup. Memory dir: `SINAIN_MEMORY_DIR` (default `~/.sinain/memory`).
+
 Escalation: Agent loop scores digests against patterns. If score >= threshold (or rich/focus mode), escalates to OpenClaw gateway via HTTP+WebSocket.
 
 ## Build & Run Commands
@@ -88,8 +90,10 @@ Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
 - `agent/context-window.ts` — Context assembly with richness presets
 - `escalation/escalator.ts` — Escalation orchestration (largest file ~28KB)
 - `escalation/scorer.ts` — Pattern-based scoring for escalation decisions
-- `buffers/feed-buffer.ts` — Ring buffer for feed items
+- `buffers/feed-buffer.ts` — Ring buffer for feed items (100 max, `onFull` callback for incremental distillation)
 - `buffers/sense-buffer.ts` — Ring buffer for screen events
+- `learning/local-curation.ts` — Local knowledge pipeline: incremental distillation on buffer full, session distillation on shutdown, periodic curation
+- `embedding/service.ts` — In-process sentence embeddings (all-MiniLM-L6-v2, 384 dims) for semantic dedup + retrieval
 - `cost/tracker.ts` — CostTracker: in-memory LLM cost accumulator, periodic logging, WS broadcast
 - `eval/` — Evaluation framework with LLM-as-Judge, JSONL scenarios
 
@@ -100,6 +104,14 @@ Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
 - `ui/hud_shell.dart` — Main shell, mode switching
 - `macos/Runner/MainFlutterWindow.swift` — NSPanel subclass (private overlay window)
 - `macos/Runner/AppDelegate.swift` — Global hotkeys, window config
+
+### sinain-memory (`sinain-hud-plugin/sinain-memory/`)
+- `session_distiller.py` — LLM-based extraction: transcript → `{facts[], entities[], decisions[]}`
+- `knowledge_integrator.py` — Deterministic pipeline: facts → graph ops + entity graph + playbook curation (no LLM)
+- `triplestore.py` — SQLite EAV store with 4 covering indexes (EAVT, AEVT, VAET, AVET), FTS5, confidence decay
+- `graph_query.py` — Hybrid retrieval: RRF fusion of FTS5 + tag-based + entity graph backrefs
+- `embed_client.py` — Python client for sinain-core `/embed` endpoint (semantic dedup + retrieval ranking)
+- `common.py` — Shared LLM call utilities with fallback chains
 
 ### sense_client (`sense_client/`)
 - `capture.py` — Screen capture (IPC from sck-capture, CGDisplayCreateImage fallback)
@@ -119,6 +131,8 @@ All config via environment variables or `.env` file at project root. Key vars:
 - `ESCALATION_MODE` — `off | selective | focus | rich` (default: `rich`)
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
 - `AUDIO_DEVICE` — macOS audio device for sox/ffmpeg fallback (default: `BlackHole 2ch`)
+- `SINAIN_MEMORY_DIR` — Knowledge graph directory (default: `~/.sinain/memory`)
+- `LEARNING_ENABLED` — Enable/disable knowledge distillation pipeline (default: `true`)
 
 See `.env.example` for the complete list and [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 
@@ -131,6 +145,9 @@ See `.env.example` for the complete list and [docs/CONFIGURATION.md](docs/CONFIG
 - **Privacy layering** — Client-side `<private>` tag stripping in sense_client, plus server-side stripping in OpenClaw plugin
 - **Fallback models** — Agent retries with configurable fallback model chain on failure
 - **Cost tracking** — CostTracker accumulates `usage.cost` from OpenRouter responses across analyzer, transcription, and vision. Vision costs piped from sense_client via POST `/sense` with retry dedup (`cost_id`). In-memory (resets on restart), broadcasts to overlay via WebSocket, logs breakdown by source/model every 60s
+- **Knowledge graph** — Two-layer EAV triplestore: `fact:*` entities store individual claims, `entity:*` nodes represent real-world entities connected by ref edges. Four covering indexes (EAVT/AEVT/VAET/AVET) + FTS5. Incremental distillation on buffer full prevents data loss in long sessions.
+- **Deterministic integration** — Distiller (LLM) extracts facts, integrator (code) stores them. No LLM in the integration step — deterministic conversion of facts to graph ops eliminates variance.
+- **Embedding service** — In-process all-MiniLM-L6-v2 (384 dims) loaded at sinain-core startup for semantic dedup (write path) and retrieval re-ranking (read path). POST `/embed` endpoint.
 
 ## Privacy Design
 
