@@ -205,12 +205,18 @@ brew install ollama && ollama pull llava
 | Windows | [setup-windows.sh](setup-windows.sh) |
 | From Source | `git clone`, `cp .env.example ~/.sinain/.env`, `./start.sh` |
 
-## Knowledge Transfer
+## Knowledge System
+
+Sinain builds a persistent knowledge graph from everything it captures — audio transcriptions, screen OCR, and agent interactions. Facts are distilled incrementally (on buffer full and session end), stored in an EAV triplestore with graph relationships, and retrieved via hybrid search (FTS5 + tag-based + entity graph backrefs with RRF fusion).
+
+The integration step is fully deterministic — no LLM decides what to store. Every extracted fact is preserved.
 
 ```bash
 npx @geravant/sinain export-knowledge   # export playbook, modules, graph
 npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
 ```
+
+See [Knowledge System docs](docs/knowledge-system.md) for architecture details.
 
 ## Deep Dives
 
