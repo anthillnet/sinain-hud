@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, appendF
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeedItem } from "../types.js";
+import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import { log, warn, error } from "../log.js";
 
 const TAG = "local-curation";
@@ -55,6 +56,10 @@ export class LocalCurationService {
   private scriptsDir: string;
   private sessionStartTs: number;
   private curationTimer: ReturnType<typeof setInterval> | null = null;
+  private _lastDistilledTs = 0; // timestamp of last incremental distillation
+  private _incrementalRunning = false;
+  private _rearmCb: (() => void) | null = null; // callback to re-arm feed buffer onFull
+  private _senseBuffer: SenseBuffer | null = null;
 
   constructor() {
     this.memoryDir = resolveMemoryDir();
@@ -87,6 +92,100 @@ export class LocalCurationService {
     if (this.curationTimer) {
       clearInterval(this.curationTimer);
       this.curationTimer = null;
+    }
+  }
+
+  /** Timestamp of last incremental distillation (items before this are already distilled). */
+  get lastDistilledTs(): number {
+    return this._lastDistilledTs;
+  }
+
+  /** Set the callback to re-arm the feed buffer's onFull trigger after distillation. */
+  setRearmCallback(cb: () => void): void {
+    this._rearmCb = cb;
+  }
+
+  /** Attach sense buffer for screen context in distillation. */
+  setSenseBuffer(sb: SenseBuffer): void {
+    this._senseBuffer = sb;
+  }
+
+  /** Extract screen context from sense buffer as feed-item-compatible entries. */
+  private getSenseContext(): Array<{ text: string; ts: number; source: string; channel: string }> {
+    if (!this._senseBuffer) return [];
+    const events = this._senseBuffer.queryByTime(this._lastDistilledTs || (Date.now() - 30 * 60 * 1000));
+    const items: Array<{ text: string; ts: number; source: string; channel: string }> = [];
+    for (const evt of events) {
+      // Include OCR text (what's visible on screen)
+      if (evt.ocr && evt.ocr.length > 20) {
+        const app = evt.semantic?.context?.app || "unknown";
+        items.push({
+          text: `[screen: ${app}] ${evt.ocr}`,
+          ts: evt.ts,
+          source: "sense",
+          channel: "screen",
+        });
+      }
+      // Include vision summaries (AI description of screen content)
+      if (evt.semantic?.visible?.summary) {
+        items.push({
+          text: `[screen-context] ${evt.semantic.visible.summary}`,
+          ts: evt.ts,
+          source: "sense",
+          channel: "screen",
+        });
+      }
+    }
+    return items;
+  }
+
+  /**
+   * Incremental distillation — called when the feed buffer reaches capacity.
+   * Distills the current buffer contents before they fall off the ring buffer.
+   * Runs async so it doesn't block new items from arriving.
+   */
+  async distillIncremental(feedItems: FeedItem[]): Promise<void> {
+    if (this._incrementalRunning) {
+      log(TAG, "incremental distillation already running — skipping");
+      return;
+    }
+    this._incrementalRunning = true;
+
+    try {
+      const itemCount = feedItems.length;
+      log(TAG, `incremental distillation: ${itemCount} items (buffer full)`);
+
+      const sessionMeta = {
+        ts: new Date().toISOString(),
+        sessionKey: "local-incremental",
+        durationMs: Date.now() - this.sessionStartTs,
+      };
+
+      const audioItems = feedItems.map(item => ({
+        text: item.text,
+        ts: item.ts,
+        source: item.source || "unknown",
+        channel: item.channel || "agent",
+      }));
+
+      // Merge screen context from sense buffer (OCR + vision summaries)
+      const senseItems = this.getSenseContext();
+      const transcript = [...audioItems, ...senseItems].sort((a, b) => a.ts - b.ts);
+
+      if (senseItems.length > 0) {
+        log(TAG, `including ${senseItems.length} screen context items in distillation`);
+      }
+
+      if (this.runDistillation(transcript, sessionMeta)) {
+        this._lastDistilledTs = Date.now();
+        log(TAG, `incremental distillation complete — ${itemCount} audio + ${senseItems.length} screen items processed`);
+      }
+    } catch (err: any) {
+      warn(TAG, `incremental distillation failed: ${err.message?.slice(0, 100)}`);
+    } finally {
+      this._incrementalRunning = false;
+      // Re-arm the buffer callback so next fill triggers another distillation
+      this._rearmCb?.();
     }
   }
 
@@ -160,13 +259,20 @@ export class LocalCurationService {
    * picked up on next startup via distillPendingSession().
    */
   async distillSession(feedItems: FeedItem[]): Promise<void> {
-    if (feedItems.length < 1) {
-      log(TAG, `skipping distillation — only ${feedItems.length} feed items`);
+    // Filter to only items not yet covered by incremental distillation
+    const items = this._lastDistilledTs > 0
+      ? feedItems.filter(i => i.ts > this._lastDistilledTs)
+      : feedItems;
+
+    if (items.length < 1) {
+      log(TAG, `skipping shutdown distillation — all ${feedItems.length} items already distilled incrementally`);
       return;
     }
 
+    log(TAG, `shutdown distillation: ${items.length} items (${feedItems.length - items.length} already distilled incrementally)`);
+
     // Step 0: Save to disk FIRST — survives force-kill
-    this.savePendingSession(feedItems);
+    this.savePendingSession(items);
 
     const sessionMeta = {
       ts: new Date().toISOString(),
@@ -174,7 +280,7 @@ export class LocalCurationService {
       durationMs: Date.now() - this.sessionStartTs,
     };
 
-    const transcript = feedItems.map(item => ({
+    const transcript = items.map(item => ({
       text: item.text,
       ts: item.ts,
       source: item.source || "unknown",
@@ -204,13 +310,37 @@ export class LocalCurationService {
     log(TAG, `distilling session: ${transcript.length} items, ${Math.round(sessionMeta.durationMs / 60000)} min`);
 
     try {
+      // Step 0.5: Retrieve existing entities for context (Mem0 retrieve-before-extract pattern)
+      let existingEntities = "";
+      const dbPath = resolve(this.memoryDir, "knowledge-graph.db");
+      if (existsSync(dbPath)) {
+        try {
+          existingEntities = execFileSync("python3", [
+            resolve(this.scriptsDir, "graph_query.py"),
+            "--db", dbPath,
+            "--top", "20",
+            "--format", "compact",
+          ], {
+            timeout: 5_000,
+            encoding: "utf-8",
+            env: { ...process.env, PYTHONPATH: this.scriptsDir },
+          }).trim();
+        } catch {
+          // Non-fatal — distillation works without existing entities
+        }
+      }
+
       // Step 1: Distill session into a SessionDigest
-      const digestJson = execFileSync("python3", [
+      const distillerArgs = [
         resolve(this.scriptsDir, "session_distiller.py"),
         "--memory-dir", this.memoryDir,
         "--transcript", JSON.stringify(transcript),
         "--session-meta", JSON.stringify(sessionMeta),
-      ], {
+      ];
+      if (existingEntities) {
+        distillerArgs.push("--existing-entities", existingEntities);
+      }
+      const digestJson = execFileSync("python3", distillerArgs, {
         timeout: 30_000,
         encoding: "utf-8",
         env: { ...process.env, PYTHONPATH: this.scriptsDir },
@@ -236,7 +366,7 @@ export class LocalCurationService {
           "--memory-dir", this.memoryDir,
           "--digest", JSON.stringify(digest),
         ], {
-          timeout: 30_000,
+          timeout: 60_000, // 60s: LLM call (~10s) + embedding dedup (~5s) + graph ops
           encoding: "utf-8",
           env: { ...process.env, PYTHONPATH: this.scriptsDir },
         });

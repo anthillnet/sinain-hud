@@ -184,6 +184,8 @@ export interface ServerDeps {
   onSpawnCommand?: (text: string) => void;
   getSpawnPending?: () => { id: string; task: string; label: string; ts: number } | null;
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
+  embedTexts?: (texts: string[]) => Promise<Float32Array[]>;
+  isEmbeddingReady?: () => boolean;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -516,6 +518,35 @@ export function createAppServer(deps: ServerDeps) {
       if (req.method === "POST" && url.pathname === "/reconnect-gateway") {
         deps.reconnectGateway();
         res.end(JSON.stringify({ ok: true, message: "gateway reconnection initiated" }));
+        return;
+      }
+
+      // ── /embed ── (used by knowledge_integrator.py and graph_query.py)
+      if (req.method === "POST" && url.pathname === "/embed") {
+        if (!deps.embedTexts || !deps.isEmbeddingReady?.()) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: "embedding model loading" }));
+          return;
+        }
+        let body = "";
+        req.on("data", (c: Buffer) => { body += c; });
+        req.on("end", async () => {
+          try {
+            const { texts } = JSON.parse(body);
+            if (!Array.isArray(texts) || texts.length === 0) {
+              res.writeHead(400);
+              res.end(JSON.stringify({ error: "texts array required" }));
+              return;
+            }
+            const embeddings = await deps.embedTexts!(texts);
+            // Return as base64-encoded float32 arrays for efficiency
+            const encoded = embeddings.map(e => Buffer.from(e.buffer).toString("base64"));
+            res.end(JSON.stringify({ embeddings: encoded, dims: 384 }));
+          } catch (err: any) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: err.message?.slice(0, 200) }));
+          }
+        });
         return;
       }
 

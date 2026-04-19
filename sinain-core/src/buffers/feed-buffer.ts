@@ -10,9 +10,29 @@ export class FeedBuffer {
   private _version = 0;
   private maxSize: number;
   private _hwm = 0;
+  private _onFullCb: ((items: FeedItem[]) => void) | null = null;
+  private _onFullArmed = true;
+  private _onFullVersion = 0; // version at last re-arm
 
   constructor(maxSize = 100) {
     this.maxSize = maxSize;
+  }
+
+  /**
+   * Register a callback that fires when the buffer reaches capacity AND
+   * at least half the buffer has been replaced with new items since the
+   * last distillation. This prevents rapid-fire triggers on the same content.
+   */
+  onFull(cb: (items: FeedItem[]) => void): void {
+    this._onFullCb = cb;
+    this._onFullArmed = true;
+    this._onFullVersion = 0;
+  }
+
+  /** Re-arm the onFull callback (call after incremental distillation completes). */
+  rearmOnFull(): void {
+    this._onFullVersion = this._version;
+    this._onFullArmed = true;
   }
 
   /** Push a new feed item. Returns the created item. */
@@ -27,6 +47,18 @@ export class FeedBuffer {
     };
     this.items.push(item);
     if (this.items.length > this._hwm) this._hwm = this.items.length;
+
+    // Fire onFull when buffer is at capacity AND enough new items have arrived
+    // since the last distillation (at least half the buffer replaced)
+    const newSinceRearm = this._version - this._onFullVersion;
+    if (this.items.length >= this.maxSize
+        && this._onFullCb && this._onFullArmed
+        && newSinceRearm >= Math.floor(this.maxSize / 2)) {
+      this._onFullArmed = false;
+      const snapshot = [...this.items];
+      queueMicrotask(() => this._onFullCb!(snapshot));
+    }
+
     if (this.items.length > this.maxSize) {
       this.items.shift();
     }
