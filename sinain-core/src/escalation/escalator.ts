@@ -237,6 +237,7 @@ export class Escalator {
       escalationReason,
       undefined,
       this.pendingUserCommand ?? undefined,
+      this.deps.wsHandler.getState().responseSize ?? "medium",
     );
 
     // Clear user command after building the message (consumed once)

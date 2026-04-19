@@ -39,6 +39,7 @@ export class WsHandler {
     screen: "off",
     escalation: "active",
     connection: "disconnected",
+    responseSize: "medium",
   };
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
@@ -75,6 +76,7 @@ export class WsHandler {
       screen: this.state.screen,
       escalation: this.state.escalation,
       connection: this.state.connection,
+      responseSize: this.state.responseSize,
     });
 
     // Replay recent feed messages for late-joining clients
@@ -151,13 +153,14 @@ export class WsHandler {
 
   /** Send a status update to all connected overlays. */
   broadcastStatus(): void {
-    const msg: StatusMessage & { envPath?: string; escalation?: string } = {
+    const msg: StatusMessage & { envPath?: string; escalation?: string; responseSize?: string } = {
       type: "status",
       audio: this.state.audio,
       mic: this.state.mic,
       screen: this.state.screen,
       escalation: this.state.escalation,
       connection: this.state.connection,
+      responseSize: this.state.responseSize,
     };
     if (loadedEnvPath) msg.envPath = loadedEnvPath;
     this.broadcastMessage(msg);

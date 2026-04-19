@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import type { InboundMessage } from "../types.js";
+import type { InboundMessage, ResponseSize } from "../types.js";
 import type { WsHandler } from "./ws-handler.js";
 import type { AudioPipeline } from "../audio/pipeline.js";
 import type { CoreConfig } from "../types.js";
@@ -101,7 +101,7 @@ export function setupCommands(deps: CommandDeps): void {
         break;
       }
       case "command": {
-        handleCommand(msg.action, deps);
+        handleCommand(msg, deps);
         log(TAG, `command processed: ${msg.action}`);
         break;
       }
@@ -109,8 +109,11 @@ export function setupCommands(deps: CommandDeps): void {
   });
 }
 
-function handleCommand(action: string, deps: CommandDeps): void {
+const VALID_RESPONSE_SIZES = new Set<ResponseSize>(["small", "medium", "large"]);
+
+function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDeps): void {
   const { wsHandler, systemAudioPipeline, micPipeline } = deps;
+  const action = msg.action;
 
   switch (action) {
     case "toggle_audio": {
@@ -171,6 +174,16 @@ function handleCommand(action: string, deps: CommandDeps): void {
         "normal"
       );
       log(TAG, `escalation toggled ${nowActive ? "ON" : "OFF"}`);
+      break;
+    }
+    case "set_response_size": {
+      const size = (msg as any).responseSize as string;
+      if (VALID_RESPONSE_SIZES.has(size as ResponseSize)) {
+        wsHandler.updateState({ responseSize: size as ResponseSize });
+        log(TAG, `response size set to ${size}`);
+      } else {
+        log(TAG, `invalid response size: ${size}`);
+      }
       break;
     }
     case "open_settings": {
