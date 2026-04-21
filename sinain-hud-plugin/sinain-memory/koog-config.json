@@ -1,0 +1,11 @@
+{
+  "models": {
+    "fast": "google/gemini-2.5-flash-lite",
+    "smart": "google/gemini-2.5-flash"
+  },
+  "scripts": {
+    "session_distiller": { "model": "fast", "maxTokens": 2000 },
+    "knowledge_integrator": { "model": "fast", "maxTokens": 2000 },
+    "meeting_benchmark": { "model": "smart", "maxTokens": 200 }
+  }
+}

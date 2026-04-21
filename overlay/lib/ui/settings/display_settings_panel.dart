@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
+import '../../core/services/websocket_service.dart';
 import '../hud_tooltip.dart';
 
 /// Compact display-settings popover for font size and accent color.
@@ -21,11 +22,16 @@ class DisplaySettingsPanel extends StatelessWidget {
     0xFFFFFFFF, // white
   ];
 
+  static const _sizeLabels = ['S', 'M', 'L'];
+  static const _sizeValues = ['small', 'medium', 'large'];
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
+    final ws = context.watch<WebSocketService>();
     final fontSize = settings.settings.fontSize;
     final accentColor = settings.settings.accentColor;
+    final responseSizeIndex = _sizeValues.indexOf(ws.responseSize).clamp(0, 2);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -151,6 +157,53 @@ class DisplaySettingsPanel extends StatelessWidget {
                 ),
               );
             }).toList(),
+          ),
+          const SizedBox(height: 10),
+
+          // Response size
+          Row(
+            children: [
+              Text(
+                'RESPONSE',
+                style: TextStyle(
+                  fontFamily: HudConstants.monoFont,
+                  fontFamilyFallback: HudConstants.monoFontFallbacks,
+                  fontSize: 9,
+                  color: Colors.white.withValues(alpha: 0.35),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _sizeLabels[responseSizeIndex],
+                style: TextStyle(
+                  fontFamily: HudConstants.monoFont,
+                  fontFamilyFallback: HudConstants.monoFontFallbacks,
+                  fontSize: 10,
+                  color: Color(accentColor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 20,
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                activeTrackColor: Color(accentColor),
+                inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+                thumbColor: Color(accentColor),
+                overlayShape: SliderComponentShape.noOverlay,
+              ),
+              child: Slider(
+                value: responseSizeIndex.toDouble(),
+                min: 0,
+                max: 2,
+                divisions: 2,
+                onChanged: (v) => ws.setResponseSize(_sizeValues[v.round()]),
+              ),
+            ),
           ),
         ],
       ),

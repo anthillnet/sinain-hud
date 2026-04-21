@@ -22,6 +22,7 @@ class WebSocketService extends ChangeNotifier {
   String _micState = 'muted';
   String _screenState = 'off';
   String _escalationState = 'active';
+  String _responseSize = 'medium';
   String _envPath = '';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
@@ -49,6 +50,7 @@ class WebSocketService extends ChangeNotifier {
   String get micState => _micState;
   String get screenState => _screenState;
   String get escalationState => _escalationState;
+  String get responseSize => _responseSize;
   String get envPath => _envPath;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
@@ -60,6 +62,10 @@ class WebSocketService extends ChangeNotifier {
   static const _maxFeedItems = 50;
   bool get audioFeedEnabled => _audioFeedEnabled;
   bool get screenFeedEnabled => _screenFeedEnabled;
+
+  void setResponseSize(String size) {
+    sendCommand('set_response_size', {'responseSize': size});
+  }
 
   void toggleAudioFeed() {
     _audioFeedEnabled = !_audioFeedEnabled;
@@ -178,6 +184,11 @@ class WebSocketService extends ChangeNotifier {
           final escalation = statusData['escalation'] as String?;
           if (escalation != null && escalation != _escalationState) {
             _escalationState = escalation;
+            notifyListeners();
+          }
+          final respSize = statusData['responseSize'] as String?;
+          if (respSize != null && respSize != _responseSize) {
+            _responseSize = respSize;
             notifyListeners();
           }
           final envPath = statusData['envPath'] as String?;

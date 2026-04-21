@@ -130,6 +130,35 @@ Prune:      retracted when confidence < 0.2 AND last_reinforced > 30 days ago
 
 Retraction is soft — the fact stays in the transaction history and can be re-asserted if the same pattern reappears in a later session.
 
+### Entity Graph (Two-Layer Model)
+
+The triplestore uses a two-layer model:
+
+- **`fact:*` entities** store individual claims, searchable via FTS5 and tags
+- **`entity:*` nodes** represent real-world entities (people, orgs, tools, concepts) with freeform types
+
+Layers are connected by ref edges:
+- `fact:citibank-abc → about → entity:citibank` (VAET indexed)
+- `fact:cto-xyz → mentions → entity:citibank` (cross-entity, inferred from fact content)
+
+This enables graph-based retrieval: `store.backrefs("entity:citibank")` finds all facts about Citibank + all entities referencing it in O(log n).
+
+### Embedding Service
+
+sinain-core hosts an in-process sentence embedding model (`all-MiniLM-L6-v2`, 384 dimensions) loaded at startup (~9s, cached on subsequent loads). Exposed via `POST /embed`.
+
+Used for:
+- **Write-time dedup**: Before asserting a fact, embed it and check cosine similarity against existing facts. Threshold 0.78 prevents storing semantic duplicates while allowing different facts about the same entity.
+- **Read-time re-ranking**: When retrieving facts for a query, re-rank by embedding similarity to surface the most semantically relevant facts.
+
+### FTS5 Full-Text Search
+
+A virtual FTS5 table indexes fact values for keyword search. Auto-sync triggers keep it in sync with the triples table. Used as one of three retrieval methods in RRF (Reciprocal Rank Fusion).
+
+### Touched-Entities Index
+
+A `touched_entities` table with an auto-insert trigger tracks which entities were modified in each transaction. This enables O(1) "was entity X modified since tx Y?" checks for cache invalidation in the live pipeline.
+
 ### Retraction (Soft Forgetting)
 
 `retract_triple(tx, entity, attribute, value)` marks a fact as logically deleted. The fact remains in the database with a `retracted_tx` reference, enabling:
@@ -146,17 +175,36 @@ Retraction is soft — the fact stays in the transaction history and can be re-a
 
 ```json
 {
-  "whatHappened": "User debugged React Native Metro crash after adding BLE module. Cache reset fixed it.",
+  "whatHappened": "User debugged React Native Metro crash after adding BLE module.",
+  "facts": [
+    "Metro cache reset fixes module resolution after native dep install",
+    "The BLE module requires react-native-ble-plx version 2.0+"
+  ],
+  "decisions": ["Use cache reset as standard step after adding native deps"],
+  "entities": [
+    {"name": "react-native", "type": "framework"},
+    {"name": "metro-bundler", "type": "tool"},
+    {"name": "react-native-ble-plx", "type": "library"}
+  ],
   "patterns": ["Metro cache reset fixes module resolution after native dep install"],
-  "antiPatterns": ["Direct metro restart without cache clear doesn't fix module resolution"],
   "preferences": [],
-  "entities": ["react-native", "metro-bundler", "react-native-ble-plx", "BLE"],
-  "toolInsights": [],
   "isEmpty": false
 }
 ```
 
 Single LLM call (smart model), ~10 seconds, ~1,200 tokens.
+
+Facts are guided by 5 diversity dimensions: **WHO** (people, roles), **WHAT** (properties, descriptions), **HOW MUCH** (numbers, dates), **WHAT CHANGED** (decisions, agreements), **WHAT'S NEXT** (commitments, plans). This prevents the LLM from fixating on one topic (e.g., 15 facts about cloud migration, 0 about people).
+
+### Local Pipeline (Incremental Distillation)
+
+`LocalCurationService` in sinain-core triggers distillation automatically:
+
+- **On buffer full**: When the feed buffer (100 items) reaches capacity and >=50% new items have accumulated, distillation fires immediately — before items fall off the ring buffer. This prevents data loss in long sessions.
+- **On shutdown**: Remaining feed items are saved to `pending-session.json` (instant, survives force-kill). The actual distillation runs on next startup.
+- **Periodically**: Every 30 minutes, the curation pipeline runs feedback analysis + playbook curation.
+
+Screen context (OCR text and vision summaries from sense_client) is merged into the distillation transcript alongside audio transcriptions.
 
 ### Distillation Watermark
 
@@ -174,13 +222,15 @@ Each heartbeat fetches `GET /feed?after=lastDistilledFeedId`. If >3 significant 
 
 ## Knowledge Integration
 
-`knowledge_integrator.py` takes a SessionDigest + current playbook + graph facts and produces:
+`knowledge_integrator.py` is **deterministic** — no LLM call needed. It takes a SessionDigest and:
 
-1. **Updated playbook** — add novel patterns, reinforce existing ones, prune contradicted ones
-2. **Graph operations** — assert new facts, reinforce confirmed facts, retract contradicted facts
-3. **Integration log** — appended to `playbook-logs/YYYY-MM-DD.jsonl`
+1. **Converts facts to graph ops** — `_facts_to_graph_ops()` mechanically maps each fact and decision to an assert operation. Entity names are extracted by matching against known entities from the digest.
+2. **Deduplicates** — Embedding similarity (cosine ≥ 0.78 via sinain-core `/embed`) prevents storing semantic duplicates. Falls back to exact hash matching if embedding service is unavailable.
+3. **Builds entity graph** — Creates `entity:*` nodes from digest entities (with freeform types), links facts to entities via `about` ref edges, and infers cross-entity `mentions` relationships from fact content.
+4. **Auto-curates playbook** — Reinforces playbook lines whose tags overlap with active session tags (increment "seen" count). Adds novel facts as new playbook entries. No LLM needed.
+5. **Writes integration log** — Appended to `playbook-logs/YYYY-MM-DD.jsonl`.
 
-Single LLM call (smart model), ~15 seconds, ~3,700 tokens.
+The deterministic approach eliminates variance: every distiller fact is stored, regardless of LLM mood or token truncation.
 
 ### Bootstrap
 
@@ -250,7 +300,7 @@ python3 sinain-memory/session_distiller.py --memory-dir memory/ \
 
 # Integrate a digest
 python3 sinain-memory/knowledge_integrator.py --memory-dir memory/ \
-  --digest '{"whatHappened":"...","patterns":[...],"entities":[...]}'
+  --digest '{"whatHappened":"...","facts":[...],"entities":[...]}'
 
 # Query graph
 python3 sinain-memory/graph_query.py --db memory/knowledge-graph.db \
