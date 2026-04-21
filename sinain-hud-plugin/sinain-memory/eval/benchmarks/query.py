@@ -50,44 +50,27 @@ def _get_all_facts_text(db_path: str) -> str:
 
 
 def _query_knowledge(db_path: str, question: str) -> str:
-    """Query sinain knowledge graph for facts relevant to a question.
+    """Query sinain knowledge graph using the SAME path as the live pipeline.
 
-    Strategy: retrieve broadly, then re-rank by keyword overlap with the question.
-    This ensures specific facts (CTO background) beat generic ones (meeting schedule)
-    when the question asks about the CTO.
+    Tries sinain-core HTTP API first (identical to what the agent sees),
+    falls back to direct Python query if core isn't running.
     """
-    from graph_query import query_facts_hybrid, query_top_facts, format_facts_text
+    keywords = _extract_keywords(question)
 
-    # Retrieve a broad candidate set
-    candidates = query_facts_hybrid(db_path, question, max_facts=30)
-    if not candidates:
-        candidates = query_top_facts(db_path, limit=30)
-    if not candidates:
-        return "(no knowledge available)"
-
-    # Re-rank by embedding similarity if available, fall back to keyword overlap
+    # Call sinain-core /knowledge/facts — EXACT same path as live escalation.
+    # Same retrieval, same format, same token budget. No special eval treatment.
+    import urllib.request, json as _json
+    entities_param = ",".join(keywords[:8])
+    url = f"http://localhost:9500/knowledge/facts?entities={entities_param}&max={MAX_FACTS_PER_QUERY}"
     try:
-        from embed_client import rank_by_similarity
-        fact_texts = [str(f.get("value", "")) for f in candidates]
-        ranked_indices = rank_by_similarity(question, fact_texts)
-        if ranked_indices is not None:
-            ranked = [candidates[i] for i, _ in ranked_indices[:MAX_FACTS_PER_QUERY]]
-            return format_facts_text(ranked, max_chars=3000)
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = _json.loads(resp.read())
+            if data.get("ok") and data.get("facts", "").strip():
+                return data["facts"]
     except Exception:
         pass
 
-    # Fallback: keyword overlap ranking
-    q_keywords = set(_extract_keywords(question))
-    def _relevance(fact: dict) -> float:
-        value = str(fact.get("value", "")).lower()
-        entity = str(fact.get("entity", "")).lower()
-        fact_words = set(_extract_keywords(value + " " + entity))
-        if not q_keywords:
-            return 0.0
-        return len(q_keywords & fact_words) / len(q_keywords)
-
-    ranked = sorted(candidates, key=_relevance, reverse=True)
-    return format_facts_text(ranked[:MAX_FACTS_PER_QUERY], max_chars=3000)
+    return "(sinain-core not running — cannot evaluate live retrieval)"
 
 
 def _get_retrieved_facts(db_path: str, question: str, k: int = 10) -> list[dict]:
