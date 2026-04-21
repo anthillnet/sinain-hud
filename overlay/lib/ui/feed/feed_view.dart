@@ -36,6 +36,11 @@ class _FeedViewState extends State<FeedView> {
   Timer? _fadeTimer;
   bool _autoScroll = true;
 
+  /// True while this widget is driving a programmatic scroll (animateTo /
+  /// jumpTo). Suppresses the ScrollController listener from reacting to the
+  /// animation as if it were a user drag.
+  bool _programmaticScroll = false;
+
   /// Threshold in pixels from the bottom to consider user "at the bottom".
   static const _atBottomThreshold = 50.0;
 
@@ -53,6 +58,7 @@ class _FeedViewState extends State<FeedView> {
   /// Detects manual scrolling and disables auto-scroll when user scrolls
   /// away from the bottom, re-enables when user scrolls back to bottom.
   void _onUserScroll() {
+    if (_programmaticScroll) return;
     if (!_scrollController.hasClients) return;
     final pos = _scrollController.position;
     final atBottom =
@@ -110,13 +116,18 @@ class _FeedViewState extends State<FeedView> {
       }
     });
     if (_autoScroll) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!_scrollController.hasClients) return;
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 100),
-          curve: Curves.easeOut,
-        );
+        _programmaticScroll = true;
+        try {
+          await _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 100),
+            curve: Curves.easeOut,
+          );
+        } finally {
+          _programmaticScroll = false;
+        }
       });
     }
   }
@@ -127,12 +138,14 @@ class _FeedViewState extends State<FeedView> {
     switch (direction) {
       case 'up':
         setState(() => _autoScroll = false);
+        _programmaticScroll = true;
         _scrollController
             .animateTo(
               (pos.pixels - _scrollStep).clamp(0.0, pos.maxScrollExtent),
               duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
             )
+            .whenComplete(() => _programmaticScroll = false)
             .then((_) => _updateSelectionFromScroll());
       case 'down':
         final target =
@@ -143,19 +156,26 @@ class _FeedViewState extends State<FeedView> {
             _autoScroll = true;
           });
         }
+        _programmaticScroll = true;
         _scrollController
             .animateTo(
               target,
               duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
             )
+            .whenComplete(() => _programmaticScroll = false)
             .then((_) => _updateSelectionFromScroll());
       case 'bottom':
         setState(() {
           _selectedIndex = null;
           _autoScroll = true;
         });
-        _scrollController.jumpTo(pos.maxScrollExtent);
+        _programmaticScroll = true;
+        try {
+          _scrollController.jumpTo(pos.maxScrollExtent);
+        } finally {
+          _programmaticScroll = false;
+        }
     }
   }
 
