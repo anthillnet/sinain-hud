@@ -396,7 +396,7 @@ def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
     return "\n".join(lines)
 
 
-def format_facts_compact(facts: list[dict], max_chars: int = 400) -> str:
+def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
     """Encode facts for efficient escalation context injection.
 
     Compact format: domain/entity: value (conf, Nx)
@@ -409,7 +409,7 @@ def format_facts_compact(facts: list[dict], max_chars: int = 400) -> str:
     total = 0
     for f in facts:
         entity = f.get("entityId", "").split(":")[-1][:20]
-        value = f.get("value", "")[:60]
+        value = f.get("value", "")
         conf = f.get("confidence", "?")
         count = f.get("reinforce_count", "1")
         domain = f.get("domain", "")
@@ -469,7 +469,12 @@ def main() -> None:
         facts = query_top_facts(args.db, limit=args.top)
     elif args.entities:
         entities = json.loads(args.entities)
-        facts = query_facts_by_entities(args.db, entities, max_facts=args.max_facts)
+        # Use hybrid retrieval (FTS5 + tags + entity graph + RRF) for best results
+        query_text = " ".join(entities)
+        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts)
+        # Fallback to tag-only if hybrid returns nothing
+        if not facts:
+            facts = query_facts_by_entities(args.db, entities, max_facts=args.max_facts)
     else:
         facts = query_top_facts(args.db, limit=args.max_facts)
 
