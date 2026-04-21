@@ -20,6 +20,7 @@ export interface StatusMessage {
   screen: string;
   escalation?: string;
   connection: string;
+  responseSize?: string;
 }
 
 /** sinain-core → Overlay: heartbeat ping */
@@ -244,6 +245,7 @@ export interface StopResult {
 
 export type EscalationMode = "off" | "selective" | "focus" | "rich";
 export type ContextRichness = "lean" | "standard" | "rich";
+export type ResponseSize = "small" | "medium" | "large";
 
 export type AnalysisProvider = "openrouter" | "ollama";
 
@@ -393,6 +395,7 @@ export interface BridgeState {
   screen: "active" | "off";
   escalation: "active" | "paused";
   connection: "connected" | "disconnected" | "connecting";
+  responseSize: ResponseSize;
 }
 
 // ── Learning / feedback types ──

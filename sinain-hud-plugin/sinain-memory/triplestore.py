@@ -79,6 +79,40 @@ CREATE INDEX IF NOT EXISTS idx_avet
     ON triples(attribute, value, entity_id, tx_id);
 """
 
+_FTS_SQL = """
+-- Full-text search on fact values (for hybrid retrieval)
+CREATE VIRTUAL TABLE IF NOT EXISTS triples_fts
+    USING fts5(entity_id, value, content=triples, content_rowid=id);
+
+-- Triggers to keep FTS in sync with triples table
+CREATE TRIGGER IF NOT EXISTS triples_ai AFTER INSERT ON triples BEGIN
+    INSERT INTO triples_fts(rowid, entity_id, value) VALUES (new.id, new.entity_id, new.value);
+END;
+
+CREATE TRIGGER IF NOT EXISTS triples_ad AFTER DELETE ON triples BEGIN
+    INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES ('delete', old.id, old.entity_id, old.value);
+END;
+
+CREATE TRIGGER IF NOT EXISTS triples_au AFTER UPDATE ON triples BEGIN
+    INSERT INTO triples_fts(triples_fts, rowid, entity_id, value) VALUES ('delete', old.id, old.entity_id, old.value);
+    INSERT INTO triples_fts(rowid, entity_id, value) VALUES (new.id, new.entity_id, new.value);
+END;
+"""
+
+_TOUCHED_SQL = """
+-- Track which entities are modified per transaction (for fast novelty checks)
+CREATE TABLE IF NOT EXISTS touched_entities (
+    tx_id INTEGER NOT NULL,
+    entity_id TEXT NOT NULL,
+    PRIMARY KEY (tx_id, entity_id)
+);
+
+CREATE TRIGGER IF NOT EXISTS track_touched AFTER INSERT ON triples BEGIN
+    INSERT OR IGNORE INTO touched_entities (tx_id, entity_id)
+    VALUES (new.tx_id, new.entity_id);
+END;
+"""
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -119,6 +153,14 @@ class TripleStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.executescript(_SCHEMA_SQL)
+        try:
+            self._conn.executescript(_FTS_SQL)
+        except sqlite3.OperationalError:
+            pass  # FTS5 not available on this Python build — degrade gracefully
+        try:
+            self._conn.executescript(_TOUCHED_SQL)
+        except sqlite3.OperationalError:
+            pass
         self._migrate()
         self._conn.commit()
 
@@ -408,6 +450,24 @@ class TripleStore:
                 (since_tx,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ----- Touched entities (fast novelty check) -----
+
+    def was_touched(self, entity_id: str, since_tx: int) -> bool:
+        """Check if entity was modified since a given transaction. O(1) via index."""
+        row = self._conn.execute(
+            "SELECT 1 FROM touched_entities WHERE entity_id = ? AND tx_id > ? LIMIT 1",
+            (entity_id, since_tx),
+        ).fetchone()
+        return row is not None
+
+    def touched_entities_since(self, since_tx: int) -> list[str]:
+        """Return entity_ids modified since a transaction."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT entity_id FROM touched_entities WHERE tx_id > ?",
+            (since_tx,),
+        ).fetchall()
+        return [r[0] for r in rows]
 
     # ----- Stats -----
 

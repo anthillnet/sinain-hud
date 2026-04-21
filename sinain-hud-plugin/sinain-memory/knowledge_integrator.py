@@ -55,29 +55,33 @@ FOR THE PLAYBOOK:
 - Three Laws: (1) don't remove error-prevention patterns, (2) preserve high-scoring approaches, (3) then evolve
 
 FOR THE KNOWLEDGE GRAPH:
-- ASSERT new durable facts (error→fix mappings, domain knowledge, user expertise)
+- ASSERT every concrete fact from the digest: factual claims, decisions, relationships, numbers
 - REINFORCE existing facts confirmed by the session (list their entity_ids)
 - RETRACT facts contradicted by session evidence (list their entity_ids)
-- Each fact needs: entity (domain/tool/workflow), attribute (relationship type), value (the knowledge), confidence (0.0-1.0), domain (for module scoping)
-- Entity naming: use lowercase-hyphenated slugs (e.g., "react-native", "metro-bundler")
-- Only assert DURABLE facts — not ephemeral session details
+- Each fact needs: entity (real name from content), attribute (relationship type), value (self-contained sentence), confidence (0.0-1.0), domain (for scoping)
+- Entity naming: use actual names as lowercase-hyphenated slugs
+    Good: "citibank", "al-futaim-group", "artom", "intellij-idea"
+    Bad: "ai-solutions", "client-understanding", "tool-usage"
+- The value field must be a complete, self-contained sentence that answers a question on its own
+- Assert BOTH durable facts AND time-bound decisions/action items (mark decisions with confidence 0.7)
 
 If the session was empty/idle, return minimal changes.
 
-Respond with ONLY a JSON object:
+Respond with ONLY a JSON object. IMPORTANT: put graphOps FIRST (before playbook) — \
+graphOps are the most valuable output and must not be truncated.
 {
-  "updatedPlaybook": "full playbook body text (between header and footer comments)",
+  "graphOps": [
+    {"op": "assert", "entity": "entity-slug", "attribute": "attr-name", "value": "fact text", "confidence": 0.8, "domain": "domain-name"},
+    {"op": "reinforce", "entityId": "fact:existing-slug"},
+    {"op": "retract", "entityId": "fact:existing-slug", "reason": "why"}
+  ],
   "changes": {
     "added": ["pattern text", ...],
     "pruned": ["pattern text", ...],
     "promoted": ["pattern text", ...],
     "reinforced": ["pattern text", ...]
   },
-  "graphOps": [
-    {"op": "assert", "entity": "entity-slug", "attribute": "attr-name", "value": "fact text", "confidence": 0.8, "domain": "domain-name"},
-    {"op": "reinforce", "entityId": "fact:existing-slug"},
-    {"op": "retract", "entityId": "fact:existing-slug", "reason": "why"}
-  ]
+  "updatedPlaybook": "full playbook body text (between header and footer comments)"
 }"""
 
 
@@ -122,46 +126,81 @@ def _normalize_entity(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
 
 
-def _canonicalize_ops(ops: list[dict], existing_entities: list[str]) -> list[dict]:
-    """Map variant entity names to canonical forms before graph execution.
+def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_facts: list[dict]) -> list[dict]:
+    """Deduplicate graph ops via embedding similarity (Mem0 pattern).
 
-    Inspired by mempalace entity detection — uses simple heuristic instead of
-    rule-based signal detection: normalize names, merge on edit distance or substring match.
-    Converts duplicate assert → reinforce when a near-match exists.
+    For each new assertion, check if a semantically equivalent fact already exists
+    using cosine similarity (threshold 0.78). If so, reinforce instead of asserting.
+    Falls back to exact hash matching if embedding service is unavailable.
     """
-    canonical_map: dict[str, str] = {}  # normalized → existing entity name
-    for eid in existing_entities:
-        # Extract entity name from the entity_id's attributes (stored as "entity" attr)
-        canonical_map[_normalize_entity(eid)] = eid
+    existing_id_set = set(existing_entities)
+
+    # Build text→entity_id map for existing facts (for embedding-based dedup)
+    existing_texts: list[str] = []
+    existing_ids: list[str] = []
+    for f in existing_facts:
+        val = f.get("value", "")
+        eid = f.get("entityId", f.get("entity_id", ""))
+        if val and eid:
+            existing_texts.append(val)
+            existing_ids.append(eid)
+
+    # Separate assert ops for batch dedup
+    assert_ops = [(i, op) for i, op in enumerate(ops) if op.get("op") == "assert"]
+    non_assert_ops = [(i, op) for i, op in enumerate(ops) if op.get("op") != "assert"]
+
+    # Batch embedding dedup: single HTTP call for all new facts
+    dedup_map: dict[int, int] = {}  # assert_index → existing_index
+    if assert_ops and existing_texts:
+        try:
+            from embed_client import find_duplicates_batch
+            new_values = [op.get("value", "") for _, op in assert_ops]
+            dedup_map = find_duplicates_batch(new_values, existing_texts)
+            if dedup_map:
+                print(f"  [dedup] found {len(dedup_map)} semantic duplicates in batch", file=sys.stderr)
+        except Exception:
+            pass  # embedding unavailable, fall through to exact matching
 
     result = []
-    for op in ops:
+    seen_fact_ids: set[str] = set()
+    seen_values_set: set[str] = set()
+
+    # Re-merge in original order
+    all_indexed = non_assert_ops + assert_ops
+    all_indexed.sort(key=lambda x: x[0])
+
+    for orig_idx, op in all_indexed:
         if op.get("op") != "assert":
             result.append(op)
             continue
 
         entity = op.get("entity", "")
-        normalized = _normalize_entity(entity)
+        attribute = op.get("attribute", "")
+        value = op.get("value", "")
+        fact_id = _fact_id(entity, attribute, value)
 
-        # Check for near-match in existing entities
-        matched_id = None
-        for existing_norm, existing_eid in canonical_map.items():
-            if existing_norm == normalized:
-                matched_id = existing_eid
-                break
-            # Substring match: "react-router" matches "react-router-dom"
-            if len(normalized) >= 4 and (normalized in existing_norm or existing_norm in normalized):
-                matched_id = existing_eid
-                break
+        # Exact hash match
+        if fact_id in existing_id_set or fact_id in seen_fact_ids:
+            if fact_id in existing_id_set:
+                result.append({"op": "reinforce", "entityId": fact_id})
+                print(f"  [dedup] exact → reinforce '{fact_id}'", file=sys.stderr)
+            continue
 
-        if matched_id:
-            # Convert assert → reinforce (entity already exists under different name)
-            result.append({"op": "reinforce", "entityId": matched_id})
-            print(f"  [canon] merged '{entity}' → existing '{matched_id}'", file=sys.stderr)
-        else:
-            result.append(op)
-            # Register the new canonical form
-            canonical_map[normalized] = _fact_id(entity, op.get("attribute", ""), op.get("value", ""))
+        # Check batch embedding dedup results
+        assert_idx = [i for i, (oi, _) in enumerate(assert_ops) if oi == orig_idx]
+        if assert_idx and assert_idx[0] in dedup_map:
+            dup_existing_idx = dedup_map[assert_idx[0]]
+            result.append({"op": "reinforce", "entityId": existing_ids[dup_existing_idx]})
+            print(f"  [dedup] semantic → reinforce '{existing_ids[dup_existing_idx]}'", file=sys.stderr)
+            continue
+
+        # Intra-batch dedup (by value text)
+        if value in seen_values_set:
+            continue
+
+        result.append(op)
+        seen_fact_ids.add(fact_id)
+        seen_values_set.add(value)
 
     return result
 
@@ -179,7 +218,14 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
         if entities:
             # Tag-based search: find facts whose tags match any of the keywords
             # Normalize keywords to lowercase for tag matching
-            keywords = [e.lower().replace(" ", "-") for e in entities]
+            # Handle both old-style string entities and new-style dict entities
+            keywords = []
+            for e in entities:
+                if isinstance(e, dict):
+                    keywords.append(e.get("name", "").lower().replace(" ", "-"))
+                else:
+                    keywords.append(str(e).lower().replace(" ", "-"))
+            keywords = [k for k in keywords if k]
             placeholders = ",".join(["?" for _ in keywords])
             rows = store._conn.execute(
                 f"""SELECT entity_id, COUNT(*) as matches
@@ -221,8 +267,156 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
         return []
 
 
-def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
-    """Execute graph operations (assert/reinforce/retract) on the knowledge graph."""
+def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
+    """Merge multiple facts about the same entity into consolidated facts.
+
+    Pure code — no LLM. Concatenates fact values with "; " separator.
+    Runs at shutdown only (not incremental passes).
+    """
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+
+        # Group facts by entity name
+        entity_facts: dict[str, list[tuple[str, str]]] = {}  # entity → [(fact_id, value)]
+        for r in store.entities_with_attr("entity"):
+            fact_id, entity_name = r[0], r[1]
+            if not fact_id.startswith("fact:") or isinstance(entity_name, list):
+                continue
+            attrs = store.entity(fact_id)
+            if attrs and "value" in attrs:
+                val = attrs["value"][0] if isinstance(attrs["value"], list) else str(attrs["value"])
+                entity_facts.setdefault(entity_name, []).append((fact_id, val))
+
+        consolidated = 0
+        for entity_name, facts in entity_facts.items():
+            if len(facts) < min_facts:
+                continue
+
+            # Check if a consolidated fact already exists
+            if any(";" in val and len(val) > 100 for _, val in facts):
+                continue  # already consolidated
+
+            # Deduplicate values (same fact stated differently)
+            seen_values: list[str] = []
+            for _, val in facts:
+                # Skip if very similar to an already-seen value
+                if not any(len(set(val.lower().split()) & set(sv.lower().split())) / max(len(val.split()), 1) > 0.7 for sv in seen_values):
+                    seen_values.append(val)
+
+            if len(seen_values) < 2:
+                continue  # nothing to consolidate after dedup
+
+            merged_value = "; ".join(seen_values)
+            if len(merged_value) > 500:
+                merged_value = merged_value[:500] + "..."
+
+            # Create consolidated fact, retract originals
+            tx = store.begin_tx("consolidation")
+            new_eid = _fact_id(entity_name, "consolidated", merged_value)
+            store.assert_triple(tx, new_eid, "entity", entity_name)
+            store.assert_triple(tx, new_eid, "attribute", "consolidated")
+            store.assert_triple(tx, new_eid, "value", merged_value)
+            store.assert_triple(tx, new_eid, "confidence", "0.95")
+            store.assert_triple(tx, new_eid, "first_seen", _now_iso())
+            store.assert_triple(tx, new_eid, "reinforce_count", str(len(facts)))
+            for tag in _extract_tags(merged_value):
+                store.assert_triple(tx, new_eid, "tag", tag)
+
+            # Retract original individual facts
+            for old_eid, _ in facts:
+                for attr_name in list(store.entity(old_eid).keys()):
+                    store.retract_triple(tx, old_eid, attr_name)
+
+            consolidated += 1
+            print(f"  [consolidate] {entity_name}: {len(facts)} facts → 1 ({len(merged_value)} chars)", file=sys.stderr)
+
+        store.close()
+        return consolidated
+    except Exception as e:
+        print(f"  [consolidate] failed: {e}", file=sys.stderr)
+        return 0
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
+    """Extract the most relevant entity name from a fact sentence.
+
+    Matches against known entities from the distiller output.
+    Falls back to first capitalized multi-word phrase.
+    """
+    fact_lower = fact_text.lower()
+    # Check which known entities appear in the fact text (longest match first)
+    candidates = []
+    for ent in known_entities:
+        ename = ent if isinstance(ent, str) else ent.get("name", "")
+        if ename and ename.lower().replace("-", " ") in fact_lower.replace("-", " "):
+            candidates.append(ename)
+    if candidates:
+        # Return the longest matching entity (most specific)
+        return _normalize_entity(max(candidates, key=len))
+
+    # Fallback: first capitalized multi-word phrase
+    import re as _re
+    match = _re.search(r"[A-Z][a-z]+(?: [A-Z][a-z]+)+", fact_text)
+    if match:
+        return _normalize_entity(match.group())
+
+    # Last resort: first significant word
+    words = [w for w in fact_text.split() if len(w) > 3 and w[0].isupper()]
+    if words:
+        return _normalize_entity(words[0])
+
+    return "general"
+
+
+def _facts_to_graph_ops(digest: dict) -> list[dict]:
+    """Convert distiller facts/entities/decisions directly to graph ops.
+
+    DETERMINISTIC — no LLM needed. The distiller already extracted structured
+    facts with entity names. This function mechanically converts them to
+    assert operations for the triplestore.
+    """
+    ops = []
+    known_entities = digest.get("entities", [])
+
+    # Each fact becomes an assert op
+    for fact_text in digest.get("facts", []):
+        if not fact_text or len(fact_text) < 5:
+            continue
+        entity = _extract_entity_from_fact(fact_text, known_entities)
+        ops.append({
+            "op": "assert",
+            "entity": entity,
+            "attribute": "fact",
+            "value": fact_text,
+            "confidence": 0.9,
+            "domain": "",
+        })
+
+    # Each decision becomes an assert with lower confidence (time-bound)
+    for decision_text in digest.get("decisions", []):
+        if not decision_text or len(decision_text) < 5:
+            continue
+        entity = _extract_entity_from_fact(decision_text, known_entities)
+        ops.append({
+            "op": "assert",
+            "entity": entity,
+            "attribute": "decision",
+            "value": decision_text,
+            "confidence": 0.7,
+            "domain": "",
+        })
+
+    return ops
+
+
+def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_entities: list | None = None) -> dict:
+    """Execute graph operations + build entity graph with ref edges."""
     if not ops:
         return {"asserted": 0, "reinforced": 0, "retracted": 0}
 
@@ -230,9 +424,18 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Canonicalize entity names to prevent fragmentation
+        # Deduplicate via embedding similarity (Mem0 pattern)
         existing_ids = [r[0] for r in store.entities_with_attr("entity")]
-        ops = _canonicalize_ops(ops, existing_ids)
+        # Load existing fact values for semantic comparison
+        existing_facts_for_dedup = []
+        for eid in existing_ids:
+            attrs = store.entity(eid)
+            if attrs and "value" in attrs:
+                vals = attrs["value"]
+                val = vals[0] if isinstance(vals, list) and vals else str(vals) if vals else ""
+                if val:
+                    existing_facts_for_dedup.append({"entity_id": eid, "value": val})
+        ops = _canonicalize_ops(ops, existing_ids, existing_facts_for_dedup)
 
         stats = {"asserted": 0, "reinforced": 0, "retracted": 0}
 
@@ -322,10 +525,78 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str) -> dict:
                         store.retract_triple(tx, entity_id, attr_name, val)
                 stats["retracted"] += 1
 
+        # --- Build entity graph layer (two-layer model) ---
+        if digest_entities and stats["asserted"] > 0:
+            try:
+                # Create entity:* nodes from digest entities
+                for ent in (digest_entities or []):
+                    if isinstance(ent, dict):
+                        ename = _normalize_entity(ent.get("name", ""))
+                        etype = ent.get("type", "unknown")
+                    else:
+                        ename = _normalize_entity(str(ent))
+                        etype = "unknown"
+                    if not ename or len(ename) < 2:
+                        continue
+
+                    entity_node_id = f"entity:{ename}"
+                    existing = store.entity(entity_node_id)
+                    if not existing:
+                        tx = store.begin_tx("entity_graph")
+                        store.assert_triple(tx, entity_node_id, "name", ename)
+                        store.assert_triple(tx, entity_node_id, "type", etype)
+
+                # Link facts to their entity nodes via "about" ref edges
+                for op_data in ops:
+                    if op_data.get("op") != "assert":
+                        continue
+                    entity = op_data.get("entity", "")
+                    value = op_data.get("value", "")
+                    attribute = op_data.get("attribute", "")
+                    fact_eid = _fact_id(entity, attribute, value)
+                    entity_node_id = f"entity:{_normalize_entity(entity)}"
+                    # Only link if entity node exists
+                    if store.entity(entity_node_id):
+                        tx = store.begin_tx("entity_graph")
+                        store.assert_triple(tx, fact_eid, "about", entity_node_id, value_type="ref")
+
+                # Infer cross-entity refs from fact content
+                all_entity_nodes = {}
+                for r in store.entities_with_attr("name"):
+                    if r[0].startswith("entity:"):
+                        all_entity_nodes[r[1]] = r[0]  # {name: entity_id}
+
+                ref_count = 0
+                for fact_eid_row in store.entities_with_attr("value"):
+                    fact_eid = fact_eid_row[0]
+                    if not fact_eid.startswith("fact:"):
+                        continue
+                    attrs = store.entity(fact_eid)
+                    source_entity = (attrs.get("entity", [""])[0] if attrs.get("entity") else "").lower()
+                    value_lower = (attrs["value"][0] if attrs.get("value") else "").lower()
+
+                    for ename, enode_id in all_entity_nodes.items():
+                        if ename == source_entity or len(ename) < 4:
+                            continue
+                        if ename in value_lower:
+                            existing_refs = store.backrefs(enode_id, attribute="mentions")
+                            if not any(r[0] == fact_eid for r in existing_refs):
+                                tx = store.begin_tx("ref_inference")
+                                store.assert_triple(tx, fact_eid, "mentions", enode_id, value_type="ref")
+                                ref_count += 1
+
+                if ref_count:
+                    stats["refs_created"] = ref_count
+                    print(f"  [graph] {len(all_entity_nodes)} entity nodes, {ref_count} ref edges", file=sys.stderr)
+            except Exception as e:
+                print(f"  [graph] entity graph failed (non-fatal): {e}", file=sys.stderr)
+
         store.close()
         return stats
     except Exception as e:
+        import traceback
         print(f"[warn] Failed to execute graph ops: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return {"asserted": 0, "reinforced": 0, "retracted": 0, "error": str(e)}
 
 
@@ -506,38 +777,60 @@ def main() -> None:
             facts_lines.append(f"- [{eid}] ({domain}, confidence={conf}) {val}")
         facts_text = f"\n\n## Existing Graph Facts (for reference — reinforce or retract as needed)\n" + "\n".join(facts_lines)
 
-    user_prompt = f"""## Session Digest
-{json.dumps(digest, indent=2, ensure_ascii=False)}
+    # ── Step 1: DETERMINISTIC graph ops from distiller output (no LLM needed) ──
+    # The distiller already extracted structured facts — conversion is mechanical.
+    graph_ops = _facts_to_graph_ops(digest)
+    digest_ts = digest.get("ts", datetime.now(timezone.utc).isoformat())
 
-## Current Playbook Body
-{body}{facts_text}"""
+    # Dedup + execute
+    graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts, digest_entities=digest_entities)
 
-    try:
-        raw = call_llm_with_fallback(
-            SYSTEM_PROMPT,
-            user_prompt,
-            script="knowledge_integrator",
-            json_mode=True,
-        )
-        result = extract_json(raw)
-    except (ValueError, LLMError) as e:
-        print(f"LLM integration failed: {e}", file=sys.stderr)
-        output_json({"error": str(e)})
-        return
+    # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
+    # at our scale (<200 facts). Individual facts are more retrievable than merged ones.
+    # Keep facts separate — dedup handles true duplicates, different facts stay distinct.
 
-    # Archive current playbook before mutation
+    # ── Step 2: Automated playbook curation (tag overlap, no LLM) ──
     archive_path = _archive_playbook(memory_dir)
+    active_tags = set()
+    for op in graph_ops:
+        active_tags.update(_extract_tags(op.get("value", "")))
 
-    # Write updated playbook
-    updated_body = result.get("updatedPlaybook", body)
+    playbook_lines = [l for l in body.splitlines() if l.strip() and not l.startswith("<!--")]
+    changes: dict[str, list[str]] = {"added": [], "pruned": [], "promoted": [], "reinforced": []}
+
+    # Reinforce playbook lines whose tags overlap with this session
+    updated_lines = []
+    for line in playbook_lines:
+        line_tags = set(_extract_tags(line))
+        if line_tags & active_tags:
+            # Increment seen count: "... (seen 3)" → "... (seen 4)"
+            import re as _re
+            seen_match = _re.search(r"\(seen (\d+)\)", line)
+            if seen_match:
+                old_count = int(seen_match.group(1))
+                line = line[:seen_match.start()] + f"(seen {old_count + 1})" + line[seen_match.end():]
+                changes["reinforced"].append(line.strip()[:60])
+            updated_lines.append(line)
+        else:
+            updated_lines.append(line)
+
+    # Add novel facts as new playbook lines (no LLM — just format as bullet points)
+    for fact in digest.get("facts", [])[:5]:  # cap at 5 new lines per pass
+        fact_tags = set(_extract_tags(fact))
+        # Only add if no existing playbook line covers this
+        if not any(set(_extract_tags(l)) & fact_tags for l in playbook_lines if len(fact_tags) > 1):
+            new_line = f"- {fact} (seen 1)"
+            updated_lines.append(new_line)
+            changes["added"].append(fact[:60])
+
+    # Keep playbook under 50 lines
+    if len(updated_lines) > 50:
+        updated_lines = updated_lines[:50]
+
+    updated_body = "\n".join(updated_lines)
     new_playbook = f"{header}\n\n{updated_body}\n\n{footer}".strip() + "\n"
     playbook_path = Path(memory_dir) / "sinain-playbook.md"
     playbook_path.write_text(new_playbook, encoding="utf-8")
-
-    # Execute graph operations
-    graph_ops = result.get("graphOps", [])
-    digest_ts = digest.get("ts", datetime.now(timezone.utc).isoformat())
-    graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts)
 
     # Append digest to session-digests.jsonl
     digests_path = Path(memory_dir) / "session-digests.jsonl"
@@ -548,7 +841,7 @@ def main() -> None:
     log_entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "_type": "integration",
-        "changes": result.get("changes", {}),
+        "changes": changes,
         "graphStats": graph_stats,
         "digestEntities": digest_entities,
         "archivePath": archive_path,
@@ -563,7 +856,7 @@ def main() -> None:
 
     output_json({
         "status": "ok",
-        "changes": result.get("changes", {}),
+        "changes": changes,
         "graphStats": graph_stats,
         "playbookLines": len(new_playbook.splitlines()),
     })
