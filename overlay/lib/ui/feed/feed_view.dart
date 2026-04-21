@@ -36,6 +36,14 @@ class _FeedViewState extends State<FeedView> {
   Timer? _fadeTimer;
   bool _autoScroll = true;
 
+  /// True while this widget is driving a programmatic scroll (animateTo /
+  /// jumpTo). Suppresses the ScrollController listener from reacting to the
+  /// animation as if it were a user drag.
+  bool _programmaticScroll = false;
+
+  /// Threshold in pixels from the bottom to consider user "at the bottom".
+  static const _atBottomThreshold = 50.0;
+
   /// Index of the selected message, or null when in auto-scroll mode
   /// (last message is implicitly selected).
   int? _selectedIndex;
@@ -44,6 +52,25 @@ class _FeedViewState extends State<FeedView> {
   void initState() {
     super.initState();
     _fadeTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fadeOldItems());
+    _scrollController.addListener(_onUserScroll);
+  }
+
+  /// Detects manual scrolling and disables auto-scroll when user scrolls
+  /// away from the bottom, re-enables when user scrolls back to bottom.
+  void _onUserScroll() {
+    if (_programmaticScroll) return;
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    final atBottom =
+        pos.pixels >= pos.maxScrollExtent - _atBottomThreshold;
+    if (atBottom && !_autoScroll) {
+      setState(() {
+        _autoScroll = true;
+        _selectedIndex = null;
+      });
+    } else if (!atBottom && _autoScroll) {
+      setState(() => _autoScroll = false);
+    }
   }
 
   @override
@@ -89,9 +116,18 @@ class _FeedViewState extends State<FeedView> {
       }
     });
     if (_autoScroll) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!_scrollController.hasClients) return;
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        _programmaticScroll = true;
+        try {
+          await _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 100),
+            curve: Curves.easeOut,
+          );
+        } finally {
+          _programmaticScroll = false;
+        }
       });
     }
   }
@@ -102,12 +138,14 @@ class _FeedViewState extends State<FeedView> {
     switch (direction) {
       case 'up':
         setState(() => _autoScroll = false);
+        _programmaticScroll = true;
         _scrollController
             .animateTo(
               (pos.pixels - _scrollStep).clamp(0.0, pos.maxScrollExtent),
               duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
             )
+            .whenComplete(() => _programmaticScroll = false)
             .then((_) => _updateSelectionFromScroll());
       case 'down':
         final target =
@@ -118,19 +156,26 @@ class _FeedViewState extends State<FeedView> {
             _autoScroll = true;
           });
         }
+        _programmaticScroll = true;
         _scrollController
             .animateTo(
               target,
               duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
             )
+            .whenComplete(() => _programmaticScroll = false)
             .then((_) => _updateSelectionFromScroll());
       case 'bottom':
         setState(() {
           _selectedIndex = null;
           _autoScroll = true;
         });
-        _scrollController.jumpTo(pos.maxScrollExtent);
+        _programmaticScroll = true;
+        try {
+          _scrollController.jumpTo(pos.maxScrollExtent);
+        } finally {
+          _programmaticScroll = false;
+        }
     }
   }
 
@@ -237,19 +282,21 @@ class _FeedViewState extends State<FeedView> {
       itemBuilder: (context, index) {
         final item = _items[index];
         final itemKey = _itemKeys.putIfAbsent(index, () => GlobalKey());
-        return Opacity(
-          key: itemKey,
-          opacity: item.opacity,
-          child: GestureDetector(
-            onLongPress: () {
-              // Copy message text to clipboard on long-press
-              Clipboard.setData(ClipboardData(text: item.text));
-            },
-            child: item.isUser
-                ? _buildUserMessage(item, fs)
-                : item.isSpawn
-                    ? _buildSpawnMessage(item, fs)
-                    : _buildAgentMessage(item, index, fs),
+        return RepaintBoundary(
+          child: Opacity(
+            key: itemKey,
+            opacity: item.opacity,
+            child: GestureDetector(
+              onLongPress: () {
+                // Copy message text to clipboard on long-press
+                Clipboard.setData(ClipboardData(text: item.text));
+              },
+              child: item.isUser
+                  ? _buildUserMessage(item, fs)
+                  : item.isSpawn
+                      ? _buildSpawnMessage(item, fs)
+                      : _buildAgentMessage(item, index, fs),
+            ),
           ),
         );
       },
