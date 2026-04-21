@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
+import '../hud_tooltip.dart';
 
 /// Compact display-settings popover for font size and accent color.
 class DisplaySettingsPanel extends StatelessWidget {
@@ -27,7 +28,7 @@ class DisplaySettingsPanel extends StatelessWidget {
     final accentColor = settings.settings.accentColor;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(8),
@@ -54,17 +55,20 @@ class DisplaySettingsPanel extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onClose,
-                  child: Icon(Icons.close, size: 12,
-                      color: Colors.white.withValues(alpha: 0.4)),
+              HudTooltip(
+                message: 'Close',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: onClose,
+                    child: Icon(Icons.close, size: 12,
+                        color: Colors.white.withValues(alpha: 0.4)),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
 
           // Font size
           Row(
@@ -110,7 +114,7 @@ class DisplaySettingsPanel extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
 
           // Accent color
           Text(
