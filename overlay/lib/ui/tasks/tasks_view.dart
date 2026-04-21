@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/spawn_task.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
+import '../hud_tooltip.dart';
 
 class TasksView extends StatefulWidget {
   const TasksView({super.key});
@@ -312,33 +313,39 @@ class _TasksViewState extends State<TasksView> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () => _sendPermissionDecision(task.taskId, 'allow'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF00FF88).withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(4),
+                        HudTooltip(
+                          message: 'Allow this action',
+                          child: GestureDetector(
+                            onTap: () => _sendPermissionDecision(task.taskId, 'allow'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00FF88).withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('Allow', style: TextStyle(
+                                fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
+                                color: const Color(0xFF00FF88),
+                              )),
                             ),
-                            child: Text('Allow', style: TextStyle(
-                              fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
-                              color: const Color(0xFF00FF88),
-                            )),
                           ),
                         ),
                         const SizedBox(width: 4),
-                        GestureDetector(
-                          onTap: () => _sendPermissionDecision(task.taskId, 'deny'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFF3344).withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(4),
+                        HudTooltip(
+                          message: 'Deny this action',
+                          child: GestureDetector(
+                            onTap: () => _sendPermissionDecision(task.taskId, 'deny'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF3344).withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('Deny', style: TextStyle(
+                                fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
+                                color: const Color(0xFFFF3344),
+                              )),
                             ),
-                            child: Text('Deny', style: TextStyle(
-                              fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
-                              color: const Color(0xFFFF3344),
-                            )),
                           ),
                         ),
                       ],

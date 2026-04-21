@@ -15,6 +15,7 @@ class MainFlutterWindow: NSPanel {
         self.isOpaque = false
         self.backgroundColor = .clear
         self.hasShadow = false
+        self.acceptsMouseMovedEvents = true
         self.titleVisibility = .hidden
         self.titlebarAppearsTransparent = true
 

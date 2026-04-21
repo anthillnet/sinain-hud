@@ -13,6 +13,7 @@ import 'feed/idle_animation.dart';
 import 'input/command_input.dart';
 import 'onboarding/onboarding_view.dart';
 import 'settings/display_settings_panel.dart';
+import 'hud_tooltip.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
 
@@ -168,6 +169,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _transitionTo(HudState target) {
     if (_state == target) return;
+    HudTooltip.dismissAll();
     setState(() => _state = target);
     _settingsService.setHudState(target);
     _resizeWindowForState(target);
@@ -287,21 +289,25 @@ class OverlayShellState extends State<OverlayShell> {
               icon: ws.screenState == 'active' ? Icons.visibility : Icons.visibility_off,
               active: ws.screenState == 'active',
               onTap: () => ws.sendCommand('toggle_screen'),
+              tooltip: 'Toggle screen capture',
             ),
             _toggleIcon(
               icon: ws.audioState == 'active' ? Icons.volume_up_rounded : Icons.volume_off_rounded,
               active: ws.audioState == 'active',
               onTap: () => ws.sendCommand('toggle_audio'),
+              tooltip: 'Toggle audio capture',
             ),
             _toggleIcon(
               icon: ws.micState == 'active' ? Icons.mic : Icons.mic_off,
               active: ws.micState == 'active',
               onTap: () => ws.sendCommand('toggle_mic'),
+              tooltip: 'Toggle microphone',
             ),
             _toggleIcon(
               icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
               active: ws.escalationState == 'active',
               onTap: () => ws.sendCommand('toggle_escalation'),
+              tooltip: 'Toggle escalation',
             ),
             const Spacer(),
             // Cost counter (replaces DEMO badge when cost > 0)
@@ -309,34 +315,40 @@ class OverlayShellState extends State<OverlayShell> {
               _costText(ws.totalCost)
             // Demo badge (only when no cost data yet)
             else if (!_settingsService.settings.privacyMode)
-              GestureDetector(
-                onTap: _toggleDemoMode,
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Text('DEMO', style: TextStyle(
-                      fontFamily: 'JetBrainsMono', fontSize: 9, fontWeight: FontWeight.bold,
-                      color: _redEye.withValues(alpha: 0.8),
-                    )),
+              HudTooltip(
+                message: 'Toggle privacy mode',
+                child: GestureDetector(
+                  onTap: _toggleDemoMode,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Text('DEMO', style: TextStyle(
+                        fontFamily: 'JetBrainsMono', fontSize: 9, fontWeight: FontWeight.bold,
+                        color: _redEye.withValues(alpha: 0.8),
+                      )),
+                    ),
                   ),
                 ),
               ),
-            _plainIcon(Icons.settings, _openSettings),
-            _plainIcon(Icons.chevron_left, () => _transitionTo(HudState.eye)),
-            _plainIcon(Icons.open_in_full, () => _transitionTo(HudState.chat)),
+            _plainIcon(Icons.settings, _openSettings, tooltip: 'Settings'),
+            _plainIcon(Icons.chevron_left, () => _transitionTo(HudState.eye), tooltip: 'Collapse'),
+            _plainIcon(Icons.open_in_full, () => _transitionTo(HudState.chat), tooltip: 'Expand to chat'),
             const SizedBox(width: 4),
             // Eye animation
-            GestureDetector(
-              onTap: () => _transitionTo(HudState.eye),
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black.withValues(alpha: 0.3),
+            HudTooltip(
+              message: 'Collapse to eye',
+              child: GestureDetector(
+                onTap: () => _transitionTo(HudState.eye),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.3),
+                  ),
+                  child: IdleAnimation(size: 32, pupilDilation: _pupilDilation, color: _eyeColor),
                 ),
-                child: IdleAnimation(size: 32, pupilDilation: _pupilDilation, color: _eyeColor),
               ),
             ),
             const SizedBox(width: 4),
@@ -373,7 +385,7 @@ class OverlayShellState extends State<OverlayShell> {
               child: Row(
                 children: [
                   // Collapse
-                  _plainIcon(Icons.expand_more, () => _transitionTo(HudState.controls), small: true),
+                  _plainIcon(Icons.expand_more, () => _transitionTo(HudState.controls), small: true, tooltip: 'Collapse to controls'),
                   const SizedBox(width: 2),
                   // Capture toggles
                   _toggleIcon(
@@ -381,43 +393,50 @@ class OverlayShellState extends State<OverlayShell> {
                     active: ws.screenState == 'active',
                     onTap: () => ws.sendCommand('toggle_screen'),
                     small: true,
+                    tooltip: 'Toggle screen capture',
                   ),
                   _toggleIcon(
                     icon: ws.audioState == 'active' ? Icons.volume_up_rounded : Icons.volume_off_rounded,
                     active: ws.audioState == 'active',
                     onTap: () => ws.sendCommand('toggle_audio'),
                     small: true,
+                    tooltip: 'Toggle audio capture',
                   ),
                   _toggleIcon(
                     icon: ws.micState == 'active' ? Icons.mic : Icons.mic_off,
                     active: ws.micState == 'active',
                     onTap: () => ws.sendCommand('toggle_mic'),
                     small: true,
+                    tooltip: 'Toggle microphone',
                   ),
                   _toggleIcon(
                     icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
                     active: ws.escalationState == 'active',
                     onTap: () => ws.sendCommand('toggle_escalation'),
                     small: true,
+                    tooltip: 'Toggle escalation',
                   ),
                   const SizedBox(width: 4),
                   // Tab indicator (clickable)
                   Consumer<SettingsService>(
-                    builder: (_, settings, __) => GestureDetector(
-                      onTap: () => _settingsService.cycleTab(),
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(3),
-                            color: Colors.white.withValues(alpha: 0.06),
-                          ),
-                          child: Text(
-                            settings.settings.activeTab == HudTab.agent ? 'AGT' : 'TSK',
-                            style: TextStyle(
-                              fontFamily: 'JetBrainsMono', fontSize: 9,
-                              color: Colors.white.withValues(alpha: 0.4),
+                    builder: (_, settings, __) => HudTooltip(
+                      message: 'Switch tab',
+                      child: GestureDetector(
+                        onTap: () => _settingsService.cycleTab(),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(3),
+                              color: Colors.white.withValues(alpha: 0.06),
+                            ),
+                            child: Text(
+                              settings.settings.activeTab == HudTab.agent ? 'AGT' : 'TSK',
+                              style: TextStyle(
+                                fontFamily: 'JetBrainsMono', fontSize: 9,
+                                color: Colors.white.withValues(alpha: 0.4),
+                              ),
                             ),
                           ),
                         ),
@@ -428,51 +447,60 @@ class OverlayShellState extends State<OverlayShell> {
                   // Cost counter
                   _costText(ws.totalCost),
                   // Demo toggle (clickable in both states)
-                  GestureDetector(
-                    onTap: _toggleDemoMode,
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: _settingsService.settings.privacyMode
-                            ? Icon(Icons.videocam_off, size: 12,
-                                color: Colors.white.withValues(alpha: 0.3))
-                            : Text('DEMO', style: TextStyle(
-                                fontFamily: 'JetBrainsMono', fontSize: 8,
-                                fontWeight: FontWeight.bold,
-                                color: _redEye.withValues(alpha: 0.8),
-                              )),
+                  HudTooltip(
+                    message: 'Toggle privacy mode',
+                    child: GestureDetector(
+                      onTap: _toggleDemoMode,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: _settingsService.settings.privacyMode
+                              ? Icon(Icons.videocam_off, size: 12,
+                                  color: Colors.white.withValues(alpha: 0.3))
+                              : Text('DEMO', style: TextStyle(
+                                  fontFamily: 'JetBrainsMono', fontSize: 8,
+                                  fontWeight: FontWeight.bold,
+                                  color: _redEye.withValues(alpha: 0.8),
+                                )),
+                        ),
                       ),
                     ),
                   ),
                   // Settings — tap toggles display panel, long-press opens .env
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _showDisplaySettings = !_showDisplaySettings),
-                      onLongPress: _openSettings,
-                      behavior: HitTestBehavior.opaque,
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(Icons.settings, size: 12,
-                            color: _showDisplaySettings
-                                ? _accentColor
-                                : Colors.white.withValues(alpha: 0.5)),
+                  HudTooltip(
+                    message: 'Display settings',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => setState(() => _showDisplaySettings = !_showDisplaySettings),
+                        onLongPress: _openSettings,
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(Icons.settings, size: 12,
+                              color: _showDisplaySettings
+                                  ? _accentColor
+                                  : Colors.white.withValues(alpha: 0.5)),
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 4),
                   // Eye — collapses all the way to State 1
-                  GestureDetector(
-                    onTap: () => _transitionTo(HudState.eye),
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.black.withValues(alpha: 0.3),
+                  HudTooltip(
+                    message: 'Collapse to eye',
+                    child: GestureDetector(
+                      onTap: () => _transitionTo(HudState.eye),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black.withValues(alpha: 0.3),
+                        ),
+                        child: IdleAnimation(size: 28, pupilDilation: _pupilDilation, color: _eyeColor),
                       ),
-                      child: IdleAnimation(size: 28, pupilDilation: _pupilDilation, color: _eyeColor),
                     ),
                   ),
                   const SizedBox(width: 2),
@@ -480,24 +508,27 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             ),
           ),
-          // Display settings panel
-          if (_showDisplaySettings)
-            DisplaySettingsPanel(
-              onClose: () => setState(() => _showDisplaySettings = false),
-            ),
-          // Tab content (Agent feed / Tasks)
+          // Tab content (Agent feed / Tasks) with display settings overlay
           Expanded(
-            child: Consumer<SettingsService>(
-              builder: (_, settings, __) => IndexedStack(
-                index: settings.settings.activeTab == HudTab.agent ? 0 : 1,
-                children: const [
-                  FeedView(
-                    channel: FeedChannel.agent,
-                    emptyLabel: 'awaiting sinain…',
+            child: Stack(
+              children: [
+                Consumer<SettingsService>(
+                  builder: (_, settings, __) => IndexedStack(
+                    index: settings.settings.activeTab == HudTab.agent ? 0 : 1,
+                    children: const [
+                      FeedView(
+                        channel: FeedChannel.agent,
+                        emptyLabel: 'awaiting sinain…',
+                      ),
+                      TasksView(),
+                    ],
                   ),
-                  TasksView(),
-                ],
-              ),
+                ),
+                if (_showDisplaySettings)
+                  DisplaySettingsPanel(
+                    onClose: () => setState(() => _showDisplaySettings = false),
+                  ),
+              ],
             ),
           ),
           // Command input
@@ -577,10 +608,11 @@ class OverlayShellState extends State<OverlayShell> {
     required bool active,
     required VoidCallback onTap,
     bool small = false,
+    String? tooltip,
   }) {
     final size = small ? 12.0 : 16.0;
     final pad = small ? 4.0 : 8.0;
-    return MouseRegion(
+    Widget child = MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: onTap,
@@ -597,6 +629,10 @@ class OverlayShellState extends State<OverlayShell> {
         ),
       ),
     );
+    if (tooltip != null) {
+      child = HudTooltip(message: tooltip, child: child);
+    }
+    return child;
   }
 
   Widget _costText(double cost) {
@@ -613,10 +649,10 @@ class OverlayShellState extends State<OverlayShell> {
     );
   }
 
-  Widget _plainIcon(IconData icon, VoidCallback onTap, {bool small = false}) {
+  Widget _plainIcon(IconData icon, VoidCallback onTap, {bool small = false, String? tooltip}) {
     final size = small ? 12.0 : 16.0;
     final pad = small ? 4.0 : 8.0;
-    return MouseRegion(
+    Widget child = MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: onTap,
@@ -627,5 +663,9 @@ class OverlayShellState extends State<OverlayShell> {
         ),
       ),
     );
+    if (tooltip != null) {
+      child = HudTooltip(message: tooltip, child: child);
+    }
+    return child;
   }
 }
