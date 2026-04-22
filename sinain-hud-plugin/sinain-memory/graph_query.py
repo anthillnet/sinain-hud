@@ -330,18 +330,11 @@ def query_facts_hybrid(
             if eid and eid not in fact_map:
                 fact_map[eid] = f
 
-    # Take top candidates from RRF, then re-rank by embedding similarity (~19ms)
-    rrf_top = [fact_map[eid] for eid in sorted_ids[:max_facts * 2] if eid in fact_map]
-    try:
-        from embed_client import rank_by_similarity
-        fact_texts = [str(f.get("value", "")) for f in rrf_top]
-        ranked = rank_by_similarity(query, fact_texts)
-        if ranked is not None:
-            results = [rrf_top[i] for i, _ in ranked[:max_facts]]
-        else:
-            results = rrf_top[:max_facts]
-    except Exception:
-        results = rrf_top[:max_facts]
+    # Return top RRF candidates. Embedding re-ranking is done by the caller
+    # (sinain-core Node.js) to avoid deadlock — the Python subprocess can't call
+    # back to sinain-core's /embed endpoint while sinain-core is blocked waiting
+    # for the subprocess.
+    results = [fact_map[eid] for eid in sorted_ids[:max_facts] if eid in fact_map]
 
     # Expand top results with 1-hop graph neighbors
     if results and len(results) < max_facts:

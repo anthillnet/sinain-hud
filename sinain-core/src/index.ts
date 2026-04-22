@@ -67,34 +67,65 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
   ];
   const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
 
-  const results: string[] = [];
+  // Step 1: Get candidates from Python (RRF-ranked, no embedding — avoids deadlock)
+  // Request 2x candidates in JSON for re-ranking in Node.js
+  const candidateFacts: Array<Record<string, string>> = [];
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts), "--format", "compact"];
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
       const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
-      if (out) results.push(out);
+      if (out) {
+        const parsed = JSON.parse(out);
+        const facts = parsed.facts || parsed;
+        if (Array.isArray(facts)) candidateFacts.push(...facts);
+      }
     } catch { /* skip failed db */ }
   }
 
-  if (results.length === 0) return "";
-  if (results.length === 1) return results[0];
+  if (candidateFacts.length === 0) return "";
 
-  // Merge and deduplicate lines from both sources
-  const seen = new Set<string>();
-  const merged: string[] = [];
-  for (const block of results) {
-    for (const line of block.split("\n")) {
-      const key = line.replace(/\(confidence:.*$/, "").trim();
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        merged.push(line);
-      }
+  // Step 2: Re-rank by embedding similarity in-process (no deadlock — model is in this process)
+  const queryText = entities.join(" ");
+  try {
+    if (embeddingService?.ready) {
+      const allTexts = [queryText, ...candidateFacts.map(f => f.value || "")];
+      const embeddings = await embeddingService.embed(allTexts);
+      const queryEmb = embeddings[0];
+      const scored = candidateFacts.map((f, i) => ({
+        fact: f,
+        sim: EmbeddingService.cosine(queryEmb, embeddings[i + 1]),
+      }));
+      scored.sort((a, b) => b.sim - a.sim);
+      candidateFacts.length = 0;
+      candidateFacts.push(...scored.slice(0, maxFacts).map(s => s.fact));
     }
+  } catch { /* embedding unavailable — use RRF order */ }
+
+  // Step 3: Format as compact text
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  let total = 0;
+  const maxChars = 1200;
+  for (const f of candidateFacts.slice(0, maxFacts)) {
+    const eid = ((f as any).entity_id || (f as any).entityId || "").split(":").pop()?.slice(0, 20) || "?";
+    const value = (f as any).value || "";
+    const conf = (f as any).confidence || "?";
+    const count = (f as any).reinforce_count || "1";
+    const line = `${eid}: ${value} (${conf},${count}x)`;
+    const key = value.slice(0, 60);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (total + line.length + 2 > maxChars) break;
+    lines.push(line);
+    total += line.length + 2;
   }
-  return merged.slice(0, maxFacts).join("\n");
+  return lines.join("; ");
 }
+
+// Reference to embedding service — set during init
+let embeddingService: import("./embedding/service.js").EmbeddingService | null = null;
 
 /** List all entities from both local and workspace knowledge graphs. */
 async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
@@ -340,7 +371,7 @@ async function main() {
     : null;
 
   // ── Initialize embedding service (non-blocking) ──
-  const embeddingService = new EmbeddingService();
+  embeddingService = new EmbeddingService();
   embeddingService.loadAsync(); // ~9s background load, server starts immediately
 
   // ── Initialize local knowledge pipeline ──
@@ -683,8 +714,8 @@ async function main() {
     },
     getSpawnPending: () => escalator.getSpawnPending(),
     respondSpawn: (id: string, result: string) => escalator.respondSpawn(id, result),
-    embedTexts: (texts: string[]) => embeddingService.embed(texts),
-    isEmbeddingReady: () => embeddingService.ready,
+    embedTexts: (texts: string[]) => embeddingService!.embed(texts),
+    isEmbeddingReady: () => embeddingService?.ready ?? false,
   });
 
   // ── Wire overlay profiling ──
