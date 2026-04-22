@@ -48,12 +48,14 @@ export class FeedBuffer {
     this.items.push(item);
     if (this.items.length > this._hwm) this._hwm = this.items.length;
 
-    // Fire onFull when buffer is at capacity AND enough new items have arrived
-    // since the last distillation (at least half the buffer replaced)
+    // Fire when enough new items have arrived since last distillation.
+    // 20 items ≈ 1.7 min of audio at ~12 items/min transcription rate.
+    // Distillation takes ~7s, so 20-item threshold gives 100s gap — safe margin.
+    // This means ~35 passes/hour, leaving <20 items undistilled at shutdown.
     const newSinceRearm = this._version - this._onFullVersion;
-    if (this.items.length >= this.maxSize
+    if (this.items.length >= 20
         && this._onFullCb && this._onFullArmed
-        && newSinceRearm >= Math.floor(this.maxSize / 2)) {
+        && newSinceRearm >= 20) {
       this._onFullArmed = false;
       const snapshot = [...this.items];
       queueMicrotask(() => this._onFullCb!(snapshot));
