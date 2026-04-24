@@ -408,6 +408,7 @@ async function main() {
     feedbackStore: feedbackStore ?? undefined,
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
     getSpawnAgent: () => bareAgentState.spawnAgent,
+    getEscalationAgent: () => bareAgentState.escalationAgent,
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -618,6 +619,10 @@ async function main() {
   // command from the overlay. Empty-string lane values = "Off" (disabled).
   const WHITELIST_AGENTS = new Set([
     "claude", "openclaude", "codex", "goose", "junie", "aider",
+    // "openclaw" is injected server-side below when gatewayWsUrl is set —
+    // it's not a local CLI, it's a routing choice that sends tasks to the
+    // remote OpenClaw gateway via WS RPC instead of the local bare agent.
+    "openclaw",
   ]);
   const bareAgentState: {
     available: string[];
@@ -627,6 +632,13 @@ async function main() {
 
   function registerBareAgent(availableList: string[], current: string): void {
     const clean = availableList.filter((a) => WHITELIST_AGENTS.has(a));
+    // Inject "openclaw" as a roster option when an OpenClaw gateway is
+    // configured. Lets the user explicitly route a lane to the remote
+    // gateway (e.g., picking "openclaw" for spawn means "use the gateway's
+    // subagent", picking "claude" means "use local claude binary").
+    if (config.openclawConfig.gatewayWsUrl && !clean.includes("openclaw")) {
+      clean.push("openclaw");
+    }
     bareAgentState.available = clean;
     // If neither lane is set yet (fresh boot), adopt the bare agent's
     // reported current. If state survives from a prior register call AND

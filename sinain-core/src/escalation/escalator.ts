@@ -39,6 +39,10 @@ export interface EscalatorDeps {
    *  so the overlay's agent-selector choice is respected even when the
    *  gateway is connected. */
   getSpawnAgent?: () => string;
+  /** Returns the currently-selected escalation-lane agent. "openclaw" routes
+   *  escalations to the remote gateway via WS; any other non-empty value
+   *  routes to the local bare agent via HTTP httpPending. */
+  getEscalationAgent?: () => string;
 }
 
 /**
@@ -289,7 +293,19 @@ export class Escalator {
       ts: entry.ts,
     };
 
-    const useHttp = transport === "http" || (transport === "auto" && !this.wsClient.isConnected);
+    // Route by overlay's escalation-lane agent choice, mirroring the spawn
+    // dispatch logic. If user picked "openclaw", force WS gateway path; if
+    // any other non-empty agent, force HTTP bare-agent path; else fall back
+    // to the transport env var + WS connectivity heuristic.
+    const escalationAgent = this.deps.getEscalationAgent?.() || "";
+    let useHttp: boolean;
+    if (escalationAgent === "openclaw") {
+      useHttp = !this.wsClient.isConnected;  // gateway if reachable, fallback otherwise
+    } else if (escalationAgent) {
+      useHttp = true;  // any local agent choice = local bare agent
+    } else {
+      useHttp = transport === "http" || (transport === "auto" && !this.wsClient.isConnected);
+    }
 
     if (useHttp) {
       // Remember the outgoing ID before overwriting so late-arriving responses
@@ -533,22 +549,27 @@ ${recentLines.join("\n")}`;
     // ★ Broadcast "spawned" BEFORE the RPC — TSK tab shows ··· immediately
     this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
 
-    // Prefer the HTTP bare-agent path when either (a) the gateway WS is
-    // disconnected, or (b) the user has explicitly selected a local spawn
-    // agent via the overlay selector. Case (b) makes the overlay's
-    // agent-selector choice authoritative — previously, when WS happened
-    // to be connected, *every* spawn was routed to the remote OpenClaw
-    // gateway regardless of what the user picked, which surfaces as
-    // 401/credential errors coming from the gateway's provider when its
-    // OpenRouter key goes stale.
-    const localSpawnAgent = this.deps.getSpawnAgent?.() || "";
-    const preferLocal = localSpawnAgent.length > 0;
-    if (preferLocal || !this.wsClient.isConnected) {
+    // Route explicitly by the overlay's spawn-agent selection:
+    //   "openclaw" (or "" with WS connected) → send to remote gateway via WS RPC
+    //   any other non-empty value             → queue for local bare agent HTTP poll
+    //   "" with WS disconnected               → queue for HTTP fallback (same)
+    // This makes the overlay's choice authoritative. Before openclaw was a
+    // roster option, the old heuristic "if WS connected, use gateway" hijacked
+    // every spawn regardless of user intent, which surfaced as 401/credential
+    // errors from the gateway's stale OpenRouter key.
+    const spawnAgent = this.deps.getSpawnAgent?.() || "";
+    const useGateway = spawnAgent === "openclaw" && this.wsClient.isConnected;
+    if (!useGateway) {
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
-      const reason = preferLocal
-        ? `selected spawn agent: ${localSpawnAgent}`
-        : "WS disconnected";
+      let reason: string;
+      if (spawnAgent === "openclaw" && !this.wsClient.isConnected) {
+        reason = "openclaw selected but gateway disconnected — fell back to bare agent";
+      } else if (spawnAgent) {
+        reason = `selected spawn agent: ${spawnAgent}`;
+      } else {
+        reason = "WS disconnected";
+      }
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
       this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
       log(TAG, `spawn-task ${taskId}: ${reason} — queued for bare agent polling`);
