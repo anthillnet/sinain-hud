@@ -395,6 +395,10 @@ async function main() {
   });
 
   // ── Initialize escalation ──
+  // getSpawnAgent reads bareAgentState (declared later in this function) via
+  // closure at call-time, NOT at construction time. Safe because
+  // dispatchSpawnTask only fires after an overlay message, which can't
+  // happen before server setup completes.
   const escalator = new Escalator({
     feedBuffer,
     wsHandler,
@@ -403,6 +407,7 @@ async function main() {
     profiler,
     feedbackStore: feedbackStore ?? undefined,
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
+    getSpawnAgent: () => bareAgentState.spawnAgent,
   });
 
   // ── Initialize agent loop (event-driven) ──
