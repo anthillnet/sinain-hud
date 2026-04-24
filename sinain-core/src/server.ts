@@ -209,6 +209,17 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
 /** Pending spawn questions/permissions — resolve callbacks keyed by "ask:{taskId}" or "perm:{taskId}" */
 const pendingSpawnQuestions = new Map<string, (answer: string) => void>();
 
+// YOLO mode: "allow all" for the current agent session. Keyed on the openclaude
+// session_id from the PreToolUse hook input (stable across tool calls within
+// one invoke_agent run, discarded when that run ends). User enters YOLO by
+// clicking the YOLO button on any permission prompt. Session id is cleared
+// implicitly when the bare agent restarts (new session_id on next run).
+const yoloSessions = new Set<string>();
+// Map permission-request id (perm-<ts>) -> session id it came from. Used so
+// that /spawn/permission-reply can flag the right session as YOLO when the
+// user picks the YOLO button. Cleaned on resolve/timeout.
+const permissionToSession = new Map<string, string>();
+
 export function createAppServer(deps: ServerDeps) {
   const { config, feedBuffer, senseBuffer, wsHandler } = deps;
   let senseInBytes = 0;
@@ -715,6 +726,14 @@ export function createAppServer(deps: ServerDeps) {
         const hookInput = JSON.parse(body);
         const tool = hookInput?.tool_name || hookInput?.toolName || "unknown";
         const input = hookInput?.tool_input || hookInput?.input || {};
+        // session_id is provided by Claude Code / openclaude per the standard
+        // PreToolUse hook contract — stable within one CLI invocation. Falls
+        // back to sinainTaskId (injected by approve-tool.sh from env) for
+        // hosts that don't emit session_id.
+        const sessionId: string =
+          (typeof hookInput?.session_id === "string" && hookInput.session_id) ||
+          (typeof hookInput?.sinainTaskId === "string" && hookInput.sinainTaskId) ||
+          "";
 
         // Auto-approve safe tools (configured via SINAIN_AUTO_APPROVE_TOOLS).
         // Tokens are exact matches, or prefix patterns ending with "*".
@@ -729,7 +748,21 @@ export function createAppServer(deps: ServerDeps) {
           return;
         }
 
+        // YOLO short-circuit: if this session previously clicked YOLO, auto-allow
+        // without routing to overlay. No user interaction needed.
+        if (sessionId && yoloSessions.has(sessionId)) {
+          res.end(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "YOLO mode active for this session",
+            },
+          }));
+          return;
+        }
+
         const taskId = `perm-${Date.now()}`;
+        if (sessionId) permissionToSession.set(taskId, sessionId);
         // Broadcast permission request to overlay
         deps.wsHandler?.broadcastRaw({
           type: "spawn_task",
@@ -750,17 +783,23 @@ export function createAppServer(deps: ServerDeps) {
             }
           }, 2 * 60_000);
         });
+        // Clean up the permission→session mapping once we're done with it.
+        permissionToSession.delete(taskId);
+        const allowed = decision === "allow" || decision === "yolo";
         res.end(JSON.stringify({
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
-            permissionDecision: decision === "allow" ? "allow" : "deny",
-            permissionDecisionReason: decision === "allow" ? "User approved via HUD" : "User denied or timed out",
+            permissionDecision: allowed ? "allow" : "deny",
+            permissionDecisionReason:
+              decision === "yolo" ? "User engaged YOLO mode — allow all for this session"
+              : decision === "allow" ? "User approved via HUD"
+              : "User denied or timed out",
           },
         }));
         return;
       }
 
-      // ── /spawn/permission-reply (overlay sends allow/deny) ──
+      // ── /spawn/permission-reply (overlay sends allow | deny | yolo) ──
       if (req.method === "POST" && url.pathname === "/spawn/permission-reply") {
         const body = await readBody(req, 1024);
         const { taskId, decision } = JSON.parse(body);
@@ -768,6 +807,14 @@ export function createAppServer(deps: ServerDeps) {
         const resolve = pendingSpawnQuestions.get(key);
         if (resolve) {
           pendingSpawnQuestions.delete(key);
+          // YOLO: flag the session so subsequent permission requests for the
+          // same openclaude invocation auto-allow without routing to overlay.
+          // Session id was captured in permissionToSession when we broadcast
+          // the request; it's cleared by the /spawn/approve handler after resolve.
+          if (decision === "yolo") {
+            const sid = permissionToSession.get(taskId);
+            if (sid) yoloSessions.add(sid);
+          }
           resolve(decision || "deny");
           res.end(JSON.stringify({ ok: true }));
         } else {

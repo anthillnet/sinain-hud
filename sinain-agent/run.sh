@@ -383,9 +383,13 @@ while true; do
     echo "[$(date +%H:%M:%S)] Escalation $ESC_ID (score=$ESC_SCORE, coding=$ESC_CODING)"
 
     if agent_has_mcp; then
-      # MCP path: agent calls sinain tools directly
+      # MCP path: agent calls sinain tools directly. Export a correlation id
+      # so the PreToolUse hook can key YOLO on this invocation when the agent
+      # runtime doesn't emit session_id in hook input.
+      export SINAIN_ESC_TASK_ID="esc-$ESC_ID"
       PROMPT=$(printf "$ESC_PROMPT_TEMPLATE" "$ESC_ID")
       RESPONSE=$(invoke_agent "$PROMPT" || echo "ERROR: $AGENT invocation failed")
+      unset SINAIN_ESC_TASK_ID
     else
       # Pipe path: bash handles HTTP, agent just generates text
       RESPONSE=$(invoke_pipe "$ESC_MSG" || true)
