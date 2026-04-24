@@ -584,6 +584,29 @@ async function main() {
   // ── Escalation pause/resume state ──
   let savedEscalationMode: typeof config.escalationConfig.mode | null = null;
 
+  /** Pause escalation (idempotent). Caches the pre-pause mode so resume
+   *  can restore it. Re-entering while already paused is a no-op — crucially,
+   *  does NOT overwrite savedEscalationMode with "off". */
+  function pauseEscalationInternal(): void {
+    const current = config.escalationConfig.mode;
+    if (current === "off") return;
+    savedEscalationMode = current;
+    escalator.setMode("off");
+    log(TAG, `escalation paused (was: ${savedEscalationMode})`);
+  }
+
+  /** Resume escalation (idempotent). Restores the saved mode or falls back
+   *  to "rich" if no saved mode exists. Re-entering while already active
+   *  is a no-op. */
+  function resumeEscalationInternal(): void {
+    const current = config.escalationConfig.mode;
+    if (current !== "off") return;
+    const mode = savedEscalationMode ?? "rich";
+    savedEscalationMode = null;
+    escalator.setMode(mode);
+    log(TAG, `escalation resumed (mode: ${mode})`);
+  }
+
   // ── Bare-agent roster & per-lane current agent ──
   // In-memory only (matches escalation-mode lifecycle). Populated when the
   // bare agent POSTs /bareagent/register on startup; mutated by set_agent
@@ -794,20 +817,44 @@ async function main() {
       return screenActive;
     },
     onToggleEscalation: () => {
-      if (savedEscalationMode === null) {
-        // Pause: save current mode, switch to off
-        savedEscalationMode = config.escalationConfig.mode;
-        escalator.setMode("off");
-        log(TAG, `escalation paused (was: ${savedEscalationMode})`);
-        return false;
-      } else {
-        // Resume: restore saved mode
-        const mode = savedEscalationMode;
-        savedEscalationMode = null;
-        escalator.setMode(mode);
-        log(TAG, `escalation resumed (mode: ${mode})`);
+      // Routes through the shared helpers so the set_agent("escalation","")
+      // path and the flash-icon-toggle path share a single source of truth
+      // for savedEscalationMode. Kept for WS backward-compat; new UI uses
+      // the agent selector.
+      if (config.escalationConfig.mode === "off") {
+        resumeEscalationInternal();
         return true;
+      } else {
+        pauseEscalationInternal();
+        return false;
       }
+    },
+    onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
+      // Empty-string agent = Off (lane disabled). Non-empty agent must be
+      // in the current roster; stale overlay state can send something that
+      // isn't available — reject with a clear error.
+      if (agent !== "" && !bareAgentState.available.includes(agent)) {
+        return { ok: false, error: `Agent "${agent}" not available` };
+      }
+      if (lane === "escalation") {
+        bareAgentState.escalationAgent = agent;
+        if (agent === "") {
+          pauseEscalationInternal();
+        } else {
+          resumeEscalationInternal();
+        }
+      } else {
+        bareAgentState.spawnAgent = agent;
+        // Spawn "off" just means run.sh won't poll /spawn/pending; no
+        // server-side state to flip. Queued spawn tasks TTL out naturally.
+      }
+      // Rebroadcast state so overlay sees the switch immediately, and the
+      // bare agent sees it on its next poll-response config piggyback.
+      wsHandler.updateState({ agents: { ...bareAgentState } });
+      const displayAgent = agent || "off";
+      wsHandler.broadcast(`Agent switched: ${lane} → ${displayAgent}`, "normal", "stream");
+      log(TAG, `set_agent lane=${lane} agent=${displayAgent}`);
+      return { ok: true };
     },
   });
 
