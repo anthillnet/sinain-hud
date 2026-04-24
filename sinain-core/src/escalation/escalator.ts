@@ -52,6 +52,14 @@ export class Escalator {
   private slot: EscalationSlot;
   private httpPending: HttpPendingEscalation | null = null;
 
+  // Grace window for stale escalation IDs — when analyzer rotates the pending
+  // slot mid-response (agent takes 10-30s on MCP flow while ticks fire every
+  // 3-6s), the agent's respondHttp(oldId) would fail. Keep last 5 IDs for ~60s
+  // so those responses still land on HUD instead of being silently dropped.
+  private recentHttpIds: Array<{ id: string; ts: number }> = [];
+  private static readonly STALE_ID_GRACE_MS = 60_000;
+  private static readonly STALE_ID_BUFFER_SIZE = 5;
+
   private lastEscalationTs = 0;
   private lastEscalatedDigest = "";
 
@@ -278,6 +286,14 @@ export class Escalator {
     const useHttp = transport === "http" || (transport === "auto" && !this.wsClient.isConnected);
 
     if (useHttp) {
+      // Remember the outgoing ID before overwriting so late-arriving responses
+      // still find a valid match in respondHttp's grace window.
+      if (this.httpPending) {
+        this.recentHttpIds.push({ id: this.httpPending.id, ts: this.httpPending.ts });
+        if (this.recentHttpIds.length > Escalator.STALE_ID_BUFFER_SIZE) {
+          this.recentHttpIds.shift();
+        }
+      }
       // Store in HTTP pending slot (newest wins, like EscalationSlot)
       this.httpPending = {
         id: slotId,
@@ -381,11 +397,21 @@ ${recentLines.join("\n")}`;
 
   /** Respond to an HTTP pending escalation. */
   respondHttp(id: string, response: string): { ok: boolean; error?: string } {
-    if (!this.httpPending) {
-      return { ok: false, error: "no pending escalation" };
-    }
-    if (this.httpPending.id !== id) {
-      return { ok: false, error: `id mismatch: expected ${this.httpPending.id}` };
+    // Grace path: the agent's response arrived for a stale ID because the
+    // analyzer rotated the pending slot mid-flight. Still push to HUD — the
+    // response was written against context that was fresh seconds ago and is
+    // almost certainly still relevant — but don't clear the current pending,
+    // so the agent can still address the newer escalation on its next poll.
+    if (!this.httpPending || this.httpPending.id !== id) {
+      const recent = this.recentHttpIds.find((e) => e.id === id);
+      if (recent && Date.now() - recent.ts < Escalator.STALE_ID_GRACE_MS) {
+        log(TAG, `respondHttp grace: id=${id} is stale (rotated ${((Date.now() - recent.ts) / 1000).toFixed(1)}s ago) — pushing to HUD anyway`);
+        this.pushResponse(response, this.lastEscalationContext);
+        return { ok: true, error: "stale-id-grace" };
+      }
+      return this.httpPending
+        ? { ok: false, error: `id mismatch: expected ${this.httpPending.id}` }
+        : { ok: false, error: "no pending escalation" };
     }
 
     this.pushResponse(response, this.lastEscalationContext);

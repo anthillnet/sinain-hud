@@ -27,7 +27,6 @@ fi
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
 POLL_INTERVAL="${SINAIN_POLL_INTERVAL:-2}"
-HEARTBEAT_INTERVAL="${SINAIN_HEARTBEAT_INTERVAL:-900}" # 15 minutes
 AGENT="${SINAIN_AGENT:-claude}"
 WORKSPACE="${SINAIN_WORKSPACE:-$HOME/.openclaw/workspace}"
 AGENT_MAX_TURNS="${SINAIN_AGENT_MAX_TURNS:-5}"
@@ -69,21 +68,57 @@ invoke_agent() {
   case "$AGENT" in
     claude|openclaude)
       local turns="${2:-$AGENT_MAX_TURNS}"
+      # Stderr filter: drops openclaude's repeated "not in context window table"
+      # warnings (one per LLM call, ~40/escalation). All other stderr passes through.
+      # No-op for claude (it doesn't emit that line). Toggle with QUIET_OPENCLAUDE=false.
+      local quiet="${QUIET_OPENCLAUDE:-true}"
       if [ -n "${SINAIN_SPAWN:-}" ]; then
-        # Spawn: PreToolUse hook routes permission prompts to overlay HUD
-        "$AGENT" \
-          --mcp-config "$MCP_CONFIG" \
-          --settings "$SCRIPT_DIR/.claude/settings.json" \
-          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-          --max-turns "$turns" --output-format text \
-          -p "$prompt"
+        # Spawn path: user-initiated tasks often need git/edit/write. The
+        # --allowedTools whitelist is a pre-invocation gate; PreToolUse hook
+        # (./hooks/approve-tool.sh) still routes each call to the overlay for
+        # user Allow/Deny. Widen the whitelist so the hook can do its job.
+        # Override via SINAIN_SPAWN_ALLOWED_TOOLS.
+        local spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
+        if [ "$quiet" = "true" ]; then
+          "$AGENT" \
+            --mcp-config "$MCP_CONFIG" \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            --allowedTools $spawn_allowed \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt" \
+            2> >(grep -v "not in context window table" >&2)
+        else
+          "$AGENT" \
+            --mcp-config "$MCP_CONFIG" \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            --allowedTools $spawn_allowed \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt"
+        fi
       else
-        # Escalation: auto-approve for speed (short-lived, read-heavy)
-        "$AGENT" --enable-auto-mode \
-          --mcp-config "$MCP_CONFIG" \
-          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-          --max-turns "$turns" --output-format text \
-          -p "$prompt"
+        # Escalation path: the PreToolUse hook auto-approves MCP + safe reads
+        # (sinain_respond, Read, Glob, Grep, Ls, Cat) for speed, and routes
+        # writes (Bash/Edit/Write) to the overlay for user Allow/Deny. Same
+        # gating as spawn — user commands like "commit this file" that land
+        # on the escalation path (Enter instead of Shift+Enter) still work.
+        # Override via SINAIN_ESC_ALLOWED_TOOLS.
+        local esc_allowed="${SINAIN_ESC_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
+        if [ "$quiet" = "true" ]; then
+          "$AGENT" \
+            --mcp-config "$MCP_CONFIG" \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            --allowedTools $esc_allowed \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt" \
+            2> >(grep -v "not in context window table" >&2)
+        else
+          "$AGENT" \
+            --mcp-config "$MCP_CONFIG" \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            --allowedTools $esc_allowed \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt"
+        fi
       fi
       ;;
     codex)
@@ -266,21 +301,56 @@ else
   AGENT_MODE="pipe"
 fi
 
+# --- OpenRouter reasoning-preserving proxy autolaunch ---
+# Starts sinain-agent/openrouter-proxy.mjs when OPENAI_BASE_URL points at it.
+# The proxy preserves reasoning_content across multi-turn MCP flows so
+# DeepSeek V4 Flash (and other thinking models) don't 400 on turn-2.
+# Skipped if proxy already running, or if base URL doesn't use the proxy port.
+PROXY_PID=""
+PROXY_PORT="${OPENROUTER_PROXY_PORT:-11435}"
+if [[ "${OPENAI_BASE_URL:-}" == *":${PROXY_PORT}"* ]]; then
+  if lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "OpenRouter proxy already running on :$PROXY_PORT — reusing"
+  else
+    PROXY_SCRIPT="$SCRIPT_DIR/openrouter-proxy.mjs"
+    if [ -f "$PROXY_SCRIPT" ]; then
+      PROXY_STDOUT="/tmp/openrouter-proxy.stdout.log"
+      echo "Starting OpenRouter proxy (mode=${REASONING_MODE:-preserve})..."
+      node "$PROXY_SCRIPT" > "$PROXY_STDOUT" 2>&1 &
+      PROXY_PID=$!
+      # Wait up to 2s for the proxy to accept connections before proceeding
+      for i in 1 2 3 4 5 6 7 8; do
+        if lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
+        sleep 0.25
+      done
+      if kill -0 "$PROXY_PID" 2>/dev/null && lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "  ✓ proxy listening (pid=$PROXY_PID, logs=/tmp/openrouter-proxy.log)"
+      else
+        echo "  ⚠ proxy failed to start — see $PROXY_STDOUT"
+        PROXY_PID=""
+      fi
+    else
+      echo "  ⚠ OPENAI_BASE_URL points at :$PROXY_PORT but $PROXY_SCRIPT missing"
+    fi
+  fi
+fi
+
 echo "sinain bare agent started"
 echo "  Agent: $AGENT ($AGENT_MODE)"
 echo "  Core: $CORE_URL"
 echo "  Allowed: ${ALLOWED_TOOLS:-<none>}"
 echo "  Poll: every ${POLL_INTERVAL}s"
-echo "  Heartbeat: every ${HEARTBEAT_INTERVAL}s"
 echo "  Press Ctrl+C to stop"
 echo ""
 
-LAST_HEARTBEAT=$(date +%s)
 ESCALATION_COUNT=0
 
 cleanup() {
   echo ""
   echo "Agent stopped. Escalations handled: $ESCALATION_COUNT"
+  if [ -n "${PROXY_PID:-}" ]; then
+    kill "$PROXY_PID" 2>/dev/null && echo "  stopped OpenRouter proxy (pid=$PROXY_PID)"
+  fi
   exit 0
 }
 trap cleanup INT TERM
@@ -292,15 +362,6 @@ ESC_PROMPT_TEMPLATE='You are the sinain HUD agent. An escalation is pending with
 Call sinain_get_escalation to see the full context, then call sinain_respond with the ID and your response.
 
 Response guidelines: 5-10 sentences, address errors first, reference specific screen/audio context, never NO_REPLY. Max 4000 chars for coding context, 3000 otherwise.'
-
-HEARTBEAT_PROMPT='You are the sinain HUD agent. Run the heartbeat cycle:
-1. Call sinain_heartbeat_tick with a brief session summary (runs signal analysis, session distillation, knowledge integration, insight synthesis)
-2. If the result contains a suggestion or insight, post it to HUD via sinain_post_feed
-3. Call sinain_get_knowledge to review the merged knowledge document (draws from both local and workspace databases)
-4. Optionally call sinain_knowledge_query with relevant entities to check long-term knowledge state
-5. Call sinain_get_feedback to review recent escalation scores
-
-Knowledge context: sinain-core maintains two knowledge databases — local (session distillation) and workspace (heartbeat curation). The knowledge tools query both via the sinain-core API. Facts have confidence decay (60-day half-life).'
 
 # --- Main loop ---
 
@@ -322,9 +383,13 @@ while true; do
     echo "[$(date +%H:%M:%S)] Escalation $ESC_ID (score=$ESC_SCORE, coding=$ESC_CODING)"
 
     if agent_has_mcp; then
-      # MCP path: agent calls sinain tools directly
+      # MCP path: agent calls sinain tools directly. Export a correlation id
+      # so the PreToolUse hook can key YOLO on this invocation when the agent
+      # runtime doesn't emit session_id in hook input.
+      export SINAIN_ESC_TASK_ID="esc-$ESC_ID"
       PROMPT=$(printf "$ESC_PROMPT_TEMPLATE" "$ESC_ID")
       RESPONSE=$(invoke_agent "$PROMPT" || echo "ERROR: $AGENT invocation failed")
+      unset SINAIN_ESC_TASK_ID
     else
       # Pipe path: bash handles HTTP, agent just generates text
       RESPONSE=$(invoke_pipe "$ESC_MSG" || true)
@@ -336,7 +401,20 @@ while true; do
     fi
 
     ESCALATION_COUNT=$((ESCALATION_COUNT + 1))
-    echo "[$(date +%H:%M:%S)] Responded ($ESCALATION_COUNT total): ${RESPONSE:0:120}..."
+    # Detect cases where the agent's tool call didn't land on HUD (ID race, max turns, API errors, crashes).
+    # On drop: print a short inline summary + append the full response to /tmp/sinain-drops.log for diagnosis.
+    if echo "$RESPONSE" | grep -qiE "no pending escalation|id mismatch|Reached max turns|invocation failed|API Error|^Error:"; then
+      echo "[$(date +%H:%M:%S)] ⚠ DROP ($ESC_ID) ─────────────────────────────"
+      echo "$RESPONSE"
+      echo "─────────────────────────────────────────────────────────────"
+      {
+        echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) DROP ($ESC_ID) ====="
+        echo "$RESPONSE"
+        echo ""
+      } >> /tmp/sinain-drops.log
+    else
+      echo "[$(date +%H:%M:%S)] Responded ($ESCALATION_COUNT total): ${RESPONSE:0:120}..."
+    fi
     echo ""
   fi
 
@@ -384,32 +462,10 @@ Complete this task thoroughly. You also have sinain_get_knowledge and sinain_kno
     echo ""
   fi
 
-  # Heartbeat check
-  NOW=$(date +%s)
-  ELAPSED=$((NOW - LAST_HEARTBEAT))
-  if [ "$ELAPSED" -ge "$HEARTBEAT_INTERVAL" ]; then
-    echo "[$(date +%H:%M:%S)] Running heartbeat tick..."
-
-    if agent_has_mcp; then
-      # MCP path: agent runs heartbeat tools
-      invoke_agent "$HEARTBEAT_PROMPT" || true
-    else
-      # Pipe path: run curation scripts directly
-      SCRIPTS_DIR="$WORKSPACE/sinain-memory"
-      MEMORY_DIR="$WORKSPACE/memory"
-      if [ -d "$SCRIPTS_DIR" ]; then
-        python3 "$SCRIPTS_DIR/signal_analyzer.py" --memory-dir "$MEMORY_DIR" 2>/dev/null || true
-        python3 "$SCRIPTS_DIR/playbook_curator.py" --memory-dir "$MEMORY_DIR" 2>/dev/null || true
-        echo "[$(date +%H:%M:%S)] Heartbeat: ran signal_analyzer + playbook_curator"
-      else
-        echo "[$(date +%H:%M:%S)] Heartbeat: skipped (no scripts at $SCRIPTS_DIR)"
-      fi
-    fi
-
-    LAST_HEARTBEAT=$NOW
-    echo "[$(date +%H:%M:%S)] Heartbeat complete"
-    echo ""
-  fi
+  # Heartbeat moved server-side: sinain-core's LocalCurationService runs the
+  # full pipeline (signal_analyzer, insight_synthesizer, feedback_analyzer,
+  # memory_miner, playbook_curator) every 30 min natively, and broadcasts
+  # insights to the HUD directly. No LLM roundtrip needed here.
 
   sleep "$POLL_INTERVAL"
 done

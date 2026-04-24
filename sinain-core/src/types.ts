@@ -461,6 +461,14 @@ export interface PrivacyConfig {
   matrix: PrivacyMatrix;
 }
 
+// ── Permission gating for /spawn/approve ──
+// Controls which tool-invocations auto-approve (vs. route to overlay for user).
+// Tokens are exact tool names (e.g. "Read") or prefix patterns ending with `*`
+// (e.g. "mcp__sinain*"). Everything else gets the overlay Allow/Deny prompt.
+export interface PermissionsConfig {
+  autoApproveTools: string[];
+}
+
 // ── Full core config ──
 
 export interface CoreConfig {
@@ -478,4 +486,5 @@ export interface CoreConfig {
   traceDir: string;
   learningConfig: LearningConfig;
   privacyConfig: PrivacyConfig;
+  permissionsConfig: PermissionsConfig;
 }
