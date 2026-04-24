@@ -189,3 +189,114 @@ class TestOutputFormat:
         assert isinstance(data, dict)
         assert "ingested" in data
         assert "source" in data
+
+
+# ---------------------------------------------------------------------------
+# Entity canonicalization tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeEntity:
+    """Tests for _normalize_entity() Unicode transliteration."""
+
+    def test_ascii_unchanged(self):
+        from knowledge_integrator import _normalize_entity
+        assert _normalize_entity("hello-world") == "hello-world"
+        assert _normalize_entity("JetBrains") == "jetbrains"
+        assert _normalize_entity("Google Meet") == "google-meet"
+
+    def test_german_umlaut(self):
+        from knowledge_integrator import _normalize_entity
+        assert _normalize_entity("Übungsbuch") == "ubungsbuch"
+        assert _normalize_entity("Hauptstraße") == "hauptstrasse"
+        assert _normalize_entity("Bemaßter") == "bemasster"
+        assert _normalize_entity("Köln") == "koln"
+        assert _normalize_entity("Müller") == "muller"
+
+    def test_accented_chars(self):
+        from knowledge_integrator import _normalize_entity
+        assert _normalize_entity("François") == "francois"
+        assert _normalize_entity("café") == "cafe"
+        assert _normalize_entity("naïve") == "naive"
+
+    def test_consecutive_hyphens_collapsed(self):
+        from knowledge_integrator import _normalize_entity
+        assert _normalize_entity("kurs- und Übungsbuch") == "kurs-und-ubungsbuch"
+        assert _normalize_entity("a--b---c") == "a-b-c"
+
+    def test_leading_trailing_hyphens_stripped(self):
+        from knowledge_integrator import _normalize_entity
+        assert _normalize_entity("-hello-") == "hello"
+        assert _normalize_entity("--test--") == "test"
+
+    def test_underscores_to_hyphens(self):
+        from knowledge_integrator import _normalize_entity
+        assert _normalize_entity("audio_midi_setup") == "audio-midi-setup"
+
+
+class TestFindMatchingEntity:
+    """Tests for _find_matching_entity() fuzzy matching."""
+
+    def test_exact_match(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"blinklearning": "entity:blinklearning"}
+        assert _find_matching_entity("blinklearning", entities) == "entity:blinklearning"
+
+    def test_hyphen_insensitive(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"chat-gpt": "entity:chat-gpt"}
+        assert _find_matching_entity("chatgpt", entities) == "entity:chat-gpt"
+
+    def test_hyphen_insensitive_reverse(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"chatgpt": "entity:chatgpt"}
+        assert _find_matching_entity("chat-gpt", entities) == "entity:chatgpt"
+
+    def test_typo_match(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"blinklearning": "entity:blinklearning"}
+        assert _find_matching_entity("blinkslearning", entities) == "entity:blinklearning"
+
+    def test_name_variant(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"dmitriy": "entity:dmitriy"}
+        # dmitri vs dmitriy: ratio = 0.857 > 0.85 threshold
+        assert _find_matching_entity("dmitri", entities) == "entity:dmitriy"
+
+    def test_model_version_variant(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"gemma-34b": "entity:gemma-34b"}
+        # gemma34b vs gemma-34b: hyphen-insensitive match
+        assert _find_matching_entity("gemma34b", entities) == "entity:gemma-34b"
+
+    def test_no_false_positive_short(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"git": "entity:git"}
+        assert _find_matching_entity("got", entities) is None
+
+    def test_no_false_positive_dissimilar(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"palo": "entity:palo"}
+        # polo vs palo: ratio = 0.75 < 0.90 threshold
+        assert _find_matching_entity("polo", entities) is None
+
+    def test_no_false_positive_shared_suffix(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"claude-code": "entity:claude-code"}
+        # cloud-code vs claude-code: ratio = 0.857 < 0.90 threshold
+        assert _find_matching_entity("cloud-code", entities) is None
+
+    def test_no_false_positive_different_prefix(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"it-bank": "entity:it-bank"}
+        # td-bank vs it-bank: ratio = 0.857 < 0.90
+        assert _find_matching_entity("td-bank", entities) is None
+
+    def test_empty_existing(self):
+        from knowledge_integrator import _find_matching_entity
+        assert _find_matching_entity("anything", {}) is None
+
+    def test_short_names_skipped(self):
+        from knowledge_integrator import _find_matching_entity
+        entities = {"ab": "entity:ab"}
+        assert _find_matching_entity("ac", entities) is None
