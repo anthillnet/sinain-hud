@@ -21,6 +21,14 @@ export interface StatusMessage {
   escalation?: string;
   connection: string;
   responseSize?: string;
+  /** Bare-agent roster + per-lane current choice. Omitted until the bare
+   *  agent has registered via POST /bareagent/register. empty-string lane
+   *  values mean "Off" (lane disabled). */
+  agents?: {
+    available: string[];
+    escalationAgent: string;
+    spawnAgent: string;
+  };
 }
 
 /** sinain-core → Overlay: heartbeat ping */
@@ -396,6 +404,13 @@ export interface BridgeState {
   escalation: "active" | "paused";
   connection: "connected" | "disconnected" | "connecting";
   responseSize: ResponseSize;
+  /** Bare-agent roster + per-lane current choice. Populated after the
+   *  bare agent's POST /bareagent/register. "" lane value = lane disabled. */
+  agents: {
+    available: string[];
+    escalationAgent: string;
+    spawnAgent: string;
+  };
 }
 
 // ── Learning / feedback types ──
