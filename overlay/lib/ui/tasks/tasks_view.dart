@@ -332,6 +332,29 @@ class _TasksViewState extends State<TasksView> {
                         ),
                         const SizedBox(width: 4),
                         HudTooltip(
+                          message: 'Allow this + auto-allow all following permissions in this agent session',
+                          child: GestureDetector(
+                            onTap: () => _sendPermissionDecision(task.taskId, 'yolo'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFAA00).withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: const Color(0xFFFFAA00).withValues(alpha: 0.5),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text('YOLO', style: TextStyle(
+                                fontFamily: 'JetBrainsMono', fontSize: (fs - 2).clamp(6.0, 20.0),
+                                color: const Color(0xFFFFAA00),
+                                fontWeight: FontWeight.bold,
+                              )),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        HudTooltip(
                           message: 'Deny this action',
                           child: GestureDetector(
                             onTap: () => _sendPermissionDecision(task.taskId, 'deny'),

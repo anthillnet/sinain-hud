@@ -60,11 +60,17 @@ export class LocalCurationService {
   private _incrementalRunning = false;
   private _rearmCb: (() => void) | null = null; // callback to re-arm feed buffer onFull
   private _senseBuffer: SenseBuffer | null = null;
+  // Optional HUD broadcast callback — when insight_synthesizer emits a
+  // suggestion/insight, we push it here so the overlay sees it. Replaces the
+  // bare-agent's prior `sinain_post_feed` roundtrip during heartbeat.
+  // Always posts at default priority; curation isn't the place for urgent pings.
+  private _broadcast: ((text: string) => void) | null = null;
 
-  constructor() {
+  constructor(broadcast?: (text: string) => void) {
     this.memoryDir = resolveMemoryDir();
     this.scriptsDir = resolveScriptsDir();
     this.sessionStartTs = Date.now();
+    if (broadcast) this._broadcast = broadcast;
 
     // Ensure memory directory exists
     for (const subdir of ["", "playbook-logs", "playbook-archive", "eval-logs", "eval-reports"]) {
@@ -384,39 +390,87 @@ export class LocalCurationService {
     }
   }
 
-  /** Run the periodic curation pipeline (feedback → mining → curation). */
+  /** Run the periodic curation pipeline.
+   * Replaces the bare-agent heartbeat entirely:
+   *   signal_analyzer + insight_synthesizer (formerly heartbeat-only)
+   *   + feedback_analyzer + memory_miner + playbook_curator (existing).
+   * insight_synthesizer output is parsed and, if it emits a suggestion or
+   * insight, broadcast to HUD via the constructor's broadcast callback.
+   */
   private runCurationPipeline(): void {
     log(TAG, "running periodic curation...");
 
-    const scripts = [
-      "feedback_analyzer.py",
-      "memory_miner.py",
-      "playbook_curator.py",
-    ];
+    const sessionSummary = "Periodic curation cycle";
+    const currentTime = new Date().toISOString();
 
-    for (const script of scripts) {
-      const scriptPath = resolve(this.scriptsDir, script);
-      if (!existsSync(scriptPath)) {
-        warn(TAG, `${script} not found — skipping`);
-        continue;
-      }
+    // Step 1: signal_analyzer — detects actionable signals from session memory
+    this.runScript("signal_analyzer.py", [
+      "--memory-dir", this.memoryDir,
+      "--session-summary", sessionSummary,
+      "--current-time", currentTime,
+    ]);
 
-      try {
-        execFileSync("python3", [
-          scriptPath,
-          "--memory-dir", this.memoryDir,
-        ], {
-          timeout: 60_000,
-          encoding: "utf-8",
-          env: { ...process.env, PYTHONPATH: this.scriptsDir },
-        });
-        log(TAG, `  ✓ ${script}`);
-      } catch (err: any) {
-        warn(TAG, `  ✗ ${script}: ${err.message?.slice(0, 100)}`);
-      }
+    // Step 2: insight_synthesizer — produces {suggestion, insight}, broadcast to HUD
+    const insightOut = this.runScript("insight_synthesizer.py", [
+      "--memory-dir", this.memoryDir,
+      "--session-summary", sessionSummary,
+      "--current-time", currentTime,
+    ], /* captureStdout */ true);
+    if (insightOut) this.maybeBroadcastInsight(insightOut);
+
+    // Steps 3-5: existing periodic pipeline (feedback → mining → curation)
+    for (const script of ["feedback_analyzer.py", "memory_miner.py", "playbook_curator.py"]) {
+      this.runScript(script, ["--memory-dir", this.memoryDir]);
     }
 
     log(TAG, "periodic curation complete");
+  }
+
+  /** Run a single curation script. Returns captured stdout when requested, else empty. */
+  private runScript(script: string, args: string[], captureStdout = false): string {
+    const scriptPath = resolve(this.scriptsDir, script);
+    if (!existsSync(scriptPath)) {
+      warn(TAG, `${script} not found — skipping`);
+      return "";
+    }
+    try {
+      const stdout = execFileSync("python3", [scriptPath, ...args], {
+        timeout: 60_000,
+        encoding: "utf-8",
+        env: { ...process.env, PYTHONPATH: this.scriptsDir },
+      });
+      log(TAG, `  ✓ ${script}`);
+      return captureStdout ? (stdout || "") : "";
+    } catch (err: any) {
+      warn(TAG, `  ✗ ${script}: ${err.message?.slice(0, 100)}`);
+      return "";
+    }
+  }
+
+  /** Parse insight_synthesizer stdout (expects JSON with {suggestion?, insight?})
+   *  and broadcast non-empty fields to the HUD feed. Safe no-op if JSON parsing
+   *  fails or if no broadcast callback was wired. */
+  private maybeBroadcastInsight(stdout: string): void {
+    if (!this._broadcast) return;
+    const lines = stdout.trim().split("\n").filter((l) => l.trim().length > 0);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith("{")) continue;
+      try {
+        const parsed = JSON.parse(line);
+        const suggestion = typeof parsed.suggestion === "string" ? parsed.suggestion.trim() : "";
+        const insight = typeof parsed.insight === "string" ? parsed.insight.trim() : "";
+        if (suggestion) {
+          log(TAG, `  posting suggestion to HUD (${suggestion.length} chars)`);
+          this._broadcast(suggestion);
+        }
+        if (insight && insight !== suggestion) {
+          log(TAG, `  posting insight to HUD (${insight.length} chars)`);
+          this._broadcast(insight);
+        }
+        return;
+      } catch { /* try previous line */ }
+    }
   }
 
   /** Write distilled session notes to daily file. */
