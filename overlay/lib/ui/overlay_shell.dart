@@ -13,6 +13,7 @@ import 'feed/idle_animation.dart';
 import 'input/command_input.dart';
 import 'onboarding/onboarding_view.dart';
 import 'settings/display_settings_panel.dart';
+import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'tasks/tasks_view.dart';
 import '../core/models/feed_item.dart';
@@ -43,6 +44,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   // Display settings panel
   bool _showDisplaySettings = false;
+  bool _showAgentPicker = false;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -306,8 +308,8 @@ class OverlayShellState extends State<OverlayShell> {
             _toggleIcon(
               icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
               active: ws.escalationState == 'active',
-              onTap: () => ws.sendCommand('toggle_escalation'),
-              tooltip: 'Toggle escalation',
+              onTap: () => setState(() => _showAgentPicker = !_showAgentPicker),
+              tooltip: 'Agent selector — which agent handles each lane',
             ),
             const Spacer(),
             // Cost counter (replaces DEMO badge when cost > 0)
@@ -412,9 +414,9 @@ class OverlayShellState extends State<OverlayShell> {
                   _toggleIcon(
                     icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
                     active: ws.escalationState == 'active',
-                    onTap: () => ws.sendCommand('toggle_escalation'),
+                    onTap: () => setState(() => _showAgentPicker = !_showAgentPicker),
                     small: true,
-                    tooltip: 'Toggle escalation',
+                    tooltip: 'Agent selector — which agent handles each lane',
                   ),
                   const SizedBox(width: 4),
                   // Tab indicator (clickable)
@@ -527,6 +529,10 @@ class OverlayShellState extends State<OverlayShell> {
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),
+                  ),
+                if (_showAgentPicker)
+                  AgentSelectorPanel(
+                    onClose: () => setState(() => _showAgentPicker = false),
                   ),
               ],
             ),
