@@ -236,6 +236,17 @@ export function loadConfig(): CoreConfig {
 
   const privacyConfig = loadPrivacyConfig();
 
+  // SINAIN_AUTO_APPROVE_TOOLS: space-separated tool names or prefix patterns
+  // (suffix *) that sinain-core auto-approves at /spawn/approve without
+  // routing to the overlay. Default matches the legacy hardcoded behavior.
+  const autoApproveRaw = env(
+    "SINAIN_AUTO_APPROVE_TOOLS",
+    "Read Glob Grep Ls Cat mcp__sinain*",
+  );
+  const permissionsConfig = {
+    autoApproveTools: autoApproveRaw.split(/\s+/).filter((t) => t.length > 0),
+  };
+
   return {
     port: intEnv("PORT", 9500),
     audioConfig,
@@ -251,5 +262,6 @@ export function loadConfig(): CoreConfig {
     costDisplayEnabled: boolEnv("COST_DISPLAY_ENABLED", false),
     learningConfig,
     privacyConfig,
+    permissionsConfig,
   };
 }

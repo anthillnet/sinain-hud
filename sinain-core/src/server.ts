@@ -716,9 +716,13 @@ export function createAppServer(deps: ServerDeps) {
         const tool = hookInput?.tool_name || hookInput?.toolName || "unknown";
         const input = hookInput?.tool_input || hookInput?.input || {};
 
-        // Auto-approve safe read-only tools
-        const safeTools = ["Read", "Glob", "Grep", "Ls", "Cat"];
-        if (safeTools.includes(tool) || tool.startsWith("mcp__sinain")) {
+        // Auto-approve safe tools (configured via SINAIN_AUTO_APPROVE_TOOLS).
+        // Tokens are exact matches, or prefix patterns ending with "*".
+        const autoApproveTools = deps.config.permissionsConfig.autoApproveTools;
+        const autoApproved = autoApproveTools.some((p) =>
+          p.endsWith("*") ? tool.startsWith(p.slice(0, -1)) : tool === p,
+        );
+        if (autoApproved) {
           res.end(JSON.stringify({
             hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
           }));
