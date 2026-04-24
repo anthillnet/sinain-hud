@@ -375,7 +375,12 @@ async function main() {
   embeddingService.loadAsync(); // ~9s background load, server starts immediately
 
   // ── Initialize local knowledge pipeline ──
-  const localCuration = new LocalCurationService();
+  // Pass wsHandler.broadcast so the periodic curator (insight_synthesizer)
+  // can push suggestions/insights directly to HUD without going through the
+  // bare-agent heartbeat. Replaces the old sinain_post_feed MCP roundtrip.
+  const localCuration = new LocalCurationService(
+    (text) => wsHandler.broadcast(text),
+  );
   // Distill pending session in background — don't block server startup
   setImmediate(() => {
     localCuration.distillPendingSession();
