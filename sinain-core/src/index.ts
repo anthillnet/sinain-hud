@@ -584,6 +584,36 @@ async function main() {
   // ── Escalation pause/resume state ──
   let savedEscalationMode: typeof config.escalationConfig.mode | null = null;
 
+  // ── Bare-agent roster & per-lane current agent ──
+  // In-memory only (matches escalation-mode lifecycle). Populated when the
+  // bare agent POSTs /bareagent/register on startup; mutated by set_agent
+  // command from the overlay. Empty-string lane values = "Off" (disabled).
+  const WHITELIST_AGENTS = new Set([
+    "claude", "openclaude", "codex", "goose", "junie", "aider",
+  ]);
+  const bareAgentState: {
+    available: string[];
+    escalationAgent: string;
+    spawnAgent: string;
+  } = { available: [], escalationAgent: "", spawnAgent: "" };
+
+  function registerBareAgent(availableList: string[], current: string): void {
+    const clean = availableList.filter((a) => WHITELIST_AGENTS.has(a));
+    bareAgentState.available = clean;
+    // If neither lane is set yet (fresh boot), adopt the bare agent's
+    // reported current. If state survives from a prior register call AND
+    // the agent still exists in the roster, keep it; otherwise fall back
+    // to the new current.
+    if (!bareAgentState.escalationAgent || !clean.includes(bareAgentState.escalationAgent)) {
+      bareAgentState.escalationAgent = clean.includes(current) ? current : (clean[0] ?? "");
+    }
+    if (!bareAgentState.spawnAgent || !clean.includes(bareAgentState.spawnAgent)) {
+      bareAgentState.spawnAgent = clean.includes(current) ? current : (clean[0] ?? "");
+    }
+    wsHandler.updateState({ agents: { ...bareAgentState } });
+    log(TAG, `bareagent register: available=[${clean.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} spawn=${bareAgentState.spawnAgent}`);
+  }
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
@@ -696,6 +726,13 @@ async function main() {
     getEscalationPending: () => escalator.getPendingHttp(),
     isEscalationPaused: () => savedEscalationMode !== null,
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
+
+    // Bare-agent roster & config (wired to server endpoints in step 2).
+    registerBareAgent,
+    getBareAgentConfig: () => ({
+      escalationAgent: bareAgentState.escalationAgent,
+      spawnAgent: bareAgentState.spawnAgent,
+    }),
 
     // Knowledge graph integration (checks both local and workspace DBs)
     getKnowledgeDocPath: () => {
