@@ -55,7 +55,7 @@ fi
 JUNIE_HAS_MCP=false  # set during startup checks
 agent_has_mcp() {
   case "$AGENT" in
-    claude|codex|goose) return 0 ;;
+    claude|openclaude|codex|goose) return 0 ;;
     junie) $JUNIE_HAS_MCP ;;
     *) return 1 ;;
   esac
@@ -67,11 +67,11 @@ agent_has_mcp() {
 invoke_agent() {
   local prompt="$1"
   case "$AGENT" in
-    claude)
+    claude|openclaude)
       local turns="${2:-$AGENT_MAX_TURNS}"
       if [ -n "${SINAIN_SPAWN:-}" ]; then
         # Spawn: PreToolUse hook routes permission prompts to overlay HUD
-        claude \
+        "$AGENT" \
           --mcp-config "$MCP_CONFIG" \
           --settings "$SCRIPT_DIR/.claude/settings.json" \
           ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
@@ -79,7 +79,7 @@ invoke_agent() {
           -p "$prompt"
       else
         # Escalation: auto-approve for speed (short-lived, read-heavy)
-        claude --enable-auto-mode \
+        "$AGENT" --enable-auto-mode \
           --mcp-config "$MCP_CONFIG" \
           ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
           --max-turns "$turns" --output-format text \
@@ -224,6 +224,38 @@ with open(config_path, 'w') as f:
     yaml.dump(cfg, f, default_flow_style=False)
 print('  sinain extension added to ' + config_path)
 " "$GOOSE_CONFIG" "$TSX_BIN" "$MCP_ENTRY" "$CORE_URL" "$WORKSPACE"
+  fi
+fi
+
+# Ollama warmup — pin the backing model so each agent invocation hits hot weights.
+# openclaude + Ollama via the OpenAI-compat endpoint does NOT forward keep_alive,
+# so we ping Ollama's native /api/generate once with keep_alive=-1 (persistent).
+# Applies to any agent pointed at an Ollama-compatible endpoint via OPENAI_BASE_URL.
+OLLAMA_WARMUP="${OLLAMA_WARMUP:-true}"
+if [ "$OLLAMA_WARMUP" = "true" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
+  if [[ "$OPENAI_BASE_URL" == *"11434"* ]] || [[ "$OPENAI_BASE_URL" == *"ollama"* ]]; then
+    # Derive Ollama host by stripping /v1 suffix from OPENAI_BASE_URL
+    OLLAMA_HOST="${OLLAMA_HOST:-${OPENAI_BASE_URL%/v1*}}"
+    OLLAMA_MODEL="${OLLAMA_MODEL:-${OPENAI_MODEL:-}}"
+    OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"  # -1 = persistent, or "24h", "30m", etc.
+    if [ -n "$OLLAMA_MODEL" ]; then
+      echo "Warming Ollama model $OLLAMA_MODEL at $OLLAMA_HOST (keep_alive=$OLLAMA_KEEP_ALIVE)..."
+      # Ollama accepts keep_alive as int (-1 = persistent) or duration string ("24h", "30m").
+      if [[ "$OLLAMA_KEEP_ALIVE" =~ ^-?[0-9]+$ ]]; then
+        WARMUP_PAYLOAD="{\"model\":\"$OLLAMA_MODEL\",\"prompt\":\"\",\"keep_alive\":$OLLAMA_KEEP_ALIVE,\"stream\":false}"
+      else
+        WARMUP_PAYLOAD="{\"model\":\"$OLLAMA_MODEL\",\"prompt\":\"\",\"keep_alive\":\"$OLLAMA_KEEP_ALIVE\",\"stream\":false}"
+      fi
+      if curl -sf -m 60 -X POST "$OLLAMA_HOST/api/generate" \
+          -H 'Content-Type: application/json' \
+          -d "$WARMUP_PAYLOAD" >/dev/null 2>&1; then
+        echo "  ✓ Model pinned in memory"
+      else
+        echo "  ⚠ Warmup failed — first request will cold-start the model"
+      fi
+    else
+      echo "  ⚠ OLLAMA_WARMUP=true but OPENAI_MODEL not set — skipping warmup"
+    fi
   fi
 fi
 

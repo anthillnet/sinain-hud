@@ -459,6 +459,7 @@ export async function stepAgent(existing, label = "Bare agent") {
     message: label,
     options: [
       { value: "claude", label: "Claude Code", hint: "Calls sinain tools directly — recommended" },
+      { value: "openclaude", label: "OpenClaude", hint: "Claude Code clone, local-first (Ollama/OpenAI-compat)" },
       { value: "codex", label: "Codex", hint: "Calls sinain tools directly" },
       { value: "goose", label: "Goose", hint: "Calls sinain tools directly" },
       { value: "junie", label: "Junie", hint: "JetBrains IDE agent" },
