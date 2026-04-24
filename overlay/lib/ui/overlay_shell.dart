@@ -306,8 +306,13 @@ class OverlayShellState extends State<OverlayShell> {
               tooltip: 'Toggle microphone',
             ),
             _toggleIcon(
-              icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
-              active: ws.escalationState == 'active',
+              // Both the icon AND its active-tint reflect the combined state:
+              // active only when escalation is running AND at least one agent
+              // is registered. Empty roster → dim, flash_off — signals
+              // "nothing is answering" even if escalation mode isn't explicitly
+              // paused.
+              icon: (ws.escalationState == 'active' && ws.availableAgents.isNotEmpty) ? Icons.flash_on : Icons.flash_off,
+              active: ws.escalationState == 'active' && ws.availableAgents.isNotEmpty,
               onTap: () => setState(() => _showAgentPicker = !_showAgentPicker),
               tooltip: 'Agent selector — which agent handles each lane',
             ),
@@ -412,8 +417,8 @@ class OverlayShellState extends State<OverlayShell> {
                     tooltip: 'Toggle microphone',
                   ),
                   _toggleIcon(
-                    icon: ws.escalationState == 'active' ? Icons.flash_on : Icons.flash_off,
-                    active: ws.escalationState == 'active',
+                    icon: (ws.escalationState == 'active' && ws.availableAgents.isNotEmpty) ? Icons.flash_on : Icons.flash_off,
+                    active: ws.escalationState == 'active' && ws.availableAgents.isNotEmpty,
                     onTap: () => setState(() => _showAgentPicker = !_showAgentPicker),
                     small: true,
                     tooltip: 'Agent selector — which agent handles each lane',
