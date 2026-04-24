@@ -342,30 +342,31 @@ echo "  Lanes:  escalation=$ESC_AGENT  spawn=$SPAWN_AGENT"
 
 # --- Apply config piggybacked on escalation/spawn poll responses ---
 # No separate polling — parses the `config` field from /escalation/pending
-# and /spawn/pending response JSONs. Heals on "empty config after we had
-# state" by re-POSTing /bareagent/register (covers core-restart).
+# and /spawn/pending response JSONs. Heals only when core explicitly signals
+# `registered: false` (core forgot our roster, probably restarted) — NOT
+# when the user legitimately picks Off/Off from the selector.
 apply_config_from_response() {
   local json="$1"
   # Short-circuit: only process if the response actually includes a config.
   echo "$json" | grep -q '"config"' || return 0
-  local new_esc new_spawn
-  new_esc=$(echo "$json"   | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('escalationAgent',''))" 2>/dev/null)
-  new_spawn=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('spawnAgent',''))" 2>/dev/null)
+  local new_esc new_spawn registered
+  new_esc=$(echo "$json"     | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('escalationAgent',''))" 2>/dev/null)
+  new_spawn=$(echo "$json"   | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('spawnAgent',''))" 2>/dev/null)
+  registered=$(echo "$json"  | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print('true' if c.get('registered') else 'false')" 2>/dev/null)
 
-  # Healing: if BOTH lanes come back empty but we had state before, core
-  # likely restarted — re-announce our roster so it re-adopts our choice.
-  if [ -z "$new_esc" ] && [ -z "$new_spawn" ] && { [ -n "$ESC_AGENT" ] || [ -n "$SPAWN_AGENT" ]; }; then
-    echo "[$(date +%H:%M:%S)] config empty — re-registering roster with core"
-    if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
-      local heal_payload
-      heal_payload=$(python3 -c "
+  # Healing: core says it doesn't have our roster. Re-register (fire-and-
+  # forget). Distinct from "user selected Off/Off" because in that case
+  # registered is still true — core knows us, lanes are just blank.
+  if [ "$registered" = "false" ] && [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
+    echo "[$(date +%H:%M:%S)] core unregistered — re-registering roster"
+    local heal_payload
+    heal_payload=$(python3 -c "
 import json, sys
 print(json.dumps({'available': sys.argv[1].split(' '), 'current': sys.argv[2]}))
 " "${AVAILABLE_AGENTS[*]}" "${ESC_AGENT:-$AGENT}")
-      curl -sf -m 2 -X POST "$CORE_URL/bareagent/register" \
-        -H 'Content-Type: application/json' \
-        -d "$heal_payload" >/dev/null 2>&1 || true
-    fi
+    curl -sf -m 2 -X POST "$CORE_URL/bareagent/register" \
+      -H 'Content-Type: application/json' \
+      -d "$heal_payload" >/dev/null 2>&1 || true
     return 0
   fi
 
