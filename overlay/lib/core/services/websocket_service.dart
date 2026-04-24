@@ -24,6 +24,13 @@ class WebSocketService extends ChangeNotifier {
   String _escalationState = 'active';
   String _responseSize = 'medium';
   String _envPath = '';
+  // Bare-agent roster + per-lane current choice. Populated from status
+  // messages once the bare agent registers with sinain-core. Empty string
+  // for a lane means "Off" (lane disabled). Empty availableAgents means
+  // the bare agent hasn't registered yet (or no agents are installed).
+  List<String> _availableAgents = const [];
+  String _escalationAgent = '';
+  String _spawnAgent = '';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
   double _totalCost = 0.0;
@@ -52,6 +59,9 @@ class WebSocketService extends ChangeNotifier {
   String get escalationState => _escalationState;
   String get responseSize => _responseSize;
   String get envPath => _envPath;
+  List<String> get availableAgents => _availableAgents;
+  String get escalationAgent => _escalationAgent;
+  String get spawnAgent => _spawnAgent;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
   bool get costDisplayEnabled => _costDisplayEnabled;
@@ -65,6 +75,13 @@ class WebSocketService extends ChangeNotifier {
 
   void setResponseSize(String size) {
     sendCommand('set_response_size', {'responseSize': size});
+  }
+
+  /// Ask sinain-core to switch the agent for a lane. Empty agent = Off.
+  /// Core validates against the current roster and sends a toast if the
+  /// agent isn't available (stale overlay state).
+  void setAgent(String lane, String agent) {
+    sendCommand('set_agent', {'lane': lane, 'agent': agent});
   }
 
   void toggleAudioFeed() {
@@ -194,6 +211,20 @@ class WebSocketService extends ChangeNotifier {
           final envPath = statusData['envPath'] as String?;
           if (envPath != null && envPath.isNotEmpty) {
             _envPath = envPath;
+          }
+          final agents = statusData['agents'] as Map<String, dynamic>?;
+          if (agents != null) {
+            final newAvail = (agents['available'] as List?)?.cast<String>() ?? const <String>[];
+            final newEsc = agents['escalationAgent'] as String? ?? '';
+            final newSpawn = agents['spawnAgent'] as String? ?? '';
+            if (newAvail.join(',') != _availableAgents.join(',') ||
+                newEsc != _escalationAgent ||
+                newSpawn != _spawnAgent) {
+              _availableAgents = newAvail;
+              _escalationAgent = newEsc;
+              _spawnAgent = newSpawn;
+              notifyListeners();
+            }
           }
           _statusController.add(statusData);
           break;
