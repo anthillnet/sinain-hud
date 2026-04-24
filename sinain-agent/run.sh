@@ -69,21 +69,44 @@ invoke_agent() {
   case "$AGENT" in
     claude|openclaude)
       local turns="${2:-$AGENT_MAX_TURNS}"
+      # Stderr filter: drops openclaude's repeated "not in context window table"
+      # warnings (one per LLM call, ~40/escalation). All other stderr passes through.
+      # No-op for claude (it doesn't emit that line). Toggle with QUIET_OPENCLAUDE=false.
+      local quiet="${QUIET_OPENCLAUDE:-true}"
       if [ -n "${SINAIN_SPAWN:-}" ]; then
         # Spawn: PreToolUse hook routes permission prompts to overlay HUD
-        "$AGENT" \
-          --mcp-config "$MCP_CONFIG" \
-          --settings "$SCRIPT_DIR/.claude/settings.json" \
-          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-          --max-turns "$turns" --output-format text \
-          -p "$prompt"
+        if [ "$quiet" = "true" ]; then
+          "$AGENT" \
+            --mcp-config "$MCP_CONFIG" \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt" \
+            2> >(grep -v "not in context window table" >&2)
+        else
+          "$AGENT" \
+            --mcp-config "$MCP_CONFIG" \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt"
+        fi
       else
         # Escalation: auto-approve for speed (short-lived, read-heavy)
-        "$AGENT" --enable-auto-mode \
-          --mcp-config "$MCP_CONFIG" \
-          ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
-          --max-turns "$turns" --output-format text \
-          -p "$prompt"
+        if [ "$quiet" = "true" ]; then
+          "$AGENT" --enable-auto-mode \
+            --mcp-config "$MCP_CONFIG" \
+            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt" \
+            2> >(grep -v "not in context window table" >&2)
+        else
+          "$AGENT" --enable-auto-mode \
+            --mcp-config "$MCP_CONFIG" \
+            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --max-turns "$turns" --output-format text \
+            -p "$prompt"
+        fi
       fi
       ;;
     codex)
@@ -336,7 +359,20 @@ while true; do
     fi
 
     ESCALATION_COUNT=$((ESCALATION_COUNT + 1))
-    echo "[$(date +%H:%M:%S)] Responded ($ESCALATION_COUNT total): ${RESPONSE:0:120}..."
+    # Detect cases where the agent's tool call didn't land on HUD (ID race, max turns, API errors, crashes).
+    # On drop: print a short inline summary + append the full response to /tmp/sinain-drops.log for diagnosis.
+    if echo "$RESPONSE" | grep -qiE "no pending escalation|id mismatch|Reached max turns|invocation failed|API Error|^Error:"; then
+      echo "[$(date +%H:%M:%S)] ⚠ DROP ($ESC_ID) ─────────────────────────────"
+      echo "$RESPONSE"
+      echo "─────────────────────────────────────────────────────────────"
+      {
+        echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) DROP ($ESC_ID) ====="
+        echo "$RESPONSE"
+        echo ""
+      } >> /tmp/sinain-drops.log
+    else
+      echo "[$(date +%H:%M:%S)] Responded ($ESCALATION_COUNT total): ${RESPONSE:0:120}..."
+    fi
     echo ""
   fi
 
