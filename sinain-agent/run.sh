@@ -74,12 +74,17 @@ invoke_agent() {
       # No-op for claude (it doesn't emit that line). Toggle with QUIET_OPENCLAUDE=false.
       local quiet="${QUIET_OPENCLAUDE:-true}"
       if [ -n "${SINAIN_SPAWN:-}" ]; then
-        # Spawn: PreToolUse hook routes permission prompts to overlay HUD
+        # Spawn path: user-initiated tasks often need git/edit/write. The
+        # --allowedTools whitelist is a pre-invocation gate; PreToolUse hook
+        # (./hooks/approve-tool.sh) still routes each call to the overlay for
+        # user Allow/Deny. Widen the whitelist so the hook can do its job.
+        # Override via SINAIN_SPAWN_ALLOWED_TOOLS.
+        local spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
         if [ "$quiet" = "true" ]; then
           "$AGENT" \
             --mcp-config "$MCP_CONFIG" \
             --settings "$SCRIPT_DIR/.claude/settings.json" \
-            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --allowedTools $spawn_allowed \
             --max-turns "$turns" --output-format text \
             -p "$prompt" \
             2> >(grep -v "not in context window table" >&2)
@@ -87,7 +92,7 @@ invoke_agent() {
           "$AGENT" \
             --mcp-config "$MCP_CONFIG" \
             --settings "$SCRIPT_DIR/.claude/settings.json" \
-            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --allowedTools $spawn_allowed \
             --max-turns "$turns" --output-format text \
             -p "$prompt"
         fi
