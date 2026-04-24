@@ -97,18 +97,26 @@ invoke_agent() {
             -p "$prompt"
         fi
       else
-        # Escalation: auto-approve for speed (short-lived, read-heavy)
+        # Escalation path: the PreToolUse hook auto-approves MCP + safe reads
+        # (sinain_respond, Read, Glob, Grep, Ls, Cat) for speed, and routes
+        # writes (Bash/Edit/Write) to the overlay for user Allow/Deny. Same
+        # gating as spawn — user commands like "commit this file" that land
+        # on the escalation path (Enter instead of Shift+Enter) still work.
+        # Override via SINAIN_ESC_ALLOWED_TOOLS.
+        local esc_allowed="${SINAIN_ESC_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
         if [ "$quiet" = "true" ]; then
-          "$AGENT" --enable-auto-mode \
+          "$AGENT" \
             --mcp-config "$MCP_CONFIG" \
-            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            --allowedTools $esc_allowed \
             --max-turns "$turns" --output-format text \
             -p "$prompt" \
             2> >(grep -v "not in context window table" >&2)
         else
-          "$AGENT" --enable-auto-mode \
+          "$AGENT" \
             --mcp-config "$MCP_CONFIG" \
-            ${ALLOWED_TOOLS:+--allowedTools $ALLOWED_TOOLS} \
+            --settings "$SCRIPT_DIR/.claude/settings.json" \
+            --allowedTools $esc_allowed \
             --max-turns "$turns" --output-format text \
             -p "$prompt"
         fi
