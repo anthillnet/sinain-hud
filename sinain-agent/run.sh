@@ -301,6 +301,77 @@ else
   AGENT_MODE="pipe"
 fi
 
+# --- Detect installed agents & register with sinain-core ---
+# Probes `command -v` for each known bare-agent CLI so the overlay knows
+# which ones to offer in its selector. The result is POSTed to
+# /bareagent/register; server state becomes visible to the overlay via the
+# existing status broadcast. Lane-specific choices (ESC_AGENT, SPAWN_AGENT)
+# default to $AGENT and are refreshed per-iteration from the config
+# piggyback field on /escalation/pending and /spawn/pending responses.
+AVAILABLE_AGENTS=()
+for candidate in claude openclaude codex goose junie aider; do
+  command -v "$candidate" >/dev/null 2>&1 && AVAILABLE_AGENTS+=("$candidate")
+done
+if ! command -v "$AGENT" >/dev/null 2>&1; then
+  echo "  ⚠ configured agent '$AGENT' not installed — waiting for overlay override"
+fi
+
+ESC_AGENT="$AGENT"
+SPAWN_AGENT="$AGENT"
+
+# Register roster with sinain-core (fire-and-forget; core may not be ready)
+if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
+  REGISTER_PAYLOAD=$(python3 -c "
+import json, sys
+available = sys.argv[1].split(' ') if sys.argv[1] else []
+print(json.dumps({'available': available, 'current': sys.argv[2]}))
+" "${AVAILABLE_AGENTS[*]}" "$AGENT")
+  curl -sf -m 2 -X POST "$CORE_URL/bareagent/register" \
+    -H 'Content-Type: application/json' \
+    -d "$REGISTER_PAYLOAD" >/dev/null 2>&1 || true
+fi
+echo "  Agents available: ${AVAILABLE_AGENTS[*]:-<none>}"
+echo "  Lanes:  escalation=$ESC_AGENT  spawn=$SPAWN_AGENT"
+
+# --- Apply config piggybacked on escalation/spawn poll responses ---
+# No separate polling — parses the `config` field from /escalation/pending
+# and /spawn/pending response JSONs. Heals on "empty config after we had
+# state" by re-POSTing /bareagent/register (covers core-restart).
+apply_config_from_response() {
+  local json="$1"
+  # Short-circuit: only process if the response actually includes a config.
+  echo "$json" | grep -q '"config"' || return 0
+  local new_esc new_spawn
+  new_esc=$(echo "$json"   | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('escalationAgent',''))" 2>/dev/null)
+  new_spawn=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('spawnAgent',''))" 2>/dev/null)
+
+  # Healing: if BOTH lanes come back empty but we had state before, core
+  # likely restarted — re-announce our roster so it re-adopts our choice.
+  if [ -z "$new_esc" ] && [ -z "$new_spawn" ] && { [ -n "$ESC_AGENT" ] || [ -n "$SPAWN_AGENT" ]; }; then
+    echo "[$(date +%H:%M:%S)] config empty — re-registering roster with core"
+    if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
+      local heal_payload
+      heal_payload=$(python3 -c "
+import json, sys
+print(json.dumps({'available': sys.argv[1].split(' '), 'current': sys.argv[2]}))
+" "${AVAILABLE_AGENTS[*]}" "${ESC_AGENT:-$AGENT}")
+      curl -sf -m 2 -X POST "$CORE_URL/bareagent/register" \
+        -H 'Content-Type: application/json' \
+        -d "$heal_payload" >/dev/null 2>&1 || true
+    fi
+    return 0
+  fi
+
+  if [ "$new_esc" != "$ESC_AGENT" ]; then
+    echo "[$(date +%H:%M:%S)] escalation agent: ${ESC_AGENT:-<off>} → ${new_esc:-<off>}"
+    ESC_AGENT="$new_esc"
+  fi
+  if [ "$new_spawn" != "$SPAWN_AGENT" ]; then
+    echo "[$(date +%H:%M:%S)] spawn agent: ${SPAWN_AGENT:-<off>} → ${new_spawn:-<off>}"
+    SPAWN_AGENT="$new_spawn"
+  fi
+}
+
 # --- OpenRouter reasoning-preserving proxy autolaunch ---
 # Starts sinain-agent/openrouter-proxy.mjs when OPENAI_BASE_URL points at it.
 # The proxy preserves reasoning_content across multi-turn MCP flows so
