@@ -289,6 +289,40 @@ else
   AGENT_MODE="pipe"
 fi
 
+# --- OpenRouter reasoning-preserving proxy autolaunch ---
+# Starts sinain-agent/openrouter-proxy.mjs when OPENAI_BASE_URL points at it.
+# The proxy preserves reasoning_content across multi-turn MCP flows so
+# DeepSeek V4 Flash (and other thinking models) don't 400 on turn-2.
+# Skipped if proxy already running, or if base URL doesn't use the proxy port.
+PROXY_PID=""
+PROXY_PORT="${OPENROUTER_PROXY_PORT:-11435}"
+if [[ "${OPENAI_BASE_URL:-}" == *":${PROXY_PORT}"* ]]; then
+  if lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "OpenRouter proxy already running on :$PROXY_PORT — reusing"
+  else
+    PROXY_SCRIPT="$SCRIPT_DIR/openrouter-proxy.mjs"
+    if [ -f "$PROXY_SCRIPT" ]; then
+      PROXY_STDOUT="/tmp/openrouter-proxy.stdout.log"
+      echo "Starting OpenRouter proxy (mode=${REASONING_MODE:-preserve})..."
+      node "$PROXY_SCRIPT" > "$PROXY_STDOUT" 2>&1 &
+      PROXY_PID=$!
+      # Wait up to 2s for the proxy to accept connections before proceeding
+      for i in 1 2 3 4 5 6 7 8; do
+        if lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
+        sleep 0.25
+      done
+      if kill -0 "$PROXY_PID" 2>/dev/null && lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "  ✓ proxy listening (pid=$PROXY_PID, logs=/tmp/openrouter-proxy.log)"
+      else
+        echo "  ⚠ proxy failed to start — see $PROXY_STDOUT"
+        PROXY_PID=""
+      fi
+    else
+      echo "  ⚠ OPENAI_BASE_URL points at :$PROXY_PORT but $PROXY_SCRIPT missing"
+    fi
+  fi
+fi
+
 echo "sinain bare agent started"
 echo "  Agent: $AGENT ($AGENT_MODE)"
 echo "  Core: $CORE_URL"
@@ -304,6 +338,9 @@ ESCALATION_COUNT=0
 cleanup() {
   echo ""
   echo "Agent stopped. Escalations handled: $ESCALATION_COUNT"
+  if [ -n "${PROXY_PID:-}" ]; then
+    kill "$PROXY_PID" 2>/dev/null && echo "  stopped OpenRouter proxy (pid=$PROXY_PID)"
+  fi
   exit 0
 }
 trap cleanup INT TERM
