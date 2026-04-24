@@ -33,6 +33,12 @@ export interface EscalatorDeps {
   feedbackStore?: FeedbackStore;
   signalCollector?: SignalCollector;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
+  /** Returns the currently-selected spawn-lane agent from the bare-agent
+   *  roster ("" = Off). When a local agent is selected, dispatchSpawnTask
+   *  prefers the HTTP bare-agent path over the OpenClaw gateway WS path,
+   *  so the overlay's agent-selector choice is respected even when the
+   *  gateway is connected. */
+  getSpawnAgent?: () => string;
 }
 
 /**
@@ -527,13 +533,25 @@ ${recentLines.join("\n")}`;
     // ★ Broadcast "spawned" BEFORE the RPC — TSK tab shows ··· immediately
     this.broadcastTaskEvent(taskId, "spawned", label, startedAt);
 
-    if (!this.wsClient.isConnected) {
-      // No OpenClaw gateway — queue for bare agent HTTP polling
+    // Prefer the HTTP bare-agent path when either (a) the gateway WS is
+    // disconnected, or (b) the user has explicitly selected a local spawn
+    // agent via the overlay selector. Case (b) makes the overlay's
+    // agent-selector choice authoritative — previously, when WS happened
+    // to be connected, *every* spawn was routed to the remote OpenClaw
+    // gateway regardless of what the user picked, which surfaces as
+    // 401/credential errors coming from the gateway's provider when its
+    // OpenRouter key goes stale.
+    const localSpawnAgent = this.deps.getSpawnAgent?.() || "";
+    const preferLocal = localSpawnAgent.length > 0;
+    if (preferLocal || !this.wsClient.isConnected) {
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
+      const reason = preferLocal
+        ? `selected spawn agent: ${localSpawnAgent}`
+        : "WS disconnected";
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
       this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
-      log(TAG, `spawn-task ${taskId}: WS disconnected — queued for bare agent polling`);
+      log(TAG, `spawn-task ${taskId}: ${reason} — queued for bare agent polling`);
       return;
     }
 
