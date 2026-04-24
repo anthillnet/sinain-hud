@@ -161,7 +161,9 @@ function parseSSEChunk(chunk, state) {
   }
 }
 
-http.createServer((clientReq, clientRes) => {
+// Exported request handler — pure function, no side effects at module load.
+// Auto-start path at bottom wraps this in http.createServer() when run directly.
+export function handler(clientReq, clientRes) {
   const ts = new Date().toISOString();
   let reqBody = Buffer.alloc(0);
   clientReq.on("data", (c) => { reqBody = Buffer.concat([reqBody, c]); });
@@ -240,23 +242,25 @@ http.createServer((clientReq, clientRes) => {
   });
 }
 
-// Core function exports for testing
+// Test helpers — small, pure, stateful.
+export function getCacheSize() { return cache.size; }
+export function clearCache() { cache.clear(); }
+
+// Core function exports for testing (names only; no `export function` on
+// the actual declarations to avoid duplicate-export errors).
 export {
   cacheSet,
   cache,
-  getCacheSize,
-  clearCache,
   rewriteRequest,
   captureNonStreaming,
   parseSSEChunk,
 };
-export function getCacheSize() { return cache.size; }
-export function clearCache() { cache.clear(); }
 
 // Only auto-start when run directly, not when imported as a module.
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
   http.createServer(handler).listen(LISTEN_PORT, () => {
-  console.log(`openrouter proxy: http://localhost:${LISTEN_PORT} → https://${UPSTREAM_HOST} (mode=${MODE})`);
-  console.log(`logs: ${LOG}`);
-});
+    console.log(`openrouter proxy: http://localhost:${LISTEN_PORT} → https://${UPSTREAM_HOST} (mode=${MODE})`);
+    console.log(`logs: ${LOG}`);
+  });
+}
