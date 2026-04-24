@@ -53,7 +53,10 @@ fi
 # Junie support is detected at startup (JUNIE_HAS_MCP flag).
 JUNIE_HAS_MCP=false  # set during startup checks
 agent_has_mcp() {
-  case "$AGENT" in
+  # Optional arg: agent name to check. Defaults to $AGENT for back-compat
+  # with startup-time usage. Main loop passes the lane-specific choice.
+  local check="${1:-$AGENT}"
+  case "$check" in
     claude|openclaude|codex|goose) return 0 ;;
     junie) $JUNIE_HAS_MCP ;;
     *) return 1 ;;
@@ -63,11 +66,14 @@ agent_has_mcp() {
 # Invoke the selected agent with a prompt. MCP-capable agents get the config
 # so they can call sinain tools directly. Returns text on stdout.
 # Exit code 1 means "agent doesn't support MCP — use pipe mode instead".
+# First arg is the lane's agent name (shadows the global $AGENT for the
+# case-dispatch below); second arg is the prompt; third optional is turns.
 invoke_agent() {
-  local prompt="$1"
+  local AGENT="$1"     # shadow the global so case-statement doesn't need edits
+  local prompt="$2"
   case "$AGENT" in
     claude|openclaude)
-      local turns="${2:-$AGENT_MAX_TURNS}"
+      local turns="${3:-$AGENT_MAX_TURNS}"
       # Stderr filter: drops openclaude's repeated "not in context window table"
       # warnings (one per LLM call, ~40/escalation). All other stderr passes through.
       # No-op for claude (it doesn't emit that line). Toggle with QUIET_OPENCLAUDE=false.
@@ -140,7 +146,7 @@ invoke_agent() {
       fi
       ;;
     goose)
-      local turns="${2:-$AGENT_MAX_TURNS}"
+      local turns="${3:-$AGENT_MAX_TURNS}"
       GOOSE_MODE=auto goose run --text "$prompt" \
         --output-format text \
         --quiet \
@@ -176,7 +182,8 @@ post_response() {
 # Invoke a pipe-mode agent with escalation message text.
 # Some agents take the message as an argument, others via stdin.
 invoke_pipe() {
-  local msg="$1"
+  local AGENT="$1"     # shadow the global; case-dispatch uses the lane's agent
+  local msg="$2"
   case "$AGENT" in
     junie)
       junie --output-format text --task "$msg"
@@ -439,12 +446,23 @@ Response guidelines: 5-10 sentences, address errors first, reference specific sc
 while true; do
   # Poll for pending escalation
   ESC=$(curl -sf "$CORE_URL/escalation/pending" 2>/dev/null || echo '{"ok":false}')
+  # Pick up per-lane agent choices from the piggybacked config field
+  apply_config_from_response "$ESC"
   ESC_PAUSED=$(echo "$ESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d.get('paused') else '')" 2>/dev/null || true)
   if [ -n "$ESC_PAUSED" ]; then
     sleep 10  # Slow polling when paused
     continue
   fi
   ESC_ID=$(echo "$ESC" | python3 -c "import sys,json; d=json.load(sys.stdin); e=d.get('escalation'); print(e['id'] if e else '')" 2>/dev/null || true)
+
+  # Escalation lane guard: if user set escalation agent to Off via the
+  # selector, skip responding even if an escalation is pending. The server's
+  # setMode("off") already stops new escalations; this protects against any
+  # residual queued state and makes "Off" behavior uniform across restarts.
+  if [ -n "$ESC_ID" ] && [ -z "$ESC_AGENT" ]; then
+    echo "[$(date +%H:%M:%S)] Escalation $ESC_ID skipped — lane is Off"
+    ESC_ID=""
+  fi
 
   if [ -n "$ESC_ID" ]; then
     ESC_MSG=$(echo "$ESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['escalation']['message'])" 2>/dev/null)
@@ -453,21 +471,21 @@ while true; do
 
     echo "[$(date +%H:%M:%S)] Escalation $ESC_ID (score=$ESC_SCORE, coding=$ESC_CODING)"
 
-    if agent_has_mcp; then
+    if agent_has_mcp "$ESC_AGENT"; then
       # MCP path: agent calls sinain tools directly. Export a correlation id
       # so the PreToolUse hook can key YOLO on this invocation when the agent
       # runtime doesn't emit session_id in hook input.
       export SINAIN_ESC_TASK_ID="esc-$ESC_ID"
       PROMPT=$(printf "$ESC_PROMPT_TEMPLATE" "$ESC_ID")
-      RESPONSE=$(invoke_agent "$PROMPT" || echo "ERROR: $AGENT invocation failed")
+      RESPONSE=$(invoke_agent "$ESC_AGENT" "$PROMPT" || echo "ERROR: $ESC_AGENT invocation failed")
       unset SINAIN_ESC_TASK_ID
     else
       # Pipe path: bash handles HTTP, agent just generates text
-      RESPONSE=$(invoke_pipe "$ESC_MSG" || true)
+      RESPONSE=$(invoke_pipe "$ESC_AGENT" "$ESC_MSG" || true)
       if [ -n "$RESPONSE" ]; then
         post_response "$ESC_ID" "$RESPONSE"
       else
-        echo "[$(date +%H:%M:%S)] WARNING: $AGENT returned empty response"
+        echo "[$(date +%H:%M:%S)] WARNING: $ESC_AGENT returned empty response"
       fi
     fi
 
@@ -489,9 +507,16 @@ while true; do
     echo ""
   fi
 
-  # Poll for pending spawn task (queued via HUD Shift+Enter or POST /spawn)
-  SPAWN=$(curl -sf "$CORE_URL/spawn/pending" 2>/dev/null || echo '{"ok":false}')
-  SPAWN_ID=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('task'); print(t['id'] if t else '')" 2>/dev/null || true)
+  # Poll for pending spawn task (queued via HUD Shift+Enter or POST /spawn).
+  # Skip entirely when the spawn lane is Off — queued tasks will TTL on
+  # the server side. This prevents fetching + throwing away task bodies.
+  if [ -n "$SPAWN_AGENT" ]; then
+    SPAWN=$(curl -sf "$CORE_URL/spawn/pending" 2>/dev/null || echo '{"ok":false}')
+    apply_config_from_response "$SPAWN"
+    SPAWN_ID=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('task'); print(t['id'] if t else '')" 2>/dev/null || true)
+  else
+    SPAWN_ID=""
+  fi
 
   if [ -n "$SPAWN_ID" ]; then
     SPAWN_TASK=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['task']['task'])" 2>/dev/null)
@@ -499,7 +524,7 @@ while true; do
 
     echo "[$(date +%H:%M:%S)] Spawn task $SPAWN_ID ($SPAWN_LABEL)"
 
-    if agent_has_mcp; then
+    if agent_has_mcp "$SPAWN_AGENT"; then
       # MCP path: agent runs task with sinain tools available
       # Pre-fetch knowledge context so the spawn doesn't waste turns calling tools
       SPAWN_KNOWLEDGE=$(curl -sf "$CORE_URL/knowledge" 2>/dev/null | python3 -c "
@@ -516,11 +541,11 @@ $SPAWN_KNOWLEDGE
 }
 Complete this task thoroughly. You also have sinain_get_knowledge and sinain_knowledge_query tools available for additional context. Summarize your findings concisely."
       export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
-      SPAWN_RESULT=$(invoke_agent "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: agent invocation failed")
+      SPAWN_RESULT=$(invoke_agent "$SPAWN_AGENT" "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: $SPAWN_AGENT invocation failed")
       unset SINAIN_SPAWN SINAIN_SPAWN_TASK_ID
     else
       # Pipe path: agent gets task text directly
-      SPAWN_RESULT=$(invoke_pipe "Background task: $SPAWN_TASK" || echo "No output")
+      SPAWN_RESULT=$(invoke_pipe "$SPAWN_AGENT" "Background task: $SPAWN_TASK" || echo "No output")
     fi
 
     # Post result back

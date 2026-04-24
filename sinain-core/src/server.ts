@@ -614,14 +614,17 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /escalation/pending ──
+      // Response piggybacks the per-lane agent config so run.sh learns
+      // about overlay-side agent switches without a separate poll.
       if (req.method === "GET" && url.pathname === "/escalation/pending") {
+        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "" };
         const paused = deps.isEscalationPaused?.() ?? false;
         if (paused) {
-          res.end(JSON.stringify({ ok: true, escalation: null, paused: true }));
+          res.end(JSON.stringify({ ok: true, escalation: null, paused: true, config }));
           return;
         }
         const pending = deps.getEscalationPending?.();
-        res.end(JSON.stringify({ ok: true, escalation: pending ?? null }));
+        res.end(JSON.stringify({ ok: true, escalation: pending ?? null, config }));
         return;
       }
 
@@ -658,9 +661,11 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /spawn/pending (bare agent polls for queued tasks) ──
+      // Response piggybacks the per-lane agent config (see /escalation/pending).
       if (req.method === "GET" && url.pathname === "/spawn/pending") {
+        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "" };
         const task = deps.getSpawnPending?.() ?? null;
-        res.end(JSON.stringify({ ok: true, task }));
+        res.end(JSON.stringify({ ok: true, task, config }));
         return;
       }
 
