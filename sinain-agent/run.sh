@@ -27,7 +27,6 @@ fi
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
 POLL_INTERVAL="${SINAIN_POLL_INTERVAL:-2}"
-HEARTBEAT_INTERVAL="${SINAIN_HEARTBEAT_INTERVAL:-900}" # 15 minutes
 AGENT="${SINAIN_AGENT:-claude}"
 WORKSPACE="${SINAIN_WORKSPACE:-$HOME/.openclaw/workspace}"
 AGENT_MAX_TURNS="${SINAIN_AGENT_MAX_TURNS:-5}"
@@ -341,11 +340,9 @@ echo "  Agent: $AGENT ($AGENT_MODE)"
 echo "  Core: $CORE_URL"
 echo "  Allowed: ${ALLOWED_TOOLS:-<none>}"
 echo "  Poll: every ${POLL_INTERVAL}s"
-echo "  Heartbeat: every ${HEARTBEAT_INTERVAL}s"
 echo "  Press Ctrl+C to stop"
 echo ""
 
-LAST_HEARTBEAT=$(date +%s)
 ESCALATION_COUNT=0
 
 cleanup() {
@@ -365,15 +362,6 @@ ESC_PROMPT_TEMPLATE='You are the sinain HUD agent. An escalation is pending with
 Call sinain_get_escalation to see the full context, then call sinain_respond with the ID and your response.
 
 Response guidelines: 5-10 sentences, address errors first, reference specific screen/audio context, never NO_REPLY. Max 4000 chars for coding context, 3000 otherwise.'
-
-HEARTBEAT_PROMPT='You are the sinain HUD agent. Run the heartbeat cycle:
-1. Call sinain_heartbeat_tick with a brief session summary (runs signal analysis, session distillation, knowledge integration, insight synthesis)
-2. If the result contains a suggestion or insight, post it to HUD via sinain_post_feed
-3. Call sinain_get_knowledge to review the merged knowledge document (draws from both local and workspace databases)
-4. Optionally call sinain_knowledge_query with relevant entities to check long-term knowledge state
-5. Call sinain_get_feedback to review recent escalation scores
-
-Knowledge context: sinain-core maintains two knowledge databases — local (session distillation) and workspace (heartbeat curation). The knowledge tools query both via the sinain-core API. Facts have confidence decay (60-day half-life).'
 
 # --- Main loop ---
 
@@ -470,32 +458,10 @@ Complete this task thoroughly. You also have sinain_get_knowledge and sinain_kno
     echo ""
   fi
 
-  # Heartbeat check
-  NOW=$(date +%s)
-  ELAPSED=$((NOW - LAST_HEARTBEAT))
-  if [ "$ELAPSED" -ge "$HEARTBEAT_INTERVAL" ]; then
-    echo "[$(date +%H:%M:%S)] Running heartbeat tick..."
-
-    if agent_has_mcp; then
-      # MCP path: agent runs heartbeat tools
-      invoke_agent "$HEARTBEAT_PROMPT" || true
-    else
-      # Pipe path: run curation scripts directly
-      SCRIPTS_DIR="$WORKSPACE/sinain-memory"
-      MEMORY_DIR="$WORKSPACE/memory"
-      if [ -d "$SCRIPTS_DIR" ]; then
-        python3 "$SCRIPTS_DIR/signal_analyzer.py" --memory-dir "$MEMORY_DIR" 2>/dev/null || true
-        python3 "$SCRIPTS_DIR/playbook_curator.py" --memory-dir "$MEMORY_DIR" 2>/dev/null || true
-        echo "[$(date +%H:%M:%S)] Heartbeat: ran signal_analyzer + playbook_curator"
-      else
-        echo "[$(date +%H:%M:%S)] Heartbeat: skipped (no scripts at $SCRIPTS_DIR)"
-      fi
-    fi
-
-    LAST_HEARTBEAT=$NOW
-    echo "[$(date +%H:%M:%S)] Heartbeat complete"
-    echo ""
-  fi
+  # Heartbeat moved server-side: sinain-core's LocalCurationService runs the
+  # full pipeline (signal_analyzer, insight_synthesizer, feedback_analyzer,
+  # memory_miner, playbook_curator) every 30 min natively, and broadcasts
+  # insights to the HUD directly. No LLM roundtrip needed here.
 
   sleep "$POLL_INTERVAL"
 done

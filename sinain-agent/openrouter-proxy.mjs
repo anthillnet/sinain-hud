@@ -35,13 +35,21 @@
 import http from "http";
 import https from "https";
 import { appendFileSync, writeFileSync } from "fs";
+import { fileURLToPath } from "url";
 
-const LOG = process.env.OPENROUTER_PROXY_LOG || "/tmp/openrouter-proxy.log";
+// Exported for testing — default values from env or hardcoded defaults.
+export const DEFAULT_LOG = "/tmp/openrouter-proxy.log";
+export const DEFAULT_UPSTREAM_HOST = "openrouter.ai";
+export const DEFAULT_UPSTREAM_PORT = 443;
+export const DEFAULT_LISTEN_PORT = 11435;
+export const DEFAULT_CACHE_MAX = 1000;
+
+const LOG = process.env.OPENROUTER_PROXY_LOG || DEFAULT_LOG;
 const UPSTREAM_HOST = "openrouter.ai";
 const UPSTREAM_PORT = 443;
-const LISTEN_PORT = parseInt(process.env.OPENROUTER_PROXY_PORT || "11435", 10);
+const LISTEN_PORT = parseInt(process.env.OPENROUTER_PROXY_PORT || String(DEFAULT_LISTEN_PORT), 10);
 const MODE = (process.env.REASONING_MODE || "preserve").toLowerCase();
-const CACHE_MAX = parseInt(process.env.OPENROUTER_PROXY_CACHE_MAX || "1000", 10);
+const CACHE_MAX = parseInt(process.env.OPENROUTER_PROXY_CACHE_MAX || String(DEFAULT_CACHE_MAX), 10);
 
 // tool_call_id -> reasoning_content. Insertion-order Map = simple LRU.
 const cache = new Map();
@@ -230,7 +238,25 @@ http.createServer((clientReq, clientRes) => {
     upReq.write(outBody);
     upReq.end();
   });
-}).listen(LISTEN_PORT, () => {
+}
+
+// Core function exports for testing
+export {
+  cacheSet,
+  cache,
+  getCacheSize,
+  clearCache,
+  rewriteRequest,
+  captureNonStreaming,
+  parseSSEChunk,
+};
+export function getCacheSize() { return cache.size; }
+export function clearCache() { cache.clear(); }
+
+// Only auto-start when run directly, not when imported as a module.
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  http.createServer(handler).listen(LISTEN_PORT, () => {
   console.log(`openrouter proxy: http://localhost:${LISTEN_PORT} → https://${UPSTREAM_HOST} (mode=${MODE})`);
   console.log(`logs: ${LOG}`);
 });
