@@ -554,7 +554,21 @@ Complete this task thoroughly. You also have sinain_get_knowledge and sinain_kno
       curl -sf -X POST "$CORE_URL/spawn/respond" \
         -H 'Content-Type: application/json' \
         -d "{\"id\":\"$SPAWN_ID\",\"result\":$(echo "$SPAWN_RESULT" | json_encode)}" >/dev/null 2>&1 || true
-      echo "[$(date +%H:%M:%S)] Spawn $SPAWN_ID completed: ${SPAWN_RESULT:0:120}..."
+      # Detect spawn-side errors (401/403/500, auth failures, max-turns,
+      # crashes). Print full body inline between dividers + append to
+      # /tmp/sinain-drops.log for post-hoc diagnosis, same UX as escalation.
+      if echo "$SPAWN_RESULT" | grep -qiE "API Error|unauthorized|401|403|invalid_api_key|Reached max turns|invocation failed|^Error:"; then
+        echo "[$(date +%H:%M:%S)] ⚠ SPAWN DROP ($SPAWN_ID) ──────────────────────"
+        echo "$SPAWN_RESULT"
+        echo "─────────────────────────────────────────────────────────────"
+        {
+          echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) SPAWN DROP ($SPAWN_ID, agent=$SPAWN_AGENT) ====="
+          echo "$SPAWN_RESULT"
+          echo ""
+        } >> /tmp/sinain-drops.log
+      else
+        echo "[$(date +%H:%M:%S)] Spawn $SPAWN_ID completed: ${SPAWN_RESULT:0:120}..."
+      fi
     fi
     echo ""
   fi
