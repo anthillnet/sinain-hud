@@ -755,6 +755,11 @@ async function main() {
     getBareAgentConfig: () => ({
       escalationAgent: bareAgentState.escalationAgent,
       spawnAgent: bareAgentState.spawnAgent,
+      // Tells the bare agent whether core still has its roster. On core
+      // restart this flips to false until the next /bareagent/register POST
+      // — distinguishes "user picked Off/Off" (registered=true, lanes="")
+      // from "core forgot about us" (registered=false).
+      registered: bareAgentState.available.length > 0,
     }),
 
     // Knowledge graph integration (checks both local and workspace DBs)
@@ -848,9 +853,14 @@ async function main() {
         // Spawn "off" just means run.sh won't poll /spawn/pending; no
         // server-side state to flip. Queued spawn tasks TTL out naturally.
       }
-      // Rebroadcast state so overlay sees the switch immediately, and the
-      // bare agent sees it on its next poll-response config piggyback.
-      wsHandler.updateState({ agents: { ...bareAgentState } });
+      // Rebroadcast state so the overlay sees the switch immediately, and
+      // the bare agent sees it on its next poll-response config piggyback.
+      // `escalation` field reflects the current escalator mode so the flash
+      // icon's color (active/paused) updates on Off-for-escalation.
+      wsHandler.updateState({
+        agents: { ...bareAgentState },
+        escalation: config.escalationConfig.mode === "off" ? "paused" : "active",
+      });
       const displayAgent = agent || "off";
       wsHandler.broadcast(`Agent switched: ${lane} → ${displayAgent}`, "normal", "stream");
       log(TAG, `set_agent lane=${lane} agent=${displayAgent}`);
