@@ -21,7 +21,9 @@ import json
 import re
 import shutil
 import sys
+import unicodedata
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from common import (
@@ -121,9 +123,50 @@ def _fact_id(entity: str, attribute: str, value: str) -> str:
     return f"fact:{slug}-{h}"
 
 
+_UNICODE_PRE_MAP = str.maketrans({"ß": "ss", "ẞ": "SS"})
+
+
 def _normalize_entity(name: str) -> str:
-    """Normalize entity name to canonical form: lowercase, hyphenated, no punctuation."""
-    return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-").replace("_", "-"))
+    """Normalize entity name to canonical form: lowercase, hyphenated, ASCII-transliterated."""
+    s = name.translate(_UNICODE_PRE_MAP)
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("ascii", "ignore").decode("ascii")
+    s = s.lower().replace(" ", "-").replace("_", "-")
+    s = re.sub(r"[^a-z0-9-]", "", s)
+    s = re.sub(r"-{2,}", "-", s)
+    return s.strip("-")
+
+
+def _find_matching_entity(
+    name: str,
+    existing_names: dict[str, str],
+) -> str | None:
+    """Find an existing entity that fuzzy-matches `name`. Returns entity_node_id or None."""
+    if name in existing_names:
+        return existing_names[name]
+
+    # Hyphen-insensitive exact match (chatgpt == chat-gpt)
+    name_compact = name.replace("-", "")
+    for existing_name, node_id in existing_names.items():
+        if existing_name.replace("-", "") == name_compact:
+            return node_id
+
+    # Edit-distance fuzzy match
+    if len(name) < 3:
+        return None
+    threshold = 0.90
+    best_match = None
+    best_ratio = threshold
+    for existing_name, node_id in existing_names.items():
+        if len(existing_name) < 3:
+            continue
+        if frozenset({name, existing_name}) in _DEDUP_SKIP_PAIRS:
+            continue
+        ratio = SequenceMatcher(None, name, existing_name).ratio()
+        if ratio >= best_ratio:
+            best_ratio = ratio
+            best_match = node_id
+    return best_match
 
 
 def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_facts: list[dict]) -> list[dict]:
@@ -528,7 +571,14 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
         # --- Build entity graph layer (two-layer model) ---
         if digest_entities and stats["asserted"] > 0:
             try:
-                # Create entity:* nodes from digest entities
+                # Load existing entity names for fuzzy matching
+                all_entity_nodes: dict[str, str] = {}  # {name: entity_node_id}
+                for r in store.entities_with_attr("name"):
+                    if r[0].startswith("entity:"):
+                        all_entity_nodes[r[1]] = r[0]
+
+                # Create entity:* nodes from digest entities (with fuzzy dedup)
+                entity_resolve: dict[str, str] = {}  # {normalized_name: resolved_node_id}
                 for ent in (digest_entities or []):
                     if isinstance(ent, dict):
                         ename = _normalize_entity(ent.get("name", ""))
@@ -539,12 +589,22 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                     if not ename or len(ename) < 2:
                         continue
 
+                    # Check for fuzzy match against existing entities
+                    matched_id = _find_matching_entity(ename, all_entity_nodes)
+                    if matched_id:
+                        entity_resolve[ename] = matched_id
+                        if matched_id != f"entity:{ename}":
+                            print(f"  [graph] alias: \"{ename}\" → {matched_id}", file=sys.stderr)
+                        continue
+
                     entity_node_id = f"entity:{ename}"
                     existing = store.entity(entity_node_id)
                     if not existing:
                         tx = store.begin_tx("entity_graph")
                         store.assert_triple(tx, entity_node_id, "name", ename)
                         store.assert_triple(tx, entity_node_id, "type", etype)
+                    all_entity_nodes[ename] = entity_node_id
+                    entity_resolve[ename] = entity_node_id
 
                 # Link facts to their entity nodes via "about" ref edges
                 for op_data in ops:
@@ -554,17 +614,12 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                     value = op_data.get("value", "")
                     attribute = op_data.get("attribute", "")
                     fact_eid = _fact_id(entity, attribute, value)
-                    entity_node_id = f"entity:{_normalize_entity(entity)}"
+                    norm_entity = _normalize_entity(entity)
+                    entity_node_id = entity_resolve.get(norm_entity, f"entity:{norm_entity}")
                     # Only link if entity node exists
                     if store.entity(entity_node_id):
                         tx = store.begin_tx("entity_graph")
                         store.assert_triple(tx, fact_eid, "about", entity_node_id, value_type="ref")
-
-                # Infer cross-entity refs from fact content
-                all_entity_nodes = {}
-                for r in store.entities_with_attr("name"):
-                    if r[0].startswith("entity:"):
-                        all_entity_nodes[r[1]] = r[0]  # {name: entity_id}
 
                 ref_count = 0
                 for fact_eid_row in store.entities_with_attr("value"):
@@ -695,16 +750,145 @@ def _bootstrap_graph(memory_dir: str, db_path: str) -> dict:
     return {"bootstrapped": stats.get("asserted", 0)}
 
 
+# Pairs that fuzzy matching incorrectly clusters — reviewed and confirmed distinct.
+_DEDUP_SKIP_PAIRS = {
+    frozenset({"ai-driven-development", "spac-driven-development"}),
+    frozenset({"german", "germany"}),
+    frozenset({"llama", "ollama"}),
+    frozenset({"gemma", "gemma4"}),
+}
+
+
+def merge_entity_duplicates(db_path: str, dry_run: bool = True) -> dict:
+    """Merge fragmented entity nodes using fuzzy matching.
+
+    Idempotent: checks for migration:entity-dedup-v1 stamp.
+    """
+    from triplestore import TripleStore
+    store = TripleStore(db_path)
+
+    # Idempotency check
+    stamp = store.entity("migration:entity-dedup-v1")
+    if stamp:
+        print("migration:entity-dedup-v1 already applied — skipping", file=sys.stderr)
+        return {"status": "already_applied"}
+
+    # Load all entity nodes
+    all_entities: dict[str, str] = {}  # {name: entity_node_id}
+    for entity_id, name in store.entities_with_attr("name"):
+        if entity_id.startswith("entity:"):
+            all_entities[name] = entity_id
+
+    print(f"Total entity nodes: {len(all_entities)}", file=sys.stderr)
+
+    # Build clusters via greedy matching
+    remaining = dict(all_entities)  # copy
+    clusters: list[list[tuple[str, str]]] = []  # [[( name, node_id ), ...], ...]
+
+    while remaining:
+        seed_name, seed_id = next(iter(remaining.items()))
+        cluster = [(seed_name, seed_id)]
+        del remaining[seed_name]
+
+        # Find all matches for this seed
+        to_remove = []
+        for other_name, other_id in remaining.items():
+            matched = _find_matching_entity(other_name, {seed_name: seed_id})
+            if matched:
+                cluster.append((other_name, other_id))
+                to_remove.append(other_name)
+        for name in to_remove:
+            del remaining[name]
+
+        if len(cluster) > 1:
+            # Filter out known false-positive pairs
+            names_set = {n for n, _ in cluster}
+            if any(pair <= names_set for pair in _DEDUP_SKIP_PAIRS):
+                continue
+            clusters.append(cluster)
+
+    print(f"Found {len(clusters)} duplicate clusters", file=sys.stderr)
+
+    merge_count = 0
+    repoint_count = 0
+
+    for cluster in clusters:
+        # Canonical selection: if any entity has significantly more backrefs (5+),
+        # use it. Otherwise prefer longest name (most complete spelling).
+        max_refs = max(len(store.backrefs(nid)) for _, nid in cluster)
+        if max_refs >= 5:
+            cluster.sort(key=lambda x: (-len(store.backrefs(x[1])), -len(x[0]), x[0]))
+        else:
+            cluster.sort(key=lambda x: (-len(x[0]), x[0]))
+        canonical_name, canonical_id = cluster[0]
+        duplicates = cluster[1:]
+
+        dup_names = [d[0] for d in duplicates]
+        print(f"  cluster: {canonical_name} ← {dup_names}", file=sys.stderr)
+
+        if dry_run:
+            merge_count += len(duplicates)
+            continue
+
+        for dup_name, dup_id in duplicates:
+            # Re-point all refs pointing to this duplicate
+            refs = store.backrefs(dup_id)
+            for src_entity, attr in refs:
+                tx = store.begin_tx("entity_dedup")
+                store.retract_triple(tx, src_entity, attr, dup_id)
+                store.assert_triple(tx, src_entity, attr, canonical_id, value_type="ref")
+                repoint_count += 1
+
+            # Retract all triples of the duplicate entity itself
+            dup_attrs = store.entity(dup_id)
+            tx = store.begin_tx("entity_dedup")
+            for attr, values in dup_attrs.items():
+                if not isinstance(values, list):
+                    values = [values]
+                for val in values:
+                    store.retract_triple(tx, dup_id, attr, str(val))
+
+            merge_count += 1
+
+    # Stamp migration
+    if not dry_run and clusters:
+        tx = store.begin_tx("entity_dedup")
+        store.assert_triple(tx, "migration:entity-dedup-v1", "applied_at",
+                            datetime.now(timezone.utc).isoformat())
+        store.assert_triple(tx, "migration:entity-dedup-v1", "clusters_merged",
+                            str(len(clusters)))
+
+    result = {
+        "status": "dry_run" if dry_run else "applied",
+        "clusters": len(clusters),
+        "entities_merged": merge_count,
+        "refs_repointed": repoint_count,
+    }
+    print(json.dumps(result, indent=2), file=sys.stderr)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Knowledge Integrator")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--digest", default=None, help="SessionDigest JSON string")
     parser.add_argument("--bootstrap", action="store_true", help="One-time: seed graph from playbook")
     parser.add_argument("--retag", action="store_true", help="Re-extract tags for all existing facts")
+    parser.add_argument("--dedup-entities", action="store_true", help="Merge fragmented entity nodes")
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying")
     args = parser.parse_args()
 
     memory_dir = args.memory_dir
     db_path = str(Path(memory_dir) / "knowledge-graph.db")
+
+    # Entity dedup mode: merge fragmented entity nodes
+    if args.dedup_entities:
+        if not Path(db_path).exists():
+            output_json({"error": "knowledge-graph.db not found"})
+            return
+        result = merge_entity_duplicates(db_path, dry_run=args.dry_run)
+        output_json(result)
+        return
 
     # Bootstrap mode: seed graph from current playbook
     if args.bootstrap:
