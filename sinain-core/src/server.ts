@@ -186,6 +186,13 @@ export interface ServerDeps {
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
   embedTexts?: (texts: string[]) => Promise<Float32Array[]>;
   isEmbeddingReady?: () => boolean;
+
+  /** Bare-agent announced its roster on startup. */
+  registerBareAgent?: (available: string[], current: string) => void;
+  /** Current per-lane agent choice; read by run.sh via the piggyback field
+   *  on /escalation/pending and /spawn/pending responses, and by manual
+   *  debug via GET /bareagent/config. */
+  getBareAgentConfig?: () => { escalationAgent: string; spawnAgent: string };
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -796,6 +803,32 @@ export function createAppServer(deps: ServerDeps) {
               : "User denied or timed out",
           },
         }));
+        return;
+      }
+
+      // ── /bareagent/register (bare agent announces its roster on startup) ──
+      if (req.method === "POST" && url.pathname === "/bareagent/register") {
+        const body = await readBody(req, 4096);
+        let parsed: any;
+        try { parsed = JSON.parse(body); }
+        catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "invalid json" })); return; }
+        const available = Array.isArray(parsed?.available) ? parsed.available : null;
+        const current = typeof parsed?.current === "string" ? parsed.current : "";
+        if (!available) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing available[]" }));
+          return;
+        }
+        deps.registerBareAgent?.(available, current);
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // ── /bareagent/config (debug; the hot path uses the config field
+      // piggybacked on /escalation/pending and /spawn/pending responses) ──
+      if (req.method === "GET" && url.pathname === "/bareagent/config") {
+        const cfg = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "" };
+        res.end(JSON.stringify({ ok: true, ...cfg }));
         return;
       }
 
