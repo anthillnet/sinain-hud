@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# PreToolUse hook for spawn subagents.
-# Only intercepts when SINAIN_SPAWN=1 (set by run.sh for spawn invocations).
-# Regular user Claude sessions are unaffected — hook exits immediately.
-
-[ -z "$SINAIN_SPAWN" ] && exit 0
+# PreToolUse hook for sinain-agent (escalation + spawn paths).
+#
+# Forwards every tool-invocation to sinain-core /spawn/approve which:
+#   - auto-approves safe read-only tools (Read, Glob, Grep, Ls, Cat)
+#   - auto-approves all mcp__sinain* tools
+#   - routes everything else to the overlay for Allow/Deny
+#
+# Scoped to sinain-agent via --settings in run.sh: regular openclaude/claude
+# sessions outside this directory don't load this settings.json and aren't
+# affected. Previously this hook early-exited unless SINAIN_SPAWN=1 was set,
+# which broke escalation-path write permissions (agent couldn't Bash/Edit).
 
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
 
