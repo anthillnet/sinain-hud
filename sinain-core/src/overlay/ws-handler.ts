@@ -40,6 +40,7 @@ export class WsHandler {
     escalation: "active",
     connection: "disconnected",
     responseSize: "medium",
+    agents: { available: [], escalationAgent: "", spawnAgent: "" },
   };
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
@@ -77,6 +78,7 @@ export class WsHandler {
       escalation: this.state.escalation,
       connection: this.state.connection,
       responseSize: this.state.responseSize,
+      agents: this.state.agents,
     });
 
     // Replay recent feed messages for late-joining clients
@@ -161,6 +163,7 @@ export class WsHandler {
       escalation: this.state.escalation,
       connection: this.state.connection,
       responseSize: this.state.responseSize,
+      agents: this.state.agents,
     };
     if (loadedEnvPath) msg.envPath = loadedEnvPath;
     this.broadcastMessage(msg);
