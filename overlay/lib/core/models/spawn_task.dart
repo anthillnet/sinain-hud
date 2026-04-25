@@ -95,6 +95,12 @@ class SpawnPermission {
     if (tool == 'Bash') return 'Bash: ${input['command'] ?? ''}';
     if (tool == 'Edit') return 'Edit: ${input['file_path'] ?? ''}';
     if (tool == 'Write') return 'Write: ${input['file_path'] ?? ''}';
-    return '$tool: ${input.toString().substring(0, 80)}';
+    // Length-guarded preview for unknown tools — input.toString() can be
+    // short ("{}" for empty) and an unguarded substring(0, 80) crashed
+    // the whole task card with a RangeError. Ellipsis matches the truncation
+    // style used elsewhere (e.g., task.label preview in tasks_view.dart).
+    final s = input.toString();
+    final truncated = s.length > 80 ? '${s.substring(0, 80)}…' : s;
+    return '$tool: $truncated';
   }
 }
