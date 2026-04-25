@@ -26,142 +26,309 @@ fi
 
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
-POLL_INTERVAL="${SINAIN_POLL_INTERVAL:-2}"
-AGENT="${SINAIN_AGENT:-claude}"
 WORKSPACE="${SINAIN_WORKSPACE:-$HOME/.openclaw/workspace}"
-AGENT_MAX_TURNS="${SINAIN_AGENT_MAX_TURNS:-5}"
-SPAWN_MAX_TURNS="${SINAIN_SPAWN_MAX_TURNS:-25}"
+
+# --- agents.json early bootstrap + top-level helper ---
+# We need top-level fields (default agent, turns, allowed tools, poll
+# interval) BEFORE the per-profile loader runs further down. So compute
+# the file path here and define a helper to read individual fields.
+#
+# Path priority (highest first):
+#   1. $AGENTS_CONFIG_PATH (explicit env override)
+#   2. ~/.sinain/agents.json (wizard write target — works on npm installs
+#      where the package dir is read-only)
+#   3. $SCRIPT_DIR/agents.json (legacy/dev-repo location)
+# agents.example.json (committed template) is the bootstrap source if
+# none of the above exists yet.
+AGENTS_EXAMPLE="$SCRIPT_DIR/agents.example.json"
+USER_AGENTS_FILE="$HOME/.sinain/agents.json"
+if [ -n "${AGENTS_CONFIG_PATH:-}" ]; then
+  AGENTS_FILE="$AGENTS_CONFIG_PATH"
+elif [ -f "$USER_AGENTS_FILE" ]; then
+  AGENTS_FILE="$USER_AGENTS_FILE"
+else
+  AGENTS_FILE="$SCRIPT_DIR/agents.json"
+fi
+# First-run bootstrap: prefer dev location ($SCRIPT_DIR/agents.json) when
+# the package dir is writable; otherwise seed user home (~/.sinain).
+if [ ! -f "$AGENTS_FILE" ] && [ -f "$AGENTS_EXAMPLE" ]; then
+  if [ -w "$SCRIPT_DIR" ] && [ "$AGENTS_FILE" = "$SCRIPT_DIR/agents.json" ]; then
+    echo "  Creating $AGENTS_FILE from agents.example.json (first-run bootstrap)"
+    cp "$AGENTS_EXAMPLE" "$AGENTS_FILE"
+  else
+    mkdir -p "$HOME/.sinain"
+    AGENTS_FILE="$USER_AGENTS_FILE"
+    echo "  Creating $AGENTS_FILE from agents.example.json (first-run bootstrap)"
+    cp "$AGENTS_EXAMPLE" "$AGENTS_FILE"
+  fi
+fi
+
+# agents_get <key> [default]
+# Reads a top-level scalar field from agents.json. Supports cross-field
+# substitution: a value like "${allowedTools} Bash(git:*)" resolves
+# `${allowedTools}` against the same JSON before being returned. Env-var
+# expansion happens via apply_profile_env later (or by shell when the
+# value is exported), so we stop at one substitution pass here.
+agents_get() {
+  local key="$1" def="${2:-}"
+  local val
+  if [ ! -f "$AGENTS_FILE" ]; then
+    printf '%s' "$def"
+    return 0
+  fi
+  val=$(python3 - "$AGENTS_FILE" "$key" <<'PY' 2>/dev/null
+import json, sys, re
+path, key = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(0)
+val = data.get(key)
+if val is None:
+    sys.exit(0)
+if isinstance(val, str):
+    def repl(m):
+        other = data.get(m.group(1))
+        return other if isinstance(other, str) else m.group(0)
+    val = re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}', repl, val)
+print(val)
+PY
+)
+  if [ -z "$val" ]; then
+    printf '%s' "$def"
+  else
+    printf '%s' "$val"
+  fi
+}
+
+# Top-level config: agents.json wins, env vars are honored as a fallback
+# (during the migration window — once .env is fully cleaned up, the
+# env reads become dead code).
+POLL_INTERVAL="${SINAIN_POLL_INTERVAL:-$(agents_get pollIntervalSec 2)}"
+AGENT="${SINAIN_AGENT:-$(agents_get default claude)}"
+AGENT_MAX_TURNS="${SINAIN_AGENT_MAX_TURNS:-$(agents_get agentMaxTurns 5)}"
+SPAWN_MAX_TURNS="${SINAIN_SPAWN_MAX_TURNS:-$(agents_get spawnMaxTurns 25)}"
 
 # Build allowed tools list for Claude's --allowedTools flag.
-# SINAIN_ALLOWED_TOOLS in .env overrides; otherwise auto-derive from MCP config.
+# Priority: SINAIN_ALLOWED_TOOLS env > agents.json `allowedTools` >
+# auto-derive from MCP config > "mcp__sinain" hardcoded default.
 if [ -n "${SINAIN_ALLOWED_TOOLS:-}" ]; then
   ALLOWED_TOOLS="$SINAIN_ALLOWED_TOOLS"
-elif [ -f "$MCP_CONFIG" ]; then
-  ALLOWED_TOOLS=$(python3 -c "
+else
+  ALLOWED_TOOLS=$(agents_get allowedTools "")
+  if [ -z "$ALLOWED_TOOLS" ] && [ -f "$MCP_CONFIG" ]; then
+    ALLOWED_TOOLS=$(python3 -c "
 import json
 with open('$MCP_CONFIG') as f:
     cfg = json.load(f)
 print(' '.join('mcp__' + s for s in cfg.get('mcpServers', {})))
 " 2>/dev/null || echo "mcp__sinain")
-else
-  ALLOWED_TOOLS="mcp__sinain"
+  fi
+  [ -z "$ALLOWED_TOOLS" ] && ALLOWED_TOOLS="mcp__sinain"
 fi
+
+# Per-lane allowed tools — agents.json wins, env vars override per-host.
+# Note: agents.json's `escAllowedTools` already substitutes ${allowedTools}
+# during agents_get, so the value is fully composed by the time we read it.
+SINAIN_ESC_ALLOWED_TOOLS="${SINAIN_ESC_ALLOWED_TOOLS:-$(agents_get escAllowedTools "")}"
+SINAIN_SPAWN_ALLOWED_TOOLS="${SINAIN_SPAWN_ALLOWED_TOOLS:-$(agents_get spawnAllowedTools "")}"
+export SINAIN_ESC_ALLOWED_TOOLS SINAIN_SPAWN_ALLOWED_TOOLS
 
 # --- Agent profiles ---
 
-# Returns 0 if the selected agent supports MCP tools natively.
-# Junie support is detected at startup (JUNIE_HAS_MCP flag).
-JUNIE_HAS_MCP=false  # set during startup checks
+# --- Agent profile registry (loaded from agents.json at startup) ---
+# Each profile maps a roster name → {bin, type, settings, model, env}.
+# The roster (AVAILABLE_AGENTS) is profile names whose bin is on PATH;
+# invoke_agent dispatches by profile.type and substitutes profile.bin.
+# This lets users add custom names like "pclaude" pointing at a binary
+# of the same kind as claude but with different env/settings.
+#
+# Implemented with namespaced variables (PROFILE_<UPPER_NAME>_<FIELD>)
+# instead of bash-4 associative arrays so the script runs on macOS's
+# default bash 3.2.
+ALL_PROFILES=()
+JUNIE_HAS_MCP=false  # set during startup checks for the junie-typed profile
+
+# Internal: build the namespaced variable name for (profile, field).
+# Profile names like "pclaude" → "PCLAUDE"; "openclaude-spawn" → "OPENCLAUDE_SPAWN".
+_prof_var() {
+  local name="$1" field="$2"
+  local safe_name
+  safe_name=$(echo "$name" | tr 'a-z-' 'A-Z_')
+  local field_upper
+  field_upper=$(echo "$field" | tr 'a-z' 'A-Z')
+  echo "PROFILE_${safe_name}_${field_upper}"
+}
+
+prof_set() {
+  local name="$1" field="$2" value="$3"
+  local var
+  var=$(_prof_var "$name" "$field")
+  printf -v "$var" '%s' "$value"
+  # Track distinct profile names in ALL_PROFILES (no duplicates).
+  local found=false p
+  for p in "${ALL_PROFILES[@]:-}"; do
+    [ "$p" = "$name" ] && { found=true; break; }
+  done
+  $found || ALL_PROFILES+=("$name")
+}
+
+prof_get() {
+  local name="$1" field="$2"
+  local var
+  var=$(_prof_var "$name" "$field")
+  echo "${!var:-}"
+}
+
+# Read with a fallback default (last arg).
+prof_get_or() {
+  local val
+  val=$(prof_get "$1" "$2")
+  echo "${val:-$3}"
+}
+
+# Returns 0 if the selected profile's TYPE supports MCP tools natively.
+# Optional arg: profile name. Defaults to $AGENT for back-compat with
+# startup-time usage. Main loop passes the lane-specific choice.
 agent_has_mcp() {
-  # Optional arg: agent name to check. Defaults to $AGENT for back-compat
-  # with startup-time usage. Main loop passes the lane-specific choice.
   local check="${1:-$AGENT}"
-  case "$check" in
+  local type
+  type=$(prof_get_or "$check" type "$check")
+  case "$type" in
     claude|openclaude|codex|goose) return 0 ;;
     junie) $JUNIE_HAS_MCP ;;
     *) return 1 ;;
   esac
 }
 
-# Invoke the selected agent with a prompt. MCP-capable agents get the config
-# so they can call sinain tools directly. Returns text on stdout.
-# Exit code 1 means "agent doesn't support MCP — use pipe mode instead".
-# First arg is the lane's agent name (shadows the global $AGENT for the
-# case-dispatch below); second arg is the prompt; third optional is turns.
+# Apply per-profile env overrides in the current (sub)shell. Values may
+# use ${VAR} indirection (anywhere in the string, e.g. "${HOME}/sub/path"
+# or "${PERSONAL_OPENAI_API_KEY}") to pull from the parent's environment
+# so secrets stay in .env, not in agents.json. Only ${...} braced refs are
+# expanded — bare $VAR and $(cmd) are left literal to avoid surprises and
+# command-injection risk from a typo'd config.
+apply_profile_env() {
+  local profile="$1"
+  local env_str
+  env_str=$(prof_get "$profile" env)
+  [ -z "$env_str" ] && return 0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    local k="${line%%=*}"
+    local v="${line#*=}"
+    # Inline ${VAR} expansion via python — handles both whole-value and
+    # embedded references. python sees env via os.environ, so we don't
+    # need to shell-export anything ahead of time.
+    if [[ "$v" == *'${'* ]]; then
+      v=$(printf '%s' "$v" | python3 -c 'import os,re,sys; sys.stdout.write(re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", lambda m: os.environ.get(m.group(1), ""), sys.stdin.read()))')
+    fi
+    export "$k=$v"
+  done <<< "$env_str"
+}
+
+# Invoke a profile with a prompt. First arg is the profile NAME (looked up
+# in PROFILE_*); second is the prompt; third optional is turns. Profile's
+# bin/type/settings/model/env apply per-invocation. Body runs in a subshell
+# so apply_profile_env's exports don't leak into the parent.
+# Returns text on stdout. Exit code 1 means "type doesn't support MCP —
+# use pipe mode instead".
 invoke_agent() {
-  local AGENT="$1"     # shadow the global so case-statement doesn't need edits
-  local prompt="$2"
-  case "$AGENT" in
-    claude|openclaude)
-      local turns="${3:-$AGENT_MAX_TURNS}"
-      # Stderr filter: drops openclaude's repeated "not in context window table"
-      # warnings (one per LLM call, ~40/escalation). All other stderr passes through.
-      # No-op for claude (it doesn't emit that line). Toggle with QUIET_OPENCLAUDE=false.
-      local quiet="${QUIET_OPENCLAUDE:-true}"
-      if [ -n "${SINAIN_SPAWN:-}" ]; then
-        # Spawn path: user-initiated tasks often need git/edit/write. The
-        # --allowedTools whitelist is a pre-invocation gate; PreToolUse hook
-        # (./hooks/approve-tool.sh) still routes each call to the overlay for
-        # user Allow/Deny. Widen the whitelist so the hook can do its job.
-        # Override via SINAIN_SPAWN_ALLOWED_TOOLS.
-        local spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
-        if [ "$quiet" = "true" ]; then
-          "$AGENT" \
-            --mcp-config "$MCP_CONFIG" \
-            --settings "$SCRIPT_DIR/.claude/settings.json" \
-            --allowedTools $spawn_allowed \
-            --max-turns "$turns" --output-format text \
-            -p "$prompt" \
-            2> >(grep -v "not in context window table" >&2)
+  (
+    local profile="$1"
+    local prompt="$2"
+    local turns="${3:-$AGENT_MAX_TURNS}"
+    local bin type settings model
+    bin=$(prof_get_or "$profile" bin "$profile")
+    type=$(prof_get_or "$profile" type "$profile")
+    settings=$(prof_get_or "$profile" settings "$SCRIPT_DIR/.claude/settings.json")
+    model=$(prof_get "$profile" model)
+    apply_profile_env "$profile"
+    # If the profile pinned a model, override OPENAI_MODEL for this call only.
+    [ -n "$model" ] && export OPENAI_MODEL="$model"
+
+    case "$type" in
+      claude|openclaude)
+        # Stderr filter: drops openclaude's repeated "not in context window table"
+        # warnings (one per LLM call, ~40/escalation). All other stderr passes through.
+        # No-op for claude (it doesn't emit that line). Toggle with QUIET_OPENCLAUDE=false.
+        local quiet="${QUIET_OPENCLAUDE:-true}"
+        if [ -n "${SINAIN_SPAWN:-}" ]; then
+          # Spawn path: user-initiated tasks often need git/edit/write. The
+          # --allowedTools whitelist is a pre-invocation gate; PreToolUse hook
+          # still routes each call to the overlay for user Allow/Deny. Widen the
+          # whitelist so the hook can do its job. Override via SINAIN_SPAWN_ALLOWED_TOOLS.
+          local spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
+          if [ "$quiet" = "true" ]; then
+            "$bin" \
+              --mcp-config "$MCP_CONFIG" \
+              --settings "$settings" \
+              --allowedTools $spawn_allowed \
+              --max-turns "$turns" --output-format text \
+              -p "$prompt" \
+              2> >(grep -v "not in context window table" >&2)
+          else
+            "$bin" \
+              --mcp-config "$MCP_CONFIG" \
+              --settings "$settings" \
+              --allowedTools $spawn_allowed \
+              --max-turns "$turns" --output-format text \
+              -p "$prompt"
+          fi
         else
-          "$AGENT" \
-            --mcp-config "$MCP_CONFIG" \
-            --settings "$SCRIPT_DIR/.claude/settings.json" \
-            --allowedTools $spawn_allowed \
-            --max-turns "$turns" --output-format text \
-            -p "$prompt"
+          # Escalation path. Override via SINAIN_ESC_ALLOWED_TOOLS.
+          local esc_allowed="${SINAIN_ESC_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
+          if [ "$quiet" = "true" ]; then
+            "$bin" \
+              --mcp-config "$MCP_CONFIG" \
+              --settings "$settings" \
+              --allowedTools $esc_allowed \
+              --max-turns "$turns" --output-format text \
+              -p "$prompt" \
+              2> >(grep -v "not in context window table" >&2)
+          else
+            "$bin" \
+              --mcp-config "$MCP_CONFIG" \
+              --settings "$settings" \
+              --allowedTools $esc_allowed \
+              --max-turns "$turns" --output-format text \
+              -p "$prompt"
+          fi
         fi
-      else
-        # Escalation path: the PreToolUse hook auto-approves MCP + safe reads
-        # (sinain_respond, Read, Glob, Grep, Ls, Cat) for speed, and routes
-        # writes (Bash/Edit/Write) to the overlay for user Allow/Deny. Same
-        # gating as spawn — user commands like "commit this file" that land
-        # on the escalation path (Enter instead of Shift+Enter) still work.
-        # Override via SINAIN_ESC_ALLOWED_TOOLS.
-        local esc_allowed="${SINAIN_ESC_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
-        if [ "$quiet" = "true" ]; then
-          "$AGENT" \
-            --mcp-config "$MCP_CONFIG" \
-            --settings "$SCRIPT_DIR/.claude/settings.json" \
-            --allowedTools $esc_allowed \
-            --max-turns "$turns" --output-format text \
-            -p "$prompt" \
-            2> >(grep -v "not in context window table" >&2)
+        ;;
+      codex)
+        "$bin" exec -s danger-full-access \
+          --dangerously-bypass-approvals-and-sandbox \
+          --skip-git-repo-check \
+          "$prompt"
+        ;;
+      junie)
+        if $JUNIE_HAS_MCP; then
+          if [ ! -f "$HOME/.junie/allowlist.json" ]; then
+            echo "  ⚠ Junie: no allowlist.json — MCP tools may prompt. Run junie --brave once to create it." >&2
+          fi
+          "$bin" --output-format text \
+            --mcp-location "$JUNIE_MCP_DIR" \
+            --task "$prompt"
         else
-          "$AGENT" \
-            --mcp-config "$MCP_CONFIG" \
-            --settings "$SCRIPT_DIR/.claude/settings.json" \
-            --allowedTools $esc_allowed \
-            --max-turns "$turns" --output-format text \
-            -p "$prompt"
+          return 1
         fi
-      fi
-      ;;
-    codex)
-      codex exec -s danger-full-access \
-        --dangerously-bypass-approvals-and-sandbox \
-        --skip-git-repo-check \
-        "$prompt"
-      ;;
-    junie)
-      if $JUNIE_HAS_MCP; then
-        if [ ! -f "$HOME/.junie/allowlist.json" ]; then
-          echo "  ⚠ Junie: no allowlist.json — MCP tools may prompt. Run junie --brave once to create it." >&2
-        fi
-        junie --output-format text \
-          --mcp-location "$JUNIE_MCP_DIR" \
-          --task "$prompt"
-      else
-        return 1
-      fi
-      ;;
-    goose)
-      local turns="${3:-$AGENT_MAX_TURNS}"
-      GOOSE_MODE=auto goose run --text "$prompt" \
-        --output-format text \
-        --quiet \
-        --no-session \
-        --max-turns "$turns"
-      ;;
-    aider)
-      # No MCP support — signal pipe mode
-      return 1
-      ;;
-    *)
-      # Generic pipe mode — treat AGENT value as a command
-      return 1
-      ;;
-  esac
+        ;;
+      goose)
+        GOOSE_MODE=auto "$bin" run --text "$prompt" \
+          --output-format text \
+          --quiet \
+          --no-session \
+          --max-turns "$turns"
+        ;;
+      aider)
+        return 1  # No MCP support — caller falls back to invoke_pipe
+        ;;
+      *)
+        return 1  # Unknown type — caller falls back to invoke_pipe
+        ;;
+    esac
+  )
 }
 
 # --- Pipe-mode helpers (for agents without MCP) ---
@@ -182,20 +349,30 @@ post_response() {
 # Invoke a pipe-mode agent with escalation message text.
 # Some agents take the message as an argument, others via stdin.
 invoke_pipe() {
-  local AGENT="$1"     # shadow the global; case-dispatch uses the lane's agent
-  local msg="$2"
+  (
+    local profile="$1"
+    local msg="$2"
+    local bin type
+    bin=$(prof_get_or "$profile" bin "$profile")
+    type=$(prof_get_or "$profile" type "$profile")
+    apply_profile_env "$profile"
+    # Below uses $bin instead of $AGENT and $type for the case-dispatch
+    # selector. Variable named AGENT is preserved as alias for type-only
+    # lookups to keep the body diff minimal.
+    local AGENT="$type"
   case "$AGENT" in
     junie)
-      junie --output-format text --task "$msg"
+      "$bin" --output-format text --task "$msg"
       ;;
     aider)
-      aider --yes -m "$msg"
+      "$bin" --yes -m "$msg"
       ;;
     *)
-      # Generic: pipe message to stdin
-      echo "$msg" | $AGENT 2>/dev/null
+      # Generic: pipe message to stdin to whatever binary the profile names
+      echo "$msg" | "$bin" 2>/dev/null
       ;;
   esac
+  )
 }
 
 # --- Startup checks ---
@@ -308,19 +485,94 @@ else
   AGENT_MODE="pipe"
 fi
 
-# --- Detect installed agents & register with sinain-core ---
-# Probes `command -v` for each known bare-agent CLI so the overlay knows
-# which ones to offer in its selector. The result is POSTed to
-# /bareagent/register; server state becomes visible to the overlay via the
-# existing status broadcast. Lane-specific choices (ESC_AGENT, SPAWN_AGENT)
+# --- Load agent profiles from agents.json ---
+# Built-in defaults are 1:1 (profile name == binary == type). Users can
+# override fields or add custom profiles by editing sinain-agent/agents.json.
+# Profiles whose binaries aren't in PATH are silently skipped.
+for default_name in claude openclaude codex goose junie aider; do
+  prof_set "$default_name" bin "$default_name"
+  prof_set "$default_name" type "$default_name"
+done
+
+# Path + bootstrap for AGENTS_FILE happen earlier in this script (right
+# after CORE_URL is set) so top-level scalars can be read before the
+# default-AGENT block. The full per-profile flatten still happens below.
+if [ -f "$AGENTS_FILE" ]; then
+  # Python flattens profiles into "name|field|value" lines; we ingest in
+  # the parent shell via process substitution so prof_set writes (which
+  # mutate ALL_PROFILES) persist — a piped `while` would run in a
+  # subshell and lose them.
+  while IFS='|' read -r p_name p_field p_value; do
+    [ -z "$p_name" ] && continue
+    case "$p_field" in
+      bin)      prof_set "$p_name" bin      "$p_value" ;;
+      type)     prof_set "$p_name" type     "$p_value" ;;
+      settings) prof_set "$p_name" settings "${p_value/#\~/$HOME}" ;;
+      model)    prof_set "$p_name" model    "$p_value" ;;
+      env)
+        # env is multi-line: each "k=v" pair on its own line. Append to
+        # any existing env block so multiple env entries accumulate.
+        existing_env=$(prof_get "$p_name" env)
+        if [ -n "$existing_env" ]; then
+          prof_set "$p_name" env "$existing_env"$'\n'"$p_value"
+        else
+          prof_set "$p_name" env "$p_value"
+        fi
+        ;;
+    esac
+  done < <(python3 -c '
+import json, sys
+try:
+  with open(sys.argv[1]) as f:
+    data = json.load(f)
+except Exception as e:
+  sys.stderr.write(f"agents.json parse failed: {e}\n")
+  sys.exit(0)
+profiles = data.get("profiles", {}) or {}
+for name, prof in profiles.items():
+  if not isinstance(prof, dict): continue
+  for field in ("bin", "type", "settings", "model"):
+    val = prof.get(field)
+    if val: print(f"{name}|{field}|{val}")
+  env = prof.get("env") or {}
+  if isinstance(env, dict):
+    for k, v in env.items():
+      print(f"{name}|env|{k}={v}")
+' "$AGENTS_FILE")
+fi
+
+# Fill in defaults for any profile that didn't specify bin or type.
+# (A profile defined with only env/settings/model still needs bin/type;
+# default both to the profile name for the 1:1 case.)
+for p in "${ALL_PROFILES[@]:-}"; do
+  [ -z "$(prof_get "$p" bin)" ]  && prof_set "$p" bin  "$p"
+  [ -z "$(prof_get "$p" type)" ] && prof_set "$p" type "$p"
+done
+
+# AVAILABLE_AGENTS = profile names whose configured bin is on PATH.
+# This is what gets POSTed to /bareagent/register and shown in the
+# overlay selector. Lane-specific choices (ESC_AGENT, SPAWN_AGENT)
 # default to $AGENT and are refreshed per-iteration from the config
 # piggyback field on /escalation/pending and /spawn/pending responses.
 AVAILABLE_AGENTS=()
-for candidate in claude openclaude codex goose junie aider; do
-  command -v "$candidate" >/dev/null 2>&1 && AVAILABLE_AGENTS+=("$candidate")
+for p in "${ALL_PROFILES[@]:-}"; do
+  # Gateway-style profiles (type=openclaw) have no local binary — they're
+  # dispatched by sinain-core via WS RPC. Include them in the roster
+  # regardless of PATH so they show up in the overlay's agent selector.
+  ptype=$(prof_get_or "$p" type "$p")
+  if [ "$ptype" = "openclaw" ]; then
+    AVAILABLE_AGENTS+=("$p")
+    continue
+  fi
+  if command -v "$(prof_get_or "$p" bin "$p")" >/dev/null 2>&1; then
+    AVAILABLE_AGENTS+=("$p")
+  fi
 done
-if ! command -v "$AGENT" >/dev/null 2>&1; then
-  echo "  ⚠ configured agent '$AGENT' not installed — waiting for overlay override"
+
+# Sanity check the configured default agent
+AGENT_BIN=$(prof_get_or "$AGENT" bin "$AGENT")
+if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+  echo "  ⚠ configured agent '$AGENT' (bin=$AGENT_BIN) not installed — waiting for overlay override"
 fi
 
 ESC_AGENT="$AGENT"
@@ -381,13 +633,29 @@ print(json.dumps({'available': sys.argv[1].split(' '), 'current': sys.argv[2]}))
 }
 
 # --- OpenRouter reasoning-preserving proxy autolaunch ---
-# Starts sinain-agent/openrouter-proxy.mjs when OPENAI_BASE_URL points at it.
+# Starts sinain-agent/openrouter-proxy.mjs when any code path will need it.
 # The proxy preserves reasoning_content across multi-turn MCP flows so
 # DeepSeek V4 Flash (and other thinking models) don't 400 on turn-2.
-# Skipped if proxy already running, or if base URL doesn't use the proxy port.
+#
+# Detection: triggers if (a) the parent shell already has OPENAI_BASE_URL
+# pointed at the proxy port (legacy .env-based config), OR (b) any loaded
+# profile's env block references the proxy port (new agents.json-based
+# config). The second case is what makes "all openclaude routing in
+# agents.json" work without forcing a duplicate OPENAI_BASE_URL in .env.
 PROXY_PID=""
 PROXY_PORT="${OPENROUTER_PROXY_PORT:-11435}"
+PROXY_NEEDED=false
 if [[ "${OPENAI_BASE_URL:-}" == *":${PROXY_PORT}"* ]]; then
+  PROXY_NEEDED=true
+else
+  for _p in "${ALL_PROFILES[@]:-}"; do
+    _env=$(prof_get "$_p" env)
+    if [[ "$_env" == *":${PROXY_PORT}"* ]]; then
+      PROXY_NEEDED=true; break
+    fi
+  done
+fi
+if $PROXY_NEEDED; then
   if lsof -iTCP:"$PROXY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "OpenRouter proxy already running on :$PROXY_PORT — reusing"
   else
@@ -456,12 +724,18 @@ while true; do
   fi
   ESC_ID=$(echo "$ESC" | python3 -c "import sys,json; d=json.load(sys.stdin); e=d.get('escalation'); print(e['id'] if e else '')" 2>/dev/null || true)
 
-  # Escalation lane guard: if user set escalation agent to Off via the
-  # selector, skip responding even if an escalation is pending. The server's
-  # setMode("off") already stops new escalations; this protects against any
-  # residual queued state and makes "Off" behavior uniform across restarts.
+  # Escalation lane guard: skip when the lane is Off (empty) OR routed to
+  # openclaw (gateway-handled, not local). Posting an "ack-skip" tells
+  # sinain-core to drop the pending entry so we don't loop on it forever
+  # if the gateway WS is down — the alternative (no response) leaves the
+  # escalation in httpPending and we re-poll it every iteration.
   if [ -n "$ESC_ID" ] && [ -z "$ESC_AGENT" ]; then
     echo "[$(date +%H:%M:%S)] Escalation $ESC_ID skipped — lane is Off"
+    post_response "$ESC_ID" "[skipped: lane is Off]" 2>/dev/null || true
+    ESC_ID=""
+  elif [ -n "$ESC_ID" ] && [ "$(prof_get_or "$ESC_AGENT" type "$ESC_AGENT")" = "openclaw" ]; then
+    echo "[$(date +%H:%M:%S)] Escalation $ESC_ID skipped — gateway agent '$ESC_AGENT' (type=openclaw) is WS-routed, not a local CLI"
+    post_response "$ESC_ID" "[skipped: $ESC_AGENT is gateway-routed; sinain-core should have dispatched via WS]" 2>/dev/null || true
     ESC_ID=""
   fi
 

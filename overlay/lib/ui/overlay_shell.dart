@@ -424,31 +424,62 @@ class OverlayShellState extends State<OverlayShell> {
                     tooltip: 'Agent selector — which agent handles each lane',
                   ),
                   const SizedBox(width: 4),
-                  // Tab indicator (clickable)
+                  // Tab indicator (clickable). When on AGT, a small orange
+                  // dot lights up if any spawn task is awaiting user action
+                  // (permission ask or free-form input) — nudges the user
+                  // to switch over without stealing focus.
                   Consumer<SettingsService>(
-                    builder: (_, settings, __) => HudTooltip(
-                      message: 'Switch tab',
-                      child: GestureDetector(
-                        onTap: () => _settingsService.cycleTab(),
-                        child: MouseRegion(
-                          cursor: SystemMouseCursors.click,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(3),
-                              color: Colors.white.withValues(alpha: 0.06),
-                            ),
-                            child: Text(
-                              settings.settings.activeTab == HudTab.agent ? 'AGT' : 'TSK',
-                              style: TextStyle(
-                                fontFamily: 'JetBrainsMono', fontSize: 9,
-                                color: Colors.white.withValues(alpha: 0.4),
+                    builder: (_, settings, __) {
+                      final onAgent = settings.settings.activeTab == HudTab.agent;
+                      final pending = ws.pendingAttentionCount;
+                      // Only surface on AGT (TSK has no equivalent
+                      // "user-must-respond" state coming from AGT today).
+                      final showDot = onAgent && pending > 0;
+                      return HudTooltip(
+                        message: showDot
+                            ? 'TSK has $pending pending — tap to switch'
+                            : 'Switch tab',
+                        child: GestureDetector(
+                          onTap: () => _settingsService.cycleTab(),
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(3),
+                                color: Colors.white.withValues(alpha: 0.06),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    onAgent ? 'AGT' : 'TSK',
+                                    style: TextStyle(
+                                      fontFamily: 'JetBrainsMono', fontSize: 9,
+                                      color: Colors.white.withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  if (showDot) ...[
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        // Orange = matches awaitingPermission
+                                        // color in tasks_view.dart for visual
+                                        // consistency across the two surfaces.
+                                        color: Color(0xFFFF8800),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   ),
                   const Spacer(),
                   // Cost counter

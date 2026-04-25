@@ -331,14 +331,16 @@ export interface ContextWindow {
 }
 
 // ── Escalation types ──
-
-export type EscalationTransport = "ws" | "http" | "auto";
+//
+// Transport choice is per-lane now (driven by the overlay's agent selector):
+// `escalationAgent === "openclaw"` → WS; any other non-empty agent → HTTP.
+// The old global `transport` setting was removed — picking an agent IS the
+// transport.
 
 export interface EscalationConfig {
   mode: EscalationMode;
   cooldownMs: number;
   staleMs: number;  // force escalation after this many ms of silence (0 = disabled)
-  transport: EscalationTransport;
 }
 
 export interface OpenClawConfig {
