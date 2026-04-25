@@ -64,9 +64,24 @@ async function main() {
   console.log();
 
   // Run setup wizard on first launch (no ~/.sinain/.env) or when --setup flag is passed
+  //
+  // Delegates to onboard.js's clack-based runOnboard (Mitch's wizard from
+  // PR #43). Previously, launcher.js had its own readline-based setupWizard
+  // that diverged from `npx sinain onboard`'s flow — same package, two
+  // different setup experiences depending on entry point. This collapses
+  // both paths to a single source of truth in config-shared.js.
+  //
+  // skipLaunchPrompt: true tells runOnboard not to ask "start sinain now?"
+  // at the end — we're already inside the launcher and will continue
+  // start-up automatically once the wizard returns.
   const userEnvPath = path.join(SINAIN_DIR, ".env");
-  if (forceSetup || !fs.existsSync(userEnvPath)) {
-    await setupWizard(userEnvPath);
+  const envExists = fs.existsSync(userEnvPath);
+  if (forceSetup || !envExists) {
+    log(envExists ? "Re-running setup wizard (--setup flag)..." : "First-time setup — running wizard...");
+    const { runOnboard } = await import("./onboard.js");
+    await runOnboard({ skipLaunchPrompt: true });
+  } else {
+    log(`Existing config found at ${DIM}${userEnvPath}${RESET} — skipping wizard. (Use ${BOLD}--setup${RESET} to re-configure.)`);
   }
 
   // Load user config
@@ -176,6 +191,19 @@ async function main() {
   // Start overlay
   let overlayStatus = "skipped";
   if (!skipOverlay) {
+    // ALWAYS check for an overlay update before launching — setup-overlay's
+    // own version.json marker decides whether to skip a download (fast)
+    // or fetch a new release (slow). Previously we only ran setup-overlay
+    // when no binary existed, which meant users with a stale binary from
+    // a months-old install ran an outdated overlay forever (no flash icon,
+    // no AgentSelectorPanel, no per-lane routing UI). When --setup is
+    // passed, force-update regardless of the marker.
+    try {
+      const { downloadOverlay } = await import("./setup-overlay.js");
+      await downloadOverlay({ silent: false, forceUpdate: forceSetup });
+    } catch (e) {
+      warn(`overlay update check failed: ${e.message} — using local binary`);
+    }
     const overlay = findOverlay();
     if (overlay?.type === "prebuilt") {
       // Remove macOS quarantine if present (ad-hoc signed app)
