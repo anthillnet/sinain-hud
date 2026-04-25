@@ -65,8 +65,12 @@ async function main() {
 
   // Run setup wizard on first launch (no ~/.sinain/.env) or when --setup flag is passed
   const userEnvPath = path.join(SINAIN_DIR, ".env");
-  if (forceSetup || !fs.existsSync(userEnvPath)) {
+  const envExists = fs.existsSync(userEnvPath);
+  if (forceSetup || !envExists) {
+    log(envExists ? "Re-running setup wizard (--setup flag)..." : "First-time setup — running wizard...");
     await setupWizard(userEnvPath);
+  } else {
+    log(`Existing config found at ${DIM}${userEnvPath}${RESET} — skipping wizard. (Use ${BOLD}--setup${RESET} to re-configure.)`);
   }
 
   // Load user config
@@ -176,6 +180,19 @@ async function main() {
   // Start overlay
   let overlayStatus = "skipped";
   if (!skipOverlay) {
+    // ALWAYS check for an overlay update before launching — setup-overlay's
+    // own version.json marker decides whether to skip a download (fast)
+    // or fetch a new release (slow). Previously we only ran setup-overlay
+    // when no binary existed, which meant users with a stale binary from
+    // a months-old install ran an outdated overlay forever (no flash icon,
+    // no AgentSelectorPanel, no per-lane routing UI). When --setup is
+    // passed, force-update regardless of the marker.
+    try {
+      const { downloadOverlay } = await import("./setup-overlay.js");
+      await downloadOverlay({ silent: false, forceUpdate: forceSetup });
+    } catch (e) {
+      warn(`overlay update check failed: ${e.message} — using local binary`);
+    }
     const overlay = findOverlay();
     if (overlay?.type === "prebuilt") {
       // Remove macOS quarantine if present (ad-hoc signed app)
