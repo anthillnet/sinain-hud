@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { loadConfig } from "./config.js";
+import { loadAgentsConfig, isGatewayProfile, gatewayProfileNames } from "./agents-loader.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -395,6 +396,14 @@ async function main() {
   });
 
   // ── Initialize escalation ──
+  // getSpawnAgent reads bareAgentState (declared later in this function) via
+  // closure at call-time, NOT at construction time. Safe because
+  // dispatchSpawnTask only fires after an overlay message, which can't
+  // happen before server setup completes.
+  // Load agents.json once for lookup helpers passed to escalator. Same file
+  // config.ts reads at startup; re-loading here keeps the dispatch lookup
+  // contained to a closure (no need to expose agentsCfg through CoreConfig).
+  const escalatorAgentsCfg = loadAgentsConfig();
   const escalator = new Escalator({
     feedBuffer,
     wsHandler,
@@ -403,6 +412,12 @@ async function main() {
     profiler,
     feedbackStore: feedbackStore ?? undefined,
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
+    getSpawnAgent: () => bareAgentState.spawnAgent,
+    getEscalationAgent: () => bareAgentState.escalationAgent,
+    // Type-based gateway lookup. Routing key is agents.json `profiles[name].type`,
+    // so any custom profile with `type: "openclaw"` (e.g. "nemoclaw",
+    // "nanoclaw-prod") gets WS dispatch automatically — no name-matching.
+    isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -584,6 +599,88 @@ async function main() {
   // ── Escalation pause/resume state ──
   let savedEscalationMode: typeof config.escalationConfig.mode | null = null;
 
+  /** Pause escalation (idempotent). Caches the pre-pause mode so resume
+   *  can restore it. Re-entering while already paused is a no-op — crucially,
+   *  does NOT overwrite savedEscalationMode with "off". */
+  function pauseEscalationInternal(): void {
+    const current = config.escalationConfig.mode;
+    if (current === "off") return;
+    savedEscalationMode = current;
+    escalator.setMode("off");
+    log(TAG, `escalation paused (was: ${savedEscalationMode})`);
+  }
+
+  /** Resume escalation (idempotent). Restores the saved mode or falls back
+   *  to "rich" if no saved mode exists. Re-entering while already active
+   *  is a no-op. */
+  function resumeEscalationInternal(): void {
+    const current = config.escalationConfig.mode;
+    if (current !== "off") return;
+    const mode = savedEscalationMode ?? "rich";
+    savedEscalationMode = null;
+    escalator.setMode(mode);
+    log(TAG, `escalation resumed (mode: ${mode})`);
+  }
+
+  // ── Bare-agent roster & per-lane current agent ──
+  // In-memory only (matches escalation-mode lifecycle). Populated when the
+  // bare agent POSTs /bareagent/register on startup; mutated by set_agent
+  // command from the overlay. Empty-string lane values = "Off" (disabled).
+  // Profile names from agents.json may be custom (e.g. "pclaude",
+  // "openclaude-spawn"), so the server validates by character class
+  // rather than a fixed whitelist. The bare agent owns the source of
+  // truth for which profiles actually exist on its host. The validator
+  // just rejects names that could break shell logging, paths, or be
+  // injection vectors.
+  const AGENT_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+  // "openclaw" is reserved-injected below when gatewayWsUrl is set —
+  // it's not a local CLI, it's a routing choice that sends tasks to the
+  // remote OpenClaw gateway via WS RPC instead of the local bare agent.
+  const bareAgentState: {
+    available: string[];
+    escalationAgent: string;
+    spawnAgent: string;
+  } = { available: [], escalationAgent: "", spawnAgent: "" };
+
+  function registerBareAgent(availableList: string[], current: string): void {
+    const clean = availableList.filter((a) => typeof a === "string" && AGENT_NAME_RE.test(a));
+    // Inject every gateway-style profile (any agents.json profile with
+    // `type: "openclaw"`) into the roster — they have no local binary, so
+    // run.sh's PATH filter drops them, but sinain-core knows they exist
+    // and routes them via WS RPC.
+    //
+    // This generalizes the legacy "auto-inject the literal name 'openclaw'"
+    // behavior: now custom gateway profiles like "nemoclaw" or
+    // "nanoclaw-prod" appear in the overlay roster automatically as soon
+    // as you add them to agents.json. The single WS client uses the first
+    // gateway profile's connection params (config.ts findGatewayProfile);
+    // simultaneous multi-gateway is a follow-up.
+    if (config.openclawConfig.gatewayWsUrl) {
+      for (const gwName of gatewayProfileNames(escalatorAgentsCfg)) {
+        if (!clean.includes(gwName)) clean.push(gwName);
+      }
+      // Legacy fallback: if no gateway profiles are defined in agents.json
+      // but gatewayWsUrl is set via env, still inject the canonical name.
+      if (clean.filter((n) => isGatewayProfile(escalatorAgentsCfg, n)).length === 0
+          && !clean.includes("openclaw")) {
+        clean.push("openclaw");
+      }
+    }
+    bareAgentState.available = clean;
+    // If neither lane is set yet (fresh boot), adopt the bare agent's
+    // reported current. If state survives from a prior register call AND
+    // the agent still exists in the roster, keep it; otherwise fall back
+    // to the new current.
+    if (!bareAgentState.escalationAgent || !clean.includes(bareAgentState.escalationAgent)) {
+      bareAgentState.escalationAgent = clean.includes(current) ? current : (clean[0] ?? "");
+    }
+    if (!bareAgentState.spawnAgent || !clean.includes(bareAgentState.spawnAgent)) {
+      bareAgentState.spawnAgent = clean.includes(current) ? current : (clean[0] ?? "");
+    }
+    wsHandler.updateState({ agents: { ...bareAgentState } });
+    log(TAG, `bareagent register: available=[${clean.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} spawn=${bareAgentState.spawnAgent}`);
+  }
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
@@ -697,6 +794,18 @@ async function main() {
     isEscalationPaused: () => savedEscalationMode !== null,
     respondEscalation: (id: string, response: string) => escalator.respondHttp(id, response),
 
+    // Bare-agent roster & config (wired to server endpoints in step 2).
+    registerBareAgent,
+    getBareAgentConfig: () => ({
+      escalationAgent: bareAgentState.escalationAgent,
+      spawnAgent: bareAgentState.spawnAgent,
+      // Tells the bare agent whether core still has its roster. On core
+      // restart this flips to false until the next /bareagent/register POST
+      // — distinguishes "user picked Off/Off" (registered=true, lanes="")
+      // from "core forgot about us" (registered=false).
+      registered: bareAgentState.available.length > 0,
+    }),
+
     // Knowledge graph integration (checks both local and workspace DBs)
     getKnowledgeDocPath: () => {
       // Check local first, then workspace
@@ -757,20 +866,62 @@ async function main() {
       return screenActive;
     },
     onToggleEscalation: () => {
-      if (savedEscalationMode === null) {
-        // Pause: save current mode, switch to off
-        savedEscalationMode = config.escalationConfig.mode;
-        escalator.setMode("off");
-        log(TAG, `escalation paused (was: ${savedEscalationMode})`);
-        return false;
-      } else {
-        // Resume: restore saved mode
-        const mode = savedEscalationMode;
-        savedEscalationMode = null;
-        escalator.setMode(mode);
-        log(TAG, `escalation resumed (mode: ${mode})`);
+      // Routes through the shared helpers so the set_agent("escalation","")
+      // path and the flash-icon-toggle path share a single source of truth
+      // for savedEscalationMode. Kept for WS backward-compat; new UI uses
+      // the agent selector.
+      if (config.escalationConfig.mode === "off") {
+        resumeEscalationInternal();
         return true;
+      } else {
+        pauseEscalationInternal();
+        return false;
       }
+    },
+    onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
+      // Empty-string agent = Off (lane disabled). Non-empty agent must be
+      // in the current roster; stale overlay state can send something that
+      // isn't available — reject with a clear error.
+      if (agent !== "" && !bareAgentState.available.includes(agent)) {
+        return { ok: false, error: `Agent "${agent}" not available` };
+      }
+      if (lane === "escalation") {
+        const prevAgent = bareAgentState.escalationAgent;
+        bareAgentState.escalationAgent = agent;
+        if (agent === "") {
+          pauseEscalationInternal();
+        } else {
+          resumeEscalationInternal();
+        }
+        // If the user flipped to a gateway-typed agent (openclaw, nemoclaw,
+        // ...) and there's a stale httpPending escalation queued from BEFORE
+        // the switch, re-dispatch it through the WS path. Without this, the
+        // bare agent picks up the stale entry on its next poll and posts a
+        // "[skipped: gateway-routed]" message to the HUD — confusing for
+        // the user, who just told us "use the gateway".
+        const wasGateway = isGatewayProfile(escalatorAgentsCfg, prevAgent);
+        const isGateway = isGatewayProfile(escalatorAgentsCfg, agent);
+        if (!wasGateway && isGateway) {
+          const did = escalator.redispatchHttpPendingToWs();
+          if (did) log(TAG, `lane switch ${prevAgent || "<empty>"} → ${agent}: stale httpPending redispatched`);
+        }
+      } else {
+        bareAgentState.spawnAgent = agent;
+        // Spawn "off" just means run.sh won't poll /spawn/pending; no
+        // server-side state to flip. Queued spawn tasks TTL out naturally.
+      }
+      // Rebroadcast state so the overlay sees the switch immediately, and
+      // the bare agent sees it on its next poll-response config piggyback.
+      // `escalation` field reflects the current escalator mode so the flash
+      // icon's color (active/paused) updates on Off-for-escalation.
+      wsHandler.updateState({
+        agents: { ...bareAgentState },
+        escalation: config.escalationConfig.mode === "off" ? "paused" : "active",
+      });
+      const displayAgent = agent || "off";
+      wsHandler.broadcast(`Agent switched: ${lane} → ${displayAgent}`, "normal", "stream");
+      log(TAG, `set_agent lane=${lane} agent=${displayAgent}`);
+      return { ok: true };
     },
   });
 

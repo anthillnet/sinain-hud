@@ -1,0 +1,148 @@
+{
+  "_doc": [
+    "Roster + bare-agent + OpenClaw config for sinain. This is the single",
+    "source of truth for everything agent-shaped:",
+    "  - top-level fields  → bare-agent infra (poll, turns, tool whitelists)",
+    "  - escalation block  → routing policy (was ESCALATION_* in .env)",
+    "  - analyzer block    → loop pacing (was AGENT_DEBOUNCE_MS / _MAX_INTERVAL_MS)",
+    "  - profiles          → one entry per CLI binary or routing target",
+    "                        (claude, openclaude, codex, ..., openclaw)",
+    "",
+    "This is the COMMITTED example. The actual file run.sh and sinain-core",
+    "read is sinain-agent/agents.json (gitignored). On first run, run.sh",
+    "copies this example into agents.json so a fresh checkout works without",
+    "manual setup. sinain-core falls back to this file too if agents.json",
+    "doesn't exist yet.",
+    "",
+    "Path resolution in sinain-core: AGENTS_CONFIG_PATH env override, or",
+    "default: <repo-root>/sinain-agent/agents.json (resolved relative to",
+    "the sinain-core/dist directory).",
+    "",
+    "Profile fields (all optional except `type`):",
+    "  type      Determines dispatch path AND CLI flag layout.",
+    "            Local CLIs (HTTP-dispatched): claude, openclaude, codex,",
+    "            goose, junie, aider — bare agent invokes the binary.",
+    "            Gateway profiles (WS-dispatched): openclaw — sinain-core",
+    "            sends via WS RPC. Multiple gateway profiles with different",
+    "            names are allowed (e.g. nemoclaw, nanoclaw-prod) — any",
+    "            profile with `type: \"openclaw\"` is treated as a gateway.",
+    "            All gateway profiles auto-register in the overlay roster.",
+    "  bin       Path or name of a real binary on PATH (default: profile",
+    "            name). Shell aliases are invisible here — replicate them",
+    "            as bin (the underlying binary) + env (the vars the alias",
+    "            was setting). See the pclaude example.",
+    "  settings  Path to a Claude-Code-style settings.json (default:",
+    "            sinain-agent/.claude/settings.json — the hook-bearing one).",
+    "  model     OPENAI_MODEL override (only meaningful for openclaude /",
+    "            CLAUDE_CODE_USE_OPENAI=1 paths).",
+    "  env       Per-profile env overrides applied only for this binary's",
+    "            invocation. Values may use ${VAR} indirection (anywhere in",
+    "            the string) to read from the parent shell's environment —",
+    "            keep secrets in .env, not here.",
+    "",
+    "openclaw-profile-only fields (consumed by sinain-core):",
+    "  wsUrl, wsToken, httpUrl, httpToken, sessionKey, phase1TimeoutMs,",
+    "  phase2TimeoutMs, pingIntervalMs",
+    "",
+    "Examples beyond the built-ins live under `_examples`. Move any of them",
+    "into `profiles` to activate; the runtime ignores keys it doesn't know."
+  ],
+
+  "default": "openclaude",
+  "pollIntervalSec": 5,
+  "agentMaxTurns": 8,
+  "spawnMaxTurns": 25,
+
+  "allowedTools": "mcp__sinain",
+  "escAllowedTools": "${allowedTools} Bash(git:*) Edit Write Read Glob Grep LS",
+  "spawnAllowedTools": "${allowedTools} Bash(git:*) Edit Write Read Glob Grep LS",
+  "autoApproveTools": "Read Glob Grep Ls Cat mcp__sinain*",
+
+  "analyzer": {
+    "debounceMs": 6000,
+    "maxIntervalMs": 60000
+  },
+
+  "escalation": {
+    "mode": "rich",
+    "cooldownMs": 30000,
+    "staleMs": 90000
+  },
+
+  "profiles": {
+    "claude":     { "type": "claude" },
+    "openclaude": {
+      "_comment": "Routes through the local OpenRouter proxy (auto-launched on :11435 by run.sh) → DeepSeek V4 Flash. Proxy preserves reasoning_content across multi-turn MCP flows. To use Anthropic API directly, drop the env block (or just pick the `claude` profile).",
+      "type": "openclaude",
+      "model": "deepseek/deepseek-v4-flash",
+      "env": {
+        "CLAUDE_CODE_USE_OPENAI": "1",
+        "OPENAI_BASE_URL": "http://localhost:11435/api/v1",
+        "OPENAI_API_KEY": "${OPENROUTER_API_KEY}"
+      }
+    },
+    "openclaw": {
+      "_comment": "Remote gateway routing. Selecting openclaw for a lane sends that lane's traffic to the OpenClaw gateway via WS RPC instead of the local bare agent. sinain-core reads these fields directly at startup to construct the WS client. Removing this profile disables the gateway path entirely (no WS client, no openclaw chip in the overlay roster).",
+      "type": "openclaw",
+      "wsUrl": "ws://localhost:18789",
+      "wsToken": "${OPENCLAW_WS_TOKEN}",
+      "httpUrl": "http://localhost:18789/hooks/agent",
+      "httpToken": "${OPENCLAW_HTTP_TOKEN}",
+      "sessionKey": "agent:main:sinain",
+      "phase1TimeoutMs": 30000,
+      "phase2TimeoutMs": 120000,
+      "pingIntervalMs": 30000
+    },
+    "codex":      { "type": "codex" },
+    "goose":      { "type": "goose" },
+    "junie":      { "type": "junie" },
+    "aider":      { "type": "aider" }
+  },
+
+  "_examples": {
+    "pclaude": {
+      "_comment": "Personal claude config. `bin` must be a real PATH binary — replicate a shell alias as bin+env (the alias `pclaude=CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude` becomes the entry below).",
+      "type": "claude",
+      "bin": "claude",
+      "env": {
+        "CLAUDE_CONFIG_DIR": "${HOME}/.claude-personal"
+      }
+    },
+    "pclaude-with-personal-endpoint": {
+      "_comment": "Personal claude pointing at a private OpenAI-compat endpoint.",
+      "type": "claude",
+      "bin": "claude",
+      "env": {
+        "OPENAI_API_KEY": "${PERSONAL_OPENAI_API_KEY}",
+        "OPENAI_BASE_URL": "https://my-personal-endpoint/v1"
+      },
+      "settings": "~/.pclaude/settings.json"
+    },
+    "openclaude-spawn": {
+      "_comment": "Different settings.json for the spawn lane vs the escalation lane.",
+      "type": "openclaude",
+      "bin": "openclaude",
+      "settings": "/Users/your.name/IdeaProjects/sinain-hud/sinain-agent/.claude/spawn-settings.json"
+    },
+    "openclaude-gpt5": {
+      "_comment": "Same binary, different model + key for a different OpenRouter route.",
+      "type": "openclaude",
+      "bin": "openclaude",
+      "model": "openai/gpt-5",
+      "env": {
+        "CLAUDE_CODE_USE_OPENAI": "1",
+        "OPENAI_BASE_URL": "http://localhost:11435/api/v1",
+        "OPENAI_API_KEY": "${OPENROUTER_API_KEY}"
+      }
+    },
+    "nemoclaw": {
+      "_comment": "Server-side NemoClaw (or any openclaw-fork) on a different host. `type: openclaw` makes it a WS-dispatched gateway alongside the canonical openclaw profile. Currently, only the first gateway profile gets a live WS client at startup — selecting nemoclaw in the overlay routes via WS, but the connection still uses openclaw's URL until per-profile WS clients ship.",
+      "type": "openclaw",
+      "wsUrl": "ws://nemoclaw-host:18789",
+      "wsToken": "${NEMOCLAW_WS_TOKEN}",
+      "httpUrl": "http://nemoclaw-host:18789/hooks/agent",
+      "httpToken": "${NEMOCLAW_HTTP_TOKEN}",
+      "sessionKey": "agent:main:sinain"
+    }
+  }
+}

@@ -8,7 +8,7 @@ import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import {
-  c, guard, maskKey, readEnv, writeEnv, summarizeConfig, runHealthCheck,
+  c, guard, maskKey, readEnv, writeEnv, writeAgentsConfig, summarizeConfig, runHealthCheck,
   stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel,
   HOME, SINAIN_DIR, ENV_PATH, PKG_DIR, IS_WINDOWS, IS_MAC,
 } from "./config-shared.js";
@@ -143,6 +143,10 @@ export async function runOnboard(args = {}) {
   // ── Collect vars ────────────────────────────────────────────────────────
 
   const vars = { ...base };
+  // agents.json patch — accumulated from steps that touch the openclaw
+  // profile / escalation / default agent. Written once after all steps
+  // complete so we don't churn ~/.sinain/agents.json on every prompt.
+  let agentsPatch = {};
 
   // Step 1: API key (both flows)
   const apiKey = await stepApiKey(base, `[1/${totalSteps}] OpenRouter API key`);
@@ -150,23 +154,25 @@ export async function runOnboard(args = {}) {
   p.log.success("API key saved.");
 
   if (flow === "quickstart") {
-    // QuickStart: sensible defaults
+    // QuickStart: sensible defaults. Gateway is opt-in (skip by default);
+    // agent + escalation defaults go to agents.json.
     vars.TRANSCRIPTION_BACKEND = base.TRANSCRIPTION_BACKEND || "openrouter";
     vars.PRIVACY_MODE = base.PRIVACY_MODE || "standard";
     vars.AGENT_MODEL = base.AGENT_MODEL || "google/gemini-2.5-flash-lite";
-    vars.ESCALATION_MODE = base.ESCALATION_MODE || "off";
-    vars.SINAIN_AGENT = base.SINAIN_AGENT || "claude";
-    if (!vars.OPENCLAW_WS_URL) {
-      vars.OPENCLAW_WS_URL = "";
-      vars.OPENCLAW_HTTP_URL = "";
-    }
+    agentsPatch = {
+      default: base.SINAIN_AGENT || "claude",
+      escalationMode: "off",
+      // Don't touch openclawProfile in quickstart — keeps existing config
+      // intact for re-runs; first-time users get the "skip" state from
+      // agents.example.json bootstrap (no openclaw profile means no gateway).
+    };
 
     p.note(
       [
         `Transcription: ${vars.TRANSCRIPTION_BACKEND}`,
         `Privacy: ${vars.PRIVACY_MODE}`,
         `Model: ${vars.AGENT_MODEL}`,
-        `Escalation: ${vars.ESCALATION_MODE}`,
+        `Escalation: off (pick a gateway agent in the overlay to enable)`,
         "",
         `Change later: sinain config`,
       ].join("\n"),
@@ -208,9 +214,12 @@ export async function runOnboard(args = {}) {
       }
     }
 
-    const gatewayVars = await stepGateway(base, "[3/5] OpenClaw gateway");
-    Object.assign(vars, gatewayVars);
-    if (gatewayVars.ESCALATION_MODE === "off") {
+    // stepGateway returns { envVars, agentsPatch }: tokens go to .env,
+    // URLs + session + escalation mode go to agents.json's openclaw profile.
+    const gatewayResult = await stepGateway(base, "[3/5] OpenClaw gateway");
+    Object.assign(vars, gatewayResult.envVars);
+    Object.assign(agentsPatch, gatewayResult.agentsPatch);
+    if (gatewayResult.agentsPatch.escalationMode === "off") {
       p.log.info("Standalone mode (no gateway).");
     } else {
       p.log.success("Gateway configured.");
@@ -224,7 +233,9 @@ export async function runOnboard(args = {}) {
     vars.AGENT_MODEL = model;
     p.log.success(`Model: ${model}.`);
 
-    vars.SINAIN_AGENT = base.SINAIN_AGENT || "claude";
+    // Default agent goes into agents.json `default` field (was SINAIN_AGENT
+    // env var). Overlay's chip selector lets the user switch at runtime.
+    agentsPatch.default = base.SINAIN_AGENT || "claude";
   }
 
   // ── Common defaults ───────────────────────────────────────────────────
@@ -237,11 +248,16 @@ export async function runOnboard(args = {}) {
   vars.PORT = vars.PORT || "9500";
 
   // ── Write config ──────────────────────────────────────────────────────
+  // Two files: ~/.sinain/.env for secrets + infra, ~/.sinain/agents.json
+  // for agent + gateway config (the migrated keys).
 
   const s = p.spinner();
   s.start("Writing configuration...");
   writeEnv(vars);
-  s.stop(c.green(`Config saved: ${c.dim(ENV_PATH)}`));
+  if (Object.keys(agentsPatch).length > 0) {
+    writeAgentsConfig(agentsPatch);
+  }
+  s.stop(c.green(`Config saved: ${c.dim(ENV_PATH)} + ~/.sinain/agents.json`));
 
   // ── Overlay ───────────────────────────────────────────────────────────
 
@@ -312,20 +328,16 @@ if (flags.reset) {
 }
 
 if (flags.nonInteractive) {
+  // .env: secrets + infra. Agent + gateway config goes to agents.json.
   const vars = {
     OPENROUTER_API_KEY: flags.key || process.env.OPENROUTER_API_KEY || "",
     TRANSCRIPTION_BACKEND: "openrouter",
     PRIVACY_MODE: "standard",
     AGENT_MODEL: "google/gemini-2.5-flash-lite",
-    ESCALATION_MODE: "off",
-    SINAIN_AGENT: "claude",
-    OPENCLAW_WS_URL: "",
-    OPENCLAW_HTTP_URL: "",
     PORT: "9500",
     AUDIO_CAPTURE_CMD: "screencapturekit",
     AUDIO_AUTO_START: "true",
     SINAIN_CORE_URL: "http://localhost:9500",
-    SINAIN_POLL_INTERVAL: "5",
     SINAIN_HEARTBEAT_INTERVAL: "900",
   };
 
@@ -335,7 +347,11 @@ if (flags.nonInteractive) {
   }
 
   writeEnv(vars);
-  console.log(c.green(`  Config written to ${ENV_PATH}`));
+  // Default agent + escalation off (no gateway by default for non-interactive).
+  // openclaw profile is left as-is from the example template (or absent
+  // if first run) — gateway is opt-in via the wizard or `sinain config`.
+  writeAgentsConfig({ default: "claude", escalationMode: "off" });
+  console.log(c.green(`  Config written to ${ENV_PATH} + ~/.sinain/agents.json`));
   process.exit(0);
 } else {
   runOnboard(flags).catch((err) => {

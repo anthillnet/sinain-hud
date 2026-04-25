@@ -23,6 +23,9 @@ export interface CommandDeps {
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
   onToggleEscalation: () => boolean;
+  /** Set the agent for a lane. agent="" means Off (lane disabled).
+   *  Returns { ok: false, error } if agent isn't in the current roster. */
+  onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
 }
 
 /**
@@ -184,6 +187,28 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       } else {
         log(TAG, `invalid response size: ${size}`);
       }
+      break;
+    }
+    case "set_agent": {
+      const lane = (msg as any).lane as "escalation" | "spawn" | undefined;
+      const agent = (msg as any).agent;
+      if (lane !== "escalation" && lane !== "spawn") {
+        log(TAG, `set_agent: invalid lane "${lane}"`);
+        break;
+      }
+      if (typeof agent !== "string") {
+        log(TAG, `set_agent: missing or non-string agent field`);
+        break;
+      }
+      if (!deps.onSetAgent) {
+        log(TAG, `set_agent: no handler wired`);
+        break;
+      }
+      const result = deps.onSetAgent(lane, agent);
+      if (!result.ok) {
+        wsHandler.broadcast(`⚠ ${result.error ?? "set_agent failed"}`, "normal");
+      }
+      log(TAG, `set_agent lane=${lane} agent=${agent || "<off>"} (ok=${result.ok})`);
       break;
     }
     case "open_settings": {

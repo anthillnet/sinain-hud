@@ -186,6 +186,15 @@ export interface ServerDeps {
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
   embedTexts?: (texts: string[]) => Promise<Float32Array[]>;
   isEmbeddingReady?: () => boolean;
+
+  /** Bare-agent announced its roster on startup. */
+  registerBareAgent?: (available: string[], current: string) => void;
+  /** Current per-lane agent choice; read by run.sh via the piggyback field
+   *  on /escalation/pending and /spawn/pending responses, and by manual
+   *  debug via GET /bareagent/config. `registered` distinguishes "user
+   *  chose Off" (registered=true, lanes="") from "core forgot our
+   *  registration" (registered=false) so run.sh heals only on the latter. */
+  getBareAgentConfig?: () => { escalationAgent: string; spawnAgent: string; registered: boolean };
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -607,14 +616,17 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /escalation/pending ──
+      // Response piggybacks the per-lane agent config so run.sh learns
+      // about overlay-side agent switches without a separate poll.
       if (req.method === "GET" && url.pathname === "/escalation/pending") {
+        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "", registered: false };
         const paused = deps.isEscalationPaused?.() ?? false;
         if (paused) {
-          res.end(JSON.stringify({ ok: true, escalation: null, paused: true }));
+          res.end(JSON.stringify({ ok: true, escalation: null, paused: true, config }));
           return;
         }
         const pending = deps.getEscalationPending?.();
-        res.end(JSON.stringify({ ok: true, escalation: pending ?? null }));
+        res.end(JSON.stringify({ ok: true, escalation: pending ?? null, config }));
         return;
       }
 
@@ -651,9 +663,11 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /spawn/pending (bare agent polls for queued tasks) ──
+      // Response piggybacks the per-lane agent config (see /escalation/pending).
       if (req.method === "GET" && url.pathname === "/spawn/pending") {
+        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "", registered: false };
         const task = deps.getSpawnPending?.() ?? null;
-        res.end(JSON.stringify({ ok: true, task }));
+        res.end(JSON.stringify({ ok: true, task, config }));
         return;
       }
 
@@ -796,6 +810,32 @@ export function createAppServer(deps: ServerDeps) {
               : "User denied or timed out",
           },
         }));
+        return;
+      }
+
+      // ── /bareagent/register (bare agent announces its roster on startup) ──
+      if (req.method === "POST" && url.pathname === "/bareagent/register") {
+        const body = await readBody(req, 4096);
+        let parsed: any;
+        try { parsed = JSON.parse(body); }
+        catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "invalid json" })); return; }
+        const available = Array.isArray(parsed?.available) ? parsed.available : null;
+        const current = typeof parsed?.current === "string" ? parsed.current : "";
+        if (!available) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing available[]" }));
+          return;
+        }
+        deps.registerBareAgent?.(available, current);
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // ── /bareagent/config (debug; the hot path uses the config field
+      // piggybacked on /escalation/pending and /spawn/pending responses) ──
+      if (req.method === "GET" && url.pathname === "/bareagent/config") {
+        const cfg = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "", registered: false };
+        res.end(JSON.stringify({ ok: true, ...cfg }));
         return;
       }
 

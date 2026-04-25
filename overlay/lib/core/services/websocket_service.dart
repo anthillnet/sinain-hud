@@ -24,6 +24,13 @@ class WebSocketService extends ChangeNotifier {
   String _escalationState = 'active';
   String _responseSize = 'medium';
   String _envPath = '';
+  // Bare-agent roster + per-lane current choice. Populated from status
+  // messages once the bare agent registers with sinain-core. Empty string
+  // for a lane means "Off" (lane disabled). Empty availableAgents means
+  // the bare agent hasn't registered yet (or no agents are installed).
+  List<String> _availableAgents = const [];
+  String _escalationAgent = '';
+  String _spawnAgent = '';
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
   double _totalCost = 0.0;
@@ -45,6 +52,18 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
+
+  // Canonical spawn-task map. TasksView still consumes the stream for
+  // incremental rendering, but the map gives the AGT/TSK tab indicator
+  // a snapshot view ("does any task need attention?") without forcing
+  // every consumer to subscribe + duplicate list-management logic.
+  final Map<String, SpawnTask> _spawnTasks = {};
+  // Number of tasks currently waiting on user action (permission ask or
+  // free-form input). Drives the badge on the inactive tab so users on
+  // AGT see when TSK has something blocking.
+  int get pendingAttentionCount =>
+      _spawnTasks.values.where((t) => t.needsInput).length;
+
   bool get connected => _connected;
   String get audioState => _audioState;
   String get micState => _micState;
@@ -52,6 +71,9 @@ class WebSocketService extends ChangeNotifier {
   String get escalationState => _escalationState;
   String get responseSize => _responseSize;
   String get envPath => _envPath;
+  List<String> get availableAgents => _availableAgents;
+  String get escalationAgent => _escalationAgent;
+  String get spawnAgent => _spawnAgent;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
   bool get costDisplayEnabled => _costDisplayEnabled;
@@ -65,6 +87,13 @@ class WebSocketService extends ChangeNotifier {
 
   void setResponseSize(String size) {
     sendCommand('set_response_size', {'responseSize': size});
+  }
+
+  /// Ask sinain-core to switch the agent for a lane. Empty agent = Off.
+  /// Core validates against the current roster and sends a toast if the
+  /// agent isn't available (stale overlay state).
+  void setAgent(String lane, String agent) {
+    sendCommand('set_agent', {'lane': lane, 'agent': agent});
   }
 
   void toggleAudioFeed() {
@@ -195,11 +224,31 @@ class WebSocketService extends ChangeNotifier {
           if (envPath != null && envPath.isNotEmpty) {
             _envPath = envPath;
           }
+          final agents = statusData['agents'] as Map<String, dynamic>?;
+          if (agents != null) {
+            final newAvail = (agents['available'] as List?)?.cast<String>() ?? const <String>[];
+            final newEsc = agents['escalationAgent'] as String? ?? '';
+            final newSpawn = agents['spawnAgent'] as String? ?? '';
+            if (newAvail.join(',') != _availableAgents.join(',') ||
+                newEsc != _escalationAgent ||
+                newSpawn != _spawnAgent) {
+              _availableAgents = newAvail;
+              _escalationAgent = newEsc;
+              _spawnAgent = newSpawn;
+              notifyListeners();
+            }
+          }
           _statusController.add(statusData);
           break;
         case 'spawn_task':
           final task = SpawnTask.fromJson(json);
           _log('SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
+          // Update the canonical map first, then notify listeners so the
+          // tab-indicator badge can re-read pendingAttentionCount before
+          // the stream subscriber rebuilds the list view.
+          final prevAttention = pendingAttentionCount;
+          _spawnTasks[task.taskId] = task;
+          if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
           break;
         case 'thinking':
