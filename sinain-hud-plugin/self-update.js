@@ -118,12 +118,14 @@ export async function checkForUpdate() {
   );
 
   const args = process.argv.slice(2);
-  // --yes prevents npx's "are you sure" prompt for unfamiliar packages.
-  // --ignore-existing forces a fresh download even if the version is
-  // already in some npx cache slot, eliminating slot-reuse confusion.
+  // --yes: skip npx's "are you sure" prompt for unfamiliar packages.
+  // (Note: do NOT pass --ignore-existing — npm 7+ removed it. The
+  //  version-pinned spec `@geravant/sinain@<remote>` already keys to a
+  //  separate npx cache slot, so a fresh `<remote>` triggers a download
+  //  regardless of what's in the unversioned slot.)
   const result = spawnSync(
     "npx",
-    ["--yes", "--ignore-existing", `${PKG_NAME}@${remote}`, ...args],
+    ["--yes", `${PKG_NAME}@${remote}`, ...args],
     {
       stdio: "inherit",
       env: { ...process.env, SINAIN_SELF_UPDATED: "1" },
