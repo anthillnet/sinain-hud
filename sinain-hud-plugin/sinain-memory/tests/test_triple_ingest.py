@@ -300,3 +300,125 @@ class TestFindMatchingEntity:
         from knowledge_integrator import _find_matching_entity
         entities = {"ab": "entity:ab"}
         assert _find_matching_entity("ac", entities) is None
+
+
+# ---------------------------------------------------------------------------
+# Community detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestExpandEntityCommunity:
+    """Tests for expand_entity_community() graph traversal."""
+
+    def test_follows_mentions_edges(self, tmp_path):
+        """Entity A's fact mentions entity B → B appears in A's community."""
+        from triplestore import TripleStore
+        from graph_query import expand_entity_community
+
+        db = str(tmp_path / "test.db")
+        store = TripleStore(db)
+
+        # Create entity nodes
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "entity:deepseek", "name", "deepseek")
+        store.assert_triple(tx, "entity:openclaude", "name", "openclaude")
+
+        # Create a fact about deepseek that mentions openclaude
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "fact:deepseek-abc", "value", "DeepSeek API error caused by openclaude")
+        store.assert_triple(tx, "fact:deepseek-abc", "about", "entity:deepseek", value_type="ref")
+        store.assert_triple(tx, "fact:deepseek-abc", "mentions", "entity:openclaude", value_type="ref")
+
+        result = expand_entity_community(store, "deepseek")
+        names = [name for name, _count in result]
+        assert "openclaude" in names
+        store.close()
+
+    def test_bidirectional(self, tmp_path):
+        """Entity B's fact is about B but mentions A → A appears in B's community."""
+        from triplestore import TripleStore
+        from graph_query import expand_entity_community
+
+        db = str(tmp_path / "test.db")
+        store = TripleStore(db)
+
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "entity:alpha", "name", "alpha")
+        store.assert_triple(tx, "entity:beta", "name", "beta")
+
+        # Fact about beta mentions alpha
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "fact:beta-001", "value", "Beta integrates with alpha")
+        store.assert_triple(tx, "fact:beta-001", "about", "entity:beta", value_type="ref")
+        store.assert_triple(tx, "fact:beta-001", "mentions", "entity:alpha", value_type="ref")
+
+        # Query from alpha's perspective — beta mentions alpha, so beta is in alpha's community
+        result = expand_entity_community(store, "alpha")
+        names = [name for name, _count in result]
+        assert "beta" in names
+        store.close()
+
+    def test_caps_at_max_related(self, tmp_path):
+        """Hub entity with many connections returns at most max_related."""
+        from triplestore import TripleStore
+        from graph_query import expand_entity_community
+
+        db = str(tmp_path / "test.db")
+        store = TripleStore(db)
+
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "entity:hub", "name", "hub")
+        for i in range(10):
+            store.assert_triple(tx, f"entity:spoke-{i}", "name", f"spoke-{i}")
+
+        for i in range(10):
+            tx = store.begin_tx("test")
+            store.assert_triple(tx, f"fact:hub-{i}", "value", f"Hub connects to spoke {i}")
+            store.assert_triple(tx, f"fact:hub-{i}", "about", "entity:hub", value_type="ref")
+            store.assert_triple(tx, f"fact:hub-{i}", "mentions", f"entity:spoke-{i}", value_type="ref")
+
+        result = expand_entity_community(store, "hub", max_related=3)
+        assert len(result) == 3
+        store.close()
+
+    def test_no_entity_returns_empty(self, tmp_path):
+        from triplestore import TripleStore
+        from graph_query import expand_entity_community
+
+        db = str(tmp_path / "test.db")
+        store = TripleStore(db)
+        result = expand_entity_community(store, "nonexistent")
+        assert result == []
+        store.close()
+
+    def test_ranked_by_frequency(self, tmp_path):
+        """Entity mentioned more often ranks higher."""
+        from triplestore import TripleStore
+        from graph_query import expand_entity_community
+
+        db = str(tmp_path / "test.db")
+        store = TripleStore(db)
+
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "entity:main", "name", "main")
+        store.assert_triple(tx, "entity:frequent", "name", "frequent")
+        store.assert_triple(tx, "entity:rare", "name", "rare")
+
+        # 3 facts mentioning "frequent", 1 mentioning "rare"
+        for i in range(3):
+            tx = store.begin_tx("test")
+            store.assert_triple(tx, f"fact:main-{i}", "value", f"Fact {i}")
+            store.assert_triple(tx, f"fact:main-{i}", "about", "entity:main", value_type="ref")
+            store.assert_triple(tx, f"fact:main-{i}", "mentions", "entity:frequent", value_type="ref")
+
+        tx = store.begin_tx("test")
+        store.assert_triple(tx, "fact:main-rare", "value", "Rare mention")
+        store.assert_triple(tx, "fact:main-rare", "about", "entity:main", value_type="ref")
+        store.assert_triple(tx, "fact:main-rare", "mentions", "entity:rare", value_type="ref")
+
+        result = expand_entity_community(store, "main", max_related=5)
+        assert result[0][0] == "frequent"
+        assert result[0][1] == 3
+        assert result[1][0] == "rare"
+        assert result[1][1] == 1
+        store.close()
