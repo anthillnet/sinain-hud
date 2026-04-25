@@ -44,7 +44,7 @@ By default, sinain uses cloud APIs (OpenRouter) for transcription and analysis. 
 ## Quick Start
 
 ```bash
-npx @geravant/sinain start
+npx @geravant/sinain@latest start
 ```
 
 That's it. On first run, sinain will:
@@ -52,7 +52,9 @@ That's it. On first run, sinain will:
 2. **Auto-download** the overlay app, sck-capture binary, and Python dependencies
 3. **Start all services** — sinain-core, sense_client, overlay, and agent
 
-> **Re-run the wizard** anytime: `npx @geravant/sinain start --setup`
+> **Pin `@latest`** on every invocation. `npx @geravant/sinain` (without `@latest`) caches *forever* against the unversioned spec — you'd silently keep running an old version for months. Sinain self-updates automatically when stale, but pinning `@latest` makes it explicit and saves a redundant relaunch.
+
+> **Re-run the wizard** anytime: `npx @geravant/sinain@latest start --setup`
 
 ### Prerequisites
 
@@ -70,12 +72,14 @@ That's it. On first run, sinain will:
 ### Managing sinain
 
 ```bash
-npx @geravant/sinain stop             # stop all services
-npx @geravant/sinain status           # check what's running
-npx @geravant/sinain start --setup    # re-run setup wizard
-npx @geravant/sinain start --no-sense # skip screen capture
-npx @geravant/sinain start --no-overlay  # headless mode
+npx @geravant/sinain@latest stop             # stop all services
+npx @geravant/sinain@latest status           # check what's running
+npx @geravant/sinain@latest start --setup    # re-run setup wizard
+npx @geravant/sinain@latest start --no-sense # skip screen capture
+npx @geravant/sinain@latest start --no-overlay  # headless mode
 ```
+
+> Always pin `@latest` — see the note in [Quick Start](#quick-start) above.
 
 ## Architecture
 
