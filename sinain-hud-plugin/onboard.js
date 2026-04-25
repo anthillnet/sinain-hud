@@ -272,6 +272,15 @@ export async function runOnboard(args = {}) {
   printOutro();
 
   // ── Start? ────────────────────────────────────────────────────────────
+  //
+  // When called from launcher.js (via `sinain start --setup`), the launcher
+  // is about to start sinain itself — asking the user again is redundant.
+  // Caller passes { skipLaunchPrompt: true } in that case.
+
+  if (args.skipLaunchPrompt) {
+    p.outro("Setup complete — starting sinain...");
+    return;
+  }
 
   const startNow = guard(await p.confirm({
     message: "Start sinain now?",
@@ -309,6 +318,18 @@ function printOutro() {
 }
 
 // ── CLI entry point ─────────────────────────────────────────────────────────
+//
+// Guarded so `import { runOnboard } from "./onboard.js"` from launcher.js
+// (or anywhere else) doesn't trigger side effects. The CLI block runs only
+// when this file is the program's entry point — i.e. `node onboard.js ...`
+// or `npx @geravant/sinain onboard ...`.
+
+const isMainModule = import.meta.url === new URL(`file://${process.argv[1]}`).href
+  || (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1])));
+
+if (!isMainModule) {
+  // Imported as a module — exports are available; do not parse argv.
+} else {
 
 const cliArgs = process.argv.slice(2);
 const flags = {};
@@ -359,3 +380,5 @@ if (flags.nonInteractive) {
     process.exit(1);
   });
 }
+
+}  // end isMainModule guard
