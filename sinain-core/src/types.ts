@@ -21,6 +21,14 @@ export interface StatusMessage {
   escalation?: string;
   connection: string;
   responseSize?: string;
+  /** Bare-agent roster + per-lane current choice. Omitted until the bare
+   *  agent has registered via POST /bareagent/register. empty-string lane
+   *  values mean "Off" (lane disabled). */
+  agents?: {
+    available: string[];
+    escalationAgent: string;
+    spawnAgent: string;
+  };
 }
 
 /** sinain-core → Overlay: heartbeat ping */
@@ -323,14 +331,16 @@ export interface ContextWindow {
 }
 
 // ── Escalation types ──
-
-export type EscalationTransport = "ws" | "http" | "auto";
+//
+// Transport choice is per-lane now (driven by the overlay's agent selector):
+// `escalationAgent === "openclaw"` → WS; any other non-empty agent → HTTP.
+// The old global `transport` setting was removed — picking an agent IS the
+// transport.
 
 export interface EscalationConfig {
   mode: EscalationMode;
   cooldownMs: number;
   staleMs: number;  // force escalation after this many ms of silence (0 = disabled)
-  transport: EscalationTransport;
 }
 
 export interface OpenClawConfig {
@@ -396,6 +406,13 @@ export interface BridgeState {
   escalation: "active" | "paused";
   connection: "connected" | "disconnected" | "connecting";
   responseSize: ResponseSize;
+  /** Bare-agent roster + per-lane current choice. Populated after the
+   *  bare agent's POST /bareagent/register. "" lane value = lane disabled. */
+  agents: {
+    available: string[];
+    escalationAgent: string;
+    spawnAgent: string;
+  };
 }
 
 // ── Learning / feedback types ──
