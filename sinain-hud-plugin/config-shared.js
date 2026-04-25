@@ -16,6 +16,16 @@ export const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 export const IS_WINDOWS = os.platform() === "win32";
 export const IS_MAC = os.platform() === "darwin";
 
+// Wizard write target for agents.json. Lives in user home so npm-installed
+// users (whose package dir is often read-only) get a writable path.
+// sinain-agent/run.sh and sinain-core/agents-loader.ts both check this
+// path with the highest priority after AGENTS_CONFIG_PATH env override.
+export const AGENTS_JSON_PATH = path.join(SINAIN_DIR, "agents.json");
+// agents.example.json ships inside the package as the bootstrap template
+// for first-run wizard writes (and as the fallback when no agents.json
+// exists yet on this host).
+export const AGENTS_EXAMPLE_PATH = path.join(PKG_DIR, "sinain-agent", "agents.example.json");
+
 // ── Colors ──────────────────────────────────────────────────────────────────
 
 export const c = {
@@ -111,6 +121,74 @@ export function writeEnv(vars) {
   }
 }
 
+/** Read agents.json (the wizard's authoritative agent + gateway config).
+ *
+ * Resolution order mirrors agents-loader.ts and run.sh:
+ *   1. ~/.sinain/agents.json (the wizard write target)
+ *   2. <pkg>/sinain-agent/agents.example.json (bootstrap template fallback)
+ *
+ * Returns an empty object if neither file exists or parsing fails — callers
+ * treat null/missing fields as "use schema defaults".
+ */
+export function readAgentsConfig() {
+  for (const p of [AGENTS_JSON_PATH, AGENTS_EXAMPLE_PATH]) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      return JSON.parse(fs.readFileSync(p, "utf-8"));
+    } catch (err) {
+      // Bad JSON — surface, but don't crash the wizard
+      console.warn(`[config] failed to parse ${p}: ${err.message}`);
+    }
+  }
+  return {};
+}
+
+/** Patch ~/.sinain/agents.json with the given updates.
+ *
+ * `patch` shape (all optional):
+ *   - default:        string  — top-level default agent name
+ *   - escalationMode: string  — sets escalation.mode
+ *   - openclawProfile: object | null — sets profiles.openclaw
+ *                       (null deletes the openclaw profile entirely,
+ *                        which disables the gateway path)
+ *
+ * Reads the existing config first (or falls back to the shipped example),
+ * applies the patch, writes pretty-printed JSON to AGENTS_JSON_PATH.
+ * The example file is the "schema source of truth" — patches preserve any
+ * other fields the user has customized (custom profiles, allowedTools,
+ * analyzer pacing, etc.).
+ */
+export function writeAgentsConfig(patch) {
+  fs.mkdirSync(SINAIN_DIR, { recursive: true });
+  // Start from existing user config if present, else the example template
+  // (so first-run writes get the full schema, not just the patched fields).
+  let cfg;
+  if (fs.existsSync(AGENTS_JSON_PATH)) {
+    cfg = JSON.parse(fs.readFileSync(AGENTS_JSON_PATH, "utf-8"));
+  } else if (fs.existsSync(AGENTS_EXAMPLE_PATH)) {
+    cfg = JSON.parse(fs.readFileSync(AGENTS_EXAMPLE_PATH, "utf-8"));
+  } else {
+    cfg = { profiles: {} };
+  }
+
+  if (patch.default !== undefined) {
+    cfg.default = patch.default;
+  }
+  if (patch.escalationMode !== undefined) {
+    cfg.escalation = cfg.escalation || {};
+    cfg.escalation.mode = patch.escalationMode;
+  }
+  if (patch.openclawProfile === null) {
+    // Explicit removal: user picked "skip / no gateway"
+    if (cfg.profiles?.openclaw) delete cfg.profiles.openclaw;
+  } else if (patch.openclawProfile) {
+    cfg.profiles = cfg.profiles || {};
+    cfg.profiles.openclaw = { type: "openclaw", ...patch.openclawProfile };
+  }
+
+  fs.writeFileSync(AGENTS_JSON_PATH, JSON.stringify(cfg, null, 2) + "\n");
+}
+
 export async function fetchHealth(port = 9500) {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
@@ -118,16 +196,28 @@ export async function fetchHealth(port = 9500) {
   } catch { return null; }
 }
 
-/** Build a config summary for display */
+/** Build a config summary for display.
+ * Reads BOTH .env (existing arg) AND ~/.sinain/agents.json — agent + gateway
+ * config moved out of .env into agents.json after the migration, so we
+ * have to consult both to render an accurate snapshot. */
 export function summarizeConfig(existing) {
   const lines = [];
+  const agentsCfg = readAgentsConfig();
+  const openclaw = agentsCfg?.profiles?.openclaw;
+
   if (existing.OPENROUTER_API_KEY) lines.push(`API Key:       ${maskKey(existing.OPENROUTER_API_KEY)}`);
   if (existing.TRANSCRIPTION_BACKEND) lines.push(`Transcription: ${existing.TRANSCRIPTION_BACKEND}`);
   if (existing.AGENT_MODEL) lines.push(`Model:         ${existing.AGENT_MODEL}`);
   if (existing.PRIVACY_MODE) lines.push(`Privacy:       ${existing.PRIVACY_MODE}`);
-  if (existing.ESCALATION_MODE) lines.push(`Escalation:    ${existing.ESCALATION_MODE}`);
-  if (existing.OPENCLAW_WS_URL) lines.push(`Gateway:       ${existing.OPENCLAW_WS_URL}`);
-  if (existing.SINAIN_AGENT) lines.push(`Agent:         ${existing.SINAIN_AGENT}`);
+
+  // Escalation mode + agent default + gateway URL all live in agents.json
+  // now (with .env as a fallback override during the migration window).
+  const escMode = agentsCfg?.escalation?.mode || existing.ESCALATION_MODE;
+  if (escMode) lines.push(`Escalation:    ${escMode}`);
+  const gatewayUrl = openclaw?.wsUrl || existing.OPENCLAW_WS_URL;
+  if (gatewayUrl) lines.push(`Gateway:       ${gatewayUrl}`);
+  const defaultAgent = agentsCfg?.default || existing.SINAIN_AGENT;
+  if (defaultAgent) lines.push(`Agent:         ${defaultAgent}`);
   return lines;
 }
 
@@ -245,12 +335,40 @@ export async function stepTranscription(existing, label = "Audio transcription")
   return choice;
 }
 
+/**
+ * Gateway setup step.
+ *
+ * Returns `{ envVars, agentsPatch }`:
+ *   - envVars: tokens (OPENCLAW_WS_TOKEN, OPENCLAW_HTTP_TOKEN) — stay in
+ *     .env as secrets, referenced from agents.json via ${VAR} indirection
+ *   - agentsPatch: feed to writeAgentsConfig(); writes the openclaw profile
+ *     (urls + session) and escalation.mode into ~/.sinain/agents.json.
+ *
+ * The user picks whether to wire up the gateway-style profile at all.
+ * The dispatch decision (which lane uses WS vs HTTP) is made later via
+ * the overlay's per-lane agent selector — there's no transport question
+ * here anymore; agent identity IS the transport.
+ *
+ * Pre-existing gateway config is read from agents.json first, then .env
+ * as a backwards-compat fallback for users migrating from before the
+ * profile refactor.
+ */
 export async function stepGateway(existing, label = "OpenClaw gateway") {
+  // Read existing gateway config from BOTH places — wizard might be
+  // running mid-migration where some users still have OPENCLAW_WS_URL in
+  // .env but agents.json's openclaw profile is absent.
+  const agentsCfg = readAgentsConfig();
+  const oc = agentsCfg?.profiles?.openclaw;
+  const existingWsUrl = oc?.wsUrl || existing.OPENCLAW_WS_URL || "";
+
   p.note(
-    "The gateway gives sinain a persistent AI agent (Claude/Codex/Goose)\n" +
-    "that handles complex tasks, background research, and multi-step actions.\n" +
-    "Without it, sinain still works — HUD analysis runs locally via OpenRouter.",
-    "What is a gateway?",
+    "The gateway gives sinain a persistent agent backend (OpenClaw/NemoClaw)\n" +
+    "that handles escalations and background tasks via WS RPC. Without it,\n" +
+    "the local bare agent (claude, openclaude, etc.) handles everything via\n" +
+    "the HTTP path.\n\n" +
+    "You can pick which agent handles each lane (escalation/spawn) at runtime\n" +
+    "via the overlay's flash-icon selector.",
+    "About the gateway",
   );
 
   const choice = guard(await p.select({
@@ -259,7 +377,7 @@ export async function stepGateway(existing, label = "OpenClaw gateway") {
       {
         value: "skip",
         label: "Skip / Disable",
-        hint: "HUD works fine without it — add later with sinain config",
+        hint: "Local agents only — add a gateway later with `sinain config`",
       },
       {
         value: "local",
@@ -272,16 +390,15 @@ export async function stepGateway(existing, label = "OpenClaw gateway") {
         hint: "Connect to existing gateway (URL + token)",
       },
     ],
-    initialValue: existing.OPENCLAW_WS_URL ? "remote" : "skip",
+    initialValue: existingWsUrl ? "remote" : "skip",
   }));
 
   if (choice === "skip") {
+    // Drop the openclaw profile from agents.json entirely. Tokens cleared
+    // in .env so they don't linger as misleading secrets.
     return {
-      OPENCLAW_WS_URL: "",
-      OPENCLAW_HTTP_URL: "",
-      OPENCLAW_WS_TOKEN: "",
-      OPENCLAW_HTTP_TOKEN: "",
-      ESCALATION_MODE: "off",
+      envVars: { OPENCLAW_WS_TOKEN: "", OPENCLAW_HTTP_TOKEN: "" },
+      agentsPatch: { escalationMode: "off", openclawProfile: null },
     };
   }
 
@@ -293,7 +410,7 @@ export async function stepGateway(existing, label = "OpenClaw gateway") {
   const wsUrl = guard(await p.text({
     message: "Gateway WebSocket URL",
     placeholder: "Example: ws://192.168.1.100:18789",
-    defaultValue: existing.OPENCLAW_WS_URL || "",
+    defaultValue: existingWsUrl,
     validate: (val) => {
       if (!val) return "URL is required";
       if (!val.startsWith("ws://") && !val.startsWith("wss://")) return "Must start with ws:// or wss://";
@@ -322,13 +439,24 @@ export async function stepGateway(existing, label = "OpenClaw gateway") {
   }
 
   const httpUrl = wsUrl.replace(/^ws/, "http") + "/hooks/agent";
+  // Tokens → .env; URLs + session → agents.json. The agents.json profile
+  // references the env tokens via ${OPENCLAW_WS_TOKEN}/${OPENCLAW_HTTP_TOKEN}
+  // indirection (resolved by sinain-core's agents-loader at startup).
   return {
-    OPENCLAW_WS_URL: wsUrl,
-    OPENCLAW_HTTP_URL: httpUrl,
-    OPENCLAW_WS_TOKEN: token,
-    OPENCLAW_HTTP_TOKEN: token,
-    OPENCLAW_SESSION_KEY: "agent:main:sinain",
-    ESCALATION_MODE: "rich",
+    envVars: {
+      OPENCLAW_WS_TOKEN: token,
+      OPENCLAW_HTTP_TOKEN: token,
+    },
+    agentsPatch: {
+      escalationMode: "rich",
+      openclawProfile: {
+        wsUrl,
+        httpUrl,
+        wsToken: "${OPENCLAW_WS_TOKEN}",
+        httpToken: "${OPENCLAW_HTTP_TOKEN}",
+        sessionKey: "agent:main:sinain",
+      },
+    },
   };
 }
 
@@ -352,10 +480,16 @@ async function setupLocalGateway(existing) {
           "Install manually: npm install -g openclaw\nThen re-run setup.",
           "Manual install",
         );
-        return { OPENCLAW_WS_URL: "", OPENCLAW_HTTP_URL: "", ESCALATION_MODE: "off" };
+        return {
+          envVars: { OPENCLAW_WS_TOKEN: "", OPENCLAW_HTTP_TOKEN: "" },
+          agentsPatch: { escalationMode: "off", openclawProfile: null },
+        };
       }
     } else {
-      return { OPENCLAW_WS_URL: "", OPENCLAW_HTTP_URL: "", ESCALATION_MODE: "off" };
+      return {
+        envVars: { OPENCLAW_WS_TOKEN: "", OPENCLAW_HTTP_TOKEN: "" },
+        agentsPatch: { escalationMode: "off", openclawProfile: null },
+      };
     }
   }
 
@@ -380,12 +514,20 @@ async function setupLocalGateway(existing) {
   }
 
   return {
-    OPENCLAW_WS_URL: "ws://localhost:18789",
-    OPENCLAW_HTTP_URL: "http://localhost:18789/hooks/agent",
-    OPENCLAW_WS_TOKEN: token,
-    OPENCLAW_HTTP_TOKEN: token,
-    OPENCLAW_SESSION_KEY: "agent:main:sinain",
-    ESCALATION_MODE: "rich",
+    envVars: {
+      OPENCLAW_WS_TOKEN: token,
+      OPENCLAW_HTTP_TOKEN: token,
+    },
+    agentsPatch: {
+      escalationMode: "rich",
+      openclawProfile: {
+        wsUrl: "ws://localhost:18789",
+        httpUrl: "http://localhost:18789/hooks/agent",
+        wsToken: "${OPENCLAW_WS_TOKEN}",
+        httpToken: "${OPENCLAW_HTTP_TOKEN}",
+        sessionKey: "agent:main:sinain",
+      },
+    },
   };
 }
 

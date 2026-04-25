@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { loadConfig } from "./config.js";
+import { loadAgentsConfig, isGatewayProfile, gatewayProfileNames } from "./agents-loader.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -399,6 +400,10 @@ async function main() {
   // closure at call-time, NOT at construction time. Safe because
   // dispatchSpawnTask only fires after an overlay message, which can't
   // happen before server setup completes.
+  // Load agents.json once for lookup helpers passed to escalator. Same file
+  // config.ts reads at startup; re-loading here keeps the dispatch lookup
+  // contained to a closure (no need to expose agentsCfg through CoreConfig).
+  const escalatorAgentsCfg = loadAgentsConfig();
   const escalator = new Escalator({
     feedBuffer,
     wsHandler,
@@ -409,6 +414,10 @@ async function main() {
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
     getSpawnAgent: () => bareAgentState.spawnAgent,
     getEscalationAgent: () => bareAgentState.escalationAgent,
+    // Type-based gateway lookup. Routing key is agents.json `profiles[name].type`,
+    // so any custom profile with `type: "openclaw"` (e.g. "nemoclaw",
+    // "nanoclaw-prod") gets WS dispatch automatically — no name-matching.
+    isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
   });
 
   // ── Initialize agent loop (event-driven) ──
@@ -617,13 +626,16 @@ async function main() {
   // In-memory only (matches escalation-mode lifecycle). Populated when the
   // bare agent POSTs /bareagent/register on startup; mutated by set_agent
   // command from the overlay. Empty-string lane values = "Off" (disabled).
-  const WHITELIST_AGENTS = new Set([
-    "claude", "openclaude", "codex", "goose", "junie", "aider",
-    // "openclaw" is injected server-side below when gatewayWsUrl is set —
-    // it's not a local CLI, it's a routing choice that sends tasks to the
-    // remote OpenClaw gateway via WS RPC instead of the local bare agent.
-    "openclaw",
-  ]);
+  // Profile names from agents.json may be custom (e.g. "pclaude",
+  // "openclaude-spawn"), so the server validates by character class
+  // rather than a fixed whitelist. The bare agent owns the source of
+  // truth for which profiles actually exist on its host. The validator
+  // just rejects names that could break shell logging, paths, or be
+  // injection vectors.
+  const AGENT_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+  // "openclaw" is reserved-injected below when gatewayWsUrl is set —
+  // it's not a local CLI, it's a routing choice that sends tasks to the
+  // remote OpenClaw gateway via WS RPC instead of the local bare agent.
   const bareAgentState: {
     available: string[];
     escalationAgent: string;
@@ -631,13 +643,28 @@ async function main() {
   } = { available: [], escalationAgent: "", spawnAgent: "" };
 
   function registerBareAgent(availableList: string[], current: string): void {
-    const clean = availableList.filter((a) => WHITELIST_AGENTS.has(a));
-    // Inject "openclaw" as a roster option when an OpenClaw gateway is
-    // configured. Lets the user explicitly route a lane to the remote
-    // gateway (e.g., picking "openclaw" for spawn means "use the gateway's
-    // subagent", picking "claude" means "use local claude binary").
-    if (config.openclawConfig.gatewayWsUrl && !clean.includes("openclaw")) {
-      clean.push("openclaw");
+    const clean = availableList.filter((a) => typeof a === "string" && AGENT_NAME_RE.test(a));
+    // Inject every gateway-style profile (any agents.json profile with
+    // `type: "openclaw"`) into the roster — they have no local binary, so
+    // run.sh's PATH filter drops them, but sinain-core knows they exist
+    // and routes them via WS RPC.
+    //
+    // This generalizes the legacy "auto-inject the literal name 'openclaw'"
+    // behavior: now custom gateway profiles like "nemoclaw" or
+    // "nanoclaw-prod" appear in the overlay roster automatically as soon
+    // as you add them to agents.json. The single WS client uses the first
+    // gateway profile's connection params (config.ts findGatewayProfile);
+    // simultaneous multi-gateway is a follow-up.
+    if (config.openclawConfig.gatewayWsUrl) {
+      for (const gwName of gatewayProfileNames(escalatorAgentsCfg)) {
+        if (!clean.includes(gwName)) clean.push(gwName);
+      }
+      // Legacy fallback: if no gateway profiles are defined in agents.json
+      // but gatewayWsUrl is set via env, still inject the canonical name.
+      if (clean.filter((n) => isGatewayProfile(escalatorAgentsCfg, n)).length === 0
+          && !clean.includes("openclaw")) {
+        clean.push("openclaw");
+      }
     }
     bareAgentState.available = clean;
     // If neither lane is set yet (fresh boot), adopt the bare agent's
@@ -859,11 +886,24 @@ async function main() {
         return { ok: false, error: `Agent "${agent}" not available` };
       }
       if (lane === "escalation") {
+        const prevAgent = bareAgentState.escalationAgent;
         bareAgentState.escalationAgent = agent;
         if (agent === "") {
           pauseEscalationInternal();
         } else {
           resumeEscalationInternal();
+        }
+        // If the user flipped to a gateway-typed agent (openclaw, nemoclaw,
+        // ...) and there's a stale httpPending escalation queued from BEFORE
+        // the switch, re-dispatch it through the WS path. Without this, the
+        // bare agent picks up the stale entry on its next poll and posts a
+        // "[skipped: gateway-routed]" message to the HUD — confusing for
+        // the user, who just told us "use the gateway".
+        const wasGateway = isGatewayProfile(escalatorAgentsCfg, prevAgent);
+        const isGateway = isGatewayProfile(escalatorAgentsCfg, agent);
+        if (!wasGateway && isGateway) {
+          const did = escalator.redispatchHttpPendingToWs();
+          if (did) log(TAG, `lane switch ${prevAgent || "<empty>"} → ${agent}: stale httpPending redispatched`);
         }
       } else {
         bareAgentState.spawnAgent = agent;

@@ -39,10 +39,17 @@ export interface EscalatorDeps {
    *  so the overlay's agent-selector choice is respected even when the
    *  gateway is connected. */
   getSpawnAgent?: () => string;
-  /** Returns the currently-selected escalation-lane agent. "openclaw" routes
-   *  escalations to the remote gateway via WS; any other non-empty value
-   *  routes to the local bare agent via HTTP httpPending. */
+  /** Returns the currently-selected escalation-lane agent. Gateway-typed
+   *  profiles (any agent whose `type` is "openclaw" — see isGatewayAgent)
+   *  route via WS; any other non-empty value routes to the local bare
+   *  agent via HTTP httpPending. */
   getEscalationAgent?: () => string;
+  /** Returns true if the named profile is a gateway-style profile
+   *  (i.e. dispatched via WS RPC, not invoked as a local CLI). Lookup is
+   *  by `agentsCfg.profiles[name].type === "openclaw"`. Custom profiles
+   *  like "nemoclaw" or "nanoclaw-prod" with that type get WS dispatch
+   *  automatically — the routing key is type, not name. */
+  isGatewayAgent?: (name: string) => boolean;
 }
 
 /**
@@ -157,9 +164,17 @@ export class Escalator {
     log(TAG, `user command set: "${preview}"`);
   }
 
-  /** Start the WS connection to OpenClaw (skipped when transport=http). */
+  /** Start the WS connection to OpenClaw.
+   *
+   * Connects whenever the gateway URL is configured AND escalation isn't
+   * fully off. WS is the transport for the openclaw lane — the user selects
+   * it via the overlay's agent picker, and dispatch routes accordingly.
+   * Removing the openclaw profile from agents.json (and unsetting the env
+   * vars) leaves gatewayWsUrl empty → no connect attempt.
+   */
   start(): void {
-    if (this.deps.escalationConfig.mode !== "off" && this.deps.escalationConfig.transport !== "http") {
+    const wsConfigured = !!this.deps.openclawConfig.gatewayWsUrl;
+    if (this.deps.escalationConfig.mode !== "off" && wsConfigured) {
       this.wsClient.connect();
       const tokenHash = this.deps.openclawConfig.gatewayToken
         ? createHash("sha256").update(this.deps.openclawConfig.gatewayToken).digest("hex").slice(0, 12)
@@ -203,11 +218,16 @@ export class Escalator {
       this.pendingUserCommand = null;
     }
 
-    // Skip WS escalations when circuit is open (HTTP transport bypasses this)
-    const transport = this.deps.escalationConfig.transport;
-    if (this.wsClient.isCircuitOpen && transport !== "http") {
-      log(TAG, `tick #${entry.id}: skipped — circuit breaker open`);
-      return;
+    // Early skip when circuit is open AND the user has selected openclaw —
+    // saves the cost of building the escalation message just to drop it.
+    // Local-agent lanes (claude, openclaude, etc.) bypass this since they
+    // route via HTTP and don't depend on WS.
+    if (this.wsClient.isCircuitOpen) {
+      const escalationAgent = this.deps.getEscalationAgent?.() || "";
+      if (this.deps.isGatewayAgent?.(escalationAgent)) {
+        log(TAG, `tick #${entry.id}: skipped — circuit breaker open and gateway agent "${escalationAgent}" selected`);
+        return;
+      }
     }
 
     // If user command is pending, force escalation (bypass score + cooldown)
@@ -293,18 +313,37 @@ export class Escalator {
       ts: entry.ts,
     };
 
-    // Route by overlay's escalation-lane agent choice, mirroring the spawn
-    // dispatch logic. If user picked "openclaw", force WS gateway path; if
-    // any other non-empty agent, force HTTP bare-agent path; else fall back
-    // to the transport env var + WS connectivity heuristic.
+    // Per-lane dispatch: agent identity *is* the transport.
+    //   - profile.type === "openclaw" (gateway-style) → WS dispatch
+    //   - any other non-empty agent (local CLI: claude, openclaude, ...) → HTTP
+    //   - empty (Off) → escalator.setMode("off") should have stopped us
+    //     upstream; defensive bailout.
+    //
+    // Routing keys off the profile's `type` field, not its name, so custom
+    // gateway profiles like "nemoclaw" or "nanoclaw-prod" route via WS
+    // automatically as long as they declare `type: "openclaw"` in agents.json.
+    //
+    // openclaw + WS-disconnected drops with a toast (no HTTP fallback),
+    // because the bare agent can't run a gateway profile as a local CLI —
+    // the fallback caused infinite skip loops historically.
     const escalationAgent = this.deps.getEscalationAgent?.() || "";
+    const isGateway = this.deps.isGatewayAgent?.(escalationAgent) ?? false;
     let useHttp: boolean;
-    if (escalationAgent === "openclaw") {
-      useHttp = !this.wsClient.isConnected;  // gateway if reachable, fallback otherwise
+    if (isGateway) {
+      if (!this.wsClient.isConnected) {
+        log(TAG, `escalation dropped: gateway agent "${escalationAgent}" selected but WS disconnected`);
+        this.deps.wsHandler.broadcast(
+          `⚠ Gateway disconnected — escalation dropped. Pick a local agent or check the ${escalationAgent} gateway.`,
+          "high",
+        );
+        return;
+      }
+      useHttp = false;
     } else if (escalationAgent) {
-      useHttp = true;  // any local agent choice = local bare agent
+      useHttp = true;
     } else {
-      useHttp = transport === "http" || (transport === "auto" && !this.wsClient.isConnected);
+      log(TAG, `escalation dropped: lane is Off (escalationAgent="")`);
+      return;
     }
 
     if (useHttp) {
@@ -325,11 +364,48 @@ export class Escalator {
         ts: entry.ts,
         feedbackCtx: slotEntry.feedbackCtx,
       };
-      log(TAG, `tick #${entry.id} → httpPending id=${slotId} (transport=${transport})`);
+      log(TAG, `tick #${entry.id} → httpPending id=${slotId} (lane=${escalationAgent || "<default>"})`);
     } else {
       log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot.depth}`);
       this.slot.insert(slotEntry);
     }
+  }
+
+  /** Redispatch a stale httpPending escalation through the WS slot.
+   *
+   * Called by index.ts when the escalation lane flips to a gateway-typed
+   * agent (e.g., openclaude → openclaw): an escalation queued for HTTP
+   * before the switch is now mis-routed. Rather than letting the bare
+   * agent skip it (which posts a confusing "[skipped: gateway-routed]"
+   * to the user's HUD), we move it into the WS slot so the gateway
+   * actually handles the user's pending question.
+   *
+   * If WS isn't connected, silently clear httpPending — the agent loop
+   * will produce a new escalation through the proper drop-with-toast
+   * path on the next tick. Better than the user seeing the skip message
+   * AND the gateway-disconnect toast for the same logical event.
+   *
+   * Returns true if a redispatch (or clear) actually happened, so the
+   * caller can log meaningfully.
+   */
+  redispatchHttpPendingToWs(): boolean {
+    if (!this.httpPending) return false;
+    const stale = this.httpPending;
+    this.httpPending = null;
+    if (!this.wsClient.isConnected) {
+      log(TAG, `redispatch skipped: WS not connected — cleared stale httpPending id=${stale.id}`);
+      return true;
+    }
+    const slotEntry: SlotEntry = {
+      id: stale.id,
+      message: stale.message,
+      sessionKey: this.deps.openclawConfig.sessionKey,
+      feedbackCtx: stale.feedbackCtx,
+      ts: stale.ts,
+    };
+    log(TAG, `redispatching stale httpPending id=${stale.id} → WS slot (lane switched to gateway)`);
+    this.slot.insert(slotEntry);
+    return true;
   }
 
   /** Push fresh SITUATION.md content to the gateway server (fire-and-forget). */
@@ -427,9 +503,17 @@ ${recentLines.join("\n")}`;
     if (!this.httpPending || this.httpPending.id !== id) {
       const recent = this.recentHttpIds.find((e) => e.id === id);
       if (recent && Date.now() - recent.ts < Escalator.STALE_ID_GRACE_MS) {
+        // Grace path: response was generated against a context that's now
+        // stale (analyzer rotated the slot mid-flight) but still recent
+        // enough that the answer is almost certainly still relevant.
+        // Push to HUD and return a clean ok=true — don't surface the
+        // grace marker on the wire, because generic LLM clients read
+        // any non-empty `error` field as a failure signal and write
+        // apologetic meta-messages to the user. The breadcrumb stays
+        // in this log for debug.
         log(TAG, `respondHttp grace: id=${id} is stale (rotated ${((Date.now() - recent.ts) / 1000).toFixed(1)}s ago) — pushing to HUD anyway`);
         this.pushResponse(response, this.lastEscalationContext);
-        return { ok: true, error: "stale-id-grace" };
+        return { ok: true };
       }
       return this.httpPending
         ? { ok: false, error: `id mismatch: expected ${this.httpPending.id}` }
@@ -494,7 +578,6 @@ ${recentLines.join("\n")}`;
   getStats(): Record<string, unknown> {
     return {
       mode: this.deps.escalationConfig.mode,
-      transport: this.deps.escalationConfig.transport,
       gatewayConnected: this.wsClient.isConnected,
       circuitOpen: this.wsClient.isCircuitOpen,
       slotDepth: this.slot.depth,
@@ -557,22 +640,34 @@ ${recentLines.join("\n")}`;
     // roster option, the old heuristic "if WS connected, use gateway" hijacked
     // every spawn regardless of user intent, which surfaced as 401/credential
     // errors from the gateway's stale OpenRouter key.
+    // Per-lane dispatch (mirror of escalation routing above):
+    //   - profile.type === "openclaw" → WS to gateway (drop with toast if
+    //     WS down — bare agent can't run gateway profiles as local CLIs)
+    //   - any other non-empty agent → HTTP queue for bare agent polling
+    //   - empty (Off) → drop; the spawn poll skip in run.sh should already
+    //     prevent us from getting here.
     const spawnAgent = this.deps.getSpawnAgent?.() || "";
-    const useGateway = spawnAgent === "openclaw" && this.wsClient.isConnected;
-    if (!useGateway) {
+    const spawnIsGateway = this.deps.isGatewayAgent?.(spawnAgent) ?? false;
+    if (spawnIsGateway) {
+      if (!this.wsClient.isConnected) {
+        log(TAG, `spawn-task ${taskId}: dropped — gateway agent "${spawnAgent}" selected but WS disconnected`);
+        this.deps.wsHandler.broadcast(
+          `⚠ Gateway disconnected — spawn task dropped. Pick a local agent or check the ${spawnAgent} gateway.`,
+          "high",
+        );
+        return;
+      }
+      // Fall through to gateway dispatch below.
+    } else if (spawnAgent) {
+      // Local bare-agent path: queue for polling.
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
-      let reason: string;
-      if (spawnAgent === "openclaw" && !this.wsClient.isConnected) {
-        reason = "openclaw selected but gateway disconnected — fell back to bare agent";
-      } else if (spawnAgent) {
-        reason = `selected spawn agent: ${spawnAgent}`;
-      } else {
-        reason = "WS disconnected";
-      }
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
       this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
-      log(TAG, `spawn-task ${taskId}: ${reason} — queued for bare agent polling`);
+      log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${spawnAgent})`);
+      return;
+    } else {
+      log(TAG, `spawn-task ${taskId}: dropped — lane is Off (spawnAgent="")`);
       return;
     }
 

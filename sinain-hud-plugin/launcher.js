@@ -8,6 +8,7 @@ import path from "path";
 import os from "os";
 import net from "net";
 import readline from "readline";
+import { writeAgentsConfig, readAgentsConfig } from "./config-shared.js";
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
@@ -486,10 +487,14 @@ async function setupWizard(envPath) {
     else if (existingKey) vars.OPENROUTER_API_KEY = existingKey;
   }
 
-  // 3. Agent selection
-  const defaultAgent = existing.SINAIN_AGENT || "claude";
-  const agentChoice = await ask(`  Agent? [${BOLD}${defaultAgent}${RESET}/claude/codex/goose/junie/aider]: `);
-  vars.SINAIN_AGENT = agentChoice.trim().toLowerCase() || defaultAgent;
+  // 3. Agent selection — written to agents.json `default` field. Existing
+  // value is read from agents.json first, falling back to .env for users
+  // mid-migration.
+  const existingAgentsCfg = readAgentsConfig();
+  const agentsPatch = {};
+  const defaultAgent = existingAgentsCfg?.default || existing.SINAIN_AGENT || "claude";
+  const agentChoice = await ask(`  Default agent? [${BOLD}${defaultAgent}${RESET}/claude/openclaude/codex/goose/junie/aider]: `);
+  agentsPatch.default = agentChoice.trim().toLowerCase() || defaultAgent;
 
   // 3b. Local vision (Ollama)
   const IS_MACOS = os.platform() === "darwin";
@@ -543,28 +548,32 @@ async function setupWizard(envPath) {
     }
   }
 
-  // 4. Escalation mode
+  // 4. Escalation mode — agents.json `escalation.mode`
   console.log();
   console.log(`  ${DIM}Escalation modes:${RESET}`);
-  console.log(`    off       — no escalation to gateway`);
+  console.log(`    off       — no escalation`);
   console.log(`    selective — score-based (errors, questions trigger it)`);
   console.log(`    focus     — always escalate every tick`);
   console.log(`    rich      — always escalate with maximum context`);
-  const defaultEsc = existing.ESCALATION_MODE || "selective";
+  const defaultEsc = existingAgentsCfg?.escalation?.mode || existing.ESCALATION_MODE || "selective";
   const escMode = await ask(`  Escalation mode? [off/${BOLD}${defaultEsc}${RESET}/selective/focus/rich]: `);
-  vars.ESCALATION_MODE = escMode.trim().toLowerCase() || defaultEsc;
+  agentsPatch.escalationMode = escMode.trim().toLowerCase() || defaultEsc;
 
-  // 5. OpenClaw gateway
-  const hadGateway = !!(existing.OPENCLAW_WS_URL);
+  // 5. OpenClaw gateway — URLs/session → agents.json (openclaw profile),
+  // tokens → .env. No transport question; agent identity (openclaw vs
+  // local) determines dispatch path.
+  const existingOpenclaw = existingAgentsCfg?.profiles?.openclaw;
+  const existingWsUrl = existingOpenclaw?.wsUrl || existing.OPENCLAW_WS_URL || "";
+  const hadGateway = !!existingWsUrl;
   const gatewayDefault = hadGateway ? "Y" : "N";
   const hasGateway = await ask(`  Do you have an OpenClaw gateway? [${gatewayDefault === "Y" ? "Y/n" : "y/N"}]: `);
   const wantsGateway = hasGateway.trim()
     ? hasGateway.trim().toLowerCase() === "y"
     : hadGateway;
   if (wantsGateway) {
-    const defaultWs = existing.OPENCLAW_WS_URL || "ws://localhost:18789";
+    const defaultWs = existingWsUrl || "ws://localhost:18789";
     const wsUrl = await ask(`  Gateway WebSocket URL [${defaultWs}]: `);
-    vars.OPENCLAW_WS_URL = wsUrl.trim() || defaultWs;
+    const finalWsUrl = wsUrl.trim() || defaultWs;
 
     const existingToken = existing.OPENCLAW_WS_TOKEN;
     const tokenHint = existingToken ? ` [${existingToken.slice(0, 6)}...${existingToken.slice(-4)}]` : "";
@@ -577,14 +586,16 @@ async function setupWizard(envPath) {
       vars.OPENCLAW_HTTP_TOKEN = existing.OPENCLAW_HTTP_TOKEN || existingToken;
     }
 
-    // Derive HTTP URL from WS URL
-    const httpBase = vars.OPENCLAW_WS_URL.replace(/^ws/, "http");
-    vars.OPENCLAW_HTTP_URL = `${httpBase}/hooks/agent`;
-    vars.OPENCLAW_SESSION_KEY = existing.OPENCLAW_SESSION_KEY || "agent:main:sinain";
+    agentsPatch.openclawProfile = {
+      wsUrl: finalWsUrl,
+      httpUrl: finalWsUrl.replace(/^ws/, "http") + "/hooks/agent",
+      wsToken: "${OPENCLAW_WS_TOKEN}",
+      httpToken: "${OPENCLAW_HTTP_TOKEN}",
+      sessionKey: existingOpenclaw?.sessionKey || "agent:main:sinain",
+    };
   } else {
-    // No gateway — disable WS connection attempts
-    vars.OPENCLAW_WS_URL = "";
-    vars.OPENCLAW_HTTP_URL = "";
+    // No gateway — drop the openclaw profile entirely.
+    agentsPatch.openclawProfile = null;
   }
 
   // 6. Knowledge import (for standalone machines)
@@ -662,10 +673,16 @@ async function setupWizard(envPath) {
     fs.writeFileSync(envPath, lines.join("\n"));
   }
 
+  // Flush agent + gateway answers to ~/.sinain/agents.json (separate file
+  // from .env after the profile-config refactor).
+  if (Object.keys(agentsPatch).length > 0) {
+    writeAgentsConfig(agentsPatch);
+  }
+
   rl.close();
 
   console.log();
-  ok(`Config written to ${envPath}`);
+  ok(`Config written to ${envPath} + ~/.sinain/agents.json`);
   console.log();
 }
 

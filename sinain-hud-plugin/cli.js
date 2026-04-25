@@ -4,6 +4,7 @@ import net from "net";
 import os from "os";
 import fs from "fs";
 import path from "path";
+import { writeAgentsConfig } from "./config-shared.js";
 
 const cmd = process.argv[2];
 const IS_WINDOWS = os.platform() === "win32";
@@ -168,34 +169,46 @@ async function runSetupWizard() {
     if (key.trim()) vars.OPENROUTER_API_KEY = key.trim();
   }
 
-  // Agent
-  const agent = await ask(`  Agent? [${BOLD}claude${RESET}/codex/goose/junie/aider]: `);
-  vars.SINAIN_AGENT = agent.trim().toLowerCase() || "claude";
+  // Agent + escalation + gateway → agents.json (not .env). Tokens stay in
+  // .env as secrets, referenced from agents.json via ${VAR} indirection.
+  const agentsPatch = {};
 
-  // Escalation
+  // Default agent — overlay's chip selector lets the user switch at runtime;
+  // this just sets the boot-time default.
+  const agent = await ask(`  Default agent? [${BOLD}claude${RESET}/openclaude/codex/goose/junie/aider]: `);
+  agentsPatch.default = agent.trim().toLowerCase() || "claude";
+
+  // Escalation mode
   console.log(`\n  ${DIM}Escalation: off | selective | focus | rich${RESET}`);
   const esc = await ask(`  Escalation mode? [${BOLD}selective${RESET}]: `);
-  vars.ESCALATION_MODE = esc.trim().toLowerCase() || "selective";
+  agentsPatch.escalationMode = esc.trim().toLowerCase() || "selective";
 
-  // Gateway
+  // Gateway — when enabled, writes the openclaw profile to agents.json
+  // (URLs + session) and tokens to .env. There's no transport choice
+  // anymore; picking openclaw vs a local agent in the overlay determines
+  // dispatch (WS vs HTTP).
   const gw = await ask(`  OpenClaw gateway? [y/N]: `);
   if (gw.trim().toLowerCase() === "y") {
     const url = await ask(`  Gateway WS URL [ws://localhost:18789]: `);
-    vars.OPENCLAW_WS_URL = url.trim() || "ws://localhost:18789";
+    const wsUrl = url.trim() || "ws://localhost:18789";
     const token = await ask(`  Auth token (48-char hex): `);
     if (token.trim()) {
       vars.OPENCLAW_WS_TOKEN = token.trim();
       vars.OPENCLAW_HTTP_TOKEN = token.trim();
     }
-    vars.OPENCLAW_HTTP_URL = vars.OPENCLAW_WS_URL.replace(/^ws/, "http") + "/hooks/agent";
-    vars.OPENCLAW_SESSION_KEY = "agent:main:sinain";
+    agentsPatch.openclawProfile = {
+      wsUrl,
+      httpUrl: wsUrl.replace(/^ws/, "http") + "/hooks/agent",
+      wsToken: "${OPENCLAW_WS_TOKEN}",
+      httpToken: "${OPENCLAW_HTTP_TOKEN}",
+      sessionKey: "agent:main:sinain",
+    };
   } else {
-    // No gateway — disable WS connection attempts
-    vars.OPENCLAW_WS_URL = "";
-    vars.OPENCLAW_HTTP_URL = "";
+    // Skip / disable: drop the openclaw profile entirely.
+    agentsPatch.openclawProfile = null;
+    agentsPatch.escalationMode = "off";
   }
 
-  vars.SINAIN_POLL_INTERVAL = "5";
   vars.SINAIN_HEARTBEAT_INTERVAL = "900";
   vars.PRIVACY_MODE = "standard";
 
@@ -230,8 +243,11 @@ async function runSetupWizard() {
     fs.writeFileSync(envPath, lines.join("\n"));
   }
 
+  // Patch ~/.sinain/agents.json with the wizard's agent + gateway choices.
+  writeAgentsConfig(agentsPatch);
+
   rl.close();
-  console.log(`\n  ${GREEN}✓${RESET} Config written to ${envPath}\n`);
+  console.log(`\n  ${GREEN}✓${RESET} Config written to ${envPath} + ~/.sinain/agents.json\n`);
 }
 
 // ── Stop ──────────────────────────────────────────────────────────────────────

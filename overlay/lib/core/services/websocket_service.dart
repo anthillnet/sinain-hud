@@ -52,6 +52,18 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
+
+  // Canonical spawn-task map. TasksView still consumes the stream for
+  // incremental rendering, but the map gives the AGT/TSK tab indicator
+  // a snapshot view ("does any task need attention?") without forcing
+  // every consumer to subscribe + duplicate list-management logic.
+  final Map<String, SpawnTask> _spawnTasks = {};
+  // Number of tasks currently waiting on user action (permission ask or
+  // free-form input). Drives the badge on the inactive tab so users on
+  // AGT see when TSK has something blocking.
+  int get pendingAttentionCount =>
+      _spawnTasks.values.where((t) => t.needsInput).length;
+
   bool get connected => _connected;
   String get audioState => _audioState;
   String get micState => _micState;
@@ -231,6 +243,12 @@ class WebSocketService extends ChangeNotifier {
         case 'spawn_task':
           final task = SpawnTask.fromJson(json);
           _log('SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
+          // Update the canonical map first, then notify listeners so the
+          // tab-indicator badge can re-read pendingAttentionCount before
+          // the stream subscriber rebuilds the list view.
+          final prevAttention = pendingAttentionCount;
+          _spawnTasks[task.taskId] = task;
+          if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
           break;
         case 'thinking':
