@@ -246,6 +246,88 @@ def query_facts_by_entity_graph(
         return []
 
 
+def expand_entity_community(
+    store,
+    entity_name: str,
+    max_related: int = 3,
+    max_facts_per_entity: int = 30,
+) -> list[tuple[str, int]]:
+    """Find related entities by following entity → facts → mentioned entities.
+
+    Returns [(entity_name, co_mention_count), ...] sorted by frequency.
+    """
+    entity_node_id = f"entity:{entity_name.lower().replace(' ', '-')}"
+    if not store.entity(entity_node_id):
+        return []
+
+    # Collect facts linked to this entity (both about and mentions)
+    fact_ids = set()
+    for fact_eid, _ in store.backrefs(entity_node_id, attribute="about")[:max_facts_per_entity]:
+        if fact_eid.startswith("fact:"):
+            fact_ids.add(fact_eid)
+    for fact_eid, _ in store.backrefs(entity_node_id, attribute="mentions")[:max_facts_per_entity]:
+        if fact_eid.startswith("fact:"):
+            fact_ids.add(fact_eid)
+
+    # Follow each fact's outgoing refs to find other entity nodes
+    related_counts: dict[str, int] = {}
+    for fact_eid in fact_ids:
+        attrs = store.entity(fact_eid)
+        for ref_attr in ("about", "mentions"):
+            targets = attrs.get(ref_attr, [])
+            if not isinstance(targets, list):
+                targets = [targets]
+            for target in targets:
+                if isinstance(target, str) and target.startswith("entity:") and target != entity_node_id:
+                    name = target[len("entity:"):]
+                    related_counts[name] = related_counts.get(name, 0) + 1
+
+    # Sort by frequency, return top N
+    ranked = sorted(related_counts.items(), key=lambda x: -x[1])
+    return ranked[:max_related]
+
+
+def _cooccurring_entities(
+    store,
+    fact_ids: set[str],
+    max_entities: int = 3,
+) -> list[str]:
+    """Find entities that co-occur in the same distillation pass (shared first_seen timestamp)."""
+    if not fact_ids:
+        return []
+
+    # Get first_seen timestamps for the input facts
+    timestamps = set()
+    for fid in list(fact_ids)[:20]:  # cap to avoid huge queries
+        attrs = store.entity(fid)
+        fs = attrs.get("first_seen", [])
+        if isinstance(fs, list) and fs:
+            timestamps.add(fs[0])
+        elif isinstance(fs, str):
+            timestamps.add(fs)
+
+    if not timestamps:
+        return []
+
+    # Find other facts with same timestamps and extract their entity names
+    placeholders = ",".join("?" for _ in timestamps)
+    rows = store._conn.execute(
+        f"SELECT DISTINCT t2.value FROM triples t1 "
+        f"JOIN triples t2 ON t2.entity_id = t1.entity_id AND t2.attribute = 'entity' AND t2.retracted = 0 "
+        f"WHERE t1.attribute = 'first_seen' AND t1.value IN ({placeholders}) "
+        f"AND t1.retracted = 0 AND t1.entity_id LIKE 'fact:%' "
+        f"AND t1.entity_id NOT IN ({','.join('?' for _ in fact_ids)})",
+        list(timestamps) + list(fact_ids),
+    ).fetchall()
+
+    # Count co-occurrence per entity name
+    counts: dict[str, int] = {}
+    for (name,) in rows:
+        counts[name] = counts.get(name, 0) + 1
+    ranked = sorted(counts, key=lambda x: -counts[x])
+    return ranked[:max_entities]
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -257,16 +339,44 @@ def query_facts_hybrid(
     expands top results with 1-hop graph neighbors.
     """
     import re
+    import time
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
 
     # Entity graph pre-filter: find facts linked to mentioned entities via backrefs.
     # Used to BOOST relevant facts in RRF, not as a separate tier (avoids dilution).
     graph_fact_ids: set[str] = set()
+    community_fact_ids: set[str] = set()
     for kw in keywords:
         for f in query_facts_by_entity_graph(db_path, kw, max_facts=50):
             eid = f.get("entity_id", "")
             if eid:
                 graph_fact_ids.add(eid)
+
+    # Community expansion: follow mentions edges to find related entities
+    t0 = time.monotonic()
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+
+        matched_entities = set()
+        for kw in keywords:
+            node_id = f"entity:{kw}"
+            if store.entity(node_id):
+                matched_entities.add(kw)
+
+        for ent in matched_entities:
+            if time.monotonic() - t0 > 0.5:
+                break  # timing guard
+            community = expand_entity_community(store, ent, max_related=3)
+            for related_name, _count in community:
+                for f in query_facts_by_entity_graph(db_path, related_name, max_facts=20):
+                    eid = f.get("entity_id", "")
+                    if eid and eid not in graph_fact_ids:
+                        community_fact_ids.add(eid)
+
+        store.close()
+    except Exception:
+        pass
 
     # Run three retrieval methods independently
     candidate_limit = max_facts * 3
@@ -296,11 +406,31 @@ def query_facts_hybrid(
         for rank, eid in enumerate(ranked_list):
             rrf_scores[eid] = rrf_scores.get(eid, 0.0) + 1.0 / (K + rank)
 
+    # Co-occurrence boost: use FTS/tag results to find temporally related entities
+    import time as _time
+    _t_cooccur = _time.monotonic()
+    query_matched_ids = {f.get("entity_id", "") for f in fts_results + tag_results if f.get("entity_id")}
+    if query_matched_ids and _time.monotonic() - _t_cooccur < 0.3:
+        try:
+            from triplestore import TripleStore
+            _store = TripleStore(db_path)
+            cooccur = _cooccurring_entities(_store, query_matched_ids, max_entities=5)
+            for ent_name in cooccur:
+                for f in query_facts_by_entity_graph(db_path, ent_name, max_facts=10):
+                    eid = f.get("entity_id", "")
+                    if eid and eid not in graph_fact_ids:
+                        community_fact_ids.add(eid)
+            _store.close()
+        except Exception:
+            pass
+
     # Graph boost: facts linked to mentioned entities via backrefs get priority
-    if graph_fact_ids:
+    if graph_fact_ids or community_fact_ids:
         for eid in rrf_scores:
             if eid in graph_fact_ids:
-                rrf_scores[eid] += 0.02  # significant boost — graph-linked facts rank higher
+                rrf_scores[eid] += 0.02  # direct graph-linked facts
+            elif eid in community_fact_ids:
+                rrf_scores[eid] += 0.01  # community-expanded facts (half weight)
 
     # Apply confidence decay as secondary signal (fresh facts rank above stale ones)
     from triplestore import decayed_confidence
