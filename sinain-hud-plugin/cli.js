@@ -14,11 +14,18 @@ const SINAIN_DIR = path.join(HOME, ".sinain");
 const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 
 // Self-update sentinel — query the npm registry, and if a newer version
-// of @geravant/sinain is available, re-exec via `npx --ignore-existing`
-// before doing anything else. Adds ~500ms startup but kills the
-// "stale npx cache silently serves 1.6.x" class of bugs permanently.
-// See self-update.js for details + opt-out env var.
-await checkForUpdate();
+// of @geravant/sinain is available, re-exec before doing anything else.
+// Adds ~500ms startup but kills the "stale npx cache silently serves 1.6.x"
+// class of bugs permanently. See self-update.js for details + opt-out env var.
+//
+// Wrapped in try/catch so a bug here (or a missing module) can't silently
+// kill the CLI — the user always sees the dispatch path run, even if the
+// update check fails for any reason.
+try {
+  await checkForUpdate();
+} catch (err) {
+  process.stderr.write(`  ⚠ self-update check failed: ${err.message}\n  (continuing with installed version)\n`);
+}
 
 switch (cmd) {
   case "start":
