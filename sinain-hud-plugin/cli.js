@@ -5,12 +5,20 @@ import os from "os";
 import fs from "fs";
 import path from "path";
 import { writeAgentsConfig } from "./config-shared.js";
+import { checkForUpdate } from "./self-update.js";
 
 const cmd = process.argv[2];
 const IS_WINDOWS = os.platform() === "win32";
 const HOME = os.homedir();
 const SINAIN_DIR = path.join(HOME, ".sinain");
 const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
+
+// Self-update sentinel — query the npm registry, and if a newer version
+// of @geravant/sinain is available, re-exec via `npx --ignore-existing`
+// before doing anything else. Adds ~500ms startup but kills the
+// "stale npx cache silently serves 1.6.x" class of bugs permanently.
+// See self-update.js for details + opt-out env var.
+await checkForUpdate();
 
 switch (cmd) {
   case "start":
