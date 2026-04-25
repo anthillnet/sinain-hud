@@ -26,11 +26,12 @@ Sinain captures your screen and audio continuously, runs OCR and transcription, 
 
 ### Agent-Agnostic
 
-Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents without losing context. Add new ones without reconfiguring.
+Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents on the fly — no restart, no context loss.
 
-- Tested with Claude Code, Codex, Goose, Junie, and Aider. Any MCP-compatible agent works.
+- Tested with Claude Code, OpenClaude, Codex, Goose, Junie, and Aider. Any MCP-compatible agent works.
+- Pick agents **per lane** in the overlay's flash-icon selector — escalations and spawn tasks can route to different agents simultaneously.
+- Add custom profiles (personal Claude config, alternate models, server-side gateways) by editing [`agents.json`](docs/AGENT-ROSTER.md). The roster is the source of truth.
 - Knowledge modules travel with you — export from one machine, import on another.
-- Run with an OpenClaw gateway, or use the shell harness (`sinain-agent/run.sh`) to connect your own agent.
 
 ### Privacy Controls
 
@@ -124,9 +125,20 @@ npx @geravant/sinain start --no-overlay  # headless mode
 
 ## Configuration
 
-All config via `.env` at project root (created by the setup wizard or `cp .env.example .env`).
+Sinain splits config across two files in `~/.sinain/`:
 
-### Context Analysis (HUD summarizer)
+- **`.env`** — secrets (API keys, gateway tokens) and infrastructure (ports, audio device, privacy mode, analyzer LLM).
+- **`agents.json`** — agent roster + bare-agent infra + escalation policy (default agent, allowed-tools whitelists, gateway URLs, escalation mode, analyzer pacing).
+
+Both are created by the setup wizard. To re-run: `npx @geravant/sinain start --setup`.
+
+### Agents & profiles → `agents.json`
+
+The agent roster lives in `~/.sinain/agents.json`. Each entry is a profile mapping a name to a binary + behavior type + optional env, settings, and model overrides. The overlay's flash-icon selector lets you pick which profile handles each lane (escalation vs spawn) at runtime. Custom profiles like `pclaude` (personal claude with its own config dir) or `nemoclaw` (server-side gateway) are first-class — the dispatch decision keys off `profile.type`, not the profile name.
+
+See **[Agent Roster & Profiles](docs/AGENT-ROSTER.md)** for the complete schema, recipes, and routing model.
+
+### Context Analysis (HUD summarizer) → `.env`
 
 The context analysis loop runs every 3–30 seconds, sending recent audio/screen context to an LLM. It produces a digest used for escalation scoring — when the score threshold is met (or always in `rich` mode), the digest is forwarded to the escalation agent for a full response.
 
@@ -139,12 +151,12 @@ The context analysis loop runs every 3–30 seconds, sending recent audio/screen
 | `ANALYSIS_API_KEY` | *(from OPENROUTER_API_KEY)* | API key; not needed for ollama |
 | `ANALYSIS_FALLBACK_MODELS` | `gemini-2.5-flash,...` | Comma-separated fallback chain |
 
-### Other Key Settings
+### Other Key Settings → `.env`
 
 | Variable | Default | Description |
 |---|---|---|
 | `OPENROUTER_API_KEY` | — | Required (unless `ANALYSIS_PROVIDER=ollama` + local transcription) |
-| `ESCALATION_MODE` | `selective` | `off` / `selective` / `focus` / `rich` |
+| `OPENCLAW_WS_TOKEN`, `OPENCLAW_HTTP_TOKEN` | — | Gateway secrets, referenced from `agents.json` via `${VAR}` indirection |
 | `PRIVACY_MODE` | `off` | `off` / `standard` / `strict` / `paranoid` |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
@@ -198,6 +210,7 @@ brew install ollama && ollama pull llava
 
 | Setup | Guide |
 |---|---|
+| **Agent Roster & Profiles** | [docs/AGENT-ROSTER.md](docs/AGENT-ROSTER.md) — pick agents, add custom profiles, route gateways |
 | Local OpenClaw | [docs/INSTALL-LOCAL.md](docs/INSTALL-LOCAL.md) |
 | Remote OpenClaw | [docs/INSTALL-REMOTE.md](docs/INSTALL-REMOTE.md) |
 | NemoClaw (Brev) | [docs/INSTALL.md](docs/INSTALL.md) |
