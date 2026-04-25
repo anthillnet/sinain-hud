@@ -1,12 +1,28 @@
 # Configuration Reference
 
-All configuration is via environment variables in a single `.env` file at the project root.
+> **Heads up:** Agent + gateway config moved from `.env` to
+> [`agents.json`](AGENT-ROSTER.md). The migrated keys are still honored as
+> a `.env` fallback, but new installs should use the wizard or hand-edit
+> `~/.sinain/agents.json` directly. Variables affected:
+> `SINAIN_AGENT`, `SINAIN_*_TURNS`, `*_ALLOWED_TOOLS`, `SINAIN_AUTO_APPROVE_TOOLS`,
+> `AGENT_DEBOUNCE_MS`, `AGENT_MAX_INTERVAL_MS`, `ESCALATION_MODE`,
+> `ESCALATION_COOLDOWN_MS`, `OPENCLAW_WS_URL`, `OPENCLAW_HTTP_URL`,
+> `OPENCLAW_SESSION_KEY`, `OPENCLAW_PHASE*_TIMEOUT_MS`,
+> `OPENCLAW_PING_INTERVAL_MS`. (`ESCALATION_TRANSPORT` was removed
+> entirely — agent identity is the transport now.)
+> See [Agent Roster & Profiles](AGENT-ROSTER.md) for the new schema.
+
+All other configuration is via environment variables. Sinain reads `~/.sinain/.env`
+(when run via npm) or the project-root `.env` (when run from source).
 
 ```bash
-cp .env.example .env    # then edit with your values
+cp .env.example ~/.sinain/.env    # then edit with your secrets
 ```
 
 sinain-core, sinain-agent, and sense_client all read from this file.
+Tokens (`OPENROUTER_API_KEY`, `OPENCLAW_WS_TOKEN`, `OPENCLAW_HTTP_TOKEN`)
+are referenced from `agents.json` via `${VAR}` indirection — keep secrets
+in `.env`, not in the JSON.
 
 ---
 
