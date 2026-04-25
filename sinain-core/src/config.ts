@@ -2,8 +2,9 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AnalysisConfig, EscalationConfig, OpenClawConfig, EscalationMode, EscalationTransport, LearningConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
+import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AnalysisConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
 import { PRESETS } from "./privacy/presets.js";
+import { loadAgentsConfig, findGatewayProfile, type AgentsConfig } from "./agents-loader.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -140,6 +141,26 @@ function loadPrivacyConfig(): PrivacyConfig {
 }
 
 export function loadConfig(): CoreConfig {
+  // sinain-agent/agents.json is the new single source of truth for the
+  // bare-agent + OpenClaw config that used to live in .env. Loading
+  // happens once at startup; null means the file isn't there (fresh
+  // checkout, custom layout, etc.) and we fall back to env defaults.
+  const agentsCfg = loadAgentsConfig();
+  if (agentsCfg) {
+    console.log(`[config] loaded agents config from ${agentsCfg.loadedFrom}`);
+  }
+
+  // Helpers that prefer agents.json values, then env, then a hardcoded
+  // default. Keeps .env working as a safety net during the migration.
+  const fromCfgStr = (cfgVal: string | undefined, envKey: string, def: string): string => {
+    if (cfgVal !== undefined && cfgVal !== "") return cfgVal;
+    return env(envKey, def);
+  };
+  const fromCfgInt = (cfgVal: number | undefined, envKey: string, def: number): number => {
+    if (cfgVal !== undefined) return cfgVal;
+    return intEnv(envKey, def);
+  };
+
   const audioConfig: AudioPipelineConfig = {
     device: env("AUDIO_DEVICE", "BlackHole 2ch"),
     sampleRate: intEnv("AUDIO_SAMPLE_RATE", 16000),
@@ -196,30 +217,57 @@ export function loadConfig(): CoreConfig {
       .split(",").map(s => s.trim()).filter(Boolean),
     timeout: intEnv("ANALYSIS_TIMEOUT", 15000),
     pushToFeed: boolEnv("AGENT_PUSH_TO_FEED", true),
-    debounceMs: intEnv("AGENT_DEBOUNCE_MS", 3000),
-    maxIntervalMs: intEnv("AGENT_MAX_INTERVAL_MS", 30000),
+    // analyzer pacing: agents.json `analyzer` block, fall back to env
+    debounceMs: fromCfgInt(agentsCfg?.analyzer?.debounceMs, "AGENT_DEBOUNCE_MS", 3000),
+    maxIntervalMs: fromCfgInt(agentsCfg?.analyzer?.maxIntervalMs, "AGENT_MAX_INTERVAL_MS", 30000),
     cooldownMs: intEnv("AGENT_COOLDOWN_MS", 10000),
     maxAgeMs: intEnv("AGENT_MAX_AGE_MS", 120000),
     historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
   };
 
-  const escalationMode = env("ESCALATION_MODE", "rich") as EscalationMode;
+  // escalation policy: agents.json `escalation` block, fall back to env.
+  // Mode is runtime-mutable via the overlay's flash-icon selector; this only
+  // sets the boot-time default. (Transport is no longer a setting — per-lane
+  // agent choice in the overlay determines WS vs HTTP dispatch.)
+  const escalationMode = fromCfgStr(agentsCfg?.escalation?.mode, "ESCALATION_MODE", "rich") as EscalationMode;
   const escalationConfig: EscalationConfig = {
     mode: escalationMode,
-    cooldownMs: intEnv("ESCALATION_COOLDOWN_MS", 30000),
-    staleMs: intEnv("ESCALATION_STALE_MS", 90000),
-    transport: env("ESCALATION_TRANSPORT", "auto") as EscalationTransport,
+    cooldownMs: fromCfgInt(agentsCfg?.escalation?.cooldownMs, "ESCALATION_COOLDOWN_MS", 30000),
+    staleMs: fromCfgInt(agentsCfg?.escalation?.staleMs, "ESCALATION_STALE_MS", 90000),
   };
 
+  // OpenClaw gateway config: pick the first openclaw-TYPED profile
+  // (preferring the canonical name "openclaw"). This lets users add
+  // server-side variants — `nemoclaw`, `nanoclaw-prod`, etc. — as full
+  // peers; the WS client connects to whichever shows up first in the
+  // profiles list. Removing all openclaw-typed profiles (and unsetting
+  // the env vars) leaves gatewayWsUrl empty → registerBareAgent skips
+  // injecting any gateway entry into the roster, and escalator.start()
+  // skips the WS connect.
+  //
+  // Limitation: only ONE gateway URL gets a live WS client today. Adding
+  // multiple openclaw-typed profiles with different URLs lets the user
+  // pick them in the overlay roster, but dispatch always uses the first
+  // one's connection params. True per-profile WS clients is a follow-up.
+  const gateway = findGatewayProfile(agentsCfg);
+  const openclawProfile = gateway?.profile;
+  // wsUrl/hookUrl default to empty so "delete the openclaw profile" genuinely
+  // disables the gateway. The shipped agents.example.json includes the
+  // profile with localhost defaults, so fresh installs still work out of
+  // the box; removal is an explicit opt-out.
   const openclawConfig: OpenClawConfig = {
-    gatewayWsUrl: envAllowEmpty("OPENCLAW_WS_URL", "OPENCLAW_GATEWAY_WS_URL", "ws://localhost:18789"),
-    gatewayToken: env("OPENCLAW_WS_TOKEN", env("OPENCLAW_GATEWAY_TOKEN", "")),
-    hookUrl: envAllowEmpty("OPENCLAW_HTTP_URL", "OPENCLAW_HOOK_URL", "http://localhost:18789/hooks/agent"),
-    hookToken: env("OPENCLAW_HTTP_TOKEN", env("OPENCLAW_HOOK_TOKEN", "")),
-    sessionKey: env("OPENCLAW_SESSION_KEY", "agent:main:sinain"),
-    phase1TimeoutMs: intEnv("OPENCLAW_PHASE1_TIMEOUT_MS", 30_000),
-    phase2TimeoutMs: intEnv("OPENCLAW_PHASE2_TIMEOUT_MS", 120_000),
-    pingIntervalMs: intEnv("OPENCLAW_PING_INTERVAL_MS", 30_000),
+    gatewayWsUrl: fromCfgStr(openclawProfile?.wsUrl, "OPENCLAW_WS_URL",
+      envAllowEmpty("OPENCLAW_GATEWAY_WS_URL", undefined, "")),
+    gatewayToken: fromCfgStr(openclawProfile?.wsToken, "OPENCLAW_WS_TOKEN",
+      env("OPENCLAW_GATEWAY_TOKEN", "")),
+    hookUrl: fromCfgStr(openclawProfile?.httpUrl, "OPENCLAW_HTTP_URL",
+      envAllowEmpty("OPENCLAW_HOOK_URL", undefined, "")),
+    hookToken: fromCfgStr(openclawProfile?.httpToken, "OPENCLAW_HTTP_TOKEN",
+      env("OPENCLAW_HOOK_TOKEN", "")),
+    sessionKey: fromCfgStr(openclawProfile?.sessionKey, "OPENCLAW_SESSION_KEY", "agent:main:sinain"),
+    phase1TimeoutMs: fromCfgInt(openclawProfile?.phase1TimeoutMs, "OPENCLAW_PHASE1_TIMEOUT_MS", 30_000),
+    phase2TimeoutMs: fromCfgInt(openclawProfile?.phase2TimeoutMs, "OPENCLAW_PHASE2_TIMEOUT_MS", 120_000),
+    pingIntervalMs: fromCfgInt(openclawProfile?.pingIntervalMs, "OPENCLAW_PING_INTERVAL_MS", 30_000),
   };
 
   const situationDir = env("OPENCLAW_WORKSPACE_DIR", "~/.openclaw/workspace");
@@ -236,10 +284,12 @@ export function loadConfig(): CoreConfig {
 
   const privacyConfig = loadPrivacyConfig();
 
-  // SINAIN_AUTO_APPROVE_TOOLS: space-separated tool names or prefix patterns
-  // (suffix *) that sinain-core auto-approves at /spawn/approve without
-  // routing to the overlay. Default matches the legacy hardcoded behavior.
-  const autoApproveRaw = env(
+  // autoApproveTools: agents.json top-level field, falls back to
+  // SINAIN_AUTO_APPROVE_TOOLS env. Space-separated tool names or prefix
+  // patterns (suffix *) that sinain-core auto-approves at /spawn/approve
+  // without routing to the overlay.
+  const autoApproveRaw = fromCfgStr(
+    agentsCfg?.autoApproveTools,
     "SINAIN_AUTO_APPROVE_TOOLS",
     "Read Glob Grep Ls Cat mcp__sinain*",
   );
