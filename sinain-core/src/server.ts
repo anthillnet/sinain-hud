@@ -179,6 +179,7 @@ export interface ServerDeps {
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   listKnowledgeEntities?: (max: number) => Promise<string>;
+  queryKnowledgeAsOf?: (entity: string, date: string) => Promise<string>;
   exportKnowledge?: (domain: string | null, max: number) => Promise<string>;
   importKnowledge?: (data: string) => Promise<string>;
   onSpawnCommand?: (text: string) => void;
@@ -449,6 +450,28 @@ export function createAppServer(deps: ServerDeps) {
           }
         } else {
           res.end(JSON.stringify({ ok: true, entities: [] }));
+        }
+        return;
+      }
+
+      // ── /knowledge/as-of — bi-temporal entity query ──
+      if (req.method === "GET" && url.pathname === "/knowledge/as-of") {
+        const entity = url.searchParams.get("entity") || "";
+        const date = url.searchParams.get("date") || "";
+        if (!entity || !date) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: "entity and date params required" }));
+          return;
+        }
+        if (deps.queryKnowledgeAsOf) {
+          try {
+            const result = await deps.queryKnowledgeAsOf(entity, date);
+            res.end(JSON.stringify({ ok: true, entity, date, attributes: JSON.parse(result) }));
+          } catch (err) {
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: false, error: "bi-temporal query not available" }));
         }
         return;
       }
