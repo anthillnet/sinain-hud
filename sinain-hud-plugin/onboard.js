@@ -154,25 +154,54 @@ export async function runOnboard(args = {}) {
   p.log.success("API key saved.");
 
   if (flow === "quickstart") {
-    // QuickStart: sensible defaults. Gateway is opt-in (skip by default);
-    // agent + escalation defaults go to agents.json.
+    // QuickStart: sensible defaults + a single opt-in question for OpenClaw.
+    // Gateway integration is off by default; users who want it run Advanced
+    // (or answer Yes here, which then walks them through stepGateway).
     vars.TRANSCRIPTION_BACKEND = base.TRANSCRIPTION_BACKEND || "openrouter";
     vars.PRIVACY_MODE = base.PRIVACY_MODE || "standard";
     vars.AGENT_MODEL = base.AGENT_MODEL || "google/gemini-2.5-flash-lite";
+
+    // Ask explicitly so first-run installs don't silently inherit a gateway
+    // profile from agents.example.json. Default reflects current state — No
+    // for fresh installs (silences the WS reconnect loop), Yes for re-runs
+    // that already had OpenClaw configured (so we don't surprise-delete it).
+    const hasExistingGateway = (() => {
+      try {
+        const agentsPath = path.join(SINAIN_DIR, "agents.json");
+        if (!fs.existsSync(agentsPath)) return false;
+        const cfg = JSON.parse(fs.readFileSync(agentsPath, "utf-8"));
+        return !!cfg?.profiles?.openclaw;
+      } catch { return false; }
+    })();
+    const enableGateway = guard(await p.confirm({
+      message: "Enable OpenClaw gateway integration?",
+      initialValue: hasExistingGateway,
+    }));
+
     agentsPatch = {
       default: base.SINAIN_AGENT || "claude",
       escalationMode: "off",
-      // Don't touch openclawProfile in quickstart — keeps existing config
-      // intact for re-runs; first-time users get the "skip" state from
-      // agents.example.json bootstrap (no openclaw profile means no gateway).
     };
+
+    if (enableGateway) {
+      // Walk through full gateway setup (URL, tokens, session key) — same
+      // step Advanced uses. Returns { envVars, agentsPatch } we merge in.
+      const gatewayResult = await stepGateway(base, "OpenClaw gateway");
+      Object.assign(vars, gatewayResult.envVars);
+      Object.assign(agentsPatch, gatewayResult.agentsPatch);
+    } else {
+      // Explicitly clear any inherited openclaw profile so the runtime
+      // doesn't auto-register the gateway or attempt WS reconnects.
+      agentsPatch.openclawProfile = null;
+    }
 
     p.note(
       [
         `Transcription: ${vars.TRANSCRIPTION_BACKEND}`,
         `Privacy: ${vars.PRIVACY_MODE}`,
         `Model: ${vars.AGENT_MODEL}`,
-        `Escalation: off (pick a gateway agent in the overlay to enable)`,
+        `OpenClaw gateway: ${enableGateway ? "enabled" : "disabled"}`,
+        `Escalation: ${agentsPatch.escalationMode || "off"}`,
         "",
         `Change later: sinain config`,
       ].join("\n"),
@@ -368,10 +397,9 @@ if (flags.nonInteractive) {
   }
 
   writeEnv(vars);
-  // Default agent + escalation off (no gateway by default for non-interactive).
-  // openclaw profile is left as-is from the example template (or absent
-  // if first run) — gateway is opt-in via the wizard or `sinain config`.
-  writeAgentsConfig({ default: "claude", escalationMode: "off" });
+  // Default agent + escalation off + openclaw explicitly disabled. Gateway is
+  // opt-in via the interactive wizard (`sinain onboard`) or `sinain config`.
+  writeAgentsConfig({ default: "claude", escalationMode: "off", openclawProfile: null });
   console.log(c.green(`  Config written to ${ENV_PATH} + ~/.sinain/agents.json`));
   process.exit(0);
 } else {
