@@ -328,6 +328,8 @@ export interface ContextWindow {
   windowMs: number;
   newestEventTs: number;
   preset: RichnessPreset;
+  /** Pre-fetched knowledge facts from entity subscription cache. */
+  knowledgeFacts?: string;
 }
 
 // ── Escalation types ──
