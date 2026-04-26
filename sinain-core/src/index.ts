@@ -173,6 +173,48 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
   return JSON.stringify(unique.slice(0, max));
 }
 
+/** Bi-temporal entity query: what did we know about entity X on a given date? */
+async function queryKnowledgeAsOfMulti(entity: string, date: string): Promise<string> {
+  const { execFileSync } = await import("node:child_process");
+  const { dirname } = await import("node:path");
+
+  const localDir = resolveLocalMemoryDir();
+  const workspaceDir = `${resolveWorkspace()}/memory`;
+  const dbPaths = [
+    `${localDir}/knowledge-graph.db`,
+    `${workspaceDir}/knowledge-graph.db`,
+  ];
+
+  const scriptCandidates = [
+    `${dirname(new URL(import.meta.url).pathname)}/../sinain-hud-plugin/sinain-memory`,
+    `${dirname(new URL(import.meta.url).pathname)}/sinain-memory`,
+    `${resolveWorkspace()}/sinain-memory`,
+  ];
+  const scriptsDir = scriptCandidates.find(p => existsSync(`${p}/triplestore.py`)) || scriptCandidates[0];
+
+  for (const dbPath of dbPaths) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const pyCode = `
+import sys, json; sys.path.insert(0, "${scriptsDir}")
+from datetime import datetime; from triplestore import TripleStore
+store = TripleStore("${dbPath}")
+d = datetime.fromisoformat("${date}")
+# Query both entity:X and fact:X-* patterns
+result = store.entity_as_of("entity:${entity}", d)
+if not result:
+    result = store.entity_as_of("${entity}", d)
+print(json.dumps({k: v for k, v in result.items()}, ensure_ascii=False))
+`;
+      const out = execFileSync("python3", ["-c", pyCode], {
+        timeout: 5000, encoding: "utf-8",
+      }).trim();
+      if (out && out !== "{}") return out;
+    } catch { /* skip */ }
+  }
+  return "{}";
+}
+
 /** Export knowledge facts as a portable JSON module. */
 async function exportKnowledgeMulti(domain: string | null, max: number): Promise<string> {
   const { execFileSync } = await import("node:child_process");
@@ -386,6 +428,13 @@ async function main() {
   setImmediate(() => {
     localCuration.distillPendingSession();
   });
+
+  // ── Entity subscription cache ���─
+  // Detects entity mentions in transcription, prefetches knowledge facts async.
+  // By the time the agent loop runs (3s debounce), cache is warm.
+  const { EntityCache } = await import("./learning/entity-cache.js");
+  const entityCache = new EntityCache(queryKnowledgeFactsMulti);
+  entityCache.loadEntityNames().catch(() => {});
   localCuration.startPeriodicCuration();
 
   // Wire incremental distillation: when feed buffer fills, distill before items are lost
@@ -464,6 +513,7 @@ async function main() {
     },
     feedbackStore: feedbackStore ?? undefined,
     costTracker,
+    entityCache,
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
@@ -590,6 +640,11 @@ async function main() {
     if (!isSystem) item.audioSource = "mic";
     wsHandler.broadcast(`${tag} ${bufferText}`, "normal");
     recorder.onFeedItem(item); // Collect for recording if active
+
+    // Entity subscription: detect mentions and prefetch knowledge (async, non-blocking)
+    const detectedEntities = entityCache.detectEntities(result.text);
+    if (detectedEntities.length > 0) entityCache.prefetch(detectedEntities);
+
     agentLoop.onNewContext(); // Trigger debounced analysis
   });
 
@@ -817,6 +872,7 @@ async function main() {
     },
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
     listKnowledgeEntities: listKnowledgeEntitiesMulti,
+    queryKnowledgeAsOf: queryKnowledgeAsOfMulti,
     exportKnowledge: exportKnowledgeMulti,
     importKnowledge: importKnowledgeToLocal,
 
