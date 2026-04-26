@@ -64,7 +64,7 @@
   },
 
   "escalation": {
-    "mode": "rich",
+    "mode": "off",
     "cooldownMs": 30000,
     "staleMs": 90000
   },
@@ -81,8 +81,15 @@
         "OPENAI_API_KEY": "${OPENROUTER_API_KEY}"
       }
     },
+    "codex":      { "type": "codex" },
+    "goose":      { "type": "goose" },
+    "junie":      { "type": "junie" },
+    "aider":      { "type": "aider" }
+  },
+
+  "_examples": {
     "openclaw": {
-      "_comment": "Remote gateway routing. Selecting openclaw for a lane sends that lane's traffic to the OpenClaw gateway via WS RPC instead of the local bare agent. sinain-core reads these fields directly at startup to construct the WS client. Removing this profile disables the gateway path entirely (no WS client, no openclaw chip in the overlay roster).",
+      "_comment": "OpenClaw gateway routing. Move this entry into `profiles` to enable. The wizard's `sinain onboard --advanced` step or `sinain config gateway` populates this section automatically with your gateway URL/tokens. Selecting openclaw for a lane sends that lane's traffic via WS RPC to the gateway instead of the local bare agent. Disabled by default so first-run installs don't attempt WS connections to a gateway that isn't running.",
       "type": "openclaw",
       "wsUrl": "ws://localhost:18789",
       "wsToken": "${OPENCLAW_WS_TOKEN}",
@@ -93,13 +100,6 @@
       "phase2TimeoutMs": 120000,
       "pingIntervalMs": 30000
     },
-    "codex":      { "type": "codex" },
-    "goose":      { "type": "goose" },
-    "junie":      { "type": "junie" },
-    "aider":      { "type": "aider" }
-  },
-
-  "_examples": {
     "pclaude": {
       "_comment": "Personal claude config. `bin` must be a real PATH binary — replicate a shell alias as bin+env (the alias `pclaude=CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude` becomes the entry below).",
       "type": "claude",
