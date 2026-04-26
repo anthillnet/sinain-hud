@@ -37,6 +37,8 @@ export interface AgentLoopDeps {
   feedbackStore?: { queryRecent(n: number): FeedbackRecord[] };
   /** Optional: cost tracker for LLM cost accumulation. */
   costTracker?: CostTracker;
+  /** Optional: entity subscription cache for real-time knowledge injection. */
+  entityCache?: import("../learning/entity-cache.js").EntityCache;
 }
 
 export interface TraceContext {
@@ -265,6 +267,15 @@ export class AgentLoop extends EventEmitter {
     const contextWindow = buildContextWindow(
       feedBuffer, senseBuffer, richness, this.deps.agentConfig.maxAgeMs,
     );
+
+    // Entity subscription: inject cached knowledge facts into context
+    if (this.deps.entityCache) {
+      const recentText = contextWindow.audio.map(a => a.text).join(" ");
+      const entities = this.deps.entityCache.detectEntities(recentText);
+      const facts = this.deps.entityCache.getRelevantFacts(entities, 500);
+      if (facts) contextWindow.knowledgeFacts = facts;
+    }
+
     this.deps.profiler?.timerRecord("agent.contextBuild", Date.now() - ctxStart);
 
     this.running = true;
