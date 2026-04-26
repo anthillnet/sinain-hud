@@ -99,6 +99,12 @@ export class Escalator {
   // Store context from last escalation for response handling
   private lastEscalationContext: ContextWindow | null = null;
 
+  // Knowledge enrichment is skipped on the very first escalation per process
+  // to avoid the 5s fetchKnowledgeFacts() cold-start tax on user-perceived
+  // first-response latency. Each subsequent escalation does its own fetch
+  // independently — no cross-escalation cache, no shared content state.
+  private firstEscalationDone = false;
+
   // User command to inject into the next escalation
   private pendingUserCommand: UserCommand | null = null;
   private static readonly USER_COMMAND_EXPIRY_MS = 120_000; // 2 minutes
@@ -281,8 +287,10 @@ export class Escalator {
     // Clear user command after building the message (consumed once)
     this.pendingUserCommand = null;
 
-    // Enrich with long-term knowledge facts (best-effort, 5s max)
-    if (this.deps.queryKnowledgeFacts) {
+    // Enrich with long-term knowledge facts (best-effort, 5s max).
+    // Skipped on the inaugural escalation per process to eliminate cold-start
+    // latency — the user's first response shouldn't wait for KG warmup.
+    if (this.deps.queryKnowledgeFacts && this.firstEscalationDone) {
       try {
         const knowledgeSection = await fetchKnowledgeFacts(
           contextWindow, entry.digest, this.deps.queryKnowledgeFacts,
@@ -294,7 +302,10 @@ export class Escalator {
       } catch (err) {
         log(TAG, `knowledge enrichment failed: ${String(err)}`);
       }
+    } else if (!this.firstEscalationDone) {
+      log(TAG, `first escalation: skipping knowledge fetch (fast path)`);
     }
+    this.firstEscalationDone = true;
 
     const slotId = createHash("sha256").update(this.deps.openclawConfig.sessionKey + entry.ts).digest("hex").slice(0, 16);
     const slotEntry: SlotEntry = {
