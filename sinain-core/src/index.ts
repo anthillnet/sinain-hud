@@ -386,6 +386,13 @@ async function main() {
   setImmediate(() => {
     localCuration.distillPendingSession();
   });
+
+  // ── Entity subscription cache ���─
+  // Detects entity mentions in transcription, prefetches knowledge facts async.
+  // By the time the agent loop runs (3s debounce), cache is warm.
+  const { EntityCache } = await import("./learning/entity-cache.js");
+  const entityCache = new EntityCache(queryKnowledgeFactsMulti);
+  entityCache.loadEntityNames().catch(() => {});
   localCuration.startPeriodicCuration();
 
   // Wire incremental distillation: when feed buffer fills, distill before items are lost
@@ -464,6 +471,7 @@ async function main() {
     },
     feedbackStore: feedbackStore ?? undefined,
     costTracker,
+    entityCache,
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
@@ -590,6 +598,11 @@ async function main() {
     if (!isSystem) item.audioSource = "mic";
     wsHandler.broadcast(`${tag} ${bufferText}`, "normal");
     recorder.onFeedItem(item); // Collect for recording if active
+
+    // Entity subscription: detect mentions and prefetch knowledge (async, non-blocking)
+    const detectedEntities = entityCache.detectEntities(result.text);
+    if (detectedEntities.length > 0) entityCache.prefetch(detectedEntities);
+
     agentLoop.onNewContext(); // Trigger debounced analysis
   });
 
