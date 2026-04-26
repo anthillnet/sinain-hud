@@ -150,6 +150,10 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
   const hasImages = imagesForPrompt && imagesForPrompt.length > 0;
   const imageNote = hasImages ? `\n\nScreen screenshots (${imagesForPrompt!.length}) are attached below.` : "";
 
+  const knowledgeSection = ctx.knowledgeFacts
+    ? `\n\nRelevant background:\n${ctx.knowledgeFacts}`
+    : "";
+
   return `Active app: ${normalizeAppName(ctx.currentApp)}
 App history: ${appSwitches || "(none)"}${recorderSection}
 
@@ -157,7 +161,7 @@ Screen (OCR text, newest first):
 ${screenLines || "(no screen data)"}
 
 Audio transcript (newest first, \ud83d\udd0a=system, \ud83c\udf99=mic):
-${audioLines || "(silence)"}${imageNote}`;
+${audioLines || "(silence)"}${knowledgeSection}${imageNote}`;
 }
 
 /**
