@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/models/feed_item.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
@@ -397,6 +398,16 @@ class _FeedViewState extends State<FeedView> {
               data: item.text,
               shrinkWrap: true,
               softLineBreak: true,
+              onTapLink: (text, href, title) async {
+                if (href == null) return;
+                final uri = Uri.tryParse(href);
+                if (uri == null) return;
+                const allowed = {'http', 'https', 'mailto'};
+                if (!allowed.contains(uri.scheme)) return;
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
               styleSheet: MarkdownStyleSheet(
                 p: TextStyle(fontFamily: 'JetBrainsMono', fontSize: fs, color: color, height: 1.3),
                 code: TextStyle(
@@ -404,6 +415,12 @@ class _FeedViewState extends State<FeedView> {
                   fontSize: (fs - 1).clamp(7.0, 22.0),
                   color: color,
                   backgroundColor: Colors.white.withValues(alpha: 0.1),
+                ),
+                a: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: fs,
+                  color: color,
+                  decoration: TextDecoration.underline,
                 ),
               ),
             ),
