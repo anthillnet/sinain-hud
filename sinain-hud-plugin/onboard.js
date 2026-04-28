@@ -180,7 +180,11 @@ export async function runOnboard(args = {}) {
 
     agentsPatch = {
       default: base.SINAIN_AGENT || "claude",
-      escalationMode: "off",
+      // No `escalationMode` written — lane (default agent) is the single
+      // source of truth for whether escalation runs. If the user picks a
+      // local agent (claude), the runtime's default mode ("rich" from
+      // config.ts) takes effect and registerBareAgent ensures lane and
+      // mode stay reconciled at boot.
     };
 
     if (enableGateway) {
@@ -397,9 +401,9 @@ if (flags.nonInteractive) {
   }
 
   writeEnv(vars);
-  // Default agent + escalation off + openclaw explicitly disabled. Gateway is
-  // opt-in via the interactive wizard (`sinain onboard`) or `sinain config`.
-  writeAgentsConfig({ default: "claude", escalationMode: "off", openclawProfile: null });
+  // Default agent + openclaw explicitly disabled. No escalation mode written
+  // — lane is the source of truth, registerBareAgent reconciles at boot.
+  writeAgentsConfig({ default: "claude", openclawProfile: null });
   console.log(c.green(`  Config written to ${ENV_PATH} + ~/.sinain/agents.json`));
   process.exit(0);
 } else {
