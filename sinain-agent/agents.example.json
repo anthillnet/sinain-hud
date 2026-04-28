@@ -64,7 +64,7 @@
   },
 
   "escalation": {
-    "mode": "off",
+    "_comment": "Lane (the agent picked for escalation in agents.json `default` or via the overlay chip) is the source of truth for whether escalation runs. `mode` is intentionally omitted here — the runtime default (rich) applies, and registerBareAgent reconciles mode with lane at boot. Override `mode` only if you want to force selective/focus/off semantics.",
     "cooldownMs": 30000,
     "staleMs": 90000
   },
