@@ -734,6 +734,16 @@ async function main() {
     }
     wsHandler.updateState({ agents: { ...bareAgentState } });
     log(TAG, `bareagent register: available=[${clean.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} spawn=${bareAgentState.spawnAgent}`);
+
+    // Lane is the source of truth for "is escalation active?". If a lane is
+    // set but mode is still "off" (e.g. an old wizard run wrote mode=off and
+    // the user has since picked an agent in the chip selector — or we just
+    // booted from agents.json with that combination), reconcile by promoting
+    // mode to match. Mirrors the existing set_agent → resumeEscalation flow,
+    // applied at register time so the boot-from-disk case isn't an exception.
+    if (bareAgentState.escalationAgent && config.escalationConfig.mode === "off") {
+      resumeEscalationInternal();
+    }
   }
 
   // ── Create HTTP + WS server ──
