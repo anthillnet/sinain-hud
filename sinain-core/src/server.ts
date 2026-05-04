@@ -60,7 +60,7 @@ let allFacts = [];
 async function loadFacts() {
   document.getElementById('status').textContent = 'Loading...';
   try {
-    const res = await fetch('/knowledge/entities?max=200');
+    const res = await fetch('/knowledge/entities?max=1000');
     const data = await res.json();
     allFacts = typeof data.entities === 'string' ? JSON.parse(data.entities) : data.entities;
     const domains = [...new Set(allFacts.map(f => f.domain).filter(Boolean))].sort();
@@ -440,7 +440,7 @@ export function createAppServer(deps: ServerDeps) {
 
       if (req.method === "GET" && url.pathname === "/knowledge/entities") {
         // List all entities in the knowledge graph
-        const max = Math.min(parseInt(url.searchParams.get("max") || "50"), 200);
+        const max = Math.min(parseInt(url.searchParams.get("max") || "50"), 1000);
         if (deps.listKnowledgeEntities) {
           try {
             const entities = await deps.listKnowledgeEntities(max);
