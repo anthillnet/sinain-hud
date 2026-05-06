@@ -305,3 +305,15 @@ These issues are specific to servers that previously ran OpenClaw in Docker and 
 | `agent:main:sinain` session key mismatch | Verify `OPENCLAW_SESSION_KEY=agent:main:sinain` in `sinain-core/.env` |
 | Camera blocked in Google Meet | Ensure you're using the `ffmpeg`-based audio path (not `sox rec`) — see `start.sh` |
 | sinain-core not picking up `.env` changes | Touch any source file (`touch sinain-core/src/index.ts`) or restart the process |
+
+---
+
+## Next: connect your agent (MCP)
+
+Once sinain-core is up, register the bundled MCP server with whichever MCP-aware agent you use (Claude Code, Cursor, Codex, Goose, Junie, Claude Desktop):
+
+```bash
+npx @geravant/sinain@latest mcp install
+```
+
+See [docs/MCP-INTEGRATION.md](MCP-INTEGRATION.md) for setup details and [docs/MCP-CAPABILITIES.md](MCP-CAPABILITIES.md) for what the 15 `sinain_*` tools enable.

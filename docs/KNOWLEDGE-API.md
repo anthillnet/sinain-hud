@@ -5,6 +5,8 @@ HTTP endpoints for querying, browsing, exporting, and importing knowledge from t
 **Base URL**: `http://localhost:9500`
 **Web UI**: `http://localhost:9500/knowledge/ui`
 
+> **Using Claude?** To query the knowledge graph from inside a Claude conversation (Claude Code, Claude Desktop), see [MCP Integration](MCP-INTEGRATION.md). The HTTP endpoints below are what the MCP server bridges to.
+
 ## Storage
 
 Knowledge is stored in SQLite triplestore databases. The API queries **both** databases and merges results:
