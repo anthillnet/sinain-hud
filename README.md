@@ -235,11 +235,17 @@ npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
 
 See [Knowledge System docs](docs/knowledge-system.md) for architecture details.
 
+### Querying knowledge from Claude (MCP)
+
+The default way to give Claude (Claude Code, Claude Desktop, or `pclaude`) read+write access to the knowledge graph is via sinain's MCP server. Register it once at user scope and Claude gains 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, and `sinain_distill_session` — across every project. See **[MCP Integration](docs/MCP-INTEGRATION.md)** for the full setup.
+
 ## Deep Dives
 
 | Topic | Doc |
 |---|---|
 | Knowledge System | [docs/knowledge-system.md](docs/knowledge-system.md) |
+| Knowledge API (HTTP) | [docs/KNOWLEDGE-API.md](docs/KNOWLEDGE-API.md) |
+| MCP Integration (Claude) | [docs/MCP-INTEGRATION.md](docs/MCP-INTEGRATION.md) |
 | Escalation Architecture | [docs/clean-architecture-escalation.md](docs/clean-architecture-escalation.md) |
 | Personality Traits | [docs/PERSONALITY-TRAITS-SYSTEM.md](docs/PERSONALITY-TRAITS-SYSTEM.md) |
 | Privacy Threat Model | [docs/privacy-protection-design.md](docs/privacy-protection-design.md) |
