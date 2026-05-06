@@ -278,3 +278,15 @@ If your NemoClaw sandbox was destroyed and recreated (e.g. Brev instance restart
 | `FailoverError: No API key found for provider "anthropic"` | Agent model set incorrectly. Inside the sandbox, verify `agents.defaults.model` isn't set to `nvidia-nim/...` — OpenShell uses its own routing. |
 | Sandbox recreated, nothing works | See [Recovery after sandbox recreation](#recovery-after-sandbox-recreation) above |
 | `403 Forbidden` on npm install | `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy` then retry `npx @geravant/sinain` |
+
+---
+
+## Next: connect your agent (MCP)
+
+Once sinain-core is up, register the bundled MCP server with whichever MCP-aware agent you use (Claude Code, Cursor, Codex, Goose, Junie, Claude Desktop):
+
+```bash
+npx @geravant/sinain@latest mcp install
+```
+
+See [docs/MCP-INTEGRATION.md](MCP-INTEGRATION.md) for setup details and [docs/MCP-CAPABILITIES.md](MCP-CAPABILITIES.md) for what the 15 `sinain_*` tools enable.

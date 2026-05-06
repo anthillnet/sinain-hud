@@ -312,3 +312,15 @@ openclaw gateway --bind loopback --port 18789 --force &
 | Vision shows "cloud (OpenRouter)" at startup | Set `LOCAL_VISION_ENABLED=true` in `.env` and restart |
 | `local ollama failed` then falls back to OpenRouter | Ollama server may not be running. Start it: `ollama serve` |
 | 401 "User not found" in paranoid mode | OpenRouter API key is invalid or revoked. With `LOCAL_VISION_ENABLED=true`, this is expected — Ollama handles everything. |
+
+---
+
+## Next: connect your agent (MCP)
+
+Once sinain-core is up, register the bundled MCP server with whichever MCP-aware agent you use (Claude Code, Cursor, Codex, Goose, Junie, Claude Desktop):
+
+```bash
+npx @geravant/sinain@latest mcp install
+```
+
+See [docs/MCP-INTEGRATION.md](MCP-INTEGRATION.md) for setup details and [docs/MCP-CAPABILITIES.md](MCP-CAPABILITIES.md) for what the 15 `sinain_*` tools enable.

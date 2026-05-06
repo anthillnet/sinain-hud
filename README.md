@@ -235,11 +235,42 @@ npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
 
 See [Knowledge System docs](docs/knowledge-system.md) for architecture details.
 
+### Querying knowledge from any MCP agent
+
+Sinain's knowledge graph is exposed to any MCP-aware agent via the bundled MCP server. See **[Connect Your Coding Agent (MCP)](#connect-your-coding-agent-mcp)** below for setup.
+
+## Connect Your Coding Agent (MCP)
+
+Sinain ships an MCP server that exposes 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, `sinain_distill_session`, `sinain_get_context`, and `sinain_respond` — to any MCP-aware agent. Register it once and the agent can read your knowledge graph, drive escalations, surface text on the HUD, and run the heartbeat pipeline from any project.
+
+```bash
+npx @geravant/sinain@latest mcp install
+```
+
+The wizard detects which MCP agents you have installed and registers sinain for the ones you select. Re-runnable any time; idempotent.
+
+| Agent | Setup | Config it touches |
+|---|---|---|
+| **Claude Code** | `mcp install` (auto via wizard) | `~/.claude.json` (`claude mcp add`) |
+| **Claude Desktop** | `mcp install` (auto via wizard) | `~/Library/Application Support/Claude/claude_desktop_config.json` (mac) |
+| **Cursor** | `mcp install` (auto via wizard) | `~/.cursor/mcp.json` |
+| **Codex** | `mcp install` (auto via wizard) | `~/.codex/config.toml` (`codex mcp add`) |
+| **Goose** | `mcp install` (auto via wizard) | `~/.config/goose/config.yaml` |
+| **Junie** | `mcp install` (auto via wizard) | `~/.junie/mcp/mcp.json` |
+
+> **Already in `sinain onboard`** — step 6 of the advanced flow runs the same registration. Quickstart asks once if any MCP agent is detected.
+
+- See [docs/MCP-INTEGRATION.md](docs/MCP-INTEGRATION.md) for setup details, troubleshooting, and the manual `pclaude` / alternate `CLAUDE_CONFIG_DIR` recipe.
+- See [docs/MCP-CAPABILITIES.md](docs/MCP-CAPABILITIES.md) for what each tool enables, with example prompts and end-to-end recipes.
+
 ## Deep Dives
 
 | Topic | Doc |
 |---|---|
 | Knowledge System | [docs/knowledge-system.md](docs/knowledge-system.md) |
+| Knowledge API (HTTP) | [docs/KNOWLEDGE-API.md](docs/KNOWLEDGE-API.md) |
+| MCP Integration (setup) | [docs/MCP-INTEGRATION.md](docs/MCP-INTEGRATION.md) |
+| MCP Capabilities (tools + recipes) | [docs/MCP-CAPABILITIES.md](docs/MCP-CAPABILITIES.md) |
 | Escalation Architecture | [docs/clean-architecture-escalation.md](docs/clean-architecture-escalation.md) |
 | Personality Traits | [docs/PERSONALITY-TRAITS-SYSTEM.md](docs/PERSONALITY-TRAITS-SYSTEM.md) |
 | Privacy Threat Model | [docs/privacy-protection-design.md](docs/privacy-protection-design.md) |

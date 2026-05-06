@@ -144,6 +144,12 @@ cp .env.example .env
 
 ### MCP Server Registration
 
+> **Easiest path:** the wizard registers sinain MCP for every detected agent.
+> Run `npx @geravant/sinain@latest mcp install` (also runs as **`[6/6]`** of `sinain onboard --advanced`).
+> Idempotent across re-runs and the canonical way to repair stale paths after upgrades.
+> The recipes below are for non-wizard installs, alternate `CLAUDE_CONFIG_DIR`, or per-CLI customization.
+> See [MCP-INTEGRATION.md](MCP-INTEGRATION.md) and [MCP-CAPABILITIES.md](MCP-CAPABILITIES.md) for the full picture.
+
 MCP agents need access to the sinain MCP server (`sinain-mcp-server/index.ts`). How it's configured depends on the agent:
 
 | Agent | MCP setup | Config location |
