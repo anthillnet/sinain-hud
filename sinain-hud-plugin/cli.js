@@ -81,6 +81,13 @@ switch (cmd) {
     await import("./install.js");
     break;
 
+  case "mcp": {
+    const sub = process.argv[3]; // install | list | remove
+    const { runMcpCli } = await import("./mcp-register.js");
+    await runMcpCli(sub, process.argv.slice(4));
+    break;
+  }
+
   case "export-knowledge":
     await exportKnowledge();
     break;
@@ -396,6 +403,9 @@ Usage:
   sinain export-knowledge      Export knowledge for transfer to another machine
   sinain import-knowledge <file>  Import knowledge from export file
   sinain install               Install OpenClaw plugin (server-side)
+  sinain mcp install           Register sinain MCP for your agents (Claude, Cursor, Codex, Goose, Junie)
+  sinain mcp list              Show MCP registration status across agents
+  sinain mcp remove <agent>    Unregister sinain MCP from one agent
 
 Start options:
   --no-sense                   Skip screen capture (sense_client)
