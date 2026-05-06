@@ -12,6 +12,7 @@ import {
   stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel,
   HOME, SINAIN_DIR, ENV_PATH, PKG_DIR, IS_WINDOWS, IS_MAC,
 } from "./config-shared.js";
+import { stepMcpInstall, detectMcpAgents } from "./mcp-register.js";
 
 // ── Header ──────────────────────────────────────────────────────────────────
 
@@ -138,7 +139,7 @@ export async function runOnboard(args = {}) {
     initialValue: "quickstart",
   }));
 
-  const totalSteps = flow === "quickstart" ? 2 : 5;
+  const totalSteps = flow === "quickstart" ? 2 : 6;
 
   // ── Collect vars ────────────────────────────────────────────────────────
 
@@ -211,9 +212,28 @@ export async function runOnboard(args = {}) {
       ].join("\n"),
       "QuickStart defaults",
     );
+
+    // QuickStart MCP install: a single confirm gated on at least one
+    // detected agent. Avoids interrupting users who don't have any
+    // MCP-aware agent installed. Re-runnable later via `sinain mcp install`.
+    try {
+      const detected = (await detectMcpAgents()).filter((a) => a.present);
+      if (detected.length > 0) {
+        const labels = detected.map((a) => a.label).join(", ");
+        const wantMcp = guard(await p.confirm({
+          message: `Detected ${labels} — register sinain MCP for them?`,
+          initialValue: true,
+        }));
+        if (wantMcp) {
+          await stepMcpInstall(base, "Connect MCP agents");
+        }
+      }
+    } catch (err) {
+      p.log.info(`Skipping MCP setup: ${err.message}`);
+    }
   } else {
-    // Advanced flow: steps 2-5
-    const transcription = await stepTranscription(base, "[2/5] Audio transcription");
+    // Advanced flow: steps 2-6 (MCP install is step 6)
+    const transcription = await stepTranscription(base, "[2/6] Audio transcription");
     vars.TRANSCRIPTION_BACKEND = transcription;
     p.log.success(`Using ${transcription === "openrouter" ? "cloud" : "local"} transcription.`);
 
@@ -249,7 +269,7 @@ export async function runOnboard(args = {}) {
 
     // stepGateway returns { envVars, agentsPatch }: tokens go to .env,
     // URLs + session + escalation mode go to agents.json's openclaw profile.
-    const gatewayResult = await stepGateway(base, "[3/5] OpenClaw gateway");
+    const gatewayResult = await stepGateway(base, "[3/6] OpenClaw gateway");
     Object.assign(vars, gatewayResult.envVars);
     Object.assign(agentsPatch, gatewayResult.agentsPatch);
     if (gatewayResult.agentsPatch.escalationMode === "off") {
@@ -258,17 +278,23 @@ export async function runOnboard(args = {}) {
       p.log.success("Gateway configured.");
     }
 
-    const privacy = await stepPrivacy(base, "[4/5] Privacy mode");
+    const privacy = await stepPrivacy(base, "[4/6] Privacy mode");
     vars.PRIVACY_MODE = privacy;
     p.log.success(`Privacy: ${privacy}.`);
 
-    const model = await stepModel(base, "[5/5] AI model for HUD analysis");
+    const model = await stepModel(base, "[5/6] AI model for HUD analysis");
     vars.AGENT_MODEL = model;
     p.log.success(`Model: ${model}.`);
 
     // Default agent goes into agents.json `default` field (was SINAIN_AGENT
     // env var). Overlay's chip selector lets the user switch at runtime.
     agentsPatch.default = base.SINAIN_AGENT || "claude";
+
+    // Step 6: register sinain MCP with locally-installed MCP-aware agents
+    // (Claude Code, Cursor, Codex, Goose, Junie, Claude Desktop). Detection
+    // is non-destructive — if no agents are installed, the step prints a
+    // skip note and returns. Idempotent across re-runs.
+    await stepMcpInstall(base, "[6/6] Connect MCP agents");
   }
 
   // ── Common defaults ───────────────────────────────────────────────────
