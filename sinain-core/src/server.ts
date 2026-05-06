@@ -4,6 +4,7 @@ import type { CoreConfig, SenseEvent } from "./types.js";
 import type { Profiler } from "./profiler.js";
 import type { CostTracker } from "./cost/tracker.js";
 import type { FeedbackStore } from "./learning/feedback-store.js";
+import type { WebDb, BookmarkStatus } from "./web-db/store.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer, type SemanticSenseEvent, type TextDelta } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -148,6 +149,693 @@ loadFacts();
 </script>
 </body></html>`;
 
+// ──────────────────────────────────────────────────────────────────────────
+// Knowledge UI V2 — "Living Confluence" SPA. Replaces the legacy fact-browser
+// (still served at /knowledge/ui-legacy). Single inline file to preserve
+// the zero-build single-file deploy story.
+// ──────────────────────────────────────────────────────────────────────────
+const KNOWLEDGE_UI_V2_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sinain Knowledge</title>
+<style>
+  :root {
+    /* Day theme: neutral white/black/blue. Surfaces use light slate
+       grays for layered elevation (no tint), text is near-black, accent
+       is a single blue used for entity links, primary buttons, and the
+       summary border. Avoids any saturated greens/reds outside semantic
+       warn/danger usage. */
+    --bg: #ffffff; --bg-elev: #f8fafc; --bg-hover: #f1f5f9;
+    --fg: #0f172a; --fg-dim: #475569; --fg-faint: #94a3b8;
+    --accent: #2563eb; --accent-dim: #1d4ed8;
+    --warn: #b45309; --danger: #b91c1c;
+    --border: #e2e8f0; --border-strong: #cbd5e1;
+    --chip: #f1f5f9;
+    --shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         font-size: 14px; line-height: 1.5; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  button { background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border);
+           padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+  button:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+  button.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
+  button.danger { color: var(--danger); }
+  /* Destructive-primary (e.g. modal "Retract"): solid red, not the awkward
+     blue-bg + red-text combination of stacking the two classes. */
+  button.primary.danger { background: var(--danger); border-color: var(--danger); color: #ffffff; }
+  button.primary.danger:hover { background: #991b1b; border-color: #991b1b; color: #ffffff; }
+  button.icon { padding: 4px 8px; }
+  input, textarea, select { background: var(--bg-elev); color: var(--fg);
+            border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;
+            font: inherit; }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  /* Header */
+  header { position: sticky; top: 0; z-index: 100; background: var(--bg);
+           border-bottom: 1px solid var(--border); padding: 12px 24px;
+           display: flex; gap: 16px; align-items: center; }
+  .logo { font-weight: 700; color: var(--accent); font-size: 16px;
+          cursor: pointer; flex-shrink: 0; }
+  .search-wrap { position: relative; flex: 1; max-width: 600px; }
+  #search { width: 100%; padding: 10px 14px; font-size: 15px; }
+  .search-results { position: absolute; top: 100%; left: 0; right: 0;
+            background: var(--bg-elev); border: 1px solid var(--border);
+            border-radius: 6px; margin-top: 4px; max-height: 400px; overflow-y: auto;
+            box-shadow: var(--shadow); display: none; }
+  .search-results.open { display: block; }
+  .search-result { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border); }
+  .search-result:hover { background: var(--bg-hover); }
+  .search-result:last-child { border-bottom: none; }
+  .search-result .entity { color: var(--accent); font-weight: 600; font-size: 13px; }
+  .search-result .meta { color: var(--fg-dim); font-size: 11px; margin-top: 2px; }
+  .search-result .snippet { color: var(--fg); font-size: 13px; margin-top: 4px; }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; }
+  /* Main */
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  h1 { color: var(--fg); font-size: 20px; margin: 0 0 16px; }
+  h2 { color: var(--fg); font-size: 16px; margin: 24px 0 12px; }
+  h3 { color: var(--fg); font-size: 14px; margin: 16px 0 8px; font-weight: 600; }
+  /* Home */
+  .bookmark-row { margin-bottom: 24px; }
+  .bookmark-row h2 { color: var(--accent); margin-bottom: 8px; }
+  .bookmark-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                   gap: 10px; }
+  .bookmark-card { background: var(--bg-elev); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 12px; cursor: pointer;
+                   transition: border-color 0.15s; }
+  .bookmark-card:hover { border-color: var(--accent-dim); }
+  .bookmark-card .entity { font-weight: 600; color: var(--accent); font-size: 13px;
+                           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bookmark-card .meta { color: var(--fg-dim); font-size: 11px; margin-top: 4px; }
+  .empty-row { color: var(--fg-faint); font-style: italic; padding: 8px; }
+  /* Import dropzone */
+  .dropzone { border: 2px dashed var(--border-strong); border-radius: 8px;
+              padding: 32px; text-align: center; color: var(--fg-dim); cursor: pointer;
+              margin-top: 24px; transition: border-color 0.15s; }
+  .dropzone:hover, .dropzone.drag-over { border-color: var(--accent); color: var(--fg); }
+  /* Entity page */
+  .page-header { padding-bottom: 16px; border-bottom: 1px solid var(--border);
+                 margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 12px;
+                 align-items: center; }
+  .page-header .title { font-size: 22px; font-weight: 700; flex: 1; }
+  .page-header .badges { color: var(--fg-dim); font-size: 12px; }
+  .page-header .badge { background: var(--chip); padding: 3px 8px; border-radius: 4px;
+                        margin-right: 6px; }
+  .page-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .layout-3col { display: grid; grid-template-columns: 220px 1fr 240px; gap: 24px; }
+  @media (max-width: 1100px) { .layout-3col { grid-template-columns: 1fr; } }
+  /* Tree */
+  .tree { font-size: 12px; }
+  .tree-group { margin-bottom: 12px; }
+  .tree-group-label { color: var(--accent); font-weight: 600; font-size: 11px;
+                      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .tree-node { padding: 4px 6px; border-radius: 4px; cursor: pointer;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tree-node:hover { background: var(--bg-hover); }
+  .tree-node.expandable::before { content: "▸ "; color: var(--fg-dim); }
+  .tree-node.expanded::before { content: "▾ "; color: var(--accent); }
+  .tree-children { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 6px; }
+  /* Page body */
+  .summary { background: var(--bg-elev); border-left: 3px solid var(--accent);
+             padding: 16px; border-radius: 0 6px 6px 0; margin-bottom: 24px;
+             font-size: 15px; }
+  .section { margin-bottom: 24px; }
+  .section-heading { color: var(--fg); font-size: 17px; font-weight: 600;
+                     border-bottom: 1px solid var(--border); padding-bottom: 6px;
+                     margin-bottom: 12px; cursor: pointer; user-select: none; }
+  .section-heading::before { content: "▾ "; color: var(--fg-dim); }
+  .section.collapsed .section-heading::before { content: "▸ "; }
+  .section.collapsed .bullets { display: none; }
+  .bullets { list-style: none; padding: 0; margin: 0; }
+  .bullet { padding: 8px 12px; border-radius: 6px; margin-bottom: 4px;
+            display: flex; gap: 12px; align-items: flex-start;
+            transition: background 0.15s; position: relative; }
+  .bullet:hover { background: var(--bg-elev); }
+  .bullet.retracting { opacity: 0.4; text-decoration: line-through;
+                       transition: opacity 0.3s, transform 0.3s; }
+  .bullet .text { flex: 1; }
+  .bullet .conf { color: var(--fg-faint); font-size: 11px; flex-shrink: 0;
+                  font-variant-numeric: tabular-nums; }
+  .bullet .fid { color: var(--fg-faint); font-size: 10px; font-family: ui-monospace, monospace;
+                 cursor: pointer; }
+  .bullet .fid:hover { color: var(--accent); }
+  .bullet .more { color: var(--fg-faint); cursor: pointer; padding: 0 4px;
+                  visibility: hidden; }
+  .bullet:hover .more { visibility: visible; }
+  .bullet .more:hover { color: var(--accent); }
+  .section .notes { color: var(--warn); font-size: 12px; font-style: italic;
+                    padding: 4px 12px; }
+  /* Raw facts accordion */
+  .raw-accordion { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .raw-toggle { color: var(--accent); cursor: pointer; user-select: none; font-size: 13px; }
+  .raw-list { display: none; margin-top: 12px; }
+  .raw-list.open { display: block; }
+  .raw-item { padding: 6px 12px; font-family: ui-monospace, monospace; font-size: 11px;
+              color: var(--fg-dim); border-left: 2px solid var(--border); margin-bottom: 4px; }
+  /* Meta panel */
+  .meta-panel { font-size: 12px; color: var(--fg-dim); }
+  .meta-panel .stat-row { display: flex; justify-content: space-between;
+                          padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .meta-panel .stat-row:last-child { border-bottom: none; }
+  .meta-panel .stat-label { color: var(--fg-faint); }
+  .meta-panel .stat-value { color: var(--fg); font-variant-numeric: tabular-nums; }
+  /* Modal */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+                    display: none; align-items: center; justify-content: center;
+                    z-index: 1000; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--bg-elev); border-radius: 8px; padding: 24px;
+           max-width: 480px; width: 90%; box-shadow: var(--shadow); }
+  .modal h2 { margin-top: 0; }
+  .modal .body { color: var(--fg); margin-bottom: 16px; }
+  .modal .quote { color: var(--fg); padding: 8px 12px; background: var(--bg);
+                  border-left: 3px solid var(--warn); border-radius: 0 4px 4px 0;
+                  margin: 8px 0; }
+  .modal label { display: block; margin: 12px 0 4px; color: var(--fg-dim); font-size: 12px; }
+  .modal textarea { width: 100%; min-height: 60px; resize: vertical; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg-elev);
+           border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px;
+           box-shadow: var(--shadow); display: flex; gap: 12px; align-items: center;
+           min-width: 320px; max-width: 480px; z-index: 1000; animation: slidein 0.2s; }
+  @keyframes slidein { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .toast .icon { color: var(--accent); }
+  .toast .text { flex: 1; font-size: 13px; }
+  .toast .timer { height: 2px; background: var(--accent); position: absolute;
+                  bottom: 0; left: 0; transition: width linear; }
+  .toast button { padding: 4px 10px; font-size: 12px; }
+  /* Loading */
+  .spinner { display: inline-block; width: 14px; height: 14px;
+             border: 2px solid var(--border); border-top-color: var(--accent);
+             border-radius: 50%; animation: spin 0.8s linear infinite;
+             vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-block { padding: 32px; text-align: center; color: var(--fg-dim); }
+  .error-block { padding: 24px; background: rgba(185, 28, 28, 0.05);
+                 border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0;
+                 color: var(--fg); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" onclick="navigate('/knowledge/ui')">SINAIN</div>
+  <div class="search-wrap">
+    <input id="search" type="text" placeholder="Search entities, topics, people…" autocomplete="off" />
+    <div id="searchResults" class="search-results"></div>
+  </div>
+  <div class="header-actions">
+    <a href="/knowledge/ui-legacy"><button>Legacy view</button></a>
+  </div>
+</header>
+<main id="root"></main>
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+// ── Util ──────────────────────────────────────────────────────────────────
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = (sel) => document.querySelector(sel);
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+// ── API ───────────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  try {
+    const res = await fetch(path, opts);
+    if (!res.ok && res.status !== 404) {
+      // Some endpoints (e.g. retract on missing fact) return error JSON with non-200.
+      // We still try to parse — ok=false in body is the contract.
+    }
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("json")) return await res.json();
+    return await res.text();
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+// ── Router ────────────────────────────────────────────────────────────────
+function navigate(path) {
+  history.pushState({}, "", path);
+  render();
+}
+window.addEventListener("popstate", render);
+window.addEventListener("DOMContentLoaded", () => {
+  setupSearch();
+  setupGlobalDrop();
+  render();
+});
+
+function render() {
+  const path = location.pathname;
+  if (path === "/knowledge/ui" || path === "/knowledge/ui/") {
+    renderHome();
+  } else if (path.startsWith("/knowledge/ui/entity/")) {
+    const entity = decodeURIComponent(path.slice("/knowledge/ui/entity/".length));
+    renderEntityPage(entity);
+  } else if (path.startsWith("/knowledge/ui/topic/")) {
+    const q = decodeURIComponent(path.slice("/knowledge/ui/topic/".length));
+    renderTopicPage(q);
+  } else {
+    renderHome();
+  }
+}
+
+// ── Home view ─────────────────────────────────────────────────────────────
+async function renderHome() {
+  document.title = "Sinain Knowledge";
+  const root = $("#root");
+  root.innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading bookmarks…</div>';
+
+  const [favs, recents, archives] = await Promise.all([
+    api("/knowledge/bookmarks?status=favorite&limit=50"),
+    api("/knowledge/bookmarks?status=recent&limit=20"),
+    api("/knowledge/bookmarks?status=archive&limit=50"),
+  ]);
+
+  root.innerHTML = \`
+    <h1>Knowledge</h1>
+    \${renderBookmarkRow("★ Favorites", favs.bookmarks ?? [])}
+    \${renderBookmarkRow("📚 Recent", recents.bookmarks ?? [])}
+    \${renderBookmarkRow("🗄 Archive", archives.bookmarks ?? [])}
+    <h2>Import a concept</h2>
+    <div class="dropzone" id="homeDropzone">
+      Drop a <code>.sinain-concept.json</code> file here, or click to choose.
+      <input type="file" id="homeFileInput" accept=".json,.sinain-concept.json"
+             style="display:none" />
+    </div>
+  \`;
+  bindDropzone($("#homeDropzone"), $("#homeFileInput"));
+}
+
+function renderBookmarkRow(label, items) {
+  const cards = items.length === 0
+    ? '<div class="empty-row">— none yet —</div>'
+    : items.map(b => \`
+        <div class="bookmark-card" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(b.entity_id)}'))">
+          <div class="entity">\${esc(b.entity_id)}</div>
+          <div class="meta">\${b.note ? esc(b.note) + ' · ' : ''}visited \${timeAgo(b.last_visited)}</div>
+        </div>\`).join("");
+  return \`<div class="bookmark-row"><h2>\${label}</h2><div class="bookmark-list">\${cards}</div></div>\`;
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return Math.round(diff / 60_000) + "m ago";
+  if (diff < 86_400_000) return Math.round(diff / 3_600_000) + "h ago";
+  return Math.round(diff / 86_400_000) + "d ago";
+}
+
+// ── Search ────────────────────────────────────────────────────────────────
+function setupSearch() {
+  const input = $("#search");
+  const dropdown = $("#searchResults");
+  const handleQuery = debounce(async () => {
+    const q = input.value.trim();
+    if (!q) { dropdown.classList.remove("open"); dropdown.innerHTML = ""; return; }
+    const result = await api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=15");
+    if (!result.results || result.results.length === 0) {
+      dropdown.innerHTML = \`
+        <div class="search-result" onclick="navigate('/knowledge/ui/topic/' + encodeURIComponent('\${esc(q)}'))">
+          <div class="entity">View as topic page</div>
+          <div class="snippet">No matching entities — synthesize from search hits.</div>
+        </div>\`;
+    } else {
+      dropdown.innerHTML = result.results.map(r => \`
+        <div class="search-result" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(r.entity)}'))">
+          <div class="entity">\${esc(r.entity)}</div>
+          <div class="meta">\${esc(r.type)} · \${r.fact_count} fact\${r.fact_count === 1 ? "" : "s"}</div>
+          <div class="snippet">\${esc(r.snippet || "")}</div>
+        </div>\`).join("");
+    }
+    dropdown.classList.add("open");
+  }, 220);
+  input.addEventListener("input", handleQuery);
+  input.addEventListener("focus", () => { if (input.value) handleQuery(); });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search-wrap")) dropdown.classList.remove("open");
+  });
+}
+
+// ── Entity page ───────────────────────────────────────────────────────────
+async function renderEntityPage(entity) {
+  document.title = entity + " · Sinain";
+  const root = $("#root");
+  root.innerHTML = \`<div class="loading-block"><span class="spinner"></span> Loading \${esc(entity)}…</div>\`;
+
+  const page = await api("/knowledge/page?entity=" + encodeURIComponent(entity));
+  if (!page.ok || page.fact_count === 0) {
+    if (page.fact_count === 0) {
+      renderMissingConcept(entity, root);
+      return;
+    }
+    root.innerHTML = \`<div class="error-block">Failed to load: \${esc(page.error || "unknown")}</div>\`;
+    return;
+  }
+
+  const factCount = page.fact_count;
+  const facts = collectFactsFromSections(page.sections || []);
+
+  root.innerHTML = \`
+    <div class="page-header">
+      <div class="title">\${esc(entity)}</div>
+      <div class="badges">
+        <span class="badge">\${factCount} fact\${factCount === 1 ? "" : "s"}</span>
+        \${page.stats?.from_cache ? '<span class="badge">cached</span>' : '<span class="badge">fresh</span>'}
+      </div>
+      <div class="page-actions">
+        <button id="bmFavorite" class="icon" title="Favorite">★</button>
+        <button id="bmArchive" class="icon" title="Archive">🗄</button>
+        <button id="actRefresh" class="icon" title="Re-render">↻</button>
+        <button id="actCopyLink" class="icon" title="Copy link">🔗</button>
+        <button id="actExport" class="icon" title="Export concept">⬇</button>
+      </div>
+    </div>
+    <div class="layout-3col">
+      <aside><div id="treeRoot" class="tree"></div></aside>
+      <div>
+        \${page.summary ? \`<div class="summary">\${esc(page.summary)}</div>\` : ""}
+        <div id="sectionsRoot">\${(page.sections || []).map((s, i) => renderSection(s, i)).join("")}</div>
+        <div class="raw-accordion">
+          <div class="raw-toggle" onclick="this.nextElementSibling.classList.toggle('open')">
+            ▸ Show all \${factCount} raw fact\${factCount === 1 ? "" : "s"}
+          </div>
+          <div class="raw-list">\${facts.map(f => \`
+            <div class="raw-item">[\${esc(f.fact_id)}] (conf=\${f.confidence}, \${esc(f.domain || "")}): \${esc(f.text || "")}</div>
+          \`).join("")}</div>
+        </div>
+      </div>
+      <aside class="meta-panel">
+        <h3>Stats</h3>
+        <div class="stat-row"><span class="stat-label">Facts</span><span class="stat-value">\${factCount}</span></div>
+        <div class="stat-row"><span class="stat-label">Used</span><span class="stat-value">\${page.facts_used ?? factCount}</span></div>
+        <div class="stat-row"><span class="stat-label">Tx watermark</span><span class="stat-value">\${page.tx_watermark}</span></div>
+        \${page.stats?.tokens_in ? \`<div class="stat-row"><span class="stat-label">Tokens in</span><span class="stat-value">\${page.stats.tokens_in}</span></div>\` : ""}
+        \${page.stats?.tokens_out ? \`<div class="stat-row"><span class="stat-label">Tokens out</span><span class="stat-value">\${page.stats.tokens_out}</span></div>\` : ""}
+        \${page.stats?.dropped_bullets ? \`<div class="stat-row"><span class="stat-label">Dropped (LLM)</span><span class="stat-value">\${page.stats.dropped_bullets}</span></div>\` : ""}
+      </aside>
+    </div>\`;
+
+  // Wire actions
+  $("#bmFavorite").onclick = () => bookmarkAction(entity, "favorite");
+  $("#bmArchive").onclick = () => bookmarkAction(entity, "archive");
+  $("#actRefresh").onclick = () => refreshPage(entity);
+  $("#actCopyLink").onclick = () => copyLink(entity);
+  $("#actExport").onclick = () => exportConcept(entity);
+
+  // Wire bullet retraction (event delegation)
+  $("#sectionsRoot").addEventListener("click", (e) => {
+    const more = e.target.closest(".more");
+    if (more) {
+      const factId = more.dataset.factId;
+      openRetractModal(factId, more.closest(".bullet"), entity);
+    }
+  });
+
+  // Tree
+  loadTreeChildren(entity, $("#treeRoot"), 0);
+}
+
+function collectFactsFromSections(sections) {
+  const out = [];
+  for (const s of sections) {
+    for (const b of s.bullets || []) out.push(b);
+  }
+  return out;
+}
+
+function renderSection(s, idx) {
+  return \`
+    <div class="section" id="sec-\${idx}">
+      <div class="section-heading" onclick="this.parentElement.classList.toggle('collapsed')">
+        \${esc(s.heading || "Untitled")}
+      </div>
+      \${s.notes ? \`<div class="notes">⚠ \${esc(s.notes)}</div>\` : ""}
+      <ul class="bullets">\${(s.bullets || []).map(b => \`
+        <li class="bullet" data-fact-id="\${esc(b.fact_id)}">
+          <span class="text">\${esc(b.text || "")}</span>
+          <span class="conf">\${b.confidence != null ? Number(b.confidence).toFixed(2) : ""}</span>
+          <span class="fid" title="\${esc(b.fact_id)}">[\${esc((b.fact_id || "").slice(0, 16))}…]</span>
+          <span class="more" data-fact-id="\${esc(b.fact_id)}" title="More">⋯</span>
+        </li>\`).join("")}</ul>
+    </div>\`;
+}
+
+// ── Tree (graph children) ─────────────────────────────────────────────────
+async function loadTreeChildren(entity, container, depth) {
+  if (depth > 3) {
+    container.innerHTML = '<div class="empty-row">depth limit</div>';
+    return;
+  }
+  const result = await api("/knowledge/graph/children?entity=" + encodeURIComponent(entity));
+  if (!result.groups || result.groups.length === 0) {
+    container.innerHTML = '<div class="empty-row">no children</div>';
+    return;
+  }
+  container.innerHTML = result.groups.map(g => \`
+    <div class="tree-group">
+      <div class="tree-group-label">\${esc(g.label)} (\${g.children.length})</div>
+      \${g.children.map(c => {
+        // Prefer the fact's own value text as the visible label; entity_id
+        // slugs are opaque to humans. Show the slug only when no snippet.
+        const label = c.snippet || c.entity.split(":").pop() || c.entity;
+        return \`
+        <div class="tree-node \${c.expandable ? 'expandable' : ''}" data-entity="\${esc(c.entity)}" title="\${esc(c.entity)}">
+          \${esc(label.length > 36 ? label.slice(0, 36) + "…" : label)}
+        </div>
+        <div class="tree-children" data-parent="\${esc(c.entity)}" style="display:none"></div>\`;
+      }).join("")}
+    </div>\`).join("");
+  // Wire expand
+  container.querySelectorAll(".tree-node").forEach(node => {
+    node.addEventListener("click", async () => {
+      const eid = node.dataset.entity;
+      const child = container.querySelector('[data-parent="' + CSS.escape(eid) + '"]');
+      if (node.classList.contains("expanded")) {
+        node.classList.remove("expanded");
+        child.style.display = "none";
+      } else if (node.classList.contains("expandable")) {
+        node.classList.add("expanded");
+        child.style.display = "block";
+        if (!child.dataset.loaded) {
+          child.dataset.loaded = "1";
+          await loadTreeChildren(eid, child, depth + 1);
+        }
+      } else {
+        navigate("/knowledge/ui/entity/" + encodeURIComponent(eid));
+      }
+    });
+  });
+}
+
+// ── Bookmark + actions ────────────────────────────────────────────────────
+async function bookmarkAction(entity, status) {
+  const r = await api("/knowledge/bookmarks", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entity, status }),
+  });
+  if (r.ok) showToast(\`✓ \${status === "favorite" ? "Favorited" : "Archived"}\`);
+  else showToast("Failed: " + (r.error || "unknown"));
+}
+
+async function refreshPage(entity) {
+  showToast(\`<span class="spinner"></span> Re-rendering…\`);
+  await api("/knowledge/page?refresh=1&entity=" + encodeURIComponent(entity));
+  render();
+}
+
+function copyLink(entity) {
+  const url = location.origin + "/knowledge/ui/entity/" + encodeURIComponent(entity);
+  navigator.clipboard.writeText(url).then(
+    () => showToast("✓ Link copied. Recipient needs the concept imported."),
+    () => showToast("Copy failed — your browser may block clipboard access"),
+  );
+}
+
+async function exportConcept(entity) {
+  // Simple export — no preflight dialog in v1, sensible defaults.
+  const url = "/knowledge/concepts/export?entity=" + encodeURIComponent(entity)
+    + "&depth=1&include_page=1";
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = entity.replace(/[^a-z0-9-]/gi, "-") + ".sinain-concept.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showToast("✓ Exporting concept bundle…");
+}
+
+// ── Retraction modal + undo toast ─────────────────────────────────────────
+function openRetractModal(factId, bulletEl, sourceEntity) {
+  const text = bulletEl.querySelector(".text").textContent;
+  const conf = bulletEl.querySelector(".conf").textContent;
+  const root = $("#modalRoot");
+  root.innerHTML = \`
+    <div class="modal-backdrop open" id="retractModal">
+      <div class="modal">
+        <h2>Retract this fact?</h2>
+        <div class="quote">\${esc(text)}</div>
+        <div class="body">Confidence \${esc(conf)} · Fact id <code>\${esc(factId)}</code></div>
+        <label>Reason (optional)</label>
+        <textarea id="retractReason" placeholder="Why are you retracting this?"></textarea>
+        <div class="modal-actions">
+          <button onclick="closeModal()">Cancel</button>
+          <button class="primary danger" id="retractGo">Retract</button>
+        </div>
+      </div>
+    </div>\`;
+  $("#retractGo").onclick = async () => {
+    const reason = $("#retractReason").value.trim() || null;
+    closeModal();
+    bulletEl.classList.add("retracting");
+    const r = await api("/knowledge/facts/" + encodeURIComponent(factId), {
+      method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason, actor: "web-ui", source_entity: sourceEntity }),
+    });
+    if (r.ok) {
+      setTimeout(() => bulletEl.remove(), 300);
+      showUndoToast(factId, r.undo_token, sourceEntity);
+    } else {
+      bulletEl.classList.remove("retracting");
+      showToast("Retract failed: " + (r.error || "unknown"));
+    }
+  };
+}
+function closeModal() { $("#modalRoot").innerHTML = ""; }
+
+function showToast(html, ms = 4000) {
+  const root = $("#toastRoot");
+  root.innerHTML = \`<div class="toast"><div class="text">\${html}</div></div>\`;
+  setTimeout(() => { if (root.innerHTML.includes(html)) root.innerHTML = ""; }, ms);
+}
+
+function showUndoToast(factId, undoToken, sourceEntity) {
+  const root = $("#toastRoot");
+  const ms = 10_000;
+  root.innerHTML = \`
+    <div class="toast" id="undoToast">
+      <span class="icon">✓</span>
+      <span class="text">Retracted</span>
+      <button id="undoBtn">Undo</button>
+      <div class="timer" style="width:100%; transition: width \${ms}ms linear;"></div>
+    </div>\`;
+  // Animate timer
+  requestAnimationFrame(() => { $("#undoToast .timer").style.width = "0%"; });
+  $("#undoBtn").onclick = async () => {
+    root.innerHTML = "";
+    const r = await api("/knowledge/facts/" + encodeURIComponent(factId) + "/restore", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ undo_token: undoToken }),
+    });
+    if (r.ok) {
+      showToast("✓ Restored — reload to see");
+    } else {
+      showToast("Restore failed: " + (r.error || "unknown"));
+    }
+  };
+  setTimeout(() => { if ($("#undoToast")) root.innerHTML = ""; }, ms);
+}
+
+// ── Missing concept landing ───────────────────────────────────────────────
+function renderMissingConcept(entity, root) {
+  document.title = "Missing · " + entity;
+  root.innerHTML = \`
+    <h1>Concept not found</h1>
+    <div class="error-block" style="margin-bottom: 24px;">
+      <code>\${esc(entity)}</code> is not in this machine's knowledge graph yet.
+    </div>
+    <p>If someone shared a <code>.sinain-concept.json</code> bundle with you, drop it here:</p>
+    <div class="dropzone" id="missingDropzone">
+      📥 Drop concept bundle
+      <input type="file" id="missingFileInput" accept=".json,.sinain-concept.json"
+             style="display:none" />
+    </div>
+    <p style="color: var(--fg-dim); margin-top:24px">After import, this page will load automatically.</p>
+  \`;
+  bindDropzone($("#missingDropzone"), $("#missingFileInput"), entity);
+}
+
+// ── Topic page (simple, v1) ───────────────────────────────────────────────
+async function renderTopicPage(q) {
+  document.title = "Topic: " + q;
+  const root = $("#root");
+  root.innerHTML = \`
+    <h1>Topic: \${esc(q)}</h1>
+    <div class="loading-block"><span class="spinner"></span> Searching…</div>\`;
+  const r = await api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=50");
+  if (!r.results || r.results.length === 0) {
+    root.innerHTML = \`<h1>Topic: \${esc(q)}</h1>
+      <div class="error-block">No matching facts.</div>\`;
+    return;
+  }
+  root.innerHTML = \`
+    <h1>Topic: \${esc(q)}</h1>
+    <div class="summary">Top \${r.results.length} matches across the knowledge graph.</div>
+    \${r.results.map(rr => \`
+      <div class="bullet" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(rr.entity)}'))" style="cursor:pointer">
+        <span class="text"><strong>\${esc(rr.entity)}</strong> — \${esc(rr.snippet || "")}</span>
+        <span class="conf">\${rr.fact_count} fact\${rr.fact_count === 1 ? "" : "s"}</span>
+      </div>\`).join("")}\`;
+}
+
+// ── Dropzone wiring (shared) ──────────────────────────────────────────────
+function bindDropzone(zone, input, redirectAfter) {
+  zone.addEventListener("click", () => input.click());
+  input.addEventListener("change", (e) => importFiles(e.target.files, redirectAfter));
+  zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drag-over"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    zone.classList.remove("drag-over");
+    importFiles(e.dataTransfer.files, redirectAfter);
+  });
+}
+
+function setupGlobalDrop() {
+  // Prevent navigation when files dropped outside the dropzone.
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => {
+    if (e.target.closest(".dropzone")) return;
+    e.preventDefault();
+  });
+}
+
+async function importFiles(files, redirectAfter) {
+  if (!files || files.length === 0) return;
+  const file = files[0];
+  showToast(\`<span class="spinner"></span> Importing \${esc(file.name)}…\`, 30_000);
+  const text = await file.text();
+  let envelope;
+  try { envelope = JSON.parse(text); } catch (e) {
+    showToast("Import failed: not valid JSON");
+    return;
+  }
+  const r = await api("/knowledge/concepts/import?conflict=merge", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(envelope),
+  });
+  if (r.ok) {
+    const stats = r.stats || {};
+    showToast(\`✓ Imported \${stats.triples_inserted || 0} triple\${stats.triples_inserted === 1 ? "" : "s"}\` +
+              (stats.triples_skipped_duplicate ? \` (\${stats.triples_skipped_duplicate} dupes skipped)\` : ""));
+    const target = r.root_entity || redirectAfter;
+    if (target) navigate("/knowledge/ui/entity/" + encodeURIComponent(target));
+    else render();
+  } else {
+    showToast("Import failed: " + (r.error || "unknown"));
+  }
+}
+</script>
+</body></html>`;
+
 /** Server epoch — lets clients detect restarts. */
 const serverEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -187,6 +875,23 @@ export interface ServerDeps {
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
   embedTexts?: (texts: string[]) => Promise<Float32Array[]>;
   isEmbeddingReady?: () => boolean;
+
+  /** Web UI metadata DB (bookmarks, page cache, retraction undo). */
+  webDb?: WebDb;
+  /** Search entities by query (FTS5 + entity ref grouping). */
+  searchEntities?: (q: string, limit: number) => Promise<unknown>;
+  /** Lazy-load entity graph children (one level via VAET backref). */
+  graphChildren?: (entity: string) => Promise<unknown>;
+  /** Render a Confluence-style page for an entity (cached via web.db). */
+  renderEntityPage?: (entity: string, opts: { refresh: boolean; maxFacts: number }) => Promise<unknown>;
+  /** Retract a fact entity (soft-delete in triplestore + audit triples + undo snapshot). */
+  retractFact?: (factId: string, reason: string | null, actor: string | null, sourceEntity: string | null) => Promise<unknown>;
+  /** Restore a previously retracted fact via undo token. */
+  restoreFact?: (factId: string, undoToken: string) => Promise<unknown>;
+  /** Export a concept bundle (entity + neighborhood) for transfer between machines. */
+  exportConcept?: (entity: string, depth: number, opts: { includeRetracted: boolean; includePage: boolean; redactRules: string[] }) => Promise<unknown>;
+  /** Import a concept bundle into the local knowledge graph. */
+  importConcept?: (envelope: unknown, conflict: "skip" | "merge" | "overwrite") => Promise<unknown>;
 
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
@@ -511,10 +1216,302 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/knowledge/ui") {
-        // Simple web UI for browsing and transferring knowledge
+      // ── /knowledge/search ── (entity-prioritized) ──
+      if (req.method === "GET" && url.pathname === "/knowledge/search") {
+        const q = url.searchParams.get("q") || "";
+        const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 100);
+        if (!q.trim()) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "q parameter required" }));
+          return;
+        }
+        if (!deps.searchEntities) {
+          res.end(JSON.stringify({ ok: true, results: [], topic_fallback: true }));
+          return;
+        }
+        try {
+          const result = await deps.searchEntities(q, limit) as any;
+          // Telemetry
+          if (deps.webDb) {
+            const top = result.results?.[0]?.entity ?? null;
+            deps.webDb.logSearch(q, top, result.results?.length ?? 0);
+          }
+          res.end(JSON.stringify({ ok: true, ...result }));
+        } catch (err) {
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // ── /knowledge/page ── (LLM-rendered Confluence-style page) ──
+      if (req.method === "GET" && url.pathname === "/knowledge/page") {
+        const entity = url.searchParams.get("entity") || "";
+        const refresh = url.searchParams.get("refresh") === "1";
+        const maxFacts = Math.min(parseInt(url.searchParams.get("max_facts") || "1000"), 5000);
+        if (!entity) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "entity parameter required" }));
+          return;
+        }
+        if (!deps.renderEntityPage) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "page renderer not available" }));
+          return;
+        }
+        try {
+          const page = await deps.renderEntityPage(entity, { refresh, maxFacts });
+          // Touch bookmark visit (auto-populates 'recent')
+          if (deps.webDb) deps.webDb.touchVisit(entity);
+          res.end(JSON.stringify({ ok: true, ...(page as object) }));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // ── /knowledge/graph/children ── (lazy tree expansion) ──
+      if (req.method === "GET" && url.pathname === "/knowledge/graph/children") {
+        const entity = url.searchParams.get("entity") || "";
+        if (!entity) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "entity parameter required" }));
+          return;
+        }
+        if (!deps.graphChildren) {
+          res.end(JSON.stringify({ ok: true, entity, groups: [] }));
+          return;
+        }
+        try {
+          const result = await deps.graphChildren(entity);
+          res.end(JSON.stringify({ ok: true, ...(result as object) }));
+        } catch (err) {
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // ── /knowledge/bookmarks ──
+      if (req.method === "GET" && url.pathname === "/knowledge/bookmarks") {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        const status = url.searchParams.get("status") as BookmarkStatus | null;
+        const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+        if (status && !["favorite","archive","recent"].includes(status)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "status must be favorite|archive|recent" }));
+          return;
+        }
+        const bookmarks = deps.webDb.listBookmarks(status ?? undefined, limit);
+        res.end(JSON.stringify({ ok: true, bookmarks }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/knowledge/bookmarks") {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        const body = await readBody(req, 16_384);
+        let payload: { entity?: string; status?: string; note?: string };
+        try { payload = JSON.parse(body); } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON body" }));
+          return;
+        }
+        const entity = (payload.entity || "").trim();
+        const status = payload.status as BookmarkStatus | undefined;
+        if (!entity) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "entity required" }));
+          return;
+        }
+        if (!status || !["favorite","archive","recent"].includes(status)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "status must be favorite|archive|recent" }));
+          return;
+        }
+        const bookmark = deps.webDb.upsertBookmark(entity, status, payload.note);
+        res.end(JSON.stringify({ ok: true, bookmark }));
+        return;
+      }
+
+      if (req.method === "DELETE" && url.pathname.startsWith("/knowledge/bookmarks/")) {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        const entity = decodeURIComponent(url.pathname.slice("/knowledge/bookmarks/".length));
+        if (!entity) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "entity required in path" }));
+          return;
+        }
+        const removed = deps.webDb.deleteBookmark(entity);
+        res.end(JSON.stringify({ ok: true, removed }));
+        return;
+      }
+
+      // ── /knowledge/concepts/export ──
+      if (req.method === "GET" && url.pathname === "/knowledge/concepts/export") {
+        const entity = url.searchParams.get("entity") || "";
+        const depth = Math.min(parseInt(url.searchParams.get("depth") || "1"), 3);
+        const includeRetracted = url.searchParams.get("include_retracted") === "1";
+        const includePage = url.searchParams.get("include_page") !== "0";
+        const redactRules = (url.searchParams.get("redact")
+          || "private,creditcard,apikey,bearer,awskey,password,secret")
+          .split(",").map(s => s.trim()).filter(Boolean);
+        if (!entity) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "entity parameter required" }));
+          return;
+        }
+        if (!deps.exportConcept) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "concept export not available" }));
+          return;
+        }
+        try {
+          const bundle = await deps.exportConcept(entity, depth, {
+            includeRetracted, includePage, redactRules,
+          });
+          // Sanitize entity for filename
+          const slug = entity.replace(/[^a-z0-9-]/gi, "-").replace(/-+/g, "-").slice(0, 60);
+          res.setHeader("Content-Type", "application/json");
+          res.setHeader("Content-Disposition", `attachment; filename="${slug}.sinain-concept.json"`);
+          res.end(JSON.stringify(bundle, null, 2));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // ── /knowledge/concepts/import ──
+      if (req.method === "POST" && url.pathname === "/knowledge/concepts/import") {
+        const conflict = (url.searchParams.get("conflict") || "merge") as "skip"|"merge"|"overwrite";
+        if (!["skip","merge","overwrite"].includes(conflict)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "conflict must be skip|merge|overwrite" }));
+          return;
+        }
+        if (!deps.importConcept) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "concept import not available" }));
+          return;
+        }
+        // Allow large bundles (up to ~50MB).
+        const body = await readBody(req, 50 * 1024 * 1024);
+        let envelope: unknown;
+        try { envelope = JSON.parse(body); } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON body" }));
+          return;
+        }
+        try {
+          const result = await deps.importConcept(envelope, conflict);
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // ── /knowledge/facts/:id (DELETE = retract, POST .../restore = restore) ──
+      if (req.method === "DELETE" && url.pathname.startsWith("/knowledge/facts/")
+          && !url.pathname.endsWith("/restore")) {
+        const factId = decodeURIComponent(url.pathname.slice("/knowledge/facts/".length));
+        if (!factId) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "fact id required in path" }));
+          return;
+        }
+        if (!deps.retractFact) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "retraction not available" }));
+          return;
+        }
+        let body: any = {};
+        if (parseInt(req.headers["content-length"] || "0") > 0) {
+          try { body = JSON.parse(await readBody(req, 4096)); } catch {}
+        }
+        const reason = (body.reason || "").toString().slice(0, 500) || null;
+        const actor = (body.actor || "web-ui").toString().slice(0, 80) || null;
+        const sourceEntity = (body.source_entity || "").toString().slice(0, 200) || null;
+        try {
+          const result = await deps.retractFact(factId, reason, actor, sourceEntity);
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname.startsWith("/knowledge/facts/")
+          && url.pathname.endsWith("/restore")) {
+        const factId = decodeURIComponent(
+          url.pathname.slice("/knowledge/facts/".length, -"/restore".length),
+        );
+        if (!factId) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "fact id required in path" }));
+          return;
+        }
+        if (!deps.restoreFact) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "restore not available" }));
+          return;
+        }
+        let body: any = {};
+        try { body = JSON.parse(await readBody(req, 4096)); } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON body" }));
+          return;
+        }
+        const undoToken = (body.undo_token || "").toString();
+        if (!undoToken) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "undo_token required" }));
+          return;
+        }
+        try {
+          // Python owns the retraction tx + audit log update — TS just relays.
+          const result = await deps.restoreFact(factId, undoToken);
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // Legacy fact-browser kept for fallback / quick raw access.
+      if (req.method === "GET" && url.pathname === "/knowledge/ui-legacy") {
         res.setHeader("Content-Type", "text/html");
         res.end(KNOWLEDGE_UI_HTML);
+        return;
+      }
+
+      // New "living Confluence" SPA — search-driven, LLM-rendered pages,
+      // bookmarks, retraction, concept transfer.
+      if (req.method === "GET" && url.pathname === "/knowledge/ui") {
+        res.setHeader("Content-Type", "text/html");
+        res.end(KNOWLEDGE_UI_V2_HTML);
+        return;
+      }
+
+      // SPA route handling — the SPA uses path-style entity URLs. Server-side
+      // we just serve the same HTML; client-side router parses location.pathname.
+      if (req.method === "GET" && url.pathname.startsWith("/knowledge/ui/")) {
+        res.setHeader("Content-Type", "text/html");
+        res.end(KNOWLEDGE_UI_V2_HTML);
         return;
       }
 
