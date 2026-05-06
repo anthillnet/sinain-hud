@@ -19,6 +19,7 @@ import { SignalCollector } from "./learning/signal-collector.js";
 import { LocalCurationService } from "./learning/local-curation.js";
 import { EmbeddingService } from "./embedding/service.js";
 import { createAppServer } from "./server.js";
+import { WebDb } from "./web-db/store.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
 import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
@@ -171,6 +172,270 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
   });
 
   return JSON.stringify(unique.slice(0, max));
+}
+
+/** Resolve graph_query.py script path. Used by all knowledge-graph subprocess calls. */
+function resolveGraphQueryScript(): string {
+  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
+  const candidates = [
+    `${__dir}/../../sinain-hud-plugin/sinain-memory/graph_query.py`,
+    `${__dir}/../sinain-memory/graph_query.py`,
+    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+  ];
+  return candidates.find(p => existsSync(p)) || candidates[0];
+}
+
+/** List of candidate knowledge DB paths (local + workspace). */
+function resolveKnowledgeDbPaths(): string[] {
+  return [
+    `${resolveLocalMemoryDir()}/knowledge-graph.db`,
+    `${resolveWorkspace()}/memory/knowledge-graph.db`,
+  ];
+}
+
+/** Search entities across all knowledge DBs. Returns ranked list with snippets. */
+async function searchEntitiesMulti(query: string, limit: number): Promise<unknown> {
+  const { execFileSync } = await import("node:child_process");
+  const scriptPath = resolveGraphQueryScript();
+  const merged: Map<string, any> = new Map();
+  let topicFallback = true;
+
+  for (const dbPath of resolveKnowledgeDbPaths()) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const out = execFileSync("python3", [
+        scriptPath, "--db", dbPath,
+        "--search-entities", query,
+        "--search-limit", String(limit * 2), // 2x then de-dup
+      ], { timeout: 5000, encoding: "utf-8" });
+      const parsed = JSON.parse(out);
+      if (!parsed.topic_fallback) topicFallback = false;
+      for (const r of parsed.results || []) {
+        const existing = merged.get(r.entity);
+        if (!existing || existing.score < r.score) {
+          merged.set(r.entity, r);
+        } else {
+          existing.fact_count += r.fact_count; // sum across DBs when same entity present
+        }
+      }
+    } catch { /* skip failed DB */ }
+  }
+
+  const results = Array.from(merged.values())
+    .sort((a, b) => (b.score - a.score) || (b.fact_count - a.fact_count))
+    .slice(0, limit);
+
+  return { results, topic_fallback: topicFallback && results.every(r => r.score < 0.4) };
+}
+
+/** Export a concept bundle (entity + neighborhood) as JSON. */
+async function exportConceptBundle(
+  entity: string,
+  depth: number,
+  opts: { includeRetracted: boolean; includePage: boolean; redactRules: string[] },
+): Promise<unknown> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const pExecFile = promisify(execFile);
+  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
+  const scriptCandidates = [
+    `${__dir}/../../sinain-hud-plugin/sinain-memory/concept_export.py`,
+    `${__dir}/../sinain-memory/concept_export.py`,
+    `${resolveWorkspace()}/sinain-memory/concept_export.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const webDbPath = `${resolveLocalMemoryDir()}/web.db`;
+
+  for (const dbPath of resolveKnowledgeDbPaths()) {
+    if (!existsSync(dbPath)) continue;
+    const args = [
+      scriptPath,
+      "--db", dbPath,
+      "--root", entity,
+      "--depth", String(depth),
+      "--web-db", webDbPath,
+      "--redact", opts.redactRules.join(","),
+    ];
+    if (opts.includeRetracted) args.push("--include-retracted");
+    if (opts.includePage) args.push("--include-page");
+    try {
+      // 30s budget — large 2-hop exports can take time on big graphs.
+      const { stdout } = await pExecFile("python3", args,
+        { timeout: 30_000, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
+      const parsed = JSON.parse(stdout);
+      // If the export found at least one entity (the root), return it.
+      if (parsed.stats && parsed.stats.entities > 0) return parsed;
+    } catch (e) {
+      // try next DB
+    }
+  }
+  return { ok: false, error: "entity not found in any knowledge graph" };
+}
+
+/** Import a concept bundle into the local knowledge graph. */
+async function importConceptBundle(
+  envelope: unknown,
+  conflict: "skip" | "merge" | "overwrite",
+): Promise<unknown> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const pExecFile = promisify(execFile);
+  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
+  const scriptCandidates = [
+    `${__dir}/../../sinain-hud-plugin/sinain-memory/concept_import.py`,
+    `${__dir}/../sinain-memory/concept_import.py`,
+    `${resolveWorkspace()}/sinain-memory/concept_import.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const localDir = resolveLocalMemoryDir();
+  const dbPath = `${localDir}/knowledge-graph.db`;
+  const webDbPath = `${localDir}/web.db`;
+
+  // Pipe envelope to stdin via spawn to avoid huge command-line args.
+  // (execFile doesn't accept stdin input — that's a spawn-only option.)
+  const args = [
+    scriptPath,
+    "--db", dbPath,
+    "--web-db", webDbPath,
+    "--bundle", "-",
+    "--conflict", conflict,
+  ];
+  const { spawn } = await import("node:child_process");
+  return await new Promise((resolve) => {
+    const child = spawn("python3", args, { timeout: 30_000 });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c: Buffer) => { stdout += c.toString("utf-8"); });
+    child.stderr.on("data", (c: Buffer) => { stderr += c.toString("utf-8"); });
+    child.on("error", (err) => resolve({ ok: false, error: err.message }));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        resolve({ ok: false, error: `python exited ${code}: ${stderr.slice(0, 300)}` });
+        return;
+      }
+      try { resolve(JSON.parse(stdout)); }
+      catch (e: any) { resolve({ ok: false, error: `parse failed: ${e.message}` }); }
+    });
+    child.stdin.write(JSON.stringify(envelope));
+    child.stdin.end();
+  });
+}
+
+/** Retract or restore a fact entity via the Python retract.py subprocess. */
+async function retractOrRestoreFact(
+  mode: "retract" | "restore",
+  factId: string,
+  opts: { reason?: string | null; actor?: string | null; sourceEntity?: string | null; undoToken?: string },
+): Promise<unknown> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const pExecFile = promisify(execFile);
+  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
+  const scriptCandidates = [
+    `${__dir}/../../sinain-hud-plugin/sinain-memory/retract.py`,
+    `${__dir}/../sinain-memory/retract.py`,
+    `${resolveWorkspace()}/sinain-memory/retract.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const webDbPath = `${resolveLocalMemoryDir()}/web.db`;
+
+  // Try DBs in order — the fact lives in one of them.
+  for (const dbPath of resolveKnowledgeDbPaths()) {
+    if (!existsSync(dbPath)) continue;
+    const args = [
+      scriptPath,
+      "--db", dbPath,
+      "--web-db", webDbPath,
+      "--fact-id", factId,
+      mode === "retract" ? "--retract" : "--restore",
+    ];
+    if (mode === "retract") {
+      if (opts.reason) args.push("--reason", opts.reason);
+      if (opts.actor) args.push("--actor", opts.actor);
+      if (opts.sourceEntity) args.push("--source-entity", opts.sourceEntity);
+    } else {
+      if (opts.undoToken) args.push("--undo-token", opts.undoToken);
+    }
+    try {
+      const { stdout } = await pExecFile("python3", args, { timeout: 10_000, encoding: "utf-8" });
+      const parsed = JSON.parse(stdout);
+      if (parsed.ok) return parsed;
+      // If error is "fact not found" try the next DB; otherwise return the error
+      if (!String(parsed.error || "").includes("not found")) return parsed;
+    } catch (e) {
+      // continue to next DB
+    }
+  }
+  return { ok: false, error: "fact not found in any knowledge graph" };
+}
+
+/** Render a Confluence-style page for an entity via Python LLM script. */
+async function renderEntityPageMulti(
+  entity: string,
+  opts: { refresh: boolean; maxFacts: number },
+): Promise<unknown> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const pExecFile = promisify(execFile);
+  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
+  const scriptCandidates = [
+    `${__dir}/../../sinain-hud-plugin/sinain-memory/page_renderer.py`,
+    `${__dir}/../sinain-memory/page_renderer.py`,
+    `${resolveWorkspace()}/sinain-memory/page_renderer.py`,
+  ];
+  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const webDbPath = `${resolveLocalMemoryDir()}/web.db`;
+
+  // Try DBs in order; first one with the entity wins.
+  for (const dbPath of resolveKnowledgeDbPaths()) {
+    if (!existsSync(dbPath)) continue;
+    const args = [
+      scriptPath,
+      "--db", dbPath,
+      "--entity", entity,
+      "--max-facts", String(opts.maxFacts),
+      "--web-db", webDbPath,
+    ];
+    if (opts.refresh) args.push("--refresh");
+    try {
+      // 60s budget — LLM rendering for large entities can take 20-30s.
+      const { stdout } = await pExecFile("python3", args, { timeout: 60_000, encoding: "utf-8" });
+      const parsed = JSON.parse(stdout);
+      if (parsed.fact_count > 0) return parsed;
+    } catch (e) {
+      // continue to next DB
+    }
+  }
+  // No DB had the entity — return an empty page rather than 404 so the UI can show empty state.
+  return {
+    entity,
+    tx_watermark: 0,
+    fact_count: 0,
+    facts_used: 0,
+    summary: "No knowledge captured for this entity yet.",
+    sections: [],
+    stats: { from_cache: false, tokens_in: 0, tokens_out: 0, dropped_bullets: 0 },
+  };
+}
+
+/** Lazy-load graph children for an entity. Local DB first, workspace as fallback. */
+async function graphChildrenMulti(entity: string): Promise<unknown> {
+  const { execFileSync } = await import("node:child_process");
+  const scriptPath = resolveGraphQueryScript();
+
+  for (const dbPath of resolveKnowledgeDbPaths()) {
+    if (!existsSync(dbPath)) continue;
+    try {
+      const out = execFileSync("python3", [
+        scriptPath, "--db", dbPath,
+        "--graph-children", entity,
+        "--graph-limit", "50",
+      ], { timeout: 5000, encoding: "utf-8" });
+      const parsed = JSON.parse(out);
+      if (parsed.groups && parsed.groups.length > 0) return parsed;
+    } catch { /* skip */ }
+  }
+  return { entity, groups: [] };
 }
 
 /** Bi-temporal entity query: what did we know about entity X on a given date? */
@@ -416,6 +681,14 @@ async function main() {
   // ── Initialize embedding service (non-blocking) ──
   embeddingService = new EmbeddingService();
   embeddingService.loadAsync(); // ~9s background load, server starts immediately
+
+  // ── Initialize web.db (UI metadata: bookmarks, page cache, retraction undo) ──
+  const webDb = new WebDb(`${resolveLocalMemoryDir()}/web.db`);
+  // Periodic prune of expired retraction undo tokens (10-min TTL).
+  setInterval(() => {
+    const pruned = webDb.pruneExpiredUndos();
+    if (pruned > 0) log(TAG, `web.db: pruned ${pruned} expired undo tokens`);
+  }, 5 * 60 * 1000);
 
   // ── Initialize local knowledge pipeline ──
   // Pass wsHandler.broadcast so the periodic curator (insight_synthesizer)
@@ -755,6 +1028,16 @@ async function main() {
     profiler,
     costTracker,
     feedbackStore: feedbackStore ?? undefined,
+    webDb,
+    searchEntities: (q, limit) => searchEntitiesMulti(q, limit),
+    graphChildren: (entity) => graphChildrenMulti(entity),
+    renderEntityPage: (entity, opts) => renderEntityPageMulti(entity, opts),
+    retractFact: (factId, reason, actor, sourceEntity) =>
+      retractOrRestoreFact("retract", factId, { reason, actor, sourceEntity }),
+    restoreFact: (factId, undoToken) =>
+      retractOrRestoreFact("restore", factId, { undoToken }),
+    exportConcept: (entity, depth, opts) => exportConceptBundle(entity, depth, opts),
+    importConcept: (envelope, conflict) => importConceptBundle(envelope, conflict),
     isScreenActive: () => screenActive,
 
     onSenseEvent: (event: SenseEvent) => {
