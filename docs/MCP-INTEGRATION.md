@@ -1,5 +1,15 @@
 # Connecting Claude to Sinain (MCP)
 
+> **Easiest path** — let the wizard do it:
+> ```bash
+> npx @geravant/sinain@latest mcp install
+> ```
+> Detects which MCP-aware agents you have (Claude Code, Claude Desktop, Cursor, Codex, Goose, Junie) and registers sinain for the ones you pick. Idempotent. Same step runs as **`[6/6]`** of `sinain onboard --advanced`. Re-run any time to re-point stale paths after upgrades.
+>
+> See **[MCP Capabilities](MCP-CAPABILITIES.md)** for what each of the 15 tools enables.
+>
+> The rest of this doc covers the manual recipe — useful for `pclaude` / alternate `CLAUDE_CONFIG_DIR`, or when scripting registrations outside the wizard.
+
 Sinain ships an [MCP](https://modelcontextprotocol.io) server that lets Claude — running locally via Claude Code or any other MCP-aware client — read and write the sinain knowledge graph, post to the HUD feed, drive escalations, and run the heartbeat pipeline. This is the **default way** to give Claude access to everything sinain has captured.
 
 ## What you get
@@ -104,6 +114,8 @@ Every tool result is filtered through `stripPrivateTags()` (`sinain-mcp-server/i
 **`tsx: command not found` style errors when Claude tries to launch the MCP:** the absolute path to `tsx` in your registration no longer points anywhere — usually because the sinain-hud checkout was moved or `node_modules/` was wiped. Re-run `npm install` in `sinain-mcp-server/`, or update the registration with `claude mcp remove sinain` followed by re-running `claude mcp add` with the corrected path.
 
 **Tool results look truncated or contain unexpected `[REDACTED]` markers:** that's `stripPrivateTags()` doing its job — text inside `<private>` tags. Inspect the underlying source (`sinain-core` logs, the knowledge graph) if you need to see the originals.
+
+**`tsx` or `index.ts` path looks stale after an upgrade:** the wizard bakes absolute paths into each agent's MCP config at registration time. After major npm cache rotations or moving your sinain-hud checkout, the registration may point at a directory that no longer exists. Re-run `npx @geravant/sinain mcp install` to repair every detected agent in one pass, or `sinain mcp install --agent=<id>` to fix one.
 
 ## Other Claude clients
 
