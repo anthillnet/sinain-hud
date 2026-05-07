@@ -60,14 +60,7 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
     `${workspaceDir}/knowledge-graph.db`,
   ];
 
-  // Candidate script paths
-  const __dir = dirname(fileURLToPath(import.meta.url));
-  const scriptCandidates = [
-    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
-    resolve(__dir, "..", "sinain-memory", "graph_query.py"),
-    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("graph_query.py");
 
   // Step 1: Get candidates from Python (RRF-ranked, no embedding — avoids deadlock)
   // Request 2x candidates in JSON for re-ranking in Node.js
@@ -142,13 +135,7 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
     `${workspaceDir}/knowledge-graph.db`,
   ];
 
-  const __dir = dirname(fileURLToPath(import.meta.url));
-  const scriptCandidates = [
-    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
-    resolve(__dir, "..", "sinain-memory", "graph_query.py"),
-    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("graph_query.py");
 
   const allFacts: any[] = [];
   for (const dbPath of dbPaths) {
@@ -174,15 +161,31 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
   return JSON.stringify(unique.slice(0, max));
 }
 
-/** Resolve graph_query.py script path. Used by all knowledge-graph subprocess calls. */
-function resolveGraphQueryScript(): string {
+/**
+ * Resolve a Python script under sinain-memory/. Two layouts are supported:
+ *
+ * - **dev repo**: code is at `<repo>/sinain-core/src/index.ts`, scripts at
+ *   `<repo>/sinain-hud-plugin/sinain-memory/<name>` (so `__dir/../../sinain-hud-plugin/sinain-memory`).
+ * - **npm-installed**: code is at `node_modules/@geravant/sinain/sinain-core/src/index.ts`,
+ *   scripts at `node_modules/@geravant/sinain/sinain-memory/<name>` (so `__dir/../../sinain-memory`).
+ *
+ * Plus a workspace fallback for OpenClaw layouts. ENOENT on the resolved
+ * path was Irina's bug — the npm path was missing from candidates.
+ */
+function resolveSinainMemoryScript(scriptName: string): string {
   const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
   const candidates = [
-    `${__dir}/../../sinain-hud-plugin/sinain-memory/graph_query.py`,
-    `${__dir}/../sinain-memory/graph_query.py`,
-    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
+    `${__dir}/../../sinain-hud-plugin/sinain-memory/${scriptName}`,  // dev repo
+    `${__dir}/../../sinain-memory/${scriptName}`,                      // npm install
+    `${__dir}/../sinain-memory/${scriptName}`,                         // legacy
+    `${resolveWorkspace()}/sinain-memory/${scriptName}`,               // openclaw workspace
   ];
   return candidates.find(p => existsSync(p)) || candidates[0];
+}
+
+/** Backward-compat alias used by legacy call sites. */
+function resolveGraphQueryScript(): string {
+  return resolveSinainMemoryScript("graph_query.py");
 }
 
 /** List of candidate knowledge DB paths (local + workspace). */
@@ -237,13 +240,7 @@ async function exportConceptBundle(
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const pExecFile = promisify(execFile);
-  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
-  const scriptCandidates = [
-    `${__dir}/../../sinain-hud-plugin/sinain-memory/concept_export.py`,
-    `${__dir}/../sinain-memory/concept_export.py`,
-    `${resolveWorkspace()}/sinain-memory/concept_export.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("concept_export.py");
   const webDbPath = `${resolveLocalMemoryDir()}/web.db`;
 
   for (const dbPath of resolveKnowledgeDbPaths()) {
@@ -286,13 +283,7 @@ async function importConceptBundle(
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const pExecFile = promisify(execFile);
-  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
-  const scriptCandidates = [
-    `${__dir}/../../sinain-hud-plugin/sinain-memory/concept_import.py`,
-    `${__dir}/../sinain-memory/concept_import.py`,
-    `${resolveWorkspace()}/sinain-memory/concept_import.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("concept_import.py");
   const localDir = resolveLocalMemoryDir();
   const dbPath = `${localDir}/knowledge-graph.db`;
   const webDbPath = `${localDir}/web.db`;
@@ -336,13 +327,7 @@ async function retractOrRestoreFact(
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const pExecFile = promisify(execFile);
-  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
-  const scriptCandidates = [
-    `${__dir}/../../sinain-hud-plugin/sinain-memory/retract.py`,
-    `${__dir}/../sinain-memory/retract.py`,
-    `${resolveWorkspace()}/sinain-memory/retract.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("retract.py");
   const webDbPath = `${resolveLocalMemoryDir()}/web.db`;
 
   // Try DBs in order — the fact lives in one of them.
@@ -383,13 +368,7 @@ async function renderEntityPageMulti(
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const pExecFile = promisify(execFile);
-  const __dir = new URL(import.meta.url).pathname.replace(/\/[^/]+$/, "");
-  const scriptCandidates = [
-    `${__dir}/../../sinain-hud-plugin/sinain-memory/page_renderer.py`,
-    `${__dir}/../sinain-memory/page_renderer.py`,
-    `${resolveWorkspace()}/sinain-memory/page_renderer.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("page_renderer.py");
   const webDbPath = `${resolveLocalMemoryDir()}/web.db`;
 
   // Try DBs in order; first one with the entity wins.
@@ -456,10 +435,12 @@ async function queryKnowledgeAsOfMulti(entity: string, date: string): Promise<st
     `${workspaceDir}/knowledge-graph.db`,
   ];
 
+  const __dir = dirname(new URL(import.meta.url).pathname);
   const scriptCandidates = [
-    `${dirname(new URL(import.meta.url).pathname)}/../sinain-hud-plugin/sinain-memory`,
-    `${dirname(new URL(import.meta.url).pathname)}/sinain-memory`,
-    `${resolveWorkspace()}/sinain-memory`,
+    `${__dir}/../../sinain-hud-plugin/sinain-memory`,  // dev repo
+    `${__dir}/../../sinain-memory`,                     // npm install
+    `${__dir}/../sinain-memory`,                        // legacy
+    `${resolveWorkspace()}/sinain-memory`,              // workspace
   ];
   const scriptsDir = scriptCandidates.find(p => existsSync(`${p}/triplestore.py`)) || scriptCandidates[0];
 
@@ -499,12 +480,7 @@ async function exportKnowledgeMulti(domain: string | null, max: number): Promise
     `${workspaceDir}/knowledge-graph.db`,
   ];
 
-  const __dir = dirname(fileURLToPath(import.meta.url));
-  const scriptCandidates = [
-    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
-    `${resolveWorkspace()}/sinain-memory/graph_query.py`,
-  ];
-  const scriptPath = scriptCandidates.find(p => existsSync(p)) || scriptCandidates[0];
+  const scriptPath = resolveSinainMemoryScript("graph_query.py");
 
   const allFacts: any[] = [];
   for (const dbPath of dbPaths) {
