@@ -13,66 +13,100 @@
   .card { max-width: 480px; width: 100%; padding: 32px;
           border: 1px solid #e2e8f0; border-radius: 12px;
           box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08); }
-  h1 { color: #2563eb; font-size: 20px; margin: 0 0 12px; }
-  p { color: #475569; line-height: 1.5; margin: 8px 0; font-size: 14px; }
+  h1 { color: #2563eb; font-size: 22px; margin: 0 0 8px; }
+  .lede { color: #475569; line-height: 1.5; margin: 4px 0 20px; font-size: 14px; }
   code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px;
          font-family: ui-monospace, monospace; font-size: 13px; color: #0f172a; }
-  .actions { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; }
-  button, a.btn {
-    background: #2563eb; color: #ffffff; border: none; padding: 10px 16px;
-    border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600;
-    text-decoration: none; display: inline-block;
+  .open-btn {
+    display: block; width: 100%; box-sizing: border-box;
+    background: #2563eb; color: #ffffff !important;
+    border: none; padding: 14px 22px; border-radius: 8px; cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 15px;
+    text-decoration: none; text-align: center;
+    transition: background 0.15s;
   }
-  button:hover, a.btn:hover { background: #1d4ed8; }
-  button.secondary, a.btn.secondary {
-    background: #f8fafc; color: #0f172a; border: 1px solid #e2e8f0; font-weight: 500;
+  .open-btn:hover { background: #1d4ed8; }
+  button.secondary {
+    background: #f8fafc; color: #0f172a; border: 1px solid #e2e8f0;
+    padding: 8px 14px; border-radius: 6px; cursor: pointer; font: inherit;
+    font-weight: 500;
   }
-  button.secondary:hover, a.btn.secondary:hover { background: #f1f5f9; }
-  input { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0;
-          border-radius: 6px; font: inherit; box-sizing: border-box; }
+  button.secondary:hover { background: #f1f5f9; }
+  .port-row { display: flex; gap: 8px; align-items: end; margin-top: 8px; }
+  input { padding: 8px 12px; border: 1px solid #e2e8f0;
+          border-radius: 6px; font: inherit; box-sizing: border-box; flex: 1; min-width: 0; }
   label { display: block; color: #475569; font-size: 12px; margin: 12px 0 4px; }
-  .small { color: #94a3b8; font-size: 12px; }
+  .small { color: #94a3b8; font-size: 12px; margin-top: 16px; line-height: 1.5; }
+  .small a { color: #2563eb; }
   .err { color: #b91c1c; }
+  details { margin-top: 16px; }
+  summary { cursor: pointer; color: #475569; font-size: 13px; user-select: none; }
+  summary:hover { color: #0f172a; }
+  details[open] summary { color: #0f172a; margin-bottom: 4px; }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>Open in Sinain</h1>
-    <p id="status">Redirecting to your local sinain-core…</p>
-    <div id="manual" style="display:none">
-      <p>This link couldn't be opened automatically. Sinain-core may not be running, or it's on a different port.</p>
-      <label for="port">Sinain-core port</label>
-      <input id="port" type="number" value="9500" min="1" max="65535" />
-      <div class="actions">
-        <button id="retry">Try again</button>
-        <a id="manualLink" class="btn secondary" target="_blank">Open URL manually</a>
+    <p class="lede" id="status">A friend has shared a concept with you. Click the button to load it in your local sinain-core:</p>
+
+    <a id="openBtn" class="open-btn" href="#">📥 Open in Sinain</a>
+
+    <details>
+      <summary>Sinain-core on a different port?</summary>
+      <label for="port">Port</label>
+      <div class="port-row">
+        <input id="port" type="number" value="9500" min="1" max="65535" />
+        <button class="secondary" id="updatePort">Update</button>
       </div>
-      <p class="small">If you don't have sinain-core installed, get it at <a href="https://github.com/anthillnet/sinain-hud" target="_blank">github.com/anthillnet/sinain-hud</a>.</p>
-    </div>
+    </details>
+
+    <p class="small">
+      <strong>Don't have sinain-core?</strong>
+      <a href="https://github.com/anthillnet/sinain-hud" target="_blank">Install it from GitHub</a>
+      and start it before clicking the button.
+      <br><br>
+      <strong>Privacy:</strong> the bundle data lives in the URL fragment (after <code>#</code>),
+      which browsers never send to servers. This page only sees the entity name and port.
+    </p>
   </div>
 <script>
 // Tiny URL rewriter. Inputs:
 //   query string ?entity=<id>&port=<n>
 //   fragment    #bundle=<encoded>  OR  #peer=<token>
-// Output: redirects to http://localhost:<port>/knowledge/ui/entity/<id><fragment>
+// On user click, navigates to http://localhost:<port>/knowledge/ui/entity/<id><fragment>
 //
 // IMPORTANT: browsers do NOT send URL fragments to servers. The bundle/peer
-// data in the hash never touches this redirector or its CDN — this page is
-// pure JS that rewrites the URL on the client side.
+// data in the hash never touches this redirector or its host.
+//
+// We DELIBERATELY require a user click rather than auto-redirecting:
+// - HTTPS→HTTP localhost top-level navigation is increasingly throttled by
+//   browser policies (Chrome's Private Network Access). User-gesture clicks
+//   are treated more permissively than programmatic location.href.
+// - If the recipient's sinain-core isn't running, they need to know BEFORE
+//   we navigate them to a "site can't be reached" page they have to back
+//   out of. The button gives them that beat to confirm.
 
 (function() {
   const params = new URLSearchParams(location.search);
   const entity = params.get("entity") || "";
   const portStr = params.get("port") || "9500";
-  const port = parseInt(portStr) || 9500;
+  const initialPort = parseInt(portStr) || 9500;
   const hash = location.hash || "";  // includes leading #
 
+  const statusEl = document.getElementById("status");
+  const openBtn = document.getElementById("openBtn");
+  const portInput = document.getElementById("port");
+  const updateBtn = document.getElementById("updatePort");
+
   if (!entity || !hash) {
-    document.getElementById("status").innerHTML =
+    statusEl.innerHTML =
       '<span class="err">Missing share data.</span> ' +
-      'This link must be opened directly — copying just the link text from a ' +
-      'preview-modified URL (Slack/iMessage may strip the fragment) won\'t work.';
-    document.getElementById("manual").style.display = "none";
+      'This link must be opened directly. Some chat apps strip the part after ' +
+      '<code>#</code> — try copying the full link from the sender into your ' +
+      'address bar manually.';
+    openBtn.style.display = "none";
+    document.querySelector("details").style.display = "none";
     return;
   }
 
@@ -80,32 +114,29 @@
     return "http://localhost:" + p + "/knowledge/ui/entity/" + entity + hash;
   }
 
-  // Try a fast probe of /knowledge/ui (HEAD) before redirecting. If the local
-  // sinain-core isn't reachable on this port, show the manual fallback.
-  // CORS will block reading the response, but the network failure is detectable.
-  function attempt(p) {
-    document.getElementById("status").textContent = "Opening localhost:" + p + "…";
-    // We can't reliably HEAD-probe due to CORS + browser fetch policies on
-    // mixed http/https. Instead just navigate and let the browser handle it.
-    // If localhost:<p> isn't running, the user lands on a "can't connect"
-    // page — and our manual fallback below gives them a way back here.
-    location.href = targetUrl(p);
+  function bindButton(p) {
+    portInput.value = String(p);
+    openBtn.href = targetUrl(p);
   }
 
-  document.getElementById("retry").addEventListener("click", () => {
-    const p = parseInt(document.getElementById("port").value) || 9500;
-    attempt(p);
+  bindButton(initialPort);
+
+  updateBtn.addEventListener("click", () => {
+    const p = parseInt(portInput.value) || 9500;
+    bindButton(p);
+    statusEl.textContent = "Click below to open localhost:" + p + ".";
   });
 
-  // Show manual UI as a fallback after a short delay (in case redirect fails
-  // silently or the user wants to override the port).
-  setTimeout(() => {
-    document.getElementById("manual").style.display = "block";
-    document.getElementById("port").value = String(port);
-    document.getElementById("manualLink").href = targetUrl(port);
-  }, 600);
-
-  attempt(port);
+  // Update the lede to match share mode for clarity
+  if (hash.indexOf("#peer=") === 0) {
+    statusEl.textContent =
+      "A friend is sharing a concept with you live (peer-to-peer). " +
+      "Click below to connect — make sure they keep their sinain tab open.";
+  } else if (hash.indexOf("#bundle=") === 0) {
+    statusEl.textContent =
+      "A friend has sent you a self-contained concept. Click below to load " +
+      "it in your local sinain-core.";
+  }
 })();
 </script>
 </body>
