@@ -7,7 +7,7 @@
  * that should not be visible to the curator/distiller.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 -- Schema version tracking (for future migrations)
@@ -97,4 +97,26 @@ CREATE TABLE IF NOT EXISTS search_log (
   result_count  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_search_log_ts ON search_log(ts DESC);
+
+-- Cross-machine concept share tracking (URL-fragment + WebRTC peer modes).
+-- Persistent across SPA refresh — ShareManager reads this on load and
+-- re-binds peer connections using the stored share_token as the peerjs ID.
+CREATE TABLE IF NOT EXISTS shared_docs (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  share_token    TEXT NOT NULL UNIQUE,
+  entity_id      TEXT NOT NULL,
+  mode           TEXT NOT NULL CHECK (mode IN ('fragment','peer')),
+  status         TEXT NOT NULL CHECK (status IN ('waiting','connecting','delivered','disconnected','revoked','expired')),
+  bundle_size    INTEGER,
+  url            TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  delivered_at   INTEGER,
+  revoked_at     INTEGER,
+  recipient_hint TEXT,
+  notes          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shared_docs_status
+  ON shared_docs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shared_docs_entity
+  ON shared_docs(entity_id);
 `;
