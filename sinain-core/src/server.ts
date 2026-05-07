@@ -749,6 +749,15 @@ const ShareManager = (() => {
               body: msg.payload,
             });
             console.log("[sinain-share:recipient] import response:", importR);
+            // CRITICAL: api() doesn't throw on {ok:false} responses — it
+            // returns the parsed body. We MUST check ok explicitly here, or
+            // a backend failure (script ENOENT, schema error, etc.) appears
+            // to the SPA as success and falls through to MissingConcept.
+            if (importR && importR.ok === false) {
+              cleanup();
+              reject(new Error(importR.error || "import failed"));
+              return;
+            }
             conn.send({ type: "ack" });
             setTimeout(cleanup, 500);
             resolve(importR);
