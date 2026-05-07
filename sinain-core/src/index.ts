@@ -264,7 +264,13 @@ async function exportConceptBundle(
         { timeout: 30_000, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
       const parsed = JSON.parse(stdout);
       // If the export found at least one entity (the root), return it.
-      if (parsed.stats && parsed.stats.entities > 0) return parsed;
+      // BFS always includes the root in `visited`, so entities >= 1 always —
+      // not a useful guard. Check for actual triples instead, otherwise we
+      // accept a bundle that has just the root with no data and never try
+      // the next DB. This was the bug that produced empty parloa bundles
+      // when entity:parloa lived in the workspace DB but local was checked
+      // first and returned an empty (root-only) bundle.
+      if (parsed.stats && parsed.stats.triples > 0) return parsed;
     } catch (e) {
       // try next DB
     }
