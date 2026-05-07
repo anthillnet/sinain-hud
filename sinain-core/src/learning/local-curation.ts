@@ -366,6 +366,9 @@ export class LocalCurationService {
       this.writeDailyNotes(digest, transcript as any);
 
       // Step 2: Integrate into playbook + knowledge graph
+      // Inject raw feed items so integrator stores verbatim quotes + agent analysis
+      digest._rawItems = transcript;
+      digest._feedItemCount = transcript.length;
       try {
         const integratorOutput = execFileSync("python3", [
           resolve(this.scriptsDir, "knowledge_integrator.py"),
