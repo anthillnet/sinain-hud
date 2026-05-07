@@ -331,6 +331,32 @@ const KNOWLEDGE_UI_V2_HTML = `<!DOCTYPE html>
   .toast .timer { height: 2px; background: var(--accent); position: absolute;
                   bottom: 0; left: 0; transition: width linear; }
   .toast button { padding: 4px 10px; font-size: 12px; }
+  /* Share badge in header */
+  .share-badge { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+  /* Shares view */
+  .shares-list { display: flex; flex-direction: column; gap: 12px; }
+  .share-row { background: var(--bg-elev); border: 1px solid var(--border);
+               border-radius: 6px; padding: 14px 16px;
+               display: grid; grid-template-columns: auto 1fr auto; gap: 12px;
+               align-items: center; }
+  .share-row .icon { font-size: 18px; line-height: 1; }
+  .share-row .body { min-width: 0; }
+  .share-row .title { font-weight: 600; color: var(--accent); white-space: nowrap;
+                      overflow: hidden; text-overflow: ellipsis; }
+  .share-row .meta { color: var(--fg-dim); font-size: 12px; margin-top: 2px;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .share-row .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .share-row .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+                     letter-spacing: 0.02em; text-transform: uppercase; }
+  .pill-waiting    { background: rgba(180,83,9,0.10);   color: var(--warn); }
+  .pill-connecting { background: rgba(37,99,235,0.10);  color: var(--accent); }
+  .pill-delivered  { background: rgba(21,128,61,0.10);  color: #15803d; }
+  .pill-disconnected { background: var(--chip);          color: var(--fg-faint); }
+  .pill-revoked    { background: rgba(185,28,28,0.08);  color: var(--danger); }
+  .pill-expired    { background: var(--chip);            color: var(--fg-faint); }
+  .pill-permanent  { background: var(--chip);            color: var(--fg-dim); }
+  .pulse { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
   /* Loading */
   .spinner { display: inline-block; width: 14px; height: 14px;
              border: 2px solid var(--border); border-top-color: var(--accent);
@@ -351,6 +377,7 @@ const KNOWLEDGE_UI_V2_HTML = `<!DOCTYPE html>
     <div id="searchResults" class="search-results"></div>
   </div>
   <div class="header-actions">
+    <button onclick="navigate('/knowledge/ui/shares')" title="My share links">📤 Shares <span id="shareBadge" class="share-badge"></span></button>
     <a href="/knowledge/ui-legacy"><button>Legacy view</button></a>
   </div>
 </header>
@@ -381,6 +408,11 @@ async function api(path, opts = {}) {
   }
 }
 
+// ── Cross-machine sharing config (env-injected at serve time) ────────────
+const SHARE_PEERJS_HOST = __SHARE_PEERJS_HOST__;     // empty string → peerjs.com cloud
+const SHARE_INLINE_MAX_BYTES = __SHARE_INLINE_MAX_BYTES__;
+const SHARE_TTL_HOURS = __SHARE_TTL_HOURS__;
+
 // ── Router ────────────────────────────────────────────────────────────────
 function navigate(path) {
   history.pushState({}, "", path);
@@ -390,6 +422,8 @@ window.addEventListener("popstate", render);
 window.addEventListener("DOMContentLoaded", () => {
   setupSearch();
   setupGlobalDrop();
+  ShareManager.resumePeerShares().catch(e => console.warn("share resume failed", e));
+  refreshShareBadge();
   render();
 });
 
@@ -397,6 +431,8 @@ function render() {
   const path = location.pathname;
   if (path === "/knowledge/ui" || path === "/knowledge/ui/") {
     renderHome();
+  } else if (path === "/knowledge/ui/shares" || path === "/knowledge/ui/shares/") {
+    renderSharesView();
   } else if (path.startsWith("/knowledge/ui/entity/")) {
     const entity = decodeURIComponent(path.slice("/knowledge/ui/entity/".length));
     renderEntityPage(entity);
@@ -406,6 +442,258 @@ function render() {
   } else {
     renderHome();
   }
+}
+
+// ── Share infrastructure (gzip helpers, peerjs loader, ShareManager) ─────
+
+function randomHex(byteCount) {
+  const buf = new Uint8Array(byteCount);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function gzipBase64(text) {
+  // CompressionStream("gzip") is in all modern browsers (Chrome 80+, Safari
+  // 16.4+, Firefox 113+). No external library needed.
+  const cs = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buf = new Uint8Array(await new Response(cs).arrayBuffer());
+  // base64url so the output is URL-safe (no +, /, =).
+  let bin = "";
+  for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+  return btoa(bin).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+}
+
+async function ungzipBase64(encoded) {
+  const padded = encoded.replace(/-/g, "+").replace(/_/g, "/")
+    + "===".slice((encoded.length + 3) % 4);
+  const bin = atob(padded);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ds = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(ds).text();
+}
+
+let _peerjsLoading = null;
+function ensurePeerJsLoaded() {
+  if (window.Peer) return Promise.resolve();
+  if (_peerjsLoading) return _peerjsLoading;
+  _peerjsLoading = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    // Pinned version + SRI hash. If you bump version, regenerate hash via:
+    //   curl -sL https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js | openssl dgst -sha384 -binary | openssl base64 -A
+    s.src = "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js";
+    s.crossOrigin = "anonymous";
+    s.onload = () => res();
+    s.onerror = (e) => rej(new Error("peerjs failed to load — network or CDN issue"));
+    document.head.appendChild(s);
+  });
+  return _peerjsLoading;
+}
+
+function newPeer(idOrUndef) {
+  // Honor SHARE_PEERJS_HOST env-injected override. Empty string = peerjs.com default.
+  const opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST } : {};
+  return idOrUndef ? new window.Peer(idOrUndef, opts) : new window.Peer(opts);
+}
+
+const ShareManager = (() => {
+  // share_token → live Peer instance (sender side only). Bundles are re-fetched
+  // on demand rather than kept in JS memory across resume.
+  const peers = new Map();
+
+  async function buildBundle(entity) {
+    const r = await fetch(\`/knowledge/concepts/export?entity=\${encodeURIComponent(entity)}\` +
+      \`&depth=1&include_page=1\`);
+    if (!r.ok) throw new Error("export failed: " + r.status);
+    return await r.text();
+  }
+
+  async function createShare(entity) {
+    const bundle = await buildBundle(entity);
+    const sizeBytes = new TextEncoder().encode(bundle).length;
+    const token = randomHex(8);  // 16 hex chars
+
+    if (sizeBytes <= SHARE_INLINE_MAX_BYTES) {
+      const compressed = await gzipBase64(bundle);
+      const url = location.origin + "/knowledge/ui/entity/" +
+        encodeURIComponent(entity) + "#bundle=" + compressed;
+      await api("/knowledge/shares", { method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          entity_id: entity, mode: "fragment", share_token: token, url, bundle_size: sizeBytes
+        })
+      });
+      try { await navigator.clipboard.writeText(url); } catch { /* clipboard denied */ }
+      showToast("✓ Link copied · self-contained, can't be revoked", 6000);
+      refreshShareBadge();
+      return { mode: "fragment", url };
+    }
+
+    // Peer mode
+    await ensurePeerJsLoaded();
+    const peer = newPeer(token);
+    await new Promise((res, rej) => {
+      peer.on("open", () => res());
+      peer.on("error", e => rej(e));
+      setTimeout(() => rej(new Error("peerjs broker timeout")), 8000);
+    });
+    const url = location.origin + "/knowledge/ui/entity/" +
+      encodeURIComponent(entity) + "#peer=" + token;
+    await api("/knowledge/shares", { method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        entity_id: entity, mode: "peer", share_token: token, url, bundle_size: sizeBytes
+      })
+    });
+    peers.set(token, peer);
+    attachSenderHandlers(peer, token, entity);
+    try { await navigator.clipboard.writeText(url); } catch {}
+    showToast("✓ Link copied · live until you revoke (see Shares)", 6000);
+    refreshShareBadge();
+    return { mode: "peer", url };
+  }
+
+  function attachSenderHandlers(peer, token, entity) {
+    peer.on("connection", (conn) => {
+      patchStatus(token, "connecting");
+      conn.on("open", async () => {
+        try {
+          // Re-fetch bundle each time — keeps memory low and reflects latest state.
+          const bundle = await buildBundle(entity);
+          conn.send({ type: "bundle", payload: bundle });
+        } catch (e) {
+          conn.send({ type: "error", message: String(e).slice(0, 200) });
+          conn.close();
+        }
+      });
+      conn.on("data", (msg) => {
+        if (msg && msg.type === "ack") {
+          patchStatus(token, "delivered", { delivered_at: Date.now() });
+          // Keep peer alive briefly for retries, then release.
+          setTimeout(() => destroyPeer(token), 5000);
+        }
+      });
+      conn.on("close", () => { /* normal */ });
+    });
+    peer.on("disconnected", () => patchStatus(token, "disconnected"));
+    peer.on("close", () => patchStatus(token, "disconnected"));
+    peer.on("error", (err) => {
+      console.warn("share peer error", token, err && err.type, err && err.message);
+    });
+  }
+
+  async function patchStatus(token, status, extra) {
+    const body = Object.assign({ status }, extra || {});
+    await api("/knowledge/shares/" + encodeURIComponent(token), {
+      method: "PATCH", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    refreshShareBadge();
+  }
+
+  async function resumePeerShares() {
+    const r = await api("/knowledge/shares?status=waiting&status=connecting&status=disconnected");
+    if (!r || !r.ok) return;
+    for (const share of r.shares || []) {
+      if (share.mode !== "peer") continue;
+      try {
+        await ensurePeerJsLoaded();
+        const peer = newPeer(share.share_token);
+        await new Promise((res, rej) => {
+          peer.on("open", () => res());
+          peer.on("error", e => rej(e));
+          setTimeout(() => rej(new Error("peerjs open timeout")), 8000);
+        });
+        peers.set(share.share_token, peer);
+        attachSenderHandlers(peer, share.share_token, share.entity_id);
+        if (share.status !== "waiting") {
+          await patchStatus(share.share_token, "waiting");
+        }
+      } catch (e) {
+        console.warn("resume failed for", share.share_token, e && e.message);
+        // Mark as disconnected so the user sees it failed; they can manually revoke.
+        await patchStatus(share.share_token, "disconnected").catch(() => {});
+      }
+    }
+  }
+
+  function destroyPeer(token) {
+    const peer = peers.get(token);
+    if (peer) {
+      try { peer.destroy(); } catch {}
+      peers.delete(token);
+    }
+  }
+
+  async function revoke(token) {
+    destroyPeer(token);
+    await api("/knowledge/shares/" + encodeURIComponent(token), {
+      method: "PATCH", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ status: "revoked", revoked_at: Date.now() })
+    });
+    refreshShareBadge();
+  }
+
+  async function forget(token) {
+    destroyPeer(token);
+    await api("/knowledge/shares/" + encodeURIComponent(token), { method: "DELETE" });
+    refreshShareBadge();
+  }
+
+  async function connectAsRecipient(token) {
+    showToast('<span class="spinner"></span> Connecting peer-to-peer…', 30_000);
+    await ensurePeerJsLoaded();
+    const me = newPeer();
+    await new Promise((res, rej) => {
+      me.on("open", () => res());
+      me.on("error", e => rej(e));
+      setTimeout(() => rej(new Error("peerjs broker timeout")), 8000);
+    });
+    return new Promise((resolve, reject) => {
+      const conn = me.connect(token, { reliable: true });
+      const cleanup = () => { try { conn.close(); } catch {} try { me.destroy(); } catch {} };
+      const openTimeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("source offline or unreachable"));
+      }, 15_000);
+      conn.on("open", () => clearTimeout(openTimeout));
+      conn.on("error", (e) => { cleanup(); reject(e); });
+      conn.on("data", async (msg) => {
+        if (!msg) return;
+        if (msg.type === "error") {
+          cleanup();
+          reject(new Error("source error: " + msg.message));
+          return;
+        }
+        if (msg.type === "bundle") {
+          try {
+            const importR = await api("/knowledge/concepts/import?conflict=merge", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: msg.payload,
+            });
+            conn.send({ type: "ack" });
+            setTimeout(cleanup, 500);
+            resolve(importR);
+          } catch (e) {
+            cleanup();
+            reject(e);
+          }
+        }
+      });
+    });
+  }
+
+  return { createShare, resumePeerShares, revoke, forget, connectAsRecipient };
+})();
+
+async function refreshShareBadge() {
+  try {
+    const r = await api("/knowledge/shares?status=waiting&status=connecting");
+    const count = (r && r.shares) ? r.shares.length : 0;
+    const badge = document.getElementById("shareBadge");
+    if (badge) badge.textContent = count > 0 ? "(" + count + ")" : "";
+  } catch {}
 }
 
 // ── Home view ─────────────────────────────────────────────────────────────
@@ -454,6 +742,111 @@ function timeAgo(ts) {
   return Math.round(diff / 86_400_000) + "d ago";
 }
 
+function fmtBytes(n) {
+  if (n == null) return "?";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+// ── Shares view ───────────────────────────────────────────────────────────
+async function renderSharesView() {
+  document.title = "Shares · Sinain";
+  const root = $("#root");
+  root.innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading shares…</div>';
+
+  const r = await api("/knowledge/shares?include_archived=1");
+  const shares = (r && r.shares) || [];
+  refreshShareBadge();
+
+  if (shares.length === 0) {
+    root.innerHTML = \`
+      <h1>Shares</h1>
+      <div class="empty-row" style="padding:24px;">
+        No shares yet. Open an entity page and click 📤 Share to create one.
+      </div>\`;
+    return;
+  }
+
+  root.innerHTML = '<h1>Shares</h1><div class="shares-list" id="sharesList"></div>';
+  const list = $("#sharesList");
+  list.innerHTML = shares.map(renderShareRow).join("");
+
+  // Wire per-row actions via event delegation
+  list.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+    const token = btn.dataset.token;
+    const action = btn.dataset.action;
+    const share = shares.find(s => s.share_token === token);
+    if (!share) return;
+    if (action === "copy") {
+      try {
+        await navigator.clipboard.writeText(share.url);
+        showToast("✓ URL copied");
+      } catch {
+        showToast("Copy failed — your browser may block clipboard access");
+      }
+    } else if (action === "revoke") {
+      if (share.mode === "fragment") {
+        const ok = confirm(
+          "Mark this share as revoked?\\n\\n" +
+          "Note: the URL is self-contained — anyone who already has it can still import. " +
+          "This only removes it from your active list.");
+        if (!ok) return;
+      }
+      await ShareManager.revoke(token);
+      renderSharesView();
+    } else if (action === "forget") {
+      const ok = confirm("Remove this share from your list permanently?");
+      if (!ok) return;
+      await ShareManager.forget(token);
+      renderSharesView();
+    } else if (action === "open") {
+      navigate("/knowledge/ui/entity/" + encodeURIComponent(share.entity_id));
+    }
+  });
+}
+
+function renderShareRow(s) {
+  const isPeer = s.mode === "peer";
+  const statusClass = "pill-" + (s.mode === "fragment" && s.status === "delivered" ? "permanent" : s.status);
+  const statusLabel = s.mode === "fragment" && s.status === "delivered" ? "permanent" : s.status;
+  const pulsing = (s.status === "waiting" || s.status === "connecting") ? " pulse" : "";
+  const icon = ({
+    waiting: "⏳", connecting: "⚡", delivered: isPeer ? "✓" : "📎",
+    disconnected: "⚠", revoked: "✕", expired: "⌛"
+  })[s.status] || "•";
+
+  const sub = [];
+  sub.push(timeAgo(s.created_at));
+  if (s.bundle_size != null) sub.push(fmtBytes(s.bundle_size));
+  if (isPeer) sub.push("PEER"); else sub.push("LINK");
+  if (s.delivered_at) sub.push("delivered " + timeAgo(s.delivered_at));
+  if (s.recipient_hint) sub.push(s.recipient_hint);
+
+  // Per-mode actions: peer has Revoke (real); fragment has Revoke (best-effort)
+  // and both have Copy + Forget.
+  const showRevoke = (s.status === "waiting" || s.status === "connecting" || s.status === "disconnected"
+                     || (s.mode === "fragment" && s.status === "delivered"));
+  return \`
+    <div class="share-row\${pulsing}">
+      <div class="icon">\${icon}</div>
+      <div class="body">
+        <div class="title" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(s.entity_id)}'))" style="cursor:pointer">
+          \${esc(s.entity_id)}
+        </div>
+        <div class="meta">\${sub.map(esc).join(" · ")}</div>
+      </div>
+      <div class="actions">
+        <span class="pill \${statusClass}">\${esc(statusLabel)}</span>
+        <button data-action="copy" data-token="\${esc(s.share_token)}" title="Copy share URL">📋</button>
+        \${showRevoke ? \`<button data-action="revoke" data-token="\${esc(s.share_token)}" title="\${isPeer ? 'Revoke this share (recipient will see source offline)' : 'Mark revoked (URL still works for anyone who has it)'}">✕</button>\` : ""}
+        <button data-action="forget" data-token="\${esc(s.share_token)}" title="Remove from list">🗑</button>
+      </div>
+    </div>\`;
+}
+
 // ── Search ────────────────────────────────────────────────────────────────
 function setupSearch() {
   const input = $("#search");
@@ -491,6 +884,30 @@ async function renderEntityPage(entity) {
   const root = $("#root");
   root.innerHTML = \`<div class="loading-block"><span class="spinner"></span> Loading \${esc(entity)}…</div>\`;
 
+  // Auto-import path for share links — runs BEFORE the local existence check
+  // so a recipient with no prior data on this entity gets the page populated.
+  if (location.hash.startsWith("#bundle=")) {
+    try {
+      const json = await ungzipBase64(location.hash.slice("#bundle=".length));
+      await api("/knowledge/concepts/import?conflict=merge", {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: json
+      });
+      showToast("✓ Concept imported");
+    } catch (e) {
+      showToast("Import failed: " + (e.message || "decode error"));
+    }
+    history.replaceState({}, "", location.pathname);  // strip hash
+  } else if (location.hash.startsWith("#peer=")) {
+    const token = location.hash.slice("#peer=".length);
+    history.replaceState({}, "", location.pathname);  // strip early — keeps refresh sane
+    try {
+      await ShareManager.connectAsRecipient(token);
+      showToast("✓ Concept imported via peer");
+    } catch (e) {
+      showToast("Peer share failed: " + (e.message || "unreachable"));
+    }
+  }
+
   const page = await api("/knowledge/page?entity=" + encodeURIComponent(entity));
   if (!page.ok || page.fact_count === 0) {
     if (page.fact_count === 0) {
@@ -515,8 +932,9 @@ async function renderEntityPage(entity) {
         <button id="bmFavorite" class="icon" title="Favorite">★</button>
         <button id="bmArchive" class="icon" title="Archive">🗄</button>
         <button id="actRefresh" class="icon" title="Re-render">↻</button>
-        <button id="actCopyLink" class="icon" title="Copy link">🔗</button>
-        <button id="actExport" class="icon" title="Export concept">⬇</button>
+        <button id="actCopyLink" class="icon" title="Copy entity URL (recipient needs same data)">🔗</button>
+        <button id="actShare" class="icon" title="Share concept (auto-imports for recipient)">📤</button>
+        <button id="actExport" class="icon" title="Download bundle file (manual transfer)">⬇</button>
       </div>
     </div>
     <div class="layout-3col">
@@ -549,6 +967,7 @@ async function renderEntityPage(entity) {
   $("#bmArchive").onclick = () => bookmarkAction(entity, "archive");
   $("#actRefresh").onclick = () => refreshPage(entity);
   $("#actCopyLink").onclick = () => copyLink(entity);
+  $("#actShare").onclick = () => shareEntity(entity);
   $("#actExport").onclick = () => exportConcept(entity);
 
   // Wire bullet retraction (event delegation)
@@ -671,6 +1090,17 @@ async function exportConcept(entity) {
   a.click();
   a.remove();
   showToast("✓ Exporting concept bundle…");
+}
+
+async function shareEntity(entity) {
+  showToast('<span class="spinner"></span> Preparing share…', 30_000);
+  try {
+    await ShareManager.createShare(entity);
+    // Toast + clipboard already handled by ShareManager. User can navigate
+    // freely; status is visible in the Shares view.
+  } catch (e) {
+    showToast("Share failed: " + (e && e.message ? e.message : String(e)));
+  }
 }
 
 // ── Retraction modal + undo toast ─────────────────────────────────────────
@@ -835,6 +1265,22 @@ async function importFiles(files, redirectAfter) {
 }
 </script>
 </body></html>`;
+
+/**
+ * Render the V2 SPA HTML with env-var-driven config substituted in.
+ * The placeholders `__SHARE_PEERJS_HOST__` etc. are inert in the source
+ * template; we replace them at serve time so the SPA can read the values
+ * without an extra `/knowledge/share/config` round-trip on load.
+ */
+function renderKnowledgeUiV2(): string {
+  const peerHost = process.env.SINAIN_PEERJS_HOST || "";  // empty = peerjs.com cloud default
+  const inlineMax = parseInt(process.env.SINAIN_SHARE_INLINE_MAX_BYTES || "6000");
+  const ttlHours = parseInt(process.env.SINAIN_SHARE_TTL_HOURS || "24");
+  return KNOWLEDGE_UI_V2_HTML
+    .replace(/__SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
+    .replace(/__SHARE_INLINE_MAX_BYTES__/g, String(inlineMax))
+    .replace(/__SHARE_TTL_HOURS__/g, String(ttlHours));
+}
 
 /** Server epoch — lets clients detect restarts. */
 const serverEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1492,6 +1938,131 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
+      // ── /knowledge/shares ── (cross-machine concept share metadata) ──
+      if (req.method === "POST" && url.pathname === "/knowledge/shares") {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        let body: any;
+        try { body = JSON.parse(await readBody(req, 16_384)); } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON" }));
+          return;
+        }
+        const required = ["entity_id", "mode", "share_token", "url"];
+        for (const k of required) {
+          if (!body[k] || typeof body[k] !== "string") {
+            res.writeHead(400);
+            res.end(JSON.stringify({ ok: false, error: `${k} required` }));
+            return;
+          }
+        }
+        if (!["fragment", "peer"].includes(body.mode)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "mode must be fragment|peer" }));
+          return;
+        }
+        try {
+          const row = deps.webDb.createSharedDoc({
+            share_token: body.share_token,
+            entity_id: body.entity_id,
+            mode: body.mode,
+            // Fragment shares are 'delivered' the moment the link is created
+            // (the bundle is in the URL); peer shares start as 'waiting'.
+            status: body.mode === "fragment" ? "delivered" : "waiting",
+            bundle_size: typeof body.bundle_size === "number" ? body.bundle_size : null,
+            url: body.url,
+            delivered_at: body.mode === "fragment" ? Date.now() : null,
+            revoked_at: null,
+            recipient_hint: null,
+            notes: body.notes || null,
+          });
+          res.end(JSON.stringify({ ok: true, share: row }));
+        } catch (err: any) {
+          // Most likely UNIQUE constraint on share_token
+          res.writeHead(409);
+          res.end(JSON.stringify({ ok: false, error: err.message?.slice(0, 200) }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/knowledge/shares") {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        // Auto-expire stale shares opportunistically on each list call.
+        const ttlHours = parseInt(process.env.SINAIN_SHARE_TTL_HOURS || "24");
+        if (ttlHours > 0) {
+          deps.webDb.expireStaleShares(ttlHours * 60 * 60 * 1000);
+        }
+        const statusParams = url.searchParams.getAll("status").filter(Boolean);
+        const limit = Math.min(parseInt(url.searchParams.get("limit") || "200"), 500);
+        const includeArchived = url.searchParams.get("include_archived") === "1";
+        const shares = deps.webDb.listSharedDocs({
+          statuses: statusParams.length > 0 ? statusParams as any : undefined,
+          limit,
+          includeArchived,
+        });
+        const activeCount = deps.webDb.countActiveShares();
+        res.end(JSON.stringify({ ok: true, shares, active_count: activeCount }));
+        return;
+      }
+
+      if (req.method === "PATCH" && url.pathname.startsWith("/knowledge/shares/")) {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        const token = decodeURIComponent(url.pathname.slice("/knowledge/shares/".length));
+        if (!token) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "share_token required" }));
+          return;
+        }
+        let body: any;
+        try { body = JSON.parse(await readBody(req, 4096)); } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON" }));
+          return;
+        }
+        const status = body.status;
+        const valid = ["waiting","connecting","delivered","disconnected","revoked","expired"];
+        if (!status || !valid.includes(status)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: `status must be one of ${valid.join("|")}` }));
+          return;
+        }
+        const ok = deps.webDb.updateSharedDocStatus(token, status, {
+          delivered_at: typeof body.delivered_at === "number" ? body.delivered_at : undefined,
+          revoked_at: typeof body.revoked_at === "number" ? body.revoked_at : undefined,
+          recipient_hint: typeof body.recipient_hint === "string" ? body.recipient_hint.slice(0, 200) : undefined,
+        });
+        if (!ok) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ ok: false, error: "share not found" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true, share: deps.webDb.getSharedDoc(token) }));
+        return;
+      }
+
+      if (req.method === "DELETE" && url.pathname.startsWith("/knowledge/shares/")) {
+        if (!deps.webDb) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "web.db not initialized" }));
+          return;
+        }
+        const token = decodeURIComponent(url.pathname.slice("/knowledge/shares/".length));
+        const removed = deps.webDb.deleteSharedDoc(token);
+        res.end(JSON.stringify({ ok: true, removed }));
+        return;
+      }
+
       // Legacy fact-browser kept for fallback / quick raw access.
       if (req.method === "GET" && url.pathname === "/knowledge/ui-legacy") {
         res.setHeader("Content-Type", "text/html");
@@ -1503,7 +2074,7 @@ export function createAppServer(deps: ServerDeps) {
       // bookmarks, retraction, concept transfer.
       if (req.method === "GET" && url.pathname === "/knowledge/ui") {
         res.setHeader("Content-Type", "text/html");
-        res.end(KNOWLEDGE_UI_V2_HTML);
+        res.end(renderKnowledgeUiV2());
         return;
       }
 
@@ -1511,7 +2082,7 @@ export function createAppServer(deps: ServerDeps) {
       // we just serve the same HTML; client-side router parses location.pathname.
       if (req.method === "GET" && url.pathname.startsWith("/knowledge/ui/")) {
         res.setHeader("Content-Type", "text/html");
-        res.end(KNOWLEDGE_UI_V2_HTML);
+        res.end(renderKnowledgeUiV2());
         return;
       }
 
