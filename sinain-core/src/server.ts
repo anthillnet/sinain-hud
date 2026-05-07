@@ -493,8 +493,55 @@ function ensurePeerJsLoaded() {
 
 function newPeer(idOrUndef) {
   // Honor SHARE_PEERJS_HOST env-injected override. Empty string = peerjs.com default.
-  const opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST } : {};
+  // debug: 3 enables verbose peerjs logging in console — critical for diagnosing
+  // WebRTC handshake failures (NAT, ICE state transitions, peer-unavailable, etc.).
+  const opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST, debug: 3 } : { debug: 3 };
   return idOrUndef ? new window.Peer(idOrUndef, opts) : new window.Peer(opts);
+}
+
+// Attach detailed instrumentation to a peer + its underlying RTCPeerConnections.
+// Logs to console (sinain-share namespace) so diagnostics are visible without
+// any UI changes. Tracks the four state machines that matter for WebRTC: ICE
+// gathering, ICE connection, peerconnection, and signaling.
+function instrumentPeer(peer, label) {
+  const tag = "[sinain-share:" + label + "]";
+  console.log(tag, "instrumented peer", peer.id || "(no-id-yet)");
+  peer.on("open", id => console.log(tag, "peer.open id=" + id));
+  peer.on("error", e => console.warn(tag, "peer.error type=" + (e && e.type) + " msg=" + (e && e.message)));
+  peer.on("disconnected", () => console.warn(tag, "peer.disconnected (lost broker connection)"));
+  peer.on("close", () => console.log(tag, "peer.close (destroyed)"));
+}
+
+function instrumentConnection(conn, label) {
+  const tag = "[sinain-share:" + label + ":" + (conn.peer || "?") + "]";
+  console.log(tag, "new connection, reliable=" + conn.reliable);
+  conn.on("open", () => console.log(tag, "conn.open (DataChannel ready)"));
+  conn.on("error", e => console.warn(tag, "conn.error", e));
+  conn.on("close", () => console.log(tag, "conn.close"));
+  conn.on("iceStateChanged", s => console.log(tag, "conn.iceStateChanged →", s));
+  // Tap into the underlying RTCPeerConnection. peerjs exposes it as
+  // conn.peerConnection (it might not exist immediately — wait a tick).
+  setTimeout(() => {
+    const pc = conn.peerConnection;
+    if (!pc) { console.warn(tag, "no peerConnection exposed"); return; }
+    pc.addEventListener("iceconnectionstatechange",
+      () => console.log(tag, "iceConnectionState →", pc.iceConnectionState));
+    pc.addEventListener("connectionstatechange",
+      () => console.log(tag, "connectionState →", pc.connectionState));
+    pc.addEventListener("icegatheringstatechange",
+      () => console.log(tag, "iceGatheringState →", pc.iceGatheringState));
+    pc.addEventListener("signalingstatechange",
+      () => console.log(tag, "signalingState →", pc.signalingState));
+    pc.addEventListener("icecandidate", (e) => {
+      if (!e.candidate) { console.log(tag, "ICE gathering complete"); return; }
+      const c = e.candidate;
+      // Log candidate type (host = local LAN, srflx = STUN, relay = TURN, prflx = peer-reflexive).
+      // If we never see "relay" but only "host"/"srflx" and connection fails, NAT traversal
+      // requires TURN — which peerjs cloud doesn't provide.
+      const type = (c.candidate.match(/typ (\\S+)/) || [])[1] || "?";
+      console.log(tag, "iceCandidate type=" + type + " proto=" + c.protocol + " addr=" + (c.address || "?") + ":" + (c.port || "?"));
+    });
+  }, 100);
 }
 
 const ShareManager = (() => {
@@ -543,6 +590,7 @@ const ShareManager = (() => {
     // Peer mode
     await ensurePeerJsLoaded();
     const peer = newPeer(token);
+    instrumentPeer(peer, "sender:" + token.slice(0, 8));
     await new Promise((res, rej) => {
       peer.on("open", () => res());
       peer.on("error", e => rej(e));
@@ -565,13 +613,17 @@ const ShareManager = (() => {
 
   function attachSenderHandlers(peer, token, entity) {
     peer.on("connection", (conn) => {
+      console.log("[sinain-share:sender:" + token.slice(0, 8) + "] inbound connection from", conn.peer);
+      instrumentConnection(conn, "sender");
       patchStatus(token, "connecting");
       conn.on("open", async () => {
         try {
           // Re-fetch bundle each time — keeps memory low and reflects latest state.
           const bundle = await buildBundle(entity);
+          console.log("[sinain-share:sender:" + token.slice(0, 8) + "] sending bundle, " + bundle.length + " bytes");
           conn.send({ type: "bundle", payload: bundle });
         } catch (e) {
+          console.warn("[sinain-share:sender] buildBundle/send failed:", e);
           conn.send({ type: "error", message: String(e).slice(0, 200) });
           conn.close();
         }
@@ -609,6 +661,7 @@ const ShareManager = (() => {
       try {
         await ensurePeerJsLoaded();
         const peer = newPeer(share.share_token);
+        instrumentPeer(peer, "sender-resume:" + share.share_token.slice(0, 8));
         await new Promise((res, rej) => {
           peer.on("open", () => res());
           peer.on("error", e => rej(e));
@@ -652,40 +705,64 @@ const ShareManager = (() => {
 
   async function connectAsRecipient(token) {
     showToast('<span class="spinner"></span> Connecting peer-to-peer…', 30_000);
+    console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] connectAsRecipient start");
     await ensurePeerJsLoaded();
     const me = newPeer();
+    instrumentPeer(me, "recipient:" + token.slice(0, 8));
     await new Promise((res, rej) => {
       me.on("open", () => res());
       me.on("error", e => rej(e));
       setTimeout(() => rej(new Error("peerjs broker timeout")), 8000);
     });
+    console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] my peer registered, dialing", token);
     return new Promise((resolve, reject) => {
       const conn = me.connect(token, { reliable: true });
+      instrumentConnection(conn, "recipient");
       const cleanup = () => { try { conn.close(); } catch {} try { me.destroy(); } catch {} };
       const openTimeout = setTimeout(() => {
+        console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] 15s timeout — conn.open never fired. Almost certainly NAT traversal failed (no TURN). Look for ICE candidate types above — only host/srflx without 'relay' = TURN missing.");
         cleanup();
         reject(new Error("source offline or unreachable"));
       }, 15_000);
-      conn.on("open", () => clearTimeout(openTimeout));
-      conn.on("error", (e) => { cleanup(); reject(e); });
+      conn.on("open", () => {
+        clearTimeout(openTimeout);
+        console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] DataChannel open — waiting for bundle");
+      });
+      conn.on("error", (e) => {
+        console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] conn.error", e);
+        cleanup(); reject(e);
+      });
       conn.on("data", async (msg) => {
         if (!msg) return;
         if (msg.type === "error") {
+          console.warn("[sinain-share:recipient] source reported error:", msg.message);
           cleanup();
           reject(new Error("source error: " + msg.message));
           return;
         }
         if (msg.type === "bundle") {
+          console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] bundle received, " + (msg.payload && msg.payload.length) + " bytes — POSTing to /knowledge/concepts/import");
           try {
             const importR = await api("/knowledge/concepts/import?conflict=merge", {
               method: "POST",
               headers: {"Content-Type": "application/json"},
               body: msg.payload,
             });
+            console.log("[sinain-share:recipient] import response:", importR);
+            // CRITICAL: api() doesn't throw on {ok:false} responses — it
+            // returns the parsed body. We MUST check ok explicitly here, or
+            // a backend failure (script ENOENT, schema error, etc.) appears
+            // to the SPA as success and falls through to MissingConcept.
+            if (importR && importR.ok === false) {
+              cleanup();
+              reject(new Error(importR.error || "import failed"));
+              return;
+            }
             conn.send({ type: "ack" });
             setTimeout(cleanup, 500);
             resolve(importR);
           } catch (e) {
+            console.warn("[sinain-share:recipient] import threw:", e);
             cleanup();
             reject(e);
           }
@@ -896,30 +973,43 @@ async function renderEntityPage(entity) {
 
   // Auto-import path for share links — runs BEFORE the local existence check
   // so a recipient with no prior data on this entity gets the page populated.
+  // We KEEP the hash on failure so a refresh retries; only strip on success.
+  let shareError = null;
+  let shareMode = null;
   if (location.hash.startsWith("#bundle=")) {
+    shareMode = "bundle";
     try {
       const json = await ungzipBase64(location.hash.slice("#bundle=".length));
       await api("/knowledge/concepts/import?conflict=merge", {
         method: "POST", headers: {"Content-Type": "application/json"}, body: json
       });
       showToast("✓ Concept imported");
+      history.replaceState({}, "", location.pathname);  // strip on success only
     } catch (e) {
-      showToast("Import failed: " + (e.message || "decode error"));
+      shareError = (e && e.message) || "decode error";
     }
-    history.replaceState({}, "", location.pathname);  // strip hash
   } else if (location.hash.startsWith("#peer=")) {
+    shareMode = "peer";
     const token = location.hash.slice("#peer=".length);
-    history.replaceState({}, "", location.pathname);  // strip early — keeps refresh sane
     try {
       await ShareManager.connectAsRecipient(token);
       showToast("✓ Concept imported via peer");
+      history.replaceState({}, "", location.pathname);  // strip on success only
     } catch (e) {
-      showToast("Peer share failed: " + (e.message || "unreachable"));
+      shareError = (e && e.message) || "unreachable";
     }
   }
 
   const page = await api("/knowledge/page?entity=" + encodeURIComponent(entity));
   if (!page.ok || page.fact_count === 0) {
+    // If a share-import was attempted and failed AND we have no local data,
+    // render an explicit share-failed view rather than the generic
+    // MissingConcept page — the user needs to know the share didn't land,
+    // not just that the entity is absent.
+    if (shareError && page.fact_count === 0) {
+      renderShareFailed(entity, shareMode, shareError, root);
+      return;
+    }
     if (page.fact_count === 0) {
       renderMissingConcept(entity, root);
       return;
@@ -1182,6 +1272,50 @@ function showUndoToast(factId, undoToken, sourceEntity) {
     }
   };
   setTimeout(() => { if ($("#undoToast")) root.innerHTML = ""; }, ms);
+}
+
+// ── Share-failed landing ──────────────────────────────────────────────────
+// Shown when a #bundle= or #peer= share-link couldn't be imported AND no
+// local data exists for the entity. Distinct from MissingConcept because
+// the user explicitly tried to load shared data — they need to know that
+// transfer failed, not just that the entity isn't here.
+function renderShareFailed(entity, mode, errorMsg, root) {
+  document.title = "Share couldn't load · Sinain";
+  const isPeer = mode === "peer";
+  root.innerHTML = \`
+    <h1>Share couldn't be loaded</h1>
+    <div class="error-block" style="margin-bottom: 16px;">
+      <strong>\${esc(entity)}</strong> — \${isPeer ? "couldn't receive bundle from sender" : "couldn't decode bundle from URL"}.
+      <br><br>
+      <code>\${esc(errorMsg)}</code>
+    </div>
+    \${isPeer ? \`
+    <p style="color: var(--fg-dim); line-height: 1.5;">
+      Likely causes:
+    </p>
+    <ul style="color: var(--fg-dim); line-height: 1.6;">
+      <li>The sender's tab is closed (peer share needs sender's sinain-core open).</li>
+      <li>The share has expired or was revoked.</li>
+      <li>Network/NAT blocked the WebRTC connection (about 10–20% of pairs need a TURN relay).</li>
+    </ul>
+    <p style="color: var(--fg-dim);">
+      Ask the sender to reopen sinain (their peer registration auto-resumes), then click <strong>Retry</strong>.
+    </p>\` : \`
+    <p style="color: var(--fg-dim); line-height: 1.5;">
+      The link's <code>#bundle=…</code> portion may have been truncated by a chat tool — some preview tools strip URL fragments.
+      Ask the sender to re-share, ideally pasted as a code block so the URL stays intact.
+    </p>\`}
+    <div class="actions" style="margin-top: 20px; display: flex; gap: 10px;">
+      <button class="primary" onclick="location.reload()">Retry</button>
+      <button onclick="window._proceedWithoutShare('\${esc(entity)}')">Continue without share</button>
+    </div>
+  \`;
+  // Continue-without-share clears the hash so the next render takes the
+  // normal MissingConcept path (which has the file-drop dropzone).
+  window._proceedWithoutShare = (eid) => {
+    history.replaceState({}, "", "/knowledge/ui/entity/" + encodeURIComponent(eid));
+    renderMissingConcept(eid, root);
+  };
 }
 
 // ── Missing concept landing ───────────────────────────────────────────────
@@ -2092,8 +2226,14 @@ export function createAppServer(deps: ServerDeps) {
 
       // New "living Confluence" SPA — search-driven, LLM-rendered pages,
       // bookmarks, retraction, concept transfer.
+      // Cache-Control: no-cache forces browsers to revalidate the SPA HTML
+      // on every navigation. Otherwise, after a sinain-core upgrade the
+      // browser serves stale SPA from cache (bugfixes don't take effect
+      // until the user hard-reloads). With revalidation on, ETag mismatches
+      // are detected immediately and the new SPA is loaded.
       if (req.method === "GET" && url.pathname === "/knowledge/ui") {
         res.setHeader("Content-Type", "text/html");
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
         res.end(renderKnowledgeUiV2());
         return;
       }
@@ -2102,6 +2242,7 @@ export function createAppServer(deps: ServerDeps) {
       // we just serve the same HTML; client-side router parses location.pathname.
       if (req.method === "GET" && url.pathname.startsWith("/knowledge/ui/")) {
         res.setHeader("Content-Type", "text/html");
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
         res.end(renderKnowledgeUiV2());
         return;
       }
