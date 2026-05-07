@@ -1289,8 +1289,14 @@ function renderKnowledgeUiV2(): string {
   // Public URL of the share-redirector (docs/share.html in the repo). Browsers
   // preserve URL fragments through redirects without sending them to the
   // server, so the bundle bytes never touch this CDN.
+  //
+  // Using raw.githack.com (not jsDelivr) because jsDelivr serves HTML from
+  // gh/ paths as Content-Type: text/plain by deliberate policy — a security
+  // stance to prevent CDN abuse for live web pages. raw.githack.com is the
+  // established alternative that serves GitHub-sourced HTML with the correct
+  // text/html MIME so the browser actually renders + executes the page.
   const shareBaseUrl = process.env.SINAIN_SHARE_BASE_URL
-    || "https://cdn.jsdelivr.net/gh/anthillnet/sinain-hud@main/docs/share.html";
+    || "https://raw.githack.com/anthillnet/sinain-hud/main/docs/share.html";
   return KNOWLEDGE_UI_V2_HTML
     .replace(/__SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
     .replace(/__SHARE_INLINE_MAX_BYTES__/g, String(inlineMax))
