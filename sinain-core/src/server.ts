@@ -493,8 +493,55 @@ function ensurePeerJsLoaded() {
 
 function newPeer(idOrUndef) {
   // Honor SHARE_PEERJS_HOST env-injected override. Empty string = peerjs.com default.
-  const opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST } : {};
+  // debug: 3 enables verbose peerjs logging in console — critical for diagnosing
+  // WebRTC handshake failures (NAT, ICE state transitions, peer-unavailable, etc.).
+  const opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST, debug: 3 } : { debug: 3 };
   return idOrUndef ? new window.Peer(idOrUndef, opts) : new window.Peer(opts);
+}
+
+// Attach detailed instrumentation to a peer + its underlying RTCPeerConnections.
+// Logs to console (sinain-share namespace) so diagnostics are visible without
+// any UI changes. Tracks the four state machines that matter for WebRTC: ICE
+// gathering, ICE connection, peerconnection, and signaling.
+function instrumentPeer(peer, label) {
+  const tag = "[sinain-share:" + label + "]";
+  console.log(tag, "instrumented peer", peer.id || "(no-id-yet)");
+  peer.on("open", id => console.log(tag, "peer.open id=" + id));
+  peer.on("error", e => console.warn(tag, "peer.error type=" + (e && e.type) + " msg=" + (e && e.message)));
+  peer.on("disconnected", () => console.warn(tag, "peer.disconnected (lost broker connection)"));
+  peer.on("close", () => console.log(tag, "peer.close (destroyed)"));
+}
+
+function instrumentConnection(conn, label) {
+  const tag = "[sinain-share:" + label + ":" + (conn.peer || "?") + "]";
+  console.log(tag, "new connection, reliable=" + conn.reliable);
+  conn.on("open", () => console.log(tag, "conn.open (DataChannel ready)"));
+  conn.on("error", e => console.warn(tag, "conn.error", e));
+  conn.on("close", () => console.log(tag, "conn.close"));
+  conn.on("iceStateChanged", s => console.log(tag, "conn.iceStateChanged →", s));
+  // Tap into the underlying RTCPeerConnection. peerjs exposes it as
+  // conn.peerConnection (it might not exist immediately — wait a tick).
+  setTimeout(() => {
+    const pc = conn.peerConnection;
+    if (!pc) { console.warn(tag, "no peerConnection exposed"); return; }
+    pc.addEventListener("iceconnectionstatechange",
+      () => console.log(tag, "iceConnectionState →", pc.iceConnectionState));
+    pc.addEventListener("connectionstatechange",
+      () => console.log(tag, "connectionState →", pc.connectionState));
+    pc.addEventListener("icegatheringstatechange",
+      () => console.log(tag, "iceGatheringState →", pc.iceGatheringState));
+    pc.addEventListener("signalingstatechange",
+      () => console.log(tag, "signalingState →", pc.signalingState));
+    pc.addEventListener("icecandidate", (e) => {
+      if (!e.candidate) { console.log(tag, "ICE gathering complete"); return; }
+      const c = e.candidate;
+      // Log candidate type (host = local LAN, srflx = STUN, relay = TURN, prflx = peer-reflexive).
+      // If we never see "relay" but only "host"/"srflx" and connection fails, NAT traversal
+      // requires TURN — which peerjs cloud doesn't provide.
+      const type = (c.candidate.match(/typ (\\S+)/) || [])[1] || "?";
+      console.log(tag, "iceCandidate type=" + type + " proto=" + c.protocol + " addr=" + (c.address || "?") + ":" + (c.port || "?"));
+    });
+  }, 100);
 }
 
 const ShareManager = (() => {
@@ -543,6 +590,7 @@ const ShareManager = (() => {
     // Peer mode
     await ensurePeerJsLoaded();
     const peer = newPeer(token);
+    instrumentPeer(peer, "sender:" + token.slice(0, 8));
     await new Promise((res, rej) => {
       peer.on("open", () => res());
       peer.on("error", e => rej(e));
@@ -565,13 +613,17 @@ const ShareManager = (() => {
 
   function attachSenderHandlers(peer, token, entity) {
     peer.on("connection", (conn) => {
+      console.log("[sinain-share:sender:" + token.slice(0, 8) + "] inbound connection from", conn.peer);
+      instrumentConnection(conn, "sender");
       patchStatus(token, "connecting");
       conn.on("open", async () => {
         try {
           // Re-fetch bundle each time — keeps memory low and reflects latest state.
           const bundle = await buildBundle(entity);
+          console.log("[sinain-share:sender:" + token.slice(0, 8) + "] sending bundle, " + bundle.length + " bytes");
           conn.send({ type: "bundle", payload: bundle });
         } catch (e) {
+          console.warn("[sinain-share:sender] buildBundle/send failed:", e);
           conn.send({ type: "error", message: String(e).slice(0, 200) });
           conn.close();
         }
@@ -609,6 +661,7 @@ const ShareManager = (() => {
       try {
         await ensurePeerJsLoaded();
         const peer = newPeer(share.share_token);
+        instrumentPeer(peer, "sender-resume:" + share.share_token.slice(0, 8));
         await new Promise((res, rej) => {
           peer.on("open", () => res());
           peer.on("error", e => rej(e));
@@ -652,40 +705,55 @@ const ShareManager = (() => {
 
   async function connectAsRecipient(token) {
     showToast('<span class="spinner"></span> Connecting peer-to-peer…', 30_000);
+    console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] connectAsRecipient start");
     await ensurePeerJsLoaded();
     const me = newPeer();
+    instrumentPeer(me, "recipient:" + token.slice(0, 8));
     await new Promise((res, rej) => {
       me.on("open", () => res());
       me.on("error", e => rej(e));
       setTimeout(() => rej(new Error("peerjs broker timeout")), 8000);
     });
+    console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] my peer registered, dialing", token);
     return new Promise((resolve, reject) => {
       const conn = me.connect(token, { reliable: true });
+      instrumentConnection(conn, "recipient");
       const cleanup = () => { try { conn.close(); } catch {} try { me.destroy(); } catch {} };
       const openTimeout = setTimeout(() => {
+        console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] 15s timeout — conn.open never fired. Almost certainly NAT traversal failed (no TURN). Look for ICE candidate types above — only host/srflx without 'relay' = TURN missing.");
         cleanup();
         reject(new Error("source offline or unreachable"));
       }, 15_000);
-      conn.on("open", () => clearTimeout(openTimeout));
-      conn.on("error", (e) => { cleanup(); reject(e); });
+      conn.on("open", () => {
+        clearTimeout(openTimeout);
+        console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] DataChannel open — waiting for bundle");
+      });
+      conn.on("error", (e) => {
+        console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] conn.error", e);
+        cleanup(); reject(e);
+      });
       conn.on("data", async (msg) => {
         if (!msg) return;
         if (msg.type === "error") {
+          console.warn("[sinain-share:recipient] source reported error:", msg.message);
           cleanup();
           reject(new Error("source error: " + msg.message));
           return;
         }
         if (msg.type === "bundle") {
+          console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] bundle received, " + (msg.payload && msg.payload.length) + " bytes — POSTing to /knowledge/concepts/import");
           try {
             const importR = await api("/knowledge/concepts/import?conflict=merge", {
               method: "POST",
               headers: {"Content-Type": "application/json"},
               body: msg.payload,
             });
+            console.log("[sinain-share:recipient] import response:", importR);
             conn.send({ type: "ack" });
             setTimeout(cleanup, 500);
             resolve(importR);
           } catch (e) {
+            console.warn("[sinain-share:recipient] import threw:", e);
             cleanup();
             reject(e);
           }
@@ -2149,8 +2217,14 @@ export function createAppServer(deps: ServerDeps) {
 
       // New "living Confluence" SPA — search-driven, LLM-rendered pages,
       // bookmarks, retraction, concept transfer.
+      // Cache-Control: no-cache forces browsers to revalidate the SPA HTML
+      // on every navigation. Otherwise, after a sinain-core upgrade the
+      // browser serves stale SPA from cache (bugfixes don't take effect
+      // until the user hard-reloads). With revalidation on, ETag mismatches
+      // are detected immediately and the new SPA is loaded.
       if (req.method === "GET" && url.pathname === "/knowledge/ui") {
         res.setHeader("Content-Type", "text/html");
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
         res.end(renderKnowledgeUiV2());
         return;
       }
@@ -2159,6 +2233,7 @@ export function createAppServer(deps: ServerDeps) {
       // we just serve the same HTML; client-side router parses location.pathname.
       if (req.method === "GET" && url.pathname.startsWith("/knowledge/ui/")) {
         res.setHeader("Content-Type", "text/html");
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
         res.end(renderKnowledgeUiV2());
         return;
       }
