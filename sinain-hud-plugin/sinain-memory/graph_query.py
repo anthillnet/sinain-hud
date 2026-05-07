@@ -76,7 +76,7 @@ def query_facts_by_entities(
             attrs = store.entity(fid)
             if not attrs:
                 continue
-            fact = {"entityId": fid}
+            fact = {"entity_id": fid}
             for attr_name, values in attrs.items():
                 if attr_name == "tag":
                     continue  # Don't include tags in output (noise)
@@ -117,7 +117,7 @@ def query_top_facts(db_path: str, limit: int = 30) -> list[dict]:
             attrs = store.entity(fid)
             if not attrs:
                 continue
-            fact = {"entityId": fid}
+            fact = {"entity_id": fid}
             for attr_name, values in attrs.items():
                 fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
@@ -425,12 +425,14 @@ def query_facts_hybrid(
             pass
 
     # Graph boost: facts linked to mentioned entities via backrefs get priority
+    # +0.05 is significant vs RRF scores of ~0.015-0.033 — ensures entity-linked facts
+    # rank above FTS noise in large graphs (100K+ triples)
     if graph_fact_ids or community_fact_ids:
         for eid in rrf_scores:
             if eid in graph_fact_ids:
-                rrf_scores[eid] += 0.02  # direct graph-linked facts
+                rrf_scores[eid] += 0.05  # direct graph-linked facts
             elif eid in community_fact_ids:
-                rrf_scores[eid] += 0.01  # community-expanded facts (half weight)
+                rrf_scores[eid] += 0.025  # community-expanded facts (half weight)
 
     # Apply confidence decay as secondary signal (fresh facts rank above stale ones)
     from triplestore import decayed_confidence
