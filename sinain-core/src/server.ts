@@ -1286,17 +1286,15 @@ function renderKnowledgeUiV2(): string {
   const peerHost = process.env.SINAIN_PEERJS_HOST || "";  // empty = peerjs.com cloud default
   const inlineMax = parseInt(process.env.SINAIN_SHARE_INLINE_MAX_BYTES || "6000");
   const ttlHours = parseInt(process.env.SINAIN_SHARE_TTL_HOURS || "24");
-  // Public URL of the share-redirector (docs/share.html in the repo). Browsers
-  // preserve URL fragments through redirects without sending them to the
-  // server, so the bundle bytes never touch this CDN.
-  //
-  // Using raw.githack.com (not jsDelivr) because jsDelivr serves HTML from
-  // gh/ paths as Content-Type: text/plain by deliberate policy — a security
-  // stance to prevent CDN abuse for live web pages. raw.githack.com is the
-  // established alternative that serves GitHub-sourced HTML with the correct
-  // text/html MIME so the browser actually renders + executes the page.
+  // Public URL of the share-redirector. Self-hosted on the existing
+  // sinain.duckdns.org Caddy + Let's Encrypt setup that already fronts the
+  // OpenClaw gateway. We control the host, headers, and reliability — no
+  // CDN policy quirks (jsDelivr serves gh-path HTML as text/plain;
+  // raw.githack.com returns 403 with body). Browsers preserve URL fragments
+  // through redirects without sending them to the server, so bundle bytes
+  // in #bundle=… never touch our host either.
   const shareBaseUrl = process.env.SINAIN_SHARE_BASE_URL
-    || "https://raw.githack.com/anthillnet/sinain-hud/main/docs/share.html";
+    || "https://sinain.duckdns.org/share.html";
   return KNOWLEDGE_UI_V2_HTML
     .replace(/__SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
     .replace(/__SHARE_INLINE_MAX_BYTES__/g, String(inlineMax))
