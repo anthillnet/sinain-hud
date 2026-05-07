@@ -412,6 +412,7 @@ async function api(path, opts = {}) {
 const SHARE_PEERJS_HOST = __SHARE_PEERJS_HOST__;     // empty string → peerjs.com cloud
 const SHARE_INLINE_MAX_BYTES = __SHARE_INLINE_MAX_BYTES__;
 const SHARE_TTL_HOURS = __SHARE_TTL_HOURS__;
+const SHARE_BASE_URL = __SHARE_BASE_URL__;            // public redirector that points to localhost
 
 // ── Router ────────────────────────────────────────────────────────────────
 function navigate(path) {
@@ -508,6 +509,17 @@ const ShareManager = (() => {
     return await r.text();
   }
 
+  // Build the public-shareable URL. Recipient pastes this anywhere; the
+  // redirector at SHARE_BASE_URL does a client-side rewrite to their local
+  // sinain-core (location.href = "http://localhost:<port>/...#hash") with
+  // the fragment preserved (browsers don't send fragments to the server,
+  // so bundle bytes never touch the CDN).
+  function buildShareUrl(entity, hash) {
+    const port = location.port || (location.protocol === "https:" ? "443" : "80");
+    const params = new URLSearchParams({ entity, port });
+    return SHARE_BASE_URL + "?" + params.toString() + hash;
+  }
+
   async function createShare(entity) {
     const bundle = await buildBundle(entity);
     const sizeBytes = new TextEncoder().encode(bundle).length;
@@ -515,8 +527,7 @@ const ShareManager = (() => {
 
     if (sizeBytes <= SHARE_INLINE_MAX_BYTES) {
       const compressed = await gzipBase64(bundle);
-      const url = location.origin + "/knowledge/ui/entity/" +
-        encodeURIComponent(entity) + "#bundle=" + compressed;
+      const url = buildShareUrl(entity, "#bundle=" + compressed);
       await api("/knowledge/shares", { method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -537,8 +548,7 @@ const ShareManager = (() => {
       peer.on("error", e => rej(e));
       setTimeout(() => rej(new Error("peerjs broker timeout")), 8000);
     });
-    const url = location.origin + "/knowledge/ui/entity/" +
-      encodeURIComponent(entity) + "#peer=" + token;
+    const url = buildShareUrl(entity, "#peer=" + token);
     await api("/knowledge/shares", { method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
@@ -1276,10 +1286,16 @@ function renderKnowledgeUiV2(): string {
   const peerHost = process.env.SINAIN_PEERJS_HOST || "";  // empty = peerjs.com cloud default
   const inlineMax = parseInt(process.env.SINAIN_SHARE_INLINE_MAX_BYTES || "6000");
   const ttlHours = parseInt(process.env.SINAIN_SHARE_TTL_HOURS || "24");
+  // Public URL of the share-redirector (docs/share.html in the repo). Browsers
+  // preserve URL fragments through redirects without sending them to the
+  // server, so the bundle bytes never touch this CDN.
+  const shareBaseUrl = process.env.SINAIN_SHARE_BASE_URL
+    || "https://cdn.jsdelivr.net/gh/anthillnet/sinain-hud@main/docs/share.html";
   return KNOWLEDGE_UI_V2_HTML
     .replace(/__SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
     .replace(/__SHARE_INLINE_MAX_BYTES__/g, String(inlineMax))
-    .replace(/__SHARE_TTL_HOURS__/g, String(ttlHours));
+    .replace(/__SHARE_TTL_HOURS__/g, String(ttlHours))
+    .replace(/__SHARE_BASE_URL__/g, JSON.stringify(shareBaseUrl));
 }
 
 /** Server epoch — lets clients detect restarts. */
