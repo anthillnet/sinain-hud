@@ -58,6 +58,26 @@ export interface ConceptImportRow {
   notes: string | null;
 }
 
+export type SharedDocMode = "fragment" | "peer";
+export type SharedDocStatus =
+  | "waiting" | "connecting" | "delivered"
+  | "disconnected" | "revoked" | "expired";
+
+export interface SharedDocRow {
+  id?: number;
+  share_token: string;
+  entity_id: string;
+  mode: SharedDocMode;
+  status: SharedDocStatus;
+  bundle_size: number | null;
+  url: string;
+  created_at: number;
+  delivered_at: number | null;
+  revoked_at: number | null;
+  recipient_hint: string | null;
+  notes: string | null;
+}
+
 const PAGE_CACHE_LRU_CAP = 500;
 
 export class WebDb {
@@ -275,5 +295,112 @@ export class WebDb {
         "INSERT INTO search_log(ts, query, resolved_to, result_count) VALUES (?, ?, ?, ?)",
       )
       .run(Date.now(), query, resolved_to, result_count);
+  }
+
+  // ── Shared docs ─────────────────────────────────────────
+  // Cross-machine sharing: persistent records of share links the user
+  // produced. ShareManager (browser) reads these on SPA load to resume
+  // peer connections.
+
+  createSharedDoc(row: Omit<SharedDocRow, "id" | "created_at"> & { created_at?: number }): SharedDocRow {
+    const created_at = row.created_at ?? Date.now();
+    const r = this.db
+      .prepare(
+        `INSERT INTO shared_docs
+         (share_token, entity_id, mode, status, bundle_size, url,
+          created_at, delivered_at, revoked_at, recipient_hint, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.share_token,
+        row.entity_id,
+        row.mode,
+        row.status,
+        row.bundle_size,
+        row.url,
+        created_at,
+        row.delivered_at,
+        row.revoked_at,
+        row.recipient_hint,
+        row.notes,
+      );
+    return this.db
+      .prepare("SELECT * FROM shared_docs WHERE id = ?")
+      .get(Number(r.lastInsertRowid)) as SharedDocRow;
+  }
+
+  /** List shares; default returns all non-revoked + non-expired, recent first. */
+  listSharedDocs(opts?: { statuses?: SharedDocStatus[]; limit?: number; includeArchived?: boolean }): SharedDocRow[] {
+    const limit = opts?.limit ?? 200;
+    const statuses = opts?.statuses;
+    if (statuses && statuses.length > 0) {
+      const placeholders = statuses.map(() => "?").join(",");
+      return this.db
+        .prepare(
+          `SELECT * FROM shared_docs WHERE status IN (${placeholders})
+           ORDER BY created_at DESC LIMIT ?`,
+        )
+        .all(...statuses, limit) as SharedDocRow[];
+    }
+    if (opts?.includeArchived) {
+      return this.db
+        .prepare("SELECT * FROM shared_docs ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as SharedDocRow[];
+    }
+    return this.db
+      .prepare(
+        `SELECT * FROM shared_docs WHERE status NOT IN ('revoked','expired')
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(limit) as SharedDocRow[];
+  }
+
+  getSharedDoc(share_token: string): SharedDocRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM shared_docs WHERE share_token = ?")
+      .get(share_token) as SharedDocRow | undefined;
+    return row ?? null;
+  }
+
+  updateSharedDocStatus(share_token: string, status: SharedDocStatus,
+                        extra?: { delivered_at?: number; revoked_at?: number; recipient_hint?: string }): boolean {
+    // Compose dynamic SET clause based on which extras are present.
+    const sets: string[] = ["status = ?"];
+    const params: any[] = [status];
+    if (extra?.delivered_at != null) { sets.push("delivered_at = ?"); params.push(extra.delivered_at); }
+    if (extra?.revoked_at != null) { sets.push("revoked_at = ?"); params.push(extra.revoked_at); }
+    if (extra?.recipient_hint != null) { sets.push("recipient_hint = ?"); params.push(extra.recipient_hint); }
+    params.push(share_token);
+    const r = this.db
+      .prepare(`UPDATE shared_docs SET ${sets.join(", ")} WHERE share_token = ?`)
+      .run(...params);
+    return r.changes > 0;
+  }
+
+  deleteSharedDoc(share_token: string): boolean {
+    const r = this.db.prepare("DELETE FROM shared_docs WHERE share_token = ?").run(share_token);
+    return r.changes > 0;
+  }
+
+  /** Auto-expire stale shares: waiting/disconnected older than ttl_ms. */
+  expireStaleShares(ttl_ms: number): number {
+    const cutoff = Date.now() - ttl_ms;
+    const r = this.db
+      .prepare(
+        `UPDATE shared_docs SET status = 'expired'
+         WHERE status IN ('waiting','disconnected','connecting') AND created_at < ?`,
+      )
+      .run(cutoff);
+    return r.changes;
+  }
+
+  countActiveShares(): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM shared_docs
+         WHERE status IN ('waiting','connecting','disconnected')`,
+      )
+      .get() as { n: number };
+    return row.n;
   }
 }
