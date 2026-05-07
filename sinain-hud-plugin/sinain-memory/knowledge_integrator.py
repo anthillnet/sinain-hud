@@ -418,16 +418,33 @@ def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
 
 
 def _facts_to_graph_ops(digest: dict) -> list[dict]:
-    """Convert distiller facts/entities/decisions directly to graph ops.
+    """Convert ALL distiller output + raw feed items to graph ops.
 
-    DETERMINISTIC — no LLM needed. The distiller already extracted structured
-    facts with entity names. This function mechanically converts them to
-    assert operations for the triplestore.
+    DETERMINISTIC — no LLM needed. Stores distilled knowledge (facts,
+    decisions, patterns, preferences, summary) AND verbatim raw captures
+    (audio quotes, agent analysis) so the triplestore is the single
+    source of truth for session recall.
     """
     ops = []
     known_entities = digest.get("entities", [])
+    raw_items = digest.pop("_rawItems", None) or []
 
-    # Each fact becomes an assert op
+    # Session anchor from whatHappened
+    session_ts = digest.get("ts", "")[:16]  # "2026-05-07T10:08"
+    session_eid = f"session:{session_ts}" if session_ts else None
+    if session_eid and digest.get("whatHappened"):
+        ops.append({
+            "op": "assert",
+            "entity": session_ts,
+            "attribute": "value",
+            "value": digest["whatHappened"],
+            "confidence": 0.9,
+            "domain": "session",
+            "kind": "distilled",
+            "session_ref": session_eid,
+        })
+
+    # Facts (distilled)
     for fact_text in digest.get("facts", []):
         if not fact_text or len(fact_text) < 5:
             continue
@@ -435,13 +452,14 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
         ops.append({
             "op": "assert",
             "entity": entity,
-            "attribute": "fact",
+            "attribute": "value",
             "value": fact_text,
             "confidence": 0.9,
-            "domain": "",
+            "kind": "distilled",
+            "session_ref": session_eid,
         })
 
-    # Each decision becomes an assert with lower confidence (time-bound)
+    # Decisions (distilled, lower confidence — time-bound)
     for decision_text in digest.get("decisions", []):
         if not decision_text or len(decision_text) < 5:
             continue
@@ -449,10 +467,63 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
         ops.append({
             "op": "assert",
             "entity": entity,
-            "attribute": "decision",
+            "attribute": "value",
             "value": decision_text,
             "confidence": 0.7,
-            "domain": "",
+            "kind": "distilled",
+            "session_ref": session_eid,
+        })
+
+    # Patterns + Preferences (distilled)
+    for text in digest.get("patterns", []) + digest.get("preferences", []):
+        if not text or not isinstance(text, str) or len(text) < 5:
+            continue
+        entity = _extract_entity_from_fact(text, known_entities)
+        ops.append({
+            "op": "assert",
+            "entity": entity,
+            "attribute": "value",
+            "value": text,
+            "confidence": 0.7,
+            "kind": "distilled",
+            "session_ref": session_eid,
+        })
+
+    # Verbatim audio quotes (top 20 by length, > 30 chars)
+    audio = [i for i in raw_items
+             if i.get("source") == "audio" and len(i.get("text", "")) > 30]
+    for item in sorted(audio, key=lambda x: -len(x.get("text", "")))[:20]:
+        text = re.sub(r"^\[.*?\]\s*", "", item["text"])  # strip emoji prefixes
+        if len(text) < 20:
+            continue
+        entity = _extract_entity_from_fact(text, known_entities)
+        ops.append({
+            "op": "assert",
+            "entity": entity,
+            "attribute": "value",
+            "value": text,
+            "confidence": 0.95,
+            "kind": "verbatim",
+            "session_ref": session_eid,
+        })
+
+    # Agent analysis responses (last 10, > 50 chars — verbatim)
+    agents = [i for i in raw_items
+              if i.get("source") in ("agent", "openclaw")
+              and len(i.get("text", "")) > 50]
+    for item in agents[-10:]:
+        text = re.sub(r"^\[.*?\]\s*", "", item["text"])  # strip emoji prefixes
+        if len(text) < 30:
+            continue
+        entity = _extract_entity_from_fact(text, known_entities)
+        ops.append({
+            "op": "assert",
+            "entity": entity,
+            "attribute": "value",
+            "value": text,
+            "confidence": 0.8,
+            "kind": "verbatim",
+            "session_ref": session_eid,
         })
 
     return ops
@@ -506,6 +577,12 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 store.assert_triple(tx, entity_id, "reinforce_count", "1")
                 if domain:
                     store.assert_triple(tx, entity_id, "domain", domain)
+                kind = op_data.get("kind", "distilled")
+                store.assert_triple(tx, entity_id, "kind", kind)
+                # Link to session anchor via ref edge
+                session_ref = op_data.get("session_ref")
+                if session_ref:
+                    store.assert_triple(tx, entity_id, "session", session_ref, value_type="ref")
                 # Auto-tag for keyword-based discovery
                 for tag in _extract_tags(value):
                     store.assert_triple(tx, entity_id, "tag", tag)
