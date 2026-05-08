@@ -1006,6 +1006,23 @@ async function main() {
     }
   }
 
+  // Pre-populate the roster from agents.json profiles so launchers that
+  // don't run the bare-agent process (e.g. start.sh / start-local.sh) still
+  // surface the user's configured profiles in the overlay's agent picker.
+  // When the bare-agent IS running (npm install + cli.js start), its first
+  // /bareagent/register POST narrows the list to PATH-installed binaries —
+  // same final state as before, just with a usable initial state for the
+  // dev-loop launcher.
+  if (escalatorAgentsCfg?.profiles) {
+    const profileNames = Object.keys(escalatorAgentsCfg.profiles)
+      .filter((n) => AGENT_NAME_RE.test(n));
+    if (profileNames.length > 0) {
+      const defaultAgent = escalatorAgentsCfg.default ?? profileNames[0];
+      registerBareAgent(profileNames, defaultAgent);
+      log(TAG, `roster pre-populated from agents.json: ${profileNames.join(",")}`);
+    }
+  }
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
