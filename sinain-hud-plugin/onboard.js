@@ -267,15 +267,39 @@ export async function runOnboard(args = {}) {
       }
     }
 
-    // stepGateway returns { envVars, agentsPatch }: tokens go to .env,
-    // URLs + session + escalation mode go to agents.json's openclaw profile.
-    const gatewayResult = await stepGateway(base, "[3/6] OpenClaw gateway");
-    Object.assign(vars, gatewayResult.envVars);
-    Object.assign(agentsPatch, gatewayResult.agentsPatch);
-    if (gatewayResult.agentsPatch.escalationMode === "off") {
-      p.log.info("Standalone mode (no gateway).");
+    // OpenClaw gateway is opt-in: most users run sinain in standalone mode
+    // and never need a gateway. Default the prompt to "No" on fresh installs
+    // (when no openclaw profile already exists) so accepting all wizard
+    // defaults never silently provisions a gateway profile or starts a WS
+    // reconnect loop. Mirrors the Quick-path gate at line ~177.
+    const hasExistingGateway = (() => {
+      try {
+        const agentsPath = path.join(SINAIN_DIR, "agents.json");
+        if (!fs.existsSync(agentsPath)) return false;
+        const cfg = JSON.parse(fs.readFileSync(agentsPath, "utf-8"));
+        return !!cfg?.profiles?.openclaw;
+      } catch { return false; }
+    })();
+    const enableGateway = guard(await p.confirm({
+      message: "[3/6] Configure OpenClaw gateway?",
+      initialValue: hasExistingGateway,
+    }));
+    if (enableGateway) {
+      // stepGateway returns { envVars, agentsPatch }: tokens go to .env,
+      // URLs + session + escalation mode go to agents.json's openclaw profile.
+      const gatewayResult = await stepGateway(base, "[3/6] OpenClaw gateway");
+      Object.assign(vars, gatewayResult.envVars);
+      Object.assign(agentsPatch, gatewayResult.agentsPatch);
+      if (gatewayResult.agentsPatch.escalationMode === "off") {
+        p.log.info("Standalone mode (no gateway).");
+      } else {
+        p.log.success("Gateway configured.");
+      }
     } else {
-      p.log.success("Gateway configured.");
+      // Explicitly clear any inherited openclaw profile so the runtime doesn't
+      // auto-register the gateway or attempt WS reconnects (matches Quick path).
+      agentsPatch.openclawProfile = null;
+      p.log.info("Standalone mode (no gateway).");
     }
 
     const privacy = await stepPrivacy(base, "[4/6] Privacy mode");
