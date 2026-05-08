@@ -40,7 +40,19 @@ class _TasksViewState extends State<TasksView> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final ws = context.read<WebSocketService>();
-    _taskSub ??= ws.spawnTaskStream.listen(_onTask);
+    if (_taskSub == null) {
+      // Seed local list from the canonical snapshot before subscribing to the
+      // stream. This handles the common case where spawn_task messages arrived
+      // while the Chat panel (and thus TasksView) was not yet built — because
+      // the overlay started in Eye or Controls state. Without this seed the
+      // broadcast stream events are already gone and the Tasks tab stays empty
+      // even though the server sent a valid permission request.
+      for (final task in ws.spawnTasks.values) {
+        final idx = _tasks.indexWhere((t) => t.taskId == task.taskId);
+        if (idx < 0) _tasks.add(task);
+      }
+      _taskSub = ws.spawnTaskStream.listen(_onTask);
+    }
   }
 
   void _onTask(SpawnTask incoming) {
