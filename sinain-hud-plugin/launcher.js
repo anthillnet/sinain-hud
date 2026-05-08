@@ -56,6 +56,26 @@ const children = [];    // { name, proc, pid }
 await main();
 
 async function main() {
+  // ── Platform guard (ENG-05, CONTEXT.md D-03) ─────────────────────────────
+  // Friendly blocker for non-macOS platforms. SINAIN_FAKE_PLATFORM enables
+  // env-var spoof testing without an actual Windows/Linux host.
+  const platform = process.env.SINAIN_FAKE_PLATFORM || os.platform();
+  if (platform !== "darwin") {
+    const isWindows = platform === "win32";
+    console.log("");
+    console.log("  ┌─────────────────────────────────────────────────────────┐");
+    console.log("  │  Sinain is macOS-only for this launch                   │");
+    console.log("  │                                                         │");
+    console.log("  │  " + (isWindows
+      ? "Windows support is in progress — star the repo for updates."
+      : "Linux support is planned — star the repo for updates.        ") + "  │");
+    console.log("  │  https://github.com/geravant/sinain-hud                 │");
+    console.log("  └─────────────────────────────────────────────────────────┘");
+    console.log("");
+    process.exit(0);
+  }
+  // ── End platform guard ────────────────────────────────────────────────────
+
   setupSignalHandlers();
 
   log("Preflight checks...");
