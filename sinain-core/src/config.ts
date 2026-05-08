@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import type { CoreConfig, AudioPipelineConfig, TranscriptionConfig, AnalysisConfig, EscalationConfig, OpenClawConfig, EscalationMode, LearningConfig, PrivacyConfig, PrivacyMatrix, PrivacyLevel, PrivacyRow } from "./types.js";
 import { PRESETS } from "./privacy/presets.js";
-import { loadAgentsConfig, findGatewayProfile, type AgentsConfig } from "./agents-loader.js";
+import { loadAgentsConfig, type AgentsConfig } from "./agents-loader.js";
+import { findGatewayProfile } from "./agents/openclaw/profile.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

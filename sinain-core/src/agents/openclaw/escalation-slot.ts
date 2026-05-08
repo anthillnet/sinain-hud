@@ -1,6 +1,6 @@
-import { log, warn } from "../log.js";
-import type { OpenClawWsClient } from "./openclaw-ws.js";
-import type { OpenClawConfig } from "../types.js";
+import { log, warn } from "../../log.js";
+import type { OpenClawWsClient } from "./ws-client.js";
+import type { OpenClawConfig } from "../../types.js";
 
 const TAG = "escalation-slot";
 

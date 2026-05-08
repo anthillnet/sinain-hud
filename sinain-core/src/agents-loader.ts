@@ -37,18 +37,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // in lockstep when changing either side.
 const VAR_REF_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
-export interface OpenClawProfileFields {
-  type: "openclaw";
-  wsUrl?: string;
-  wsToken?: string;
-  httpUrl?: string;
-  httpToken?: string;
-  sessionKey?: string;
-  phase1TimeoutMs?: number;
-  phase2TimeoutMs?: number;
-  pingIntervalMs?: number;
-}
-
 export interface AgentProfile {
   type?: string;
   bin?: string;
@@ -206,49 +194,6 @@ export function loadAgentsConfig(): AgentsConfig | null {
   return null;
 }
 
-/** Convenience: pull the openclaw profile if present, else null.
- *  @deprecated Prefer findGatewayProfile() — it doesn't assume the name. */
-export function getOpenClawProfile(cfg: AgentsConfig | null): AgentProfile | null {
-  return cfg?.profiles?.openclaw ?? null;
-}
-
-/**
- * Find a gateway-style profile (any profile with `type: "openclaw"`,
- * regardless of the profile's name). Used by sinain-core to:
- *   - load WS connection params at startup (config.ts)
- *   - decide whether a lane choice should route via WS or HTTP (escalator.ts)
- *
- * Preference order: the canonical name "openclaw" wins if present, otherwise
- * the first openclaw-typed profile found in the JSON. This lets users add
- * `nemoclaw`, `nanoclaw-prod`, etc. with their own URLs as drop-in replacements.
- */
-export function findGatewayProfile(
-  cfg: AgentsConfig | null,
-): { name: string; profile: AgentProfile } | null {
-  const profiles = cfg?.profiles;
-  if (!profiles) return null;
-  if (profiles.openclaw?.type === "openclaw") {
-    return { name: "openclaw", profile: profiles.openclaw };
-  }
-  for (const [name, profile] of Object.entries(profiles)) {
-    if (profile?.type === "openclaw") return { name, profile };
-  }
-  return null;
-}
-
-/** Is the given profile name a gateway-style (WS-dispatched) profile? */
-export function isGatewayProfile(
-  cfg: AgentsConfig | null,
-  name: string,
-): boolean {
-  return cfg?.profiles?.[name]?.type === "openclaw";
-}
-
-/** All openclaw-typed profile names in the config. */
-export function gatewayProfileNames(cfg: AgentsConfig | null): string[] {
-  const profiles = cfg?.profiles;
-  if (!profiles) return [];
-  return Object.entries(profiles)
-    .filter(([_, p]) => p?.type === "openclaw")
-    .map(([name]) => name);
-}
+// OpenClaw-specific profile lookups (findGatewayProfile, isGatewayProfile,
+// gatewayProfileNames, OpenClawProfileFields) moved to agents/openclaw/profile.ts
+// — they're owned by the openclaw module, not the generic loader.

@@ -4,8 +4,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import WebSocket from "ws";
-import type { OpenClawConfig } from "../types.js";
-import { log, warn, error } from "../log.js";
+import type { OpenClawConfig } from "../../types.js";
+import { log, warn, error } from "../../log.js";
 
 const TAG = "openclaw";
 

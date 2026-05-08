@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { loadConfig } from "./config.js";
-import { loadAgentsConfig, isGatewayProfile, gatewayProfileNames } from "./agents-loader.js";
+import { loadAgentsConfig } from "./agents-loader.js";
+import { isGatewayProfile, gatewayProfileNames } from "./agents/openclaw/profile.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
