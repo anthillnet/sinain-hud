@@ -743,6 +743,11 @@ async function main() {
     onSituationUpdate: (content) => {
       escalator.pushSituationMd(content);
     },
+    // Gate SITUATION.md writes (and the subsequent push) on a gateway lane
+    // being active — see escalator.shouldDriveGateway. Users with no openclaw
+    // profile, or with the profile but no lane selecting it, pay zero disk
+    // I/O on every tick.
+    shouldWriteSituation: () => escalator.shouldDriveGateway(),
     onHudUpdate: (text) => {
       wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
       wsHandler.broadcast(text, "normal", "stream");
@@ -1241,6 +1246,12 @@ async function main() {
         // Spawn "off" just means run.sh won't poll /spawn/pending; no
         // server-side state to flip. Queued spawn tasks TTL out naturally.
       }
+      // Re-evaluate WS lifecycle: connect when a gateway lane just got
+      // selected (zero attempts before this point), disconnect when the user
+      // moved off every gateway lane. This is what makes the "no resources
+      // when not in use" guarantee hold across runtime selection changes,
+      // not just startup config.
+      escalator.evaluateGatewayLifecycle();
       // Rebroadcast state so the overlay sees the switch immediately, and
       // the bare agent sees it on its next poll-response config piggyback.
       // `escalation` field reflects the current escalator mode so the flash

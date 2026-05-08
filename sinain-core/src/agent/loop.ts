@@ -31,6 +31,12 @@ export interface AgentLoopDeps {
   profiler?: Profiler;
   /** Called after each successful SITUATION.md write with the content string. */
   onSituationUpdate?: (content: string) => void;
+  /** Predicate to skip SITUATION.md writes entirely when no consumer is
+   *  listening. Today only the openclaw module reads SITUATION.md, so when
+   *  no gateway-typed agent is selected this returns false and the disk
+   *  write is skipped on every tick. Defaults to "always write" if absent
+   *  (preserves prior behavior for callers that don't pass the predicate). */
+  shouldWriteSituation?: () => boolean;
   /** Optional: path to sinain-knowledge.md for startup recap. */
   getKnowledgeDocPath?: () => string | null;
   /** Optional: feedback store for startup recap context. */
@@ -376,9 +382,14 @@ export class AgentLoop extends EventEmitter {
       // Calculate escalation score for both SITUATION.md and escalation check
       const escalationScore = calculateEscalationScore(digest, contextWindow);
 
-      // Write SITUATION.md (enhanced with escalation context and recorder status)
-      const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
-      this.deps.onSituationUpdate?.(situationContent);
+      // Write SITUATION.md only when something consumes it (today: an openclaw
+      // gateway lane is selected). Without a consumer, skip the disk write to
+      // avoid pinning ~/.openclaw/workspace/SITUATION.md on every tick of users
+      // who chose claude/openclaude/etc as both lanes.
+      if (this.deps.shouldWriteSituation?.() ?? true) {
+        const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
+        this.deps.onSituationUpdate?.(situationContent);
+      }
 
       // Notify for escalation check
       traceCtx?.startSpan("escalation-check");
