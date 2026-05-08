@@ -543,7 +543,14 @@ async function importKnowledgeToLocal(data: string): Promise<string> {
   const dbPath = `${localDir}/knowledge-graph.db`;
 
   const __dir = dirname(fileURLToPath(import.meta.url));
-  const scriptsDir = resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory");
+  // Two package layouts are supported:
+  //   dev/monorepo: <repo>/sinain-core/src/ → ../../sinain-hud-plugin/sinain-memory
+  //   npm-published flat: <pkg>/sinain-core/src/ → ../../sinain-memory
+  const scriptsDir = [
+    resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory"),  // dev/monorepo layout
+    resolve(__dir, "..", "..", "sinain-memory"),                         // npm-published flat layout
+    resolve(__dir, "..", "sinain-memory"),                               // legacy alt
+  ].find(p => existsSync(`${p}/triplestore.py`)) || resolve(__dir, "..", "..", "sinain-memory");
 
   // Convert facts to graph ops for knowledge_integrator
   const graphOps = facts.map((f: any) => ({
@@ -832,6 +839,12 @@ async function main() {
   systemAudioPipeline.on("stopped", () => {
     log(TAG, "system audio pipeline stopped");
     wsHandler.updateState({ audio: "muted" });
+  });
+
+  systemAudioPipeline.on("tcc-denied", () => {
+    // Banner already printed by pipeline.ts. Initiate graceful shutdown so
+    // sinain exits cleanly rather than continuing with audio dead.
+    shutdown("TCC-DENIED").catch(() => process.exit(1));
   });
 
   systemAudioPipeline.on("muted", () => {
