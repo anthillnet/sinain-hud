@@ -1344,20 +1344,60 @@ async function renderTopicPage(q) {
   root.innerHTML = \`
     <h1>Topic: \${esc(q)}</h1>
     <div class="loading-block"><span class="spinner"></span> Searching…</div>\`;
-  const r = await api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=50");
-  if (!r.results || r.results.length === 0) {
+
+  // Combined query: get actual facts (not just entity links)
+  const qr = await api("/knowledge/query?q=" + encodeURIComponent(q) + "&max=20");
+  const factsText = qr.facts_text || "";
+
+  // Also get matching entities for navigation
+  const sr = await api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=10");
+  const entities = sr.results || [];
+
+  if (!factsText && entities.length === 0) {
     root.innerHTML = \`<h1>Topic: \${esc(q)}</h1>
       <div class="error-block">No matching facts.</div>\`;
     return;
   }
+
+  // Parse compact facts text into individual items
+  const factItems = factsText ? factsText.split("; ").filter(Boolean) : [];
+
   root.innerHTML = \`
     <h1>Topic: \${esc(q)}</h1>
-    <div class="summary">Top \${r.results.length} matches across the knowledge graph.</div>
-    \${r.results.map(rr => \`
-      <div class="bullet" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(rr.entity)}'))" style="cursor:pointer">
-        <span class="text"><strong>\${esc(rr.entity)}</strong> — \${esc(rr.snippet || "")}</span>
-        <span class="conf">\${rr.fact_count} fact\${rr.fact_count === 1 ? "" : "s"}</span>
-      </div>\`).join("")}\`;
+    <div class="summary">
+      \${factItems.length} fact\${factItems.length === 1 ? "" : "s"} retrieved
+      \${entities.length > 0 ? \` · \${entities.length} related entit\${entities.length === 1 ? "y" : "ies"}\` : ""}
+      <button onclick="exportTopicFacts('\${esc(q)}')" style="margin-left:12px;font-size:0.85em">📥 Export</button>
+    </div>
+    \${factItems.length > 0 ? \`
+      <div style="margin:16px 0">
+        \${factItems.map(f => {
+          const parts = f.match(/^([^:]*): (.+) \\(([^)]+)\\)$/);
+          const entity = parts ? parts[1] : "";
+          const value = parts ? parts[2] : f;
+          const meta = parts ? parts[3] : "";
+          return \`<div class="bullet">
+            <span class="text">\${entity ? \`<strong>\${esc(entity)}</strong> — \` : ""}\${esc(value)}</span>
+            \${meta ? \`<span class="conf">\${esc(meta)}</span>\` : ""}
+          </div>\`;
+        }).join("")}
+      </div>\` : ""}
+    \${entities.length > 0 ? \`
+      <h2 style="margin-top:24px">Related Entities</h2>
+      \${entities.map(rr => \`
+        <div class="bullet" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(rr.entity)}'))" style="cursor:pointer">
+          <span class="text"><strong>\${esc(rr.entity)}</strong> — \${esc(rr.snippet || "")}</span>
+          <span class="conf">\${rr.fact_count} fact\${rr.fact_count === 1 ? "" : "s"}</span>
+        </div>\`).join("")}\` : ""}\`;
+}
+
+async function exportTopicFacts(q) {
+  const qr = await api("/knowledge/query?q=" + encodeURIComponent(q) + "&max=50");
+  const blob = new Blob([JSON.stringify({topic: q, facts_text: qr.facts_text, entities: qr.entities, exported: new Date().toISOString()}, null, 2)], {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "sinain-topic-" + q.replace(/\\s+/g, "-") + ".json";
+  a.click();
 }
 
 // ── Dropzone wiring (shared) ──────────────────────────────────────────────
@@ -1812,6 +1852,30 @@ export function createAppServer(deps: ServerDeps) {
           }
         } else {
           res.end(JSON.stringify({ ok: false, error: "import not available" }));
+        }
+        return;
+      }
+
+      // ── /knowledge/query ── (combined entity recall — used by topic page) ──
+      if (req.method === "GET" && url.pathname === "/knowledge/query") {
+        const q = url.searchParams.get("q") || "";
+        const maxFacts = Math.min(parseInt(url.searchParams.get("max") || "20"), 50);
+        if (!q.trim()) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "q parameter required" }));
+          return;
+        }
+        // Split query into entity keywords for queryKnowledgeFacts
+        const entities = q.trim().split(/[\s,+]+/).filter(Boolean);
+        if (deps.queryKnowledgeFacts) {
+          try {
+            const factsText = await deps.queryKnowledgeFacts(entities, maxFacts);
+            res.end(JSON.stringify({ ok: true, query: q, facts_text: factsText, entities }));
+          } catch (err) {
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        } else {
+          res.end(JSON.stringify({ ok: true, query: q, facts_text: "", entities }));
         }
         return;
       }
