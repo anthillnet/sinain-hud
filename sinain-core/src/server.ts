@@ -942,14 +942,16 @@ function setupSearch() {
     const q = input.value.trim();
     if (!q) { dropdown.classList.remove("open"); dropdown.innerHTML = ""; return; }
     const result = await api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=15");
+    // Always show "Search: query" as first option → topic page with combined recall
+    const topicLink = \`
+      <div class="search-result" onclick="navigate('/knowledge/ui/topic/' + encodeURIComponent('\${esc(q)}'))" style="border-bottom:1px solid rgba(255,255,255,0.1)">
+        <div class="entity">🔍 Search: \${esc(q)}</div>
+        <div class="snippet">Combined query — find facts across multiple entities</div>
+      </div>\`;
     if (!result.results || result.results.length === 0) {
-      dropdown.innerHTML = \`
-        <div class="search-result" onclick="navigate('/knowledge/ui/topic/' + encodeURIComponent('\${esc(q)}'))">
-          <div class="entity">View as topic page</div>
-          <div class="snippet">No matching entities — synthesize from search hits.</div>
-        </div>\`;
+      dropdown.innerHTML = topicLink;
     } else {
-      dropdown.innerHTML = result.results.map(r => \`
+      dropdown.innerHTML = topicLink + result.results.map(r => \`
         <div class="search-result" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(r.entity)}'))">
           <div class="entity">\${esc(r.entity)}</div>
           <div class="meta">\${esc(r.type)} · \${r.fact_count} fact\${r.fact_count === 1 ? "" : "s"}</div>
@@ -960,6 +962,12 @@ function setupSearch() {
   }, 220);
   input.addEventListener("input", handleQuery);
   input.addEventListener("focus", () => { if (input.value) handleQuery(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim()) {
+      dropdown.classList.remove("open");
+      navigate("/knowledge/ui/topic/" + encodeURIComponent(input.value.trim()));
+    }
+  });
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".search-wrap")) dropdown.classList.remove("open");
   });
@@ -1339,65 +1347,109 @@ function renderMissingConcept(entity, root) {
 
 // ── Topic page (simple, v1) ───────────────────────────────────────────────
 async function renderTopicPage(q) {
-  document.title = "Topic: " + q;
+  document.title = "Topic: " + q + " · Sinain";
   const root = $("#root");
-  root.innerHTML = \`
-    <h1>Topic: \${esc(q)}</h1>
-    <div class="loading-block"><span class="spinner"></span> Searching…</div>\`;
+  root.innerHTML = \`<div class="loading-block"><span class="spinner"></span> Searching…</div>\`;
 
-  // Combined query: get actual facts (not just entity links)
-  const qr = await api("/knowledge/query?q=" + encodeURIComponent(q) + "&max=20");
+  // Parallel: get combined facts + matching entities
+  const [qr, sr] = await Promise.all([
+    api("/knowledge/query?q=" + encodeURIComponent(q) + "&max=30"),
+    api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=10"),
+  ]);
   const factsText = qr.facts_text || "";
-
-  // Also get matching entities for navigation
-  const sr = await api("/knowledge/search?q=" + encodeURIComponent(q) + "&limit=10");
   const entities = sr.results || [];
 
   if (!factsText && entities.length === 0) {
-    root.innerHTML = \`<h1>Topic: \${esc(q)}</h1>
+    root.innerHTML = \`
+      <div class="page-header"><div class="title">Topic: \${esc(q)}</div></div>
       <div class="error-block">No matching facts.</div>\`;
     return;
   }
 
-  // Parse compact facts text into individual items
+  // Parse compact facts into structured items, group by entity
   const factItems = factsText ? factsText.split("; ").filter(Boolean) : [];
+  const grouped = {};
+  const ungrouped = [];
+  for (const f of factItems) {
+    const m = f.match(/^([^:]*?):\\s*(.+?)\\s*\\(([^)]+)\\)$/);
+    if (m) {
+      const ent = m[1].trim() || "general";
+      (grouped[ent] = grouped[ent] || []).push({text: m[2], meta: m[3], raw: f});
+    } else {
+      ungrouped.push({text: f, meta: "", raw: f});
+    }
+  }
+
+  // Build summary from top entities
+  const topEnts = Object.keys(grouped).slice(0, 5).join(", ");
+  const summary = factItems.length > 0
+    ? \`\${factItems.length} facts retrieved across \${Object.keys(grouped).length} entities\${topEnts ? ": " + topEnts : ""}\`
+    : "No facts found for this query.";
 
   root.innerHTML = \`
-    <h1>Topic: \${esc(q)}</h1>
-    <div class="summary">
-      \${factItems.length} fact\${factItems.length === 1 ? "" : "s"} retrieved
-      \${entities.length > 0 ? \` · \${entities.length} related entit\${entities.length === 1 ? "y" : "ies"}\` : ""}
-      <button onclick="exportTopicFacts('\${esc(q)}')" style="margin-left:12px;font-size:0.85em">📥 Export</button>
+    <div class="page-header">
+      <div class="title">Topic: \${esc(q)}</div>
+      <div class="badges">
+        <span class="badge">\${factItems.length} fact\${factItems.length === 1 ? "" : "s"}</span>
+        <span class="badge">\${Object.keys(grouped).length} entit\${Object.keys(grouped).length === 1 ? "y" : "ies"}</span>
+      </div>
+      <div class="page-actions">
+        <button id="topicCopyLink" class="icon" title="Copy topic URL">🔗</button>
+        <button id="topicShare" class="icon" title="Share topic (auto-imports for recipient)">📤</button>
+      </div>
     </div>
-    \${factItems.length > 0 ? \`
-      <div style="margin:16px 0">
-        \${factItems.map(f => {
-          const parts = f.match(/^([^:]*): (.+) \\(([^)]+)\\)$/);
-          const entity = parts ? parts[1] : "";
-          const value = parts ? parts[2] : f;
-          const meta = parts ? parts[3] : "";
-          return \`<div class="bullet">
-            <span class="text">\${entity ? \`<strong>\${esc(entity)}</strong> — \` : ""}\${esc(value)}</span>
-            \${meta ? \`<span class="conf">\${esc(meta)}</span>\` : ""}
-          </div>\`;
-        }).join("")}
-      </div>\` : ""}
+    <div class="summary">\${esc(summary)}</div>
+    <div id="topicSections">
+      \${Object.entries(grouped).map(([ent, facts], i) => \`
+        <div class="section" id="sec-\${i}">
+          <div class="section-heading" onclick="this.parentElement.classList.toggle('collapsed')">
+            \${esc(ent)}
+            <span style="opacity:0.5;font-size:0.85em;margin-left:8px">\${facts.length} fact\${facts.length === 1 ? "" : "s"}</span>
+          </div>
+          <ul class="bullets">\${facts.map(f => \`
+            <li class="bullet">
+              <span class="text">\${esc(f.text)}</span>
+              <span class="conf">\${esc(f.meta)}</span>
+            </li>\`).join("")}</ul>
+        </div>\`).join("")}
+      \${ungrouped.length > 0 ? \`
+        <div class="section">
+          <div class="section-heading">Other</div>
+          <ul class="bullets">\${ungrouped.map(f => \`
+            <li class="bullet"><span class="text">\${esc(f.text)}</span></li>\`).join("")}</ul>
+        </div>\` : ""}
+    </div>
     \${entities.length > 0 ? \`
-      <h2 style="margin-top:24px">Related Entities</h2>
-      \${entities.map(rr => \`
-        <div class="bullet" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(rr.entity)}'))" style="cursor:pointer">
-          <span class="text"><strong>\${esc(rr.entity)}</strong> — \${esc(rr.snippet || "")}</span>
-          <span class="conf">\${rr.fact_count} fact\${rr.fact_count === 1 ? "" : "s"}</span>
-        </div>\`).join("")}\` : ""}\`;
-}
+      <div class="section" style="margin-top:16px">
+        <div class="section-heading" onclick="this.parentElement.classList.toggle('collapsed')">
+          Related Entities
+        </div>
+        <ul class="bullets">\${entities.map(rr => \`
+          <li class="bullet" onclick="navigate('/knowledge/ui/entity/' + encodeURIComponent('\${esc(rr.entity)}'))" style="cursor:pointer">
+            <span class="text"><strong>\${esc(rr.entity)}</strong> — \${esc(rr.snippet || "")}</span>
+            <span class="conf">\${rr.fact_count} fact\${rr.fact_count === 1 ? "" : "s"}</span>
+          </li>\`).join("")}</ul>
+      </div>\` : ""}\`;
 
-async function exportTopicFacts(q) {
-  const qr = await api("/knowledge/query?q=" + encodeURIComponent(q) + "&max=50");
-  const blob = new Blob([JSON.stringify({topic: q, facts_text: qr.facts_text, entities: qr.entities, exported: new Date().toISOString()}, null, 2)], {type: "application/json"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "sinain-topic-" + q.replace(/\\s+/g, "-") + ".json";
-  a.click();
+  // Wire actions
+  $("#topicCopyLink").onclick = () => {
+    const url = location.origin + "/knowledge/ui/topic/" + encodeURIComponent(q);
+    navigator.clipboard.writeText(url);
+    showToast("✓ Link copied");
+  };
+  $("#topicShare").onclick = async () => {
+    // Share all entities mentioned in the query
+    const ents = (qr.entities || q.split(/[\\s,+]+/)).filter(Boolean);
+    if (ents.length === 0) { showToast("No entities to share"); return; }
+    showToast('<span class="spinner"></span> Preparing share…', 30_000);
+    try {
+      for (const ent of ents.slice(0, 3)) {
+        await ShareManager.createShare(ent);
+      }
+    } catch (e) {
+      showToast("Share failed: " + (e && e.message ? e.message : String(e)));
+    }
+  };
 }
 
 // ── Dropzone wiring (shared) ──────────────────────────────────────────────
