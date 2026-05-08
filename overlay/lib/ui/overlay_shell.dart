@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/models/hud_settings.dart';
 import '../core/services/onboarding_service.dart';
 import '../core/services/settings_service.dart';
@@ -264,6 +265,29 @@ class OverlayShellState extends State<OverlayShell> {
     ws.sendCommand('open_settings');
   }
 
+  /// Open the sinain-core knowledge web UI in the user's default browser.
+  /// URL is derived from the configured WebSocket URL — swap ws://→http://,
+  /// wss://→https://, then append /knowledge/ui. Uses externalApplication
+  /// mode so the browser takes focus rather than embedding in a webview.
+  Future<void> _openKnowledgeUI() async {
+    final ws = _settingsService.settings.wsUrl;
+    // Dart's String.replaceFirst doesn't interpret $1 as a capture group —
+    // that's replaceFirstMapped. A literal startsWith ladder is clearer
+    // anyway and handles all three cases (wss, ws, anything else).
+    final String httpUrl;
+    if (ws.startsWith('wss://')) {
+      httpUrl = 'https://${ws.substring(6)}';
+    } else if (ws.startsWith('ws://')) {
+      httpUrl = 'http://${ws.substring(5)}';
+    } else {
+      httpUrl = ws;
+    }
+    final uri = Uri.parse('$httpUrl/knowledge/ui');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show onboarding if not complete
@@ -372,6 +396,7 @@ class OverlayShellState extends State<OverlayShell> {
                   ),
                 ),
               ),
+            _plainIcon(Icons.psychology_outlined, _openKnowledgeUI, tooltip: 'Open knowledge browser'),
             _plainIcon(Icons.settings, _openSettings, tooltip: 'Settings'),
             _plainIcon(Icons.chevron_left, () => _transitionTo(HudState.eye), tooltip: 'Collapse'),
             _plainIcon(Icons.open_in_full, () => _transitionTo(HudState.chat), tooltip: 'Expand to chat'),
@@ -535,6 +560,23 @@ class OverlayShellState extends State<OverlayShell> {
                                   fontWeight: FontWeight.bold,
                                   color: _redEye.withValues(alpha: 0.8),
                                 )),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Knowledge browser — opens sinain-core's web UI in the
+                  // user's default browser. Mirrors the Controls-bar entry.
+                  HudTooltip(
+                    message: 'Open knowledge browser',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: _openKnowledgeUI,
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(Icons.psychology_outlined, size: 12,
+                              color: Colors.white.withValues(alpha: 0.5)),
                         ),
                       ),
                     ),
