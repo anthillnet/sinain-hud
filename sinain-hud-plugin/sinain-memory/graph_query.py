@@ -328,6 +328,70 @@ def _cooccurring_entities(
     return ranked[:max_entities]
 
 
+_SEMANTIC_CACHE: dict = {}  # {"db_path": {"names": [...], "embs": ndarray, "ts": float}}
+
+
+def _expand_keywords_semantic(
+    keywords: list[str],
+    db_path: str,
+    threshold: float = 0.50,
+    max_expansions: int = 3,
+) -> list[str]:
+    """Expand keywords with semantically similar entity names from the graph.
+
+    "AI" → ["ai", "machine-learning", "ai-agents", ...]. Caches model + entity
+    embeddings for fast repeated calls (<50ms after first load).
+    """
+    import time as _t
+    try:
+        from sentence_transformers import SentenceTransformer
+        import numpy as np
+        from triplestore import TripleStore
+
+        if not hasattr(_expand_keywords_semantic, "_model"):
+            _expand_keywords_semantic._model = SentenceTransformer("all-MiniLM-L6-v2")
+        model = _expand_keywords_semantic._model
+
+        # Cache entity names + embeddings (refresh every 5 min)
+        cache = _SEMANTIC_CACHE.get(db_path)
+        if not cache or _t.time() - cache["ts"] > 300:
+            store = TripleStore(db_path)
+            entity_names = [n for eid, n in store.entities_with_attr("name")
+                            if eid.startswith("entity:") and len(n) >= 4]
+            store.close()
+            if not entity_names:
+                return keywords
+            entity_embs = model.encode(entity_names, show_progress_bar=False)
+            _SEMANTIC_CACHE[db_path] = {"names": entity_names, "embs": entity_embs, "ts": _t.time()}
+            cache = _SEMANTIC_CACHE[db_path]
+
+        entity_names = cache["names"]
+        entity_embs = cache["embs"]
+
+        kw_embs = model.encode(keywords, show_progress_bar=False)
+
+        expanded = list(keywords)
+        for i, kw in enumerate(keywords):
+            # Skip expansion for very short keywords — embeddings are unreliable
+            # for abbreviations like "ml", "ai" (use community detection instead)
+            if len(kw) < 4:
+                continue
+            sims = []
+            for j, name in enumerate(entity_names):
+                if name == kw or name in expanded:
+                    continue
+                sim = float(np.dot(kw_embs[i], entity_embs[j]) /
+                            (np.linalg.norm(kw_embs[i]) * np.linalg.norm(entity_embs[j]) + 1e-9))
+                if sim >= threshold:
+                    sims.append((name, sim))
+            sims.sort(key=lambda x: -x[1])
+            expanded.extend(name for name, _ in sims[:max_expansions])
+
+        return expanded
+    except (ImportError, Exception):
+        return keywords
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -342,15 +406,32 @@ def query_facts_hybrid(
     import time
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
 
-    # Entity graph pre-filter: find facts linked to mentioned entities via backrefs.
-    # Used to BOOST relevant facts in RRF, not as a separate tier (avoids dilution).
+    # Change 0: Semantic entity expansion — "ML" → ["ml", "machine-learning", "ai", ...]
+    expanded_keywords = keywords
+    if len(keywords) >= 1:
+        expanded_keywords = _expand_keywords_semantic(keywords, db_path)
+
+    # Entity graph pre-filter with per-entity tracking for intersection (Change A)
     graph_fact_ids: set[str] = set()
+    graph_intersection: set[str] = set()
     community_fact_ids: set[str] = set()
-    for kw in keywords:
+    per_entity_facts: dict[str, set[str]] = {}
+    for kw in expanded_keywords:
+        kw_facts: set[str] = set()
         for f in query_facts_by_entity_graph(db_path, kw, max_facts=50):
             eid = f.get("entity_id", "")
             if eid:
+                kw_facts.add(eid)
                 graph_fact_ids.add(eid)
+        if kw_facts:
+            per_entity_facts[kw] = kw_facts
+
+    # Compute intersection: facts linked to ALL original query keywords
+    if len(per_entity_facts) >= 2:
+        try:
+            graph_intersection = set.intersection(*per_entity_facts.values())
+        except TypeError:
+            pass
 
     # Community expansion: follow mentions edges to find related entities
     t0 = time.monotonic()
@@ -359,14 +440,14 @@ def query_facts_hybrid(
         store = TripleStore(db_path)
 
         matched_entities = set()
-        for kw in keywords:
+        for kw in expanded_keywords:
             node_id = f"entity:{kw}"
             if store.entity(node_id):
                 matched_entities.add(kw)
 
         for ent in matched_entities:
             if time.monotonic() - t0 > 0.5:
-                break  # timing guard
+                break
             community = expand_entity_community(store, ent, max_related=3)
             for related_name, _count in community:
                 for f in query_facts_by_entity_graph(db_path, related_name, max_facts=20):
@@ -378,11 +459,49 @@ def query_facts_hybrid(
     except Exception:
         pass
 
-    # Run three retrieval methods independently
+    # Run retrieval methods independently
     candidate_limit = max_facts * 3
-    fts_results = query_facts_fts(db_path, query, max_facts=candidate_limit)
-    tag_results = query_facts_by_entities(db_path, keywords, max_facts=candidate_limit) if keywords else []
+
+    # Change C: FTS5 AND mode for multi-keyword queries
+    if len(keywords) > 1:
+        fts_and_query = " AND ".join(keywords)
+        fts_results = query_facts_fts(db_path, fts_and_query, max_facts=candidate_limit)
+        if len(fts_results) < candidate_limit:
+            fts_or = query_facts_fts(db_path, " OR ".join(keywords), max_facts=candidate_limit)
+            fts_results.extend(fts_or)
+    else:
+        fts_results = query_facts_fts(db_path, query, max_facts=candidate_limit)
+
+    tag_results = query_facts_by_entities(db_path, expanded_keywords, max_facts=candidate_limit) if expanded_keywords else []
     top_results = query_top_facts(db_path, limit=candidate_limit)
+
+    # Change B: Tag intersection tier (facts tagged with ALL keywords)
+    intersection_results: list[dict] = []
+    if len(keywords) >= 2:
+        try:
+            from triplestore import TripleStore
+            _istore = TripleStore(db_path)
+            placeholders = ",".join("?" for _ in keywords)
+            rows = _istore._conn.execute(
+                f"""SELECT entity_id, COUNT(DISTINCT value) as matches
+                    FROM triples WHERE attribute = 'tag' AND NOT retracted
+                    AND value IN ({placeholders})
+                    GROUP BY entity_id HAVING COUNT(DISTINCT value) >= ?
+                    ORDER BY matches DESC LIMIT ?""",
+                (*keywords, len(keywords), candidate_limit),
+            ).fetchall()
+            for r in rows:
+                fid = r["entity_id"]
+                attrs = _istore.entity(fid)
+                if attrs and "value" in attrs:
+                    fact = {"entity_id": fid}
+                    for attr_name, values in attrs.items():
+                        if attr_name != "tag":
+                            fact[attr_name] = values[0] if len(values) == 1 else values
+                    intersection_results.append(fact)
+            _istore.close()
+        except Exception:
+            pass
 
     # Build ranked lists by entity_id
     def _ranked_ids(facts: list[dict]) -> list[str]:
@@ -398,41 +517,58 @@ def query_facts_hybrid(
     fts_ranked = _ranked_ids(fts_results)
     tag_ranked = _ranked_ids(tag_results)
     top_ranked = _ranked_ids(top_results)
+    intersection_ranked = _ranked_ids(intersection_results)
 
     # Reciprocal Rank Fusion: RRF(d) = Σ 1/(k + rank_i(d))
-    K = 60  # standard RRF constant
+    K = 60
     rrf_scores: dict[str, float] = {}
-    for ranked_list in [fts_ranked, tag_ranked, top_ranked]:
+    tiers = [fts_ranked, tag_ranked, top_ranked]
+    if intersection_ranked:
+        tiers.append(intersection_ranked)
+    for ranked_list in tiers:
         for rank, eid in enumerate(ranked_list):
             rrf_scores[eid] = rrf_scores.get(eid, 0.0) + 1.0 / (K + rank)
 
-    # Co-occurrence boost: use FTS/tag results to find temporally related entities
-    import time as _time
-    _t_cooccur = _time.monotonic()
-    query_matched_ids = {f.get("entity_id", "") for f in fts_results + tag_results if f.get("entity_id")}
-    if query_matched_ids and _time.monotonic() - _t_cooccur < 0.3:
+    # Change D: Session co-occurrence for multi-entity queries
+    if len(keywords) >= 2 and time.monotonic() - t0 < 1.0:
         try:
             from triplestore import TripleStore
-            _store = TripleStore(db_path)
-            cooccur = _cooccurring_entities(_store, query_matched_ids, max_entities=5)
-            for ent_name in cooccur:
-                for f in query_facts_by_entity_graph(db_path, ent_name, max_facts=10):
-                    eid = f.get("entity_id", "")
-                    if eid and eid not in graph_fact_ids:
+            _sstore = TripleStore(db_path)
+            # Find sessions where facts about BOTH keywords exist
+            kw_a, kw_b = keywords[0], keywords[1]
+            sess_rows = _sstore._conn.execute(
+                """SELECT DISTINCT t1.value as ts FROM triples t1
+                   JOIN triples t2 ON t2.attribute='first_seen' AND t2.value=t1.value AND t2.retracted=0
+                   WHERE t1.attribute='first_seen' AND t1.retracted=0
+                   AND t1.entity_id IN (SELECT entity_id FROM triples WHERE attribute='tag' AND value=? AND NOT retracted)
+                   AND t2.entity_id IN (SELECT entity_id FROM triples WHERE attribute='tag' AND value=? AND NOT retracted)
+                   LIMIT 10""",
+                (kw_a, kw_b),
+            ).fetchall()
+            if sess_rows:
+                ts_values = [r[0] for r in sess_rows]
+                ph = ",".join("?" for _ in ts_values)
+                fact_rows = _sstore._conn.execute(
+                    f"SELECT DISTINCT entity_id FROM triples WHERE attribute='first_seen' AND value IN ({ph}) AND NOT retracted AND entity_id LIKE 'fact:%' LIMIT 30",
+                    ts_values,
+                ).fetchall()
+                for r in fact_rows:
+                    eid = r[0]
+                    if eid not in graph_fact_ids:
                         community_fact_ids.add(eid)
-            _store.close()
+            _sstore.close()
         except Exception:
             pass
 
-    # Graph boost: facts linked to mentioned entities via backrefs get priority
-    # +0.05 is significant vs RRF scores of ~0.015-0.033 — ensures entity-linked facts
-    # rank above FTS noise in large graphs (100K+ triples)
-    if graph_fact_ids or community_fact_ids:
+    # Graph boost with intersection bonus (Change A continued)
+    if graph_fact_ids or community_fact_ids or graph_intersection:
         for eid in rrf_scores:
-            if eid in graph_fact_ids:
+            if eid in graph_intersection:
+                rrf_scores[eid] += 0.10  # intersection: linked to ALL queried entities
+            elif eid in graph_fact_ids:
                 rrf_scores[eid] += 0.05  # direct graph-linked facts
             elif eid in community_fact_ids:
-                rrf_scores[eid] += 0.025  # community-expanded facts (half weight)
+                rrf_scores[eid] += 0.025  # community-expanded facts
 
     # Apply confidence decay as secondary signal (fresh facts rank above stale ones)
     from triplestore import decayed_confidence
@@ -462,11 +598,30 @@ def query_facts_hybrid(
             if eid and eid not in fact_map:
                 fact_map[eid] = f
 
-    # Return top RRF candidates. Embedding re-ranking is done by the caller
-    # (sinain-core Node.js) to avoid deadlock — the Python subprocess can't call
-    # back to sinain-core's /embed endpoint while sinain-core is blocked waiting
-    # for the subprocess.
-    results = [fact_map[eid] for eid in sorted_ids[:max_facts] if eid in fact_map]
+    # Return top RRF candidates, optionally re-ranked by embedding similarity.
+    # When called from sinain-core subprocess, embedding re-ranking happens in
+    # Node.js (to avoid deadlock). When called standalone (benchmark, CLI),
+    # we re-rank in-process if sentence-transformers is available.
+    rrf_candidates = [fact_map[eid] for eid in sorted_ids[:max_facts * 2] if eid in fact_map]
+
+    results = rrf_candidates[:max_facts]
+    try:
+        from sentence_transformers import SentenceTransformer
+        import numpy as np
+        if not hasattr(query_facts_hybrid, "_embed_model"):
+            query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+        model = query_facts_hybrid._embed_model
+        texts = [query] + [f.get("value", "") for f in rrf_candidates]
+        embs = model.encode(texts, show_progress_bar=False)
+        q_emb = embs[0]
+        scored = []
+        for i, f in enumerate(rrf_candidates):
+            sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
+            scored.append((sim, f))
+        scored.sort(key=lambda x: -x[0])
+        results = [f for _, f in scored[:max_facts]]
+    except ImportError:
+        pass  # sentence-transformers not installed — use RRF order
 
     # Expand top results with 1-hop graph neighbors
     if results and len(results) < max_facts:
