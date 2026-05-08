@@ -50,27 +50,20 @@ def _get_all_facts_text(db_path: str) -> str:
 
 
 def _query_knowledge(db_path: str, question: str) -> str:
-    """Query sinain knowledge graph using the SAME path as the live pipeline.
+    """Query sinain knowledge graph for benchmark evaluation.
 
-    Tries sinain-core HTTP API first (identical to what the agent sees),
-    falls back to direct Python query if core isn't running.
+    Uses the same retrieval pipeline (query_facts_hybrid + format) as the
+    live system, but queries the per-question benchmark store directly.
+    This ensures evaluation measures the actual KG quality, not whether
+    sinain-core happens to be running or which DB it's pointing at.
     """
-    keywords = _extract_keywords(question)
+    from graph_query import query_facts_hybrid, format_facts_compact
 
-    # Call sinain-core /knowledge/facts — EXACT same path as live escalation.
-    # Same retrieval, same format, same token budget. No special eval treatment.
-    import urllib.request, json as _json
-    entities_param = ",".join(keywords[:8])
-    url = f"http://localhost:9500/knowledge/facts?entities={entities_param}&max={MAX_FACTS_PER_QUERY}"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            data = _json.loads(resp.read())
-            if data.get("ok") and data.get("facts", "").strip():
-                return data["facts"]
-    except Exception:
-        pass
+    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY)
+    if not facts:
+        return "(no facts retrieved)"
 
-    return "(sinain-core not running — cannot evaluate live retrieval)"
+    return format_facts_compact(facts, max_chars=1200)
 
 
 def _get_retrieved_facts(db_path: str, question: str, k: int = 10) -> list[dict]:
