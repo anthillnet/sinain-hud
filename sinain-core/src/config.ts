@@ -291,7 +291,7 @@ export function loadConfig(): CoreConfig {
   const autoApproveRaw = fromCfgStr(
     agentsCfg?.autoApproveTools,
     "SINAIN_AUTO_APPROVE_TOOLS",
-    "Read Glob Grep Ls Cat mcp__sinain*",
+    "Read Glob Grep Ls Cat mcp__sinain* ToolSearch",
   );
   const permissionsConfig = {
     autoApproveTools: autoApproveRaw.split(/\s+/).filter((t) => t.length > 0),
