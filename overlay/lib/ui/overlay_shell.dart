@@ -17,6 +17,7 @@ import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'tasks/tasks_view.dart';
+import 'chat/permission_banner.dart';
 import '../core/models/feed_item.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
@@ -649,6 +650,11 @@ class OverlayShellState extends State<OverlayShell> {
               ],
             ),
           ),
+          // Permission banner — visible above the input field whenever an
+          // agent task is blocked waiting for user approval. Hidden (zero
+          // height) when no tasks are pending. Mirrors Tasks tab — does not
+          // remove tasks from that view.
+          const PermissionBanner(),
           // Command input
           CommandInput(
             externalFocusNode: _commandFocusNode,
