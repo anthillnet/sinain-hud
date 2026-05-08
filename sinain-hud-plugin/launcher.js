@@ -139,6 +139,17 @@ async function main() {
     }
   }
 
+  // Pre-cache embedding model if not already cached (prevents 10s huggingface.co
+  // download at sinain-core first-startup; skipped silently if SINAIN_SKIP_EMBEDDING_SETUP=1)
+  if (process.env.SINAIN_SKIP_EMBEDDING_SETUP !== "1") {
+    try {
+      const { cacheEmbeddingModel } = await import("./setup-embedding.js");
+      await cacheEmbeddingModel({ silent: true });
+    } catch (e) {
+      warn(`embedding model pre-cache skipped: ${e.message}`);
+    }
+  }
+
   // Start core
   log("Starting sinain-core...");
   const coreDir = path.join(PKG_DIR, "sinain-core");

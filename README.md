@@ -49,8 +49,10 @@ npx @geravant/sinain@latest start
 
 That's it. On first run, sinain will:
 1. Run an **interactive setup wizard** — transcription backend, API key, agent, privacy mode
-2. **Auto-download** the overlay app, sck-capture binary, and Python dependencies
+2. **Auto-download** the overlay app (~17MB), sck-capture binary (~5MB), embedding model (~90MB), and Python dependencies
 3. **Start all services** — sinain-core, sense_client, overlay, and agent
+
+All assets are cached locally after the first install. In `paranoid` mode, subsequent runs are fully offline — no network calls at runtime.
 
 > **Pin `@latest`** on every invocation. `npx @geravant/sinain` (without `@latest`) caches *forever* against the unversioned spec — you'd silently keep running an old version for months. Sinain self-updates automatically when stale, but pinning `@latest` makes it explicit and saves a redundant relaunch.
 
