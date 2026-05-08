@@ -212,6 +212,8 @@ export class AudioPipeline extends EventEmitter {
 
     let headerSkipped = name !== "sox";
     let headerBuf = Buffer.alloc(0);
+    let stderrAccum = "";
+    const spawnTime = Date.now();
 
     proc.stdout?.on("data", (data: Buffer) => {
       if (!this.running) return;
@@ -237,6 +239,12 @@ export class AudioPipeline extends EventEmitter {
       if (msg && !/^In:.*Out:/.test(msg)) {
         log(TAG, `${name} stderr: ${msg.slice(0, 200)}`);
       }
+      // Accumulate stderr for TCC detection on exit
+      stderrAccum += data.toString();
+      // Cap accumulation to avoid unbounded growth (4KB is enough for any TCC message)
+      if (stderrAccum.length > 4096) {
+        stderrAccum = stderrAccum.slice(-4096);
+      }
     });
 
     proc.on("error", (err) => {
@@ -252,6 +260,45 @@ export class AudioPipeline extends EventEmitter {
       if (this.running && code !== 0) {
         this.errorCount++;
         this.profiler?.gauge("audio.errors", this.errorCount);
+
+        // Detect TCC (macOS Screen Recording / Microphone) permission denial.
+        // sck-capture logs "declined TCCs" to stderr when the entitlement is
+        // missing. The chicken-and-egg: clicking "Allow" on the prompt doesn't
+        // apply to a running process — the user must restart Terminal and
+        // re-run. We print a prominent banner and request graceful shutdown
+        // so users aren't left wondering why the agent never escalates.
+        const elapsedMs = Date.now() - spawnTime;
+        const isTccDenial = stderrAccum.includes("declined TCCs");
+        if (isTccDenial && elapsedMs < 5000) {
+          process.stdout.write([
+            "",
+            "=======================================================================",
+            "  WARNING: Screen Recording permission needed",
+            "=======================================================================",
+            "",
+            "  sck-capture cannot access screen capture and audio without",
+            "  TCC (Screen Recording) permission from macOS.",
+            "",
+            "  If you just clicked Allow -- that is normal! macOS does not apply",
+            "  the permission to processes that are already running. To fix:",
+            "",
+            "    1. Press Ctrl+C to stop sinain",
+            "    2. Quit and restart your Terminal app (Cmd+Q, then reopen)",
+            "    3. Run again: npx @geravant/sinain@latest start",
+            "",
+            "  Already declined? Re-grant permission:",
+            "    System Settings > Privacy & Security > Screen Recording",
+            "    > enable Terminal (or your terminal app)",
+            "",
+            "=======================================================================",
+            "",
+          ].join("\n"));
+
+          // Emit TCC-specific error so index.ts can initiate graceful shutdown
+          this.emit("tcc-denied");
+          return;
+        }
+
         warn(TAG, `${name} exited unexpectedly, stopping pipeline`);
         this.stop();
       }

@@ -64,6 +64,12 @@ class WebSocketService extends ChangeNotifier {
   int get pendingAttentionCount =>
       _spawnTasks.values.where((t) => t.needsInput).length;
 
+  /// Snapshot of all known spawn tasks, keyed by taskId.
+  /// TasksView reads this on mount to seed its local list with any tasks
+  /// that arrived before the Chat panel (and TasksView itself) was built.
+  /// The map is unmodifiable — mutations go through the stream only.
+  Map<String, SpawnTask> get spawnTasks => Map.unmodifiable(_spawnTasks);
+
   bool get connected => _connected;
   String get audioState => _audioState;
   String get micState => _micState;

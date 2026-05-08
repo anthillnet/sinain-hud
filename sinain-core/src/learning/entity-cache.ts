@@ -55,10 +55,14 @@ export class EntityCache {
         return;
       }
 
-      // Query entity names directly via SQLite
+      // Query entity names directly via SQLite.
+      // Two package layouts are supported:
+      //   dev/monorepo: <repo>/sinain-core/src/learning/ → ../../../sinain-hud-plugin/sinain-memory
+      //   npm-published flat: <pkg>/sinain-core/src/learning/ → ../../../sinain-memory
       const scriptCandidates = [
-        resolve(__dir, "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),
-        resolve(__dir, "..", "sinain-memory", "graph_query.py"),
+        resolve(__dir, "..", "..", "..", "sinain-hud-plugin", "sinain-memory", "graph_query.py"),  // dev/monorepo layout
+        resolve(__dir, "..", "..", "..", "sinain-memory", "graph_query.py"),                        // npm-published flat layout
+        resolve(__dir, "..", "..", "sinain-memory", "graph_query.py"),                             // legacy alt
       ];
       const scriptPath = scriptCandidates.find(p => existsSync(p));
       if (!scriptPath) return;

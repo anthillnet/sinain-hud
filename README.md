@@ -49,8 +49,10 @@ npx @geravant/sinain@latest start
 
 That's it. On first run, sinain will:
 1. Run an **interactive setup wizard** — transcription backend, API key, agent, privacy mode
-2. **Auto-download** the overlay app, sck-capture binary, and Python dependencies
+2. **Auto-download** the overlay app (~17MB), sck-capture binary (~5MB), embedding model (~90MB), and Python dependencies
 3. **Start all services** — sinain-core, sense_client, overlay, and agent
+
+All assets are cached locally after the first install. In `paranoid` mode, subsequent runs are fully offline — no network calls at runtime.
 
 > **Pin `@latest`** on every invocation. `npx @geravant/sinain` (without `@latest`) caches *forever* against the unversioned spec — you'd silently keep running an old version for months. Sinain self-updates automatically when stale, but pinning `@latest` makes it explicit and saves a redundant relaunch.
 
@@ -58,16 +60,22 @@ That's it. On first run, sinain will:
 
 ### Prerequisites
 
+- **macOS 12.3+** — Sinain uses ScreenCaptureKit (introduced in 12.3). Earlier versions are not supported in this release. Apple Silicon and Intel both work.
 - **Node.js 18+** — [nodejs.org](https://nodejs.org/) (LTS recommended)
 - **Python 3.10+** — `brew install python3` (macOS) or [python.org](https://www.python.org/downloads/)
 - **OpenRouter API key** (optional for local-only mode) — [openrouter.ai](https://openrouter.ai)
+- **Network access during first install** — the wizard downloads ~112MB total (overlay app, sck-capture binary, sentence-transformer embedding model). All cached locally; subsequent runs need network only for cloud LLM API calls (or zero network in `paranoid` mode).
 
-> **Fully local?** No API key needed. Ollama + whisper-cli = zero cloud. See [Running Fully Local](#running-fully-local).
+> **Fully local?** No API key needed. Ollama + whisper-cli = zero cloud at runtime. See [Running Fully Local](#running-fully-local).
+
+> **First install reproducibility?** See [docs/cold-install-verification.md](docs/cold-install-verification.md) for a step-by-step verified-on-fresh-user-account guide, including the timing measurement and the failure modes the audit caught + fixed.
 
 ### macOS Permissions
 
-1. **System Settings → Privacy & Security → Screen Recording** — add your Terminal
-2. **System Settings → Privacy & Security → Microphone** — add your Terminal
+1. **System Settings → Privacy & Security → Screen Recording** — add your Terminal, then **quit and reopen Terminal** (macOS TCC entitlements only apply to processes started after the grant)
+2. **System Settings → Privacy & Security → Microphone** — same: add Terminal, then restart Terminal
+
+> Sinain detects when these permissions are missing and surfaces a clear restart-instruction banner; you'll never get a silent degraded mode.
 
 ### Managing sinain
 

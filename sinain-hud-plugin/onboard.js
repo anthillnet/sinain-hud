@@ -346,6 +346,27 @@ export async function runOnboard(args = {}) {
 
   await stepOverlay(base);
 
+  // ── Embedding model ───────────────────────────────────────────────────
+  // Pre-cache Xenova/all-MiniLM-L6-v2 (~90MB) so sinain-core startup is
+  // a cache-hit with no network activity. Helps all users, not just paranoid
+  // mode — runtime load goes from ~10s download to <1s cache read.
+
+  {
+    const s = p.spinner();
+    s.start("Pre-caching sentence-transformer model (~90MB)...");
+    try {
+      const { cacheEmbeddingModel } = await import("./setup-embedding.js");
+      await cacheEmbeddingModel({ silent: true });
+      s.stop(c.green("Embedding model cached."));
+    } catch (err) {
+      s.stop(c.yellow(`Embedding model pre-cache skipped: ${err.message}`));
+      p.note(
+        "Run manually: sinain setup-embedding\nOr set SINAIN_SKIP_EMBEDDING_SETUP=1 to skip.",
+        "Embedding",
+      );
+    }
+  }
+
   // ── Health check ──────────────────────────────────────────────────────
 
   await runHealthCheck();

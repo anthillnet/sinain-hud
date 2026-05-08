@@ -56,6 +56,26 @@ const children = [];    // { name, proc, pid }
 await main();
 
 async function main() {
+  // ── Platform guard (ENG-05, CONTEXT.md D-03) ─────────────────────────────
+  // Friendly blocker for non-macOS platforms. SINAIN_FAKE_PLATFORM enables
+  // env-var spoof testing without an actual Windows/Linux host.
+  const platform = process.env.SINAIN_FAKE_PLATFORM || os.platform();
+  if (platform !== "darwin") {
+    const isWindows = platform === "win32";
+    console.log("");
+    console.log("  ┌─────────────────────────────────────────────────────────┐");
+    console.log("  │  Sinain is macOS-only for this launch                   │");
+    console.log("  │                                                         │");
+    console.log("  │  " + (isWindows
+      ? "Windows support is in progress — star the repo for updates."
+      : "Linux support is planned — star the repo for updates.        ") + "  │");
+    console.log("  │  https://github.com/geravant/sinain-hud                 │");
+    console.log("  └─────────────────────────────────────────────────────────┘");
+    console.log("");
+    process.exit(0);
+  }
+  // ── End platform guard ────────────────────────────────────────────────────
+
   setupSignalHandlers();
 
   log("Preflight checks...");
@@ -116,6 +136,17 @@ async function main() {
       } catch (e) {
         warn(`sck-capture auto-download failed: ${e.message}`);
       }
+    }
+  }
+
+  // Pre-cache embedding model if not already cached (prevents 10s huggingface.co
+  // download at sinain-core first-startup; skipped silently if SINAIN_SKIP_EMBEDDING_SETUP=1)
+  if (process.env.SINAIN_SKIP_EMBEDDING_SETUP !== "1") {
+    try {
+      const { cacheEmbeddingModel } = await import("./setup-embedding.js");
+      await cacheEmbeddingModel({ silent: true });
+    } catch (e) {
+      warn(`embedding model pre-cache skipped: ${e.message}`);
     }
   }
 

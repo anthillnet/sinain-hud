@@ -69,6 +69,13 @@ switch (cmd) {
     break;
   }
 
+  case "setup-embedding": {
+    const { cacheEmbeddingModel } = await import("./setup-embedding.js");
+    const forceUpdate = process.argv.includes("--update");
+    await cacheEmbeddingModel({ forceUpdate });
+    break;
+  }
+
   case "install":
     // --if-openclaw: only run if OpenClaw is installed (for postinstall)
     if (process.argv.includes("--if-openclaw")) {
@@ -400,6 +407,7 @@ Usage:
   sinain setup                 (deprecated — use onboard)
   sinain setup-overlay         Download pre-built overlay app
   sinain setup-sck-capture     Download sck-capture audio binary (macOS)
+  sinain setup-embedding       Pre-cache sentence-transformer model (~90MB)
   sinain export-knowledge      Export knowledge for transfer to another machine
   sinain import-knowledge <file>  Import knowledge from export file
   sinain install               Install OpenClaw plugin (server-side)
@@ -416,6 +424,9 @@ Start options:
 Setup-overlay options:
   --from-source                Build from Flutter source instead of downloading
   --update                     Force re-download even if version matches
+
+Setup-embedding options:
+  --update                     Force re-download even if model is already cached
 `);
 
 }
