@@ -170,17 +170,38 @@ export class Escalator {
     log(TAG, `user command set: "${preview}"`);
   }
 
+  /** True iff a gateway-typed profile is the active agent on at least one
+   *  lane. WS-bearing operations (connect, reset, situation push) are gated
+   *  on this so a user with a configured-but-unselected gateway pays no
+   *  reconnect tax. */
+  private isGatewayLaneSelected(): boolean {
+    const isGw = this.deps.isGatewayAgent;
+    if (!isGw) return false;
+    const esc = this.deps.getEscalationAgent?.() ?? "";
+    const spawn = this.deps.getSpawnAgent?.() ?? "";
+    return isGw(esc) || isGw(spawn);
+  }
+
+  /** Public predicate so the agent loop / index.ts can ask "should I do
+   *  openclaw-only side-effects on this tick?" without depending on the
+   *  internals. Mirrors isGatewayLaneSelected. */
+  shouldDriveGateway(): boolean {
+    const wsConfigured = !!this.deps.openclawConfig.gatewayWsUrl;
+    return wsConfigured && this.isGatewayLaneSelected();
+  }
+
   /** Start the WS connection to OpenClaw.
    *
-   * Connects whenever the gateway URL is configured AND escalation isn't
-   * fully off. WS is the transport for the openclaw lane — the user selects
-   * it via the overlay's agent picker, and dispatch routes accordingly.
-   * Removing the openclaw profile from agents.json (and unsetting the env
-   * vars) leaves gatewayWsUrl empty → no connect attempt.
+   * Connects whenever the gateway URL is configured AND a gateway-typed
+   * profile is selected on a lane AND escalation isn't fully off. WS is
+   * the transport for the openclaw lane — the user selects it via the
+   * overlay's agent picker, and dispatch routes accordingly. Removing the
+   * openclaw profile from agents.json (and unsetting the env vars) leaves
+   * gatewayWsUrl empty → no connect attempt. Likewise, if the profile
+   * exists but no lane selects it, no connect attempt.
    */
   start(): void {
-    const wsConfigured = !!this.deps.openclawConfig.gatewayWsUrl;
-    if (this.deps.escalationConfig.mode !== "off" && wsConfigured) {
+    if (this.deps.escalationConfig.mode !== "off" && this.shouldDriveGateway()) {
       this.wsClient.connect();
       const tokenHash = this.deps.openclawConfig.gatewayToken
         ? createHash("sha256").update(this.deps.openclawConfig.gatewayToken).digest("hex").slice(0, 12)
@@ -194,11 +215,26 @@ export class Escalator {
     this.wsClient.disconnect();
   }
 
+  /** Re-evaluate WS lifecycle after lane selection changes. Connects when a
+   *  gateway lane just got selected; disconnects when the user moved off
+   *  every gateway lane. Called from the set_agent overlay handler. */
+  evaluateGatewayLifecycle(): void {
+    const shouldConnect =
+      this.deps.escalationConfig.mode !== "off" && this.shouldDriveGateway();
+    if (shouldConnect && !this.wsClient.isConnected) {
+      log(TAG, "lane switched to gateway — connecting WS");
+      this.wsClient.resetConnection();
+    } else if (!shouldConnect && this.wsClient.isConnected) {
+      log(TAG, "lane switched off gateway — disconnecting WS");
+      this.wsClient.disconnect();
+    }
+  }
+
   /** Update escalation mode at runtime. */
   setMode(mode: EscalatorDeps["escalationConfig"]["mode"]): void {
     const wasOff = this.deps.escalationConfig.mode === "off";
     this.deps.escalationConfig.mode = mode;
-    if (mode !== "off" && !this.wsClient.isConnected) {
+    if (mode !== "off" && !this.wsClient.isConnected && this.shouldDriveGateway()) {
       this.wsClient.resetConnection();
     }
     if (mode === "off") {
