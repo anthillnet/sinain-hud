@@ -42,6 +42,13 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription<FeedItem>? _contentSub;
 
+  // Pending-permission signal — drives orange eye + auto-switch to TSK.
+  // Hidden state intentionally ignores this: explicit user hide outranks
+  // agent's "I need attention". Agent will time out into deny.
+  int _pendingAttention = 0;
+  WebSocketService? _wsForListener;
+  VoidCallback? _wsListener;
+
   // Display settings panel
   bool _showDisplaySettings = false;
   bool _showAgentPicker = false;
@@ -85,11 +92,29 @@ class OverlayShellState extends State<OverlayShell> {
         if (mounted) setState(() => _hasNewContent = false);
       });
     });
+
+    // Watch pending-permission count from WebSocketService (ChangeNotifier).
+    // Trigger tab auto-switch only on increments — manual user switches back
+    // to AGT mid-session aren't fought unless a new permission actually arrives.
+    _wsForListener = ws;
+    _wsListener = () {
+      if (!mounted) return;
+      final n = ws.pendingAttentionCount;
+      if (n == _pendingAttention) return;
+      final prev = _pendingAttention;
+      setState(() => _pendingAttention = n);
+      if (n > prev) {
+        _settingsService.setActiveTab(HudTab.tasks);
+      }
+    };
+    ws.addListener(_wsListener!);
   }
 
   static const _redEye = Color(0xFFFF3344);
+  static const _pendingOrange = Color(0xFFFFAA00);
 
   double get _pupilDilation {
+    if (_pendingAttention > 0) return 1.0; // blocked on user — full dilation
     if (_isThinking) return 0.3;
     if (_hasNewContent) return 0.6;
     return 0.0;
@@ -100,8 +125,10 @@ class OverlayShellState extends State<OverlayShell> {
     return Color(c != 0 ? c : 0xFF00FF88);
   }
 
-  Color get _eyeColor =>
-      _settingsService.settings.privacyMode ? _accentColor : _redEye;
+  Color get _eyeColor {
+    if (_pendingAttention > 0) return _pendingOrange;
+    return _settingsService.settings.privacyMode ? _accentColor : _redEye;
+  }
 
   void toggleVisibility(bool visible) {
     if (visible) {
@@ -210,6 +237,9 @@ class OverlayShellState extends State<OverlayShell> {
     _thinkingSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
+    if (_wsForListener != null && _wsListener != null) {
+      _wsForListener!.removeListener(_wsListener!);
+    }
     _commandFocusNode.dispose();
     super.dispose();
   }
@@ -254,7 +284,11 @@ class OverlayShellState extends State<OverlayShell> {
     switch (_state) {
       case HudState.eye:
         return EyeWidget(
-          onTap: () => _transitionTo(HudState.controls),
+          // Pending permission shortcuts past Controls — one click to land
+          // on TSK-with-Allow/Deny (auto-switch already moved the tab).
+          onTap: () => _transitionTo(
+            _pendingAttention > 0 ? HudState.chat : HudState.controls,
+          ),
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
