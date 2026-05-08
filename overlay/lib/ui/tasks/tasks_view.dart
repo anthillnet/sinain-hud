@@ -163,7 +163,14 @@ class _TasksViewState extends State<TasksView> {
   Widget build(BuildContext context) {
     final fs = context.watch<SettingsService>().settings.fontSize;
 
-    if (_tasks.isEmpty) {
+    // Permission-awaiting tasks are handled exclusively by PermissionBanner
+    // above the chat input. Filter them out here so Tasks tab stays a clean
+    // history/status surface (running, completed, failed, timeout, awaitingInput).
+    final visibleTasks = _tasks
+        .where((t) => t.status != SpawnTaskStatus.awaitingPermission)
+        .toList();
+
+    if (visibleTasks.isEmpty) {
       return Center(
         child: Text(
           'no active tasks',
@@ -178,9 +185,9 @@ class _TasksViewState extends State<TasksView> {
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      itemCount: _tasks.length,
+      itemCount: visibleTasks.length,
       itemBuilder: (context, index) {
-        final task = _tasks[index];
+        final task = visibleTasks[index];
         final sColor = _statusColor(task);
 
         return Opacity(

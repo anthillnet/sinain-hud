@@ -44,9 +44,11 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription<FeedItem>? _contentSub;
 
-  // Pending-permission signal — drives orange eye + auto-switch to TSK.
+  // Pending-permission signal — drives orange eye color and pupil dilation.
   // Hidden state intentionally ignores this: explicit user hide outranks
   // agent's "I need attention". Agent will time out into deny.
+  // NOTE: no auto-switch to Tasks tab — permissions are handled via the
+  // PermissionBanner above the chat input only.
   int _pendingAttention = 0;
   WebSocketService? _wsForListener;
   VoidCallback? _wsListener;
@@ -96,18 +98,14 @@ class OverlayShellState extends State<OverlayShell> {
     });
 
     // Watch pending-permission count from WebSocketService (ChangeNotifier).
-    // Trigger tab auto-switch only on increments — manual user switches back
-    // to AGT mid-session aren't fought unless a new permission actually arrives.
+    // Only used to drive eye color + pupil dilation. No auto-switch to Tasks
+    // tab — permissions are surfaced exclusively via PermissionBanner.
     _wsForListener = ws;
     _wsListener = () {
       if (!mounted) return;
       final n = ws.pendingAttentionCount;
       if (n == _pendingAttention) return;
-      final prev = _pendingAttention;
       setState(() => _pendingAttention = n);
-      if (n > prev) {
-        _settingsService.setActiveTab(HudTab.tasks);
-      }
     };
     ws.addListener(_wsListener!);
   }
