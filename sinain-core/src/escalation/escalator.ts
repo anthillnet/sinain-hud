@@ -5,9 +5,10 @@ import type { Profiler } from "../profiler.js";
 import type { FeedbackStore } from "../learning/feedback-store.js";
 import type { SignalCollector } from "../learning/signal-collector.js";
 import { randomUUID, createHash } from "node:crypto";
-import { OpenClawWsClient } from "./openclaw-ws.js";
-import { EscalationSlot } from "./escalation-slot.js";
-import type { SlotEntry, QueueFeedbackCtx } from "./escalation-slot.js";
+import type { OpenClawWsClient } from "../agents/openclaw/ws-client.js";
+import type { EscalationSlot } from "../agents/openclaw/escalation-slot.js";
+import type { SlotEntry, QueueFeedbackCtx } from "../agents/openclaw/escalation-slot.js";
+import { createOpenClawModule, type OpenClawModule } from "../agents/openclaw/index.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { isCodingContext, buildEscalationMessage, fetchKnowledgeFacts } from "./message-builder.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
@@ -65,8 +66,20 @@ export interface EscalatorDeps {
  * provides content-hash idempotency keys for gateway-level dedup.
  */
 export class Escalator {
-  private wsClient: OpenClawWsClient;
-  private slot: EscalationSlot;
+  /** OpenClaw agent module — owns ws client + slot lifecycle. Inactive at
+   *  construction time; activated by evaluateGatewayLifecycle() when a
+   *  gateway-typed profile is the selected agent on at least one lane.
+   *  Resources (socket, reconnect timer, slot buffer) only allocate while
+   *  active, so users with no gateway selection pay nothing for this. */
+  private module: OpenClawModule;
+
+  /** Convenience accessors for the module's transient state. Both return
+   *  null whenever the module is inactive — every call site must null-check.
+   *  Prefer `this.wsClient?.X ?? fallback` for reads and `this.wsClient?.X()`
+   *  (no-op when null) for writes. */
+  private get wsClient(): OpenClawWsClient | null { return this.module.wsClient; }
+  private get slot(): EscalationSlot | null { return this.module.slot; }
+
   private httpPending: HttpPendingEscalation | null = null;
 
   // Grace window for stale escalation IDs — when analyzer rotates the pending
@@ -131,9 +144,14 @@ export class Escalator {
   private outboundBytes = 0;
 
   constructor(private deps: EscalatorDeps) {
-    this.wsClient = new OpenClawWsClient(deps.openclawConfig);
-    this.slot = new EscalationSlot(this.wsClient, deps.openclawConfig, {
-      onResponse: (result, entry, latencyMs) => this.handleEscalationResponse(result, entry, latencyMs),
+    // Build the openclaw module but DON'T start it. start() is deferred to
+    // evaluateGatewayLifecycle() which only fires when a gateway lane is
+    // selected — that's how we keep ws://localhost:18789 silent for users
+    // who never picked openclaw.
+    this.module = createOpenClawModule({
+      config: deps.openclawConfig,
+      onResponse: (result, entry, latencyMs) =>
+        this.handleEscalationResponse(result as Record<string, unknown> | null, entry, latencyMs),
       onPhase1Failure: (isTimeout) => {
         if (isTimeout) {
           this.stats.totalTimeouts++;
@@ -152,8 +170,6 @@ export class Escalator {
     });
     // Load pending tasks from disk (crash recovery)
     this.pendingSpawnTasks = loadPendingTasks();
-    // Attempt delivery on every WS reconnect
-    this.wsClient.on("connected", () => this.slot.onConnected());
   }
 
   /** Late-bind the signal collector (created after AgentLoop). */
@@ -190,19 +206,14 @@ export class Escalator {
     return wsConfigured && this.isGatewayLaneSelected();
   }
 
-  /** Start the WS connection to OpenClaw.
-   *
-   * Connects whenever the gateway URL is configured AND a gateway-typed
-   * profile is selected on a lane AND escalation isn't fully off. WS is
-   * the transport for the openclaw lane — the user selects it via the
-   * overlay's agent picker, and dispatch routes accordingly. Removing the
-   * openclaw profile from agents.json (and unsetting the env vars) leaves
-   * gatewayWsUrl empty → no connect attempt. Likewise, if the profile
-   * exists but no lane selects it, no connect attempt.
+  /** Start escalation. Module activation is deferred to
+   *  evaluateGatewayLifecycle — when a gateway-typed lane is selected the
+   *  module's WS connect happens; otherwise the module stays inactive and
+   *  no WS attempts are made.
    */
   start(): void {
-    if (this.deps.escalationConfig.mode !== "off" && this.shouldDriveGateway()) {
-      this.wsClient.connect();
+    this.evaluateGatewayLifecycle();
+    if (this.module.isActive()) {
       const tokenHash = this.deps.openclawConfig.gatewayToken
         ? createHash("sha256").update(this.deps.openclawConfig.gatewayToken).digest("hex").slice(0, 12)
         : "none";
@@ -210,23 +221,24 @@ export class Escalator {
     }
   }
 
-  /** Stop and disconnect. */
+  /** Stop and tear down the module. */
   stop(): void {
-    this.wsClient.disconnect();
+    this.module.stop();
   }
 
-  /** Re-evaluate WS lifecycle after lane selection changes. Connects when a
-   *  gateway lane just got selected; disconnects when the user moved off
-   *  every gateway lane. Called from the set_agent overlay handler. */
+  /** Re-evaluate module lifecycle after lane selection changes. Starts the
+   *  module when a gateway lane just got selected; stops it when the user
+   *  moved off every gateway lane. Called from start(), setMode(), and the
+   *  index.ts set_agent overlay handler. */
   evaluateGatewayLifecycle(): void {
-    const shouldConnect =
+    const shouldRun =
       this.deps.escalationConfig.mode !== "off" && this.shouldDriveGateway();
-    if (shouldConnect && !this.wsClient.isConnected) {
-      log(TAG, "lane switched to gateway — connecting WS");
-      this.wsClient.resetConnection();
-    } else if (!shouldConnect && this.wsClient.isConnected) {
-      log(TAG, "lane switched off gateway — disconnecting WS");
-      this.wsClient.disconnect();
+    if (shouldRun && !this.module.isActive()) {
+      log(TAG, "lane→gateway — activating openclaw module");
+      this.module.start();
+    } else if (!shouldRun && this.module.isActive()) {
+      log(TAG, "lane→non-gateway — deactivating openclaw module");
+      this.module.stop();
     }
   }
 
@@ -234,12 +246,9 @@ export class Escalator {
   setMode(mode: EscalatorDeps["escalationConfig"]["mode"]): void {
     const wasOff = this.deps.escalationConfig.mode === "off";
     this.deps.escalationConfig.mode = mode;
-    if (mode !== "off" && !this.wsClient.isConnected && this.shouldDriveGateway()) {
-      this.wsClient.resetConnection();
-    }
-    if (mode === "off") {
-      this.wsClient.disconnect();
-    }
+    // Mode change can flip the module's lifecycle (off ↔ active) — let the
+    // unified evaluator decide rather than driving the WS client directly.
+    this.evaluateGatewayLifecycle();
     // Reset stale timer when transitioning from "off" to active (prevents immediate stale)
     if (wasOff && mode !== "off") {
       this.lastEscalationTs = Date.now();
@@ -264,7 +273,7 @@ export class Escalator {
     // saves the cost of building the escalation message just to drop it.
     // Local-agent lanes (claude, openclaude, etc.) bypass this since they
     // route via HTTP and don't depend on WS.
-    if (this.wsClient.isCircuitOpen) {
+    if (this.wsClient?.isCircuitOpen) {
       const escalationAgent = this.deps.getEscalationAgent?.() || "";
       if (this.deps.isGatewayAgent?.(escalationAgent)) {
         log(TAG, `tick #${entry.id}: skipped — circuit breaker open and gateway agent "${escalationAgent}" selected`);
@@ -300,7 +309,7 @@ export class Escalator {
 
     const staleTag = stale ? ", STALE" : "";
     const cmdTag = hasUserCommand ? ", USER_CMD" : "";
-    const wsState = this.wsClient.isConnected ? "ws=connected" : "ws=disconnected";
+    const wsState = this.wsClient?.isConnected ? "ws=connected" : "ws=disconnected";
     log(TAG, `escalating tick #${entry.id} (score=${score.total}, reasons=[${score.reasons.join(",")}]${staleTag}${cmdTag}, ${wsState})`);
 
     // Store context for response handling (used in pushResponse for coding-context max-length)
@@ -377,7 +386,7 @@ export class Escalator {
     const isGateway = this.deps.isGatewayAgent?.(escalationAgent) ?? false;
     let useHttp: boolean;
     if (isGateway) {
-      if (!this.wsClient.isConnected) {
+      if (!this.wsClient?.isConnected) {
         log(TAG, `escalation dropped: gateway agent "${escalationAgent}" selected but WS disconnected`);
         this.deps.wsHandler.broadcast(
           `⚠ Gateway disconnected — escalation dropped. Pick a local agent or check the ${escalationAgent} gateway.`,
@@ -413,8 +422,8 @@ export class Escalator {
       };
       log(TAG, `tick #${entry.id} → httpPending id=${slotId} (lane=${escalationAgent || "<default>"})`);
     } else {
-      log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot.depth}`);
-      this.slot.insert(slotEntry);
+      log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot?.depth ?? 0}`);
+      this.slot?.insert(slotEntry);
     }
   }
 
@@ -439,7 +448,7 @@ export class Escalator {
     if (!this.httpPending) return false;
     const stale = this.httpPending;
     this.httpPending = null;
-    if (!this.wsClient.isConnected) {
+    if (!this.wsClient?.isConnected) {
       log(TAG, `redispatch skipped: WS not connected — cleared stale httpPending id=${stale.id}`);
       return true;
     }
@@ -451,23 +460,25 @@ export class Escalator {
       ts: stale.ts,
     };
     log(TAG, `redispatching stale httpPending id=${stale.id} → WS slot (lane switched to gateway)`);
-    this.slot.insert(slotEntry);
+    this.slot?.insert(slotEntry);
     return true;
   }
 
   /** Push fresh SITUATION.md content to the gateway server (fire-and-forget). */
   pushSituationMd(content: string): void {
-    if (!this.wsClient.isConnected) return;
-    this.wsClient.sendRpc("situation.update", { content }, 10_000)
+    const ws = this.wsClient;
+    if (!ws?.isConnected) return;
+    ws.sendRpc("situation.update", { content }, 10_000)
       .catch((err: any) => warn(TAG, `situation.update rpc failed: ${err.message}`));
   }
 
   /** Send a direct user message to OpenClaw. */
   async sendDirect(text: string): Promise<void> {
     const idemKey = `direct-${Date.now()}`;
-    if (this.wsClient.isConnected) {
+    const ws = this.wsClient;
+    if (ws?.isConnected) {
       try {
-        await this.wsClient.sendAgentRpc(text, idemKey, this.deps.openclawConfig.sessionKey);
+        await ws.sendAgentRpc(text, idemKey, this.deps.openclawConfig.sessionKey);
         return;
       } catch (err: any) {
         warn(TAG, `sendDirect RPC failed: ${err.message}`);
@@ -486,7 +497,8 @@ export class Escalator {
    */
   async sendFeedbackSummary(): Promise<boolean> {
     if (!this.deps.feedbackStore) return false;
-    if (!this.wsClient.isConnected) return false;
+    const ws = this.wsClient;
+    if (!ws?.isConnected) return false;
 
     const stats = this.deps.feedbackStore.getStats();
     const totalRecords = stats.totalRecords as number;
@@ -526,7 +538,7 @@ ${recentLines.join("\n")}`;
 
     const idemKey = `feedback-summary-${Date.now()}`;
     try {
-      await this.wsClient.sendAgentRpc(message, idemKey, this.deps.openclawConfig.sessionKey);
+      await ws.sendAgentRpc(message, idemKey, this.deps.openclawConfig.sessionKey);
       log(TAG, `feedback summary sent (${totalRecords} records, ${withSignals.length} with signals)`);
       return true;
     } catch (err: any) {
@@ -613,22 +625,28 @@ ${recentLines.join("\n")}`;
 
   /** Whether the gateway WS client is currently connected. */
   get isGatewayConnected(): boolean {
-    return this.wsClient.isConnected;
+    return this.wsClient?.isConnected ?? false;
   }
 
-  /** Force-reconnect the gateway WS client. */
+  /** Force-reconnect the gateway WS client. Activates the module if it
+   *  wasn't already; otherwise asks the existing client to reset. */
   reconnectGateway(): void {
-    this.wsClient.resetConnection();
+    if (!this.module.isActive()) {
+      this.module.start();
+    } else {
+      this.wsClient?.resetConnection();
+    }
   }
 
   /** Get stats for /health. */
   getStats(): Record<string, unknown> {
     return {
       mode: this.deps.escalationConfig.mode,
-      gatewayConnected: this.wsClient.isConnected,
-      circuitOpen: this.wsClient.isCircuitOpen,
-      slotDepth: this.slot.depth,
-      slotInFlight: this.slot.inFlightId,
+      gatewayActive: this.module.isActive(),
+      gatewayConnected: this.wsClient?.isConnected ?? false,
+      circuitOpen: this.wsClient?.isCircuitOpen ?? false,
+      slotDepth: this.slot?.depth ?? 0,
+      slotInFlight: this.slot?.inFlightId ?? null,
       httpPendingId: this.httpPending?.id ?? null,
       spawnInFlight: this.spawnInFlight,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
@@ -696,7 +714,7 @@ ${recentLines.join("\n")}`;
     const spawnAgent = this.deps.getSpawnAgent?.() || "";
     const spawnIsGateway = this.deps.isGatewayAgent?.(spawnAgent) ?? false;
     if (spawnIsGateway) {
-      if (!this.wsClient.isConnected) {
+      if (!this.wsClient?.isConnected) {
         log(TAG, `spawn-task ${taskId}: dropped — gateway agent "${spawnAgent}" selected but WS disconnected`);
         this.deps.wsHandler.broadcast(
           `⚠ Gateway disconnected — spawn task dropped. Pick a local agent or check the ${spawnAgent} gateway.`,
@@ -723,8 +741,10 @@ ${recentLines.join("\n")}`;
     // continue unblocked while this spawn RPC is pending.
     this.spawnInFlight = true;
     try {
+      // ws is non-null here — checked at line 717 before reaching this point.
+      const ws = this.wsClient!;
       // Send directly to a new child session via the gateway agent RPC
-      const result = await this.wsClient.sendRpc("agent", {
+      const result = await ws.sendRpc("agent", {
         message: task,
         sessionKey: childSessionKey,
         lane: "subagent",
@@ -848,8 +868,10 @@ ${recentLines.join("\n")}`;
 
   /** Fetch the latest assistant reply from a child session's chat history. */
   private async fetchChildResult(childSessionKey: string): Promise<string | null> {
+    const ws = this.wsClient;
+    if (!ws?.isConnected) return null;
     try {
-      const historyResult = await this.wsClient.sendRpc("chat.history", {
+      const historyResult = await ws.sendRpc("chat.history", {
         sessionKey: childSessionKey,
         limit: 10,
       }, 10_000);
@@ -881,8 +903,8 @@ ${recentLines.join("\n")}`;
     const pollIntervalMs = 5000; // 5 seconds
 
     const poll = async (): Promise<void> => {
-
-      if (!this.wsClient.isConnected) {
+      const ws = this.wsClient;
+      if (!ws?.isConnected) {
         // Retry later
         setTimeout(() => poll(), pollIntervalMs);
         return;
@@ -890,7 +912,7 @@ ${recentLines.join("\n")}`;
 
       try {
         // Wait for completion (short timeout to poll periodically)
-        const waitResult = await this.wsClient.sendRpc("agent.wait", {
+        const waitResult = await ws.sendRpc("agent.wait", {
           runId: task.runId,
           timeoutMs: pollIntervalMs,
         }, pollIntervalMs + 2000);
@@ -906,7 +928,7 @@ ${recentLines.join("\n")}`;
           log(TAG, `spawn-task completed: taskId=${taskId}, status=${status}`);
 
           // Fetch the result from chat history
-          const historyResult = await this.wsClient.sendRpc("chat.history", {
+          const historyResult = await ws.sendRpc("chat.history", {
             sessionKey: task.childSessionKey,
             limit: 10,
           }, 10000);
