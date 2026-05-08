@@ -40,7 +40,19 @@ class _TasksViewState extends State<TasksView> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final ws = context.read<WebSocketService>();
-    _taskSub ??= ws.spawnTaskStream.listen(_onTask);
+    if (_taskSub == null) {
+      // Seed local list from the canonical snapshot before subscribing to the
+      // stream. This handles the common case where spawn_task messages arrived
+      // while the Chat panel (and thus TasksView) was not yet built — because
+      // the overlay started in Eye or Controls state. Without this seed the
+      // broadcast stream events are already gone and the Tasks tab stays empty
+      // even though the server sent a valid permission request.
+      for (final task in ws.spawnTasks.values) {
+        final idx = _tasks.indexWhere((t) => t.taskId == task.taskId);
+        if (idx < 0) _tasks.add(task);
+      }
+      _taskSub = ws.spawnTaskStream.listen(_onTask);
+    }
   }
 
   void _onTask(SpawnTask incoming) {
@@ -151,7 +163,14 @@ class _TasksViewState extends State<TasksView> {
   Widget build(BuildContext context) {
     final fs = context.watch<SettingsService>().settings.fontSize;
 
-    if (_tasks.isEmpty) {
+    // Permission-awaiting tasks are handled exclusively by PermissionBanner
+    // above the chat input. Filter them out here so Tasks tab stays a clean
+    // history/status surface (running, completed, failed, timeout, awaitingInput).
+    final visibleTasks = _tasks
+        .where((t) => t.status != SpawnTaskStatus.awaitingPermission)
+        .toList();
+
+    if (visibleTasks.isEmpty) {
       return Center(
         child: Text(
           'no active tasks',
@@ -166,9 +185,9 @@ class _TasksViewState extends State<TasksView> {
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      itemCount: _tasks.length,
+      itemCount: visibleTasks.length,
       itemBuilder: (context, index) {
-        final task = _tasks[index];
+        final task = visibleTasks[index];
         final sColor = _statusColor(task);
 
         return Opacity(

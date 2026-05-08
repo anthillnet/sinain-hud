@@ -23,18 +23,26 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Resolve the sinain-memory Python scripts directory. */
 function resolveScriptsDir(): string {
-  // Look for sinain-memory scripts in known locations
+  // Look for sinain-memory scripts in known locations.
+  // Two package layouts are supported:
+  //   dev/monorepo: <repo>/sinain-core/src/learning/ → ../../../sinain-hud-plugin/sinain-memory
+  //   npm-published flat: <pkg>/sinain-core/src/learning/ → ../../../sinain-memory
   const candidates = [
-    resolve(__dirname, "..", "..", "..", "sinain-hud-plugin", "sinain-memory"),
-    resolve(__dirname, "..", "..", "sinain-memory"),
-    resolve(process.env.HOME || "", ".sinain", "sinain-memory"),
+    resolve(__dirname, "..", "..", "..", "sinain-hud-plugin", "sinain-memory"),  // dev/monorepo layout
+    resolve(__dirname, "..", "..", "..", "sinain-memory"),                         // npm-published flat layout
+    resolve(__dirname, "..", "..", "sinain-memory"),                               // legacy alt
+    resolve(process.env.HOME || "", ".sinain", "sinain-memory"),                  // user-local fallback
   ];
   for (const dir of candidates) {
     if (existsSync(resolve(dir, "session_distiller.py"))) {
       return dir;
     }
   }
-  return candidates[0]; // Fallback
+  error(TAG, `sinain-memory scripts not found. Searched ${candidates.length} locations:`);
+  for (const dir of candidates) {
+    error(TAG, `  - ${dir}`);
+  }
+  return candidates[candidates.length - 1]; // Return user-local path as sentinel
 }
 
 /** Resolve the local memory directory. */
