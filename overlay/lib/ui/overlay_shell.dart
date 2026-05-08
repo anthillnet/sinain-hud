@@ -271,7 +271,17 @@ class OverlayShellState extends State<OverlayShell> {
   /// mode so the browser takes focus rather than embedding in a webview.
   Future<void> _openKnowledgeUI() async {
     final ws = _settingsService.settings.wsUrl;
-    final httpUrl = ws.replaceFirst(RegExp(r'^ws(s?)://'), 'http\$1://');
+    // Dart's String.replaceFirst doesn't interpret $1 as a capture group —
+    // that's replaceFirstMapped. A literal startsWith ladder is clearer
+    // anyway and handles all three cases (wss, ws, anything else).
+    final String httpUrl;
+    if (ws.startsWith('wss://')) {
+      httpUrl = 'https://${ws.substring(6)}';
+    } else if (ws.startsWith('ws://')) {
+      httpUrl = 'http://${ws.substring(5)}';
+    } else {
+      httpUrl = ws;
+    }
     final uri = Uri.parse('$httpUrl/knowledge/ui');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
