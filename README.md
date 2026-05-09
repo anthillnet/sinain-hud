@@ -6,7 +6,7 @@
 [![macOS 12.3+](https://img.shields.io/badge/macOS-12.3%2B-black?logo=apple)](https://support.apple.com/macos)
 [![LongMemEval IPR 82.8%](https://img.shields.io/badge/LongMemEval%20IPR-82.8%25-success)](docs/LONGMEMEVAL-AUDIT.md)
 
-**Context OS** — captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, HTTP API, web UI, and a screen-recording-invisible HUD overlay.
+**Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, HTTP API, web UI, and a screen-recording-invisible HUD overlay.
 
 <p align="center">
   <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
