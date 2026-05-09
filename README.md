@@ -4,9 +4,8 @@
 [![CI](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml/badge.svg)](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@geravant/sinain)](https://www.npmjs.com/package/@geravant/sinain)
 [![macOS 12.3+](https://img.shields.io/badge/macOS-12.3%2B-black?logo=apple)](https://support.apple.com/macos)
-[![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D6?logo=windows)](https://www.microsoft.com/windows)
 
-Ambient intelligence that sees what you see, hears what you hear, and acts on your behalf.
+**Context OS** — captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, HTTP API, web UI, and a screen-recording-invisible HUD overlay.
 
 <p align="center">
   <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
@@ -18,11 +17,13 @@ Ambient intelligence that sees what you see, hears what you hear, and acts on yo
 
 ### You, Augmented
 
-Sinain captures your screen and audio continuously, runs OCR and transcription, and feeds a rolling context window to your agent. The agent analyzes what's happening, surfaces advice on a private HUD overlay, and can act on its own — fixing code, running commands, or spawning background tasks.
+Sinain captures your screen and audio continuously, distills the stream into a **structured live knowledge graph** of facts, entities, and decisions, and exposes that graph through every interface where you might need it.
 
-- Screen capture → OCR → context digest, updated every few seconds.
-- System audio → transcription (local whisper.cpp or cloud) → real-time awareness.
-- Private overlay: only you see it. Never in screenshots, recordings, or screen shares.
+- **Capture** — screen frames + system audio, with `<private>` tag stripping and auto-redaction of credentials and tokens *before* anything leaves your machine.
+- **Distill** — facts (atomic claims), entities (people / projects / topics), decisions (what was chosen and why) — extracted by an LLM, integrated by deterministic graph operations (no LLM in the integration step → [65% relative recall uplift on the LongMemEval benchmark](docs/LONGMEMEVAL-AUDIT.md)).
+- **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie, Aider), **HTTP API** for systems and integrations, **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
+
+The HUD overlay is invisible to screen capture — never appears in screenshots, recordings, or screen shares.
 
 ### Agent-Agnostic
 
@@ -38,8 +39,8 @@ Sinain feeds the same screen and audio context to any MCP-compatible agent. Swit
 By default, sinain uses cloud APIs (OpenRouter) for transcription and analysis. When you need tighter control, switch privacy modes — no code changes, one env var.
 
 - `off` → `standard` → `strict` → `paranoid` — four modes in `~/.sinain/.env`.
-- `paranoid` mode: Ollama + whisper.cpp, fully offline. No network calls.
-- HUD overlay is invisible to screen capture (`NSWindow.sharingType = .none`).
+- `paranoid` mode: Ollama + whisper.cpp. **Zero network calls at runtime** — the embedding model is pre-cached during the setup wizard (`sinain setup-embedding`), so subsequent runs are fully offline.
+- HUD overlay is invisible to screen capture (`NSWindow.sharingType = .none` — see `overlay/macos/Runner/AppDelegate.swift:70`). Verifiable via split-screen recording with QuickTime + OBS + Loom — the HUD is absent from all three.
 
 ## Quick Start
 
@@ -180,7 +181,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 | `off` | All data flows freely — maximum insight quality |
 | `standard` | Auto-redacts credentials before cloud APIs (wizard default) |
 | `strict` | Only summaries leave your machine — no raw text sent to cloud |
-| `paranoid` | Fully local: Ollama + whisper.cpp. Zero network calls. |
+| `paranoid` | Fully local: Ollama + whisper.cpp. Zero network calls at runtime (embedding model pre-cached at install). |
 
 See [Privacy Threat Model](docs/privacy-protection-design.md) for the full design.
 
