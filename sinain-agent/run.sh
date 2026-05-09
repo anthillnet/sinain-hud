@@ -259,6 +259,12 @@ invoke_agent() {
           # still routes each call to the overlay for user Allow/Deny. Widen the
           # whitelist so the hook can do its job. Override via SINAIN_SPAWN_ALLOWED_TOOLS.
           local spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
+          # ToolSearch is a built-in Claude Code uses to load deferred MCP tool
+          # schemas. Without it pre-approved, every escalation that needs an
+          # un-cached sinain_* tool triggers a permission prompt — Test Mac
+          # hit this on overlay-v1.24.5 (~4 prompts per 7min). Always include
+          # regardless of agents.json content (defense-in-depth).
+          spawn_allowed="$spawn_allowed ToolSearch"
           if [ "$quiet" = "true" ]; then
             "$bin" \
               --mcp-config "$MCP_CONFIG" \
@@ -278,6 +284,9 @@ invoke_agent() {
         else
           # Escalation path. Override via SINAIN_ESC_ALLOWED_TOOLS.
           local esc_allowed="${SINAIN_ESC_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS}"
+          # See spawn_allowed comment above — ToolSearch must be pre-approved
+          # or every escalation triggers a permission prompt.
+          esc_allowed="$esc_allowed ToolSearch"
           if [ "$quiet" = "true" ]; then
             "$bin" \
               --mcp-config "$MCP_CONFIG" \
