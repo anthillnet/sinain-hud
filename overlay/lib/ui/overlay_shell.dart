@@ -16,7 +16,6 @@ import 'onboarding/onboarding_view.dart';
 import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
-import 'tasks/tasks_view.dart';
 import 'chat/permission_banner.dart';
 import '../core/models/feed_item.dart';
 
@@ -481,64 +480,9 @@ class OverlayShellState extends State<OverlayShell> {
                     small: true,
                     tooltip: 'Agent selector — which agent handles each lane',
                   ),
-                  const SizedBox(width: 4),
-                  // Tab indicator (clickable). When on AGT, a small orange
-                  // dot lights up if any spawn task is awaiting user action
-                  // (permission ask or free-form input) — nudges the user
-                  // to switch over without stealing focus.
-                  Consumer<SettingsService>(
-                    builder: (_, settings, __) {
-                      final onAgent = settings.settings.activeTab == HudTab.agent;
-                      final pending = ws.pendingAttentionCount;
-                      // Only surface on AGT (TSK has no equivalent
-                      // "user-must-respond" state coming from AGT today).
-                      final showDot = onAgent && pending > 0;
-                      return HudTooltip(
-                        message: showDot
-                            ? 'TSK has $pending pending — tap to switch'
-                            : 'Switch tab',
-                        child: GestureDetector(
-                          onTap: () => _settingsService.cycleTab(),
-                          child: MouseRegion(
-                            cursor: SystemMouseCursors.click,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(3),
-                                color: Colors.white.withValues(alpha: 0.06),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    onAgent ? 'AGT' : 'TSK',
-                                    style: TextStyle(
-                                      fontFamily: 'JetBrainsMono', fontSize: 9,
-                                      color: Colors.white.withValues(alpha: 0.4),
-                                    ),
-                                  ),
-                                  if (showDot) ...[
-                                    const SizedBox(width: 4),
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: const BoxDecoration(
-                                        // Orange = matches awaitingPermission
-                                        // color in tasks_view.dart for visual
-                                        // consistency across the two surfaces.
-                                        color: Color(0xFFFF8800),
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                  // AGT/TSK tab pill removed — Tasks tab deactivated for
+                  // launch (permissions surface via PermissionBanner above
+                  // chat input; tasks tab added no unique value).
                   const Spacer(),
                   // Cost counter
                   _costText(ws.totalCost),
@@ -625,17 +569,14 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                Consumer<SettingsService>(
-                  builder: (_, settings, __) => IndexedStack(
-                    index: settings.settings.activeTab == HudTab.agent ? 0 : 1,
-                    children: const [
-                      FeedView(
-                        channel: FeedChannel.agent,
-                        emptyLabel: 'awaiting sinain…',
-                      ),
-                      TasksView(),
-                    ],
-                  ),
+                // Tasks tab deactivated for launch — Agent feed is the only
+                // visible surface. Permissions live on PermissionBanner above
+                // the chat input, so the Tasks tab adds no unique surface.
+                // Re-enable by restoring the Consumer<SettingsService> wrapper
+                // and switching index back to activeTab.
+                const FeedView(
+                  channel: FeedChannel.agent,
+                  emptyLabel: 'awaiting sinain…',
                 ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
