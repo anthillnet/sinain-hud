@@ -22,7 +22,7 @@ Sinain captures your screen and audio continuously, distills the stream into a *
 
 - **Capture** — screen frames + system audio, with `<private>` tag stripping and auto-redaction of credentials and tokens *before* anything leaves your machine.
 - **Distill** — facts (atomic claims), entities (people / projects / topics), decisions (what was chosen and why) — extracted by an LLM, integrated by deterministic graph operations (no LLM in the integration step → **[82.8% Information Preservation Rate](docs/LONGMEMEVAL-AUDIT.md)** on the [LongMemEval benchmark](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025, 500 questions), measured against full-context oracle).
-- **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie, Aider), **HTTP API** for systems and integrations, **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
+- **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie), **HTTP API** for systems and integrations, **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
 
 The HUD overlay is invisible to screen capture — never appears in screenshots, recordings, or screen shares.
 
@@ -30,7 +30,7 @@ The HUD overlay is invisible to screen capture — never appears in screenshots,
 
 Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents on the fly — no restart, no context loss.
 
-- Tested with Claude Code, OpenClaude, Codex, Goose, Junie, and Aider. Any MCP-compatible agent works.
+- Tested with Claude Code, OpenClaude, Codex, Goose, and Junie. Any MCP-compatible agent works.
 - Pick agents in the overlay's flash-icon selector — spawn tasks can route to any profile in your roster.
 - Add custom profiles (personal Claude config, alternate models) by editing [`agents.json`](docs/AGENT-ROSTER.md). The roster is the source of truth.
 - Knowledge modules travel with you — export from one machine, import on another.
