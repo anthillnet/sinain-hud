@@ -21,7 +21,7 @@
 Sinain captures your screen and audio continuously, distills the stream into a **structured live knowledge graph** of facts, entities, and decisions, and exposes that graph through every interface where you might need it.
 
 - **Capture** — screen frames + system audio, with `<private>` tag stripping and auto-redaction of credentials and tokens *before* anything leaves your machine.
-- **Distill** — facts (atomic claims), entities (people / projects / topics), decisions (what was chosen and why) — extracted by an LLM, integrated by deterministic graph operations (no LLM in the integration step → **[82.8% Information Preservation Rate on the LongMemEval benchmark](docs/LONGMEMEVAL-AUDIT.md)**, measured against full-context oracle).
+- **Distill** — facts (atomic claims), entities (people / projects / topics), decisions (what was chosen and why) — extracted by an LLM, integrated by deterministic graph operations (no LLM in the integration step → **[82.8% Information Preservation Rate](docs/LONGMEMEVAL-AUDIT.md)** on the [LongMemEval benchmark](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025, 500 questions), measured against full-context oracle).
 - **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie, Aider), **HTTP API** for systems and integrations, **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
 
 The HUD overlay is invisible to screen capture — never appears in screenshots, recordings, or screen shares.
