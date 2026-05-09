@@ -6,7 +6,7 @@
 [![macOS 12.3+](https://img.shields.io/badge/macOS-12.3%2B-black?logo=apple)](https://support.apple.com/macos)
 [![LongMemEval IPR 82.8%](https://img.shields.io/badge/LongMemEval%20IPR-82.8%25-success)](docs/LONGMEMEVAL-AUDIT.md)
 
-**Context OS** — captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, HTTP API, web UI, and a screen-recording-invisible HUD overlay.
+**Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, HTTP API, web UI, and a screen-recording-invisible HUD overlay.
 
 <p align="center">
   <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
@@ -31,8 +31,8 @@ The HUD overlay is invisible to screen capture — never appears in screenshots,
 Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents on the fly — no restart, no context loss.
 
 - Tested with Claude Code, OpenClaude, Codex, Goose, Junie, and Aider. Any MCP-compatible agent works.
-- Pick agents **per lane** in the overlay's flash-icon selector — escalations and spawn tasks can route to different agents simultaneously.
-- Add custom profiles (personal Claude config, alternate models, server-side gateways) by editing [`agents.json`](docs/AGENT-ROSTER.md). The roster is the source of truth.
+- Pick agents in the overlay's flash-icon selector — spawn tasks can route to any profile in your roster.
+- Add custom profiles (personal Claude config, alternate models) by editing [`agents.json`](docs/AGENT-ROSTER.md). The roster is the source of truth.
 - Knowledge modules travel with you — export from one machine, import on another.
 
 ### Privacy Controls
@@ -105,8 +105,7 @@ npx @geravant/sinain@latest start --no-overlay  # headless mode
 │                         sinain-core                                 │
 │                           ├─ audio pipeline → transcription         │
 │                           ├─ agent loop → digest + HUD text         │
-│                           ├─ escalation ──► OpenClaw Gateway (WS)   │
-│                           │                  or sinain-agent (poll)  │
+│                           ├─ knowledge graph (private, on-device)   │
 │                           └─ WebSocket feed                         │
 │                                  │                                  │
 │                                  ▼                                  │
@@ -114,47 +113,38 @@ npx @geravant/sinain@latest start --no-overlay  # headless mode
 │                           private, invisible to screen capture      │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
-                                   │
-                          ┌────────┴─────────┐
-                          ▼                  ▼
-                   OpenClaw Gateway    sinain-agent
-                   (server or local)   (bare agent, no gateway)
-                     ├─ sinain-hud plugin
-                     │   └─ sinain-knowledge (curation, playbook, eval)
-                     └─ SITUATION.md, Telegram alerts
 ```
 
 ## Components
 
 | Component | Language | What it does | Docs |
 |---|---|---|---|
-| **sinain-core** | TypeScript | Central hub: audio pipeline, agent loop, escalation, WS feed | [README](sinain-core/README.md) |
-| **overlay** | Dart / Swift / C++ | Private HUD (macOS + Windows), 4 display modes, hotkeys | [Hotkeys](docs/HOTKEYS.md) |
+| **sinain-core** | TypeScript | Central hub: audio pipeline, agent loop, knowledge graph, WS feed | [README](sinain-core/README.md) |
+| **overlay** | Dart / Swift | Private HUD (macOS), display modes, hotkeys | [Hotkeys](docs/HOTKEYS.md) |
 | **sense_client** | Python | Screen capture, SSIM diff, OCR, privacy filter | [sense_client/](sense_client/) |
 | **sck-capture** | Swift | ScreenCaptureKit: system audio + screen frames | [tools/sck-capture/](tools/sck-capture/) |
 | **sinain-agent** | Bash | Shell harness that connects any agent to sinain-core | [sinain-agent/](sinain-agent/) |
 | **sinain-knowledge** | TypeScript | Curation, playbook, eval, portable knowledge modules | [Knowledge System](docs/knowledge-system.md) |
-| **sinain-hud-plugin** | TypeScript | OpenClaw plugin: lifecycle, curation, overflow watchdog | [sinain-hud-plugin/](sinain-hud-plugin/) |
 | **sinain-mcp-server** | TypeScript | MCP server exposing sinain tools to agents | [sinain-mcp-server/](sinain-mcp-server/) |
 
 ## Configuration
 
 Sinain splits config across two files in `~/.sinain/`:
 
-- **`.env`** — secrets (API keys, gateway tokens) and infrastructure (ports, audio device, privacy mode, analyzer LLM).
-- **`agents.json`** — agent roster + bare-agent infra + escalation policy (default agent, allowed-tools whitelists, gateway URLs, escalation mode, analyzer pacing).
+- **`.env`** — secrets (API keys) and infrastructure (ports, audio device, privacy mode, analyzer LLM).
+- **`agents.json`** — agent roster (default agent, allowed-tools whitelists, analyzer pacing).
 
 Both are created by the setup wizard. To re-run: `npx @geravant/sinain start --setup`.
 
 ### Agents & profiles → `agents.json`
 
-The agent roster lives in `~/.sinain/agents.json`. Each entry is a profile mapping a name to a binary + behavior type + optional env, settings, and model overrides. The overlay's flash-icon selector lets you pick which profile handles each lane (escalation vs spawn) at runtime. Custom profiles like `pclaude` (personal claude with its own config dir) or `nemoclaw` (server-side gateway) are first-class — the dispatch decision keys off `profile.type`, not the profile name.
+The agent roster lives in `~/.sinain/agents.json`. Each entry is a profile mapping a name to a binary + behavior type + optional env, settings, and model overrides. The overlay's flash-icon selector lets you pick which profile handles spawn tasks at runtime. Custom profiles like `pclaude` (personal claude with its own config dir) are first-class — the dispatch decision keys off `profile.type`, not the profile name.
 
 See **[Agent Roster & Profiles](docs/AGENT-ROSTER.md)** for the complete schema, recipes, and routing model.
 
 ### Context Analysis (HUD summarizer) → `.env`
 
-The context analysis loop runs every 3–30 seconds, sending recent audio/screen context to an LLM. It produces a digest used for escalation scoring — when the score threshold is met (or always in `rich` mode), the digest is forwarded to the escalation agent for a full response.
+The context analysis loop runs every 3–30 seconds, sending recent audio/screen context to an LLM. It produces the short HUD text shown on the overlay plus a richer digest stored in the feed buffer for the knowledge graph.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -170,7 +160,6 @@ The context analysis loop runs every 3–30 seconds, sending recent audio/screen
 | Variable | Default | Description |
 |---|---|---|
 | `OPENROUTER_API_KEY` | — | Required (unless `ANALYSIS_PROVIDER=ollama` + local transcription) |
-| `OPENCLAW_WS_TOKEN`, `OPENCLAW_HTTP_TOKEN` | — | Gateway secrets, referenced from `agents.json` via `${VAR}` indirection |
 | `PRIVACY_MODE` | `off` | `off` / `standard` / `strict` / `paranoid` |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
@@ -188,7 +177,7 @@ See [Privacy Threat Model](docs/privacy-protection-design.md) for the full desig
 
 ## Hotkeys
 
-Global hotkeys use **Cmd+Shift** (macOS) or **Ctrl+Shift** (Windows):
+Global hotkeys use **Cmd+Shift**:
 
 | Shortcut | Action |
 |---|---|
@@ -224,12 +213,8 @@ brew install ollama && ollama pull llava
 
 | Setup | Guide |
 |---|---|
-| **Agent Roster & Profiles** | [docs/AGENT-ROSTER.md](docs/AGENT-ROSTER.md) — pick agents, add custom profiles, route gateways |
-| Local OpenClaw | [docs/INSTALL-LOCAL.md](docs/INSTALL-LOCAL.md) |
-| Remote OpenClaw | [docs/INSTALL-REMOTE.md](docs/INSTALL-REMOTE.md) |
-| NemoClaw (Brev) | [docs/INSTALL.md](docs/INSTALL.md) |
-| Bare Agent | [docs/INSTALL-BARE-AGENT.md](docs/INSTALL-BARE-AGENT.md) |
-| Windows | [setup-windows.sh](setup-windows.sh) |
+| **Agent Roster & Profiles** | [docs/AGENT-ROSTER.md](docs/AGENT-ROSTER.md) — pick agents, add custom profiles |
+| **Bare Agent** | [docs/INSTALL-BARE-AGENT.md](docs/INSTALL-BARE-AGENT.md) — the default install path |
 | From Source | `git clone`, `cp .env.example ~/.sinain/.env`, `./start.sh` |
 
 ## Knowledge System
@@ -251,7 +236,7 @@ Sinain's knowledge graph is exposed to any MCP-aware agent via the bundled MCP s
 
 ## Connect Your Coding Agent (MCP)
 
-Sinain ships an MCP server that exposes 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, `sinain_distill_session`, `sinain_get_context`, and `sinain_respond` — to any MCP-aware agent. Register it once and the agent can read your knowledge graph, drive escalations, surface text on the HUD, and run the heartbeat pipeline from any project.
+Sinain ships an MCP server that exposes 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, `sinain_distill_session`, `sinain_get_context`, and `sinain_respond` — to any MCP-aware agent. Register it once and the agent can read your knowledge graph and surface text on the HUD from any project.
 
 ```bash
 npx @geravant/sinain@latest mcp install
@@ -281,10 +266,8 @@ The wizard detects which MCP agents you have installed and registers sinain for 
 | Knowledge API (HTTP) | [docs/KNOWLEDGE-API.md](docs/KNOWLEDGE-API.md) |
 | MCP Integration (setup) | [docs/MCP-INTEGRATION.md](docs/MCP-INTEGRATION.md) |
 | MCP Capabilities (tools + recipes) | [docs/MCP-CAPABILITIES.md](docs/MCP-CAPABILITIES.md) |
-| Escalation Architecture | [docs/clean-architecture-escalation.md](docs/clean-architecture-escalation.md) |
-| Personality Traits | [docs/PERSONALITY-TRAITS-SYSTEM.md](docs/PERSONALITY-TRAITS-SYSTEM.md) |
+| LongMemEval Audit | [docs/LONGMEMEVAL-AUDIT.md](docs/LONGMEMEVAL-AUDIT.md) |
 | Privacy Threat Model | [docs/privacy-protection-design.md](docs/privacy-protection-design.md) |
-| HUD Skill Protocol | [docs/HUD-SKILL-PROTOCOL.md](docs/HUD-SKILL-PROTOCOL.md) |
 | Full Configuration | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 | All Hotkeys | [docs/HOTKEYS.md](docs/HOTKEYS.md) |
 
