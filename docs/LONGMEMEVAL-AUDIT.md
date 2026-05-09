@@ -1,8 +1,8 @@
 # LongMemEval Benchmark Audit Report
 
 **Date:** 2026-05-08
-**Benchmark:** LongMemEval (ICLR 2025) — 500 questions across 6 categories
-**Dataset:** [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)
+**Benchmark:** [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) — 500 questions across 6 categories
+**Dataset:** [xiaowu0162/longmemeval-cleaned](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned) (HuggingFace)
 **System:** sinain-memory knowledge graph (triplestore + hybrid retrieval)
 
 ## Results Summary
