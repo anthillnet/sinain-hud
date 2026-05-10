@@ -9,7 +9,7 @@
 **Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay.
 
 <p align="center">
-  <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
+  <img src="media/sinain-demo-full.gif" alt="Sinain demo" width="720">
 </p>
 
 **[Quick Start](#quick-start)** · **[Docs](docs/)** · **[Privacy](docs/privacy-protection-design.md)** · **[Configuration](docs/CONFIGURATION.md)** · **[Contributing](CONTRIBUTING.md)**
