@@ -6,7 +6,7 @@
 [![macOS 12.3+](https://img.shields.io/badge/macOS-12.3%2B-black?logo=apple)](https://support.apple.com/macos)
 [![LongMemEval IPR 82.8%](https://img.shields.io/badge/LongMemEval%20IPR-82.8%25-success)](docs/LONGMEMEVAL-AUDIT.md)
 
-**Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, HTTP API, web UI, and a screen-recording-invisible HUD overlay.
+**Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay.
 
 <p align="center">
   <img src="media/sinain-demo.gif" alt="Sinain demo" width="800">
@@ -22,7 +22,7 @@ Sinain captures your screen and audio continuously, distills the stream into a *
 
 - **Capture** — screen frames + system audio, with `<private>` tag stripping and auto-redaction of credentials and tokens *before* anything leaves your machine.
 - **Distill** — facts (atomic claims), entities (people / projects / topics), decisions (what was chosen and why) — extracted by an LLM, integrated by deterministic graph operations (no LLM in the integration step → **[82.8% Information Preservation Rate](docs/LONGMEMEVAL-AUDIT.md)** on the [LongMemEval benchmark](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025, 500 questions), measured against full-context oracle).
-- **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie), **HTTP API** for systems and integrations, **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
+- **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie), **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
 
 The HUD overlay is invisible to screen capture — never appears in screenshots, recordings, or screen shares.
 
