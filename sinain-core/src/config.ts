@@ -291,7 +291,15 @@ export function loadConfig(): CoreConfig {
   const autoApproveRaw = fromCfgStr(
     agentsCfg?.autoApproveTools,
     "SINAIN_AUTO_APPROVE_TOOLS",
-    "Read Glob Grep Ls Cat mcp__sinain* ToolSearch",
+    // Default auto-approve covers the Claude Code core tools the escalation
+    // flow realistically uses without prompting. Bash is intentionally NOT
+    // included — users wanting scoped shell commands without prompts should
+    // add patterns like "Bash(git:*) Bash(npm:*)" to agents.json.
+    "Read Glob Grep Ls Cat Edit Write MultiEdit NotebookEdit " +
+    "WebFetch WebSearch " +
+    "TaskCreate TaskUpdate TaskGet TaskList TaskOutput TaskStop " +
+    "LSP Skill Monitor BashOutput KillBash " +
+    "mcp__sinain* ToolSearch",
   );
   const permissionsConfig = {
     autoApproveTools: autoApproveRaw.split(/\s+/).filter((t) => t.length > 0),

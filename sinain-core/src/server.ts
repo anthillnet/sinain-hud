@@ -1616,15 +1616,16 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
 /** Pending spawn questions/permissions — resolve callbacks keyed by "ask:{taskId}" or "perm:{taskId}" */
 const pendingSpawnQuestions = new Map<string, (answer: string) => void>();
 
-// YOLO mode: "allow all" for the current agent session. Keyed on the openclaude
-// session_id from the PreToolUse hook input (stable across tool calls within
-// one invoke_agent run, discarded when that run ends). User enters YOLO by
-// clicking the YOLO button on any permission prompt. Session id is cleared
-// implicitly when the bare agent restarts (new session_id on next run).
-const yoloSessions = new Set<string>();
-// Map permission-request id (perm-<ts>) -> session id it came from. Used so
-// that /spawn/permission-reply can flag the right session as YOLO when the
-// user picks the YOLO button. Cleaned on resolve/timeout.
+// YOLO mode: "allow all permissions" until sinain-core restarts. Previously
+// keyed on the openclaude session_id, but `claude -p ...` generates a fresh
+// session_id every invocation, so the per-session YOLO never persisted across
+// escalation calls and the user got prompted again on the very next tool use.
+// A single process-global flag matches what users actually want from a YOLO
+// button ("stop asking until I restart"), and is reset on every sinain-core
+// start so it can't outlive a session unintentionally.
+let yoloActive = false;
+// Map permission-request id (perm-<ts>) -> session id it came from. Kept for
+// debug/logging visibility into which agent invocation triggered YOLO.
 const permissionToSession = new Map<string, string>();
 
 export function createAppServer(deps: ServerDeps) {
@@ -2630,14 +2631,16 @@ export function createAppServer(deps: ServerDeps) {
           return;
         }
 
-        // YOLO short-circuit: if this session previously clicked YOLO, auto-allow
-        // without routing to overlay. No user interaction needed.
-        if (sessionId && yoloSessions.has(sessionId)) {
+        // YOLO short-circuit: if the user previously clicked YOLO on any
+        // permission prompt, auto-allow everything until core restarts. The
+        // flag is process-global (not per-session) because claude -p creates
+        // a fresh session_id per invocation and per-session YOLO never stuck.
+        if (yoloActive) {
           res.end(JSON.stringify({
             hookSpecificOutput: {
               hookEventName: "PreToolUse",
               permissionDecision: "allow",
-              permissionDecisionReason: "YOLO mode active for this session",
+              permissionDecisionReason: "YOLO mode active (process-global)",
             },
           }));
           return;
@@ -2715,13 +2718,13 @@ export function createAppServer(deps: ServerDeps) {
         const resolve = pendingSpawnQuestions.get(key);
         if (resolve) {
           pendingSpawnQuestions.delete(key);
-          // YOLO: flag the session so subsequent permission requests for the
-          // same openclaude invocation auto-allow without routing to overlay.
-          // Session id was captured in permissionToSession when we broadcast
-          // the request; it's cleared by the /spawn/approve handler after resolve.
+          // YOLO: flip the process-global flag so every subsequent permission
+          // request auto-allows until sinain-core restarts. Logs the triggering
+          // session id (if known) for debug visibility.
           if (decision === "yolo") {
+            yoloActive = true;
             const sid = permissionToSession.get(taskId);
-            if (sid) yoloSessions.add(sid);
+            log(TAG, `YOLO mode activated (triggered by sessionId=${sid || "<none>"})`);
           }
           resolve(decision || "deny");
           res.end(JSON.stringify({ ok: true }));
