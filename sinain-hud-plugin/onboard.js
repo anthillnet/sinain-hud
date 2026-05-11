@@ -267,6 +267,37 @@ export async function runOnboard(args = {}) {
       }
     }
 
+    // If Ollama is installed, offer to pull a local LLM for paranoid-mode
+    // analysis. Mirrors the whisper download pattern — auto-acquire optional,
+    // user can `ollama pull <model>` manually later if they skip here.
+    let ollamaInstalled = false;
+    try {
+      execFileSync("ollama", ["--version"], { stdio: "ignore" });
+      ollamaInstalled = true;
+    } catch { /* ollama not on PATH */ }
+
+    if (ollamaInstalled) {
+      const pullOllama = guard(await p.confirm({
+        message: "Pull an Ollama model for paranoid-mode analysis (~4.7 GB for llava)?",
+        initialValue: true,
+      }));
+      if (pullOllama) {
+        const modelName = guard(await p.text({
+          message: "Ollama model to pull",
+          placeholder: "llava",
+          defaultValue: "llava",
+        }));
+        const s = p.spinner();
+        s.start(`Pulling ${modelName} via Ollama (this can take several minutes)...`);
+        try {
+          execFileSync("ollama", ["pull", modelName], { stdio: "inherit" });
+          s.stop(c.green(`Pulled ${modelName}.`));
+        } catch {
+          s.stop(c.yellow(`Pull failed. Run \`ollama pull ${modelName}\` manually later.`));
+        }
+      }
+    }
+
     // OpenClaw gateway is opt-in: most users run sinain in standalone mode
     // and never need a gateway. Default the prompt to "No" on fresh installs
     // (when no openclaw profile already exists) so accepting all wizard
