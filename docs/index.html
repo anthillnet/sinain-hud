@@ -547,8 +547,9 @@
             src="media/sinain-demo-full.gif"
             alt="Sinain HUD demo — ambient knowledge graph in action"
             loading="eager"
-            decoding="async" />
-          <div class="demo-fallback" id="demo-fallback" hidden>
+            decoding="async"
+            style="display:none" />
+          <div class="demo-fallback" id="demo-fallback">
             <div class="df-title">Demo GIF</div>
             <div class="df-path">media/sinain-demo-full.gif</div>
             <div class="df-hint">loads from raw.githubusercontent.com in production</div>
@@ -1209,15 +1210,13 @@
 </footer>
 
 <script>
-  // ─── Demo GIF: only swap to fallback if the image truly errors out.
-  //     No premature timeout — a heavy GIF on a slow link can take many seconds.
   (function(){
     const img = document.getElementById('demo-img');
     const fb  = document.getElementById('demo-fallback');
     if(!img || !fb) return;
-    img.addEventListener('error', () => {
-      img.style.display = 'none';
-      fb.hidden = false;
+    img.addEventListener('load', () => {
+      fb.hidden = true;
+      img.style.display = '';
     });
   })();
 
