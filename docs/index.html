@@ -1220,23 +1220,6 @@
       fb.hidden = false;
     });
   })();
-  // ─── Demo GIF: gracefully fall back to a synthetic preview if the
-  //     image fails to load (typical inside sandboxed preview iframes —
-  //     in production from a real domain, the GIF loads fine). ───
-  (function(){
-    const img = document.getElementById('demo-img');
-    const fb  = document.getElementById('demo-fallback');
-    if(!img || !fb) return;
-    const showFallback = () => {
-      img.style.display = 'none';
-      fb.hidden = false;
-    };
-    img.addEventListener('error', showFallback);
-    // If still 0×0 after 5s (slow load + opaque-origin sandbox), fall back.
-    setTimeout(() => {
-      if (!img.complete || img.naturalWidth === 0) showFallback();
-    }, 5000);
-  })();
 
   // ─── Copy install command ───
   (function(){
