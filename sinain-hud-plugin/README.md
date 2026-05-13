@@ -1,189 +1,284 @@
-# @geravant/sinain
+# Sinain <img src="https://raw.githubusercontent.com/anthillnet/sinain-hud/main/media/screen-recording-2026-03-26.gif" alt="Sinain HUD" width="120" align="right">
 
-This package serves two roles:
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/anthillnet/sinain-hud/blob/main/LICENSE)
+[![CI](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml/badge.svg)](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@geravant/sinain)](https://www.npmjs.com/package/@geravant/sinain)
+[![macOS 12.3+](https://img.shields.io/badge/macOS-12.3%2B-black?logo=apple)](https://support.apple.com/macos)
+[![LongMemEval IPR 82.8%](https://img.shields.io/badge/LongMemEval%20IPR-82.8%25-success)](https://github.com/anthillnet/sinain-hud/blob/main/docs/LONGMEMEVAL-AUDIT.md)
 
-1. **Standalone launcher** — run `npx @geravant/sinain start` to launch the full sinain stack (core, sense, overlay, agent) on your Mac. See the [main README](../README.md#quick-start) for usage.
-2. **OpenClaw plugin** — when installed on an OpenClaw gateway server (`npx @geravant/sinain install`), it manages the sinain-hud agent lifecycle.
+**Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/anthillnet/sinain-hud/main/media/sinain-demo-full.gif" alt="Sinain demo" width="720">
+</p>
+
+**[Quick Start](#quick-start)** · **[Docs](https://github.com/anthillnet/sinain-hud/tree/main/docs)** · **[Privacy](https://github.com/anthillnet/sinain-hud/blob/main/docs/privacy-protection-design.md)** · **[Configuration](https://github.com/anthillnet/sinain-hud/blob/main/docs/CONFIGURATION.md)** · **[Contributing](https://github.com/anthillnet/sinain-hud/blob/main/CONTRIBUTING.md)**
 
 ---
 
-## OpenClaw Plugin
+### You, Augmented
 
-Plugin for the [anthillnet fork of OpenClaw](https://github.com/anthillnet/openclaw) that manages the sinain-hud agent lifecycle on the server.
+Sinain captures your screen and audio continuously, distills the stream into a **structured live knowledge graph** of facts, entities, and decisions, and exposes that graph through every interface where you might need it.
 
-## What It Does
+- **Capture** — screen frames + system audio, with `<private>` tag stripping and auto-redaction of credentials and tokens *before* anything leaves your machine.
+- **Distill** — facts (atomic claims), entities (people / projects / topics), decisions (what was chosen and why) — extracted by an LLM, integrated by deterministic graph operations (no LLM in the integration step → **[82.8% Information Preservation Rate](https://github.com/anthillnet/sinain-hud/blob/main/docs/LONGMEMEVAL-AUDIT.md)** on the [LongMemEval benchmark](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025, 500 questions), measured against full-context oracle).
+- **Access from anywhere** — **MCP server** for agents (Claude Code, Codex, Goose, OpenClaude, Junie), **web UI** at `localhost:9500/knowledge/ui/` for browsing, and a **HUD overlay** for in-the-moment recall.
 
-Five lifecycle hooks, one tool, four commands, and a background service:
+The HUD overlay is invisible to screen capture — never appears in screenshots, recordings, or screen shares.
 
-### Hooks
+### Agent-Agnostic
 
-| Hook | Purpose |
-|---|---|
-| `session_start` | Initializes per-session tool usage and compliance tracking |
-| `before_agent_start` | Syncs HEARTBEAT.md, SKILL.md, sinain-memory/ (recursively, including eval/), and modules/ from `sinain-sources/` to workspace; generates effective playbook; creates memory directories |
-| `tool_result_persist` | Strips `<private>` tags from tool results; tracks `sinain_heartbeat_tick` calls for compliance validation |
-| `agent_end` | Writes structured session summary; validates heartbeat compliance (warns on skip, escalates after 3 consecutive skips) |
-| `session_end` | Cleans up orphaned session state |
+Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents on the fly — no restart, no context loss.
 
-### Tool
+- Tested with Claude Code, OpenClaude, Codex, Goose, and Junie. Any MCP-compatible agent works.
+- Pick agents in the overlay's flash-icon selector — spawn tasks can route to any profile in your roster.
+- Add custom profiles (personal Claude config, alternate models) by editing [`agents.json`](https://github.com/anthillnet/sinain-hud/blob/main/docs/AGENT-ROSTER.md). The roster is the source of truth.
+- Knowledge modules travel with you — export from one machine, import on another.
 
-| Tool | Purpose |
-|---|---|
-| `sinain_heartbeat_tick` | Executes all heartbeat mechanical work (signal analysis, insight synthesis, log writing). Returns structured JSON with results, recommended actions, and Telegram output. |
+### Privacy Controls
 
-The heartbeat tool accepts `{ sessionSummary: string, idle: boolean }` and runs:
-1. `uv run python3 sinain-memory/signal_analyzer.py` (60s timeout)
-2. `uv run python3 sinain-memory/insight_synthesizer.py` (60s timeout)
-3. Writes log entry to `memory/playbook-logs/YYYY-MM-DD.jsonl`
+By default, sinain uses cloud APIs (OpenRouter) for transcription and analysis. When you need tighter control, switch privacy modes — no code changes, one env var.
 
-### Commands
+- `off` → `standard` → `strict` → `paranoid` — four modes in `~/.sinain/.env`.
+- `paranoid` mode: Ollama + whisper.cpp. **Zero network calls at runtime** — the embedding model is pre-cached during the setup wizard (`sinain setup-embedding`), so subsequent runs are fully offline.
+- HUD overlay is invisible to screen capture (`NSWindow.sharingType = .none` — see [`overlay/macos/Runner/AppDelegate.swift:70`](https://github.com/anthillnet/sinain-hud/blob/main/overlay/macos/Runner/AppDelegate.swift#L70)). Verifiable via split-screen recording with QuickTime + OBS + Loom — the HUD is absent from all three.
 
-| Command | Purpose |
-|---|---|
-| `/sinain_status` | Shows persistent session data from `sessions.json` (update time, tokens, compactions, transcript size) and resilience metrics |
-| `/sinain_modules` | Shows active knowledge module stack, suspended and disabled modules |
-| `/sinain_eval` | Shows latest evaluation report and recent tick evaluation metrics |
-| `/sinain_eval_level` | Sets evaluation level: `mechanical`, `sampled`, or `full` |
+## Quick Start
 
-### Service
+```bash
+npx @geravant/sinain@latest start
+```
 
-**Curation pipeline** — runs every 30 minutes in the background:
-1. Feedback analysis (`feedback_analyzer.py`) → extracts `curateDirective` + effectiveness metrics
-2. Memory mining (`memory_miner.py`) → reads unread daily memory files
-3. Playbook curation (`playbook_curator.py`) → archives, applies changes
-4. Effectiveness footer update → writes metrics into playbook
-5. Effective playbook regeneration → merges base playbook + active module patterns
-6. Tick evaluation (`tick_evaluator.py`) → runs mechanical + sampled judges (120s timeout)
-7. Daily eval report (`eval_reporter.py`) → generates report once per day after 03:00 UTC
+That's it. On first run, sinain will:
+1. Run an **interactive setup wizard** — transcription backend, API key, agent, privacy mode
+2. **Auto-download** the overlay app (~17MB), sck-capture binary (~5MB), embedding model (~90MB), and Python dependencies
+3. **Start all services** — sinain-core, sense_client, overlay, and agent
+
+All assets are cached locally after the first install. In `paranoid` mode, subsequent runs are fully offline — no network calls at runtime.
+
+> **Pin `@latest`** on every invocation. `npx @geravant/sinain` (without `@latest`) caches *forever* against the unversioned spec — you'd silently keep running an old version for months. Sinain self-updates automatically when stale, but pinning `@latest` makes it explicit and saves a redundant relaunch.
+
+> **Re-run the wizard** anytime: `npx @geravant/sinain@latest start --setup`
+
+### Prerequisites
+
+- **macOS 12.3+** — Sinain uses ScreenCaptureKit (introduced in 12.3). Earlier versions are not supported in this release. Apple Silicon and Intel both work.
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/) (LTS recommended)
+- **Python 3.10+** — `brew install python3` (macOS) or [python.org](https://www.python.org/downloads/)
+- **OpenRouter API key** (optional for local-only mode) — [openrouter.ai](https://openrouter.ai)
+- **Network access during first install** — the wizard downloads ~112MB total (overlay app, sck-capture binary, sentence-transformer embedding model). All cached locally; subsequent runs need network only for cloud LLM API calls (or zero network in `paranoid` mode).
+
+> **Fully local?** No API key needed. Ollama + whisper-cli = zero cloud at runtime. See [Running Fully Local](#running-fully-local).
+
+> **First install reproducibility?** See [docs/cold-install-verification.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/cold-install-verification.md) for a step-by-step verified-on-fresh-user-account guide, including the timing measurement and the failure modes the audit caught + fixed.
+
+### macOS Permissions
+
+1. **System Settings → Privacy & Security → Screen Recording** — add your Terminal, then **quit and reopen Terminal** (macOS TCC entitlements only apply to processes started after the grant)
+2. **System Settings → Privacy & Security → Microphone** — same: add Terminal, then restart Terminal
+
+> Sinain detects when these permissions are missing and surfaces a clear restart-instruction banner; you'll never get a silent degraded mode.
+
+### Managing sinain
+
+```bash
+npx @geravant/sinain@latest stop             # stop all services
+npx @geravant/sinain@latest status           # check what's running
+npx @geravant/sinain@latest start --setup    # re-run setup wizard
+npx @geravant/sinain@latest start --no-sense # skip screen capture
+npx @geravant/sinain@latest start --no-overlay  # headless mode
+```
+
+> Always pin `@latest` — see the note in [Quick Start](#quick-start) above.
+
+## Architecture
+
+```
+┌─── Your Device ─────────────────────────────────────────────────────┐
+│                                                                     │
+│  sck-capture (Swift)                                                │
+│    ├─ system audio (PCM) ──► sinain-core :9500                      │
+│    └─ screen frames (JPEG) ──► sense_client ─── POST /sense ──►    │
+│                                                      │              │
+│                              ┌────────────────────────┘              │
+│                              │                                      │
+│                         sinain-core                                 │
+│                           ├─ audio pipeline → transcription         │
+│                           ├─ agent loop → digest + HUD text         │
+│                           ├─ knowledge graph (private, on-device)   │
+│                           └─ WebSocket feed                         │
+│                                  │                                  │
+│                                  ▼                                  │
+│                           overlay (Flutter)                         │
+│                           private, invisible to screen capture      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Components
+
+| Component | Language | What it does | Docs |
+|---|---|---|---|
+| **sinain-core** | TypeScript | Central hub: audio pipeline, agent loop, knowledge graph, WS feed | [README](https://github.com/anthillnet/sinain-hud/blob/main/sinain-core/README.md) |
+| **overlay** | Dart / Swift | Private HUD (macOS), display modes, hotkeys | [Hotkeys](https://github.com/anthillnet/sinain-hud/blob/main/docs/HOTKEYS.md) |
+| **sense_client** | Python | Screen capture, SSIM diff, OCR, privacy filter | [sense_client/](https://github.com/anthillnet/sinain-hud/tree/main/sense_client) |
+| **sck-capture** | Swift | ScreenCaptureKit: system audio + screen frames | [tools/sck-capture/](https://github.com/anthillnet/sinain-hud/tree/main/tools/sck-capture) |
+| **sinain-agent** | Bash | Shell harness that connects any agent to sinain-core | [sinain-agent/](https://github.com/anthillnet/sinain-hud/tree/main/sinain-agent) |
+| **sinain-knowledge** | TypeScript | Curation, playbook, eval, portable knowledge modules | [Knowledge System](https://github.com/anthillnet/sinain-hud/blob/main/docs/knowledge-system.md) |
+| **sinain-mcp-server** | TypeScript | MCP server exposing sinain tools to agents | [sinain-mcp-server/](https://github.com/anthillnet/sinain-hud/tree/main/sinain-mcp-server) |
 
 ## Configuration
 
-Configured in `openclaw.json` under `plugins.entries.sinain-hud`:
+Sinain splits config across two files in `~/.sinain/`:
 
-```json
-{
-  "plugins": {
-    "entries": {
-      "sinain-hud": {
-        "enabled": true,
-        "config": {
-          "heartbeatPath": "/home/node/.openclaw/sinain-sources/HEARTBEAT.md",
-          "skillPath": "/home/node/.openclaw/sinain-sources/SKILL.md",
-          "memoryPath": "/home/node/.openclaw/sinain-sources/sinain-memory",
-          "modulesPath": "/home/node/.openclaw/sinain-sources/modules",
-          "sessionKey": "agent:main:sinain"
-        }
-      }
-    }
-  }
-}
-```
+- **`.env`** — secrets (API keys) and infrastructure (ports, audio device, privacy mode, analyzer LLM).
+- **`agents.json`** — agent roster (default agent, allowed-tools whitelists, analyzer pacing).
 
-| Field | Type | Description |
+Both are created by the setup wizard. To re-run: `npx @geravant/sinain start --setup`.
+
+### Agents & profiles → `agents.json`
+
+The agent roster lives in `~/.sinain/agents.json`. Each entry is a profile mapping a name to a binary + behavior type + optional env, settings, and model overrides. The overlay's flash-icon selector lets you pick which profile handles spawn tasks at runtime. Custom profiles like `pclaude` (personal claude with its own config dir) are first-class — the dispatch decision keys off `profile.type`, not the profile name.
+
+See **[Agent Roster & Profiles](https://github.com/anthillnet/sinain-hud/blob/main/docs/AGENT-ROSTER.md)** for the complete schema, recipes, and routing model.
+
+### Context Analysis (HUD summarizer) → `.env`
+
+The context analysis loop runs every 3–30 seconds, sending recent audio/screen context to an LLM. It produces the short HUD text shown on the overlay plus a richer digest stored in the feed buffer for the knowledge graph.
+
+| Variable | Default | Description |
 |---|---|---|
-| `heartbeatPath` | string | Path to HEARTBEAT.md source (resolved relative to state dir) |
-| `skillPath` | string | Path to SKILL.md source |
-| `memoryPath` | string | Path to sinain-memory/ scripts directory |
-| `modulesPath` | string | Path to modules/ directory for knowledge module system |
-| `sessionKey` | string | Session key for the sinain agent |
+| `ANALYSIS_PROVIDER` | `openrouter` | `openrouter` (cloud) or `ollama` (local, free) |
+| `ANALYSIS_MODEL` | `google/gemini-2.5-flash-lite` | Primary model for text analysis |
+| `ANALYSIS_VISION_MODEL` | `google/gemini-2.5-flash` | Auto-selected when screen images are present |
+| `ANALYSIS_ENDPOINT` | *(auto per provider)* | Override for custom OpenAI-compatible endpoints |
+| `ANALYSIS_API_KEY` | *(from OPENROUTER_API_KEY)* | API key; not needed for ollama |
+| `ANALYSIS_FALLBACK_MODELS` | `gemini-2.5-flash,...` | Comma-separated fallback chain |
 
-## File Auto-Deploy
+### Other Key Settings → `.env`
 
-The `before_agent_start` hook copies files from the persistent source directory to the agent workspace:
+| Variable | Default | Description |
+|---|---|---|
+| `OPENROUTER_API_KEY` | — | Required (unless `ANALYSIS_PROVIDER=ollama` + local transcription) |
+| `PRIVACY_MODE` | `off` | `off` / `standard` / `strict` / `paranoid` |
 
-```
-/mnt/openclaw-state/sinain-sources/     →  /home/node/.openclaw/workspace/
-  HEARTBEAT.md                               HEARTBEAT.md
-  SKILL.md                                   SKILL.md
-  sinain-memory/                               sinain-memory/
-    *.json, *.sh, *.txt                        (always overwritten)
-    *.py                                       (deploy-once — skip if exists)
-  modules/                                   modules/
-    manifest.json                              (always overwritten)
-    module-registry.json                       (deploy-once)
-    */patterns.md                              (deploy-once)
-  sinain-memory/eval/                          sinain-memory/eval/   (recursive)
-    *.py                                       (deploy-once)
-    *.json, *.jsonl                             (always overwritten)
-```
+See [docs/CONFIGURATION.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/CONFIGURATION.md) for the full reference.
 
-Only writes if content has actually changed (avoids unnecessary git diffs).
+## Privacy Modes
 
-Also ensures these directories exist:
-- `memory/`, `memory/playbook-archive/`, `memory/playbook-logs/`
-- `memory/eval-logs/`, `memory/eval-reports/`
+| Mode | What it does |
+|---|---|
+| `off` | All data flows freely — maximum insight quality |
+| `standard` | Auto-redacts credentials before cloud APIs (wizard default) |
+| `strict` | Only summaries leave your machine — no raw text sent to cloud |
+| `paranoid` | Fully local: Ollama + whisper.cpp. Zero network calls at runtime (embedding model pre-cached at install). |
 
-After syncing modules, the plugin generates `memory/sinain-playbook-effective.md` — a merged view of active module patterns (sorted by priority) plus the base playbook.
+See [Privacy Threat Model](https://github.com/anthillnet/sinain-hud/blob/main/docs/privacy-protection-design.md) for the full design.
 
-## Heartbeat Compliance Validation
+## Hotkeys
 
-The plugin enforces that the agent actually calls `sinain_heartbeat_tick` during heartbeat runs:
+Global hotkeys use **Cmd+Shift**:
 
-1. `tool_result_persist` sets `heartbeatToolCalled = true` when `sinain_heartbeat_tick` is invoked
-2. `agent_end` checks if the run was a heartbeat (`messageProvider === "heartbeat"`)
-3. If tool wasn't called: logs warning, increments `consecutiveHeartbeatSkips` counter
-4. After 3 consecutive skips: logs ESCALATION warning
-5. A successful tool call resets the counter to 0
+| Shortcut | Action |
+|---|---|
+| `Cmd+Shift+Space` | Toggle overlay visibility |
+| `Cmd+Shift+M` | Cycle display mode |
+| `Cmd+Shift+/` | Open command input |
+| `Cmd+Shift+H` | Quit overlay |
 
-## Privacy Tag Stripping
+See [docs/HOTKEYS.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/HOTKEYS.md) for all 15 shortcuts.
 
-The `tool_result_persist` hook intercepts tool results before they're saved to session history. Any `<private>...</private>` blocks are removed from:
-- String content (simple tool results)
-- Text blocks in array content (structured tool results)
+## Running Fully Local
 
-This is the server-side complement to sense_client's client-side `apply_privacy()` filter.
-
-## Session Summaries
-
-On `agent_end`, the plugin appends a JSON line to `memory/session-summaries.jsonl`:
-
-```json
-{
-  "ts": "2026-02-18T12:00:00.000Z",
-  "sessionKey": "agent:main:sinain",
-  "agentId": "...",
-  "durationMs": 45000,
-  "success": true,
-  "error": null,
-  "toolCallCount": 12,
-  "toolBreakdown": { "sessions_history": 3, "sinain_heartbeat_tick": 1, "Write": 5 },
-  "messageCount": 8
-}
-```
-
-## Context Overflow Watchdog
-
-Automatically recovers from runaway context growth that causes repeated agent failures.
-
-- **Detection:** Tracks consecutive errors matching `/overloaded|context.*too.*long|token.*limit/i` on `cfg.sessionKey`
-- **Trigger:** 5 consecutive errors + transcript ≥ 1 MB
-- **Action:** Archives transcript via `copyFileSync`, truncates to empty, resets `contextTokens` in `sessions.json`
-- **Resets:** Counter clears on any successful session completion and on `gateway_start`
-
-The 1 MB minimum guard prevents resets from transient API outages when the transcript is small.
-
-## Deployment
-
-**IMPORTANT:** Use `docker-compose.openclaw.yml` — the default compose file uses unset env vars and will fail.
+No cloud APIs needed. Local models handle everything:
 
 ```bash
-# Upload plugin files to the server
-scp -i ~/.ssh/<your-key> \
-  sinain-hud-plugin/index.ts sinain-hud-plugin/openclaw.plugin.json \
-  root@<your-server-ip>:/mnt/openclaw-state/extensions/sinain-hud/
+# 1. Install local transcription
+./setup-local-stt.sh
 
-# Restart gateway to load updated plugin
-ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
-  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml restart'
+# 2. Install Ollama + vision model
+brew install ollama && ollama pull llava
 
-# Verify plugin loaded
-ssh -i ~/.ssh/<your-key> root@<your-server-ip> \
-  'cd /opt/openclaw && docker compose -f docker-compose.openclaw.yml logs --tail=30 openclaw-gateway 2>&1 | grep sinain'
+# 3. Start in local mode
+./start-local.sh
 ```
 
-## Files
+| Model | Size | Speed | Best for |
+|---|---|---|---|
+| `llava` | 4.7 GB | ~2s/frame | General use (recommended) |
+| `llama3.2-vision` | 7.9 GB | ~4s/frame | Best accuracy |
+| `moondream` | 1.7 GB | ~1s/frame | Fastest, lower quality |
 
-| File | Purpose |
+## Setup Guides
+
+| Setup | Guide |
 |---|---|
-| `index.ts` | Plugin implementation (hooks, tool, commands, curation service) |
-| `openclaw.plugin.json` | Plugin manifest (metadata, config schema, UI hints) |
+| **Agent Roster & Profiles** | [docs/AGENT-ROSTER.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/AGENT-ROSTER.md) — pick agents, add custom profiles |
+| **Bare Agent** | [docs/INSTALL-BARE-AGENT.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/INSTALL-BARE-AGENT.md) — the default install path |
+| From Source | `git clone`, `cp .env.example ~/.sinain/.env`, `./start.sh` |
+
+## Knowledge System
+
+Sinain builds a persistent knowledge graph from everything it captures — audio transcriptions, screen OCR, and agent interactions. Facts are distilled incrementally (on buffer full and session end), stored in an EAV triplestore with graph relationships, and retrieved via hybrid search (FTS5 + tag-based + entity graph backrefs with RRF fusion).
+
+The integration step is fully deterministic — no LLM decides what to store. Every extracted fact is preserved.
+
+```bash
+npx @geravant/sinain export-knowledge   # export playbook, modules, graph
+npx @geravant/sinain import-knowledge ~/sinain-knowledge-export.tar.gz
+```
+
+See [Knowledge System docs](https://github.com/anthillnet/sinain-hud/blob/main/docs/knowledge-system.md) for architecture details.
+
+### Querying knowledge from any MCP agent
+
+Sinain's knowledge graph is exposed to any MCP-aware agent via the bundled MCP server. See **[Connect Your Coding Agent (MCP)](#connect-your-coding-agent-mcp)** below for setup.
+
+## Connect Your Coding Agent (MCP)
+
+Sinain ships an MCP server that exposes 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, `sinain_distill_session`, `sinain_get_context`, and `sinain_respond` — to any MCP-aware agent. Register it once and the agent can read your knowledge graph and surface text on the HUD from any project.
+
+```bash
+npx @geravant/sinain@latest mcp install
+```
+
+The wizard detects which MCP agents you have installed and registers sinain for the ones you select. Re-runnable any time; idempotent.
+
+| Agent | Setup | Config it touches |
+|---|---|---|
+| **Claude Code** | `mcp install` (auto via wizard) | `~/.claude.json` (`claude mcp add`) |
+| **Claude Desktop** | `mcp install` (auto via wizard) | `~/Library/Application Support/Claude/claude_desktop_config.json` (mac) |
+| **Cursor** | `mcp install` (auto via wizard) | `~/.cursor/mcp.json` |
+| **Codex** | `mcp install` (auto via wizard) | `~/.codex/config.toml` (`codex mcp add`) |
+| **Goose** | `mcp install` (auto via wizard) | `~/.config/goose/config.yaml` |
+| **Junie** | `mcp install` (auto via wizard) | `~/.junie/mcp/mcp.json` |
+
+> **Already in `sinain onboard`** — step 6 of the advanced flow runs the same registration. Quickstart asks once if any MCP agent is detected.
+
+- See [docs/MCP-INTEGRATION.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-INTEGRATION.md) for setup details, troubleshooting, and the manual `pclaude` / alternate `CLAUDE_CONFIG_DIR` recipe.
+- See [docs/MCP-CAPABILITIES.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-CAPABILITIES.md) for what each tool enables, with example prompts and end-to-end recipes.
+
+## Deep Dives
+
+| Topic | Doc |
+|---|---|
+| Knowledge System | [docs/knowledge-system.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/knowledge-system.md) |
+| Knowledge API (HTTP) | [docs/KNOWLEDGE-API.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/KNOWLEDGE-API.md) |
+| MCP Integration (setup) | [docs/MCP-INTEGRATION.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-INTEGRATION.md) |
+| MCP Capabilities (tools + recipes) | [docs/MCP-CAPABILITIES.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-CAPABILITIES.md) |
+| LongMemEval Audit | [docs/LONGMEMEVAL-AUDIT.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/LONGMEMEVAL-AUDIT.md) |
+| Privacy Threat Model | [docs/privacy-protection-design.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/privacy-protection-design.md) |
+| Full Configuration | [docs/CONFIGURATION.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/CONFIGURATION.md) |
+| All Hotkeys | [docs/HOTKEYS.md](https://github.com/anthillnet/sinain-hud/blob/main/docs/HOTKEYS.md) |
+
+## Source
+
+Full source, issues, and contributing guide: **[github.com/anthillnet/sinain-hud](https://github.com/anthillnet/sinain-hud)**
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/anthillnet/sinain-hud/blob/main/CONTRIBUTING.md).
+
+## License
+
+MIT
