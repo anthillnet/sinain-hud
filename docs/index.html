@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sinain — a private knowledge graph from your screen and audio</title>
+  <meta name="description" content="Open-source macOS app that captures screen and system audio, distills it into a private knowledge graph, and exposes it through a HUD overlay, web UI, and MCP server for AI agents. Local-first, MIT-licensed.">
+
+  <meta property="og:title" content="sinain">
+  <meta property="og:description" content="A private knowledge graph built from your screen and audio. Local-first, open source, macOS.">
+  <meta property="og:url" content="https://anthillnet.github.io/sinain-hud/">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://raw.githubusercontent.com/anthillnet/sinain-hud/main/media/sinain-demo-full.gif">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://anthillnet.github.io/sinain-hud/">
+
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --bg-elevated: #141414;
+      --fg: #e5e5e5;
+      --fg-dim: #9a9a9a;
+      --fg-faint: #666;
+      --accent: #7dd3fc;
+      --border: #262626;
+      --code-bg: #18181b;
+      --max-width: 720px;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre {
+      font-family: ui-monospace, "SF Mono", Monaco, "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+      font-size: 0.92em;
+    }
+    h1, h2, h3 { line-height: 1.2; font-weight: 600; }
+    h1 {
+      font-size: clamp(2.2rem, 6vw, 3.4rem);
+      letter-spacing: -0.02em;
+      margin: 0 0 0.4rem 0;
+    }
+    h2 {
+      font-size: 1.3rem;
+      letter-spacing: -0.01em;
+      margin: 3rem 0 0.8rem 0;
+      color: var(--fg);
+    }
+    h2::before {
+      content: "→ ";
+      color: var(--fg-faint);
+    }
+    p { margin: 0 0 1rem 0; }
+    .container {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    /* Header */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.5rem;
+    }
+    .header-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .logo {
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--fg);
+    }
+    .nav-links a { margin-left: 1.2rem; color: var(--fg-dim); }
+    .nav-links a:hover { color: var(--fg); text-decoration: none; }
+
+    /* Hero */
+    .hero {
+      padding: 3rem 0 2rem;
+    }
+    .hero .tagline {
+      font-size: 1.2rem;
+      color: var(--fg-dim);
+      margin-bottom: 1.5rem;
+    }
+    .install {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.85rem 1rem;
+      font-size: 1rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin: 0.5rem 0 1.5rem 0;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    .install::before {
+      content: "$";
+      color: var(--fg-faint);
+    }
+    .install code {
+      color: var(--fg);
+      white-space: nowrap;
+    }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 0.5rem;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.55rem 1rem;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      color: var(--fg);
+    }
+    .btn:hover {
+      border-color: var(--fg-dim);
+      text-decoration: none;
+    }
+    .btn.primary {
+      background: var(--fg);
+      color: var(--bg);
+      border-color: var(--fg);
+    }
+    .btn.primary:hover {
+      background: #fff;
+    }
+
+    /* Demo embed */
+    .demo-frame {
+      margin: 2rem 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+      background: var(--bg-elevated);
+    }
+    .demo-frame iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
+
+    /* Content blocks */
+    .block {
+      margin: 2rem 0;
+    }
+    .block p:last-child { margin-bottom: 0; }
+    ul {
+      padding-left: 1.2rem;
+      margin: 0 0 1rem 0;
+    }
+    li { margin-bottom: 0.4rem; }
+    li::marker { color: var(--fg-faint); }
+
+    /* Inline code */
+    p code, li code {
+      background: var(--code-bg);
+      padding: 0.1em 0.4em;
+      border-radius: 3px;
+      color: var(--fg);
+      font-size: 0.9em;
+      border: 1px solid var(--border);
+    }
+
+    /* Block code */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin: 0 0 1rem 0;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+      color: var(--fg);
+    }
+
+    /* Three-interface grid */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+    @media (min-width: 640px) {
+      .grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    .card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.1rem;
+    }
+    .card h3 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1rem;
+      color: var(--fg);
+    }
+    .card p {
+      margin: 0;
+      font-size: 0.92rem;
+      color: var(--fg-dim);
+    }
+
+    /* Stat */
+    .stat {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+    }
+    .stat-number {
+      font-size: 2.4rem;
+      font-weight: 600;
+      color: var(--accent);
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+    .stat-label {
+      font-size: 0.95rem;
+      color: var(--fg-dim);
+      margin-top: 0.3rem;
+    }
+
+    /* Pipeline diagram */
+    .pipeline {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.2rem;
+      margin: 1rem 0;
+      font-family: ui-monospace, "SF Mono", Monaco, monospace;
+      font-size: 0.88rem;
+      line-height: 1.7;
+      color: var(--fg);
+      overflow-x: auto;
+    }
+    .pipeline .arrow { color: var(--fg-faint); }
+    .pipeline .llm { color: #f0abfc; }
+    .pipeline .det { color: #7dd3fc; }
+    .pipeline .store { color: #86efac; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      color: var(--fg-dim);
+      font-size: 0.9rem;
+    }
+    .footer-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: space-between;
+    }
+    .footer-links a {
+      margin-right: 1.2rem;
+      color: var(--fg-dim);
+    }
+    .footer-links a:hover { color: var(--fg); text-decoration: none; }
+    .license {
+      color: var(--fg-faint);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <span class="logo">sinain</span>
+    <nav class="nav-links">
+      <a href="https://github.com/anthillnet/sinain-hud">GitHub</a>
+      <a href="https://www.npmjs.com/package/@geravant/sinain">npm</a>
+      <a href="https://youtu.be/EWLcVtPPbac">Demo</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+
+  <section class="hero">
+    <h1>sinain</h1>
+    <p class="tagline">A private knowledge graph built from your screen and audio. Local-first, open source, macOS.</p>
+
+    <div class="install">
+      <code>npx @geravant/sinain@latest start</code>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/anthillnet/sinain-hud">View on GitHub</a>
+      <a class="btn" href="https://youtu.be/EWLcVtPPbac">Watch 25s demo</a>
+    </div>
+
+    <div class="demo-frame">
+      <iframe src="https://www.youtube.com/embed/EWLcVtPPbac" title="sinain demo" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>What it does</h2>
+    <p>Sinain runs in the background on your Mac. It captures your screen frames and system audio, an LLM extracts facts and decisions from the stream, and a non-LLM pipeline writes those facts into a local SQLite knowledge graph you own.</p>
+    <p>You read it back through three surfaces. Same graph, different shapes.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>HUD overlay</h3>
+        <p>A glanceable feed pinned over your screen. Invisible to screen-capture tools, so it never shows up on shared meetings or recordings.</p>
+      </div>
+      <div class="card">
+        <h3>Web UI</h3>
+        <p>Browse and search the knowledge graph at <code>localhost:9500</code>. Entities, concepts, source timestamps, who-said-what.</p>
+      </div>
+      <div class="card">
+        <h3>MCP server</h3>
+        <p>Coding agents like Claude Code pull context directly from the graph through MCP. No more re-pasting old notes into every session.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>Privacy</h2>
+    <p>Paranoid mode runs the whole pipeline on-device: Ollama for the LLM extraction, whisper.cpp for transcription, Apple Vision for OCR. Zero network at runtime. No cloud, no API keys, no telemetry.</p>
+    <p>Cloud mode (via OpenRouter) is opt-in and uses your own API key. Either way, the knowledge graph stays on your machine — there is no Sinain server.</p>
+    <p>Auto-redaction strips API keys, credit cards, bearer tokens, and AWS keys before anything reaches the graph. Text wrapped in <code>&lt;private&gt;</code> tags is dropped at the capture layer.</p>
+  </section>
+
+  <section class="block">
+    <h2>How well does it work</h2>
+    <div class="stat">
+      <div class="stat-number">82.8%</div>
+      <div class="stat-label">IPR on LongMemEval (ICLR 2025 public benchmark, 500 questions). <a href="https://github.com/anthillnet/sinain-hud/blob/main/docs/LONGMEMEVAL-AUDIT.md">Full audit</a>.</div>
+    </div>
+    <p>On our internal meeting-recall benchmark, recall went from 37.9% to 62.7% after one specific architectural change: moving the integration step off the LLM and into deterministic code. More on that below.</p>
+  </section>
+
+  <section class="block">
+    <h2>The one architectural thing worth knowing</h2>
+    <p>Most memory systems use an LLM for both extraction and integration. We split the two:</p>
+
+    <div class="pipeline">
+<span class="arrow">raw stream</span>
+   <span class="arrow">↓</span>
+<span class="llm">LLM extractor</span>  <span class="arrow">→</span>  {facts, entities, decisions}
+   <span class="arrow">↓</span>
+<span class="det">deterministic integrator</span>  <span class="arrow">(no LLM)</span>
+   <span class="arrow">↓</span>
+<span class="store">SQLite triplestore</span>  <span class="arrow">(EAV + time, FTS5)</span>
+    </div>
+
+    <p>The LLM is variance. Code is determinism. Letting the LLM extract facts but not write them into the graph is where the recall jump came from — the integration step needed to be repeatable, and LLMs are not.</p>
+    <p>Reads use hybrid retrieval: full-text search, tag-based filter, and entity-graph backrefs in parallel, fused by reciprocal rank. Embedding-based dedup merges semantically equivalent facts on write so the graph doesn't bloat.</p>
+  </section>
+
+  <section class="block">
+    <h2>Install</h2>
+    <pre><code>npx @geravant/sinain@latest start</code></pre>
+    <p>macOS only for now. Windows is on the roadmap, not in this release. You'll be asked for Screen Recording and Microphone permissions on first run. The HUD overlay is a separate <code>.app</code> that the setup wizard downloads from GitHub Releases.</p>
+    <p>Cloud mode needs an OpenRouter API key. Paranoid mode needs Ollama + a local model (the setup wizard pulls one for you).</p>
+  </section>
+
+  <section class="block">
+    <h2>Honest gaps</h2>
+    <ul>
+      <li>macOS only. Windows support exists in the codebase but is not validated yet.</li>
+      <li>The graph doesn't auto-detect when a fact has been superseded by a later contradictory one. We have confidence decay and explicit decision-tracking, but semantic supersession is still an open problem.</li>
+      <li>Cloud mode costs OpenRouter tokens during heavy use. Paranoid mode is free at runtime but slower (depends on your machine).</li>
+      <li>The setup is a CLI install, not a polished <code>.dmg</code>. You'll see permission prompts.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <div class="footer-links">
+      <a href="https://github.com/anthillnet/sinain-hud">Source on GitHub</a>
+      <a href="https://www.npmjs.com/package/@geravant/sinain">npm package</a>
+      <a href="https://youtu.be/EWLcVtPPbac">Demo</a>
+      <a href="https://github.com/anthillnet/sinain-hud/blob/main/docs/LONGMEMEVAL-AUDIT.md">Benchmark audit</a>
+    </div>
+    <div class="license">MIT licensed</div>
+  </div>
+</footer>
+
+</body>
+</html>
