@@ -78,8 +78,7 @@
   .top-inner{display:flex;align-items:center;gap:18px;height:60px}
   .logo{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--accent);font-size:16px;letter-spacing:.02em}
   .logo .mark{
-    width:22px;height:22px;border-radius:6px;background:var(--accent);
-    display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700;
+    width:22px;height:22px;display:block;flex-shrink:0;
   }
   .logo .sub{color:var(--fg-faint);font-weight:500;font-size:12px;margin-left:2px;letter-spacing:0}
   nav.primary{display:flex;gap:20px;color:var(--fg-dim);font-size:13.5px}
@@ -490,7 +489,13 @@
 <header class="top">
   <div class="container top-inner">
     <div class="logo">
-      <span class="mark">s</span>
+      <svg class="mark" viewBox="0 0 32 32" aria-label="Sinain logo">
+        <rect width="32" height="32" rx="8.7" fill="#2563eb"/>
+        <g stroke="#fff" fill="#fff" stroke-linecap="round">
+          <circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/>
+          <path d="M 16 9.5 Q 18 16 16 22.5 Q 14 16 16 9.5 Z" stroke="none"/>
+        </g>
+      </svg>
       <span>SINAIN</span>
       <span class="sub mono">/ context os</span>
     </div>
@@ -902,7 +907,13 @@
     <div class="ft">
       <div>
         <div class="logo" style="margin-bottom:14px">
-          <span class="mark">s</span>
+          <svg class="mark" viewBox="0 0 32 32" aria-label="Sinain logo">
+            <rect width="32" height="32" rx="8.7" fill="#2563eb"/>
+            <g stroke="#fff" fill="#fff" stroke-linecap="round">
+              <circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/>
+              <path d="M 16 9.5 Q 18 16 16 22.5 Q 14 16 16 9.5 Z" stroke="none"/>
+            </g>
+          </svg>
           <span>SINAIN</span>
           <span class="sub mono">/ context os</span>
         </div>
