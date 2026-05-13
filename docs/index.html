@@ -1214,10 +1214,9 @@
     const img = document.getElementById('demo-img');
     const fb  = document.getElementById('demo-fallback');
     if(!img || !fb) return;
-    img.addEventListener('load', () => {
-      fb.hidden = true;
-      img.style.display = '';
-    });
+    const show = () => { fb.style.display = 'none'; img.style.display = ''; };
+    img.addEventListener('load', show);
+    if (img.complete && img.naturalWidth > 0) show();
   })();
 
   // ─── Copy install command ───
