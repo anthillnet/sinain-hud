@@ -233,7 +233,7 @@
   .sec-lede{font-size:16px;color:var(--fg-dim);max-width:62ch;text-wrap:pretty;margin:0}
 
   /* ─── Pillars ─── */
-  .pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .pillars{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
   .pillar{
     background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;
     padding:24px 22px;display:flex;flex-direction:column;gap:10px;
@@ -496,9 +496,8 @@
     </div>
     <nav class="primary" aria-label="primary">
       <a href="#augmented">Product</a>
-      <a href="#quickstart">Quick Start</a>
-      <a href="#architecture">Architecture</a>
       <a href="#privacy">Privacy</a>
+      <a href="#quickstart">Quick Start</a>
       <a href="#mcp">MCP</a>
       <a href="#docs">Docs</a>
     </nav>
@@ -514,11 +513,12 @@
     <div class="hero-grid">
       <div>
         <span class="eyebrow"><span class="bar"></span> Context OS · ambient intelligence for builders</span>
-        <h1 class="hero-title">Sees what you see.<br/>Hears what you hear.<br/><em>Acts on your behalf.</em></h1>
+        <h1 class="hero-title">Sees what you see.<br/>Hears what you hear.<br/><em>Distills it into a graph you own.</em></h1>
         <p class="hero-sub">
-          Sinain captures your screen and audio continuously, distills the stream into a
-          <strong>structured live knowledge graph</strong> of facts, entities, and decisions —
-          accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay.
+          A private Context OS that runs ambient in the background, distilling your screen and audio
+          into a <strong>structured knowledge graph</strong> of facts, entities, and decisions —
+          accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay,
+          plus <strong>peer-to-peer sharing</strong> between users.
         </p>
 
         <div class="install" role="group" aria-label="Install command">
@@ -529,7 +529,7 @@
 
         <div class="cta">
           <a class="btn primary btn-lg" href="#quickstart">Get started <span class="arr">→</span></a>
-          <a class="btn btn-lg" href="#architecture">Read the docs</a>
+          <a class="btn btn-lg" href="#docs">Read the docs</a>
         </div>
 
         <div class="meta" aria-label="Project facts">
@@ -572,11 +572,11 @@
     <div class="sec-head">
       <div class="sec-num">§ 01 — You, Augmented</div>
       <div>
-        <h2 class="sec-title">Capture. Distill. Access from anywhere.</h2>
+        <h2 class="sec-title">Capture. Distill. Access. Share.</h2>
         <p class="sec-lede">
-          Three pipelines, one knowledge graph. Sinain extracts atomic facts, entities,
+          One knowledge graph, four uses. Sinain extracts atomic facts, entities,
           and decisions with an LLM — then integrates them through deterministic graph
-          operations, so nothing important quietly disappears.
+          operations.
         </p>
       </div>
     </div>
@@ -590,18 +590,20 @@
           tokens happen <strong style="color:var(--fg)">before</strong> anything leaves your machine.
         </p>
         <div class="chips">
-          <span>ScreenCaptureKit</span><span>PCM audio</span><span>SSIM diff</span><span>OCR</span>
+          <span>macOS native</span><span>screen + audio</span><span>OCR included</span>
         </div>
       </div>
       <div class="pillar">
         <div class="ix">02 / distill</div>
         <h3>Facts, entities, decisions.</h3>
         <p>
-          Atomic claims, people / projects / topics, what was chosen and why. Extracted
-          by an LLM, integrated by deterministic graph ops — <strong>no LLM in the integration step.</strong>
+          Atomic claims, people / projects / topics, what was chosen and why. An LLM extracts —
+          a non-LLM pipeline integrates. Moving the integration step <em>off</em> the LLM was
+          the single biggest gain: <strong>37.9% → 62.7% recall</strong> on internal Meeting
+          Memory, <strong>82.8% IPR on LongMemEval</strong> (ICLR 2025 public benchmark).
         </p>
         <div class="chips">
-          <span>EAV triplestore</span><span>FTS5 + tags</span><span>RRF fusion</span><span>82.8% IPR</span>
+          <span>structured graph</span><span>hybrid retrieval</span><span>82.8% IPR</span>
         </div>
       </div>
       <div class="pillar">
@@ -612,7 +614,19 @@
           You glance at it through a HUD that is <strong>invisible to screen capture</strong>.
         </p>
         <div class="chips">
-          <span>15 MCP tools</span><span>WebSocket feed</span><span>NSWindow.sharingType=.none</span>
+          <span>15 MCP tools</span><span>live updates</span><span>invisible to capture</span>
+        </div>
+      </div>
+      <div class="pillar">
+        <div class="ix">04 / share</div>
+        <h3>Peer-to-peer. No server in the data path.</h3>
+        <p>
+          Send a slice of your graph to another person. Their machine pulls from yours directly
+          over WebRTC; the data itself never touches a server. Their AI agents inherit the
+          context via the same MCP.
+        </p>
+        <div class="chips">
+          <span>WebRTC</span><span>direct transfer</span><span>data stays local</span>
         </div>
       </div>
     </div>
@@ -633,82 +647,17 @@
       </div>
     </div>
 
-    <div class="feat">
-      <div class="feat-text">
-        <h3>Pick the agent in the flash-icon selector. Spawn tasks route to any profile in your roster.</h3>
-        <p>
-          Tested with Claude Code, OpenClaude, Codex, Goose, and Junie — any MCP-compatible
-          agent works. Add custom profiles (personal Claude config, alternate models) by
-          editing <code>agents.json</code>; the roster is the source of truth. Knowledge
-          modules travel with you — export from one machine, import on another.
-        </p>
-        <ul>
-          <li><span><strong>Hot-swap</strong> between agents without losing screen/audio context.</span></li>
-          <li><span>Per-profile <strong>binary, behavior type, env, settings, model overrides</strong>.</span></li>
-          <li><span>Dispatch decision keys off <code>profile.type</code>, not the profile name — first-class custom profiles like <code>pclaude</code>.</span></li>
-          <li><span><strong>Portable</strong> knowledge graphs — <code>export-knowledge</code> / <code>import-knowledge</code>.</span></li>
-        </ul>
+    <div class="card" aria-label="Tested agents" style="margin-top:24px">
+      <div class="card-head">
+        <span class="lhs">tested with</span>
+        <span>any MCP-compatible agent</span>
       </div>
-
-      <div class="card" aria-label="Agent roster">
-        <div class="card-head">
-          <span class="lhs">~/.sinain/agents.json</span>
-          <span>ROSTER · 6 profiles</span>
-        </div>
-        <div class="roster-row active">
-          <div class="glyph">CC</div>
-          <div>
-            <div class="name">Claude Code</div>
-            <div class="sub">type: claude-code · primary</div>
-          </div>
-          <div class="id">~/.claude.json</div>
-          <div><span class="pill pill-good">active</span></div>
-        </div>
-        <div class="roster-row">
-          <div class="glyph">PC</div>
-          <div>
-            <div class="name">pclaude</div>
-            <div class="sub">type: claude-code · personal cfg</div>
-          </div>
-          <div class="id">$CLAUDE_CONFIG_DIR</div>
-          <div><span class="pill pill-chip">ready</span></div>
-        </div>
-        <div class="roster-row">
-          <div class="glyph">CX</div>
-          <div>
-            <div class="name">Codex</div>
-            <div class="sub">type: codex</div>
-          </div>
-          <div class="id">~/.codex/config.toml</div>
-          <div><span class="pill pill-chip">ready</span></div>
-        </div>
-        <div class="roster-row">
-          <div class="glyph">GS</div>
-          <div>
-            <div class="name">Goose</div>
-            <div class="sub">type: goose</div>
-          </div>
-          <div class="id">~/.config/goose/config.yaml</div>
-          <div><span class="pill pill-chip">ready</span></div>
-        </div>
-        <div class="roster-row">
-          <div class="glyph">OC</div>
-          <div>
-            <div class="name">OpenClaude</div>
-            <div class="sub">type: openclaude</div>
-          </div>
-          <div class="id">~/.openclaude/</div>
-          <div><span class="pill pill-chip">ready</span></div>
-        </div>
-        <div class="roster-row">
-          <div class="glyph">JN</div>
-          <div>
-            <div class="name">Junie</div>
-            <div class="sub">type: junie</div>
-          </div>
-          <div class="id">~/.junie/mcp/mcp.json</div>
-          <div><span class="pill pill-chip">ready</span></div>
-        </div>
+      <div style="padding:22px 24px;display:flex;flex-wrap:wrap;gap:8px">
+        <span class="pill pill-chip">Claude Code</span>
+        <span class="pill pill-chip">OpenClaude</span>
+        <span class="pill pill-chip">Codex</span>
+        <span class="pill pill-chip">Goose</span>
+        <span class="pill pill-chip">Junie</span>
       </div>
     </div>
   </div>
@@ -720,10 +669,10 @@
     <div class="sec-head">
       <div class="sec-num">§ 03 — Privacy Controls</div>
       <div>
-        <h2 class="sec-title">Four modes. One env var. From cloud-fast to fully offline.</h2>
+        <h2 class="sec-title">Four modes. From cloud-fast to fully offline.</h2>
         <p class="sec-lede">
           By default, sinain uses cloud APIs (OpenRouter) for transcription and analysis.
-          Need tighter control? Flip the mode — no code changes.
+          Need tighter control? Flip the mode.
         </p>
       </div>
     </div>
@@ -731,75 +680,45 @@
     <div class="feat reverse">
       <div>
         <div class="card" style="padding:24px">
-          <div style="font-family:var(--mono);font-size:11px;color:var(--fg-faint);letter-spacing:.06em;text-transform:uppercase;font-weight:600">▸ HUD overlay · capture proof</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
-            <div style="border:1px solid var(--border);background:#fff;border-radius:6px;padding:14px">
-              <div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-faint);letter-spacing:.05em">QuickTime · screen recording</div>
-              <div style="height:72px;margin-top:10px;background:repeating-linear-gradient(135deg,var(--chip) 0 8px,var(--bg-hover) 8px 16px);position:relative;border-radius:4px">
-                <div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--fg-faint);font-family:var(--mono);font-size:11px">HUD: absent</div>
-              </div>
-            </div>
-            <div style="border:1px solid var(--border);background:#fff;border-radius:6px;padding:14px">
-              <div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-faint);letter-spacing:.05em">OBS · capture</div>
-              <div style="height:72px;margin-top:10px;background:repeating-linear-gradient(135deg,var(--chip) 0 8px,var(--bg-hover) 8px 16px);position:relative;border-radius:4px">
-                <div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--fg-faint);font-family:var(--mono);font-size:11px">HUD: absent</div>
-              </div>
-            </div>
-            <div style="border:1px solid var(--border);background:#fff;border-radius:6px;padding:14px">
-              <div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-faint);letter-spacing:.05em">Loom · share</div>
-              <div style="height:72px;margin-top:10px;background:repeating-linear-gradient(135deg,var(--chip) 0 8px,var(--bg-hover) 8px 16px);position:relative;border-radius:4px">
-                <div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--fg-faint);font-family:var(--mono);font-size:11px">HUD: absent</div>
-              </div>
-            </div>
-            <div style="border:1px solid var(--accent);background:var(--accent-soft);border-radius:6px;padding:14px">
-              <div style="font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.05em;font-weight:700">YOUR EYES</div>
-              <div style="height:72px;margin-top:10px;background:#fff;border:1px dashed var(--accent);border-radius:4px;position:relative">
-                <div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--accent);font-family:var(--mono);font-size:11px;font-weight:600">HUD: visible</div>
-              </div>
-            </div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--fg-faint);letter-spacing:.06em;text-transform:uppercase;font-weight:600">▸ HUD invisible to screen capture</div>
+          <div style="margin-top:18px;font-family:var(--mono);font-size:13px;color:var(--fg-dim);line-height:1.8">
+            <div><span style="color:var(--accent)">NSWindow.sharingType = .none</span></div>
+            <div style="color:var(--fg-faint)">overlay/macos/Runner/AppDelegate.swift:70</div>
           </div>
-          <div style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-dim);line-height:1.6;background:var(--chip);padding:10px 12px;border-radius:6px">
-            <span style="color:var(--accent)">// </span>NSWindow.sharingType = .none<br/>
-            <span style="color:var(--accent)">// </span>overlay/macos/Runner/AppDelegate.swift:70
-          </div>
+          <p style="margin:18px 0 0 0;font-size:14.5px;color:var(--fg-dim);line-height:1.65">
+            The HUD never appears in screenshots, recordings, or screen shares.
+          </p>
         </div>
       </div>
 
       <div class="feat-text">
-        <h3>Invisible to screen capture. Verifiable on your machine.</h3>
+        <h3>Invisible to screen capture.</h3>
         <p>
-          The HUD overlay never appears in screenshots, recordings, or screen shares —
-          set <code>NSWindow.sharingType = .none</code> at the AppKit level. Verifiable
-          via split-screen recording with QuickTime + OBS + Loom; the HUD is absent from
-          all three.
+          The HUD overlay never appears in screenshots, recordings, or screen shares.
         </p>
         <ul>
           <li><span><strong><code>off</code></strong> — all data flows freely; maximum insight quality.</span></li>
           <li><span><strong><code>standard</code></strong> — auto-redacts credentials before cloud APIs (wizard default).</span></li>
           <li><span><strong><code>strict</code></strong> — only summaries leave your machine; no raw text sent to cloud.</span></li>
-          <li><span><strong><code>paranoid</code></strong> — Ollama + whisper.cpp, embedding model pre-cached. <strong>Zero network calls at runtime.</strong></span></li>
+          <li><span><strong><code>paranoid</code></strong> — Ollama + whisper.cpp. <strong>Zero network calls at runtime.</strong></span></li>
         </ul>
       </div>
     </div>
 
     <div class="modes" style="margin-top:32px">
       <div class="mode">
-        <div class="lvl"><i class="on"></i><i></i><i></i><i></i></div>
-        <div class="nm"><b>off</b> · max insight</div>
-        <p class="desc">All data flows freely. Best fidelity, broadest model choice.</p>
+        <div class="nm"><b>off</b></div>
+        <p class="desc">All data flows freely — maximum insight quality.</p>
       </div>
       <div class="mode">
-        <div class="lvl"><i class="on"></i><i class="on"></i><i></i><i></i></div>
         <div class="nm"><b>standard</b> · wizard default</div>
-        <p class="desc">Auto-redacts credentials and tokens before cloud APIs.</p>
+        <p class="desc">Auto-redacts credentials before cloud APIs.</p>
       </div>
       <div class="mode">
-        <div class="lvl"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
-        <div class="nm"><b>strict</b> · summaries only</div>
-        <p class="desc">Only summaries leave your machine. No raw text sent to cloud.</p>
+        <div class="nm"><b>strict</b></div>
+        <p class="desc">Only summaries leave your machine — no raw text sent to cloud.</p>
       </div>
       <div class="mode">
-        <div class="lvl"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
         <div class="nm"><b>paranoid</b> · fully local</div>
         <p class="desc">Ollama + whisper.cpp. Zero network calls at runtime.</p>
       </div>
@@ -868,7 +787,7 @@
         <li>
           <div>
             <h4>Re-run anytime</h4>
-            <p><code>npx @geravant/sinain@latest start --setup</code> — idempotent. Stop / status / no-sense / headless flags available.</p>
+            <p><code>npx @geravant/sinain@latest start --setup</code>. Stop / status / no-sense / headless flags available.</p>
           </div>
         </li>
       </ol>
@@ -878,7 +797,7 @@
       <div class="c">
         <div class="k">macOS</div>
         <div class="v">12.3+</div>
-        <div class="n">ScreenCaptureKit. Apple Silicon &amp; Intel.</div>
+        <div class="n">Apple Silicon &amp; Intel.</div>
       </div>
       <div class="c">
         <div class="k">Node</div>
@@ -901,177 +820,8 @@
       <div class="ic">!</div>
       <div>
         <strong>macOS Permissions.</strong> Add Terminal to <em>System Settings → Privacy &amp; Security → Screen Recording</em>,
-        then <em>quit and reopen Terminal</em> — TCC entitlements only apply to processes started after the grant.
-        Same for Microphone. Sinain detects missing permissions and surfaces a clear restart banner — no silent degraded mode.
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ───────────── ARCHITECTURE ───────────── -->
-<section class="s" id="architecture">
-  <div class="container">
-    <div class="sec-head">
-      <div class="sec-num">§ 05 — Architecture</div>
-      <div>
-        <h2 class="sec-title">Capture → distill → graph → surfaces. All on-device.</h2>
-        <p class="sec-lede">
-          Swift talks to ScreenCaptureKit. TypeScript runs the audio pipeline, agent loop,
-          and knowledge graph. Flutter renders an overlay AppKit refuses to share. The graph
-          stays private — on your machine, in <code>~/.sinain/</code>.
-        </p>
-      </div>
-    </div>
-
-    <div class="arch">
-<pre>┌─── <b>Your Device</b> ─────────────────────────────────────────────────────┐
-│                                                                     │
-│  <u>sck-capture</u> · Swift                                             │
-│    ├─ system audio (PCM) ────────────────────► sinain-core :9500    │
-│    └─ screen frames (JPEG) ──► <u>sense_client</u> ───  POST /sense ───►  │
-│                                       │                              │
-│                              ┌────────┘                              │
-│                              ▼                                       │
-│                         <u>sinain-core</u> · TypeScript                  │
-│                           ├─ audio pipeline → <i>transcription</i>       │
-│                           ├─ agent loop → <i>digest + HUD text</i>       │
-│                           ├─ <b>knowledge graph</b>  (private, on-device)│
-│                           └─ WebSocket feed ─────────────┐           │
-│                                                          ▼           │
-│                                                  <u>overlay</u> · Flutter │
-│                                       <i>private · invisible to capture</i>│
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘</pre>
-    </div>
-
-    <div class="ctable" aria-label="Components">
-      <div class="crow head">
-        <div>Component</div><div>Language</div><div>What it does</div><div style="text-align:right">Docs</div>
-      </div>
-      <div class="crow">
-        <div class="nm">sinain-core</div>
-        <div class="lang">TypeScript</div>
-        <div class="d">Central hub: audio pipeline, agent loop, knowledge graph, WS feed.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/sinain-core/README.md" target="_blank">README →</a></div>
-      </div>
-      <div class="crow">
-        <div class="nm">overlay</div>
-        <div class="lang">Dart · Swift</div>
-        <div class="d">Private HUD (macOS), display modes, hotkeys.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/docs/HOTKEYS.md" target="_blank">Hotkeys →</a></div>
-      </div>
-      <div class="crow">
-        <div class="nm">sense_client</div>
-        <div class="lang">Python</div>
-        <div class="d">Screen capture, SSIM diff, OCR, privacy filter.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/sense_client" target="_blank">sense_client/ →</a></div>
-      </div>
-      <div class="crow">
-        <div class="nm">sck-capture</div>
-        <div class="lang">Swift</div>
-        <div class="d">ScreenCaptureKit: system audio + screen frames.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/tools/sck-capture" target="_blank">tools/ →</a></div>
-      </div>
-      <div class="crow">
-        <div class="nm">sinain-agent</div>
-        <div class="lang">Bash</div>
-        <div class="d">Shell harness that connects any agent to sinain-core.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/sinain-agent" target="_blank">sinain-agent/ →</a></div>
-      </div>
-      <div class="crow">
-        <div class="nm">sinain-knowledge</div>
-        <div class="lang">TypeScript</div>
-        <div class="d">Curation, playbook, eval, portable knowledge modules.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/docs/knowledge-system.md" target="_blank">Knowledge →</a></div>
-      </div>
-      <div class="crow">
-        <div class="nm">sinain-mcp-server</div>
-        <div class="lang">TypeScript</div>
-        <div class="d">MCP server exposing sinain tools to agents.</div>
-        <div class="doc"><a href="https://github.com/anthillnet/sinain-hud/blob/main/sinain-mcp-server" target="_blank">mcp-server/ →</a></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ───────────── HOTKEYS + LOCAL ───────────── -->
-<section class="s" id="hotkeys">
-  <div class="container">
-    <div class="sec-head">
-      <div class="sec-num">§ 06 — Hotkeys &amp; Local Models</div>
-      <div>
-        <h2 class="sec-title">Cmd+Shift, four shortcuts to remember, fifteen total.</h2>
-        <p class="sec-lede">
-          Plus a fully-local runtime if cloud isn't on the table — Ollama + whisper.cpp
-          handle transcription and vision.
-        </p>
-      </div>
-    </div>
-
-    <div class="hot" aria-label="Global hotkeys">
-      <div class="h">
-        <span class="act">Toggle overlay visibility</span>
-        <span class="keys"><span class="key">⌘</span><span class="key">⇧</span><span class="key">Space</span></span>
-      </div>
-      <div class="h">
-        <span class="act">Cycle display mode</span>
-        <span class="keys"><span class="key">⌘</span><span class="key">⇧</span><span class="key">M</span></span>
-      </div>
-      <div class="h">
-        <span class="act">Open command input</span>
-        <span class="keys"><span class="key">⌘</span><span class="key">⇧</span><span class="key">/</span></span>
-      </div>
-      <div class="h">
-        <span class="act">Quit overlay</span>
-        <span class="keys"><span class="key">⌘</span><span class="key">⇧</span><span class="key">H</span></span>
-      </div>
-    </div>
-
-    <div style="margin-top:48px;display:flex;align-items:baseline;justify-content:space-between;gap:18px;flex-wrap:wrap">
-      <h3 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.01em">Running fully local</h3>
-      <span class="mono" style="color:var(--fg-faint);font-size:12px;letter-spacing:.04em">▸ no cloud APIs · local models handle everything</span>
-    </div>
-
-    <div class="term" style="margin-top:18px">
-      <div class="term-head">
-        <div class="dots"><i></i><i></i><i></i></div>
-        <span>local-mode · setup</span>
-      </div>
-      <div class="term-body">
-        <div class="c"># 1. install local transcription</div>
-        <div><span class="p">$</span> ./setup-local-stt.sh</div>
-        <div class="c"># 2. install ollama + vision model</div>
-        <div><span class="p">$</span> brew install ollama &amp;&amp; ollama pull llava</div>
-        <div class="c"># 3. start in local mode</div>
-        <div><span class="p">$</span> ./start-local.sh</div>
-      </div>
-    </div>
-
-    <div class="lm">
-      <div class="m">
-        <span class="tag">recommended</span>
-        <div class="name">llava</div>
-        <div class="stats">
-          <span>size <b>4.7 GB</b></span>
-          <span>speed <b>~2 s/frame</b></span>
-        </div>
-        <p>General use. Balanced size, speed, and quality — start here.</p>
-      </div>
-      <div class="m">
-        <div class="name">llama3.2-vision</div>
-        <div class="stats">
-          <span>size <b>7.9 GB</b></span>
-          <span>speed <b>~4 s/frame</b></span>
-        </div>
-        <p>Best accuracy when you can spend the RAM and per-frame latency.</p>
-      </div>
-      <div class="m">
-        <div class="name">moondream</div>
-        <div class="stats">
-          <span>size <b>1.7 GB</b></span>
-          <span>speed <b>~1 s/frame</b></span>
-        </div>
-        <p>Fastest option. Trade accuracy for snappy on-device response.</p>
+        then <em>quit and reopen Terminal</em> — macOS only applies the permission to apps started after granting.
+        Same for Microphone.
       </div>
     </div>
   </div>
@@ -1081,41 +831,24 @@
 <section class="s" id="mcp">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 07 — Connect Your Coding Agent</div>
+      <div class="sec-num">§ 05 — Connect Your Coding Agent</div>
       <div>
         <h2 class="sec-title">15 <code style="font-family:var(--mono);color:var(--accent);background:var(--accent-soft);padding:0 8px;border-radius:6px;font-size:30px">sinain_*</code> tools, one MCP install.</h2>
         <p class="sec-lede">
           The wizard detects which MCP agents you have installed and registers sinain for
-          each one you select. Re-runnable any time; idempotent.
+          each one you select.
         </p>
       </div>
     </div>
 
-    <div class="term">
-      <div class="term-head"><div class="dots"><i></i><i></i><i></i></div><span>~ · mcp install</span></div>
-      <div class="term-body">
-        <div><span class="p">$</span> npx @geravant/sinain@latest mcp install</div>
-        <div class="dim">›</div>
-        <div><span class="ar">▸</span> detect MCP agents on this machine…</div>
-        <div><span class="ok">✓</span> Claude Code      <span class="dim">~/.claude.json</span></div>
-        <div><span class="ok">✓</span> Claude Desktop   <span class="dim">~/Library/Application Support/Claude/…</span></div>
-        <div><span class="ok">✓</span> Cursor           <span class="dim">~/.cursor/mcp.json</span></div>
-        <div><span class="ok">✓</span> Codex            <span class="dim">~/.codex/config.toml</span></div>
-        <div><span class="ok">✓</span> Goose            <span class="dim">~/.config/goose/config.yaml</span></div>
-        <div><span class="ok">✓</span> Junie            <span class="dim">~/.junie/mcp/mcp.json</span></div>
-        <div class="dim">›</div>
-        <div><span class="ar">▸</span> registered <span style="color:#60a5fa">sinain_knowledge_query · sinain_get_knowledge · sinain_distill_session · sinain_get_context · sinain_respond …</span></div>
-      </div>
+    <div class="install" role="group" aria-label="MCP install command" style="margin-top:24px">
+      <div class="label">▸ INSTALL FOR AGENTS</div>
+      <code>npx @geravant/sinain@latest mcp install</code>
     </div>
 
-    <div class="mcp">
-      <div class="a"><div class="nm"><b>Claude Code</b><span class="pill pill-good">registered</span></div><div class="path">~/.claude.json — claude mcp add</div></div>
-      <div class="a"><div class="nm"><b>Claude Desktop</b><span class="pill pill-good">registered</span></div><div class="path">~/Library/Application Support/Claude/claude_desktop_config.json</div></div>
-      <div class="a"><div class="nm"><b>Cursor</b><span class="pill pill-good">registered</span></div><div class="path">~/.cursor/mcp.json</div></div>
-      <div class="a"><div class="nm"><b>Codex</b><span class="pill pill-good">registered</span></div><div class="path">~/.codex/config.toml — codex mcp add</div></div>
-      <div class="a"><div class="nm"><b>Goose</b><span class="pill pill-good">registered</span></div><div class="path">~/.config/goose/config.yaml</div></div>
-      <div class="a"><div class="nm"><b>Junie</b><span class="pill pill-good">registered</span></div><div class="path">~/.junie/mcp/mcp.json</div></div>
-    </div>
+    <p style="margin-top:18px;font-size:14.5px;color:var(--fg-dim);line-height:1.65;max-width:640px">
+      Re-run any time to update. Registers sinain with Claude Code, Claude Desktop, Cursor, Codex, Goose, and Junie.
+    </p>
   </div>
 </section>
 
@@ -1123,7 +856,7 @@
 <section class="s" id="docs">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 08 — Deep Dives</div>
+      <div class="sec-num">§ 06 — Deep Dives</div>
       <div>
         <h2 class="sec-title">Threat models, audits, full configuration.</h2>
         <p class="sec-lede">
@@ -1173,7 +906,7 @@
           <span>SINAIN</span>
           <span class="sub mono">/ context os</span>
         </div>
-        <p class="blurb">Ambient intelligence that sees what you see, hears what you hear, and acts on your behalf.</p>
+        <p class="blurb">A private Context OS that runs ambient in the background, distilling your screen and audio into a structured knowledge graph.</p>
         <p style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-faint);letter-spacing:.04em">MIT · anthillnet/sinain-hud</p>
       </div>
       <div>
@@ -1182,16 +915,16 @@
           <li><a href="#augmented">You, Augmented</a></li>
           <li><a href="#agents">Agent-Agnostic</a></li>
           <li><a href="#privacy">Privacy</a></li>
-          <li><a href="#hotkeys">Hotkeys</a></li>
+          <li><a href="#quickstart">Quick Start</a></li>
         </ul>
       </div>
       <div>
         <h5>Get Started</h5>
         <ul>
           <li><a href="#quickstart">Quick Start</a></li>
-          <li><a href="#architecture">Architecture</a></li>
           <li><a href="#mcp">MCP Setup</a></li>
           <li><a href="https://github.com/anthillnet/sinain-hud/blob/main/docs/AGENT-ROSTER.md" target="_blank">Agent Roster</a></li>
+          <li><a href="https://github.com/anthillnet/sinain-hud" target="_blank">GitHub Repo</a></li>
         </ul>
       </div>
       <div>
