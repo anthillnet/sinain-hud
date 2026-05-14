@@ -392,18 +392,201 @@ def _expand_keywords_semantic(
         return keywords
 
 
+_PRECISION_MODES = {"fast", "balanced", "precise"}
+_TEMPORAL_MODES = {"current", "historical", "any"}
+_FORMATS = {"facts", "triples", "narrative", "structured"}
+
+
+def _validate_query_params(
+    precision_mode: str,
+    temporal_mode: str,
+    confidence_floor: float,
+    hop_depth: int,
+    format: str,
+) -> None:
+    """Validate query parameters; raise ValueError on bad input.
+
+    Centralized so MCP tool schemas and the Python API stay in sync.
+    """
+    if precision_mode not in _PRECISION_MODES:
+        raise ValueError(f"precision_mode must be one of {_PRECISION_MODES}, got {precision_mode!r}")
+    if temporal_mode not in _TEMPORAL_MODES:
+        raise ValueError(f"temporal_mode must be one of {_TEMPORAL_MODES}, got {temporal_mode!r}")
+    if not 0.0 <= confidence_floor <= 1.0:
+        raise ValueError(f"confidence_floor must be in [0.0, 1.0], got {confidence_floor}")
+    if not 0 <= hop_depth <= 3:
+        raise ValueError(f"hop_depth must be in [0, 3], got {hop_depth}")
+    if format not in _FORMATS:
+        raise ValueError(f"format must be one of {_FORMATS}, got {format!r}")
+
+
+def _apply_confidence_floor(facts: list[dict], floor: float) -> list[dict]:
+    """Drop facts whose decayed confidence is below `floor`.
+
+    Uses decayed_confidence so a 0.8 fact that has aged past its half-life
+    gets filtered out by a moderate floor — fresh facts get more leeway.
+    """
+    if floor <= 0.0:
+        return facts
+    from triplestore import decayed_confidence
+    kept = []
+    for f in facts:
+        try:
+            conf = float(f.get("confidence", 0.5))
+        except (ValueError, TypeError):
+            conf = 0.5
+        created = str(f.get("first_seen", "")) or str(f.get("created_at", ""))
+        eff = decayed_confidence(conf, created) if created else conf
+        if eff >= floor:
+            kept.append(f)
+    return kept
+
+
+def _enrich_temporal(facts: list[dict], db_path: str) -> list[dict]:
+    """Attach occurred_start / occurred_end / mentioned_at to each fact dict.
+
+    Temporal columns live on triple rows, not in the attribute dict returned by
+    store.entity(). Bulk-fetch them here in one query so the filter has the data
+    it needs without N round-trips.
+    """
+    entity_ids = [f.get("entity_id", "") for f in facts if f.get("entity_id")]
+    if not entity_ids:
+        return facts
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+        temporal = store.temporal_fields_for(entity_ids)
+        store.close()
+    except Exception:
+        return facts
+    for f in facts:
+        eid = f.get("entity_id", "")
+        if eid in temporal:
+            for k, v in temporal[eid].items():
+                # Only fill keys not already present so an explicit override sticks.
+                if k not in f:
+                    f[k] = v
+    return facts
+
+
+def _apply_temporal_filter(
+    facts: list[dict],
+    mode: str,
+    as_of: str | None,
+    db_path: str | None = None,
+) -> list[dict]:
+    """Filter and boost facts based on temporal_mode.
+
+    - "current": keep facts where occurred_end IS NULL or occurred_end > now()
+    - "historical": no filter; boost by proximity of occurred_start to as_of (if set)
+    - "any": no-op
+    """
+    if mode == "any":
+        return facts
+    if db_path:
+        facts = _enrich_temporal(facts, db_path)
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    if mode == "current":
+        kept = []
+        for f in facts:
+            occ_end = f.get("occurred_end")
+            if occ_end is None or (isinstance(occ_end, str) and occ_end > now_iso):
+                kept.append(f)
+        return kept
+    if mode == "historical":
+        # Phase 3: boost by occurred_start proximity to as_of. Phase 1: pass through.
+        return facts
+    return facts
+
+
+def _format_results(
+    facts: list[dict],
+    format: str,
+    db_path: str,
+) -> list[dict] | str:
+    """Format retrieval output for the caller.
+
+    - "facts": current list[dict] shape (default, unchanged).
+    - "triples": list of (entity, attribute, value, confidence, occurred_start, occurred_end).
+    - "narrative" / "structured": stubs that fall through to facts in Phase 1.
+    """
+    if format == "facts":
+        return facts
+    if format == "triples":
+        out = []
+        for f in facts:
+            out.append({
+                "entity_id": f.get("entity_id", ""),
+                "entity": f.get("entity", ""),
+                "attribute": "value",
+                "value": f.get("value", ""),
+                "value_type": "string",
+                "confidence": f.get("confidence", ""),
+                "occurred_start": f.get("occurred_start"),
+                "occurred_end": f.get("occurred_end"),
+                "mentioned_at": f.get("mentioned_at"),
+            })
+        return out
+    # narrative / structured — Phase 3. Phase 1 stub: return facts unchanged.
+    return facts
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
     max_facts: int = 10,
-) -> list[dict]:
+    *,
+    precision_mode: str = "balanced",
+    temporal_mode: str = "any",
+    confidence_floor: float = 0.0,
+    hop_depth: int = 1,
+    latency_budget_ms: int | None = None,
+    format: str = "facts",
+    as_of: str | None = None,
+) -> list[dict] | str:
     """Hybrid retrieval with Reciprocal Rank Fusion (Graphiti pattern).
 
-    Runs three independent retrieval methods, fuses via RRF, then
-    expands top results with 1-hop graph neighbors.
+    Runs independent retrieval methods (FTS5, tag, top-confidence, entity-graph),
+    fuses via RRF, applies temporal/confidence filters, optionally reranks, and
+    optionally expands with graph neighbors.
+
+    Parameters (keyword-only, defaults preserve historical behavior):
+        precision_mode:     "fast" skips bi-encoder rerank and shrinks the
+                            candidate pool. "balanced" (default) keeps current
+                            behavior. "precise" reserves a slot for cross-encoder
+                            rerank (Phase 3); currently falls through to balanced.
+        temporal_mode:      "current" filters to facts whose occurred_end is NULL
+                            or in the future. "historical" reserves a slot for
+                            occurred_start-anchored boosting (Phase 3). "any"
+                            (default) applies no temporal filter.
+        confidence_floor:   Drop facts whose decayed confidence is below this
+                            threshold. Default 0.0 (no floor).
+        hop_depth:          0 skips graph expansion. 1 (default) does the
+                            current 1-hop fallback. 2/3 reserved for multi-hop
+                            spreading activation (Phase 3); currently caps at 1.
+        latency_budget_ms:  Soft cap. Stages check elapsed wall time and skip
+                            later work if exceeded. None = no cap (default).
+        format:             "facts" (default), "triples", "narrative",
+                            "structured". narrative/structured are Phase 3
+                            stubs that fall through to "facts".
+        as_of:              ISO timestamp for point-in-time queries (Phase 3).
+
+    Returns:
+        list[dict] for format="facts"/"triples"; downstream formats may return
+        other shapes in Phase 3.
     """
+    _validate_query_params(precision_mode, temporal_mode, confidence_floor, hop_depth, format)
+
     import re
     import time
+    pipeline_start = time.monotonic()
+
+    def budget_exceeded() -> bool:
+        if latency_budget_ms is None:
+            return False
+        return (time.monotonic() - pipeline_start) * 1000.0 > latency_budget_ms
+
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
 
     # Change 0: Semantic entity expansion — "ML" → ["ml", "machine-learning", "ai", ...]
@@ -459,8 +642,15 @@ def query_facts_hybrid(
     except Exception:
         pass
 
-    # Run retrieval methods independently
-    candidate_limit = max_facts * 3
+    # Run retrieval methods independently.
+    # precision_mode=fast shrinks the candidate pool to keep wall time predictable;
+    # precise widens it so cross-encoder rerank (Phase 3) has more to work with.
+    if precision_mode == "fast":
+        candidate_limit = max(max_facts * 2, max_facts + 5)
+    elif precision_mode == "precise":
+        candidate_limit = max_facts * 5
+    else:
+        candidate_limit = max_facts * 3
 
     # Change C: FTS5 AND mode for multi-keyword queries
     if len(keywords) > 1:
@@ -604,27 +794,44 @@ def query_facts_hybrid(
     # we re-rank in-process if sentence-transformers is available.
     rrf_candidates = [fact_map[eid] for eid in sorted_ids[:max_facts * 2] if eid in fact_map]
 
-    results = rrf_candidates[:max_facts]
-    try:
-        from sentence_transformers import SentenceTransformer
-        import numpy as np
-        if not hasattr(query_facts_hybrid, "_embed_model"):
-            query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-        model = query_facts_hybrid._embed_model
-        texts = [query] + [f.get("value", "") for f in rrf_candidates]
-        embs = model.encode(texts, show_progress_bar=False)
-        q_emb = embs[0]
-        scored = []
-        for i, f in enumerate(rrf_candidates):
-            sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
-            scored.append((sim, f))
-        scored.sort(key=lambda x: -x[0])
-        results = [f for _, f in scored[:max_facts]]
-    except ImportError:
-        pass  # sentence-transformers not installed — use RRF order
+    # Cheap filters first — pruning noise before reranking avoids paying
+    # encoder cost on facts we'll drop anyway.
+    rrf_candidates = _apply_confidence_floor(rrf_candidates, confidence_floor)
+    rrf_candidates = _apply_temporal_filter(rrf_candidates, temporal_mode, as_of, db_path=db_path)
 
-    # Expand top results with 1-hop graph neighbors
-    if results and len(results) < max_facts:
+    results = rrf_candidates[:max_facts]
+
+    # Bi-encoder rerank — skipped in fast mode (too slow for hot path)
+    # and skipped if budget already exceeded.
+    if precision_mode != "fast" and not budget_exceeded():
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+            if not hasattr(query_facts_hybrid, "_embed_model"):
+                query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+            model = query_facts_hybrid._embed_model
+            texts = [query] + [f.get("value", "") for f in rrf_candidates]
+            embs = model.encode(texts, show_progress_bar=False)
+            q_emb = embs[0]
+            scored = []
+            for i, f in enumerate(rrf_candidates):
+                sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
+                scored.append((sim, f))
+            scored.sort(key=lambda x: -x[0])
+            results = [f for _, f in scored[:max_facts]]
+        except ImportError:
+            pass  # sentence-transformers not installed — use RRF order
+
+    # precision_mode=precise reserves a slot for cross-encoder rerank (Phase 3).
+    # Phase 1 stub: balanced behavior, but log that the request reached this point
+    # so we can wire the cross-encoder later without changing callers.
+    if precision_mode == "precise":
+        pass  # Phase 3: load cross-encoder/ms-marco-MiniLM-L-6-v2, rerank top-30 → top-K
+
+    # Graph expansion. hop_depth=0 skips entirely. hop_depth=1 is current behavior.
+    # hop_depth>=2 is reserved for Phase 3 multi-hop spreading activation; Phase 1
+    # caps at 1 hop to avoid surprise latency.
+    if hop_depth >= 1 and results and len(results) < max_facts and not budget_exceeded():
         seen_ids = {f.get("entity_id", "") for f in results}
         try:
             from triplestore import TripleStore
@@ -646,7 +853,8 @@ def query_facts_hybrid(
         except Exception:
             pass
 
-    return results[:max_facts]
+    final = results[:max_facts]
+    return _format_results(final, format, db_path)
 
 
 def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
