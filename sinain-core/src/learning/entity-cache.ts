@@ -22,7 +22,11 @@ interface CacheEntry {
   ts: number;
 }
 
-type QueryFn = (entities: string[], maxFacts: number) => Promise<string>;
+type QueryFn = (
+  entities: string[],
+  maxFacts: number,
+  options?: import("../types.js").KnowledgeQueryOptions,
+) => Promise<string>;
 
 export class EntityCache {
   private cache = new Map<string, CacheEntry>();
@@ -138,7 +142,10 @@ export class EntityCache {
 
     for (const entity of toFetch) {
       this.pendingQueries.add(entity);
-      this.queryFn([entity], 3)
+      // Agent-tick hot path: fast precision mode, no graph expansion, strict
+      // latency cap, drop low-confidence noise. The profile preset matches
+      // what the 3s debounced agent loop needs from the knowledge graph.
+      this.queryFn([entity], 3, { profile: "agent-tick" })
         .then(facts => {
           this.cache.set(entity, { facts, ts: Date.now() });
           this.evictionOrder.push(entity);

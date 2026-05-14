@@ -1968,7 +1968,14 @@ export function createAppServer(deps: ServerDeps) {
         const entities = q.trim().split(/[\s,+]+/).filter(Boolean);
         if (deps.queryKnowledgeFacts) {
           try {
-            const factsText = await deps.queryKnowledgeFacts(entities, maxFacts);
+            // Topic page is the overlay browse experience — narrative briefs,
+            // moderate latency budget, recency-tolerant. The "browse" profile
+            // matches that shape exactly.
+            const factsText = await deps.queryKnowledgeFacts(
+              entities,
+              maxFacts,
+              { profile: "browse" },
+            );
             res.end(JSON.stringify({ ok: true, query: q, facts_text: factsText, entities }));
           } catch (err) {
             res.end(JSON.stringify({ ok: false, error: String(err) }));

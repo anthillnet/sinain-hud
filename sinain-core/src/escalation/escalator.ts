@@ -815,7 +815,15 @@ ${recentLines.join("\n")}`;
         if (nouns) entities.push(...nouns.map(n => n.toLowerCase()).slice(0, 3));
 
         if (entities.length > 0) {
-          const facts = await this.deps.queryKnowledgeFacts(entities.slice(0, 5), 5);
+          // Escalation path: use the "escalation" profile so retrieval applies
+          // cross-encoder rerank, multi-hop spreading, and structured-format
+          // output. Latency budget is tolerant here — escalations already
+          // sit on the multi-second LLM path.
+          const facts = await this.deps.queryKnowledgeFacts(
+            entities.slice(0, 5),
+            5,
+            { profile: "escalation" },
+          );
           if (facts && facts.trim().length > 20) {
             knowledgeSection = `\n## Relevant Knowledge\n${facts.trim()}`;
           }
