@@ -478,7 +478,9 @@ def _apply_temporal_filter(
     """Filter and boost facts based on temporal_mode.
 
     - "current": keep facts where occurred_end IS NULL or occurred_end > now()
-    - "historical": no filter; boost by proximity of occurred_start to as_of (if set)
+    - "historical": no filter, but reorder by proximity of occurred_start to
+      as_of (when provided) so the most contemporaneous facts surface first.
+      Facts without occurred_start are kept but ranked at the tail.
     - "any": no-op
     """
     if mode == "any":
@@ -495,8 +497,25 @@ def _apply_temporal_filter(
                 kept.append(f)
         return kept
     if mode == "historical":
-        # Phase 3: boost by occurred_start proximity to as_of. Phase 1: pass through.
-        return facts
+        if not as_of:
+            return facts  # nothing to anchor against
+        try:
+            anchor = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return facts
+        # Sort by absolute distance between occurred_start and anchor.
+        # Facts without occurred_start get pushed to the tail via a large
+        # sentinel — they're still returned, just deprioritized.
+        def _distance(f: dict) -> float:
+            os = f.get("occurred_start")
+            if not os or not isinstance(os, str):
+                return 10 ** 9  # tail sentinel
+            try:
+                d = datetime.fromisoformat(os.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                return 10 ** 9
+            return abs((d - anchor).total_seconds())
+        return sorted(facts, key=_distance)
     return facts
 
 
@@ -508,8 +527,11 @@ def _format_results(
     """Format retrieval output for the caller.
 
     - "facts": current list[dict] shape (default, unchanged).
-    - "triples": list of (entity, attribute, value, confidence, occurred_start, occurred_end).
-    - "narrative" / "structured": stubs that fall through to facts in Phase 1.
+    - "triples": list of EAV records including temporal columns.
+    - "structured": nested dict per fact with provenance, temporal bounds,
+       supporting facts, and source session reference. Deterministic — no LLM.
+    - "narrative": per-entity LLM-summarized briefs grouped by canonical entity,
+       cached by (canonical_id, mentioned_at) with a 1h TTL.
     """
     if format == "facts":
         return facts
@@ -528,8 +550,206 @@ def _format_results(
                 "mentioned_at": f.get("mentioned_at"),
             })
         return out
-    # narrative / structured — Phase 3. Phase 1 stub: return facts unchanged.
+    if format == "structured":
+        return _format_structured(facts, db_path)
+    if format == "narrative":
+        return _format_narrative(facts, db_path)
     return facts
+
+
+def _format_structured(facts: list[dict], db_path: str) -> list[dict]:
+    """Deterministic rich format: fact + temporal + provenance + linked entities.
+
+    Pulls extra metadata for each fact in two batched queries (one for ref
+    edges, one for session references) so this stays cheap even for 10+ facts.
+    Designed for OpenClaw-style escalation: the consumer gets enough context
+    to reason about provenance and supporting facts without a second round-trip.
+    """
+    if not facts:
+        return []
+    fact_ids = [f.get("entity_id", "") for f in facts if f.get("entity_id")]
+    if not fact_ids:
+        return [dict(f) for f in facts]
+
+    # Bulk-load ref edges (about/mentions/session) for all facts in one query
+    refs_by_fact: dict[str, list[tuple[str, str]]] = {}
+    sessions_by_fact: dict[str, str | None] = {}
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+        placeholders = ",".join("?" for _ in fact_ids)
+        rows = store._conn.execute(
+            f"SELECT entity_id, attribute, value FROM triples "
+            f"WHERE entity_id IN ({placeholders}) "
+            f"AND value_type = 'ref' AND retracted = 0",
+            tuple(fact_ids),
+        ).fetchall()
+        for r in rows:
+            eid = r["entity_id"]
+            attr = r["attribute"]
+            val = r["value"]
+            if attr == "session":
+                sessions_by_fact[eid] = val
+            else:
+                refs_by_fact.setdefault(eid, []).append((attr, val))
+        store.close()
+    except Exception:
+        pass
+
+    out = []
+    for f in facts:
+        eid = f.get("entity_id", "")
+        out.append({
+            "fact_id": eid,
+            "text": f.get("value", ""),
+            "entity": f.get("entity", ""),
+            "confidence": f.get("confidence", ""),
+            "kind": f.get("kind", "distilled"),
+            "when_occurred": {
+                "start": f.get("occurred_start"),
+                "end": f.get("occurred_end"),
+            },
+            "last_mentioned": f.get("mentioned_at"),
+            "first_seen": f.get("first_seen"),
+            "links": [
+                {"relation": rel, "target": tgt}
+                for rel, tgt in refs_by_fact.get(eid, [])
+            ],
+            "source_session": sessions_by_fact.get(eid),
+            "reinforce_count": f.get("reinforce_count", "1"),
+        })
+    return out
+
+
+def _narrative_cache_ttl_seconds() -> int:
+    """How long an entity-brief cache entry lives. 1h matches mentioned_at granularity."""
+    return 3600
+
+
+_NARRATIVE_PROMPT = """\
+You are summarizing what is currently known about a single entity for an AI agent's \
+working context. Produce ONE concise narrative (1-2 sentences) that integrates the \
+provided facts.
+
+Rules:
+- Lead with the entity's current state. Mention past states only if they add context.
+- Preserve temporal evolution explicitly when facts show change over time.
+- Cite specific dates/numbers when they appear in source facts.
+- Do not invent details not present in the facts.
+- Aim for 30-60 words — dense, not exhaustive.
+
+Respond with ONLY the narrative sentence(s). No JSON, no preamble."""
+
+
+def _format_narrative(facts: list[dict], db_path: str) -> list[dict]:
+    """Per-entity LLM-summarized brief with TTL cache.
+
+    Groups facts by entity, renders a 1-2 sentence brief per entity via LLM,
+    and caches per (entity_name, latest mentioned_at) so repeated queries on
+    the same entity in the same hour don't re-pay the LLM cost.
+    """
+    if not facts:
+        return []
+    # Group by entity
+    by_entity: dict[str, list[dict]] = {}
+    for f in facts:
+        ent = f.get("entity") or "unknown"
+        if isinstance(ent, list):
+            ent = ent[0] if ent else "unknown"
+        by_entity.setdefault(str(ent), []).append(f)
+
+    out = []
+    for entity_name, group in by_entity.items():
+        # Cache key: entity + max(mentioned_at). When any fact about this
+        # entity is reinforced, mentioned_at advances and the cache invalidates.
+        latest_mention = max(
+            (f.get("mentioned_at") or f.get("first_seen") or "" for f in group),
+            default="",
+        )
+        cache_key = (entity_name, latest_mention)
+        cached = _narrative_cache_lookup(cache_key)
+        if cached is not None:
+            out.append({
+                "entity": entity_name,
+                "brief": cached,
+                "fact_count": len(group),
+                "cache_hit": True,
+            })
+            continue
+
+        brief = _generate_narrative_brief(entity_name, group)
+        _narrative_cache_store(cache_key, brief)
+        out.append({
+            "entity": entity_name,
+            "brief": brief,
+            "fact_count": len(group),
+            "cache_hit": False,
+        })
+    return out
+
+
+# Process-local TTL cache for narrative briefs. {(entity, mention_ts): (text, expires_at)}
+_NARRATIVE_CACHE: dict[tuple, tuple[str, float]] = {}
+
+
+def _narrative_cache_lookup(key: tuple) -> str | None:
+    """Return cached brief if still within TTL, else None."""
+    import time as _time
+    entry = _NARRATIVE_CACHE.get(key)
+    if entry is None:
+        return None
+    text, expires_at = entry
+    if _time.time() < expires_at:
+        return text
+    # Lazy eviction
+    _NARRATIVE_CACHE.pop(key, None)
+    return None
+
+
+def _narrative_cache_store(key: tuple, text: str) -> None:
+    """Insert a brief into the TTL cache."""
+    import time as _time
+    _NARRATIVE_CACHE[key] = (text, _time.time() + _narrative_cache_ttl_seconds())
+
+
+def _generate_narrative_brief(entity_name: str, facts: list[dict]) -> str:
+    """LLM-summarize facts about an entity into a 1-2 sentence brief.
+
+    Falls back to a templated "entity: fact; fact; fact" join when the LLM
+    is unavailable — keeps the format usable in sandboxed or offline contexts.
+    """
+    try:
+        from common import call_llm_with_fallback, LLMError
+    except Exception:
+        return _fallback_brief(entity_name, facts)
+
+    numbered = "\n".join(
+        f"- {f.get('value', '')}" + (
+            f" [{f.get('occurred_start')} → {f.get('occurred_end') or 'now'}]"
+            if f.get("occurred_start") else ""
+        )
+        for f in facts[:10]
+    )
+    user_prompt = f"Entity: {entity_name}\n\nFacts:\n{numbered}"
+    try:
+        return call_llm_with_fallback(
+            _NARRATIVE_PROMPT,
+            user_prompt,
+            script="narrative_brief",
+            json_mode=False,
+        ).strip()
+    except (ValueError, LLMError, Exception):
+        return _fallback_brief(entity_name, facts)
+
+
+def _fallback_brief(entity_name: str, facts: list[dict]) -> str:
+    """Deterministic fallback when the LLM isn't reachable."""
+    parts = []
+    for f in facts[:3]:
+        v = f.get("value", "")
+        if v:
+            parts.append(v if len(v) < 100 else v[:97] + "...")
+    return f"{entity_name}: " + " ".join(parts) if parts else entity_name
 
 
 def query_facts_hybrid(
@@ -554,23 +774,28 @@ def query_facts_hybrid(
     Parameters (keyword-only, defaults preserve historical behavior):
         precision_mode:     "fast" skips bi-encoder rerank and shrinks the
                             candidate pool. "balanced" (default) keeps current
-                            behavior. "precise" reserves a slot for cross-encoder
-                            rerank (Phase 3); currently falls through to balanced.
+                            behavior. "precise" runs a cross-encoder rerank
+                            over the top RRF candidates for higher precision
+                            at ~50-150 ms extra latency.
         temporal_mode:      "current" filters to facts whose occurred_end is NULL
-                            or in the future. "historical" reserves a slot for
-                            occurred_start-anchored boosting (Phase 3). "any"
-                            (default) applies no temporal filter.
+                            or in the future. "historical" reorders by proximity
+                            of occurred_start to `as_of` (or no-op without as_of).
+                            "any" (default) applies no temporal filter.
         confidence_floor:   Drop facts whose decayed confidence is below this
                             threshold. Default 0.0 (no floor).
         hop_depth:          0 skips graph expansion. 1 (default) does the
-                            current 1-hop fallback. 2/3 reserved for multi-hop
-                            spreading activation (Phase 3); currently caps at 1.
+                            1-hop fallback. 2/3 activate budget-constrained
+                            spreading activation (~50 nodes/hop) through
+                            mentions/ref edges; confidence_floor is re-applied
+                            to discovered facts.
         latency_budget_ms:  Soft cap. Stages check elapsed wall time and skip
                             later work if exceeded. None = no cap (default).
-        format:             "facts" (default), "triples", "narrative",
-                            "structured". narrative/structured are Phase 3
-                            stubs that fall through to "facts".
-        as_of:              ISO timestamp for point-in-time queries (Phase 3).
+        format:             "facts" (default), "triples", "structured", or
+                            "narrative". structured includes provenance and
+                            temporal bounds; narrative produces 1-2 sentence
+                            per-entity briefs (LLM, TTL-cached).
+        as_of:              ISO timestamp for point-in-time queries — anchors
+                            temporal_mode=historical proximity ordering.
 
     Returns:
         list[dict] for format="facts"/"triples"; downstream formats may return
@@ -822,16 +1047,22 @@ def query_facts_hybrid(
         except ImportError:
             pass  # sentence-transformers not installed — use RRF order
 
-    # precision_mode=precise reserves a slot for cross-encoder rerank (Phase 3).
-    # Phase 1 stub: balanced behavior, but log that the request reached this point
-    # so we can wire the cross-encoder later without changing callers.
-    if precision_mode == "precise":
-        pass  # Phase 3: load cross-encoder/ms-marco-MiniLM-L-6-v2, rerank top-30 → top-K
+    # precision_mode=precise activates cross-encoder reranking. Cross-encoders
+    # score (query, document) pairs jointly, which captures relevance signal
+    # the bi-encoder cosine misses. Cost: ~50-150ms on 30 candidates. We
+    # respect the latency budget and fall back gracefully when the model is
+    # missing from the environment (sandboxed installs without extra weights).
+    if precision_mode == "precise" and not budget_exceeded() and len(results) > 1:
+        try:
+            results = _cross_encoder_rerank(query, results, top_k=max_facts)
+        except Exception as e:
+            print(f"[warn] cross-encoder rerank failed (non-fatal): {e}", file=sys.stderr)
 
-    # Graph expansion. hop_depth=0 skips entirely. hop_depth=1 is current behavior.
-    # hop_depth>=2 is reserved for Phase 3 multi-hop spreading activation; Phase 1
-    # caps at 1 hop to avoid surprise latency.
-    if hop_depth >= 1 and results and len(results) < max_facts and not budget_exceeded():
+    # Graph expansion. hop_depth=0 skips entirely. hop_depth=1 = current 1-hop
+    # behavior. hop_depth>=2 activates budget-constrained spreading activation
+    # across mentions/ref edges. We always need to keep results bounded by
+    # max_facts and not_budget_exceeded so a deep query can't blow the budget.
+    if hop_depth == 1 and results and len(results) < max_facts and not budget_exceeded():
         seen_ids = {f.get("entity_id", "") for f in results}
         try:
             from triplestore import TripleStore
@@ -852,9 +1083,130 @@ def query_facts_hybrid(
             store.close()
         except Exception:
             pass
+    elif hop_depth >= 2 and results and not budget_exceeded():
+        try:
+            results = _multi_hop_expansion(
+                db_path, results, max_facts=max_facts,
+                hop_depth=hop_depth, confidence_floor=confidence_floor,
+                budget_check=budget_exceeded,
+            )
+        except Exception as e:
+            print(f"[warn] multi-hop expansion failed (non-fatal): {e}", file=sys.stderr)
 
     final = results[:max_facts]
     return _format_results(final, format, db_path)
+
+
+def _cross_encoder_rerank(query: str, facts: list[dict], top_k: int) -> list[dict]:
+    """Pairwise rerank with a cross-encoder. Loads the model lazily on first call.
+
+    Cross-encoders are slow per-pair vs bi-encoders but score query × document
+    jointly, so they catch relevance the bi-encoder cosine misses (e.g. query
+    asks for "when X happened" but the bi-encoder ranks any mention of X
+    equally). We only rerank the top-30 RRF survivors — running cross-encoder
+    on a wide candidate pool is what makes it expensive.
+    """
+    from sentence_transformers import CrossEncoder
+    if not hasattr(_cross_encoder_rerank, "_model"):
+        # ms-marco-MiniLM-L-6-v2 is the sweet spot: ~80MB, ~50ms/query for
+        # 30 candidates on CPU. For tighter bundles, a quantized ONNX
+        # variant can be dropped in here without changing the call site.
+        _cross_encoder_rerank._model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    model = _cross_encoder_rerank._model
+
+    # Bound the pool — pairwise scoring is O(N), keep it cheap.
+    pool = facts[:30]
+    pairs = [(query, f.get("value", "")) for f in pool]
+    if not pairs:
+        return facts
+    scores = model.predict(pairs)
+    ranked = sorted(zip(scores, pool), key=lambda x: -x[0])
+    return [f for _, f in ranked[:top_k]]
+
+
+def _multi_hop_expansion(
+    db_path: str,
+    seed_facts: list[dict],
+    *,
+    max_facts: int,
+    hop_depth: int,
+    confidence_floor: float,
+    budget_check,
+) -> list[dict]:
+    """Budget-constrained spreading activation through the entity graph.
+
+    Starts from the entities referenced by seed_facts, follows mentions/ref
+    edges up to `hop_depth` levels deep, and merges newly discovered facts
+    into the result set. Per-query node budget caps the total exploration to
+    keep latency predictable on densely-connected graphs.
+
+    Node budget scales with hop_depth: depth=2 visits ~50 nodes, depth=3 ~100.
+    We also re-apply confidence_floor on discovered facts so a deep walk
+    can't drag in stale low-confidence neighbors.
+    """
+    from triplestore import TripleStore
+
+    node_budget = 50 * hop_depth  # 100 for depth=2, 150 for depth=3
+    visited_entities: set[str] = set()
+    seen_fact_ids: set[str] = {f.get("entity_id", "") for f in seed_facts}
+    results: list[dict] = list(seed_facts)
+
+    # Seed frontier: pull "about"/"mentions" ref targets from each seed fact
+    store = TripleStore(db_path)
+    try:
+        frontier: set[str] = set()
+        for fact in seed_facts:
+            eid = fact.get("entity_id", "")
+            if not eid:
+                continue
+            attrs = store.entity(eid)
+            for attr_name, values in attrs.items():
+                if attr_name in ("about", "mentions"):
+                    for v in (values if isinstance(values, list) else [values]):
+                        if isinstance(v, str) and v.startswith("entity:"):
+                            frontier.add(v)
+
+        for hop in range(hop_depth):
+            if not frontier or budget_check() or len(visited_entities) >= node_budget:
+                break
+            next_frontier: set[str] = set()
+            for ent_node in frontier:
+                if budget_check() or len(visited_entities) >= node_budget:
+                    break
+                if ent_node in visited_entities:
+                    continue
+                visited_entities.add(ent_node)
+
+                # Pull facts that link to this entity via about/mentions
+                for src_eid, _attr in store.backrefs(ent_node):
+                    if not src_eid.startswith("fact:") or src_eid in seen_fact_ids:
+                        continue
+                    if len(results) >= max_facts * 2:  # double-budget to leave room for rerank
+                        break
+                    attrs = store.entity(src_eid)
+                    if not attrs:
+                        continue
+                    nfact = {"entity_id": src_eid}
+                    for a, vs in attrs.items():
+                        if a != "tag":
+                            nfact[a] = vs[0] if len(vs) == 1 else vs
+                    # Apply confidence floor on the hop expansion too — a
+                    # cheap stale-neighbor filter that compounds over hops.
+                    filtered = _apply_confidence_floor([nfact], confidence_floor)
+                    if filtered:
+                        results.append(filtered[0])
+                        seen_fact_ids.add(src_eid)
+
+                # Cooccurring entities feed the next hop
+                for cooc_ent, _cnt in store.cooccurring(ent_node, limit=5):
+                    if cooc_ent not in visited_entities:
+                        next_frontier.add(cooc_ent)
+
+            frontier = next_frontier
+    finally:
+        store.close()
+
+    return results[:max_facts]
 
 
 def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
