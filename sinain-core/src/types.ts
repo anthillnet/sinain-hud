@@ -488,6 +488,29 @@ export interface PermissionsConfig {
   autoApproveTools: string[];
 }
 
+// ── Knowledge query parameter surface ──
+//
+// Mirrors sinain-hud-plugin/sinain-memory/query_params.py — that file is the
+// canonical source of truth. When you add a value here, update the Python
+// constants too. A drift test compares the two.
+
+export type PrecisionMode = "fast" | "balanced" | "precise";
+export type TemporalMode = "current" | "historical" | "any";
+export type ResultFormat = "facts" | "triples" | "narrative" | "structured";
+export type QueryProfile = "agent-tick" | "escalation" | "mcp-default" | "browse" | "eval";
+
+/** Optional knobs for knowledge retrieval. Defaults match today's behavior. */
+export interface KnowledgeQueryOptions {
+  precisionMode?: PrecisionMode;
+  temporalMode?: TemporalMode;
+  confidenceFloor?: number;
+  hopDepth?: number;
+  latencyBudgetMs?: number | null;
+  format?: ResultFormat;
+  asOf?: string;
+  profile?: QueryProfile;
+}
+
 // ── Full core config ──
 
 export interface CoreConfig {

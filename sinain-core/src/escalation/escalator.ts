@@ -32,7 +32,11 @@ export interface EscalatorDeps {
   profiler?: Profiler;
   feedbackStore?: FeedbackStore;
   signalCollector?: SignalCollector;
-  queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
+  queryKnowledgeFacts?: (
+    entities: string[],
+    maxFacts: number,
+    options?: import("../types.js").KnowledgeQueryOptions,
+  ) => Promise<string>;
   /** Returns the currently-selected spawn-lane agent from the bare-agent
    *  roster ("" = Off). When a local agent is selected, dispatchSpawnTask
    *  prefers the HTTP bare-agent path over the OpenClaw gateway WS path,

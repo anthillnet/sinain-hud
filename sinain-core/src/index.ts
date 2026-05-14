@@ -46,7 +46,11 @@ function resolveLocalMemoryDir(): string {
  * Checks local (~/.sinain/memory) first, then workspace (~/.openclaw/workspace/memory).
  * Merges results, deduplicates, returns up to maxFacts.
  */
-async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
+async function queryKnowledgeFactsMulti(
+  entities: string[],
+  maxFacts: number,
+  options?: import("./types.js").KnowledgeQueryOptions,
+): Promise<string> {
   const { execFileSync } = await import("node:child_process");
   const { resolve } = await import("node:path");
   const { dirname } = await import("node:path");
@@ -70,6 +74,17 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
     try {
       const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
+      // Phase 4: forward retrieval params to the CLI. Defaults are preserved
+      // for callers that pass no options — agent loop and escalator behavior
+      // is unchanged unless they opt in via the new fields.
+      if (options?.profile) args.push("--profile", options.profile);
+      if (options?.precisionMode) args.push("--precision-mode", options.precisionMode);
+      if (options?.temporalMode) args.push("--temporal-mode", options.temporalMode);
+      if (options?.confidenceFloor !== undefined) args.push("--confidence-floor", String(options.confidenceFloor));
+      if (options?.hopDepth !== undefined) args.push("--hop-depth", String(options.hopDepth));
+      if (options?.latencyBudgetMs != null) args.push("--latency-budget-ms", String(options.latencyBudgetMs));
+      if (options?.format) args.push("--result-format", options.format);
+      if (options?.asOf) args.push("--as-of", options.asOf);
       const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
       if (out) {
         const parsed = JSON.parse(out);

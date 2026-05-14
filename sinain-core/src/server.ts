@@ -1557,7 +1557,11 @@ export interface ServerDeps {
   isEscalationPaused?: () => boolean;
   respondEscalation?: (id: string, response: string) => any;
   getKnowledgeDocPath?: () => string | null;
-  queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
+  queryKnowledgeFacts?: (
+    entities: string[],
+    maxFacts: number,
+    options?: import("./types.js").KnowledgeQueryOptions,
+  ) => Promise<string>;
   listKnowledgeEntities?: (max: number) => Promise<string>;
   queryKnowledgeAsOf?: (entity: string, date: string) => Promise<string>;
   exportKnowledge?: (domain: string | null, max: number) => Promise<string>;
@@ -1818,14 +1822,56 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       if (req.method === "GET" && url.pathname === "/knowledge/facts") {
-        // Query knowledge graph for entity-matched facts
+        // Query knowledge graph for entity-matched facts.
+        // Phase 4: optional retrieval params forwarded to graph_query.py.
+        // Schema mirrors KnowledgeQueryOptions in types.ts.
         const entitiesParam = url.searchParams.get("entities") || "";
         const maxFacts = Math.min(parseInt(url.searchParams.get("max") || "5"), 20);
         const entities = entitiesParam.split(",").map(e => e.trim()).filter(Boolean);
 
+        const options: import("./types.js").KnowledgeQueryOptions = {};
+        const precisionMode = url.searchParams.get("precision_mode");
+        if (precisionMode === "fast" || precisionMode === "balanced" || precisionMode === "precise") {
+          options.precisionMode = precisionMode;
+        }
+        const temporalMode = url.searchParams.get("temporal_mode");
+        if (temporalMode === "current" || temporalMode === "historical" || temporalMode === "any") {
+          options.temporalMode = temporalMode;
+        }
+        const confFloorStr = url.searchParams.get("confidence_floor");
+        if (confFloorStr !== null) {
+          const cf = parseFloat(confFloorStr);
+          if (Number.isFinite(cf) && cf >= 0.0 && cf <= 1.0) options.confidenceFloor = cf;
+        }
+        const hopDepthStr = url.searchParams.get("hop_depth");
+        if (hopDepthStr !== null) {
+          const hd = parseInt(hopDepthStr, 10);
+          if (Number.isFinite(hd) && hd >= 0 && hd <= 3) options.hopDepth = hd;
+        }
+        const latencyStr = url.searchParams.get("latency_budget_ms");
+        if (latencyStr !== null) {
+          const lb = parseInt(latencyStr, 10);
+          if (Number.isFinite(lb) && lb > 0) options.latencyBudgetMs = lb;
+        }
+        const format = url.searchParams.get("format");
+        if (format === "facts" || format === "triples" || format === "narrative" || format === "structured") {
+          options.format = format;
+        }
+        const asOf = url.searchParams.get("as_of");
+        if (asOf) options.asOf = asOf;
+        const profile = url.searchParams.get("profile");
+        if (profile === "agent-tick" || profile === "escalation" || profile === "mcp-default"
+            || profile === "browse" || profile === "eval") {
+          options.profile = profile;
+        }
+
         if (deps.queryKnowledgeFacts) {
           try {
-            const facts = await deps.queryKnowledgeFacts(entities, maxFacts);
+            const facts = await deps.queryKnowledgeFacts(
+              entities,
+              maxFacts,
+              Object.keys(options).length > 0 ? options : undefined,
+            );
             res.end(JSON.stringify({ ok: true, facts }));
           } catch (err) {
             res.end(JSON.stringify({ ok: true, facts: [], error: String(err) }));

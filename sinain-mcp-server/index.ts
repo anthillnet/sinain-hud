@@ -241,14 +241,37 @@ server.tool(
 // 8b. sinain_knowledge_query (graph query — entity-based lookup)
 // Queries sinain-core's /knowledge/facts API which merges both local and workspace DBs.
 // Falls back to local graph_query.py (workspace DB only) if sinain-core is unreachable.
+//
+// Parameter surface mirrors sinain-hud-plugin/sinain-memory/query_params.py.
+// Defaults preserve historical behavior — callers that pass only entities +
+// max_facts see no change from prior MCP versions.
 server.tool(
   "sinain_knowledge_query",
-  "Query the knowledge graph for facts about specific entities/domains (searches both local and workspace databases)",
+  "Query the knowledge graph for facts about specific entities/domains. Optional knobs: precision_mode (fast/balanced/precise), temporal_mode (current/historical/any), hop_depth (0-3), format (facts/triples/narrative/structured), profile (agent-tick/escalation/browse/eval).",
   {
     entities: z.array(z.string()).optional().default([]),
     max_facts: z.number().optional().default(5),
+    precision_mode: z.enum(["fast", "balanced", "precise"]).optional(),
+    temporal_mode: z.enum(["current", "historical", "any"]).optional(),
+    confidence_floor: z.number().min(0).max(1).optional(),
+    hop_depth: z.number().int().min(0).max(3).optional(),
+    latency_budget_ms: z.number().int().positive().optional(),
+    format: z.enum(["facts", "triples", "narrative", "structured"]).optional(),
+    as_of: z.string().optional(),
+    profile: z.enum(["agent-tick", "escalation", "mcp-default", "browse", "eval"]).optional(),
   },
-  async ({ entities, max_facts }) => {
+  async ({
+    entities,
+    max_facts,
+    precision_mode,
+    temporal_mode,
+    confidence_floor,
+    hop_depth,
+    latency_budget_ms,
+    format,
+    as_of,
+    profile,
+  }) => {
     // Try sinain-core API first (merges both local + workspace DBs)
     if (entities.length > 0) {
       try {
@@ -256,6 +279,14 @@ server.tool(
           entities: entities.join(","),
           max: String(max_facts),
         });
+        if (precision_mode) params.set("precision_mode", precision_mode);
+        if (temporal_mode) params.set("temporal_mode", temporal_mode);
+        if (confidence_floor !== undefined) params.set("confidence_floor", String(confidence_floor));
+        if (hop_depth !== undefined) params.set("hop_depth", String(hop_depth));
+        if (latency_budget_ms !== undefined) params.set("latency_budget_ms", String(latency_budget_ms));
+        if (format) params.set("format", format);
+        if (as_of) params.set("as_of", as_of);
+        if (profile) params.set("profile", profile);
         const data = await coreRequest("GET", `/knowledge/facts?${params}`);
         if (data.ok && data.facts) {
           return textResult(stripPrivateTags(data.facts));
@@ -273,6 +304,16 @@ server.tool(
       if (entities.length > 0) {
         args.push("--entities", JSON.stringify(entities));
       }
+      // Same parameter forwarding as the HTTP path so the fallback honors
+      // the caller's requested retrieval profile.
+      if (profile) args.push("--profile", profile);
+      if (precision_mode) args.push("--precision-mode", precision_mode);
+      if (temporal_mode) args.push("--temporal-mode", temporal_mode);
+      if (confidence_floor !== undefined) args.push("--confidence-floor", String(confidence_floor));
+      if (hop_depth !== undefined) args.push("--hop-depth", String(hop_depth));
+      if (latency_budget_ms !== undefined) args.push("--latency-budget-ms", String(latency_budget_ms));
+      if (format) args.push("--result-format", format);
+      if (as_of) args.push("--as-of", as_of);
       const output = await runScript(args);
       return textResult(stripPrivateTags(output));
     } catch (err: any) {
