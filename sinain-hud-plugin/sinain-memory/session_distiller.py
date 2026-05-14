@@ -38,8 +38,16 @@ The transcript contains feed items from sinain-core:
 
 Extract:
 1. whatHappened: 2-3 sentences summarizing what occurred in this session
-2. facts: up to 15 concrete factual claims. Each must be a self-contained sentence. \
-IMPORTANT — spread across these dimensions (do not let one theme dominate):
+2. facts: up to 15 concrete factual claims. Each fact is an OBJECT with:
+   - "text": self-contained factual sentence
+   - "occurredStart" (optional ISO date): earliest time this fact was true in the world.
+     Set this when the source mentions a date or relative anchor ("yesterday",
+     "last week", "in September 2024"). Omit when the fact is a stable property
+     with no time anchor.
+   - "occurredEnd" (optional ISO date): most recent time this fact was true.
+     Set this for facts that are bounded ("until June 2026", "before the layoffs",
+     "ended last quarter"). Omit when the fact is still current.
+   IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHO: people mentioned, their roles, backgrounds, relationships to each other
    - WHAT: specific claims, properties, descriptions of things discussed
    - HOW MUCH: any numbers, quantities, dates, durations, counts stated
@@ -47,30 +55,40 @@ IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHAT'S NEXT: commitments, action items, plans, deadlines
    If you have 5+ facts about one dimension and 0 about another that was discussed, \
 you are missing something. Breadth over depth.
-   Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
-   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
-   Good: "The meeting is 45 minutes, scheduled for Tuesday"
-   Bad: "client-understanding-key: True"
-   Bad: five variations of "Al-Futaim is moving to the cloud"
-3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
-4. entities: named things discussed or interacted with — as objects with name \
-(lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
-service, framework, error, whatever fits the context).
-   Examples: {"name": "citibank", "type": "org"}, {"name": "auth-module", "type": "file"}, \
-{"name": "react-native", "type": "framework"}
-5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
-6. preferences: up to 3 user preferences or habits observed
+   Good: {"text": "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"}
+   Good: {"text": "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"}
+   Good: {"text": "The meeting is 45 minutes, scheduled for Tuesday", "occurredStart": "2026-05-12"}
+   Good: {"text": "Sarah was CTO at Acme from 2020 to 2023", "occurredStart": "2020-01-01", "occurredEnd": "2023-12-31"}
+   Bad: {"text": "client-understanding-key: True"}
+3. decisions: up to 5 decisions or agreements made. SAME object shape as facts
+   (text + optional occurredStart/occurredEnd).
+4. entities: named things discussed or interacted with — as objects with:
+   - "name" (lowercase-hyphenated slug)
+   - "type" (freeform — person, org, tool, file, concept, service, framework, error, whatever fits)
+   - "aliases" (optional list of strings): alternate surface forms the source used
+     to refer to this entity ("the CEO", "Sarah", "Sarah Chen"). Helps coreference
+     resolution. Omit when the entity was always referred to by one name.
+   Examples:
+     {"name": "citibank", "type": "org"}
+     {"name": "sarah-chen", "type": "person", "aliases": ["Sarah", "the CEO", "Sarah Chen"]}
+     {"name": "react-native", "type": "framework"}
+5. patterns: up to 3 reusable techniques or workflows (plain strings — no time anchors)
+6. preferences: up to 3 user preferences or habits observed (plain strings)
 
 If existing entities are provided, reference them by name to enable reinforcement.
 Focus on CONCRETE, SPECIFIC knowledge. Skip vague observations.
 If the session was idle or empty, say so briefly.
 
+For backwards compatibility, facts and decisions may be emitted as plain strings
+if no temporal anchor exists — the parser accepts both shapes. Prefer the object
+shape when you've detected a temporal anchor or an alias.
+
 Respond with ONLY a JSON object:
 {
   "whatHappened": "string",
-  "facts": ["self-contained factual sentence", ...],
-  "decisions": ["decision sentence with who/what/when", ...],
-  "entities": [{"name": "citibank", "type": "org"}, {"name": "artom", "type": "person"}, ...],
+  "facts": [{"text": "...", "occurredStart": "...", "occurredEnd": "..."}, ...],
+  "decisions": [{"text": "...", "occurredStart": "..."}, ...],
+  "entities": [{"name": "citibank", "type": "org", "aliases": ["Citi"]}, ...],
   "patterns": ["reusable technique or workflow", ...],
   "preferences": ["user preference or habit", ...],
   "isEmpty": false

@@ -310,11 +310,81 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
         return []
 
 
-def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
-    """Merge multiple facts about the same entity into consolidated facts.
+_CONSOLIDATION_PROMPT = """\
+You are reviewing multiple stored facts about the same entity to detect \
+redundancy, contradiction, and state evolution.
 
-    Pure code — no LLM. Concatenates fact values with "; " separator.
-    Runs at shutdown only (not incremental passes).
+You will receive:
+- The entity name
+- A numbered list of facts currently stored about it
+
+Your job: produce ONE integrated narrative fact that captures the entity's \
+current truth, then identify which original facts should be retracted.
+
+Rules:
+- The narrative MUST be a single self-contained sentence.
+- If facts contradict each other in a way that reflects state change over time \
+("was X, then became Y"), the narrative MUST preserve that evolution explicitly \
+("Used to X; now Y" or "X from 2020 to 2023, then Y").
+- If facts are simply redundant (same claim worded differently), pick the most \
+informative wording.
+- If a fact is clearly outdated, retract it. If two facts contradict and only one \
+is still true, retract the outdated one.
+- Set narrativeOccurredStart only if a clear earliest temporal anchor exists.
+- Set narrativeOccurredEnd only if the integrated fact is bounded (rare — most \
+current-state narratives have no end).
+- retractIds MUST be a subset of the input fact indices (0-based).
+
+Respond with ONLY JSON:
+{
+  "narrative": "single-sentence integrated fact",
+  "narrativeOccurredStart": "YYYY-MM-DD or null",
+  "narrativeOccurredEnd": "YYYY-MM-DD or null",
+  "retractIndices": [0, 2, 3]
+}"""
+
+
+def _llm_consolidate(entity_name: str, facts: list[tuple[str, str]]) -> dict | None:
+    """Ask the LLM to produce an integrated narrative + retraction plan.
+
+    Returns parsed JSON or None on failure. Caller must handle None by leaving
+    facts as-is — consolidation is best-effort, never destructive on error.
+    """
+    numbered = "\n".join(f"{i}. {val}" for i, (_, val) in enumerate(facts))
+    user_prompt = f"Entity: {entity_name}\n\nFacts:\n{numbered}"
+    try:
+        raw = call_llm_with_fallback(
+            _CONSOLIDATION_PROMPT,
+            user_prompt,
+            script="consolidation",
+            json_mode=True,
+        )
+        return extract_json(raw)
+    except (ValueError, LLMError) as e:
+        print(f"  [consolidate] LLM failed for {entity_name}: {e}", file=sys.stderr)
+        return None
+
+
+def _consolidate_entity_facts(db_path: str, min_facts: int = 3, use_llm: bool = True) -> int:
+    """LLM-judged contradiction-aware consolidation.
+
+    For each entity with at least `min_facts` stored facts, an LLM classifies
+    the set as redundant / contradictory / state-evolution / independent and
+    produces a single narrative fact that integrates the current truth.
+    Outdated or redundant originals are retracted (soft, via valid_to).
+
+    With use_llm=False, the function is a no-op — useful for tests that don't
+    want to incur LLM cost. The legacy "; "-join consolidation has been removed
+    because it conflated state-change with redundancy and silently flattened
+    temporal evolution.
+
+    Args:
+        db_path: path to the knowledge graph DB
+        min_facts: minimum fact count to consider for consolidation (default 3)
+        use_llm: when False, returns 0 without making LLM calls
+
+    Returns:
+        Number of entities consolidated.
     """
     try:
         from triplestore import TripleStore
@@ -336,49 +406,82 @@ def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
             if len(facts) < min_facts:
                 continue
 
-            # Check if a consolidated fact already exists
-            if any(";" in val and len(val) > 100 for _, val in facts):
-                continue  # already consolidated
+            # Skip entities that already have an integrated narrative
+            if any(_looks_consolidated(val) for _, val in facts):
+                continue
 
-            # Deduplicate values (same fact stated differently)
-            seen_values: list[str] = []
-            for _, val in facts:
-                # Skip if very similar to an already-seen value
-                if not any(len(set(val.lower().split()) & set(sv.lower().split())) / max(len(val.split()), 1) > 0.7 for sv in seen_values):
-                    seen_values.append(val)
+            if not use_llm:
+                continue  # bail without modifying anything
 
-            if len(seen_values) < 2:
-                continue  # nothing to consolidate after dedup
+            plan = _llm_consolidate(entity_name, facts)
+            if not plan:
+                continue
 
-            merged_value = "; ".join(seen_values)
-            if len(merged_value) > 500:
-                merged_value = merged_value[:500] + "..."
+            narrative = (plan.get("narrative") or "").strip()
+            retract_indices = plan.get("retractIndices") or []
+            if not narrative or not isinstance(retract_indices, list):
+                continue
+            # Defensive: bound indices to the input range
+            retract_indices = [i for i in retract_indices
+                               if isinstance(i, int) and 0 <= i < len(facts)]
 
-            # Create consolidated fact, retract originals
-            tx = store.begin_tx("consolidation")
-            new_eid = _fact_id(entity_name, "consolidated", merged_value)
+            occ_start = plan.get("narrativeOccurredStart")
+            occ_end = plan.get("narrativeOccurredEnd")
+            # Normalize "null" string and None to None
+            occ_start = occ_start if occ_start and occ_start != "null" else None
+            occ_end = occ_end if occ_end and occ_end != "null" else None
+
+            tx = store.begin_tx("consolidation", metadata=json.dumps({
+                "entity": entity_name,
+                "original_count": len(facts),
+                "retracted_count": len(retract_indices),
+            }))
+            new_eid = _fact_id(entity_name, "consolidated", narrative)
             store.assert_triple(tx, new_eid, "entity", entity_name)
             store.assert_triple(tx, new_eid, "attribute", "consolidated")
-            store.assert_triple(tx, new_eid, "value", merged_value)
+            store.assert_triple(
+                tx, new_eid, "value", narrative,
+                occurred_start=occ_start, occurred_end=occ_end,
+            )
             store.assert_triple(tx, new_eid, "confidence", "0.95")
             store.assert_triple(tx, new_eid, "first_seen", _now_iso())
             store.assert_triple(tx, new_eid, "reinforce_count", str(len(facts)))
-            for tag in _extract_tags(merged_value):
+            store.assert_triple(tx, new_eid, "kind", "consolidated")
+            for tag in _extract_tags(narrative):
                 store.assert_triple(tx, new_eid, "tag", tag)
 
-            # Retract original individual facts
-            for old_eid, _ in facts:
+            # Retract only the facts the LLM flagged as outdated/redundant.
+            # The append-only triplestore preserves them via valid_to for audit.
+            for idx in retract_indices:
+                old_eid, _ = facts[idx]
                 for attr_name in list(store.entity(old_eid).keys()):
                     store.retract_triple(tx, old_eid, attr_name)
 
             consolidated += 1
-            print(f"  [consolidate] {entity_name}: {len(facts)} facts → 1 ({len(merged_value)} chars)", file=sys.stderr)
+            print(
+                f"  [consolidate] {entity_name}: integrated {len(facts)} facts → 1 "
+                f"narrative ({len(narrative)} chars, retracted {len(retract_indices)} originals)",
+                file=sys.stderr,
+            )
 
         store.close()
         return consolidated
     except Exception as e:
         print(f"  [consolidate] failed: {e}", file=sys.stderr)
         return 0
+
+
+def _looks_consolidated(val: str) -> bool:
+    """Heuristic: skip facts that already look like a consolidated narrative.
+
+    Catches both the legacy "; "-join shape AND new-style integrated narratives
+    that mention temporal evolution. Conservative — false negatives just trigger
+    another consolidation pass.
+    """
+    if len(val) > 200 and val.count(";") >= 2:
+        return True  # legacy "; "-joined consolidation
+    lower = val.lower()
+    return ("used to" in lower and "now" in lower) or ("from " in lower and "to " in lower)
 
 
 def _now_iso() -> str:
@@ -417,6 +520,24 @@ def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
     return "general"
 
 
+def _unpack_fact_item(item) -> tuple[str, str | None, str | None]:
+    """Parse a distiller fact/decision entry. Accepts both legacy string shape
+    and the new object shape with optional temporal anchors.
+
+    Legacy:  "Sarah leads platform"
+    New:     {"text": "Sarah leads platform", "occurredStart": "...", "occurredEnd": "..."}
+
+    Returns (text, occurred_start, occurred_end). Missing fields are None.
+    """
+    if isinstance(item, str):
+        return item, None, None
+    if isinstance(item, dict):
+        # Tolerate either "text" or "value" — different LLM passes have used both.
+        text = item.get("text", "") or item.get("value", "") or ""
+        return str(text), item.get("occurredStart"), item.get("occurredEnd")
+    return "", None, None
+
+
 def _facts_to_graph_ops(digest: dict) -> list[dict]:
     """Convert ALL distiller output + raw feed items to graph ops.
 
@@ -444,12 +565,14 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "session_ref": session_eid,
         })
 
-    # Facts (distilled)
-    for fact_text in digest.get("facts", []):
+    # Facts (distilled). Each item may be a string (legacy) or an object with
+    # optional occurredStart/occurredEnd temporal anchors.
+    for raw in digest.get("facts", []):
+        fact_text, occ_start, occ_end = _unpack_fact_item(raw)
         if not fact_text or len(fact_text) < 5:
             continue
         entity = _extract_entity_from_fact(fact_text, known_entities)
-        ops.append({
+        op = {
             "op": "assert",
             "entity": entity,
             "attribute": "value",
@@ -457,14 +580,20 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.9,
             "kind": "distilled",
             "session_ref": session_eid,
-        })
+        }
+        if occ_start:
+            op["occurred_start"] = occ_start
+        if occ_end:
+            op["occurred_end"] = occ_end
+        ops.append(op)
 
-    # Decisions (distilled, lower confidence — time-bound)
-    for decision_text in digest.get("decisions", []):
+    # Decisions (distilled, lower confidence — time-bound). Same dual-shape support.
+    for raw in digest.get("decisions", []):
+        decision_text, occ_start, occ_end = _unpack_fact_item(raw)
         if not decision_text or len(decision_text) < 5:
             continue
         entity = _extract_entity_from_fact(decision_text, known_entities)
-        ops.append({
+        op = {
             "op": "assert",
             "entity": entity,
             "attribute": "value",
@@ -472,7 +601,12 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.7,
             "kind": "distilled",
             "session_ref": session_eid,
-        })
+        }
+        if occ_start:
+            op["occurred_start"] = occ_start
+        if occ_end:
+            op["occurred_end"] = occ_end
+        ops.append(op)
 
     # Patterns + Preferences (distilled)
     for text in digest.get("patterns", []) + digest.get("preferences", []):
@@ -562,6 +696,8 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 value = op_data.get("value", "")
                 confidence = op_data.get("confidence", 0.7)
                 domain = op_data.get("domain", "")
+                occ_start = op_data.get("occurred_start")
+                occ_end = op_data.get("occurred_end")
 
                 if not entity or not attribute or not value:
                     continue
@@ -570,7 +706,13 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 tx = store.begin_tx("knowledge_integrator", metadata=json.dumps({"digest_ts": digest_ts}))
                 store.assert_triple(tx, entity_id, "entity", entity)
                 store.assert_triple(tx, entity_id, "attribute", attribute)
-                store.assert_triple(tx, entity_id, "value", value)
+                # Temporal anchors belong on the canonical "value" triple — that
+                # row represents the fact's claim, so its occurred_start/end
+                # describe when the claim was true in the world.
+                store.assert_triple(
+                    tx, entity_id, "value", value,
+                    occurred_start=occ_start, occurred_end=occ_end,
+                )
                 store.assert_triple(tx, entity_id, "confidence", str(confidence))
                 store.assert_triple(tx, entity_id, "first_seen", digest_ts)
                 store.assert_triple(tx, entity_id, "last_reinforced", digest_ts)
@@ -627,6 +769,9 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 for val in old_reinforced:
                     store.retract_triple(tx, entity_id, "last_reinforced", val)
                 store.assert_triple(tx, entity_id, "last_reinforced", digest_ts)
+                # Update mentioned_at on the value triple — this is the recency
+                # signal used by retrieval's temporal_mode currency boost.
+                store.touch_mention(entity_id, attribute="value")
                 stats["reinforced"] += 1
 
             elif op == "retract":
@@ -654,15 +799,22 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                     if r[0].startswith("entity:"):
                         all_entity_nodes[r[1]] = r[0]
 
-                # Create entity:* nodes from digest entities (with fuzzy dedup)
+                # Create entity:* nodes from digest entities (with fuzzy dedup).
+                # Track aliases per canonical node so we can populate entity_aliases
+                # after the resolve step, and track the set of canonical IDs in
+                # this session so we can record cooccurrence pairs.
                 entity_resolve: dict[str, str] = {}  # {normalized_name: resolved_node_id}
+                aliases_to_record: list[tuple[str, str]] = []  # (canonical_id, alias)
+                session_canonicals: set[str] = set()
                 for ent in (digest_entities or []):
                     if isinstance(ent, dict):
                         ename = _normalize_entity(ent.get("name", ""))
                         etype = ent.get("type", "unknown")
+                        ent_aliases = ent.get("aliases", []) or []
                     else:
                         ename = _normalize_entity(str(ent))
                         etype = "unknown"
+                        ent_aliases = []
                     if not ename or len(ename) < 2:
                         continue
 
@@ -670,8 +822,17 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                     matched_id = _find_matching_entity(ename, all_entity_nodes)
                     if matched_id:
                         entity_resolve[ename] = matched_id
+                        session_canonicals.add(matched_id)
+                        # Even when the entity already exists, the distiller may
+                        # have observed new surface forms — record them.
+                        for a in ent_aliases:
+                            if isinstance(a, str) and a.strip():
+                                aliases_to_record.append((matched_id, a.strip()))
+                        # The original name we resolved away from is itself an
+                        # alias of the canonical — record it too.
                         if matched_id != f"entity:{ename}":
                             print(f"  [graph] alias: \"{ename}\" → {matched_id}", file=sys.stderr)
+                            aliases_to_record.append((matched_id, ename))
                         continue
 
                     entity_node_id = f"entity:{ename}"
@@ -682,6 +843,36 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                         store.assert_triple(tx, entity_node_id, "type", etype)
                     all_entity_nodes[ename] = entity_node_id
                     entity_resolve[ename] = entity_node_id
+                    session_canonicals.add(entity_node_id)
+                    for a in ent_aliases:
+                        if isinstance(a, str) and a.strip():
+                            aliases_to_record.append((entity_node_id, a.strip()))
+
+                # Record aliases. add_alias is idempotent via the (canonical, alias)
+                # primary key so re-running is safe.
+                for canonical_id, alias in aliases_to_record:
+                    try:
+                        store.add_alias(canonical_id, alias, confidence=0.95, source="extracted")
+                    except Exception as e:
+                        print(f"  [graph] alias record failed for {alias}: {e}", file=sys.stderr)
+
+                # Record cooccurrence pairs for entities in this session. The
+                # cooccurrence table dedupes via canonical lexicographic ordering
+                # so direction doesn't matter; we increment session_count once
+                # per ordered pair per integration call.
+                canonicals = sorted(session_canonicals)
+                for i in range(len(canonicals)):
+                    for j in range(i + 1, len(canonicals)):
+                        try:
+                            store.record_cooccurrence(canonicals[i], canonicals[j])
+                        except Exception:
+                            pass
+                if aliases_to_record or len(canonicals) >= 2:
+                    print(
+                        f"  [graph] aliases={len(aliases_to_record)} "
+                        f"cooccur_pairs={(len(canonicals) * (len(canonicals) - 1)) // 2}",
+                        file=sys.stderr,
+                    )
 
                 # Link facts to their entity nodes via "about" ref edges
                 for op_data in ops:
