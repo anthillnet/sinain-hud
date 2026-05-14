@@ -110,15 +110,17 @@ QUERY_PROFILES: dict[str, dict] = {
         "format": "narrative",
     },
 
-    # Eval harness: precise + multi-hop + structured. Reproduces escalation
-    # behavior plus the structured format the judge consumes.
+    # Eval harness: precise + multi-hop, but format=facts because the QA
+    # consumer formats results via format_facts_compact which reads the facts
+    # shape (entityId/value). The structured shape is for callers that consume
+    # the nested dict directly (escalation, MCP clients with custom parsing).
     "eval": {
         "precision_mode": "precise",
         "temporal_mode": "any",
         "confidence_floor": 0.0,
         "hop_depth": 2,
         "latency_budget_ms": None,
-        "format": "structured",
+        "format": "facts",
     },
 }
 

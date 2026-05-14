@@ -1266,14 +1266,19 @@ def main() -> None:
         else:
             updated_lines.append(line)
 
-    # Add novel facts as new playbook lines (no LLM — just format as bullet points)
-    for fact in digest.get("facts", [])[:5]:  # cap at 5 new lines per pass
-        fact_tags = set(_extract_tags(fact))
+    # Add novel facts as new playbook lines (no LLM — just format as bullet points).
+    # Phase 2: facts may be strings (legacy) or {"text", "occurredStart", ...} objects.
+    # _unpack_fact_item normalizes both shapes; _extract_tags needs a plain string.
+    for raw_fact in digest.get("facts", [])[:5]:  # cap at 5 new lines per pass
+        fact_text, _occ_start, _occ_end = _unpack_fact_item(raw_fact)
+        if not fact_text:
+            continue
+        fact_tags = set(_extract_tags(fact_text))
         # Only add if no existing playbook line covers this
         if not any(set(_extract_tags(l)) & fact_tags for l in playbook_lines if len(fact_tags) > 1):
-            new_line = f"- {fact} (seen 1)"
+            new_line = f"- {fact_text} (seen 1)"
             updated_lines.append(new_line)
-            changes["added"].append(fact[:60])
+            changes["added"].append(fact_text[:60])
 
     # Keep playbook under 50 lines
     if len(updated_lines) > 50:
