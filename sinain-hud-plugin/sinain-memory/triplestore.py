@@ -44,22 +44,47 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 CREATE TABLE IF NOT EXISTS triples (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    tx_id         INTEGER NOT NULL REFERENCES transactions(tx_id),
-    entity_id     TEXT    NOT NULL,
-    attribute     TEXT    NOT NULL,
-    value         TEXT    NOT NULL,
-    value_type    TEXT    NOT NULL DEFAULT 'string',
-    retracted     INTEGER NOT NULL DEFAULT 0,
-    retracted_tx  INTEGER,
-    valid_to      TEXT,
-    created_at    TEXT    NOT NULL
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tx_id           INTEGER NOT NULL REFERENCES transactions(tx_id),
+    entity_id       TEXT    NOT NULL,
+    attribute       TEXT    NOT NULL,
+    value           TEXT    NOT NULL,
+    value_type      TEXT    NOT NULL DEFAULT 'string',
+    retracted       INTEGER NOT NULL DEFAULT 0,
+    retracted_tx    INTEGER,
+    valid_to        TEXT,
+    created_at      TEXT    NOT NULL,
+    occurred_start  TEXT,
+    occurred_end    TEXT,
+    mentioned_at    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS entity_types (
     entity_id   TEXT PRIMARY KEY,
     entity_type TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    canonical_id TEXT    NOT NULL,
+    alias        TEXT    NOT NULL,
+    confidence   REAL    NOT NULL DEFAULT 1.0,
+    source       TEXT    NOT NULL DEFAULT 'extracted',
+    created_at   TEXT    NOT NULL,
+    PRIMARY KEY (canonical_id, alias)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alias_lookup ON entity_aliases(alias);
+
+CREATE TABLE IF NOT EXISTS entity_cooccurrence (
+    entity_a       TEXT    NOT NULL,
+    entity_b       TEXT    NOT NULL,
+    session_count  INTEGER NOT NULL DEFAULT 1,
+    last_seen      TEXT    NOT NULL,
+    PRIMARY KEY (entity_a, entity_b)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cooccur_a ON entity_cooccurrence(entity_a);
+CREATE INDEX IF NOT EXISTS idx_cooccur_b ON entity_cooccurrence(entity_b);
 
 -- EAVT: "what does entity X look like?"
 CREATE INDEX IF NOT EXISTS idx_eavt
@@ -165,11 +190,25 @@ class TripleStore:
         self._conn.commit()
 
     def _migrate(self) -> None:
-        """Run schema migrations for existing databases."""
-        # Add valid_to column if missing (added in memory-improvements)
+        """Run schema migrations for existing databases.
+
+        All migrations are additive (ADD COLUMN / CREATE TABLE IF NOT EXISTS)
+        and O(1) on SQLite — safe to run on a live database of any size.
+        """
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(triples)").fetchall()]
+        # valid_to: temporal closure on retraction
         if "valid_to" not in cols:
             self._conn.execute("ALTER TABLE triples ADD COLUMN valid_to TEXT")
+        # Temporal fact representation (memory-service-redesign):
+        # occurred_start / occurred_end model when the fact was true in the world;
+        # mentioned_at models when the fact was last referenced.
+        # All three default to NULL — readers fall back to created_at.
+        if "occurred_start" not in cols:
+            self._conn.execute("ALTER TABLE triples ADD COLUMN occurred_start TEXT")
+        if "occurred_end" not in cols:
+            self._conn.execute("ALTER TABLE triples ADD COLUMN occurred_end TEXT")
+        if "mentioned_at" not in cols:
+            self._conn.execute("ALTER TABLE triples ADD COLUMN mentioned_at TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -214,16 +253,30 @@ class TripleStore:
         attribute: str,
         value: str,
         value_type: str = "string",
+        *,
+        occurred_start: str | None = None,
+        occurred_end: str | None = None,
+        mentioned_at: str | None = None,
     ) -> int:
         """Assert a triple within a transaction. Returns the triple id.
 
         Auto-populates entity_types from entity_id prefix.
+
+        Temporal fields (keyword-only, all optional):
+        - occurred_start: earliest time the fact was true in the world
+        - occurred_end: most recent time the fact was true (NULL = unbounded / still true)
+        - mentioned_at: when the fact was last referenced (defaults to created_at on insert)
         """
         now = _now_iso()
+        # mentioned_at defaults to now on first assertion
+        m_at = mentioned_at if mentioned_at is not None else now
         cur = self._conn.execute(
-            "INSERT INTO triples (tx_id, entity_id, attribute, value, value_type, retracted, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 0, ?)",
-            (tx_id, entity_id, attribute, value, value_type, now),
+            "INSERT INTO triples ("
+            "tx_id, entity_id, attribute, value, value_type, retracted, created_at, "
+            "occurred_start, occurred_end, mentioned_at"
+            ") VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            (tx_id, entity_id, attribute, value, value_type, now,
+             occurred_start, occurred_end, m_at),
         )
         # Upsert entity type
         etype = _entity_type(entity_id)
@@ -233,6 +286,131 @@ class TripleStore:
         )
         self._conn.commit()
         return cur.lastrowid
+
+    def temporal_fields_for(
+        self,
+        entity_ids: list[str],
+        attribute: str = "value",
+    ) -> dict[str, dict[str, str | None]]:
+        """Bulk-fetch temporal columns for fact entities by their primary attribute triple.
+
+        Returns {entity_id: {'occurred_start': ..., 'occurred_end': ..., 'mentioned_at': ...}}.
+        Entities without a matching triple are absent from the result. NULL columns
+        come through as None — readers should treat None as "unbounded" or "default to
+        created_at" depending on the field's semantics.
+        """
+        if not entity_ids:
+            return {}
+        placeholders = ",".join("?" for _ in entity_ids)
+        rows = self._conn.execute(
+            f"SELECT entity_id, occurred_start, occurred_end, mentioned_at "
+            f"FROM triples WHERE entity_id IN ({placeholders}) "
+            f"AND attribute = ? AND retracted = 0",
+            (*entity_ids, attribute),
+        ).fetchall()
+        return {
+            r["entity_id"]: {
+                "occurred_start": r["occurred_start"],
+                "occurred_end": r["occurred_end"],
+                "mentioned_at": r["mentioned_at"],
+            }
+            for r in rows
+        }
+
+    def touch_mention(self, entity_id: str, attribute: str | None = None) -> int:
+        """Update mentioned_at on all active triples for entity (or entity+attribute).
+
+        Called when a fact is reinforced — updates the recency signal without
+        creating a new triple. Returns the number of rows updated.
+        """
+        now = _now_iso()
+        if attribute is not None:
+            cur = self._conn.execute(
+                "UPDATE triples SET mentioned_at = ? "
+                "WHERE entity_id = ? AND attribute = ? AND retracted = 0",
+                (now, entity_id, attribute),
+            )
+        else:
+            cur = self._conn.execute(
+                "UPDATE triples SET mentioned_at = ? "
+                "WHERE entity_id = ? AND retracted = 0",
+                (now, entity_id),
+            )
+        self._conn.commit()
+        return cur.rowcount
+
+    # ----- Entity aliases (coreference resolution) -----
+
+    def add_alias(
+        self,
+        canonical_id: str,
+        alias: str,
+        confidence: float = 1.0,
+        source: str = "extracted",
+    ) -> None:
+        """Record that `alias` is a surface form referring to `canonical_id`.
+
+        Idempotent — repeated calls with the same (canonical_id, alias) pair
+        are upserted (latest confidence and source win).
+        """
+        self._conn.execute(
+            "INSERT INTO entity_aliases (canonical_id, alias, confidence, source, created_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(canonical_id, alias) DO UPDATE SET "
+            "  confidence = excluded.confidence, source = excluded.source",
+            (canonical_id, alias.lower(), confidence, source, _now_iso()),
+        )
+        self._conn.commit()
+
+    def resolve_alias(self, alias: str) -> list[tuple[str, float]]:
+        """Return [(canonical_id, confidence)] for a surface form, highest confidence first."""
+        rows = self._conn.execute(
+            "SELECT canonical_id, confidence FROM entity_aliases "
+            "WHERE alias = ? ORDER BY confidence DESC",
+            (alias.lower(),),
+        ).fetchall()
+        return [(r["canonical_id"], r["confidence"]) for r in rows]
+
+    def aliases_of(self, canonical_id: str) -> list[str]:
+        """Return all known aliases for a canonical entity."""
+        rows = self._conn.execute(
+            "SELECT alias FROM entity_aliases WHERE canonical_id = ?",
+            (canonical_id,),
+        ).fetchall()
+        return [r["alias"] for r in rows]
+
+    # ----- Entity cooccurrence (soft graph signal) -----
+
+    def record_cooccurrence(self, entity_a: str, entity_b: str) -> None:
+        """Record that two entities co-occurred in a session. Idempotent per session.
+
+        Stores canonical ordering (lexicographic) to avoid double-counting (A,B) and (B,A).
+        Increments session_count and updates last_seen.
+        """
+        if entity_a == entity_b:
+            return
+        a, b = (entity_a, entity_b) if entity_a < entity_b else (entity_b, entity_a)
+        self._conn.execute(
+            "INSERT INTO entity_cooccurrence (entity_a, entity_b, session_count, last_seen) "
+            "VALUES (?, ?, 1, ?) "
+            "ON CONFLICT(entity_a, entity_b) DO UPDATE SET "
+            "  session_count = session_count + 1, last_seen = excluded.last_seen",
+            (a, b, _now_iso()),
+        )
+        self._conn.commit()
+
+    def cooccurring(self, entity: str, limit: int = 10) -> list[tuple[str, int]]:
+        """Return [(other_entity, session_count)] for entities cooccurring with `entity`."""
+        rows = self._conn.execute(
+            "SELECT entity_b AS other, session_count FROM entity_cooccurrence "
+            "WHERE entity_a = ? "
+            "UNION ALL "
+            "SELECT entity_a AS other, session_count FROM entity_cooccurrence "
+            "WHERE entity_b = ? "
+            "ORDER BY session_count DESC LIMIT ?",
+            (entity, entity, limit),
+        ).fetchall()
+        return [(r["other"], r["session_count"]) for r in rows]
 
     def retract_triple(
         self,
@@ -603,6 +781,66 @@ def _self_test() -> None:
         old_conf = decayed_confidence(0.8, old_date)
         assert 0.35 < old_conf < 0.45, f"60-day-old fact should decay to ~0.4: {old_conf}"
         print(f"  [OK] Confidence decay: fresh=0.8→{fresh_conf:.2f}, 60d=0.8→{old_conf:.2f}")
+
+        # Temporal fields on assert_triple
+        tx_t = store.begin_tx("temporal-test")
+        past = "2024-01-15T10:00:00.000000Z"
+        future = "2025-06-01T10:00:00.000000Z"
+        store.assert_triple(
+            tx_t, "fact:role-2024", "value", "Sarah was CTO from 2024 to 2025",
+            occurred_start=past, occurred_end=future,
+        )
+        row = store._conn.execute(
+            "SELECT occurred_start, occurred_end, mentioned_at FROM triples "
+            "WHERE entity_id = 'fact:role-2024'"
+        ).fetchone()
+        assert row["occurred_start"] == past, f"occurred_start mismatch: {row['occurred_start']}"
+        assert row["occurred_end"] == future, f"occurred_end mismatch: {row['occurred_end']}"
+        assert row["mentioned_at"] is not None, "mentioned_at should default to now on insert"
+        print("  [OK] Temporal columns persisted")
+
+        # Backward compat: assert_triple without temporal args still works
+        store.assert_triple(tx_t, "fact:basic", "value", "no temporal anchor")
+        row = store._conn.execute(
+            "SELECT occurred_start, occurred_end FROM triples WHERE entity_id = 'fact:basic'"
+        ).fetchone()
+        assert row["occurred_start"] is None, "occurred_start should be NULL when not provided"
+        assert row["occurred_end"] is None, "occurred_end should be NULL when not provided"
+        print("  [OK] Temporal fields default to NULL (backward compat)")
+
+        # touch_mention updates mentioned_at without creating new triple
+        import time as _time
+        _time.sleep(0.01)  # ensure timestamp differs
+        before_mention = store._conn.execute(
+            "SELECT mentioned_at FROM triples WHERE entity_id = 'fact:basic'"
+        ).fetchone()["mentioned_at"]
+        store.touch_mention("fact:basic")
+        after_mention = store._conn.execute(
+            "SELECT mentioned_at FROM triples WHERE entity_id = 'fact:basic'"
+        ).fetchone()["mentioned_at"]
+        assert after_mention > before_mention, f"touch_mention should advance mentioned_at: {before_mention} → {after_mention}"
+        print("  [OK] touch_mention updates recency signal")
+
+        # Entity aliases
+        store.add_alias("entity:sarah-chen", "Sarah")
+        store.add_alias("entity:sarah-chen", "the CEO", confidence=0.7, source="inferred")
+        resolved = store.resolve_alias("Sarah")
+        assert ("entity:sarah-chen", 1.0) in resolved, f"alias resolve missed Sarah: {resolved}"
+        resolved_ceo = store.resolve_alias("the CEO")
+        assert resolved_ceo and resolved_ceo[0][0] == "entity:sarah-chen", "alias resolve missed 'the CEO'"
+        all_aliases = store.aliases_of("entity:sarah-chen")
+        assert "sarah" in all_aliases and "the ceo" in all_aliases, f"aliases_of missing entries: {all_aliases}"
+        print(f"  [OK] entity_aliases: {len(all_aliases)} aliases for entity:sarah-chen")
+
+        # Entity cooccurrence
+        store.record_cooccurrence("entity:sarah-chen", "entity:acme-corp")
+        store.record_cooccurrence("entity:acme-corp", "entity:sarah-chen")  # reverse — should canonicalize
+        store.record_cooccurrence("entity:sarah-chen", "entity:project-x")
+        cooc = store.cooccurring("entity:sarah-chen")
+        cooc_dict = dict(cooc)
+        assert cooc_dict.get("entity:acme-corp") == 2, f"acme cooccurrence count wrong: {cooc_dict}"
+        assert cooc_dict.get("entity:project-x") == 1, f"project-x cooccurrence count wrong: {cooc_dict}"
+        print(f"  [OK] entity_cooccurrence: {len(cooc)} neighbors for entity:sarah-chen")
 
         # GC (retracted triples are fresh, so gc with 0 days should get them)
         gc_count = store.gc(older_than_days=0)
