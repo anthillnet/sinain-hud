@@ -392,32 +392,15 @@ def _expand_keywords_semantic(
         return keywords
 
 
-_PRECISION_MODES = {"fast", "balanced", "precise"}
-_TEMPORAL_MODES = {"current", "historical", "any"}
-_FORMATS = {"facts", "triples", "narrative", "structured"}
-
-
-def _validate_query_params(
-    precision_mode: str,
-    temporal_mode: str,
-    confidence_floor: float,
-    hop_depth: int,
-    format: str,
-) -> None:
-    """Validate query parameters; raise ValueError on bad input.
-
-    Centralized so MCP tool schemas and the Python API stay in sync.
-    """
-    if precision_mode not in _PRECISION_MODES:
-        raise ValueError(f"precision_mode must be one of {_PRECISION_MODES}, got {precision_mode!r}")
-    if temporal_mode not in _TEMPORAL_MODES:
-        raise ValueError(f"temporal_mode must be one of {_TEMPORAL_MODES}, got {temporal_mode!r}")
-    if not 0.0 <= confidence_floor <= 1.0:
-        raise ValueError(f"confidence_floor must be in [0.0, 1.0], got {confidence_floor}")
-    if not 0 <= hop_depth <= 3:
-        raise ValueError(f"hop_depth must be in [0, 3], got {hop_depth}")
-    if format not in _FORMATS:
-        raise ValueError(f"format must be one of {_FORMATS}, got {format!r}")
+# Re-export the canonical schema constants from query_params so existing
+# imports (tests, callers) keep working. The actual definitions live in
+# query_params.py — that's the single source of truth for the parameter API.
+from query_params import (
+    FORMATS as _FORMATS,
+    PRECISION_MODES as _PRECISION_MODES,
+    TEMPORAL_MODES as _TEMPORAL_MODES,
+    validate_query_params as _validate_query_params,
+)
 
 
 def _apply_confidence_floor(facts: list[dict], floor: float) -> list[dict]:
@@ -1745,14 +1728,50 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Graph Query")
     parser.add_argument("--db", required=True, help="Path to knowledge-graph.db")
     parser.add_argument("--entities", default=None, help="JSON array of entity/domain names")
+    parser.add_argument("--query", default=None, help="Free-text query string (preferred over --entities for hybrid retrieval)")
     parser.add_argument("--top", type=int, default=None, help="Query top-N facts by confidence")
     parser.add_argument("--domain-counts", action="store_true", help="Show fact counts per domain")
     parser.add_argument("--max-facts", type=int, default=5, help="Maximum facts to return")
-    parser.add_argument("--format", choices=["text", "json", "compact"], default="json", help="Output format")
+    parser.add_argument("--format", choices=["text", "json", "compact"], default="json", help="CLI output rendering")
     parser.add_argument("--search-entities", default=None, help="Search query for entity-prioritized lookup")
     parser.add_argument("--search-limit", type=int, default=20, help="Max entity results")
     parser.add_argument("--graph-children", default=None, help="Entity to expand for graph tree")
     parser.add_argument("--graph-limit", type=int, default=50, help="Max children per parent")
+
+    # Phase 1-3 retrieval parameters. Defaults preserve historical behavior so
+    # existing callers (sinain-core, the MCP server, eval) keep working unless
+    # they explicitly opt in to a new mode.
+    parser.add_argument(
+        "--precision-mode", choices=sorted(_PRECISION_MODES), default="balanced",
+        help="fast | balanced | precise — controls reranking cost",
+    )
+    parser.add_argument(
+        "--temporal-mode", choices=sorted(_TEMPORAL_MODES), default="any",
+        help="current | historical | any — filters/reorders by fact temporal validity",
+    )
+    parser.add_argument(
+        "--confidence-floor", type=float, default=0.0,
+        help="Drop facts with decayed confidence below this threshold (0.0-1.0)",
+    )
+    parser.add_argument(
+        "--hop-depth", type=int, default=1,
+        help="Graph expansion depth: 0=skip, 1=fallback, 2-3=spreading activation",
+    )
+    parser.add_argument(
+        "--latency-budget-ms", type=int, default=None,
+        help="Soft cap on pipeline wall time; later stages skip if exceeded",
+    )
+    parser.add_argument(
+        "--result-format", choices=sorted(_FORMATS), default="facts",
+        help="facts | triples | structured | narrative — result shape",
+    )
+    parser.add_argument("--as-of", default=None, help="ISO date anchor for temporal-mode=historical")
+    parser.add_argument(
+        "--profile", default=None,
+        help="Apply a named caller profile (overridden by other flags). "
+             "See query_params.QUERY_PROFILES.",
+    )
+
     args = parser.parse_args()
 
     if args.search_entities is not None:
@@ -1771,15 +1790,54 @@ def main() -> None:
         print(json.dumps(counts, indent=2))
         return
 
+    # Resolve named profile (if given) and overlay CLI flag overrides on top.
+    # Order: profile defaults → explicit CLI flags. Explicit flags always win.
+    hybrid_kwargs: dict = {
+        "precision_mode": args.precision_mode,
+        "temporal_mode": args.temporal_mode,
+        "confidence_floor": args.confidence_floor,
+        "hop_depth": args.hop_depth,
+        "latency_budget_ms": args.latency_budget_ms,
+        "format": args.result_format,
+        "as_of": args.as_of,
+    }
+    if args.profile:
+        from query_params import resolve_profile
+        profile = resolve_profile(args.profile)
+        # CLI flags override profile only when the user supplied a non-default
+        # value. We detect this by comparing to the argparse defaults below.
+        _PROFILE_OVERRIDABLE_DEFAULTS = {
+            "precision_mode": "balanced",
+            "temporal_mode": "any",
+            "confidence_floor": 0.0,
+            "hop_depth": 1,
+            "latency_budget_ms": None,
+            "format": "facts",
+            "as_of": None,
+        }
+        for key, default_val in _PROFILE_OVERRIDABLE_DEFAULTS.items():
+            cli_val = hybrid_kwargs[key]
+            if cli_val == default_val and key in profile:
+                hybrid_kwargs[key] = profile[key]
+
     if args.top is not None:
         facts = query_top_facts(args.db, limit=args.top)
+    elif args.query is not None:
+        # Preferred path — free-text query into hybrid retrieval
+        facts = query_facts_hybrid(args.db, args.query, max_facts=args.max_facts, **hybrid_kwargs)
     elif args.entities:
         entities = json.loads(args.entities)
         # Use hybrid retrieval (FTS5 + tags + entity graph + RRF) for best results
         query_text = " ".join(entities)
-        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts)
-        # Fallback to tag-only if hybrid returns nothing
-        if not facts:
+        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts, **hybrid_kwargs)
+        # Fallback to tag-only if hybrid returns nothing AND we used legacy defaults.
+        # If the caller asked for a specific format/mode, respect the empty result.
+        used_defaults = (
+            args.precision_mode == "balanced" and args.temporal_mode == "any"
+            and args.confidence_floor == 0.0 and args.result_format == "facts"
+            and not args.profile
+        )
+        if not facts and used_defaults:
             facts = query_facts_by_entities(args.db, entities, max_facts=args.max_facts)
     else:
         facts = query_top_facts(args.db, limit=args.max_facts)
@@ -1789,7 +1847,12 @@ def main() -> None:
     elif args.format == "compact":
         print(format_facts_compact(facts))
     else:
-        print(json.dumps({"facts": facts, "count": len(facts)}, indent=2, ensure_ascii=False))
+        # facts may be a list[dict] or already a formatted structure (when
+        # --result-format=narrative/structured returns nested shapes).
+        print(json.dumps(
+            {"facts": facts, "count": len(facts) if isinstance(facts, list) else 1},
+            indent=2, ensure_ascii=False,
+        ))
 
 
 if __name__ == "__main__":

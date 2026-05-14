@@ -49,29 +49,51 @@ def _get_all_facts_text(db_path: str) -> str:
     return format_facts_text(facts, max_chars=6000)
 
 
-def _query_knowledge(db_path: str, question: str) -> str:
+def _resolve_profile_kwargs(profile: str | None) -> dict:
+    """Translate a profile name into query_facts_hybrid kwargs. None = no overrides."""
+    if not profile:
+        return {}
+    try:
+        from query_params import resolve_profile
+        return resolve_profile(profile)
+    except Exception:
+        return {}
+
+
+def _query_knowledge(db_path: str, question: str, profile: str | None = None) -> str:
     """Query sinain knowledge graph for benchmark evaluation.
 
     Uses the same retrieval pipeline (query_facts_hybrid + format) as the
     live system, but queries the per-question benchmark store directly.
     This ensures evaluation measures the actual KG quality, not whether
     sinain-core happens to be running or which DB it's pointing at.
+
+    profile: optional named caller profile (eval/escalation/agent-tick/etc).
+        When set, the profile's precision_mode / hop_depth / format / etc are
+        applied. Default behavior preserved when None.
     """
     from graph_query import query_facts_hybrid, format_facts_compact
 
-    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY)
+    kwargs = _resolve_profile_kwargs(profile)
+    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY, **kwargs)
     if not facts:
         return "(no facts retrieved)"
 
+    # Profiles may return non-list shapes (narrative). Coerce to text in that case.
+    if not isinstance(facts, list):
+        return str(facts)[:1200]
     return format_facts_compact(facts, max_chars=1200)
 
 
-def _get_retrieved_facts(db_path: str, question: str, k: int = 10) -> list[dict]:
+def _get_retrieved_facts(
+    db_path: str, question: str, k: int = 10, profile: str | None = None
+) -> list[dict]:
     """Get facts retrieved for a question (for retrieval evaluation)."""
     from graph_query import query_facts_hybrid, query_top_facts
 
-    facts = query_facts_hybrid(db_path, question, max_facts=k)
-    if facts:
+    kwargs = _resolve_profile_kwargs(profile)
+    facts = query_facts_hybrid(db_path, question, max_facts=k, **kwargs)
+    if facts and isinstance(facts, list):
         return facts
 
     # Fallback: top facts by confidence
@@ -121,16 +143,21 @@ def answer_question(
     full_context: str | None = None,
     knowledge_doc: str | None = None,
     model: str | None = None,
+    profile: str | None = None,
 ) -> str:
     """Generate an answer for a benchmark question under a specific condition.
 
     Returns the LLM's answer text.
+
+    profile: optional caller profile applied to sinain-memory retrieval (only
+        affects the "sinain-memory" condition; full-context and knowledge-doc
+        are unaffected by retrieval params by design).
     """
     qa_model = model or QA_MODEL
 
     if condition == "sinain-memory":
         assert db_path, "db_path required for sinain-memory condition"
-        facts = _query_knowledge(db_path, question.text)
+        facts = _query_knowledge(db_path, question.text, profile=profile)
         system = (
             "Answer the question using ONLY the provided knowledge facts. "
             "If the facts don't contain enough information to answer, say \"I don't know.\""
