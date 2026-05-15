@@ -186,11 +186,14 @@ def answer_question(
         raise ValueError(f"Unknown condition: {condition}")
 
     try:
+        # temperature=0 — eval reproducibility. Same retrieved facts must
+        # produce the same answer, or run-to-run comparisons are noise.
         return call_llm(
             system_prompt=system,
             user_prompt=user,
             model=qa_model,
             max_tokens=300,
+            temperature=0.0,
         ).strip()
     except Exception as e:
         return f"(error: {e})"

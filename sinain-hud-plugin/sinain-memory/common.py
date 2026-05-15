@@ -155,6 +155,7 @@ def call_llm(
     *,
     script: str | None = None,
     json_mode: bool = False,
+    temperature: float | None = None,
 ) -> str:
     """Call OpenRouter chat completions API. Returns assistant message text.
 
@@ -163,6 +164,11 @@ def call_llm(
 
     When *json_mode* is True and the resolved model starts with ``openai/``,
     ``response_format: {"type": "json_object"}`` is added to the request body.
+
+    When *temperature* is set, it's passed through to the provider. Use 0.0
+    for deterministic outputs (essential for judge/eval calls — without it,
+    OpenRouter's default temperature of 1.0 causes ~20% score variance on
+    identical inputs).
     """
     timeout_s = 60
     if script:
@@ -184,6 +190,8 @@ def call_llm(
             {"role": "user", "content": user_prompt},
         ],
     }
+    if temperature is not None:
+        body["temperature"] = temperature
     if json_mode and model.startswith("openai/"):
         body["response_format"] = {"type": "json_object"}
 
