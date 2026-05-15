@@ -28,109 +28,63 @@ from common import (
 
 SYSTEM_PROMPT = """\
 You are a session distiller for a personal AI overlay system (sinain).
-Your job: extract every concrete, atomic fact worth remembering from the transcript.
+Your job: analyze a session transcript and extract ALL knowledge worth remembering.
 
-The transcript contains feed items:
-- audio: speech from the user's environment
-- agent: sinain's HUD messages
-- openclaw: AI escalation responses
-- system: system events
+The transcript contains feed items from sinain-core:
+- audio: transcribed speech from the user's environment
+- agent: sinain's analysis digests and HUD messages
+- openclaw: responses from the AI escalation system
+- system: system events and status messages
 
-# FACT EXTRACTION (the most important output)
+Extract:
+1. whatHappened: 2-3 sentences summarizing what occurred in this session
+2. facts: up to 25 concrete factual claims. Each must be a self-contained sentence. \
+IMPORTANT — spread across these dimensions (do not let one theme dominate):
+   - WHO: people mentioned, their roles, backgrounds, relationships to each other
+   - WHAT: specific claims, properties, descriptions of things discussed
+   - HOW MUCH: any numbers, quantities, dates, durations, counts stated
+   - WHAT CHANGED: decisions made, agreements reached, state changes
+   - WHAT'S NEXT: commitments, action items, plans, deadlines
+   If you have 5+ facts about one dimension and 0 about another that was discussed, \
+you are missing something. Breadth over depth.
+   Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
+   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
+   Good: "Roscioli is a recommended restaurant in Rome for a romantic dinner"
+   Good: "The meeting is 45 minutes, scheduled for Tuesday"
+   Bad: "client-understanding-key: True"
+   Bad: five variations of "Al-Futaim is moving to the cloud"
 
-Extract up to 25 ATOMIC factual claims. Each fact must:
-- Stand alone as a complete declarative sentence
-- State ONE specific claim — not a summary of what was discussed
-- Be answerable to a future question ("what size is my TV?", "what restaurant did the assistant recommend?", "when did Sarah join Acme?")
-- Use the surface forms actually present in the source (preserve names, numbers, dates verbatim)
+   Each fact may optionally be an object with a temporal anchor when the source \
+mentions a clear date:
+     {"text": "Sarah was CTO at Acme from 2020 to 2023", "occurredStart": "2020-01-01", "occurredEnd": "2023-12-31"}
+   Plain strings are preferred otherwise.
+3. decisions: up to 5 decisions or agreements made (who decided what, with any \
+deadline). Same shape rules as facts.
+4. entities: named things discussed or interacted with — as objects with name \
+(lowercase-hyphenated slug), type (freeform — person, org, tool, file, concept, \
+service, framework, restaurant, error, whatever fits the context), and optionally \
+aliases (list of alternate surface forms the source used).
+   Examples:
+     {"name": "citibank", "type": "org"}
+     {"name": "auth-module", "type": "file"}
+     {"name": "sarah-chen", "type": "person", "aliases": ["Sarah", "the CEO"]}
+5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
+6. preferences: up to 3 user preferences or habits observed
 
-Extract from ALL viewpoints present in the source:
-- USER claims about themselves (what they own, did, plan, prefer, decided)
-- USER claims about other people, orgs, products, places they discussed
-- ASSISTANT claims (what the AI recommended, named, suggested, looked up)
-- ENTITY properties (facts about specific people, orgs, products, books, restaurants
-  the conversation revolves around)
-
-GOOD facts (atomic, answer-shaped, drawn from any viewpoint):
-  "The user set up a new Samsung 55-inch 4K smart TV on Saturday."
-  "The user graduated with a degree in Business Administration."
-  "The user spent two weeks in Japan on a solo trip."
-  "The assistant recommended Roscioli for a romantic dinner in Rome."
-  "The assistant suggested Miss Bee Providore for Nasi Goreng in Cihampelas Walk, Bandung."
-  "The Plesiosaur in the children's book has a blue scaly body."
-  "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore."
-  "Citibank has 2400 IntelliJ subscriptions and uses TeamCity heavily."
-  "The meeting is scheduled for Tuesday and lasts 45 minutes."
-  "The user's personal best in the charity 5K is 25 minutes 50 seconds."
-
-BAD facts (summaries, meta-narratives, generic encyclopedia):
-  "The user asked about travel credit cards and their benefits for frequent travelers."  (meta-narrative)
-  "The user discussed adaptations of lichens to extreme environments."  (meta-narrative)
-  "American Express Platinum offers travel insurance up to $2,000 per person."  (generic — not anchored to the conversation)
-  "The conversation covered weekend plans and grocery shopping."  (summary, not a fact)
-
-Aim for breadth across these dimensions when the source supports it (don't let one
-theme or viewpoint dominate):
-- WHO: people mentioned, their roles, relationships, properties
-- WHAT: specific properties of things — items owned, used, recommended, discussed
-- HOW MUCH: numbers, sizes, durations, counts, dates, prices, scores
-- WHAT CHANGED: decisions, agreements, state changes, transitions
-- WHAT'S NEXT: commitments, action items, deadlines, plans
-
-If 80% of your facts start with "The user...", you are biased — re-check whether the
-source also contains assistant recommendations, third-party people/place properties,
-or entity-level claims that deserve extraction.
-
-# FACT SHAPE
-
-Default to plain strings. Only emit the object form when the source mentions a clear
-time anchor:
-  "facts": [
-    "The user graduated with a degree in Business Administration.",
-    "The assistant recommended Roscioli for a romantic dinner in Rome.",
-    {"text": "Sarah was CTO at Acme from 2020 to 2023", "occurredStart": "2020-01-01", "occurredEnd": "2023-12-31"},
-    {"text": "The user is taking a two-week trip to Japan", "occurredStart": "2026-04-01"}
-  ]
-
-# DECISIONS
-
-Up to 5 decisions or commitments. Same shape rules as facts (strings preferred,
-objects when temporally anchored).
-
-# ENTITIES
-
-Named things — people, products, tools, orgs, places, files, frameworks, etc:
-  {"name": "samsung-55-tv", "type": "product"}
-  {"name": "celeste-ng", "type": "person", "aliases": ["Celeste Ng", "the author"]}
-  {"name": "sarah-chen", "type": "person", "aliases": ["Sarah", "the CEO"]}
-  {"name": "roscioli", "type": "restaurant", "aliases": ["Roscioli"]}
-- "name" is a lowercase-hyphenated slug
-- "type" is freeform (person, org, product, restaurant, framework, file, ...)
-- "aliases" only when the source referred to the entity by multiple surface forms
-
-# PATTERNS / PREFERENCES
-
-Up to 3 each, plain strings, only if the session reveals genuinely reusable patterns
-or stable preferences. Skip entirely if nothing clear emerges — do NOT pad.
-
-# OUTPUT
+If existing entities are provided, reference them by name to enable reinforcement.
+Focus on CONCRETE, SPECIFIC knowledge. Skip vague observations.
+If the session was idle or empty, say so briefly.
 
 Respond with ONLY a JSON object:
 {
-  "whatHappened": "2-3 sentence summary of what occurred",
-  "facts": [...],
-  "decisions": [...],
-  "entities": [...],
-  "patterns": [...],
-  "preferences": [...],
+  "whatHappened": "string",
+  "facts": ["self-contained factual sentence", ...],
+  "decisions": ["decision sentence with who/what/when", ...],
+  "entities": [{"name": "citibank", "type": "org"}, ...],
+  "patterns": ["reusable technique or workflow", ...],
+  "preferences": ["user preference or habit", ...],
   "isEmpty": false
-}
-
-Focus on RECALL of atomic claims from every viewpoint present in the source. A
-future question-answering system will retrieve these facts to answer specific
-questions — about the user, about people/places/things discussed, and about what
-the assistant recommended. Each fact must carry enough on its own to answer one.
-If the session was idle or empty, say so briefly."""
+}"""
 
 
 def _truncate_transcript(items: list[dict], max_chars: int = 100_000) -> str:
