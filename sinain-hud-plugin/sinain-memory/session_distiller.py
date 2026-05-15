@@ -31,7 +31,7 @@ You are a session distiller for a personal AI overlay system (sinain).
 Your job: extract every concrete, atomic fact worth remembering from the transcript.
 
 The transcript contains feed items:
-- audio: speech from the user's environment (usually first-person statements)
+- audio: speech from the user's environment
 - agent: sinain's HUD messages
 - openclaw: AI escalation responses
 - system: system events
@@ -41,32 +41,45 @@ The transcript contains feed items:
 Extract up to 25 ATOMIC factual claims. Each fact must:
 - Stand alone as a complete declarative sentence
 - State ONE specific claim — not a summary of what was discussed
-- Be answerable to a future question ("what size is my TV?", "when did I visit Japan?", "what's my degree in?")
-- Prefer the user's own claims about themselves, their possessions, plans, history, preferences
-- Use the surface forms the user actually used (e.g. "Samsung 55-inch 4K smart TV", not "the user's television")
+- Be answerable to a future question ("what size is my TV?", "what restaurant did the assistant recommend?", "when did Sarah join Acme?")
+- Use the surface forms actually present in the source (preserve names, numbers, dates verbatim)
 
-GOOD facts (atomic, answer-shaped, drawn from user's own statements):
+Extract from ALL viewpoints present in the source:
+- USER claims about themselves (what they own, did, plan, prefer, decided)
+- USER claims about other people, orgs, products, places they discussed
+- ASSISTANT claims (what the AI recommended, named, suggested, looked up)
+- ENTITY properties (facts about specific people, orgs, products, books, restaurants
+  the conversation revolves around)
+
+GOOD facts (atomic, answer-shaped, drawn from any viewpoint):
   "The user set up a new Samsung 55-inch 4K smart TV on Saturday."
   "The user graduated with a degree in Business Administration."
-  "The user attended a literary festival and met author Celeste Ng."
   "The user spent two weeks in Japan on a solo trip."
-  "The user decided to buy the TriggerPoint GRID Foam Roller for shoulder recovery."
-  "The meeting is scheduled for Tuesday and lasts 45 minutes."
+  "The assistant recommended Roscioli for a romantic dinner in Rome."
+  "The assistant suggested Miss Bee Providore for Nasi Goreng in Cihampelas Walk, Bandung."
+  "The Plesiosaur in the children's book has a blue scaly body."
+  "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore."
   "Citibank has 2400 IntelliJ subscriptions and uses TeamCity heavily."
+  "The meeting is scheduled for Tuesday and lasts 45 minutes."
+  "The user's personal best in the charity 5K is 25 minutes 50 seconds."
 
-BAD facts (summaries, meta-narratives, generic):
-  "The user asked about travel credit cards and their benefits for frequent travelers."
-  "The user discussed adaptations of lichens to extreme environments."
-  "American Express Platinum offers travel insurance up to $2,000 per person."  (encyclopedic — not about the user)
-  "client-understanding-key: True"
+BAD facts (summaries, meta-narratives, generic encyclopedia):
+  "The user asked about travel credit cards and their benefits for frequent travelers."  (meta-narrative)
+  "The user discussed adaptations of lichens to extreme environments."  (meta-narrative)
+  "American Express Platinum offers travel insurance up to $2,000 per person."  (generic — not anchored to the conversation)
+  "The conversation covered weekend plans and grocery shopping."  (summary, not a fact)
 
 Aim for breadth across these dimensions when the source supports it (don't let one
-theme dominate):
-- WHO: people mentioned, their roles, relationships
-- WHAT: specific properties of things the user owns, uses, did, plans
-- HOW MUCH: numbers, sizes, durations, counts, dates the user stated
-- WHAT CHANGED: decisions, agreements, state changes
-- WHAT'S NEXT: commitments, action items, deadlines
+theme or viewpoint dominate):
+- WHO: people mentioned, their roles, relationships, properties
+- WHAT: specific properties of things — items owned, used, recommended, discussed
+- HOW MUCH: numbers, sizes, durations, counts, dates, prices, scores
+- WHAT CHANGED: decisions, agreements, state changes, transitions
+- WHAT'S NEXT: commitments, action items, deadlines, plans
+
+If 80% of your facts start with "The user...", you are biased — re-check whether the
+source also contains assistant recommendations, third-party people/place properties,
+or entity-level claims that deserve extraction.
 
 # FACT SHAPE
 
@@ -74,7 +87,7 @@ Default to plain strings. Only emit the object form when the source mentions a c
 time anchor:
   "facts": [
     "The user graduated with a degree in Business Administration.",
-    "The user set up a new Samsung 55-inch 4K smart TV on Saturday.",
+    "The assistant recommended Roscioli for a romantic dinner in Rome.",
     {"text": "Sarah was CTO at Acme from 2020 to 2023", "occurredStart": "2020-01-01", "occurredEnd": "2023-12-31"},
     {"text": "The user is taking a two-week trip to Japan", "occurredStart": "2026-04-01"}
   ]
@@ -90,8 +103,9 @@ Named things — people, products, tools, orgs, places, files, frameworks, etc:
   {"name": "samsung-55-tv", "type": "product"}
   {"name": "celeste-ng", "type": "person", "aliases": ["Celeste Ng", "the author"]}
   {"name": "sarah-chen", "type": "person", "aliases": ["Sarah", "the CEO"]}
+  {"name": "roscioli", "type": "restaurant", "aliases": ["Roscioli"]}
 - "name" is a lowercase-hyphenated slug
-- "type" is freeform (person, org, product, framework, file, ...)
+- "type" is freeform (person, org, product, restaurant, framework, file, ...)
 - "aliases" only when the source referred to the entity by multiple surface forms
 
 # PATTERNS / PREFERENCES
@@ -112,9 +126,11 @@ Respond with ONLY a JSON object:
   "isEmpty": false
 }
 
-Focus on RECALL of atomic user-centric claims. A future question-answering system
-will retrieve these facts to answer specific questions, so each fact must carry
-enough on its own to answer one. If the session was idle or empty, say so briefly."""
+Focus on RECALL of atomic claims from every viewpoint present in the source. A
+future question-answering system will retrieve these facts to answer specific
+questions — about the user, about people/places/things discussed, and about what
+the assistant recommended. Each fact must carry enough on its own to answer one.
+If the session was idle or empty, say so briefly."""
 
 
 def _truncate_transcript(items: list[dict], max_chars: int = 100_000) -> str:
