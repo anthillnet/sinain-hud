@@ -38,7 +38,7 @@ The transcript contains feed items from sinain-core:
 
 Extract:
 1. whatHappened: 2-3 sentences summarizing what occurred in this session
-2. facts: up to 25 concrete factual claims. Each must be a self-contained sentence. \
+2. facts: up to 15 concrete factual claims. Each must be a self-contained sentence. \
 IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHO: people mentioned, their roles, backgrounds, relationships to each other
    - WHAT: specific claims, properties, descriptions of things discussed
@@ -49,25 +49,15 @@ IMPORTANT — spread across these dimensions (do not let one theme dominate):
 you are missing something. Breadth over depth.
    Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
    Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
-   Good: "Roscioli is a recommended restaurant in Rome for a romantic dinner"
    Good: "The meeting is 45 minutes, scheduled for Tuesday"
    Bad: "client-understanding-key: True"
    Bad: five variations of "Al-Futaim is moving to the cloud"
-
-   Each fact may optionally be an object with a temporal anchor when the source \
-mentions a clear date:
-     {"text": "Sarah was CTO at Acme from 2020 to 2023", "occurredStart": "2020-01-01", "occurredEnd": "2023-12-31"}
-   Plain strings are preferred otherwise.
-3. decisions: up to 5 decisions or agreements made (who decided what, with any \
-deadline). Same shape rules as facts.
+3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
 4. entities: named things discussed or interacted with — as objects with name \
-(lowercase-hyphenated slug), type (freeform — person, org, tool, file, concept, \
-service, framework, restaurant, error, whatever fits the context), and optionally \
-aliases (list of alternate surface forms the source used).
-   Examples:
-     {"name": "citibank", "type": "org"}
-     {"name": "auth-module", "type": "file"}
-     {"name": "sarah-chen", "type": "person", "aliases": ["Sarah", "the CEO"]}
+(lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
+service, framework, error, whatever fits the context).
+   Examples: {"name": "citibank", "type": "org"}, {"name": "auth-module", "type": "file"}, \
+{"name": "react-native", "type": "framework"}
 5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
 6. preferences: up to 3 user preferences or habits observed
 
@@ -80,7 +70,7 @@ Respond with ONLY a JSON object:
   "whatHappened": "string",
   "facts": ["self-contained factual sentence", ...],
   "decisions": ["decision sentence with who/what/when", ...],
-  "entities": [{"name": "citibank", "type": "org"}, ...],
+  "entities": [{"name": "citibank", "type": "org"}, {"name": "artom", "type": "person"}, ...],
   "patterns": ["reusable technique or workflow", ...],
   "preferences": ["user preference or habit", ...],
   "isEmpty": false
