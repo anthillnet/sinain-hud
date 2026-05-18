@@ -11,9 +11,72 @@ Usage:
 """
 
 import argparse
+import functools
 import json
+import os
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
+
+
+def _record_candidate(retrieval_path: str):
+    """Decorator: emit one NDJSON line per retrieval call when SINAIN_EVAL_CAPTURE=1.
+
+    Fire-and-forget — any error in the hook is swallowed so retrieval is
+    never blocked by capture telemetry. Off by default (privacy stance):
+    callers opt in by setting SINAIN_EVAL_CAPTURE=1, typically from the
+    replay-baseline workflow.
+
+    NDJSON line shape:
+        {ts, query, db_path, retrieved_entity_slugs,
+         retrieved_value_keywords, latency_ms, retrieval_path}
+
+    Output file: $SINAIN_MEMORY_DIR/eval-captures.ndjson (fallback ~/.sinain/memory).
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(db_path, query, *args, **kwargs):
+            if os.environ.get("SINAIN_EVAL_CAPTURE") != "1":
+                return fn(db_path, query, *args, **kwargs)
+            t0 = time.perf_counter()
+            facts = fn(db_path, query, *args, **kwargs)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            try:
+                if isinstance(facts, list):
+                    entity_slugs: list[str] = []
+                    value_keywords: list[str] = []
+                    for f in facts:
+                        if not isinstance(f, dict):
+                            continue
+                        eid = f.get("entity_id") or f.get("entityId")
+                        if eid:
+                            entity_slugs.append(eid)
+                        val = f.get("value")
+                        if isinstance(val, str):
+                            value_keywords.append(val)
+                    memory_dir = os.environ.get(
+                        "SINAIN_MEMORY_DIR",
+                        str(Path.home() / ".sinain" / "memory"),
+                    )
+                    capture_path = Path(memory_dir) / "eval-captures.ndjson"
+                    capture_path.parent.mkdir(parents=True, exist_ok=True)
+                    line = json.dumps({
+                        "ts": datetime.utcnow().isoformat() + "Z",
+                        "query": query,
+                        "db_path": str(db_path),
+                        "retrieved_entity_slugs": entity_slugs,
+                        "retrieved_value_keywords": value_keywords,
+                        "latency_ms": round(latency_ms, 2),
+                        "retrieval_path": retrieval_path,
+                    }, ensure_ascii=False)
+                    with capture_path.open("a", encoding="utf-8") as fh:
+                        fh.write(line + "\n")
+            except Exception:
+                pass
+            return facts
+        return wrapper
+    return deco
 
 
 def query_facts_by_entities(
@@ -735,6 +798,7 @@ def _fallback_brief(entity_name: str, facts: list[dict]) -> str:
     return f"{entity_name}: " + " ".join(parts) if parts else entity_name
 
 
+@_record_candidate("query_facts_hybrid")
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -1291,6 +1355,7 @@ _STAGE2_BOOKKEEPING = (
 )
 
 
+@_record_candidate("query_stage2_triples")
 def query_stage2_triples(db_path: str, query: str, max_facts: int = 30) -> list[dict]:
     """Stage 4 retrieval: walk direct S-P-O triples + alias resolution.
 
