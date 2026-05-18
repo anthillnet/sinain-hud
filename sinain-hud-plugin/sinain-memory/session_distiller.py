@@ -92,6 +92,12 @@ Each entity is an object with these required fields:
   - `schema:Date` (specific dates, deadlines)
 - `altLabels`: array of strings — synonyms, abbreviations, misspellings, role-paraphrases. **CRITICAL: every proper-noun entity MUST have at least one altLabel.** Whisper STT mishears proper nouns (Citibank → "City Bank"; JetBrains → "Jet Brains"); altLabels are how we recover. For a role-typed Person, include the role-paraphrases you heard ("the CTO", "the senior executive"). Empty array is ONLY acceptable for common-noun entities.
 
+**Named-Person-with-Role rule (REQUIRED — load-bearing for retrieval):** if a named Person is described in the transcript by a role title (e.g., "Ibrahim is the CTO", "the chief data officer, Deepak"), DO NOT create separate entities for the role. Create ONE entity for the Person and put ALL role-paraphrases into that Person's altLabels. Otherwise queries asking about "the CTO" cannot resolve to the named person.
+  - ✓ CORRECT: `{"id": "ibrahim", "name": "Ibrahim", "type": "schema:Person", "altLabels": ["the CTO", "the chief technology officer", "the senior executive"]}` — single entity, role-paraphrases as aliases
+  - ✗ WRONG: two entities, one named `ibrahim` and a second named `cto` — splits the graph
+  - The same rule applies to a Person mentioned as "the lead", "the manager", "the founder", "the head of X", etc.
+  - If the role is mentioned BEFORE the name ("the CTO, Ibrahim"), the rule still applies — collapse to one Person entity
+
 **User anchor — REQUIRED when any first-person utterance exists:** if the transcript contains anything in first person ("I X", "my Y", "we Z", "I've been"), you MUST declare an entity with `id: "user"`, `type: "schema:Person"`, `name: "User"`, `altLabels: ["I", "me", "my", "mine", "myself", "we", "the user"]`. Then every first-person fact becomes a triple anchored on `subject: "user"`. Examples:
   - "I ran a 5K in 25:50" → entity `user` + fact `{subject: "user", predicate: "personalBest5KTime", object: "25:50", value_type: "literal"}`
   - "I need to return 3 items to the store" → entity `user` + fact `{subject: "user", predicate: "needsToReturn", object: "3-clothing-items", value_type: "ref"}`

@@ -1186,6 +1186,117 @@ _DEDUP_SKIP_PAIRS = {
 }
 
 
+def _dedup_via_aliases(db_path: str) -> dict:
+    """Stage 2 dedup: merge entities where one's altLabel matches another's slug.
+
+    Runs after every integration. Lighter than merge_entity_duplicates — no
+    fuzzy matching, no migration stamp, no full-graph scan. Driven entirely by
+    entity_aliases entries written by Stage 2 distillation.
+
+    Algorithm:
+    1. Collect candidate pairs from entity_aliases — wherever a canonical_id has
+       an altLabel whose slug matches another existing entity:* id.
+    2. For each pair, pick the entity with more outbound triples as canonical
+       (richer node = more knowledge). Tiebreak by lexicographic id for
+       determinism. This avoids the "bidirectional alias = merge both
+       directions = data shuttled back and forth" bug.
+    3. Merge weaker → richer. Each pair processed at most once.
+
+    Idempotent: once the weaker entity has no triples, future runs skip it.
+    """
+    from triplestore import TripleStore
+    import re as _re
+    store = TripleStore(db_path)
+    try:
+        rows = store._conn.execute(
+            "SELECT canonical_id, alias FROM entity_aliases"
+        ).fetchall()
+
+        # Build unordered candidate pairs (frozenset of two entity ids)
+        candidate_pairs: set[frozenset[str]] = set()
+        for row in rows:
+            canonical_id = row["canonical_id"]
+            alias = row["alias"] or ""
+            if not alias.strip():
+                continue
+            slug = _re.sub(r"[^a-z0-9]+", "-", alias.lower()).strip("-")
+            if not slug:
+                continue
+            candidate_id = slug if slug.startswith("entity:") else f"entity:{slug}"
+            if candidate_id == canonical_id:
+                continue
+            if not canonical_id.startswith("entity:") or not candidate_id.startswith("entity:"):
+                continue
+            candidate_pairs.add(frozenset({canonical_id, candidate_id}))
+
+        # For each pair, pick the richer entity (more outbound triples) as canonical.
+        def triple_count(eid: str) -> int:
+            row = store._conn.execute(
+                "SELECT COUNT(*) FROM triples WHERE entity_id = ? AND NOT retracted",
+                (eid,),
+            ).fetchone()
+            return row[0] if row else 0
+
+        merge_count = 0
+        repoint_count = 0
+        already_merged: set[str] = set()
+
+        # Sort pairs so we get deterministic order (richer first to maximize transitive merges)
+        ordered_pairs = sorted(
+            candidate_pairs,
+            key=lambda pair: -max(triple_count(e) for e in pair),
+        )
+        for pair in ordered_pairs:
+            a, b = sorted(pair)  # deterministic
+            if a in already_merged or b in already_merged:
+                continue
+            ca, cb = triple_count(a), triple_count(b)
+            if ca == 0 or cb == 0:
+                continue  # one side is already empty
+            # Richer = canonical; lighter = merged-away
+            if ca >= cb:
+                canonical_id, candidate_id = a, b
+            else:
+                canonical_id, candidate_id = b, a
+
+            cand_attrs = store.entity(candidate_id)
+            if not cand_attrs:
+                continue
+
+            # Move outbound triples from candidate → canonical
+            canon = store.entity(canonical_id) or {}
+            for attr, values in cand_attrs.items():
+                values_list = values if isinstance(values, list) else [values]
+                existing = canon.get(attr, [])
+                if not isinstance(existing, list):
+                    existing = [existing]
+                existing_str = {str(e) for e in existing}
+                for val in values_list:
+                    tx = store.begin_tx("alias_dedup")
+                    store.retract_triple(tx, candidate_id, attr, str(val))
+                    if str(val) not in existing_str:
+                        vt = "ref" if str(val).startswith(("entity:", "fact:", "session:")) else "string"
+                        store.assert_triple(tx, canonical_id, attr, str(val), value_type=vt)
+
+            # Repoint inbound refs (X refers_to candidate → X refers_to canonical)
+            for src_entity, src_attr in store.backrefs(candidate_id):
+                tx = store.begin_tx("alias_dedup")
+                store.retract_triple(tx, src_entity, src_attr, candidate_id)
+                store.assert_triple(tx, src_entity, src_attr, canonical_id, value_type="ref")
+                repoint_count += 1
+
+            # Propagate aliases from duplicate to canonical
+            for da in store.aliases_of(candidate_id):
+                store.add_alias(canonical_id, da, confidence=0.9, source="alias_dedup")
+
+            already_merged.add(candidate_id)
+            merge_count += 1
+
+        return {"merged_entities": merge_count, "refs_repointed": repoint_count}
+    finally:
+        store.close()
+
+
 def merge_entity_duplicates(db_path: str, dry_run: bool = True) -> dict:
     """Merge fragmented entity nodes using fuzzy matching.
 
@@ -1419,6 +1530,21 @@ def main() -> None:
 
     # Dedup + execute
     graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts, digest_entities=digest_entities)
+
+    # Stage 2 dedup: merge entities where one's altLabel matches another's slug.
+    # Catches the citibank/city-bank duplicate that whisper STT mishearings
+    # can produce when the same real entity is named differently across sessions.
+    try:
+        dedup_stats = _dedup_via_aliases(db_path)
+        if dedup_stats.get("merged_entities", 0):
+            graph_stats["alias_dedup"] = dedup_stats
+            print(
+                f"  [graph] alias_dedup merged={dedup_stats['merged_entities']} "
+                f"repointed={dedup_stats['refs_repointed']}",
+                file=sys.stderr,
+            )
+    except Exception as e:
+        print(f"[warn] alias_dedup failed (non-fatal): {e}", file=sys.stderr)
 
     # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
     # at our scale (<200 facts). Individual facts are more retrievable than merged ones.
