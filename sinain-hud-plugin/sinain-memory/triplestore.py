@@ -287,6 +287,19 @@ class TripleStore:
         self._conn.commit()
         return cur.lastrowid
 
+    def set_type(self, entity_id: str, entity_type: str) -> None:
+        """Set the canonical entity_type. Stage 2: stores schema.org class strings.
+
+        Overrides the prefix-derived default from `_entity_type` ("fact"/"entity").
+        Idempotent — repeated calls update in place.
+        """
+        self._conn.execute(
+            "INSERT INTO entity_types (entity_id, entity_type) VALUES (?, ?) "
+            "ON CONFLICT(entity_id) DO UPDATE SET entity_type = excluded.entity_type",
+            (entity_id, entity_type),
+        )
+        self._conn.commit()
+
     def temporal_fields_for(
         self,
         entity_ids: list[str],

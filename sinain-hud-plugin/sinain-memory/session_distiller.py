@@ -14,8 +14,10 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
@@ -26,9 +28,40 @@ from common import (
     read_effective_playbook,
 )
 
+
+def _log_distillation_failure(
+    memory_dir: str,
+    error: Exception,
+    raw_response: str | None,
+    transcript: str,
+    stage: str,
+) -> None:
+    """Append a structured record to distiller-failures.jsonl for post-hoc analysis.
+
+    Stage 2 prep: stops the silent isEmpty drop from being invisible. Failures here
+    must never propagate — observability is not allowed to break the pipeline it observes.
+    """
+    try:
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "stage": stage,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "raw_response": raw_response[:5000] if raw_response else None,
+            "raw_response_length": len(raw_response) if raw_response else 0,
+            "transcript_hash": hashlib.sha256(transcript.encode("utf-8")).hexdigest()[:16],
+            "transcript_length": len(transcript),
+        }
+        log_path = Path(memory_dir) / "distiller-failures.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
 SYSTEM_PROMPT = """\
 You are a session distiller for a personal AI overlay system (sinain).
-Your job: analyze a session transcript and extract ALL knowledge worth remembering.
+Your job: analyze a session transcript and extract structured knowledge as a typed graph.
 
 The transcript contains feed items from sinain-core:
 - audio: transcribed speech from the user's environment
@@ -36,45 +69,103 @@ The transcript contains feed items from sinain-core:
 - openclaw: responses from the AI escalation system
 - system: system events and status messages
 
-Extract:
-1. whatHappened: 2-3 sentences summarizing what occurred in this session
-2. facts: up to 15 concrete factual claims. Each must be a self-contained sentence. \
-IMPORTANT — spread across these dimensions (do not let one theme dominate):
-   - WHO: people mentioned, their roles, backgrounds, relationships to each other
-   - WHAT: specific claims, properties, descriptions of things discussed
-   - HOW MUCH: any numbers, quantities, dates, durations, counts stated
-   - WHAT CHANGED: decisions made, agreements reached, state changes
-   - WHAT'S NEXT: commitments, action items, plans, deadlines
-   If you have 5+ facts about one dimension and 0 about another that was discussed, \
-you are missing something. Breadth over depth.
-   Good: "The CTO of Initech previously worked at Globex for 17 years as Director of IT in Berlin"
-   Good: "Globex has 2400 GitHub Enterprise subscriptions and heavy Jenkins usage"
-   Good: "The meeting is 45 minutes, scheduled for Tuesday"
-   Bad: "client-understanding-key: True"
-   Bad: five variations of "Initech is moving to the cloud"
-3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
-4. entities: named things discussed or interacted with — as objects with name \
-(lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
-service, framework, error, whatever fits the context).
-   Examples: {"name": "globex", "type": "org"}, {"name": "auth-module", "type": "file"}, \
-{"name": "react-native", "type": "framework"}
-5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
-6. preferences: up to 3 user preferences or habits observed
+**Output is a typed graph with TWO connected layers — `entities` (typed nodes) and `facts` (subject-predicate-object triples).** Free-text claims belong in `whatHappened`; everything queryable belongs in the graph.
 
-If existing entities are provided, reference them by name to enable reinforcement.
-Focus on CONCRETE, SPECIFIC knowledge. Skip vague observations.
-If the session was idle or empty, say so briefly.
+## entities — declare every node you'll reference
 
-Respond with ONLY a JSON object:
+Each entity is an object with these required fields:
+- `id`: lowercase-hyphenated slug, used as the canonical reference key in facts (e.g., "citibank", "al-futaim-cto", "react-native")
+- `name`: display name (e.g., "Citibank", "Al-Futaim CTO", "React Native")
+- `type`: a schema.org class string. Pick the closest match:
+  - `schema:Person` (named individuals, roles like "the CTO")
+  - `schema:Organization` (companies, teams, projects-as-org)
+  - `schema:SoftwareApplication` (tools, frameworks, IDEs, libraries)
+  - `schema:CreativeWork` (documents, designs, code files)
+  - `schema:Event` (meetings, releases, incidents)
+  - `schema:Place` (cities, offices, regions)
+  - `schema:Product` (physical or digital products)
+  - `schema:Project` (named initiatives, sprints)
+  - `schema:Service` (APIs, infra services)
+  - `schema:Concept` (abstract topics, methodologies)
+  - `schema:Action` (specific things someone did)
+  - `schema:Quantity` (numeric measurements with units)
+  - `schema:Date` (specific dates, deadlines)
+- `altLabels`: array of strings — synonyms, abbreviations, misspellings, role-paraphrases. **CRITICAL: every proper-noun entity MUST have at least one altLabel.** Whisper STT mishears proper nouns (Citibank → "City Bank"; JetBrains → "Jet Brains"); altLabels are how we recover. For a role-typed Person, include the role-paraphrases you heard ("the CTO", "the senior executive"). Empty array is ONLY acceptable for common-noun entities.
+
+## facts — subject-predicate-object triples
+
+Each fact is an object with:
+- `subject`: the `id` of an entity declared in `entities`
+- `predicate`: a domain relation name in camelCase. Prefer schema.org vocabulary when applicable:
+  - `worksFor`, `previouslyWorkedAt`, `roleOf`, `jobTitle`, `homeLocation`, `workLocation`
+  - `subscribesTo`, `uses`, `dependsOn`, `competes`, `partnerOf`
+  - `startDate`, `endDate`, `duration`, `attendedBy`
+  - `quantityOf`, `priceOf`, `versionOf`
+  Use freeform camelCase predicates when no canonical fits, e.g. `prefers`, `expressedConcernAbout`.
+- `object`: EITHER another entity's `id` (set `value_type: "ref"`) OR a literal string (set `value_type: "literal"`). Numbers and dates are literals as strings.
+- `value_type`: `"ref"` or `"literal"`. Required.
+- `confidence`: optional float 0.0-1.0; default 0.9.
+
+Up to 25 facts per session. Spread across these dimensions — do NOT let one theme dominate:
+- **WHO**: people, roles, backgrounds, relationships (`previouslyWorkedAt`, `roleOf`, `reportsTo`)
+- **WHAT**: properties, attributes, descriptions (`uses`, `dependsOn`, `versionOf`)
+- **HOW MUCH**: numbers, quantities, dates, durations (`quantityOf`, `subscriptionCount`, `duration`)
+- **WHAT CHANGED**: decisions, agreements, state transitions (`decidedTo`, `switchedFrom`, `committedTo`)
+- **WHAT'S NEXT**: commitments, action items, deadlines (`willDeliver`, `dueBy`, `plannedFor`)
+
+If 5+ facts cover one dimension and 0 cover another that was discussed, you are missing something. Breadth over depth.
+
+## Other top-level fields
+
+- `whatHappened`: 2-3 sentence prose summary (free text — NOT in the graph)
+- `decisions`: up to 5 decision sentences ("who decided what, with any deadline")
+- `patterns`: up to 3 reusable techniques or workflows (skip if none)
+- `preferences`: up to 3 user preferences or habits observed
+- `isEmpty`: true if the session had nothing substantive
+
+If existing entities are provided in context, reuse their `id`s exactly so the integrator can reinforce them.
+
+## Example output
+
+```json
 {
-  "whatHappened": "string",
-  "facts": ["self-contained factual sentence", ...],
-  "decisions": ["decision sentence with who/what/when", ...],
-  "entities": [{"name": "globex", "type": "org"}, {"name": "alex", "type": "person"}, ...],
-  "patterns": ["reusable technique or workflow", ...],
-  "preferences": ["user preference or habit", ...],
+  "whatHappened": "Al-Futaim's CTO described prior employment and tooling. Background discussion covered subscription counts and the CDO role.",
+  "entities": [
+    {"id": "citibank", "name": "Citibank", "type": "schema:Organization", "altLabels": ["Citi", "City Bank", "Citicorp"]},
+    {"id": "al-futaim-cto", "name": "Al-Futaim CTO", "type": "schema:Person", "altLabels": ["the CTO", "the senior executive", "the chief technology officer"]},
+    {"id": "singapore", "name": "Singapore", "type": "schema:Place", "altLabels": ["SG", "Republic of Singapore"]},
+    {"id": "intellij", "name": "IntelliJ IDEA", "type": "schema:SoftwareApplication", "altLabels": ["IntelliJ", "IDEA", "JetBrains IntelliJ", "Jet Brains"]},
+    {"id": "teamcity", "name": "TeamCity", "type": "schema:SoftwareApplication", "altLabels": ["Team City"]},
+    {"id": "al-futaim-cdo", "name": "Al-Futaim CDO", "type": "schema:Person", "altLabels": ["the CDO", "the chief data officer"]},
+    {"id": "ai-engineering-lead", "name": "AI Engineering Lead", "type": "schema:Concept", "altLabels": ["AI eng lead"]}
+  ],
+  "facts": [
+    {"subject": "al-futaim-cto", "predicate": "previouslyWorkedAt", "object": "citibank", "value_type": "ref"},
+    {"subject": "al-futaim-cto", "predicate": "workLocation", "object": "singapore", "value_type": "ref"},
+    {"subject": "al-futaim-cto", "predicate": "yearsOfTenure", "object": "17", "value_type": "literal"},
+    {"subject": "al-futaim-cto", "predicate": "jobTitle", "object": "Director of IT", "value_type": "literal"},
+    {"subject": "citibank", "predicate": "subscribesTo", "object": "intellij", "value_type": "ref"},
+    {"subject": "citibank", "predicate": "subscriptionCount", "object": "2400", "value_type": "literal"},
+    {"subject": "citibank", "predicate": "uses", "object": "teamcity", "value_type": "ref"},
+    {"subject": "al-futaim-cdo", "predicate": "previouslyWorkedAt", "object": "citibank", "value_type": "ref"},
+    {"subject": "al-futaim-cdo", "predicate": "roleOf", "object": "ai-engineering-lead", "value_type": "ref"}
+  ],
+  "decisions": [],
+  "patterns": [],
+  "preferences": [],
   "isEmpty": false
-}"""
+}
+```
+
+## Hard rules
+
+- Every `fact.subject` MUST appear in `entities` (with matching `id`). Same for `fact.object` when `value_type` is `"ref"`.
+- Every proper-noun entity (named person, named company, named tool/product) MUST have at least one altLabel.
+- If you don't know an entity's schema.org type, prefer `schema:Concept` over guessing wrong.
+- Numbers, dates, and durations are literals — never invent entity ids for them unless they refer to a named/recurring thing.
+- If the session was idle or empty, return `isEmpty: true` with empty arrays and a one-sentence `whatHappened`.
+
+Respond with ONLY a JSON object matching the example shape above. No prose before or after."""
 
 
 def _truncate_transcript(items: list[dict], max_chars: int = 100_000) -> str:
@@ -160,6 +251,8 @@ def main() -> None:
 ## Session Metadata
 {json.dumps(meta, indent=2)}{playbook_summary}{existing_section}"""
 
+    raw: str | None = None
+    stage = "llm_call"
     try:
         raw = call_llm_with_fallback(
             SYSTEM_PROMPT,
@@ -168,9 +261,11 @@ def main() -> None:
             json_mode=True,
             temperature=0.0,
         )
+        stage = "extract_json"
         result = extract_json(raw)
     except (ValueError, LLMError) as e:
-        print(f"LLM distillation failed: {e}", file=sys.stderr)
+        print(f"LLM distillation failed at {stage}: {e}", file=sys.stderr)
+        _log_distillation_failure(args.memory_dir, e, raw, args.transcript, stage)
         output_json({"error": str(e), "isEmpty": True})
         return
 

@@ -96,6 +96,34 @@ _STOPWORDS = frozenset({
 })
 
 
+def _log_integrator_failure(memory_dir: str, digest: dict, errors: list[str]) -> None:
+    """Stage 2: structured logging of Pydantic validation failures.
+
+    Lenient mode never raises, but it can return ok=False if the digest is so
+    malformed that even the salvage-by-dropping-bad-facts path fails. Surface
+    those cases to integrator-failures.jsonl so they're investigable.
+    Mirror of the distiller-failures.jsonl pattern.
+    """
+    try:
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "errors": errors,
+            "digest_keys": sorted(digest.keys()) if isinstance(digest, dict) else None,
+            "fact_count": len(digest.get("facts", [])) if isinstance(digest, dict) else 0,
+            "entity_count": len(digest.get("entities", [])) if isinstance(digest, dict) else 0,
+            "session_ts": digest.get("ts", "") if isinstance(digest, dict) else "",
+            "digest_hash": hashlib.sha256(
+                json.dumps(digest, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16],
+        }
+        log_path = Path(memory_dir) / "integrator-failures.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
 def _extract_tags(value: str) -> list[str]:
     """Extract searchable keyword tags from fact value text.
 
@@ -538,6 +566,27 @@ def _unpack_fact_item(item) -> tuple[str, str | None, str | None]:
     return "", None, None
 
 
+def _is_stage2_shape(digest: dict) -> bool:
+    """Detect whether digest carries Stage 2 structured-triple shape.
+
+    Stage 2 signal: at least one fact is a dict with subject/predicate/object keys,
+    AND at least one entity is a dict with id/name/type keys.
+    """
+    facts = digest.get("facts", [])
+    if not facts:
+        return False
+    first_fact = facts[0]
+    if not isinstance(first_fact, dict):
+        return False
+    if not all(k in first_fact for k in ("subject", "predicate", "object")):
+        return False
+    entities = digest.get("entities", [])
+    if entities and isinstance(entities[0], dict):
+        if "id" in entities[0]:
+            return True
+    return False
+
+
 def _facts_to_graph_ops(digest: dict) -> list[dict]:
     """Convert ALL distiller output + raw feed items to graph ops.
 
@@ -545,10 +594,15 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
     decisions, patterns, preferences, summary) AND verbatim raw captures
     (audio quotes, agent analysis) so the triplestore is the single
     source of truth for session recall.
+
+    Stage 2 path: when distiller emits structured triples + altLabels +
+    schema.org types, writes direct S-P-O rows + alias ops + set_type ops
+    alongside the legacy narrative path (verbatim audio + agent analysis).
     """
     ops = []
     known_entities = digest.get("entities", [])
     raw_items = digest.pop("_rawItems", None) or []
+    stage2 = _is_stage2_shape(digest)
 
     # Session anchor from whatHappened
     session_ts = digest.get("ts", "")[:16]  # "2026-05-07T10:08"
@@ -565,9 +619,72 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "session_ref": session_eid,
         })
 
+    # ── Stage 2 path: structured triples + aliases + schema.org types ──
+    if stage2:
+        for entity in known_entities:
+            if not isinstance(entity, dict):
+                continue
+            eid = entity.get("id", "")
+            if not eid:
+                continue
+            # Namespace the entity id to match assert_triple's expectation
+            canonical_id = eid if eid.startswith("entity:") else f"entity:{eid}"
+            # Schema.org type override
+            etype = entity.get("type", "")
+            if etype:
+                ops.append({
+                    "op": "set_type",
+                    "entity_id": canonical_id,
+                    "entity_type": etype,
+                })
+            # Aliases — one op per altLabel
+            for alias in entity.get("altLabels", []) or []:
+                if alias and isinstance(alias, str):
+                    ops.append({
+                        "op": "alias",
+                        "canonical_id": canonical_id,
+                        "alias": alias,
+                        "confidence": 1.0,
+                        "source": "distiller",
+                    })
+            # Also write the display name as a triple so the entity has a label
+            name = entity.get("name", "")
+            if name:
+                ops.append({
+                    "op": "triple",
+                    "subject": canonical_id,
+                    "predicate": "schema:name",
+                    "object": name,
+                    "value_type": "literal",
+                })
+        # Structured facts → direct triples
+        for fact in digest.get("facts", []):
+            if not isinstance(fact, dict):
+                continue
+            subj = fact.get("subject", "")
+            pred = fact.get("predicate", "")
+            obj = fact.get("object", "")
+            if not subj or not pred or not obj:
+                continue
+            value_type = fact.get("value_type", "literal")
+            # Namespace subject and (for ref-typed objects) the object
+            subj_id = subj if subj.startswith("entity:") else f"entity:{subj}"
+            obj_id = obj
+            if value_type == "ref" and not obj.startswith(("entity:", "fact:", "session:")):
+                obj_id = f"entity:{obj}"
+            ops.append({
+                "op": "triple",
+                "subject": subj_id,
+                "predicate": pred,
+                "object": obj_id,
+                "value_type": value_type,
+            })
+
     # Facts (distilled). Each item may be a string (legacy) or an object with
     # optional occurredStart/occurredEnd temporal anchors.
-    for raw in digest.get("facts", []):
+    # In Stage 2 mode, facts have already been emitted as triples above — skip the legacy path.
+    legacy_fact_iter = [] if stage2 else digest.get("facts", [])
+    for raw in legacy_fact_iter:
         fact_text, occ_start, occ_end = _unpack_fact_item(raw)
         if not fact_text or len(fact_text) < 5:
             continue
@@ -729,6 +846,48 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 for tag in _extract_tags(value):
                     store.assert_triple(tx, entity_id, "tag", tag)
                 stats["asserted"] += 1
+
+            elif op == "triple":
+                # Stage 2: structured S-P-O triple written directly into EAV,
+                # NOT wrapped in a fact:* entity. Cleaner graph shape.
+                subj = op_data.get("subject", "")
+                pred = op_data.get("predicate", "")
+                obj = op_data.get("object", "")
+                value_type = op_data.get("value_type", "literal")
+                if not subj or not pred or not obj:
+                    continue
+                tx = store.begin_tx(
+                    "knowledge_integrator",
+                    metadata=json.dumps({"digest_ts": digest_ts, "shape": "stage2_triple"}),
+                )
+                store.assert_triple(
+                    tx, subj, pred, obj,
+                    value_type=("ref" if value_type == "ref" else "string"),
+                    occurred_start=op_data.get("occurred_start"),
+                    occurred_end=op_data.get("occurred_end"),
+                )
+                stats["asserted"] += 1
+
+            elif op == "alias":
+                # Stage 2: write SKOS-style altLabel into entity_aliases table.
+                canonical = op_data.get("canonical_id", "")
+                alias = op_data.get("alias", "")
+                if not canonical or not alias:
+                    continue
+                store.add_alias(
+                    canonical,
+                    alias,
+                    confidence=op_data.get("confidence", 1.0),
+                    source=op_data.get("source", "distiller"),
+                )
+
+            elif op == "set_type":
+                # Stage 2: store schema.org class string for an entity.
+                eid = op_data.get("entity_id", "")
+                etype = op_data.get("entity_type", "")
+                if not eid or not etype:
+                    continue
+                store.set_type(eid, etype)
 
             elif op == "reinforce":
                 entity_id = op_data.get("entityId", "")
@@ -1208,6 +1367,30 @@ def main() -> None:
     if digest.get("isEmpty", False):
         output_json({"skipped": True, "reason": "empty session"})
         return
+
+    # Stage 2: validate distiller output through Pydantic schema (lenient mode).
+    # If the digest carries the new structured-triple shape, lenient validation
+    # salvages malformed facts (drops unresolved refs, keeps the rest) and
+    # surfaces warnings without raising. Legacy-shape digests bypass this.
+    validation_warnings: list[str] = []
+    try:
+        from distiller_schema import validate_lenient
+    except ImportError:
+        validate_lenient = None  # type: ignore[assignment]
+    if validate_lenient is not None and _is_stage2_shape(digest):
+        result = validate_lenient(digest)
+        if result.ok and result.payload is not None:
+            validation_warnings = result.warnings
+            cleaned = result.payload.model_dump(exclude_unset=False)
+            # Preserve top-level metadata fields the schema marks as extras
+            for k in ("ts", "sessionKey", "durationMs", "feedItemCount", "_rawItems"):
+                if k in digest and k not in cleaned:
+                    cleaned[k] = digest[k]
+            digest = cleaned
+        else:
+            _log_integrator_failure(memory_dir, digest, result.errors)
+            # Best-effort: keep going with the raw digest; the shape detector
+            # will route to the most-applicable path.
 
     # Read current playbook
     playbook = read_playbook(memory_dir)
