@@ -6,6 +6,20 @@
       "**/.*",
       "**/node_modules/**",
       "cold-install-reset.sh"
+    ],
+    "headers": [
+      {
+        "source": "**/*.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
+        "source": "**/*.@(svg|gif|png|jpg|ico)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=86400" }
+        ]
+      }
     ]
   }
 }
