@@ -281,6 +281,17 @@ def main() -> None:
         output_json({"error": str(e), "isEmpty": True})
         return
 
+    # Robustness: LLMs occasionally return a top-level JSON array instead of an
+    # object (especially when the prompt's example block contains heavy nested
+    # JSON). Treat that as a malformed-shape failure rather than crashing on
+    # `result["ts"] = ...`. Log the raw response so we can iterate the prompt.
+    if not isinstance(result, dict):
+        err = TypeError(f"distiller returned non-dict shape: {type(result).__name__}")
+        print(f"LLM distillation produced invalid top-level shape: {type(result).__name__}", file=sys.stderr)
+        _log_distillation_failure(args.memory_dir, err, raw, args.transcript, "non_dict_result")
+        output_json({"error": str(err), "isEmpty": True})
+        return
+
     # Add metadata
     result["ts"] = meta.get("ts", "")
     result["sessionKey"] = meta.get("sessionKey", "")
