@@ -382,6 +382,13 @@ export class LocalCurationService {
           resolve(this.scriptsDir, "knowledge_integrator.py"),
           "--memory-dir", this.memoryDir,
           "--digest", JSON.stringify(digest),
+          // Proposal A — zero-LLM typed-link extraction. The integrator
+          // scans the raw transcript for entity co-occurrences and emits
+          // auto:-prefixed edges (worksAt / founded / advises / investedIn)
+          // BEFORE the LLM-distilled facts land. Off-path: when --transcript
+          // is absent the integrator skips extraction entirely, so this is
+          // additive — no risk to legacy callers.
+          "--transcript", JSON.stringify(transcript),
         ], {
           timeout: 60_000, // 60s: LLM call (~10s) + embedding dedup (~5s) + graph ops
           encoding: "utf-8",
@@ -390,6 +397,9 @@ export class LocalCurationService {
 
         const result = JSON.parse(integratorOutput);
         log(TAG, `knowledge integrated: ${JSON.stringify(result.graphStats || result)}`);
+        if (result.autoEdges?.emitted > 0) {
+          log(TAG, `auto-edges: ${result.autoEdges.emitted} (${JSON.stringify(result.autoEdges.by_predicate)})`);
+        }
       } catch (err: any) {
         warn(TAG, `knowledge integration failed: ${err.message?.slice(0, 200)}`);
       }

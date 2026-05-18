@@ -51,6 +51,7 @@ from typing import Iterable
 # a naive employee match would mis-classify those phrasings.
 
 WORKS_AT_RE = re.compile(
+    # gbrain patterns (written prose — bios, Crunchbase-style pages)
     r"\b(?:CEO of|CTO of|COO of|CFO of|CMO of|CRO of|VP at|VP of|VPs? Engineering|"
     r"VPs? Product|works at|worked at|working at|employed by|employed at|"
     r"joined as|joined the team|engineer at|engineer for|director at|director of|"
@@ -63,7 +64,25 @@ WORKS_AT_RE = re.compile(
     r"(?:senior|staff|principal|lead|backend|frontend|full-?stack|ML|data|security) "
     r"engineer at|"
     r"promoted to (?:senior|staff|principal|lead) .{0,20} at|"
-    r"(?:his|her|their|my) time at)\b",
+    r"(?:his|her|their|my) time at|"
+    # sinain conversational additions — informal verb forms common in
+    # transcribed meeting audio (e.g., "he comes from Citibank"). Tuned
+    # against al-futaim-prep-5min on 2026-05-18.
+    r"comes from|came from|coming from|came over from|"
+    r"works for|worked for|working for|"
+    r"is from .{0,15} (?:team|org|side|group|department)|"
+    r"is at .{0,5}(?:Inc|Corp|Group|Ltd|company)?|"
+    r"used to (?:work|be) (?:at|with|for)|used to run|used to lead|"
+    r"over at|over there at|"
+    r"(?:guy|gal|woman|man|person|individual|colleague) (?:from|at|with)|"
+    r"his background (?:is|was) (?:at|with|from)|"
+    r"her background (?:is|was) (?:at|with|from)|"
+    r"their background (?:is|was) (?:at|with|from)|"
+    r"background (?:is|was) (?:at|from)|"
+    r"started (?:his|her|their) career at|started out at|"
+    r"experience at|experience with|years at|"
+    r"comes (?:to us|from)|"
+    r"on (?:loan|secondment) (?:from|at))\b",
     re.IGNORECASE,
 )
 
@@ -145,9 +164,15 @@ _PREDICATE_MAP = {
 
 # Co-occurrence search window. gbrain's value is implicit (uses chunk
 # boundaries); we use a char-window because sinain transcripts are
-# unstructured streams. 120 chars ≈ one to two sentences, matches typical
-# human-language relation-assertion span.
-DEFAULT_WINDOW_CHARS = 120
+# unstructured streams.
+#
+# 120 chars was tuned for written prose where mentions cluster tightly.
+# Conversational transcripts have mentions spread across multiple short
+# audio items (e.g., al-futaim-prep-5min: "Ibrahim" in one item, then 30-60s
+# later "He comes from the Citibank" in another — separated by 300-500 chars
+# of intervening speech). 600 chars covers typical conversational spread
+# without inviting cross-topic noise. Tunable per call.
+DEFAULT_WINDOW_CHARS = 600
 
 # Promotion threshold per HANDOFF.json design decision. Singletons are
 # usually noise; ≥ 2 occurrences in the same batch suggest the connection
