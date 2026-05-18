@@ -154,6 +154,39 @@ DEFAULT_WINDOW_CHARS = 120
 # is real, not a passing reference.
 DEFAULT_PROMOTION_THRESHOLD = 2
 
+# Type-aware filter — semantic priors that recover the subject/object
+# directionality gbrain gets for free from markdown wikilink syntax.
+# Without this, prose extraction emits Acme→founded→Bob alongside the
+# correct Bob→founded→Acme because regex matches inside a co-occurrence
+# window without knowing which entity is the subject.
+#
+# Constraints reflect real-world semantics:
+#   - Only Person can work-at / found / advise an Organization
+#   - Investments allow Person→Org (angels) AND Org→Org (VC firms → startups)
+#
+# Strict-by-default: an edge is dropped if either type is missing or the
+# (subject_type, object_type) pair isn't in the predicate's allowed set.
+# Stage 2 distiller guarantees types on every entity; cache-invalidation
+# salt forces re-distill of legacy caches, so strict-default is forward-safe.
+_TYPE_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
+    "auto:worksAt":    {("Person", "Organization")},
+    "auto:founded":    {("Person", "Organization")},
+    "auto:advises":    {("Person", "Organization")},
+    "auto:investedIn": {("Person", "Organization"), ("Organization", "Organization")},
+}
+
+
+def _normalize_type(t: str | None) -> str:
+    """Drop the schema.org prefix for pair-matching against _TYPE_CONSTRAINTS.
+
+    Distiller emits types like `schema:Person`; constraints use bare
+    `Person` so the table stays readable. Returns empty string on missing
+    or non-string input — caller treats empty as a strict-mode drop.
+    """
+    if not isinstance(t, str):
+        return ""
+    return t.removeprefix("schema:")
+
 
 def infer_link_type(context: str) -> str | None:
     """Classify a window of prose by which relation it asserts.
@@ -291,6 +324,20 @@ def extract_auto_edges(
     if not index:
         return []
 
+    # Build (entity_id → normalized_type) lookup for the post-classification
+    # type filter. Stage 2 distiller guarantees types; missing/unknown types
+    # cause the edge to be dropped under strict-default semantics.
+    entity_types: dict[str, str] = {}
+    for ent in entities:
+        if not isinstance(ent, dict):
+            continue
+        eid = ent.get("id")
+        if not eid:
+            continue
+        if not eid.startswith("entity:"):
+            eid = f"entity:{eid}"
+        entity_types[eid] = _normalize_type(ent.get("type"))
+
     mentions = _find_mentions(text, index)
     if len(mentions) < 2:
         return []
@@ -310,6 +357,15 @@ def extract_auto_edges(
             ctx = text[max(0, pos_a - 20):min(len(text), pos_b + 50)]
             predicate = infer_link_type(ctx)
             if predicate is None:
+                continue
+            # Type-aware filter — eliminates directional spurious edges by
+            # checking the (subject_type, object_type) pair against the
+            # predicate's allowed combos. Stage 2 distiller guarantees types;
+            # we strict-deny on missing type to keep the bench number clean.
+            subj_t = entity_types.get(ent_a, "")
+            obj_t = entity_types.get(ent_b, "")
+            allowed = _TYPE_CONSTRAINTS.get(predicate, set())
+            if (subj_t, obj_t) not in allowed:
                 continue
             key = (ent_a, predicate, ent_b)
             pair_counts[key] = pair_counts.get(key, 0) + 1
