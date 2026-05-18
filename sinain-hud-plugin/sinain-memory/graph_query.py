@@ -1284,6 +1284,148 @@ def domain_fact_counts(db_path: str) -> dict[str, int]:
         return {}
 
 
+_STAGE2_BOOKKEEPING = (
+    "tag", "attribute", "confidence", "entity", "first_seen", "kind",
+    "last_reinforced", "reinforce_count", "session", "value", "name", "type",
+    "about", "mentions", "domain",
+)
+
+
+def query_stage2_triples(db_path: str, query: str, max_facts: int = 30) -> list[dict]:
+    """Stage 4 retrieval: walk direct S-P-O triples + alias resolution.
+
+    Bridges the post-Stage-2 graph shape to the bench's QA path. Two discovery
+    paths feed into one ranked list:
+      - FTS5 across triples_fts where entity_id starts with 'entity:' and
+        attribute is not a bookkeeping predicate (i.e., a domain relation)
+      - Alias resolution: each query token → entity_aliases lookup → walk all
+        non-bookkeeping triples about each resolved canonical id
+
+    Returns fact-shaped dicts that format_facts_compact / format_facts_text
+    can render. The `value` field carries a readable "predicate object" string
+    (e.g., "isSuitableFor commute") so the QA model sees the relationship
+    without needing to understand the graph encoding.
+    """
+    if not Path(db_path).exists():
+        return []
+
+    try:
+        from triplestore import TripleStore
+        store = TripleStore(db_path)
+        bookkeeping_placeholders = ",".join("?" for _ in _STAGE2_BOOKKEEPING)
+        rows: list = []
+
+        # Path 1: FTS5 across direct triples — query may match subject or object
+        try:
+            fts_rows = store._conn.execute(
+                f"""SELECT t.entity_id, t.attribute, t.value, t.value_type
+                    FROM triples_fts fts
+                    JOIN triples t ON fts.rowid = t.id
+                    WHERE triples_fts MATCH ?
+                      AND t.entity_id LIKE 'entity:%'
+                      AND t.attribute NOT IN ({bookkeeping_placeholders})
+                      AND NOT t.retracted
+                    LIMIT ?""",
+                (query, *_STAGE2_BOOKKEEPING, max_facts * 2),
+            ).fetchall()
+            rows.extend(fts_rows)
+        except Exception:
+            pass
+
+        # Path 2: alias resolution → walk all triples about resolved canonicals
+        import re as _re
+        resolved_canonicals: set[str] = set()
+        for token in _re.findall(r"[a-zA-Z][a-zA-Z0-9\- ]+", query.lower()):
+            token = token.strip()
+            if not token or len(token) < 2:
+                continue
+            for canonical_id, _conf in store.resolve_alias(token):
+                resolved_canonicals.add(canonical_id)
+            # Also direct-slug match (no alias): "citibank" without an alias entry
+            slug = _re.sub(r"\s+", "-", token)
+            if slug:
+                ent_id = slug if slug.startswith("entity:") else f"entity:{slug}"
+                cur = store._conn.execute(
+                    "SELECT 1 FROM triples WHERE entity_id = ? AND NOT retracted LIMIT 1",
+                    (ent_id,),
+                ).fetchone()
+                if cur:
+                    resolved_canonicals.add(ent_id)
+        if resolved_canonicals:
+            entity_placeholders = ",".join("?" for _ in resolved_canonicals)
+            extra_rows = store._conn.execute(
+                f"""SELECT entity_id, attribute, value, value_type
+                    FROM triples
+                    WHERE entity_id IN ({entity_placeholders})
+                      AND attribute NOT IN ({bookkeeping_placeholders})
+                      AND NOT retracted""",
+                (*resolved_canonicals, *_STAGE2_BOOKKEEPING),
+            ).fetchall()
+            rows.extend(extra_rows)
+
+        if not rows:
+            store.close()
+            return []
+
+        # Resolve display names for entity references (both subject and ref-object)
+        all_entities: set[str] = set()
+        for r in rows:
+            all_entities.add(r["entity_id"])
+            if r["value_type"] == "ref" and isinstance(r["value"], str) and r["value"].startswith("entity:"):
+                all_entities.add(r["value"])
+        name_map: dict[str, str] = {}
+        if all_entities:
+            name_placeholders = ",".join("?" for _ in all_entities)
+            name_rows = store._conn.execute(
+                f"""SELECT entity_id, value FROM triples
+                    WHERE entity_id IN ({name_placeholders})
+                      AND attribute = 'schema:name'
+                      AND NOT retracted""",
+                tuple(all_entities),
+            ).fetchall()
+            name_map = {r["entity_id"]: r["value"] for r in name_rows}
+
+        def _display(eid: str) -> str:
+            if eid in name_map:
+                return name_map[eid]
+            return eid.split(":", 1)[1] if ":" in eid else eid
+
+        # Render each triple as a fact-shaped dict, dedup by (subj, pred, obj)
+        facts: list[dict] = []
+        seen: set[tuple] = set()
+        for r in rows:
+            key = (r["entity_id"], r["attribute"], r["value"])
+            if key in seen:
+                continue
+            seen.add(key)
+            subj_label = _display(r["entity_id"])
+            if r["value_type"] == "ref" and r["value"] in name_map:
+                obj_label = name_map[r["value"]]
+            elif r["value_type"] == "ref" and r["value"].startswith("entity:"):
+                obj_label = r["value"].split(":", 1)[1]
+            else:
+                obj_label = r["value"]
+            facts.append({
+                "entity_id": r["entity_id"],
+                "entityId": r["entity_id"],
+                "entity": subj_label,
+                "attribute": r["attribute"],
+                "value": f"{r['attribute']} {obj_label}",
+                "confidence": "1.0",
+                "reinforce_count": "1",
+                "kind": "stage2_triple",
+                "domain": "stage2",
+                "_predicate": r["attribute"],
+                "_object": r["value"],
+                "_value_type": r["value_type"],
+            })
+        store.close()
+        return facts[:max_facts]
+    except Exception as e:
+        print(f"[warn] Stage 2 triple retrieval failed: {e}", file=sys.stderr)
+        return []
+
+
 def _slug_variants(query: str) -> set[str]:
     """Generate slug variations to handle 'Al Futaim' / 'al-futaim' / 'alfutaim'.
 
