@@ -19,6 +19,13 @@ MODEL_FAST = "google/gemini-3-flash-preview"
 MODEL_SMART = "anthropic/claude-sonnet-4.6"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Local-model routing — when a resolved model ID starts with `ollama/`, the
+# `ollama/` prefix is stripped and the request is sent to a local Ollama server
+# instead of OpenRouter. Used by the Phase 12 v2 memory bench harness to swap
+# in candidates like `ollama/qwen3.5:9b` via the SINAIN_BENCH_MODEL env var.
+OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
+OLLAMA_MODEL_PREFIX = "ollama/"
+
 
 class LLMError(Exception):
     """Raised when the LLM API call fails (timeout, network, bad response)."""
@@ -141,7 +148,16 @@ def _load_config() -> dict:
 
 
 def _resolve_model(logical_name: str) -> str:
-    """Map a logical model name ('fast'/'smart') to an actual model ID via config."""
+    """Map a logical model name ('fast'/'smart') to an actual model ID via config.
+
+    Honors SINAIN_<NAME>_MODEL env var override (e.g., SINAIN_FAST_MODEL) — used
+    by the Phase 12 bench harness to swap models per candidate without editing
+    koog-config.json. ingest.py forwards SINAIN_BENCH_MODEL → SINAIN_FAST_MODEL
+    across the subprocess boundary; this is the consumer that closes the loop.
+    """
+    env_override = os.environ.get(f"SINAIN_{logical_name.upper()}_MODEL")
+    if env_override:
+        return env_override
     cfg = _load_config()
     models = cfg.get("models", {})
     return models.get(logical_name, logical_name)
@@ -156,6 +172,8 @@ def call_llm(
     script: str | None = None,
     json_mode: bool = False,
     temperature: float | None = None,
+    images: list[bytes] | None = None,
+    retry_on_empty: int = 5,
 ) -> str:
     """Call OpenRouter chat completions API. Returns assistant message text.
 
@@ -169,6 +187,19 @@ def call_llm(
     for deterministic outputs (essential for judge/eval calls — without it,
     OpenRouter's default temperature of 1.0 causes ~20% score variance on
     identical inputs).
+
+    When *images* is a list of JPEG/PNG byte blobs, they're appended to the
+    user message as `image_url` parts (OpenAI multimodal format). Used by the
+    Phase 12 vision bench judge to send candidate output + source image to a
+    vision-capable judge (gpt-4o). Only OpenRouter destination is supported
+    for image input today; Ollama vision routing goes through OllamaVision
+    in sense_client (different endpoint/format).
+
+    When the provider returns an empty completion (a known transient failure
+    on deepseek-v4-flash for longer prompts — ~25% in the Phase 12 bench),
+    the call is retried `retry_on_empty` times (default 1) before raising
+    LLMError. Other failures (HTTP, connection, parse) are not retried here —
+    they bubble to call_llm_with_fallback which has its own retry logic.
     """
     timeout_s = 60
     if script:
@@ -178,49 +209,107 @@ def call_llm(
         max_tokens = script_cfg.get("maxTokens", max_tokens)
         timeout_s = script_cfg.get("timeout", cfg.get("defaults", {}).get("timeout", 60))
 
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
+    # Pick destination: local Ollama if the model ID is prefixed `ollama/`,
+    # OpenRouter otherwise. Auth requirement and timeout differ per destination
+    # (local inference can be slow on cold starts — bump timeout for Ollama).
+    use_ollama = model.startswith(OLLAMA_MODEL_PREFIX)
+    if use_ollama:
+        actual_model = model[len(OLLAMA_MODEL_PREFIX):]
+        endpoint = OLLAMA_URL
+        headers = {"Content-Type": "application/json"}
+        timeout_s = max(timeout_s, 120)  # cold-start tolerance for local model load
+    else:
+        actual_model = model
+        endpoint = OPENROUTER_URL
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+    user_content: str | list[dict]
+    if images:
+        if use_ollama:
+            raise RuntimeError(
+                "Image input via call_llm is OpenRouter-only. For Ollama vision, "
+                "use sense_client.ollama_vision.OllamaVision (different endpoint)."
+            )
+        import base64
+        parts: list[dict] = [{"type": "text", "text": user_prompt}]
+        for img_bytes in images:
+            b64 = base64.b64encode(img_bytes).decode("ascii")
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            })
+        user_content = parts
+    else:
+        user_content = user_prompt
 
     body: dict = {
-        "model": model,
+        "model": actual_model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ],
     }
     if temperature is not None:
         body["temperature"] = temperature
-    if json_mode and model.startswith("openai/"):
+    if json_mode and actual_model.startswith("openai/"):
         body["response_format"] = {"type": "json_object"}
 
-    try:
-        resp = requests.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-            timeout=timeout_s,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException as e:
-        raise LLMError(f"LLM call failed ({type(e).__name__}): {e}") from e
+    total_attempts = 1 + max(0, retry_on_empty)
+    for attempt in range(total_attempts):
+        try:
+            resp = requests.post(endpoint, headers=headers, json=body, timeout=timeout_s)
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.ConnectionError as e:
+            if use_ollama:
+                raise LLMError(
+                    f"Ollama not reachable at {endpoint}. Is `ollama serve` running? "
+                    f"(also verify `ollama pull {actual_model}` has completed)"
+                ) from e
+            raise LLMError(f"LLM call failed (ConnectionError): {e}") from e
+        except requests.exceptions.HTTPError as e:
+            if use_ollama and resp.status_code == 404:
+                raise LLMError(
+                    f"Ollama returned 404 for model '{actual_model}'. "
+                    f"Run `ollama pull {actual_model}` to download it."
+                ) from e
+            raise LLMError(f"LLM call failed (HTTPError): {e}") from e
+        except requests.exceptions.RequestException as e:
+            raise LLMError(f"LLM call failed ({type(e).__name__}): {e}") from e
 
-    # Log token usage to stderr for cost tracking
-    usage = data.get("usage", {})
-    if usage:
-        print(
-            f"[tokens] model={model} prompt={usage.get('prompt_tokens', '?')} "
-            f"completion={usage.get('completion_tokens', '?')} "
-            f"total={usage.get('total_tokens', '?')}",
-            file=sys.stderr,
-        )
+        # Log token usage to stderr for cost tracking
+        usage = data.get("usage", {})
+        if usage:
+            print(
+                f"[tokens] model={model} prompt={usage.get('prompt_tokens', '?')} "
+                f"completion={usage.get('completion_tokens', '?')} "
+                f"total={usage.get('total_tokens', '?')}",
+                file=sys.stderr,
+            )
 
-    content = data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        if content:
+            return content
+
+        # Empty response — retry if attempts remain
+        if attempt < total_attempts - 1:
+            print(
+                f"[retry] empty response from {model} "
+                f"(attempt {attempt + 1}/{total_attempts}) — retrying",
+                file=sys.stderr,
+            )
+            time.sleep(0.5)
+            continue
+        # Out of attempts — fall through to the raise below
+        break
+
     if not content:
         raise LLMError(f"LLM returned empty response (model={model})")
     return content
@@ -233,6 +322,7 @@ def call_llm_with_fallback(
     script: str | None = None,
     json_mode: bool = False,
     retries: int = 1,
+    temperature: float | None = None,
 ) -> str:
     """call_llm with automatic retry on failure (same model).
 
@@ -242,7 +332,7 @@ def call_llm_with_fallback(
     last_err: LLMError | None = None
     for attempt in range(1 + retries):
         try:
-            return call_llm(system_prompt, user_prompt, script=script, json_mode=json_mode)
+            return call_llm(system_prompt, user_prompt, script=script, json_mode=json_mode, temperature=temperature)
         except LLMError as e:
             last_err = e
             if attempt < retries:

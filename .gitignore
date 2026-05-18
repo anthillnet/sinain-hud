@@ -9,6 +9,7 @@ bridge/dist/
 # Python
 __pycache__/
 *.pyc
+*.output.txt
 
 # Environment
 .env
@@ -25,6 +26,9 @@ overlay/macos/.symlinks/
 
 # Claude
 .claude/
+
+# Agent skill definitions — private; contain server/SSH details
+.agents/
 
 # Generated MCP config (sinain-agent)
 sinain-agent/.junie-mcp/
@@ -80,5 +84,21 @@ docs/logs/
 media/*.mp4
 media/*.mov
 
-# GSD planning workspace (commit_docs=false; baseline kept on chore/gsd-init via 4bbb543/d886792)
+# GSD planning workspace (commit_docs=false)
 .planning/
+
+# Phase 12 internal eval — CONFIDENTIAL business media. See phase plan in
+# .planning/ for context. Already covered by .planning/ above; kept explicit
+# as defense-in-depth in case commit_docs flips to true or someone tries
+# `git add -f`. Never commit, never publish, never reference externally.
+.planning/eval-internal/
+
+# Memory eval harness — keep the entire tree out of future commits so private
+# bench surfaces, ground-truth references, and operator-machine paths cannot
+# leak through accidental `git add`. Already-tracked public LongMemEval
+# infrastructure (longmemeval_adapter.py, runner.py, judges/, etc.) stays
+# committed; gitignore only affects new files added to this tree.
+sinain-hud-plugin/sinain-memory/eval/
+
+# git-filter-branch / filter-repo temp dirs — never commit
+.git-rewrite/

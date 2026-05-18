@@ -47,16 +47,16 @@ IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHAT'S NEXT: commitments, action items, plans, deadlines
    If you have 5+ facts about one dimension and 0 about another that was discussed, \
 you are missing something. Breadth over depth.
-   Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
-   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
+   Good: "The CTO of Initech previously worked at Globex for 17 years as Director of IT in Berlin"
+   Good: "Globex has 2400 GitHub Enterprise subscriptions and heavy Jenkins usage"
    Good: "The meeting is 45 minutes, scheduled for Tuesday"
    Bad: "client-understanding-key: True"
-   Bad: five variations of "Al-Futaim is moving to the cloud"
+   Bad: five variations of "Initech is moving to the cloud"
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
 4. entities: named things discussed or interacted with — as objects with name \
 (lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
 service, framework, error, whatever fits the context).
-   Examples: {"name": "citibank", "type": "org"}, {"name": "auth-module", "type": "file"}, \
+   Examples: {"name": "globex", "type": "org"}, {"name": "auth-module", "type": "file"}, \
 {"name": "react-native", "type": "framework"}
 5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
 6. preferences: up to 3 user preferences or habits observed
@@ -70,7 +70,7 @@ Respond with ONLY a JSON object:
   "whatHappened": "string",
   "facts": ["self-contained factual sentence", ...],
   "decisions": ["decision sentence with who/what/when", ...],
-  "entities": [{"name": "citibank", "type": "org"}, {"name": "artom", "type": "person"}, ...],
+  "entities": [{"name": "globex", "type": "org"}, {"name": "alex", "type": "person"}, ...],
   "patterns": ["reusable technique or workflow", ...],
   "preferences": ["user preference or habit", ...],
   "isEmpty": false
@@ -166,6 +166,7 @@ def main() -> None:
             user_prompt,
             script="session_distiller",
             json_mode=True,
+            temperature=0.0,
         )
         result = extract_json(raw)
     except (ValueError, LLMError) as e:
