@@ -468,6 +468,13 @@
     display:flex;justify-content:space-between;align-items:center;gap:18px;
     color:var(--fg-faint);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;
   }
+  .ft-mail{
+    display:inline-flex;align-items:center;gap:6px;
+    color:var(--fg-dim);transition:color .2s;
+  }
+  .ft-mail:hover{color:var(--accent)}
+  .ft-mail svg{flex-shrink:0;opacity:.7;transition:opacity .2s}
+  .ft-mail:hover svg{opacity:1}
 
   /* ─── Responsive ─── */
   @media (max-width:1000px){
@@ -964,6 +971,10 @@
     </div>
     <div class="ft-meta">
       <span>SINAIN · CONTEXT OS · © 2026 ANTHILLNET</span>
+      <a href="mailto:contact@sinain.com" class="ft-mail">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+        contact@sinain.com
+      </a>
       <span>BUILT FOR BUILDERS · MIT</span>
     </div>
   </div>
