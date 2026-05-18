@@ -38,6 +38,7 @@
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, system-ui, sans-serif;
   }
   *{box-sizing:border-box}
+  html{overflow-x:hidden}
   html,body{margin:0}
   body{
     background:var(--bg);color:var(--fg);
@@ -80,7 +81,7 @@
   .logo .mark{
     width:22px;height:22px;display:block;flex-shrink:0;
   }
-  .logo .sub{color:var(--fg-faint);font-weight:500;font-size:12px;margin-left:2px;letter-spacing:0}
+  .logo .sub{color:var(--fg-faint);font-weight:500;font-size:12px;margin-left:2px;letter-spacing:0;white-space:nowrap}
   nav.primary{display:flex;gap:20px;color:var(--fg-dim);font-size:13.5px}
   nav.primary a{color:var(--fg-dim)}
   nav.primary a:hover{color:var(--fg);text-decoration:none}
@@ -471,6 +472,7 @@
   /* ─── Responsive ─── */
   @media (max-width:1000px){
     .hero-grid,.feat,.feat.reverse,.qs,.cta-card{grid-template-columns:1fr;gap:40px}
+    .hero-grid>*,.feat>*,.qs>*,.sec-head>*{min-width:0}
     .sec-head{grid-template-columns:1fr;gap:8px}
     h1.hero-title{font-size:42px}
     .pillars,.modes,.lm,.mcp,.prereq{grid-template-columns:1fr;gap:10px}
@@ -480,6 +482,18 @@
     .dd .d{border-right:0}
     .ft{grid-template-columns:1fr 1fr}
     nav.primary{display:none}
+    .top-inner .spacer{display:none}
+    .top-inner .pill{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;padding:3px 8px}
+  }
+  @media (max-width:480px){
+    .top-inner{gap:10px}
+    .top-inner .btn{padding:8px 10px;font-size:12px}
+    .logo .sub{display:none}
+    h1.hero-title{font-size:32px}
+    .install{max-width:100%}
+    .install .label{display:none}
+    .install code{font-size:13px}
+    .meta{gap:12px 20px}
   }
 </style>
 </head>
