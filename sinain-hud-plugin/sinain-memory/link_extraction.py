@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""Zero-LLM typed-link extractor for sinain transcripts.
+
+Adapted from gbrain/src/core/link-extraction.ts (Garry Tan's personal-AI
+memory system). gbrain's mechanism: regex patterns over markdown wikilinks
+emit deterministic typed edges (works_at / founded / invested_in / advises)
+at write-time — LLM only fires in overnight dream cycle.
+
+Sinain adaptation: transcripts have no markdown wikilink syntax, so we use
+the distiller's entity list (name + altLabels) to build a lexicon, scan
+transcript text for entity-pair co-occurrences within a window, and
+classify the connecting prose with the same regex chain.
+
+Predicate naming uses sinain's camelCase convention with an `auto:` prefix
+to mark provenance:
+    works_at      → auto:worksAt
+    founded       → auto:founded
+    invested_in   → auto:investedIn
+    advises       → auto:advises
+
+Edges with co-occurrence count ≥ 2 within a single batch are promoted;
+singletons drop. Confidence is fixed at 0.6 (below the 1.0 default for
+LLM-distilled facts so query ranking de-prioritizes them).
+
+Usage (programmatic):
+    from link_extraction import extract_auto_edges
+    edges = extract_auto_edges(transcript, entities)
+    # edges: [{subject_id, predicate, object_id, confidence, evidence, count}, ...]
+
+Usage (CLI smoke test):
+    python3 link_extraction.py --transcript '[{"text":"...","role":"audio"}]' \
+        --entities '[{"id":"entity:jane","name":"Jane Smith"}]'
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from typing import Iterable
+
+
+# ─── Regex patterns (verbatim port of gbrain TS) ────────────────────────────
+#
+# Each pattern fires on prose that asserts a specific relationship between
+# two entities found in the same window. Patterns are tried in order and the
+# first match wins; precedence reflects gbrain's tuning: founded > invested_in
+# > advises > works_at. Investor patterns precede employee patterns because
+# investors often "sit on the board at" or "advise" portfolio companies and
+# a naive employee match would mis-classify those phrasings.
+
+WORKS_AT_RE = re.compile(
+    r"\b(?:CEO of|CTO of|COO of|CFO of|CMO of|CRO of|VP at|VP of|VPs? Engineering|"
+    r"VPs? Product|works at|worked at|working at|employed by|employed at|"
+    r"joined as|joined the team|engineer at|engineer for|director at|director of|"
+    r"head of|heads up .{0,20} at|leads engineering|leads product|"
+    r"leads the .{0,20} (?:team|org) at|manages engineering at|"
+    r"manages product at|running (?:engineering|product|design) at|"
+    r"currently at|previously at|previously worked at|"
+    r"spent .* (?:years|months) at|stint at|stint as|tenure at|tenure as|"
+    r"role at|position at|"
+    r"(?:senior|staff|principal|lead|backend|frontend|full-?stack|ML|data|security) "
+    r"engineer at|"
+    r"promoted to (?:senior|staff|principal|lead) .{0,20} at|"
+    r"(?:his|her|their|my) time at)\b",
+    re.IGNORECASE,
+)
+
+INVESTED_RE = re.compile(
+    r"\b(?:invested in|invests in|investing in|invest in|investment in|"
+    r"investments in|backed by|funding from|funded by|raised from|"
+    r"led the (?:seed|Series|round|investment|round)|"
+    r"led .{0,30}(?:Series [A-Z]|seed|round|investment)|"
+    r"participated in (?:the )?(?:seed|Series|round)|"
+    r"wrote (?:a |the )?check|first check|early investor|"
+    r"portfolio (?:company|includes)|board seat (?:at|in|on)|"
+    r"term sheet for)\b",
+    re.IGNORECASE,
+)
+
+FOUNDED_RE = re.compile(
+    r"\b(?:founded|co-?founded|started the company|incorporated|"
+    r"founder of|founders? (?:include|are)|the founder|"
+    r"is a co-?founder|is one of the founders)\b",
+    re.IGNORECASE,
+)
+
+ADVISES_RE = re.compile(
+    r"\b(?:advises|advised|advisor (?:to|at|for|of)|"
+    r"advisory (?:board|role|position|capacity|engagement|partnership|"
+    r"contract|relationship|work)|board advisor|"
+    r"on .{0,20} advisory board|joined .{0,20} advisory board|"
+    r"in an? advisory (?:capacity|role|position)|"
+    r"as an? (?:advisor|security advisor|technical advisor|strategic advisor|"
+    r"industry advisor|product advisor|board advisor|senior advisor)|"
+    r"(?:strategic|technical|security|product|industry|senior|board) "
+    r"advisor (?:to|at|for|of)|"
+    r"consults for|consulting role (?:at|with))\b",
+    re.IGNORECASE,
+)
+
+# Page-role priors from gbrain — used as fallback classifiers when no verb
+# pattern fires but context suggests a specific relationship type.
+PARTNER_ROLE_RE = re.compile(
+    r"\b(?:partner at|partner of|venture partner|VC partner|invested early|"
+    r"investor at|investor in|portfolio|venture capital|"
+    r"early-stage investor|seed investor|fund [A-Z]|invests across|"
+    r"backs companies)\b",
+    re.IGNORECASE,
+)
+
+ADVISOR_ROLE_RE = re.compile(
+    r"\b(?:full-time advisor|professional advisor|"
+    r"advises (?:multiple|several|various)|"
+    r"is an? (?:advisor|security advisor|technical advisor|strategic advisor|"
+    r"industry advisor|product advisor|senior advisor)|"
+    r"took on advisory roles|"
+    r"(?:her|his|their) advisory (?:work|role|engagement|portfolio)|"
+    r"serves as (?:an )?advisor)\b",
+    re.IGNORECASE,
+)
+
+EMPLOYEE_ROLE_RE = re.compile(
+    r"\b(?:is an? (?:senior|staff|principal|lead|backend|frontend|full-?stack|"
+    r"ML|data|security|DevOps|platform)? ?engineer at|"
+    r"is an? (?:senior|staff|principal|lead)? ?"
+    r"(?:developer|designer|product manager|engineering manager|director|VP) "
+    r"(?:at|of)|"
+    r"holds? the (?:CTO|CEO|CFO|COO|CMO|CRO|VP) (?:role|position|seat|title) at|"
+    r"is the (?:CTO|CEO|CFO|COO|CMO|CRO) of|"
+    r"employee at|on the team at|works on .{0,30} at)\b",
+    re.IGNORECASE,
+)
+
+# Sinain predicate naming: gbrain's snake_case → sinain's camelCase, with
+# `auto:` prefix to flag origin. Query layers can filter on `auto:` to
+# de-prioritize auto-extracted edges vs LLM-distilled facts.
+_PREDICATE_MAP = {
+    "founded": "auto:founded",
+    "invested_in": "auto:investedIn",
+    "advises": "auto:advises",
+    "works_at": "auto:worksAt",
+}
+
+# Co-occurrence search window. gbrain's value is implicit (uses chunk
+# boundaries); we use a char-window because sinain transcripts are
+# unstructured streams. 120 chars ≈ one to two sentences, matches typical
+# human-language relation-assertion span.
+DEFAULT_WINDOW_CHARS = 120
+
+# Promotion threshold per HANDOFF.json design decision. Singletons are
+# usually noise; ≥ 2 occurrences in the same batch suggest the connection
+# is real, not a passing reference.
+DEFAULT_PROMOTION_THRESHOLD = 2
+
+
+def infer_link_type(context: str) -> str | None:
+    """Classify a window of prose by which relation it asserts.
+
+    Verb patterns checked in gbrain's documented precedence: founded first
+    (catches "Jane founded Acme"), then invested_in / advises / works_at.
+    Falls back to role priors which are weaker but catch noun-phrase forms
+    like "advisor to Acme" without a leading verb.
+
+    Returns the sinain-namespaced predicate (e.g., `auto:founded`) or
+    `None` if no pattern fires — caller drops `None` results to avoid
+    polluting the graph with generic `mentions` edges.
+    """
+    if FOUNDED_RE.search(context):
+        return _PREDICATE_MAP["founded"]
+    if INVESTED_RE.search(context):
+        return _PREDICATE_MAP["invested_in"]
+    if ADVISES_RE.search(context):
+        return _PREDICATE_MAP["advises"]
+    if WORKS_AT_RE.search(context):
+        return _PREDICATE_MAP["works_at"]
+    # Role priors — weaker; only used when no verb pattern matched.
+    if PARTNER_ROLE_RE.search(context):
+        return _PREDICATE_MAP["invested_in"]
+    if ADVISOR_ROLE_RE.search(context):
+        return _PREDICATE_MAP["advises"]
+    if EMPLOYEE_ROLE_RE.search(context):
+        return _PREDICATE_MAP["works_at"]
+    return None
+
+
+def _build_mention_index(
+    entities: list[dict],
+) -> list[tuple[str, str]]:
+    """Build a (search_token, entity_id) list from distiller entities.
+
+    Each entity contributes its `name` plus any `altLabels`. Tokens are
+    lowercased once here so the scan can do case-insensitive matching
+    without per-call .lower() overhead.
+
+    Tokens shorter than 3 chars are dropped (avoid false hits on stop-word-
+    length names that would explode the co-occurrence space).
+    """
+    pairs: list[tuple[str, str]] = []
+    for ent in entities:
+        if not isinstance(ent, dict):
+            continue
+        eid = ent.get("id")
+        if not eid:
+            continue
+        # Normalize to full entity_id form expected by the triplestore.
+        if not eid.startswith("entity:"):
+            eid = f"entity:{eid}"
+        for label in [ent.get("name"), *(ent.get("altLabels") or [])]:
+            if not isinstance(label, str):
+                continue
+            token = label.strip().lower()
+            if len(token) < 3:
+                continue
+            pairs.append((token, eid))
+    return pairs
+
+
+def _find_mentions(text: str, index: list[tuple[str, str]]) -> list[tuple[int, str]]:
+    """Locate every entity-label occurrence in text, return (pos, entity_id).
+
+    Uses word-boundary regex per token. Same entity can match via multiple
+    altLabels — that's fine; we keep all positions for window-pair sweeps.
+    Sort ascending by position so the outer-loop sweep can break out as soon
+    as the inner pointer passes the window edge.
+    """
+    mentions: list[tuple[int, str]] = []
+    for token, eid in index:
+        # re.escape handles entity names containing special regex chars
+        pattern = re.compile(r"\b" + re.escape(token) + r"\b", re.IGNORECASE)
+        for m in pattern.finditer(text):
+            mentions.append((m.start(), eid))
+    mentions.sort(key=lambda x: x[0])
+    return mentions
+
+
+def _flatten_transcript(transcript: Iterable[dict]) -> str:
+    """Concatenate transcript items into a single text blob for regex scan.
+
+    Items joined with "  " (two spaces) so word boundaries hold across the
+    boundary — a name at the end of one item won't bleed into the next item's
+    first word and cause a spurious match.
+    """
+    parts: list[str] = []
+    for item in transcript:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text") or ""
+        if isinstance(text, str) and text.strip():
+            parts.append(text)
+    return "  ".join(parts)
+
+
+def extract_auto_edges(
+    transcript: list[dict],
+    entities: list[dict],
+    *,
+    window_chars: int = DEFAULT_WINDOW_CHARS,
+    promotion_threshold: int = DEFAULT_PROMOTION_THRESHOLD,
+    confidence: float = 0.6,
+) -> list[dict]:
+    """Extract typed (subj, predicate, obj) edges from co-occurrences.
+
+    Workflow:
+      1. Concat transcript items into one text blob.
+      2. Build a (name|altLabel → entity_id) index from distiller entities.
+      3. Find every entity mention position in the text.
+      4. Sweep ordered pairs within `window_chars`; for each pair, slice
+         the connecting context and classify via inferLinkType chain.
+      5. Count occurrences per directed (subj, pred, obj) key. Drop pairs
+         below `promotion_threshold`.
+      6. Emit one edge dict per promoted key with the first-seen evidence
+         excerpt.
+
+    Same-entity pairs (subj == obj) are skipped — auto-edges to oneself
+    would be noise (e.g., "Jane works at Jane's company" mentions Jane
+    twice but the edge target is the company, not Jane).
+
+    Returns a list of dicts ready for direct triplestore writes:
+        {subject_id, predicate, object_id, confidence, evidence, count}
+    """
+    if not transcript or not entities:
+        return []
+
+    text = _flatten_transcript(transcript)
+    if not text:
+        return []
+
+    index = _build_mention_index(entities)
+    if not index:
+        return []
+
+    mentions = _find_mentions(text, index)
+    if len(mentions) < 2:
+        return []
+
+    pair_counts: dict[tuple[str, str, str], int] = {}
+    pair_evidence: dict[tuple[str, str, str], str] = {}
+
+    for i, (pos_a, ent_a) in enumerate(mentions):
+        for j in range(i + 1, len(mentions)):
+            pos_b, ent_b = mentions[j]
+            if pos_b - pos_a > window_chars:
+                break
+            if ent_a == ent_b:
+                continue
+            # Include a small left-pad so verbs preceding the first mention
+            # (e.g., "founded by Jane and John") are visible to the regex.
+            ctx = text[max(0, pos_a - 20):min(len(text), pos_b + 50)]
+            predicate = infer_link_type(ctx)
+            if predicate is None:
+                continue
+            key = (ent_a, predicate, ent_b)
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+            if key not in pair_evidence:
+                pair_evidence[key] = ctx
+
+    edges: list[dict] = []
+    for (subj, predicate, obj), count in pair_counts.items():
+        if count < promotion_threshold:
+            continue
+        edges.append({
+            "subject_id": subj,
+            "predicate": predicate,
+            "object_id": obj,
+            "confidence": confidence,
+            "evidence": pair_evidence[(subj, predicate, obj)],
+            "count": count,
+        })
+    return edges
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Zero-LLM typed-link extractor (smoke test CLI)"
+    )
+    parser.add_argument("--transcript", required=True, help="JSON list of {role,text,ts?} items")
+    parser.add_argument("--entities", required=True, help="JSON list of {id,name,altLabels?} items")
+    parser.add_argument("--window-chars", type=int, default=DEFAULT_WINDOW_CHARS)
+    parser.add_argument("--threshold", type=int, default=DEFAULT_PROMOTION_THRESHOLD)
+    args = parser.parse_args()
+
+    transcript = json.loads(args.transcript)
+    entities = json.loads(args.entities)
+    edges = extract_auto_edges(
+        transcript, entities,
+        window_chars=args.window_chars,
+        promotion_threshold=args.threshold,
+    )
+    json.dump(edges, sys.stdout, indent=2, ensure_ascii=False)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

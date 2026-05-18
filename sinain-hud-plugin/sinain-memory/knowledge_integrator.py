@@ -1410,6 +1410,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Knowledge Integrator")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--digest", default=None, help="SessionDigest JSON string")
+    parser.add_argument("--transcript", default=None, help="Raw transcript JSON (Proposal A: enables zero-LLM typed-link extraction). When present, link_extraction.extract_auto_edges runs against the transcript and emits auto:-prefixed edges with confidence=0.6 before LLM-distilled facts land.")
     parser.add_argument("--bootstrap", action="store_true", help="One-time: seed graph from playbook")
     parser.add_argument("--retag", action="store_true", help="Re-extract tags for all existing facts")
     parser.add_argument("--dedup-entities", action="store_true", help="Merge fragmented entity nodes")
@@ -1523,6 +1524,40 @@ def main() -> None:
             facts_lines.append(f"- [{eid}] ({domain}, confidence={conf}) {val}")
         facts_text = f"\n\n## Existing Graph Facts (for reference — reinforce or retract as needed)\n" + "\n".join(facts_lines)
 
+    # ── Step 0.5: Zero-LLM typed-link extraction (Proposal A) ──
+    # When the caller passes the raw transcript, run regex-based relation
+    # extraction across entity co-occurrences in prose. Emits auto:-prefixed
+    # edges (worksAt / founded / investedIn / advises) at confidence=0.6.
+    # Runs BEFORE the LLM-distilled facts land so the graph has a deterministic
+    # baseline of typed edges even when LLM distillation degrades or fails.
+    auto_edges_stats: dict = {"emitted": 0, "by_predicate": {}}
+    if args.transcript:
+        try:
+            transcript_items = json.loads(args.transcript)
+            from link_extraction import extract_auto_edges
+            from triplestore import TripleStore
+            auto_edges = extract_auto_edges(transcript_items, digest_entities)
+            if auto_edges:
+                _auto_store = TripleStore(db_path)
+                _auto_tx = _auto_store.begin_tx(
+                    "auto-link",
+                    metadata=json.dumps({"source": "link_extraction.extract_auto_edges"}),
+                )
+                for edge in auto_edges:
+                    _auto_store.assert_triple(
+                        _auto_tx,
+                        edge["subject_id"],
+                        edge["predicate"],
+                        edge["object_id"],
+                        value_type="ref",
+                    )
+                    auto_edges_stats["emitted"] += 1
+                    pred = edge["predicate"]
+                    auto_edges_stats["by_predicate"][pred] = auto_edges_stats["by_predicate"].get(pred, 0) + 1
+                _auto_store.close()
+        except Exception as e:
+            print(f"[warn] auto-link extraction failed (non-fatal): {e}", file=sys.stderr)
+
     # ── Step 1: DETERMINISTIC graph ops from distiller output (no LLM needed) ──
     # The distiller already extracted structured facts — conversion is mechanical.
     graph_ops = _facts_to_graph_ops(digest)
@@ -1624,6 +1659,7 @@ def main() -> None:
         "status": "ok",
         "changes": changes,
         "graphStats": graph_stats,
+        "autoEdges": auto_edges_stats,
         "playbookLines": len(new_playbook.splitlines()),
     })
 
