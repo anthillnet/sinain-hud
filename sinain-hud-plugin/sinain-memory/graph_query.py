@@ -1315,53 +1315,65 @@ def query_stage2_triples(db_path: str, query: str, max_facts: int = 30) -> list[
         bookkeeping_placeholders = ",".join("?" for _ in _STAGE2_BOOKKEEPING)
         rows: list = []
 
-        # Path 1: FTS5 across direct triples — query may match subject or object
-        try:
-            fts_rows = store._conn.execute(
-                f"""SELECT t.entity_id, t.attribute, t.value, t.value_type
-                    FROM triples_fts fts
-                    JOIN triples t ON fts.rowid = t.id
-                    WHERE triples_fts MATCH ?
-                      AND t.entity_id LIKE 'entity:%'
-                      AND t.attribute NOT IN ({bookkeeping_placeholders})
-                      AND NOT t.retracted
-                    LIMIT ?""",
-                (query, *_STAGE2_BOOKKEEPING, max_facts * 2),
-            ).fetchall()
-            rows.extend(fts_rows)
-        except Exception:
-            pass
-
-        # Path 2: alias resolution → walk all triples about resolved canonicals
+        # Tokenize once, used by all three paths.
         import re as _re
         _STOPWORDS = {
             "the", "is", "in", "on", "for", "and", "or", "of", "to", "a", "an",
             "it", "was", "not", "how", "what", "when", "does", "did", "do", "my",
             "your", "their", "have", "has", "had", "are", "were", "been", "being",
             "about", "from", "with", "that", "this", "which", "who", "whom",
-            "where", "why", "can", "could", "would", "should", "any",
+            "where", "why", "can", "could", "would", "should", "any", "many",
+            "long", "much", "before", "after",
         }
-        query_tokens = [
-            t for t in _re.findall(r"[a-zA-Z][a-zA-Z0-9]{2,}", query.lower())
-            if t not in _STOPWORDS
-        ]
+        # Single-word tokens (alphanumeric, len >= 3, not stopword).
+        # NB: \b boundaries ensure individual words rather than the whole phrase.
+        raw_tokens = _re.findall(r"\b[a-zA-Z][a-zA-Z0-9]{2,}\b", query.lower())
+        query_tokens = [t for t in raw_tokens if t not in _STOPWORDS]
+
+        # Path 1 (fixed): FTS5 across direct triples. The raw bench query ends with
+        # "?" which FTS5 parses as a syntax error. Build an OR-query from sanitized
+        # significant tokens instead. This both fixes the crash AND broadens recall.
+        if query_tokens:
+            fts_match = " OR ".join(query_tokens)
+            try:
+                fts_rows = store._conn.execute(
+                    f"""SELECT t.entity_id, t.attribute, t.value, t.value_type
+                        FROM triples_fts fts
+                        JOIN triples t ON fts.rowid = t.id
+                        WHERE triples_fts MATCH ?
+                          AND t.entity_id LIKE 'entity:%'
+                          AND t.attribute NOT IN ({bookkeeping_placeholders})
+                          AND NOT t.retracted
+                        LIMIT ?""",
+                    (fts_match, *_STAGE2_BOOKKEEPING, max_facts * 2),
+                ).fetchall()
+                rows.extend(fts_rows)
+            except Exception:
+                pass
+
+        # Path 2 (fixed): alias resolution → walk all triples about resolved
+        # canonicals. Previously the regex greedily matched the entire phrase
+        # as one "token" because the character class included spaces. Now we
+        # iterate individual words AND adjacent 2-word pairs (for compound
+        # entity names like "city bank").
         resolved_canonicals: set[str] = set()
-        for token in _re.findall(r"[a-zA-Z][a-zA-Z0-9\- ]+", query.lower()):
-            token = token.strip()
-            if not token or len(token) < 2:
+        lookup_phrases: list[str] = list(raw_tokens)  # include stopwords for slug fallback
+        # Two-word adjacent pairs (e.g., "city bank", "team city")
+        for i in range(len(raw_tokens) - 1):
+            lookup_phrases.append(f"{raw_tokens[i]} {raw_tokens[i+1]}")
+        for phrase in lookup_phrases:
+            if len(phrase) < 2:
                 continue
-            for canonical_id, _conf in store.resolve_alias(token):
+            for canonical_id, _conf in store.resolve_alias(phrase):
                 resolved_canonicals.add(canonical_id)
-            # Also direct-slug match (no alias): "citibank" without an alias entry
-            slug = _re.sub(r"\s+", "-", token)
-            if slug:
-                ent_id = slug if slug.startswith("entity:") else f"entity:{slug}"
-                cur = store._conn.execute(
-                    "SELECT 1 FROM triples WHERE entity_id = ? AND NOT retracted LIMIT 1",
-                    (ent_id,),
-                ).fetchone()
-                if cur:
-                    resolved_canonicals.add(ent_id)
+            slug = phrase.replace(" ", "-")
+            ent_id = slug if slug.startswith("entity:") else f"entity:{slug}"
+            cur = store._conn.execute(
+                "SELECT 1 FROM triples WHERE entity_id = ? AND NOT retracted LIMIT 1",
+                (ent_id,),
+            ).fetchone()
+            if cur:
+                resolved_canonicals.add(ent_id)
         if resolved_canonicals:
             entity_placeholders = ",".join("?" for _ in resolved_canonicals)
             extra_rows = store._conn.execute(
@@ -1374,13 +1386,24 @@ def query_stage2_triples(db_path: str, query: str, max_facts: int = 30) -> list[
             ).fetchall()
             rows.extend(extra_rows)
 
-        # Path 3: predicate-name search. FTS5 indexes (entity_id, value) but NOT
-        # attribute, so the predicate slot itself isn't searchable. For each
-        # significant query token, match attributes via case-insensitive LIKE —
-        # catches "what bait was used" → finds the baitUsed predicate.
+        # Path 3 (fixed): predicate-name search. FTS5 indexes (entity_id, value)
+        # but NOT attribute, so the predicate slot itself isn't searchable. For
+        # each significant query token, match the attribute column via LIKE —
+        # AND also try a stemmed singular form so "subscriptions" (plural query)
+        # matches "subscriptionCount" (singular predicate).
         if query_tokens:
-            attr_clauses = " OR ".join(["LOWER(attribute) LIKE ?"] * len(query_tokens))
-            like_params = [f"%{t}%" for t in query_tokens]
+            stemmed: list[str] = []
+            for t in query_tokens:
+                stemmed.append(t)
+                if len(t) > 4 and t.endswith("ies"):
+                    stemmed.append(t[:-3] + "y")
+                elif len(t) > 4 and t.endswith("es") and t[-3] not in "aeiou":
+                    stemmed.append(t[:-2])
+                elif len(t) > 3 and t.endswith("s") and not t.endswith("ss"):
+                    stemmed.append(t[:-1])
+            stemmed = list(dict.fromkeys(stemmed))  # dedup, preserve order
+            attr_clauses = " OR ".join(["LOWER(attribute) LIKE ?"] * len(stemmed))
+            like_params = [f"%{t}%" for t in stemmed]
             attr_rows = store._conn.execute(
                 f"""SELECT entity_id, attribute, value, value_type
                     FROM triples
