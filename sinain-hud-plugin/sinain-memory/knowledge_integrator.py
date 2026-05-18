@@ -1534,7 +1534,7 @@ def main() -> None:
     if args.transcript:
         try:
             transcript_items = json.loads(args.transcript)
-            from link_extraction import extract_auto_edges
+            from link_extraction import extract_auto_edges, edge_readable_value
             from triplestore import TripleStore
             auto_edges = extract_auto_edges(transcript_items, digest_entities)
             if auto_edges:
@@ -1544,6 +1544,9 @@ def main() -> None:
                     metadata=json.dumps({"source": "link_extraction.extract_auto_edges"}),
                 )
                 for edge in auto_edges:
+                    # 1. Direct entity-to-entity edge — visible to
+                    # query_stage2_triples Path 2/3 (alias resolution +
+                    # predicate-name search).
                     _auto_store.assert_triple(
                         _auto_tx,
                         edge["subject_id"],
@@ -1551,6 +1554,43 @@ def main() -> None:
                         edge["object_id"],
                         value_type="ref",
                     )
+                    # 2. Paired fact:auto-{hash} provenance node so the
+                    # edge is also visible to query_facts_hybrid. The
+                    # readable value text (e.g., "Ibrahim works at
+                    # Citibank") goes through FTS5, and the confidence
+                    # triple lets confidence-weighted ranking deprioritize
+                    # auto-edges (0.6) below LLM-distilled facts (1.0).
+                    readable = edge_readable_value(edge)
+                    fact_eid = _fact_id(
+                        edge["subject_id"], edge["predicate"], edge["object_id"]
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "entity", edge["subject_id"], value_type="ref"
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "target", edge["object_id"], value_type="ref"
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "attribute", edge["predicate"], value_type="string"
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "value", readable, value_type="string"
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "confidence",
+                        str(edge.get("confidence", 0.6)), value_type="string"
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "domain", "auto", value_type="string"
+                    )
+                    _auto_store.assert_triple(
+                        _auto_tx, fact_eid, "extractor", "regex", value_type="string"
+                    )
+                    # Tags for tag-based ranked search (mirrors LLM-fact path).
+                    for tag in _extract_tags(readable):
+                        _auto_store.assert_triple(
+                            _auto_tx, fact_eid, "tag", tag, value_type="string"
+                        )
                     auto_edges_stats["emitted"] += 1
                     pred = edge["predicate"]
                     auto_edges_stats["by_predicate"][pred] = auto_edges_stats["by_predicate"].get(pred, 0) + 1

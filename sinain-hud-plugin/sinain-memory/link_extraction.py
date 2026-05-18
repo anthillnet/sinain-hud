@@ -367,6 +367,21 @@ def extract_auto_edges(
     if len(mentions) < 2:
         return []
 
+    # Entity-id → display name for the readable value text on provenance nodes.
+    # FTS5 indexes the value column; using human names instead of slugs means
+    # natural-language queries ("How long has the CTO been at Citibank?") can
+    # match the auto: provenance node via the same path as LLM-distilled facts.
+    entity_names: dict[str, str] = {}
+    for ent in entities:
+        if not isinstance(ent, dict):
+            continue
+        eid = ent.get("id")
+        if not eid:
+            continue
+        if not eid.startswith("entity:"):
+            eid = f"entity:{eid}"
+        entity_names[eid] = ent.get("name") or eid.split(":", 1)[1]
+
     pair_counts: dict[tuple[str, str, str], int] = {}
     pair_evidence: dict[tuple[str, str, str], str] = {}
 
@@ -408,8 +423,37 @@ def extract_auto_edges(
             "confidence": confidence,
             "evidence": pair_evidence[(subj, predicate, obj)],
             "count": count,
+            "subject_name": entity_names.get(subj, subj.split(":", 1)[-1]),
+            "object_name": entity_names.get(obj, obj.split(":", 1)[-1]),
         })
     return edges
+
+
+# Map sinain predicate slugs back to human-readable verb phrases for the
+# value text of the provenance fact node. FTS5 indexes the value column,
+# so storing "Ibrahim works at Citibank" makes the node retrievable by
+# natural-language queries that contain "Ibrahim", "Citibank", or "works at".
+PREDICATE_READABLE: dict[str, str] = {
+    "auto:worksAt":    "works at",
+    "auto:founded":    "founded",
+    "auto:advises":    "advises",
+    "auto:investedIn": "invested in",
+}
+
+
+def edge_readable_value(edge: dict) -> str:
+    """Render an auto-edge as a natural-language sentence for FTS indexing.
+
+    Example: ('entity:ibrahim', 'auto:worksAt', 'entity:citibank') →
+        "Ibrahim works at Citibank"
+
+    Falls back to slug names + raw predicate when name/predicate isn't in
+    the known map — the goal is FTS-matchable text, even if slightly clunky.
+    """
+    subj = edge.get("subject_name") or edge.get("subject_id", "").split(":", 1)[-1]
+    obj = edge.get("object_name") or edge.get("object_id", "").split(":", 1)[-1]
+    pred_readable = PREDICATE_READABLE.get(edge.get("predicate", ""), edge.get("predicate", "").split(":")[-1])
+    return f"{subj} {pred_readable} {obj}"
 
 
 def main() -> None:
