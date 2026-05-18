@@ -1334,6 +1334,17 @@ def query_stage2_triples(db_path: str, query: str, max_facts: int = 30) -> list[
 
         # Path 2: alias resolution → walk all triples about resolved canonicals
         import re as _re
+        _STOPWORDS = {
+            "the", "is", "in", "on", "for", "and", "or", "of", "to", "a", "an",
+            "it", "was", "not", "how", "what", "when", "does", "did", "do", "my",
+            "your", "their", "have", "has", "had", "are", "were", "been", "being",
+            "about", "from", "with", "that", "this", "which", "who", "whom",
+            "where", "why", "can", "could", "would", "should", "any",
+        }
+        query_tokens = [
+            t for t in _re.findall(r"[a-zA-Z][a-zA-Z0-9]{2,}", query.lower())
+            if t not in _STOPWORDS
+        ]
         resolved_canonicals: set[str] = set()
         for token in _re.findall(r"[a-zA-Z][a-zA-Z0-9\- ]+", query.lower()):
             token = token.strip()
@@ -1362,6 +1373,25 @@ def query_stage2_triples(db_path: str, query: str, max_facts: int = 30) -> list[
                 (*resolved_canonicals, *_STAGE2_BOOKKEEPING),
             ).fetchall()
             rows.extend(extra_rows)
+
+        # Path 3: predicate-name search. FTS5 indexes (entity_id, value) but NOT
+        # attribute, so the predicate slot itself isn't searchable. For each
+        # significant query token, match attributes via case-insensitive LIKE —
+        # catches "what bait was used" → finds the baitUsed predicate.
+        if query_tokens:
+            attr_clauses = " OR ".join(["LOWER(attribute) LIKE ?"] * len(query_tokens))
+            like_params = [f"%{t}%" for t in query_tokens]
+            attr_rows = store._conn.execute(
+                f"""SELECT entity_id, attribute, value, value_type
+                    FROM triples
+                    WHERE entity_id LIKE 'entity:%'
+                      AND attribute NOT IN ({bookkeeping_placeholders})
+                      AND NOT retracted
+                      AND ({attr_clauses})
+                    LIMIT ?""",
+                (*_STAGE2_BOOKKEEPING, *like_params, max_facts * 2),
+            ).fetchall()
+            rows.extend(attr_rows)
 
         if not rows:
             store.close()

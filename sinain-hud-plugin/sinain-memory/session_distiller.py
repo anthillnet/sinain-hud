@@ -92,6 +92,11 @@ Each entity is an object with these required fields:
   - `schema:Date` (specific dates, deadlines)
 - `altLabels`: array of strings — synonyms, abbreviations, misspellings, role-paraphrases. **CRITICAL: every proper-noun entity MUST have at least one altLabel.** Whisper STT mishears proper nouns (Citibank → "City Bank"; JetBrains → "Jet Brains"); altLabels are how we recover. For a role-typed Person, include the role-paraphrases you heard ("the CTO", "the senior executive"). Empty array is ONLY acceptable for common-noun entities.
 
+**User anchor — REQUIRED when any first-person utterance exists:** if the transcript contains anything in first person ("I X", "my Y", "we Z", "I've been"), you MUST declare an entity with `id: "user"`, `type: "schema:Person"`, `name: "User"`, `altLabels: ["I", "me", "my", "mine", "myself", "we", "the user"]`. Then every first-person fact becomes a triple anchored on `subject: "user"`. Examples:
+  - "I ran a 5K in 25:50" → entity `user` + fact `{subject: "user", predicate: "personalBest5KTime", object: "25:50", value_type: "literal"}`
+  - "I need to return 3 items to the store" → entity `user` + fact `{subject: "user", predicate: "needsToReturn", object: "3-clothing-items", value_type: "ref"}`
+  - "I asked Claude Code to refactor my auth module" → entity `user` + fact `{subject: "user", predicate: "askedAgent", object: "claude-code", value_type: "ref"}`
+
 ## facts — subject-predicate-object triples
 
 Each fact is an object with:
@@ -163,6 +168,7 @@ If existing entities are provided in context, reuse their `id`s exactly so the i
 - Every proper-noun entity (named person, named company, named tool/product) MUST have at least one altLabel.
 - If you don't know an entity's schema.org type, prefer `schema:Concept` over guessing wrong.
 - Numbers, dates, and durations are literals — never invent entity ids for them unless they refer to a named/recurring thing.
+- **If first-person utterances exist, `entity:user` MUST be declared AND every first-person property MUST be a triple with `subject: "user"`. No first-person content may live only in `whatHappened` or `facts` strings — it must be in the graph.**
 - If the session was idle or empty, return `isEmpty: true` with empty arrays and a one-sentence `whatHappened`.
 
 Respond with ONLY a JSON object matching the example shape above. No prose before or after."""
