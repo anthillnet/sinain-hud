@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Local retrieval-drift check — re-runs a captured NDJSON baseline through the
+# current graph_query.py code and reports Jaccard@k / top-1 stability / latency Δ.
+# Wired into .git/hooks/pre-commit; safe to run standalone.
+#
+# Usage:
+#   scripts/memory-replay-check.sh              # check current code vs baseline
+#   scripts/memory-replay-check.sh --refresh    # capture a new baseline (slow, ~1min)
+#
+# Baseline and reports live at ~/.sinain/eval/ (never committed — eval-as-private).
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MEM_DIR="$ROOT/sinain-hud-plugin/sinain-memory"
+
+BASELINE_HOME="${SINAIN_EVAL_HOME:-$HOME/.sinain/eval}"
+BASELINE_PATH="$BASELINE_HOME/baseline.ndjson"
+REPORT_PATH="$BASELINE_HOME/last-replay.json"
+
+SUBSET="${SINAIN_REPLAY_SUBSET:-30}"
+JACCARD_K="${SINAIN_REPLAY_K:-10}"
+THRESHOLD="${SINAIN_REPLAY_THRESHOLD:-0.85}"
+
+mkdir -p "$BASELINE_HOME"
+
+# Pull OPENROUTER_API_KEY etc. from project .env so bootstrap-ingestion works
+# in a clean shell (pre-commit hook runs without inherited env).
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
+
+if [[ "${1:-}" == "--refresh" ]]; then
+  echo "[replay-check] capturing fresh baseline (subset=$SUBSET) ..."
+  rm -f "$BASELINE_PATH"
+  CAPTURE_TMP="${SINAIN_MEMORY_DIR:-$HOME/.sinain/memory}/eval-captures.ndjson"
+  rm -f "$CAPTURE_TMP"
+  cd "$MEM_DIR"
+  SINAIN_EVAL_CAPTURE=1 python3 -m eval.local_models.bench_retrieval \
+    --subset "$SUBSET" --reps 1 --seed 42 \
+    --out "$BASELINE_HOME/refresh-bench.json" >&2
+  if [[ ! -s "$CAPTURE_TMP" ]]; then
+    echo "[replay-check] ERROR: capture file $CAPTURE_TMP is empty — hook not firing?" >&2
+    exit 2
+  fi
+  mv "$CAPTURE_TMP" "$BASELINE_PATH"
+  ROWS=$(wc -l < "$BASELINE_PATH" | tr -d ' ')
+  echo "[replay-check] baseline captured: $ROWS rows → $BASELINE_PATH" >&2
+  exit 0
+fi
+
+if [[ ! -s "$BASELINE_PATH" ]]; then
+  echo "[replay-check] no baseline at $BASELINE_PATH — skipping (run with --refresh to create one)" >&2
+  exit 0
+fi
+
+cd "$MEM_DIR"
+python3 -m eval.local_models.replay \
+  --against "$BASELINE_PATH" \
+  --reps 1 \
+  --jaccard-k "$JACCARD_K" \
+  --out "$REPORT_PATH" >&2
+
+# Parse Jaccard mean from the report and gate on threshold.
+python3 - "$REPORT_PATH" "$JACCARD_K" "$THRESHOLD" <<'PY'
+import json, sys
+report_path, k, threshold = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+report = json.loads(open(report_path).read())
+agg = report["aggregate"]
+key = f"jaccard_at_{k}_mean"
+mean = agg[key]
+top1 = agg["top1_stability_rate"]
+delta = agg["latency_delta_ms_median"]
+print(f"[replay-check] jaccard@{k}_mean={mean:.3f} (threshold {threshold:.2f})  top1={top1*100:.1f}%  Δlat={delta:+.1f}ms", file=sys.stderr)
+if mean < threshold:
+    print(f"[replay-check] FAIL: retrieval drift — jaccard@{k}_mean {mean:.3f} < {threshold:.2f}", file=sys.stderr)
+    print(f"[replay-check] inspect: {report_path}", file=sys.stderr)
+    print(f"[replay-check] intentional? rebaseline:  scripts/memory-replay-check.sh --refresh", file=sys.stderr)
+    sys.exit(1)
+print("[replay-check] OK", file=sys.stderr)
+PY
