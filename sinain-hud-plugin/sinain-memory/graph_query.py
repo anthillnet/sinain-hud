@@ -61,10 +61,22 @@ def _record_candidate(retrieval_path: str):
                     )
                     capture_path = Path(memory_dir) / "eval-captures.ndjson"
                     capture_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Record kwargs so replay reproduces the call faithfully —
+                    # without this, profile-driven kwargs (precision_mode,
+                    # hop_depth, format, …) are dropped and replay falls back
+                    # to defaults, producing false-positive drift.
+                    safe_kwargs: dict = {}
+                    for k, v in kwargs.items():
+                        try:
+                            json.dumps(v)
+                            safe_kwargs[k] = v
+                        except (TypeError, ValueError):
+                            pass
                     line = json.dumps({
                         "ts": datetime.utcnow().isoformat() + "Z",
                         "query": query,
                         "db_path": str(db_path),
+                        "kwargs": safe_kwargs,
                         "retrieved_entity_slugs": entity_slugs,
                         "retrieved_value_keywords": value_keywords,
                         "latency_ms": round(latency_ms, 2),
