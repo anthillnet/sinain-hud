@@ -398,8 +398,7 @@ async function preflight() {
     if (fs.existsSync(prebuiltApp)) {
       ok("overlay: pre-built app");
     } else {
-      warn("no overlay available — run: sinain setup-overlay");
-      skipOverlay = true;
+      warn("no overlay available — will auto-download from GitHub Releases");
     }
   }
 

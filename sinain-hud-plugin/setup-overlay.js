@@ -199,7 +199,7 @@ ${GREEN}✓${RESET} Overlay ready!
 
 // ── Build from source (legacy) ───────────────────────────────────────────────
 
-async function buildFromSource() {
+export async function buildFromSource() {
   // Check flutter
   try {
     execSync("which flutter", { stdio: "pipe" });

@@ -68,9 +68,12 @@ async function stepOverlay(existing) {
     const label = choice === "download" ? "Downloading overlay..." : "Building overlay from source...";
     s.start(label);
     try {
-      // setup-overlay.js handles both modes via process.argv
-      if (choice === "source") process.argv.push("--from-source");
-      await import("./setup-overlay.js");
+      const { downloadOverlay, buildFromSource } = await import("./setup-overlay.js");
+      if (choice === "source") {
+        await buildFromSource();
+      } else {
+        await downloadOverlay({ silent: true });
+      }
       s.stop(c.green("Overlay installed."));
     } catch (err) {
       s.stop(c.yellow(`Failed: ${err.message}`));
