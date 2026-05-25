@@ -21,6 +21,7 @@ REPORT_PATH="$BASELINE_HOME/last-replay.json"
 SUBSET="${SINAIN_REPLAY_SUBSET:-30}"
 JACCARD_K="${SINAIN_REPLAY_K:-10}"
 THRESHOLD="${SINAIN_REPLAY_THRESHOLD:-0.85}"
+TOP1_THRESHOLD="${SINAIN_REPLAY_TOP1_THRESHOLD:-0.85}"
 
 mkdir -p "$BASELINE_HOME"
 
@@ -64,21 +65,29 @@ python3 -m eval.local_models.replay \
   --jaccard-k "$JACCARD_K" \
   --out "$REPORT_PATH" >&2
 
-# Parse Jaccard mean from the report and gate on threshold.
-python3 - "$REPORT_PATH" "$JACCARD_K" "$THRESHOLD" <<'PY'
+# Parse Jaccard mean + top-1 stability from the report; both must clear thresholds.
+python3 - "$REPORT_PATH" "$JACCARD_K" "$THRESHOLD" "$TOP1_THRESHOLD" <<'PY'
 import json, sys
-report_path, k, threshold = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+report_path, k = sys.argv[1], int(sys.argv[2])
+j_threshold, t1_threshold = float(sys.argv[3]), float(sys.argv[4])
 report = json.loads(open(report_path).read())
 agg = report["aggregate"]
 key = f"jaccard_at_{k}_mean"
 mean = agg[key]
 top1 = agg["top1_stability_rate"]
 delta = agg["latency_delta_ms_median"]
-print(f"[replay-check] jaccard@{k}_mean={mean:.3f} (threshold {threshold:.2f})  top1={top1*100:.1f}%  Δlat={delta:+.1f}ms", file=sys.stderr)
-if mean < threshold:
-    print(f"[replay-check] FAIL: retrieval drift — jaccard@{k}_mean {mean:.3f} < {threshold:.2f}", file=sys.stderr)
+print(f"[replay-check] jaccard@{k}_mean={mean:.3f} (≥{j_threshold:.2f})  top1={top1*100:.1f}% (≥{t1_threshold*100:.0f}%)  Δlat={delta:+.1f}ms", file=sys.stderr)
+fails = []
+if mean < j_threshold:
+    fails.append(f"jaccard@{k}_mean {mean:.3f} < {j_threshold:.2f} — result SET diverged")
+if top1 < t1_threshold:
+    fails.append(f"top1_stability {top1:.3f} < {t1_threshold:.2f} — top result ORDER diverged")
+if fails:
+    print(f"[replay-check] FAIL: {len(fails)} threshold(s) breached", file=sys.stderr)
+    for f in fails:
+        print(f"  - {f}", file=sys.stderr)
     print(f"[replay-check] inspect: {report_path}", file=sys.stderr)
-    print(f"[replay-check] intentional? rebaseline:  scripts/memory-replay-check.sh --refresh", file=sys.stderr)
+    print(f"[replay-check] intentional change? rebaseline:  scripts/memory-replay-check.sh --refresh", file=sys.stderr)
     sys.exit(1)
 print("[replay-check] OK", file=sys.stderr)
 PY
