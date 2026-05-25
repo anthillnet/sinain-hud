@@ -285,9 +285,11 @@ export class AgentLoop extends EventEmitter {
     this.deps.profiler?.timerRecord("agent.contextBuild", Date.now() - ctxStart);
 
     this.running = true;
-    const traceCtx = this.deps.onTraceStart?.(this.agentNextId) ?? null;
+    // Inside try so a throw from onTraceStart doesn't leak this.running.
+    let traceCtx: TraceContext | null = null;
 
     try {
+      traceCtx = this.deps.onTraceStart?.(this.agentNextId) ?? null;
       traceCtx?.startSpan("context-window");
       traceCtx?.endSpan({ richness, screenEvents: contextWindow.screenCount, audioEntries: contextWindow.audioCount });
 
