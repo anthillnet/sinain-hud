@@ -531,34 +531,185 @@ async function setupLocalGateway(existing) {
   };
 }
 
-export async function stepPrivacy(existing, label = "Privacy mode") {
-  const current = existing.PRIVACY_MODE || "standard";
-  return guard(await p.select({
-    message: label,
-    options: [
-      {
-        value: "off",
-        label: "Off",
-        hint: "No filtering — screen text, credentials, everything sent to cloud",
-      },
-      {
-        value: "standard",
-        label: "Standard",
-        hint: "Auto-redacts cards, API keys, tokens before sending to cloud",
-      },
-      {
-        value: "strict",
-        label: "Strict",
-        hint: "Only summaries leave your machine, no raw screen text or audio",
-      },
-      {
-        value: "paranoid",
-        label: "Paranoid",
-        hint: "Zero cloud calls — needs Whisper + Ollama installed or nothing works",
-      },
-    ],
-    initialValue: current,
+/**
+ * Local mode: run everything on-device with Ollama + whisper.cpp.
+ *
+ * Returns null (skip) or { llm, vision } model names.
+ * When enabled, also checks Ollama is reachable and offers to pull models.
+ */
+export async function stepLocalMode(existing, label = "Local mode (Ollama)") {
+  const currentEnabled = existing.SINAIN_LOCAL_MODE === "true";
+  const enable = guard(await p.confirm({
+    message: `${label} — run analysis + OCR on your machine, no cloud?`,
+    initialValue: currentEnabled,
   }));
+
+  if (!enable) return null;
+
+  // Check Ollama
+  let ollamaOk = false;
+  let availableModels = [];
+  const s = p.spinner();
+  s.start("Checking Ollama...");
+  try {
+    const res = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const data = await res.json();
+      availableModels = (data.models || []).map((m) => m.name);
+      ollamaOk = true;
+      s.stop(c.green(`Ollama running (${availableModels.length} models).`));
+    } else {
+      s.stop(c.yellow("Ollama responded but returned an error."));
+    }
+  } catch {
+    s.stop(c.yellow("Ollama not reachable at localhost:11434."));
+  }
+
+  if (!ollamaOk) {
+    p.note(
+      "Install and start Ollama first:\n" +
+      "  brew install ollama && ollama serve\n" +
+      "Then re-run setup.",
+      "Ollama required",
+    );
+    const proceed = guard(await p.confirm({
+      message: "Continue anyway? (config will be saved, but won't work until Ollama runs)",
+      initialValue: false,
+    }));
+    if (!proceed) return null;
+  }
+
+  // LLM model (analysis + distillation)
+  const currentLlm = existing.SINAIN_LOCAL_LLM || "phi4-mini";
+  const llmOptions = [
+    { value: "phi4-mini", label: "phi4-mini", hint: "2.5 GB — fast, good quality (recommended)" },
+    { value: "gemma3:4b", label: "gemma3:4b", hint: "2.5 GB — Google, competitive quality" },
+    { value: "llama3.2:3b", label: "llama3.2:3b", hint: "2.0 GB — Meta, smallest" },
+  ];
+  // Add current model if it's custom and not in the list
+  if (!llmOptions.some((o) => o.value === currentLlm)) {
+    llmOptions.push({ value: currentLlm, label: currentLlm, hint: "currently configured" });
+  }
+  llmOptions.push({ value: "custom", label: "Custom", hint: "Enter any Ollama model name" });
+
+  let llm = guard(await p.select({
+    message: "LLM model (analysis + knowledge distillation)",
+    options: llmOptions,
+    initialValue: llmOptions.some((o) => o.value === currentLlm) ? currentLlm : "custom",
+  }));
+
+  if (llm === "custom") {
+    llm = guard(await p.text({
+      message: "Ollama model name for LLM",
+      placeholder: "model-name or model-name:tag",
+      validate: (val) => { if (!val) return "Model name required"; },
+    }));
+  }
+
+  // Vision model (screen OCR)
+  const currentVision = existing.SINAIN_LOCAL_VISION || "qwen2.5vl:7b";
+  const visionOptions = [
+    { value: "qwen2.5vl:7b", label: "qwen2.5vl:7b", hint: "4.7 GB — best OCR quality (recommended)" },
+    { value: "gemma4:e2b", label: "gemma4:e2b", hint: "5.2 GB — Google multimodal, new" },
+    { value: "llava:7b", label: "llava:7b", hint: "4.7 GB — general purpose vision" },
+    { value: "moondream", label: "moondream", hint: "1.7 GB — fastest, lower quality" },
+  ];
+  if (!visionOptions.some((o) => o.value === currentVision)) {
+    visionOptions.push({ value: currentVision, label: currentVision, hint: "currently configured" });
+  }
+  visionOptions.push({ value: "custom", label: "Custom", hint: "Enter any Ollama vision model" });
+
+  let vision = guard(await p.select({
+    message: "Vision model (screen OCR)",
+    options: visionOptions,
+    initialValue: visionOptions.some((o) => o.value === currentVision) ? currentVision : "custom",
+  }));
+
+  if (vision === "custom") {
+    vision = guard(await p.text({
+      message: "Ollama model name for vision",
+      placeholder: "model-name:tag",
+      validate: (val) => { if (!val) return "Model name required"; },
+    }));
+  }
+
+  // Offer to pull missing models
+  if (ollamaOk) {
+    const missing = [llm, vision].filter((m) => !availableModels.some((a) => a.startsWith(m)));
+    if (missing.length > 0) {
+      const pull = guard(await p.confirm({
+        message: `Pull missing models? (${missing.join(", ")})`,
+        initialValue: true,
+      }));
+      if (pull) {
+        for (const model of missing) {
+          const sp = p.spinner();
+          sp.start(`Pulling ${model}...`);
+          try {
+            execFileSync("ollama", ["pull", model], { stdio: "pipe", timeout: 600_000 });
+            sp.stop(c.green(`${model} pulled.`));
+          } catch {
+            sp.stop(c.yellow(`Failed to pull ${model} — pull manually: ollama pull ${model}`));
+          }
+        }
+      }
+    }
+  }
+
+  return { llm, vision };
+}
+
+export async function stepPrivacy(existing, label = "Privacy mode", { localModeEnabled = false } = {}) {
+  const current = existing.PRIVACY_MODE || "standard";
+
+  const options = [
+    {
+      value: "off",
+      label: "Off",
+      hint: "No filtering — screen text, credentials, everything sent to cloud",
+    },
+    {
+      value: "standard",
+      label: "Standard",
+      hint: "Auto-redacts cards, API keys, tokens before sending to cloud",
+    },
+    {
+      value: "strict",
+      label: "Strict",
+      hint: "Only summaries leave your machine, no raw screen text or audio",
+    },
+  ];
+
+  if (localModeEnabled) {
+    options.push({
+      value: "paranoid",
+      label: "Paranoid",
+      hint: "Zero cloud calls — all processing stays on-device via Ollama + Whisper",
+    });
+  } else {
+    options.push({
+      value: "paranoid",
+      label: "Paranoid",
+      hint: c.dim("Requires local mode — enable it first"),
+    });
+  }
+
+  const choice = guard(await p.select({
+    message: label,
+    options,
+    initialValue: current === "paranoid" && !localModeEnabled ? "standard" : current,
+  }));
+
+  if (choice === "paranoid" && !localModeEnabled) {
+    p.log.warn("Paranoid mode requires local mode (Ollama + Whisper). Enable local mode first.");
+    return guard(await p.select({
+      message: `${label} (local mode not enabled)`,
+      options: options.slice(0, 3),
+      initialValue: "standard",
+    }));
+  }
+
+  return choice;
 }
 
 export async function stepModel(existing, label = "AI model for HUD analysis") {
