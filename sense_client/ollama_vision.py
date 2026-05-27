@@ -39,7 +39,7 @@ class OllamaVision:
         self,
         model: str = "llava",
         base_url: str = "http://localhost:11434",
-        timeout: float = 10.0,
+        timeout: float = 30.0,
         max_tokens: int = 200,
     ):
         self.model = model

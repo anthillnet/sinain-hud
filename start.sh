@@ -12,6 +12,7 @@ PID_FILE="/tmp/sinain-pids.txt"
 PIDS=()
 SKIP_SENSE=false
 SKIP_OVERLAY=false
+PARANOID_MODE=false
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 CYAN='\033[0;36m'
@@ -28,10 +29,12 @@ for arg in "$@"; do
   case "$arg" in
     --no-sense)   SKIP_SENSE=true ;;
     --no-overlay) SKIP_OVERLAY=true ;;
+    --paranoid)   PARANOID_MODE=true ;;
     --help|-h)
-      echo "Usage: ./start.sh [--no-sense] [--no-overlay]"
+      echo "Usage: ./start.sh [--no-sense] [--no-overlay] [--paranoid]"
       echo "  --no-sense    Skip sense_client (screen capture)"
       echo "  --no-overlay  Skip overlay (Flutter HUD)"
+      echo "  --paranoid    Fully offline mode (Ollama + whisper, zero cloud)"
       exit 0
       ;;
     *) echo "Unknown flag: $arg"; exit 1 ;;
@@ -43,6 +46,53 @@ log()  { echo -e "${BOLD}[start]${RESET} $*"; }
 ok()   { echo -e "${BOLD}[start]${RESET} ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "${BOLD}[start]${RESET} ${YELLOW}⚠${RESET} $*"; }
 fail() { echo -e "${BOLD}[start]${RESET} ${RED}✗${RESET} $*"; exit 1; }
+
+# ── Paranoid mode: source config + verify prerequisites ──────────────────────
+if [ "$PARANOID_MODE" = true ]; then
+  if [ -f "$SCRIPT_DIR/.env.paranoid" ]; then
+    set -a; source "$SCRIPT_DIR/.env.paranoid"; set +a
+    log "${MAGENTA}PARANOID MODE${RESET} — fully offline, zero cloud APIs"
+  else
+    fail ".env.paranoid not found in $SCRIPT_DIR"
+  fi
+
+  # Verify Ollama
+  if ! curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; then
+    fail "Ollama not running. Start with: ${BOLD}ollama serve${RESET}"
+  fi
+  ok "Ollama running"
+
+  # Verify required models
+  _ollama_tags=$(curl -sf http://localhost:11434/api/tags)
+  _llm="${SINAIN_LOCAL_LLM:-phi4-mini}"
+  _vision="${SINAIN_LOCAL_VISION:-qwen2.5vl:7b}"
+  for _model in "$_llm" "$_vision"; do
+    if echo "$_ollama_tags" | grep -q "\"name\":\"${_model}"; then
+      ok "Model $_model available"
+    else
+      warn "Model '$_model' not found. Pull with: ${BOLD}ollama pull $_model${RESET}"
+    fi
+  done
+
+  # Verify whisper
+  if [ "${TRANSCRIPTION_BACKEND:-}" = "local" ]; then
+    _whisper_bin="${LOCAL_WHISPER_BIN:-whisper-cli}"
+    if command -v "$_whisper_bin" >/dev/null 2>&1; then
+      ok "$_whisper_bin found"
+    else
+      warn "$_whisper_bin not found. Install: ${BOLD}brew install whisper-cpp${RESET}"
+    fi
+    _whisper_model="${LOCAL_WHISPER_MODEL/#\~/$HOME}"
+    if [ -f "$_whisper_model" ]; then
+      ok "Whisper model: $_whisper_model"
+    else
+      warn "Whisper model not found at $_whisper_model"
+      warn "Download from: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+    fi
+  fi
+
+  echo ""
+fi
 
 # ── Kill stale processes from previous runs ──────────────────────────────────
 kill_stale() {
@@ -217,8 +267,11 @@ CORE_PID=$!
 PIDS+=("$CORE_PID")
 
 # ── 3. Health-check sinain-core ────────────────────────────────────────────
+# Paranoid mode needs longer — local model distillation at startup is slower
+HEALTH_TIMEOUT=15
+if [ "$PARANOID_MODE" = true ]; then HEALTH_TIMEOUT=45; fi
 CORE_OK=false
-for i in $(seq 1 15); do
+for i in $(seq 1 $HEALTH_TIMEOUT); do
   if curl -sf http://localhost:9500/health >/dev/null 2>&1; then
     CORE_OK=true
     break
@@ -228,7 +281,7 @@ done
 if $CORE_OK; then
   ok "sinain-core healthy on :9500"
 else
-  fail "sinain-core did not become healthy after 15s"
+  fail "sinain-core did not become healthy after ${HEALTH_TIMEOUT}s"
 fi
 
 # ── 3b. Propagate PRIVACY_MODE to sense_client env vars ─────────────────────

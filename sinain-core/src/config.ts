@@ -186,6 +186,25 @@ export function loadConfig(): CoreConfig {
     gainDb: intEnv("MIC_GAIN_DB", 0),
   };
 
+  // ── Local mode: unified config ──────────────────────────────────────────
+  // SINAIN_LOCAL_MODE=true auto-derives all component config from two vars:
+  //   SINAIN_LOCAL_LLM=phi4-mini       → analyzer + distiller
+  //   SINAIN_LOCAL_VISION=qwen2.5vl:7b → sense_client (propagated via start.sh)
+  // Must run BEFORE transcriptionConfig / analysisConfig are read.
+  const localMode = boolEnv("SINAIN_LOCAL_MODE", false);
+  if (localMode) {
+    const localLlm = env("SINAIN_LOCAL_LLM", "phi4-mini");
+    const localVision = env("SINAIN_LOCAL_VISION", "qwen2.5vl:7b");
+    if (!process.env.ANALYSIS_PROVIDER) process.env.ANALYSIS_PROVIDER = "ollama";
+    if (!process.env.ANALYSIS_MODEL) process.env.ANALYSIS_MODEL = localLlm;
+    if (!process.env.ANALYSIS_VISION_MODEL) process.env.ANALYSIS_VISION_MODEL = localLlm;
+    if (!process.env.TRANSCRIPTION_BACKEND) process.env.TRANSCRIPTION_BACKEND = "local";
+    if (!process.env.LOCAL_VISION_ENABLED) process.env.LOCAL_VISION_ENABLED = "true";
+    if (!process.env.LOCAL_VISION_MODEL) process.env.LOCAL_VISION_MODEL = localVision;
+    if (!process.env.SINAIN_FAST_MODEL) process.env.SINAIN_FAST_MODEL = `ollama/${localLlm}`;
+    if (!process.env.SINAIN_SMART_MODEL) process.env.SINAIN_SMART_MODEL = `ollama/${localLlm}`;
+  }
+
   const transcriptionConfig: TranscriptionConfig = {
     backend: env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"],
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
