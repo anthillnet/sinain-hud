@@ -366,7 +366,8 @@ async function callOllama(
 ): Promise<AgentResult> {
   const start = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.timeout);
+  // Local Ollama models need more time than cloud APIs (cold start + generation)
+  const timeout = setTimeout(() => controller.abort(), Math.max(config.timeout, 45_000));
 
   try {
     const imageB64List = (images || []).map((img) => img.data);

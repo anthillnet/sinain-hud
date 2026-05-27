@@ -106,6 +106,20 @@ async function main() {
   // Load user config
   loadUserEnv();
 
+  // Propagate unified local mode config to component-level vars
+  if (process.env.SINAIN_LOCAL_MODE === "true") {
+    const llm = process.env.SINAIN_LOCAL_LLM || "phi4-mini";
+    const vision = process.env.SINAIN_LOCAL_VISION || "qwen2.5vl:7b";
+    if (!process.env.LOCAL_VISION_ENABLED) process.env.LOCAL_VISION_ENABLED = "true";
+    if (!process.env.LOCAL_VISION_MODEL) process.env.LOCAL_VISION_MODEL = vision;
+    if (!process.env.ANALYSIS_PROVIDER) process.env.ANALYSIS_PROVIDER = "ollama";
+    if (!process.env.ANALYSIS_MODEL) process.env.ANALYSIS_MODEL = llm;
+    if (!process.env.TRANSCRIPTION_BACKEND) process.env.TRANSCRIPTION_BACKEND = "local";
+    if (!process.env.SINAIN_FAST_MODEL) process.env.SINAIN_FAST_MODEL = `ollama/${llm}`;
+    if (!process.env.SINAIN_SMART_MODEL) process.env.SINAIN_SMART_MODEL = `ollama/${llm}`;
+    log(`${MAGENTA}LOCAL MODE${RESET} — LLM: ${llm}, Vision: ${vision}`);
+  }
+
   // Ensure Ollama is running (if local vision enabled)
   if (process.env.LOCAL_VISION_ENABLED === "true") {
     await ensureOllama();
@@ -162,10 +176,11 @@ async function main() {
     color: CYAN,
   });
 
-  // Health check
-  const healthy = await healthCheck("http://localhost:9500/health", 20);
+  // Health check (local mode needs longer — cold model load + startup distillation)
+  const healthTimeout = process.env.SINAIN_LOCAL_MODE === "true" ? 45 : 20;
+  const healthy = await healthCheck("http://localhost:9500/health", healthTimeout);
   if (!healthy) {
-    fail("sinain-core did not become healthy after 20s");
+    fail(`sinain-core did not become healthy after ${healthTimeout}s`);
   }
   ok("sinain-core healthy on :9500");
 

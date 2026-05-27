@@ -6,7 +6,7 @@
 import * as p from "@clack/prompts";
 import {
   c, guard, readEnv, writeEnv, summarizeConfig, runHealthCheck,
-  stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepAgent,
+  stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepAgent, stepLocalMode,
   ENV_PATH, IS_WINDOWS, HOME, PKG_DIR,
 } from "./config-shared.js";
 import fs from "fs";
@@ -16,6 +16,7 @@ import path from "path";
 
 const SECTIONS = [
   { value: "apikey",        label: "API Key",        hint: "OpenRouter API key" },
+  { value: "localmode",     label: "Local Mode",     hint: "Ollama + Whisper, zero cloud" },
   { value: "transcription", label: "Transcription",  hint: "Cloud or local whisper" },
   { value: "model",         label: "Model",          hint: "AI model for analysis" },
   { value: "privacy",       label: "Privacy",        hint: "Standard / strict / paranoid" },
@@ -48,9 +49,26 @@ async function runSection(section, existing) {
       const model = await stepModel(existing);
       return { AGENT_MODEL: model };
     }
+    case "localmode": {
+      const result = await stepLocalMode(existing);
+      if (result) {
+        return {
+          SINAIN_LOCAL_MODE: "true",
+          SINAIN_LOCAL_LLM: result.llm,
+          SINAIN_LOCAL_VISION: result.vision,
+        };
+      }
+      return { SINAIN_LOCAL_MODE: "" };
+    }
     case "privacy": {
-      const mode = await stepPrivacy(existing);
-      return { PRIVACY_MODE: mode };
+      const localModeEnabled = existing.SINAIN_LOCAL_MODE === "true";
+      const mode = await stepPrivacy(existing, "Privacy mode", { localModeEnabled });
+      const vars = { PRIVACY_MODE: mode };
+      if (mode === "paranoid" && localModeEnabled) {
+        vars.PRIVACY_OCR_AGENT_GATEWAY = "redacted";
+        vars.PRIVACY_AUDIO_AGENT_GATEWAY = "redacted";
+      }
+      return vars;
     }
     case "gateway": {
       return await stepGateway(existing);

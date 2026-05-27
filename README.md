@@ -190,24 +190,42 @@ See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
 
 ## Running Fully Local
 
-No cloud APIs needed. Local models handle everything:
+No API keys, no cloud calls, no data leaves your laptop.
 
 ```bash
-# 1. Install local transcription
-./setup-local-stt.sh
+# 1. Install prerequisites
+brew install ollama whisper-cpp
+ollama serve &
 
-# 2. Install Ollama + vision model
-brew install ollama && ollama pull llava
+# 2. Pull the recommended models (~12 GB total)
+ollama pull phi4-mini qwen2.5vl:7b
 
-# 3. Start in local mode
-./start-local.sh
+# 3. Start in paranoid mode
+./start.sh --paranoid
 ```
 
-| Model | Size | Speed | Best for |
-|---|---|---|---|
-| `llava` | 4.7 GB | ~2s/frame | General use (recommended) |
-| `llama3.2-vision` | 7.9 GB | ~4s/frame | Best accuracy |
-| `moondream` | 1.7 GB | ~1s/frame | Fastest, lower quality |
+Or via the setup wizard: `npx @geravant/sinain@latest start --setup` → select **Local / Paranoid**.
+
+### What Runs Where
+
+| Component | Model | Task | VRAM |
+|-----------|-------|------|------|
+| Screen OCR | qwen2.5vl:7b | Read screen content via Ollama | 4.7 GB |
+| Analysis + Distillation | phi4-mini | Context analysis, build knowledge graph | 2.5 GB |
+| Audio transcription | whisper.cpp (large-v3-turbo) | Speech-to-text | 1.5 GB |
+| Embeddings | all-MiniLM-L6-v2 | Semantic search (ONNX, in-process) | ~0.1 GB |
+
+**Minimum:** 16 GB RAM (Apple Silicon M1+) &nbsp; **Recommended:** 24 GB RAM
+
+### Choosing Models
+
+The defaults (qwen2.5vl + phi4-mini) are [benchmarked](docs/local-mode.md#benchmarked-models) for the best quality/speed tradeoff. Swap them with env vars:
+
+```bash
+SINAIN_LOCAL_VISION=gemma4:e2b SINAIN_LOCAL_LLM=gemma4:e2b ./start.sh --paranoid
+```
+
+See **[docs/local-mode.md](docs/local-mode.md)** for benchmarks, hardware tiers, model recommendations, and advanced configuration.
 
 ## Setup Guides
 

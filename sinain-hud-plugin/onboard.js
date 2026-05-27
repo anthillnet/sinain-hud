@@ -8,8 +8,8 @@ import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import {
-  c, guard, maskKey, readEnv, writeEnv, writeAgentsConfig, summarizeConfig, runHealthCheck,
-  stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel,
+  c, guard, cmdExists, maskKey, readEnv, writeEnv, writeAgentsConfig, summarizeConfig, runHealthCheck,
+  stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepLocalMode,
   HOME, SINAIN_DIR, ENV_PATH, PKG_DIR, IS_WINDOWS, IS_MAC,
 } from "./config-shared.js";
 import { stepMcpInstall, detectMcpAgents } from "./mcp-register.js";
@@ -131,6 +131,11 @@ export async function runOnboard(args = {}) {
         hint: "Get running in 2 minutes. Configure details later.",
       },
       {
+        value: "local",
+        label: "Local / Paranoid",
+        hint: "Fully offline — Ollama + Whisper, zero cloud calls.",
+      },
+      {
         value: "advanced",
         label: "Advanced",
         hint: "Full control over privacy, models, and connections.",
@@ -139,7 +144,7 @@ export async function runOnboard(args = {}) {
     initialValue: "quickstart",
   }));
 
-  const totalSteps = flow === "quickstart" ? 2 : 6;
+  const totalSteps = flow === "quickstart" ? 2 : flow === "local" ? 4 : 6;
 
   // ── Collect vars ────────────────────────────────────────────────────────
 
@@ -149,12 +154,130 @@ export async function runOnboard(args = {}) {
   // complete so we don't churn ~/.sinain/agents.json on every prompt.
   let agentsPatch = {};
 
-  // Step 1: API key (both flows)
-  const apiKey = await stepApiKey(base, `[1/${totalSteps}] OpenRouter API key`);
-  vars.OPENROUTER_API_KEY = apiKey;
-  p.log.success("API key saved.");
+  // Step 1: API key (quickstart + advanced only — local mode skips cloud)
+  if (flow !== "local") {
+    const apiKey = await stepApiKey(base, `[1/${totalSteps}] OpenRouter API key`);
+    vars.OPENROUTER_API_KEY = apiKey;
+    p.log.success("API key saved.");
+  }
 
-  if (flow === "quickstart") {
+  if (flow === "local") {
+    // ── Local / Paranoid flow ─────────────────────────────────────────────
+    // Step 1: Local models (Ollama)
+    const localResult = await stepLocalMode(base, `[1/${totalSteps}] Local models`);
+    if (localResult) {
+      vars.SINAIN_LOCAL_MODE = "true";
+      vars.SINAIN_LOCAL_LLM = localResult.llm;
+      vars.SINAIN_LOCAL_VISION = localResult.vision;
+      p.log.success(`LLM: ${localResult.llm}, Vision: ${localResult.vision}`);
+    } else {
+      p.log.warn("Local mode cancelled — switching to QuickStart defaults.");
+      vars.TRANSCRIPTION_BACKEND = "openrouter";
+      vars.PRIVACY_MODE = "standard";
+      vars.AGENT_MODEL = "google/gemini-2.5-flash-lite";
+    }
+
+    // Step 2: Whisper setup (if local mode enabled)
+    if (vars.SINAIN_LOCAL_MODE === "true") {
+      vars.TRANSCRIPTION_BACKEND = "local";
+      const hasWhisper = !IS_WINDOWS && cmdExists("whisper-cli");
+      if (hasWhisper) {
+        p.log.success(`[2/${totalSteps}] whisper-cli found — local transcription enabled.`);
+      } else if (IS_MAC) {
+        const install = guard(await p.confirm({
+          message: `[2/${totalSteps}] whisper-cli not found. Install via Homebrew?`,
+          initialValue: true,
+        }));
+        if (install) {
+          const s = p.spinner();
+          s.start("Installing whisper-cpp...");
+          try {
+            execFileSync("brew", ["install", "whisper-cpp"], { stdio: "pipe" });
+            s.stop(c.green("whisper-cpp installed."));
+          } catch {
+            s.stop(c.yellow("Install failed — audio transcription won't work offline."));
+          }
+        }
+      }
+      // Check whisper model
+      const modelDir = path.join(HOME, "models");
+      const modelPath = path.join(modelDir, "ggml-large-v3-turbo.bin");
+      if (fs.existsSync(modelPath)) {
+        vars.LOCAL_WHISPER_MODEL = modelPath;
+        p.log.info(`Whisper model: ${c.dim(modelPath)}`);
+      } else {
+        const download = guard(await p.confirm({
+          message: "Download Whisper model (~1.5 GB)?",
+          initialValue: true,
+        }));
+        if (download) {
+          const s = p.spinner();
+          s.start("Downloading Whisper model...");
+          try {
+            fs.mkdirSync(modelDir, { recursive: true });
+            execFileSync("curl", [
+              "-L", "--progress-bar",
+              "-o", modelPath,
+              "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+            ], { stdio: "inherit" });
+            s.stop(c.green("Model downloaded."));
+            vars.LOCAL_WHISPER_MODEL = modelPath;
+          } catch {
+            s.stop(c.yellow("Download failed. Run manually later."));
+          }
+        }
+      }
+
+      // Step 3: Privacy — default to paranoid since user chose local mode
+      vars.PRIVACY_MODE = "paranoid";
+      const privacy = await stepPrivacy(base, `[3/${totalSteps}] Privacy mode`, { localModeEnabled: true });
+      vars.PRIVACY_MODE = privacy;
+      p.log.success(`Privacy: ${privacy}.`);
+
+      // Privacy overrides for escalation (redacted OCR+audio in escalation)
+      if (privacy === "paranoid") {
+        vars.PRIVACY_OCR_AGENT_GATEWAY = "redacted";
+        vars.PRIVACY_AUDIO_AGENT_GATEWAY = "redacted";
+      }
+    }
+
+    // Step 4: Gateway (optional — works with local mode too)
+    const hasExistingGateway = (() => {
+      try {
+        const agentsPath = path.join(SINAIN_DIR, "agents.json");
+        if (!fs.existsSync(agentsPath)) return false;
+        const cfg = JSON.parse(fs.readFileSync(agentsPath, "utf-8"));
+        return !!cfg?.profiles?.openclaw;
+      } catch { return false; }
+    })();
+    const enableGateway = guard(await p.confirm({
+      message: `[4/${totalSteps}] Enable OpenClaw gateway? (escalation agent for deeper analysis)`,
+      initialValue: hasExistingGateway,
+    }));
+    if (enableGateway) {
+      const gatewayResult = await stepGateway(base, "OpenClaw gateway");
+      Object.assign(vars, gatewayResult.envVars);
+      Object.assign(agentsPatch, gatewayResult.agentsPatch);
+    } else {
+      agentsPatch.openclawProfile = null;
+    }
+    agentsPatch.default = base.SINAIN_AGENT || "claude";
+
+    p.note(
+      [
+        `Local mode: ${vars.SINAIN_LOCAL_MODE === "true" ? c.green("enabled") : "disabled"}`,
+        vars.SINAIN_LOCAL_LLM ? `  LLM: ${vars.SINAIN_LOCAL_LLM}` : null,
+        vars.SINAIN_LOCAL_VISION ? `  Vision: ${vars.SINAIN_LOCAL_VISION}` : null,
+        `Transcription: ${vars.TRANSCRIPTION_BACKEND}`,
+        `Privacy: ${vars.PRIVACY_MODE}`,
+        `OpenClaw gateway: ${enableGateway ? "enabled" : "disabled"}`,
+        "",
+        `Start with: ./start.sh --paranoid`,
+        `Change later: sinain config`,
+      ].filter(Boolean).join("\n"),
+      "Local mode summary",
+    );
+  } else if (flow === "quickstart") {
     // QuickStart: sensible defaults + a single opt-in question for OpenClaw.
     // Gateway integration is off by default; users who want it run Advanced
     // (or answer Yes here, which then walks them through stepGateway).
@@ -267,35 +390,14 @@ export async function runOnboard(args = {}) {
       }
     }
 
-    // If Ollama is installed, offer to pull a local LLM for paranoid-mode
-    // analysis. Mirrors the whisper download pattern — auto-acquire optional,
-    // user can `ollama pull <model>` manually later if they skip here.
-    let ollamaInstalled = false;
-    try {
-      execFileSync("ollama", ["--version"], { stdio: "ignore" });
-      ollamaInstalled = true;
-    } catch { /* ollama not on PATH */ }
-
-    if (ollamaInstalled) {
-      const pullOllama = guard(await p.confirm({
-        message: "Pull an Ollama model for paranoid-mode analysis (~4.7 GB for llava)?",
-        initialValue: true,
-      }));
-      if (pullOllama) {
-        const modelName = guard(await p.text({
-          message: "Ollama model to pull",
-          placeholder: "llava",
-          defaultValue: "llava",
-        }));
-        const s = p.spinner();
-        s.start(`Pulling ${modelName} via Ollama (this can take several minutes)...`);
-        try {
-          execFileSync("ollama", ["pull", modelName], { stdio: "inherit" });
-          s.stop(c.green(`Pulled ${modelName}.`));
-        } catch {
-          s.stop(c.yellow(`Pull failed. Run \`ollama pull ${modelName}\` manually later.`));
-        }
-      }
+    // Offer local mode (Ollama) — enables paranoid privacy
+    const localResult = await stepLocalMode(base, "Local mode (Ollama)");
+    const localModeEnabled = !!localResult;
+    if (localResult) {
+      vars.SINAIN_LOCAL_MODE = "true";
+      vars.SINAIN_LOCAL_LLM = localResult.llm;
+      vars.SINAIN_LOCAL_VISION = localResult.vision;
+      p.log.success(`Local mode: LLM=${localResult.llm}, Vision=${localResult.vision}`);
     }
 
     // OpenClaw gateway is opt-in: most users run sinain in standalone mode
@@ -333,8 +435,12 @@ export async function runOnboard(args = {}) {
       p.log.info("Standalone mode (no gateway).");
     }
 
-    const privacy = await stepPrivacy(base, "[4/6] Privacy mode");
+    const privacy = await stepPrivacy(base, "[4/6] Privacy mode", { localModeEnabled });
     vars.PRIVACY_MODE = privacy;
+    if (privacy === "paranoid" && localModeEnabled) {
+      vars.PRIVACY_OCR_AGENT_GATEWAY = "redacted";
+      vars.PRIVACY_AUDIO_AGENT_GATEWAY = "redacted";
+    }
     p.log.success(`Privacy: ${privacy}.`);
 
     const model = await stepModel(base, "[5/6] AI model for HUD analysis");
