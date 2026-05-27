@@ -244,6 +244,12 @@ class TripleStore:
         ).fetchone()
         return row[0] or 0
 
+    def commit_tx(self, tx_id: int) -> None:
+        # No-op alias — assert_triple auto-commits per-statement.
+        # Present so call sites that bracket assert_triple in a begin_tx/commit_tx
+        # pair remain valid even though no batched-commit semantics exist yet.
+        pass
+
     # ----- Assert / Retract -----
 
     def assert_triple(
