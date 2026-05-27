@@ -11,6 +11,15 @@
 
 set -euo pipefail
 
+# EVAL-05 safety: refuse to capture or replay against an ablated baseline.
+# An ablated baseline would silently corrupt drift gating — ablation runs
+# stub out retrieval/distiller/integrator and replay against them produces
+# nonsense Jaccard@10.
+if [[ -n "${SINAIN_ABLATE:-}" && "${SINAIN_ABLATE}" != "none" ]]; then
+  echo "[replay-check] ERROR: SINAIN_ABLATE=${SINAIN_ABLATE} set — refusing to capture or replay against an ablated baseline. Unset SINAIN_ABLATE and retry." >&2
+  exit 3
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MEM_DIR="$ROOT/sinain-hud-plugin/sinain-memory"
 
@@ -35,6 +44,7 @@ if [[ -f "$ROOT/.env" ]]; then
 fi
 
 if [[ "${1:-}" == "--refresh" ]]; then
+  # Reminder: SINAIN_ABLATE must remain unset (or 'none') during --refresh; the guard above enforces this.
   echo "[replay-check] capturing fresh baseline (subset=$SUBSET) ..."
   rm -f "$BASELINE_PATH"
   CAPTURE_TMP="${SINAIN_MEMORY_DIR:-$HOME/.sinain/memory}/eval-captures.ndjson"

@@ -81,6 +81,7 @@ def _record_candidate(retrieval_path: str):
                         "retrieved_value_keywords": value_keywords,
                         "latency_ms": round(latency_ms, 2),
                         "retrieval_path": retrieval_path,
+                        "ablation": os.environ.get("SINAIN_ABLATE", "none"),
                     }, ensure_ascii=False)
                     with capture_path.open("a", encoding="utf-8") as fh:
                         fh.write(line + "\n")
