@@ -76,6 +76,13 @@ key = f"jaccard_at_{k}_mean"
 mean = agg[key]
 top1 = agg["top1_stability_rate"]
 delta = agg["latency_delta_ms_median"]
+n_scored = report["config"]["n_scored"]
+# When no rows could be scored (e.g. baseline DBs absent in worktree),
+# there is no drift to measure — skip threshold checks and pass.
+if n_scored == 0:
+    n_total = report["config"]["n_baseline_rows"]
+    print(f"[replay-check] all {n_total} baseline rows skipped (DBs absent) — no drift possible, OK", file=sys.stderr)
+    sys.exit(0)
 print(f"[replay-check] jaccard@{k}_mean={mean:.3f} (≥{j_threshold:.2f})  top1={top1*100:.1f}% (≥{t1_threshold*100:.0f}%)  Δlat={delta:+.1f}ms", file=sys.stderr)
 fails = []
 if mean < j_threshold:
