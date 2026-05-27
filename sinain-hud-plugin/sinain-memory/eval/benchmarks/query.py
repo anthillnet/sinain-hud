@@ -7,6 +7,7 @@ Condition C (knowledge-doc): answer from portable knowledge document
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -60,7 +61,12 @@ def _resolve_profile_kwargs(profile: str | None) -> dict:
         return {}
 
 
-def _query_knowledge(db_path: str, question: str, profile: str | None = None) -> str:
+def _query_knowledge(
+    db_path: str,
+    question: str,
+    profile: str | None = None,
+    gold_keywords: list[str] | None = None,
+) -> str:
     """Query sinain knowledge graph for benchmark evaluation.
 
     Uses the same retrieval pipeline (query_facts_hybrid + format) as the
@@ -71,11 +77,27 @@ def _query_knowledge(db_path: str, question: str, profile: str | None = None) ->
     profile: optional named caller profile (eval/escalation/agent-tick/etc).
         When set, the profile's precision_mode / hop_depth / format / etc are
         applied. Default behavior preserved when None.
+
+    gold_keywords: optional oracle-mode keyword list for SINAIN_ABLATE=retrieval
+        (mode=oracle). Plan 05's runner wires this; in Plan 04 it stays None
+        at the call site so oracle reduces to passthrough until then.
     """
     from graph_query import query_facts_hybrid, format_facts_compact
 
-    kwargs = _resolve_profile_kwargs(profile)
-    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY, **kwargs)
+    ablate = os.environ.get("SINAIN_ABLATE", "none")
+    if ablate == "retrieval":
+        from eval.benchmarks.ablation.retrieval_stub import stub_retrieve
+        ablate_mode = os.environ.get("SINAIN_ABLATE_MODE", "passthrough")
+        facts = stub_retrieve(
+            db_path,
+            question,
+            max_facts=MAX_FACTS_PER_QUERY,
+            mode=ablate_mode,
+            gold_keywords=gold_keywords,
+        )
+    else:
+        kwargs = _resolve_profile_kwargs(profile)
+        facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY, **kwargs)
     if not facts:
         return "(no facts retrieved)"
 

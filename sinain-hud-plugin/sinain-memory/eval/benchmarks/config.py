@@ -18,3 +18,11 @@ JUDGE_MODEL = "deepseek/deepseek-v4-flash"
 # Retrieval
 K_VALUES = [1, 3, 5, 10]
 MAX_FACTS_PER_QUERY = 10
+
+# Ingestion
+DISTILLER_TIMEOUT_S = 30
+INTEGRATOR_TIMEOUT_S = 60
+
+# Dataset URLs
+LONGMEMEVAL_HF = "xiaowu0162/longmemeval-cleaned"
+LOCOMO_GITHUB = "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
