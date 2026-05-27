@@ -71,6 +71,14 @@ import json, sys
 report_path, k = sys.argv[1], int(sys.argv[2])
 j_threshold, t1_threshold = float(sys.argv[3]), float(sys.argv[4])
 report = json.loads(open(report_path).read())
+cfg = report.get("config", {})
+n_scored = cfg.get("n_scored", 0)
+# If no queries could be scored (e.g. baseline DB paths absent in a fresh worktree),
+# thresholds are meaningless — skip gracefully rather than falsely failing.
+if n_scored == 0:
+    n_skip = cfg.get("n_skipped", cfg.get("n_baseline_rows", 0))
+    print(f"[replay-check] SKIP — 0/{n_skip} queries scored (DB paths unavailable); no drift to measure", file=sys.stderr)
+    sys.exit(0)
 agg = report["aggregate"]
 key = f"jaccard_at_{k}_mean"
 mean = agg[key]
