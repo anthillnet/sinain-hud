@@ -631,6 +631,39 @@ def query_facts_hybrid(
                     effective = decayed_confidence(conf, created)
                     rrf_scores[eid] += effective * 0.01  # small boost, preserves RRF rank
 
+    # Phase D Tier 2 (first slice 2026-05-28): recency boost via
+    # `last_reinforced`. Distillation/reinforcement writes a timestamp every
+    # time a fact is re-asserted. Facts mentioned recently get a small
+    # additive boost so the "what did the user just say" use case stays
+    # responsive to the freshest context without dominating long-tail
+    # retrieval. 7-day half-life keeps the boost meaningful for current-
+    # week conversations and decays to near-zero for monthly-old facts.
+    # Bench gate: must NOT regress cloud q1+q2 (currently 2/2 100% recall).
+    import math
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    for facts_list in [fts_results, tag_results, top_results]:
+        for f in facts_list:
+            eid = f.get("entity_id", "")
+            if eid not in rrf_scores:
+                continue
+            ts = (
+                f.get("last_reinforced")
+                or f.get("first_seen")
+                or ""
+            )
+            if isinstance(ts, list):
+                ts = ts[0] if ts else ""
+            if not ts or not isinstance(ts, str):
+                continue
+            try:
+                t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                age_days = max(0.0, (now - t).total_seconds() / 86400.0)
+                recency = math.exp(-0.693 * age_days / 7.0)
+                rrf_scores[eid] += recency * 0.02  # boost ≤ 0.02, comparable to RRF rung
+            except (ValueError, TypeError):
+                pass
+
     # Sort by RRF score descending
     sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)
 
