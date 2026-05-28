@@ -335,18 +335,133 @@ def _expand_keywords_semantic(
         return keywords
 
 
+def _apply_confidence_floor(facts: list[dict], floor: float) -> list[dict]:
+    """Drop facts whose decayed confidence is below `floor`.
+
+    Uses decayed_confidence so a 0.8 fact past its half-life gets filtered
+    by a moderate floor — fresh facts get more leeway.
+    """
+    if floor <= 0.0:
+        return facts
+    from triplestore import decayed_confidence
+    kept = []
+    for f in facts:
+        try:
+            conf = float(f.get("confidence", 0.5))
+        except (ValueError, TypeError):
+            conf = 0.5
+        created = str(f.get("first_seen", "")) or str(f.get("created_at", ""))
+        eff = decayed_confidence(conf, created) if created else conf
+        if eff >= floor:
+            kept.append(f)
+    return kept
+
+
+def _cross_encoder_rerank(query: str, facts: list[dict], top_k: int) -> list[dict]:
+    """Pairwise query×document rerank with a cross-encoder. Loads lazily.
+
+    Cross-encoders are slow per-pair vs bi-encoders but score (query, doc)
+    jointly, so they catch relevance the cosine misses (e.g. "when X happened"
+    where bi-encoder treats every mention of X equally). Bounded to top-30
+    RRF survivors — pairwise scoring is O(N), keep it cheap.
+
+    Graceful fallback: if `cross-encoder/ms-marco-MiniLM-L-6-v2` isn't
+    available (sandboxed installs without the extra weights), return the
+    input list unchanged.
+    """
+    from sentence_transformers import CrossEncoder
+    if not hasattr(_cross_encoder_rerank, "_model"):
+        _cross_encoder_rerank._model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    model = _cross_encoder_rerank._model
+    pool = facts[:30]
+    pairs = [(query, f.get("value", "")) for f in pool]
+    if not pairs:
+        return facts
+    scores = model.predict(pairs)
+    ranked = sorted(zip(scores, pool), key=lambda x: -x[0])
+    return [f for _, f in ranked[:top_k]]
+
+
+def _format_results(facts: list[dict], format: str) -> list[dict]:
+    """Format dispatcher for query_facts_hybrid output.
+
+    Phase D Tier 1: "facts" (default list[dict]) and "triples" (EAV records).
+    "structured" and "narrative" formats are deferred (Tier 2 — require
+    temporal columns + LLM-summarized briefs that the RDF backend doesn't
+    yet expose). Until those land, structured/narrative return "facts" shape.
+    """
+    if format == "triples":
+        out = []
+        for f in facts:
+            out.append({
+                "entity_id": f.get("entity_id", ""),
+                "entity": f.get("entity", ""),
+                "attribute": "value",
+                "value": f.get("value", ""),
+                "value_type": "string",
+                "confidence": f.get("confidence", ""),
+            })
+        return out
+    return facts  # facts (default), structured/narrative fall through
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
     max_facts: int = 10,
+    *,
+    precision_mode: str = "balanced",
+    temporal_mode: str = "any",
+    confidence_floor: float = 0.0,
+    hop_depth: int = 1,
+    latency_budget_ms: int | None = None,
+    format: str = "facts",
+    as_of: str | None = None,
 ) -> list[dict]:
     """Hybrid retrieval with Reciprocal Rank Fusion (Graphiti pattern).
 
-    Runs three independent retrieval methods, fuses via RRF, then
-    expands top results with 1-hop graph neighbors.
+    Runs FTS5, tag, top-confidence, and entity-graph retrievals independently,
+    fuses via RRF, applies confidence_floor, optionally reranks (bi- or
+    cross-encoder per precision_mode), and optionally expands via graph
+    neighbors.
+
+    Phase D parameter API (Tier 1 implemented 2026-05-28):
+        precision_mode:     "fast" shrinks candidate pool and skips bi-encoder
+                            rerank entirely. "balanced" (default) keeps
+                            bi-encoder rerank. "precise" widens the pool and
+                            adds cross-encoder rerank (~50-150ms extra) on
+                            top of bi-encoder.
+        temporal_mode:      ACCEPTED BUT NOT HONORED (Tier 2 — requires
+                            occurred_start/occurred_end/mentioned_at on the
+                            RDF backend). Defaults to "any" behavior.
+        confidence_floor:   Drop facts whose decayed confidence is below
+                            this value before rerank. Default 0.0 = no floor.
+        hop_depth:          0 skips 1-hop graph expansion entirely. 1
+                            (default) does the existing 1-hop fallback.
+                            >=2 ACCEPTED BUT NOT HONORED (Tier 2 — multi-hop
+                            spreading activation deferred).
+        latency_budget_ms:  Soft cap. Rerank + expansion stages check elapsed
+                            time and skip later work if exceeded. None = no
+                            cap (default).
+        format:             "facts" (default), "triples". "structured" /
+                            "narrative" ACCEPTED but fall through to "facts"
+                            shape (Tier 2).
+        as_of:              ISO timestamp for point-in-time queries.
+                            ACCEPTED BUT NOT HONORED (Tier 2).
+
+    Returns list[dict] always — format-dependent shape variants are Tier 2.
     """
     import re
     import time
+    pipeline_start = time.monotonic()
+
+    def budget_exceeded() -> bool:
+        if latency_budget_ms is None:
+            return False
+        return (time.monotonic() - pipeline_start) * 1000.0 > latency_budget_ms
+
+    if precision_mode not in ("fast", "balanced", "precise"):
+        precision_mode = "balanced"
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
 
     # Change 0: Semantic entity expansion — "ML" → ["ml", "machine-learning", "ai", ...]
@@ -402,8 +517,16 @@ def query_facts_hybrid(
     except Exception:
         pass
 
-    # Run retrieval methods independently
-    candidate_limit = max_facts * 3
+    # Run retrieval methods independently. precision_mode tunes the pool:
+    #   fast    — narrow pool (2x) so wall-time stays predictable, no rerank
+    #   balanced— current default 3x (keeps existing behavior on default path)
+    #   precise — wide pool 5x so cross-encoder rerank has more to work with
+    if precision_mode == "fast":
+        candidate_limit = max(max_facts * 2, max_facts + 5)
+    elif precision_mode == "precise":
+        candidate_limit = max_facts * 5
+    else:
+        candidate_limit = max_facts * 3
 
     # Change C: FTS5 AND mode for multi-keyword queries
     if len(keywords) > 1:
@@ -519,33 +642,49 @@ def query_facts_hybrid(
             if eid and eid not in fact_map:
                 fact_map[eid] = f
 
-    # Return top RRF candidates, optionally re-ranked by embedding similarity.
-    # When called from sinain-core subprocess, embedding re-ranking happens in
-    # Node.js (to avoid deadlock). When called standalone (benchmark, CLI),
-    # we re-rank in-process if sentence-transformers is available.
+    # Return top RRF candidates. Cheap filters first — pruning noise before
+    # rerank avoids paying encoder cost on facts we'd drop anyway.
     rrf_candidates = [fact_map[eid] for eid in sorted_ids[:max_facts * 2] if eid in fact_map]
+    rrf_candidates = _apply_confidence_floor(rrf_candidates, confidence_floor)
 
     results = rrf_candidates[:max_facts]
-    try:
-        from sentence_transformers import SentenceTransformer
-        import numpy as np
-        if not hasattr(query_facts_hybrid, "_embed_model"):
-            query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-        model = query_facts_hybrid._embed_model
-        texts = [query] + [f.get("value", "") for f in rrf_candidates]
-        embs = model.encode(texts, show_progress_bar=False)
-        q_emb = embs[0]
-        scored = []
-        for i, f in enumerate(rrf_candidates):
-            sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
-            scored.append((sim, f))
-        scored.sort(key=lambda x: -x[0])
-        results = [f for _, f in scored[:max_facts]]
-    except ImportError:
-        pass  # sentence-transformers not installed — use RRF order
 
-    # Expand top results with 1-hop graph neighbors
-    if results and len(results) < max_facts:
+    # Bi-encoder rerank — skipped in fast mode (too slow for hot path) and
+    # if the latency budget already blew. Falls back silently when
+    # sentence-transformers is missing.
+    if precision_mode != "fast" and not budget_exceeded():
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+            if not hasattr(query_facts_hybrid, "_embed_model"):
+                query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+            model = query_facts_hybrid._embed_model
+            texts = [query] + [f.get("value", "") for f in rrf_candidates]
+            embs = model.encode(texts, show_progress_bar=False)
+            q_emb = embs[0]
+            scored = []
+            for i, f in enumerate(rrf_candidates):
+                sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
+                scored.append((sim, f))
+            scored.sort(key=lambda x: -x[0])
+            results = [f for _, f in scored[:max_facts]]
+        except ImportError:
+            pass  # sentence-transformers not installed — use RRF order
+
+    # precision_mode=precise: cross-encoder rerank on top of bi-encoder.
+    # Cost is bounded (pool=30, top_k=max_facts) and we respect the latency
+    # budget. Falls back gracefully if the cross-encoder model isn't
+    # available locally (no extra weights downloaded).
+    if precision_mode == "precise" and not budget_exceeded() and len(results) > 1:
+        try:
+            results = _cross_encoder_rerank(query, results, top_k=max_facts)
+        except Exception as e:
+            print(f"[warn] cross-encoder rerank failed (non-fatal): {e}", file=sys.stderr)
+
+    # Graph expansion: hop_depth=0 skips entirely, hop_depth=1 = current 1-hop
+    # behavior. hop_depth>=2 is Tier 2 (multi-hop spreading activation
+    # deferred — would need store.cooccurring + budgeted BFS over ref edges).
+    if hop_depth >= 1 and results and len(results) < max_facts and not budget_exceeded():
         seen_ids = {f.get("entity_id", "") for f in results}
         try:
             from triplestore import TripleStore
@@ -567,7 +706,7 @@ def query_facts_hybrid(
         except Exception:
             pass
 
-    return results[:max_facts]
+    return _format_results(results[:max_facts], format)
 
 
 def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
