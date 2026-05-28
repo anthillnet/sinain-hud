@@ -1028,6 +1028,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Knowledge Integrator")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--digest", default=None, help="SessionDigest JSON string")
+    parser.add_argument("--transcript", default=None,
+                        help="Raw transcript JSON (list of {source,text,ts} items). When provided, "
+                             "the zero-LLM typed-link extractor + user-attribute extractor "
+                             "run post-LLM to recover facts the distiller missed. gbrain "
+                             "Proposal A pattern — topic-robust, deterministic.")
     parser.add_argument("--bootstrap", action="store_true", help="One-time: seed graph from playbook")
     parser.add_argument("--retag", action="store_true", help="Re-extract tags for all existing facts")
     parser.add_argument("--dedup-entities", action="store_true", help="Merge fragmented entity nodes")
@@ -1126,6 +1131,58 @@ def main() -> None:
     # The distiller already extracted structured facts — conversion is mechanical.
     graph_ops = _facts_to_graph_ops(digest)
     digest_ts = digest.get("ts", datetime.now(timezone.utc).isoformat())
+
+    # ── Step 1.5: Zero-LLM typed-link + user-attribute extractor ──
+    # Topic-robust safety net: weak distillers (phi4-mini, qwen2.5:7b) drop
+    # first-person attribute claims when the session is crowded with other
+    # content. Run the deterministic regex extractor over the raw transcript
+    # to recover degree/occupation/location/duration/name/age/relation facts
+    # that match high-signal patterns. Facts merge into graph_ops as ASSERT
+    # ops at confidence=0.85 (below LLM-distilled 0.9 — they don't
+    # dominate when both are present, but they cover gaps when LLM missed).
+    if args.transcript:
+        try:
+            from link_extraction import extract_user_attributes, extract_auto_edges
+            transcript_items = json.loads(args.transcript)
+            user_facts = extract_user_attributes(transcript_items)
+            for f in user_facts:
+                graph_ops.append({
+                    "op": "assert",
+                    "entity": f["entity"],
+                    "attribute": f["attribute"],
+                    "value": f["value"],
+                    "confidence": f["confidence"],
+                    "domain": "user",
+                    "kind": f.get("kind", "auto-extracted"),
+                })
+            if user_facts:
+                print(f"  [zero-llm] user-attribute extractor: +{len(user_facts)} fact(s)",
+                      file=sys.stderr)
+
+            # Entity-relationship extractor (gbrain Proposal A) — fires when
+            # the distiller's entities list has >=2 entries.
+            if digest_entities and len(digest_entities) >= 2:
+                edges = extract_auto_edges(transcript_items, [
+                    {"id": f"entity:{e.get('name', '').lower().replace(' ', '-')}",
+                     "name": e.get("name", ""), "type": e.get("type", "")}
+                    for e in digest_entities
+                    if isinstance(e, dict) and e.get("name")
+                ])
+                for edge in edges:
+                    graph_ops.append({
+                        "op": "assert",
+                        "entity": edge["subject_id"].replace("entity:", ""),
+                        "attribute": edge["predicate"],
+                        "value": edge.get("object_name", edge["object_id"]),
+                        "confidence": edge["confidence"],
+                        "domain": "entity-relationship",
+                        "kind": "auto-extracted",
+                    })
+                if edges:
+                    print(f"  [zero-llm] entity-relationship extractor: +{len(edges)} edge(s)",
+                          file=sys.stderr)
+        except Exception as e:
+            print(f"  [zero-llm] extractor failed (non-fatal): {e}", file=sys.stderr)
 
     # Dedup + execute
     graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts, digest_entities=digest_entities)

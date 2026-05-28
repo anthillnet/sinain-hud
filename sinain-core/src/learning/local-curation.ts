@@ -382,6 +382,10 @@ export class LocalCurationService {
           resolve(this.scriptsDir, "knowledge_integrator.py"),
           "--memory-dir", this.memoryDir,
           "--digest", JSON.stringify(digest),
+          // --transcript wires the zero-LLM extractor (gbrain Proposal A
+          // pattern + user-attribute regex set in link_extraction.py).
+          // Topic-robust safety net for weak distillers that drop facts.
+          "--transcript", JSON.stringify(transcript),
         ], {
           timeout: 60_000, // 60s: LLM call (~10s) + embedding dedup (~5s) + graph ops
           encoding: "utf-8",
