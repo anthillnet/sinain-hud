@@ -197,7 +197,11 @@ export function loadConfig(): CoreConfig {
     const localVision = env("SINAIN_LOCAL_VISION", "qwen2.5vl:7b");
     if (!process.env.ANALYSIS_PROVIDER) process.env.ANALYSIS_PROVIDER = "ollama";
     if (!process.env.ANALYSIS_MODEL) process.env.ANALYSIS_MODEL = localLlm;
-    if (!process.env.ANALYSIS_VISION_MODEL) process.env.ANALYSIS_VISION_MODEL = localLlm;
+    // ANALYSIS_VISION_MODEL must point at a VISION-capable model (qwen2.5vl,
+    // gemma4 vision variants, llava). Previously misconfigured to localLlm
+    // (text-only phi4-mini), which made the analyzer's image-tick path fail
+    // silently in local-mode.
+    if (!process.env.ANALYSIS_VISION_MODEL) process.env.ANALYSIS_VISION_MODEL = localVision;
     if (!process.env.TRANSCRIPTION_BACKEND) process.env.TRANSCRIPTION_BACKEND = "local";
     if (!process.env.LOCAL_VISION_ENABLED) process.env.LOCAL_VISION_ENABLED = "true";
     if (!process.env.LOCAL_VISION_MODEL) process.env.LOCAL_VISION_MODEL = localVision;
