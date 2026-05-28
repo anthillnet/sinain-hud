@@ -82,6 +82,15 @@ export class LocalTranscriptionBackend {
         "-l", lang,
         "-np",
       ];
+      // language="auto" → whisper autodetects spoken language and transcribes
+      // in source (Russian audio → Russian transcript). We deliberately do
+      // NOT pass -tr (translate-to-English): the ggml-large-v3-turbo model
+      // doesn't support translation (verified 2026-05-28 — -tr was a no-op).
+      // The downstream distiller (gemini-2.5-flash) is multilingual and
+      // produces an English digest from a Russian transcript, preserving
+      // entity names better than asking gemini-audio to translate directly
+      // (gemini-audio dropped "raccoon/енот" entirely; whisper retains it
+      // in Cyrillic for the distiller to preserve).
 
       debug(TAG, `exec: ${this.config.bin} ${args.join(" ")}`);
 
