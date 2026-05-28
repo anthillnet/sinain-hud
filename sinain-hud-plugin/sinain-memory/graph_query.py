@@ -692,6 +692,13 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
 
     Compact format: domain/entity: value (conf, Nx)
     Inspired by mempalace AAAK compression — fits 3-5x more facts per token budget.
+
+    2026-05-28: Switched from "; "-separated single-line to newline-per-fact
+    output. The single-line form caused gemini-2.5-flash to lose the first
+    fact under attention pressure from later longer facts — verified on
+    LongMemEval-S q1 e47becba: BA fact first + full sports fact last → "I
+    don't know"; same facts newline-separated → correct answer. Token cost
+    is unchanged (\\n is one character, "; " is two).
     """
     if not facts:
         return ""
@@ -706,16 +713,16 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
         domain = f.get("domain", "")
 
         if domain:
-            line = f"{domain}/{entity}: {value} ({conf},{count}x)"
+            line = f"- {domain}/{entity}: {value} ({conf},{count}x)"
         else:
-            line = f"{entity}: {value} ({conf},{count}x)"
+            line = f"- {entity}: {value} ({conf},{count}x)"
 
-        if total + len(line) + 2 > max_chars:
+        if total + len(line) + 1 > max_chars:
             break
         lines.append(line)
-        total += len(line) + 2  # account for "; " separator
+        total += len(line) + 1  # account for "\n" separator
 
-    return "; ".join(lines)
+    return "\n".join(lines)
 
 
 def domain_fact_counts(db_path: str) -> dict[str, int]:
