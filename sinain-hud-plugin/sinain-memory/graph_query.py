@@ -766,7 +766,22 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
     lines = []
     total = 0
     for f in facts:
-        entity = f.get("entityId", "").split(":")[-1][:20]
+        # 2026-05-28 fix: prior code read "entityId" (camelCase) but fact dicts
+        # produced by query_facts_hybrid use "entity_id" (snake_case). Result
+        # was an empty entity slug in every compact line — gemini saw lines
+        # like "- /: BA in Business Administration (...)" which looked
+        # broken and made the QA model abstain ("I don't know" floor) even
+        # when the right fact was at rank #1. Prefer the human-readable
+        # `entity` field when present (short name like "user"), fall back
+        # to slug of entity_id, fall back to "?".
+        entity = (
+            f.get("entity")
+            or f.get("entity_id", "").split(":")[-1].rsplit("-", 1)[0]
+            or "?"
+        )
+        if isinstance(entity, list):
+            entity = entity[0] if entity else "?"
+        entity = str(entity)[:20]
         value = f.get("value", "")
         conf = f.get("confidence", "?")
         count = f.get("reinforce_count", "1")
