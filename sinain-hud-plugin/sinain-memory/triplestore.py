@@ -198,6 +198,13 @@ class TripleStore:
         self._conn.commit()
         return cur.lastrowid
 
+    def commit_tx(self, tx_id: int) -> None:
+        """No-op alias for symmetry with begin_tx; assert_triple auto-commits
+        per-statement so an explicit commit_tx is a docs-only finalizer. Kept
+        for callers that prefer the explicit form (notably the eval ablation
+        stub modules)."""
+        self._conn.commit()
+
     def latest_tx(self) -> int:
         """Return the latest transaction id, or 0 if none."""
         row = self._conn.execute(

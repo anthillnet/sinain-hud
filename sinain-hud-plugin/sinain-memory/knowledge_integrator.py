@@ -96,11 +96,83 @@ _STOPWORDS = frozenset({
 })
 
 
-def _extract_tags(value: str) -> list[str]:
+def _to_str(v) -> str:
+    """Coerce any value to a string; dict/list go through json.dumps."""
+    if isinstance(v, str):
+        return v
+    try:
+        return json.dumps(v, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _normalize_digest(digest: dict) -> dict:
+    """Force the digest into the schema the integrator expects.
+
+    Main's distiller emits a tight `list[str]` shape for facts/decisions/
+    patterns/preferences and a list[dict] for entities. Local distillers
+    (phi4-mini, gemma4:e2b, etc.) sometimes emit dicts in place of lists,
+    bools in place of strings, or single objects instead of arrays. We
+    normalize once at the parse boundary so every downstream consumer
+    (graph ops, playbook formatting, tag extraction) sees the same shape.
+
+    Returns a NEW dict (does not mutate input).
+    """
+    if not isinstance(digest, dict):
+        return {"isEmpty": True, "error": "digest is not a dict"}
+
+    out = dict(digest)
+
+    # String-list fields: coerce each element to a string; wrap dicts in
+    # a single-element list of their JSON form; drop non-iterables.
+    for key in ("facts", "decisions", "patterns", "preferences"):
+        raw = out.get(key, [])
+        if isinstance(raw, list):
+            out[key] = [_to_str(x) for x in raw if x not in (None, "", False)]
+        elif isinstance(raw, dict):
+            # Dict-shaped emission — flatten values into strings.
+            out[key] = [_to_str(v) for v in raw.values() if v not in (None, "", False)]
+        elif isinstance(raw, str):
+            out[key] = [raw] if raw else []
+        else:
+            out[key] = []
+
+    # entities: list of dicts. If dict, wrap in list; if list, keep dicts only.
+    ents = out.get("entities", [])
+    if isinstance(ents, dict):
+        # Some local models emit a flat dict of name → metadata.
+        out["entities"] = [{"name": k, **(v if isinstance(v, dict) else {"type": _to_str(v)})}
+                           for k, v in ents.items()]
+    elif isinstance(ents, list):
+        out["entities"] = [e for e in ents if isinstance(e, dict)]
+    else:
+        out["entities"] = []
+
+    # Scalar fields — keep type or coerce.
+    if not isinstance(out.get("whatHappened", ""), str):
+        out["whatHappened"] = _to_str(out.get("whatHappened", ""))
+    if not isinstance(out.get("ts", ""), str):
+        out["ts"] = _to_str(out.get("ts", ""))
+    out["isEmpty"] = bool(out.get("isEmpty", False))
+
+    return out
+
+
+def _extract_tags(value) -> list[str]:
     """Extract searchable keyword tags from fact value text.
 
     Returns up to 10 deduplicated lowercase tags suitable for AVET-indexed lookup.
+
+    Defensive coercion 2026-05-27: local distillers (phi4-mini, gemma4:e2b)
+    sometimes emit `value` as a nested dict or list rather than a string.
+    JSON-stringify non-string inputs so tag extraction still produces
+    meaningful tags (keys + values both contribute) instead of crashing.
     """
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            value = str(value)
     # Lowercase words (including hyphenated compounds like "react-native")
     words = re.findall(r"[a-z][a-z0-9-]+", value.lower())
     tags = [w for w in words if len(w) > 2 and w not in _STOPWORDS]
@@ -446,6 +518,14 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
 
     # Facts (distilled)
     for fact_text in digest.get("facts", []):
+        # Defensive coercion 2026-05-27: local distillers emit non-string
+        # facts (dicts for typed SPO triples, sometimes bools/ints). Coerce
+        # to JSON string so the length check + storage work uniformly.
+        if not isinstance(fact_text, str):
+            try:
+                fact_text = json.dumps(fact_text, ensure_ascii=False)
+            except (TypeError, ValueError):
+                fact_text = str(fact_text)
         if not fact_text or len(fact_text) < 5:
             continue
         entity = _extract_entity_from_fact(fact_text, known_entities)
@@ -461,6 +541,11 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
 
     # Decisions (distilled, lower confidence — time-bound)
     for decision_text in digest.get("decisions", []):
+        if not isinstance(decision_text, str):
+            try:
+                decision_text = json.dumps(decision_text, ensure_ascii=False)
+            except (TypeError, ValueError):
+                decision_text = str(decision_text)
         if not decision_text or len(decision_text) < 5:
             continue
         entity = _extract_entity_from_fact(decision_text, known_entities)
@@ -1013,6 +1098,13 @@ def main() -> None:
         output_json({"error": f"Invalid digest JSON: {e}"})
         return
 
+    # Normalize digest at parse boundary. Local distillers (phi4-mini and
+    # similar small models) emit list fields as dicts, bools, or nested
+    # objects rather than the list[str] shape main's distiller produces.
+    # Coerce here so downstream code (graph ops, playbook rendering,
+    # tag extraction) can rely on the schema contract.
+    digest = _normalize_digest(digest)
+
     # Skip if digest indicates empty session
     if digest.get("isEmpty", False):
         output_json({"skipped": True, "reason": "empty session"})
@@ -1077,12 +1169,16 @@ def main() -> None:
 
     # Add novel facts as new playbook lines (no LLM — just format as bullet points)
     for fact in digest.get("facts", [])[:5]:  # cap at 5 new lines per pass
-        fact_tags = set(_extract_tags(fact))
+        # Defensive coercion 2026-05-27: local distillers can emit dict/list
+        # facts (typed graph triples) rather than English sentences. Coerce
+        # to string so the playbook formatting and log slice don't crash.
+        fact_str = fact if isinstance(fact, str) else json.dumps(fact, ensure_ascii=False)
+        fact_tags = set(_extract_tags(fact_str))
         # Only add if no existing playbook line covers this
         if not any(set(_extract_tags(l)) & fact_tags for l in playbook_lines if len(fact_tags) > 1):
-            new_line = f"- {fact} (seen 1)"
+            new_line = f"- {fact_str} (seen 1)"
             updated_lines.append(new_line)
-            changes["added"].append(fact[:60])
+            changes["added"].append(fact_str[:60])
 
     # Keep playbook under 50 lines
     if len(updated_lines) > 50:

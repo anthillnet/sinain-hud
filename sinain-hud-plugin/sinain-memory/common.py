@@ -19,6 +19,13 @@ MODEL_FAST = "google/gemini-3-flash-preview"
 MODEL_SMART = "anthropic/claude-sonnet-4.6"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Local Ollama OpenAI-compatible endpoint. Model IDs prefixed with "ollama/"
+# route here instead of OpenRouter (no API key needed). See docs/local-mode.md
+# for the paranoid-mode wiring; this is the bench-side equivalent that lets
+# SINAIN_BENCH_MODEL=ollama/phi4-mini route the distiller + QA locally.
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/v1/chat/completions"
+
 
 class LLMError(Exception):
     """Raised when the LLM API call fails (timeout, network, bad response)."""
@@ -141,7 +148,18 @@ def _load_config() -> dict:
 
 
 def _resolve_model(logical_name: str) -> str:
-    """Map a logical model name ('fast'/'smart') to an actual model ID via config."""
+    """Map a logical model name ('fast'/'smart') to an actual model ID.
+
+    Env-var overrides take precedence over koog-config.json so the bench
+    harness can route a single script-call site (e.g. session_distiller's
+    `script="session_distiller"` → model="fast") to a different model per
+    run. Used by ingest.py to thread SINAIN_BENCH_MODEL through to the
+    distiller subprocess as SINAIN_FAST_MODEL.
+    """
+    env_key = f"SINAIN_{logical_name.upper()}_MODEL"
+    env_override = os.environ.get(env_key)
+    if env_override:
+        return env_override
     cfg = _load_config()
     models = cfg.get("models", {})
     return models.get(logical_name, logical_name)
@@ -155,6 +173,7 @@ def call_llm(
     *,
     script: str | None = None,
     json_mode: bool = False,
+    temperature: float | None = None,
 ) -> str:
     """Call OpenRouter chat completions API. Returns assistant message text.
 
@@ -163,6 +182,10 @@ def call_llm(
 
     When *json_mode* is True and the resolved model starts with ``openai/``,
     ``response_format: {"type": "json_object"}`` is added to the request body.
+
+    *temperature*: deterministic-judging knob used by the LongMemEval paper-
+    standard judge (temperature=0.0 for reproducibility). When omitted, the
+    provider default applies (no temperature key in the request body).
     """
     timeout_s = 60
     if script:
@@ -172,28 +195,45 @@ def call_llm(
         max_tokens = script_cfg.get("maxTokens", max_tokens)
         timeout_s = script_cfg.get("timeout", cfg.get("defaults", {}).get("timeout", 60))
 
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
+    # Route based on model id. "ollama/<model>" → local Ollama; else OpenRouter.
+    is_ollama = model.startswith("ollama/")
+    if is_ollama:
+        target_url = OLLAMA_CHAT_URL
+        target_model = model[len("ollama/"):]  # strip prefix for Ollama API
+        request_headers = {"Content-Type": "application/json"}
+        # Local Ollama timeouts are longer than cloud — small models can stall.
+        if timeout_s < 120:
+            timeout_s = 120
+    else:
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
+        target_url = OPENROUTER_URL
+        target_model = model
+        request_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
 
     body: dict = {
-        "model": model,
+        "model": target_model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     }
-    if json_mode and model.startswith("openai/"):
+    if temperature is not None:
+        body["temperature"] = temperature
+    # json_mode: OpenAI dialect for cloud (openai/* models); Ollama's OpenAI-
+    # compat endpoint supports the same response_format key for instruct models.
+    if json_mode and (model.startswith("openai/") or is_ollama):
         body["response_format"] = {"type": "json_object"}
 
     try:
         resp = requests.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            target_url,
+            headers=request_headers,
             json=body,
             timeout=timeout_s,
         )
