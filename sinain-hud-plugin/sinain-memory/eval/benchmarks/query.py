@@ -7,6 +7,7 @@ Condition C (knowledge-doc): answer from portable knowledge document
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -49,32 +50,87 @@ def _get_all_facts_text(db_path: str) -> str:
     return format_facts_text(facts, max_chars=6000)
 
 
-def _query_knowledge(db_path: str, question: str) -> str:
+def _resolve_profile_kwargs(profile: str | None) -> dict:
+    """Translate a profile name into query_facts_hybrid kwargs. None = no overrides."""
+    if not profile:
+        return {}
+    try:
+        from query_params import resolve_profile
+        return resolve_profile(profile)
+    except Exception:
+        return {}
+
+
+def _query_knowledge(
+    db_path: str,
+    question: str,
+    profile: str | None = None,
+    gold_keywords: list[str] | None = None,
+    speaker_filter: list[str] | None = None,
+) -> str:
     """Query sinain knowledge graph for benchmark evaluation.
 
     Uses the same retrieval pipeline (query_facts_hybrid + format) as the
     live system, but queries the per-question benchmark store directly.
     This ensures evaluation measures the actual KG quality, not whether
     sinain-core happens to be running or which DB it's pointing at.
+
+    profile: optional named caller profile (eval/escalation/agent-tick/etc).
+        When set, the profile's precision_mode / hop_depth / format / etc are
+        applied. Default behavior preserved when None.
+
+    gold_keywords: optional oracle-mode keyword list for SINAIN_ABLATE=retrieval
+        (mode=oracle). Plan 05's runner wires this; in Plan 04 it stays None
+        at the call site so oracle reduces to passthrough until then.
     """
     from graph_query import query_facts_hybrid, format_facts_compact
 
-    facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY)
+    ablate = os.environ.get("SINAIN_ABLATE", "none")
+    if ablate == "retrieval":
+        from eval.benchmarks.ablation.retrieval_stub import stub_retrieve
+        ablate_mode = os.environ.get("SINAIN_ABLATE_MODE", "passthrough")
+        facts = stub_retrieve(
+            db_path,
+            question,
+            max_facts=MAX_FACTS_PER_QUERY,
+            mode=ablate_mode,
+            gold_keywords=gold_keywords,
+        )
+    else:
+        kwargs = _resolve_profile_kwargs(profile)
+        if speaker_filter:
+            kwargs["mentioned_by_speaker"] = list(speaker_filter)
+        facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY, **kwargs)
     if not facts:
         return "(no facts retrieved)"
 
+    # Profiles may return non-list shapes (narrative). Coerce to text in that case.
+    if not isinstance(facts, list):
+        return str(facts)[:1200]
     return format_facts_compact(facts, max_chars=1200)
 
 
-def _get_retrieved_facts(db_path: str, question: str, k: int = 10) -> list[dict]:
+def _get_retrieved_facts(
+    db_path: str, question: str, k: int = 10, profile: str | None = None,
+    speaker_filter: list[str] | None = None,
+) -> list[dict]:
     """Get facts retrieved for a question (for retrieval evaluation)."""
     from graph_query import query_facts_hybrid, query_top_facts
 
-    facts = query_facts_hybrid(db_path, question, max_facts=k)
-    if facts:
+    kwargs = _resolve_profile_kwargs(profile)
+    if speaker_filter:
+        kwargs["mentioned_by_speaker"] = list(speaker_filter)
+    facts = query_facts_hybrid(db_path, question, max_facts=k, **kwargs)
+    if facts and isinstance(facts, list):
         return facts
 
-    # Fallback: top facts by confidence
+    # Fallback: top facts by confidence. Lever 4 invariant — when a speaker
+    # filter is in effect we must NOT bypass it via the unfiltered top-facts
+    # path (legacy graphs without mentioned_by triples would otherwise leak
+    # back through and produce misleading recall metrics that contradict the
+    # actual answer-gen path which DOES respect the filter).
+    if speaker_filter:
+        return []
     return query_top_facts(db_path, limit=k)
 
 
@@ -121,16 +177,23 @@ def answer_question(
     full_context: str | None = None,
     knowledge_doc: str | None = None,
     model: str | None = None,
+    profile: str | None = None,
 ) -> str:
     """Generate an answer for a benchmark question under a specific condition.
 
     Returns the LLM's answer text.
+
+    profile: optional caller profile applied to sinain-memory retrieval (only
+        affects the "sinain-memory" condition; full-context and knowledge-doc
+        are unaffected by retrieval params by design).
     """
     qa_model = model or QA_MODEL
 
     if condition == "sinain-memory":
         assert db_path, "db_path required for sinain-memory condition"
-        facts = _query_knowledge(db_path, question.text)
+        # Lever 4: per-question speaker filter from QA metadata.
+        speaker_filter = (question.metadata or {}).get("speaker_filter") or None
+        facts = _query_knowledge(db_path, question.text, profile=profile, speaker_filter=speaker_filter)
         system = (
             "Answer the question using ONLY the provided knowledge facts. "
             "If the facts don't contain enough information to answer, say \"I don't know.\""
@@ -159,11 +222,17 @@ def answer_question(
         raise ValueError(f"Unknown condition: {condition}")
 
     try:
+        # temperature=0 — eval reproducibility. Same retrieved facts must
+        # produce the same answer, or run-to-run comparisons are noise.
         return call_llm(
             system_prompt=system,
             user_prompt=user,
             model=qa_model,
-            max_tokens=300,
+            # 2026-05-28: bumped 300 → 1000 to accommodate local reasoning models
+            # (gemma4:e2b emits ~400-500 hidden reasoning tokens before any visible
+            # content; 300 budget produced empty responses on longer prompts).
+            max_tokens=1000,
+            temperature=0.0,
         ).strip()
     except Exception as e:
         return f"(error: {e})"
