@@ -738,27 +738,47 @@ def query_facts_hybrid(
         except Exception as e:
             print(f"[warn] cross-encoder rerank failed (non-fatal): {e}", file=sys.stderr)
 
-    # Graph expansion: hop_depth=0 skips entirely, hop_depth=1 = current 1-hop
-    # behavior. hop_depth>=2 is Tier 2 (multi-hop spreading activation
-    # deferred — would need store.cooccurring + budgeted BFS over ref edges).
+    # Graph expansion. hop_depth=0 skips entirely. hop_depth=1 = 1-hop ref
+    # neighbors. hop_depth>=2 = budgeted spreading activation: BFS up to
+    # hop_depth levels through ref edges (both directions), capped by a
+    # per-query node budget that scales with depth so deep queries can't
+    # blow latency on densely-connected graphs.
     if hop_depth >= 1 and results and len(results) < max_facts and not budget_exceeded():
         seen_ids = {f.get("entity_id", "") for f in results}
+        node_budget = 30 * hop_depth  # 30 for d=1, 60 for d=2, 90 for d=3
+        visited_count = 0
         try:
             from triplestore import TripleStore
             store = TripleStore(db_path)
             for fact in list(results):
+                if budget_exceeded() or visited_count >= node_budget:
+                    break
                 eid = fact.get("entity_id", "")
                 if not eid:
                     continue
-                neighbors = store.neighbors(eid, depth=1)
+                # Whisper-thin guard: cap neighbors() at this hop_depth and
+                # let RdfStore's internal BFS do the rest. The 1-hop default
+                # behavior is preserved bit-for-bit when hop_depth==1.
+                neighbors = store.neighbors(eid, depth=hop_depth)
                 for nid, nattrs in neighbors.items():
-                    if nid not in seen_ids and len(results) < max_facts:
-                        seen_ids.add(nid)
-                        nfact = {"entity_id": nid, "entity": nid.split(":")[-1].rsplit("-", 1)[0] if ":" in nid else nid}
-                        for attr, values in nattrs.items():
-                            if attr != "tag":
-                                nfact[attr] = values[0] if len(values) == 1 else values
-                        results.append(nfact)
+                    if nid in seen_ids:
+                        continue
+                    if len(results) >= max_facts or visited_count >= node_budget:
+                        break
+                    visited_count += 1
+                    seen_ids.add(nid)
+                    nfact = {
+                        "entity_id": nid,
+                        "entity": nid.split(":")[-1].rsplit("-", 1)[0] if ":" in nid else nid,
+                    }
+                    for attr, values in nattrs.items():
+                        if attr != "tag":
+                            nfact[attr] = values[0] if len(values) == 1 else values
+                    # Re-apply confidence_floor on hop neighbors so a deep
+                    # walk can't drag in stale low-confidence facts.
+                    filtered = _apply_confidence_floor([nfact], confidence_floor)
+                    if filtered:
+                        results.append(filtered[0])
             store.close()
         except Exception:
             pass
