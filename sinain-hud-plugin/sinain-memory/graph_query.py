@@ -763,17 +763,19 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
     if not facts:
         return ""
 
+    # 2026-05-28 follow-up fix: removed (conf,Nx) metadata + entity/entity
+    # prefix from the line format. Isolation test against gemini-2.5-flash
+    # showed the metadata-laden form
+    #   "- user/user: degree in Business Administration (0.85,1x)"
+    # produced "I don't know" while the cleaner form
+    #   "- user: degree in Business Administration"
+    # produced the correct answer. The compact format had been actively
+    # sabotaging QA for every bench: noise tokens (conf, count, doubled
+    # entity prefix) made gemini parse the line as opaque structured data
+    # rather than as a fact statement.
     lines = []
     total = 0
     for f in facts:
-        # 2026-05-28 fix: prior code read "entityId" (camelCase) but fact dicts
-        # produced by query_facts_hybrid use "entity_id" (snake_case). Result
-        # was an empty entity slug in every compact line — gemini saw lines
-        # like "- /: BA in Business Administration (...)" which looked
-        # broken and made the QA model abstain ("I don't know" floor) even
-        # when the right fact was at rank #1. Prefer the human-readable
-        # `entity` field when present (short name like "user"), fall back
-        # to slug of entity_id, fall back to "?".
         entity = (
             f.get("entity")
             or f.get("entity_id", "").split(":")[-1].rsplit("-", 1)[0]
@@ -781,21 +783,16 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
         )
         if isinstance(entity, list):
             entity = entity[0] if entity else "?"
-        entity = str(entity)[:20]
-        value = f.get("value", "")
-        conf = f.get("confidence", "?")
-        count = f.get("reinforce_count", "1")
-        domain = f.get("domain", "")
+        entity = str(entity)[:30]
+        value = (f.get("value", "") or "").strip()
+        if not value:
+            continue
 
-        if domain:
-            line = f"- {domain}/{entity}: {value} ({conf},{count}x)"
-        else:
-            line = f"- {entity}: {value} ({conf},{count}x)"
-
+        line = f"- {entity}: {value}"
         if total + len(line) + 1 > max_chars:
             break
         lines.append(line)
-        total += len(line) + 1  # account for "\n" separator
+        total += len(line) + 1
 
     return "\n".join(lines)
 
