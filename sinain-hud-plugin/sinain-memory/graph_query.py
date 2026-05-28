@@ -528,6 +528,30 @@ def query_facts_hybrid(
     else:
         candidate_limit = max_facts * 3
 
+    # Phase D Tier 2: question-typed pool sizing per PLAN.md.
+    # Counting / listing / temporal questions need a broader recall pool —
+    # the answer aggregates over multiple facts, so cutting at top-30 may
+    # leave out facts that belong in the answer. Heuristic prefix check on
+    # the question text — light-weight, no LLM. Only WIDENS the pool (never
+    # narrows below the precision_mode default) so this can only improve
+    # recall for matching question shapes; single-lookup defaults are
+    # preserved unchanged.
+    q_lc = query.lower()
+    if any(p in q_lc for p in (
+        "how many", "count of", "number of", "how often",
+        "list all", "list every", "all of the", "list the",
+    )):
+        candidate_limit = max(candidate_limit, max_facts * 8)
+        question_class = "counting"
+    elif any(p in q_lc for p in (
+        "when did", "when was", "what year", "what time",
+        "what date", "how long ago", "since when", "the date when",
+    )):
+        candidate_limit = max(candidate_limit, max_facts * 4)
+        question_class = "temporal"
+    else:
+        question_class = "default"
+
     # Change C: FTS5 AND mode for multi-keyword queries
     if len(keywords) > 1:
         fts_and_query = " AND ".join(keywords)
