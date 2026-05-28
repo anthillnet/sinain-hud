@@ -573,12 +573,21 @@ class RdfStore:
         return rows[: int(limit)]
 
     def fts_search(self, query: str, limit: int) -> list[str]:
-        """Keyword search across all `value` triples (legacy "FTS5 + LIKE" path).
+        """Keyword search across all `value` triples, ranked by Okapi BM25.
 
-        Pure-Python contains-filter on `sinain:value`. Slower than FTS5 but
-        deterministic and correct for the corpora the bench uses.
-        Supports the FTS5-style "term1 AND term2" / "term1 OR term2" syntax
-        callers pass — defaults to AND across whitespace-split tokens.
+        The legacy path was a pure-Python contains-filter that returned the
+        *first* `limit` matches in arbitrary RocksDB iteration order — no
+        relevance signal at all. That caused the A1.6 "rank-out": when many
+        facts contain a query term, the genuinely-relevant one could sit past
+        the cutoff and never reach the rerank window (see
+        .planning/phases/diarization-levers/00-PLAN.md).
+
+        We now scan every `sinain:value` triple once (corpora are small — tens
+        to low-thousands of facts), gate candidates by the same FTS5-style
+        "term1 AND term2" / "term1 OR term2" logic callers pass (default AND),
+        then rank survivors by BM25 and return the top-`limit` entity ids by
+        score. The ranked list also gives RRF a meaningful per-rank signal it
+        previously lacked.
         """
         q = (query or "").strip()
         if not q:
@@ -596,29 +605,60 @@ class RdfStore:
         tokens = [t for t in tokens if t]
         if not tokens:
             return []
+
         p = attribute_to_predicate("value")
-        seen = set()
-        out: list[str] = []
+        # Single pass: collect candidate docs + corpus stats for BM25 scoring.
+        docs: list[tuple[str, str, int]] = []  # (eid, lowercased text, doc_len words)
+        seen: set[str] = set()
+        total_len = 0
+        df: dict[str, int] = {tok: 0 for tok in tokens}
         for q_obj in self._store.quads_for_pattern(None, p, None, None):
             if isinstance(q_obj.object, ox.NamedNode):
                 continue
             text = str(q_obj.object.value).lower() if hasattr(q_obj.object, "value") else ""
             if not text:
                 continue
-            if require_or:
-                if not any(tok in text for tok in tokens):
-                    continue
-            else:
-                if not all(tok in text for tok in tokens):
-                    continue
             eid = uri_to_entity_id(q_obj.subject)
             if eid in seen:
                 continue
             seen.add(eid)
-            out.append(eid)
-            if len(out) >= int(limit):
-                break
-        return out
+            dl = len(text.split()) or 1
+            docs.append((eid, text, dl))
+            total_len += dl
+            for tok in tokens:
+                if tok in text:
+                    df[tok] += 1
+        if not docs:
+            return []
+
+        import math
+        n_docs = len(docs)
+        avgdl = (total_len / n_docs) if n_docs else 1.0
+        k1, b = 1.5, 0.75
+
+        def _bm25(text: str, dl: int) -> float:
+            score = 0.0
+            for tok in tokens:
+                tf = text.count(tok)
+                if tf == 0:
+                    continue
+                n_t = df.get(tok, 0)
+                idf = math.log(1 + (n_docs - n_t + 0.5) / (n_t + 0.5))
+                score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avgdl))
+            return score
+
+        scored: list[tuple[float, str]] = []
+        for eid, text, dl in docs:
+            present = sum(1 for tok in tokens if tok in text)
+            # Same gate as before: OR needs ≥1 token, AND needs all tokens.
+            if require_or:
+                if present == 0:
+                    continue
+            elif present != len(tokens):
+                continue
+            scored.append((_bm25(text, dl), eid))
+        scored.sort(key=lambda x: -x[0])
+        return [eid for _, eid in scored[: int(limit)]]
 
     def entity_id_or_domain_search(
         self,

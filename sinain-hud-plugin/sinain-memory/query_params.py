@@ -90,7 +90,12 @@ QUERY_PROFILES: dict[str, dict] = {
         "format": "structured",
     },
 
-    # External MCP query — today's behavior for backward compatibility.
+    # External MCP query — legacy balanced/1-hop config. NO LONGER the
+    # production default (2026-05-28): query_facts_hybrid now defaults to
+    # balanced + hop_depth=2 so ONE config serves both production and eval
+    # (no bench-only profile to overfit against). This profile differs only
+    # by hop_depth=1; kept as an explicit opt-in for a latency-bound caller
+    # that wants to skip multi-hop expansion.
     "mcp-default": {
         "precision_mode": "balanced",
         "temporal_mode": "any",
@@ -110,15 +115,19 @@ QUERY_PROFILES: dict[str, dict] = {
         "format": "narrative",
     },
 
-    # Eval harness: precise + multi-hop + structured. Reproduces escalation
-    # behavior plus the structured format the judge consumes.
+    # Eval harness: balanced + multi-hop. As of 2026-05-28 this is functionally
+    # IDENTICAL to query_facts_hybrid's defaults — kept as an explicit alias so
+    # `--profile eval` and a no-profile run produce the same config. The bench
+    # measures exactly what production runs; do not let these drift apart again
+    # (the divergence was the overfitting risk we removed). NB: dropped the
+    # cross-encoder ("precise") here too — bench-confirmed net-negative.
     "eval": {
-        "precision_mode": "precise",
+        "precision_mode": "balanced",
         "temporal_mode": "any",
         "confidence_floor": 0.0,
         "hop_depth": 2,
         "latency_budget_ms": None,
-        "format": "structured",
+        "format": "facts",
     },
 }
 

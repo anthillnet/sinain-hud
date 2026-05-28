@@ -413,10 +413,11 @@ def query_facts_hybrid(
     precision_mode: str = "balanced",
     temporal_mode: str = "any",
     confidence_floor: float = 0.0,
-    hop_depth: int = 1,
+    hop_depth: int = 2,
     latency_budget_ms: int | None = None,
     format: str = "facts",
     as_of: str | None = None,
+    mentioned_by_speaker: list[str] | None = None,
 ) -> list[dict]:
     """Hybrid retrieval with Reciprocal Rank Fusion (Graphiti pattern).
 
@@ -426,20 +427,28 @@ def query_facts_hybrid(
     neighbors.
 
     Phase D parameter API (Tier 1 implemented 2026-05-28):
-        precision_mode:     "fast" shrinks candidate pool and skips bi-encoder
-                            rerank entirely. "balanced" (default) keeps
-                            bi-encoder rerank. "precise" widens the pool and
-                            adds cross-encoder rerank (~50-150ms extra) on
-                            top of bi-encoder.
+        precision_mode:     "balanced" (DEFAULT — the single production+eval
+                            profile, 2026-05-28) uses the wide ~200-candidate
+                            pool + bi-encoder rerank. "precise" adds a cross-
+                            encoder pass over the bi-encoder's top-30; it is
+                            NOT the default because bench data (2026-05-28)
+                            showed the ms-marco cross-encoder demotes gold
+                            facts on the meeting bench (al-futaim 3.33→2.67)
+                            and added nothing at LongMemEval scale — revisit
+                            if a larger run shows it helps. "fast" shrinks the
+                            pool and skips bi-encoder entirely (latency-bound
+                            paths that explicitly opt in — no caller does today).
         temporal_mode:      ACCEPTED BUT NOT HONORED (Tier 2 — requires
                             occurred_start/occurred_end/mentioned_at on the
                             RDF backend). Defaults to "any" behavior.
         confidence_floor:   Drop facts whose decayed confidence is below
                             this value before rerank. Default 0.0 = no floor.
-        hop_depth:          0 skips 1-hop graph expansion entirely. 1
-                            (default) does the existing 1-hop fallback.
-                            >=2 ACCEPTED BUT NOT HONORED (Tier 2 — multi-hop
-                            spreading activation deferred).
+        hop_depth:          0 skips graph expansion entirely. 1 does the
+                            1-hop fallback. 2 (DEFAULT) does budgeted multi-hop
+                            spreading activation (Phase D Tier 2, shipped
+                            commit c8550af) — BFS up to hop_depth levels
+                            through ref edges, capped by a per-query node
+                            budget (30*hop_depth).
         latency_budget_ms:  Soft cap. Rerank + expansion stages check elapsed
                             time and skip later work if exceeded. None = no
                             cap (default).
@@ -448,6 +457,17 @@ def query_facts_hybrid(
                             shape (Tier 2).
         as_of:              ISO timestamp for point-in-time queries.
                             ACCEPTED BUT NOT HONORED (Tier 2).
+        mentioned_by_speaker:
+                            Optional list of speaker labels (e.g.
+                            ["SPEAKER_01", "SPEAKER_USER"]) — filter results
+                            to facts whose ``mentioned_by`` triples include
+                            at least one of these speakers. Default None =
+                            no filter (existing behavior). Diarization
+                            Lever 4 — see .planning/phases/diarization-
+                            levers/00-PLAN.md. Facts in legacy graphs
+                            without ``mentioned_by`` triples will be
+                            excluded when this filter is set; pre-Lever-4
+                            graphs must be re-ingested to use the filter.
 
     Returns list[dict] always — format-dependent shape variants are Tier 2.
     """
@@ -463,6 +483,74 @@ def query_facts_hybrid(
     if precision_mode not in ("fast", "balanced", "precise"):
         precision_mode = "balanced"
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
+
+    # Layer 2 tiny-LLM query rewriter (opt-in via SINAIN_QUERY_REWRITER=1).
+    # Augments the keyword list with model-derived key terms + synonyms BEFORE
+    # FTS5/tag/semantic-expansion pipelines run. Failure is silent — falls
+    # back to the regex-only keywords above. See query_rewriter.py and
+    # .planning/phases/diarization-levers/00-PLAN.md § Tiny-LLM Layer 2.
+    rewrite_meta: dict | None = None
+    try:
+        import os as _os
+        if _os.environ.get("SINAIN_QUERY_REWRITER", "").lower() in ("1", "true", "yes"):
+            from query_rewriter import rewrite_query as _rewrite_query
+            rewrite_meta = _rewrite_query(query, fallback=True)
+            extra = list(rewrite_meta.get("key_terms", [])) + list(rewrite_meta.get("expanded_synonyms", []))
+            seen = set(keywords)
+            for term in extra:
+                t = term.lower().strip()
+                if t and t not in seen and len(t) > 1:
+                    keywords.append(t)
+                    seen.add(t)
+    except Exception:
+        rewrite_meta = None
+
+    # Tier-3 dedicated tiny-LLM (SmolLM2:latest) — multi-query probes + HyDE
+    # hypothesis. Opt-in via SINAIN_SMOLLM_PROBES=1. Targets the bench-confirmed
+    # "buried fact with generic query terms" retrieval failure (al-futaim
+    # recall@1 stuck at 16.7%; LongMemEval q3+q4 retrieval-gap = 0%).
+    #
+    # Probes: 3 statement-form paraphrases → tokenize → merge keywords.
+    # Hypothesis: fact-shaped answer template → used as bi-encoder rerank
+    # seed instead of raw query (true HyDE pattern).
+    smollm_probes: list[str] = []
+    smollm_hypothesis: str = ""
+    try:
+        import os as _os
+        if _os.environ.get("SINAIN_SMOLLM_PROBES", "").lower() in ("1", "true", "yes"):
+            from query_smollm import generate_probes_and_hypothesis as _smollm_probes
+            smollm_probes, smollm_hypothesis = _smollm_probes(query, fallback=True)
+            # Merge probe keywords into the FTS5/tag candidate keyword list.
+            seen = set(keywords)
+            for probe in smollm_probes:
+                for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", probe):
+                    t = w.lower()
+                    if len(t) > 2 and t not in seen:
+                        keywords.append(t)
+                        seen.add(t)
+    except Exception:
+        smollm_probes, smollm_hypothesis = [], ""
+
+    # Diarization Lever 4: normalize speaker filter once. Empty filter ⇒ None
+    # (no filter). When set, results are restricted to facts whose mentioned_by
+    # triples include at least one of these speakers.
+    speaker_filter: set[str] | None = None
+    if mentioned_by_speaker:
+        speaker_filter = {str(s) for s in mentioned_by_speaker if s}
+        if not speaker_filter:
+            speaker_filter = None
+
+    def _matches_speaker(fact: dict) -> bool:
+        if speaker_filter is None:
+            return True
+        mb = fact.get("mentioned_by")
+        if mb is None:
+            return False
+        if isinstance(mb, str):
+            return mb in speaker_filter
+        if isinstance(mb, list):
+            return any(isinstance(m, str) and m in speaker_filter for m in mb)
+        return False
 
     # Change 0: Semantic entity expansion — "ML" → ["ml", "machine-learning", "ai", ...]
     expanded_keywords = keywords
@@ -521,12 +609,16 @@ def query_facts_hybrid(
     #   fast    — narrow pool (2x) so wall-time stays predictable, no rerank
     #   balanced— current default 3x (keeps existing behavior on default path)
     #   precise — wide pool 5x so cross-encoder rerank has more to work with
+    # A1.6 production-IR fix: widen the candidate net so a buried-but-relevant
+    # fact is actually FETCHED before any ranking. The old balanced/precise
+    # nets (3x / 5x = 30/50) cut facts that the BM25-ranked fts + bi/cross-
+    # encoder cascade would have surfaced. fast stays narrow (hot agent-tick
+    # path is latency-bound); balanced and precise fetch ~max_facts*20 (=200,
+    # the production-IR "top-200 candidate pool").
     if precision_mode == "fast":
         candidate_limit = max(max_facts * 2, max_facts + 5)
-    elif precision_mode == "precise":
-        candidate_limit = max_facts * 5
     else:
-        candidate_limit = max_facts * 3
+        candidate_limit = max_facts * 20
 
     # Phase D Tier 2: question-typed pool sizing per PLAN.md.
     # Counting / listing / temporal questions need a broader recall pool —
@@ -701,8 +793,73 @@ def query_facts_hybrid(
 
     # Return top RRF candidates. Cheap filters first — pruning noise before
     # rerank avoids paying encoder cost on facts we'd drop anyway.
-    rrf_candidates = [fact_map[eid] for eid in sorted_ids[:max_facts * 2] if eid in fact_map]
+    # A1.6: feed the full wide candidate net into rerank. The old window
+    # (max_facts*2 = 20) cut buried facts before the bi-/cross-encoder ever
+    # scored them — the core rank-out failure. Non-fast modes now hand the
+    # whole ~200-candidate pool to the bi-encoder, which is the stage that
+    # actually does relevance ranking. fast keeps the narrow window to bound
+    # hot-path latency. Lever 4 speaker widening folds into the wide pool.
+    if precision_mode == "fast":
+        pool_width = max_facts * (6 if speaker_filter else 2)
+    else:
+        pool_width = max_facts * 20
+    rrf_candidates = [fact_map[eid] for eid in sorted_ids[:pool_width] if eid in fact_map]
     rrf_candidates = _apply_confidence_floor(rrf_candidates, confidence_floor)
+    if speaker_filter is not None:
+        rrf_candidates = [f for f in rrf_candidates if _matches_speaker(f)]
+
+    # Graph expansion — IR-correct placement: BEFORE rerank, so hop-neighbors
+    # join the candidate pool and must EARN their rank against directly-
+    # retrieved facts. (The previous design appended neighbors AFTER rerank,
+    # raw and unranked, where they bypassed the bi-/cross-encoder entirely and
+    # tanked small-graph recall@1 — see diarization-levers/00-PLAN.md A1.6.)
+    # hop_depth=0 skips. hop_depth=1 = 1-hop ref neighbors. hop_depth>=2 =
+    # budgeted spreading activation: BFS up to hop_depth levels through ref
+    # edges, capped by a per-query node budget that scales with depth. Seeds
+    # are the strongest direct hits (top RRF candidates); a neighbor survives
+    # only if the rerank below scores it into the final max_facts.
+    if hop_depth >= 1 and rrf_candidates and not budget_exceeded():
+        seen_ids = {f.get("entity_id", "") for f in rrf_candidates}
+        node_budget = 30 * hop_depth  # 30 for d=1, 60 for d=2, 90 for d=3
+        visited_count = 0
+        neighbors_added: list[dict] = []
+        try:
+            from triplestore import TripleStore
+            store = TripleStore(db_path)
+            # Seed off the top direct candidates only — expanding off all ~200
+            # pooled facts would blow up the graph walk and the rerank pool.
+            for fact in rrf_candidates[:max_facts]:
+                if budget_exceeded() or visited_count >= node_budget:
+                    break
+                eid = fact.get("entity_id", "")
+                if not eid:
+                    continue
+                neighbors = store.neighbors(eid, depth=hop_depth)
+                for nid, nattrs in neighbors.items():
+                    if nid in seen_ids or visited_count >= node_budget:
+                        if visited_count >= node_budget:
+                            break
+                        continue
+                    visited_count += 1
+                    seen_ids.add(nid)
+                    nfact = {
+                        "entity_id": nid,
+                        "entity": nid.split(":")[-1].rsplit("-", 1)[0] if ":" in nid else nid,
+                    }
+                    for attr, values in nattrs.items():
+                        if attr != "tag":
+                            nfact[attr] = values[0] if len(values) == 1 else values
+                    # Confidence_floor on neighbors so a deep walk can't drag
+                    # in stale low-confidence facts; speaker filter respected.
+                    filtered = _apply_confidence_floor([nfact], confidence_floor)
+                    if filtered and _matches_speaker(filtered[0]):
+                        neighbors_added.append(filtered[0])
+            store.close()
+        except Exception:
+            pass
+        # Neighbors join the candidate pool; the rerank below ranks the
+        # combined set and the final max_facts cut decides what survives.
+        rrf_candidates.extend(neighbors_added)
 
     results = rrf_candidates[:max_facts]
 
@@ -716,7 +873,11 @@ def query_facts_hybrid(
             if not hasattr(query_facts_hybrid, "_embed_model"):
                 query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
             model = query_facts_hybrid._embed_model
-            texts = [query] + [f.get("value", "") for f in rrf_candidates]
+            # HyDE: use SmolLM hypothesis as the bi-encoder seed when available
+            # (falls back to raw query). The hypothesis is fact-shaped, so it
+            # embeds closer to actual graph facts than the question form.
+            seed_text = smollm_hypothesis if smollm_hypothesis else query
+            texts = [seed_text] + [f.get("value", "") for f in rrf_candidates]
             embs = model.encode(texts, show_progress_bar=False)
             q_emb = embs[0]
             scored = []
@@ -724,7 +885,11 @@ def query_facts_hybrid(
                 sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
                 scored.append((sim, f))
             scored.sort(key=lambda x: -x[0])
-            results = [f for _, f in scored[:max_facts]]
+            # A1.6: when the cross-encoder runs next (precise mode), keep a
+            # wider top-30 window so it re-ranks a real candidate set instead
+            # of just the bi-encoder's top-10. Otherwise narrow to max_facts.
+            keep = max(max_facts * 3, 30) if precision_mode == "precise" else max_facts
+            results = [f for _, f in scored[:keep]]
         except ImportError:
             pass  # sentence-transformers not installed — use RRF order
 
@@ -738,51 +903,9 @@ def query_facts_hybrid(
         except Exception as e:
             print(f"[warn] cross-encoder rerank failed (non-fatal): {e}", file=sys.stderr)
 
-    # Graph expansion. hop_depth=0 skips entirely. hop_depth=1 = 1-hop ref
-    # neighbors. hop_depth>=2 = budgeted spreading activation: BFS up to
-    # hop_depth levels through ref edges (both directions), capped by a
-    # per-query node budget that scales with depth so deep queries can't
-    # blow latency on densely-connected graphs.
-    if hop_depth >= 1 and results and len(results) < max_facts and not budget_exceeded():
-        seen_ids = {f.get("entity_id", "") for f in results}
-        node_budget = 30 * hop_depth  # 30 for d=1, 60 for d=2, 90 for d=3
-        visited_count = 0
-        try:
-            from triplestore import TripleStore
-            store = TripleStore(db_path)
-            for fact in list(results):
-                if budget_exceeded() or visited_count >= node_budget:
-                    break
-                eid = fact.get("entity_id", "")
-                if not eid:
-                    continue
-                # Whisper-thin guard: cap neighbors() at this hop_depth and
-                # let RdfStore's internal BFS do the rest. The 1-hop default
-                # behavior is preserved bit-for-bit when hop_depth==1.
-                neighbors = store.neighbors(eid, depth=hop_depth)
-                for nid, nattrs in neighbors.items():
-                    if nid in seen_ids:
-                        continue
-                    if len(results) >= max_facts or visited_count >= node_budget:
-                        break
-                    visited_count += 1
-                    seen_ids.add(nid)
-                    nfact = {
-                        "entity_id": nid,
-                        "entity": nid.split(":")[-1].rsplit("-", 1)[0] if ":" in nid else nid,
-                    }
-                    for attr, values in nattrs.items():
-                        if attr != "tag":
-                            nfact[attr] = values[0] if len(values) == 1 else values
-                    # Re-apply confidence_floor on hop neighbors so a deep
-                    # walk can't drag in stale low-confidence facts.
-                    filtered = _apply_confidence_floor([nfact], confidence_floor)
-                    if filtered:
-                        results.append(filtered[0])
-            store.close()
-        except Exception:
-            pass
-
+    # NOTE: graph expansion now happens BEFORE rerank (above) so neighbors
+    # compete for rank instead of being raw-appended here. See the expansion
+    # block after the speaker filter.
     return _format_results(results[:max_facts], format)
 
 
