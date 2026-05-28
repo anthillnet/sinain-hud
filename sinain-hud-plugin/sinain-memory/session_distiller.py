@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +26,58 @@ from common import (
     output_json,
     read_effective_playbook,
 )
+
+# Strict JSON Schema for the distiller's response shape. Forces atomic facts[]
+# vs narrative paragraphs — the failure mode for qwen2.5:7b (0/2) and
+# gemma4:e2b (q1 0/1) on LongMemEval-S. Bounds string lengths so a model
+# can't pack a session summary into a single "fact" item.
+DIGEST_SCHEMA = {
+    "title": "SessionDigest",
+    "type": "object",
+    "properties": {
+        "whatHappened": {"type": "string", "minLength": 1, "maxLength": 600},
+        "facts": {
+            "type": "array",
+            "maxItems": 20,
+            # Per-fact bound: 250 chars is enough for "X has a degree in Y" or
+            # "Citibank has 2400 IntelliJ subscriptions" but too short for a
+            # paragraph-style summary.
+            "items": {"type": "string", "minLength": 10, "maxLength": 250},
+        },
+        "decisions": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {"type": "string", "minLength": 5, "maxLength": 300},
+        },
+        "entities": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "type": {"type": "string", "minLength": 1, "maxLength": 40},
+                },
+                "required": ["name", "type"],
+                "additionalProperties": False,
+            },
+        },
+        "patterns": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {"type": "string", "minLength": 5, "maxLength": 300},
+        },
+        "preferences": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {"type": "string", "minLength": 5, "maxLength": 200},
+        },
+        "isEmpty": {"type": "boolean"},
+    },
+    "required": ["whatHappened", "facts", "decisions", "entities", "patterns", "preferences", "isEmpty"],
+    "additionalProperties": False,
+}
+
 
 SYSTEM_PROMPT = """\
 You are a session distiller for a personal AI overlay system (sinain).
@@ -160,12 +213,17 @@ def main() -> None:
 ## Session Metadata
 {json.dumps(meta, indent=2)}{playbook_summary}{existing_section}"""
 
+    # SINAIN_STRUCTURED_DISTILLER=0 disables strict JSON Schema mode for
+    # A/B comparison. Default is on — measurement showed 0/2 → ?/2 for qwen
+    # and confirms phi/cloud don't regress under the constraint.
+    use_schema = os.environ.get("SINAIN_STRUCTURED_DISTILLER", "1") != "0"
     try:
         raw = call_llm_with_fallback(
             SYSTEM_PROMPT,
             user_prompt,
             script="session_distiller",
             json_mode=True,
+            json_schema=DIGEST_SCHEMA if use_schema else None,
         )
         result = extract_json(raw)
     except (ValueError, LLMError) as e:

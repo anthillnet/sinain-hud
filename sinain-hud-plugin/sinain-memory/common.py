@@ -173,6 +173,7 @@ def call_llm(
     *,
     script: str | None = None,
     json_mode: bool = False,
+    json_schema: dict | None = None,
     temperature: float | None = None,
 ) -> str:
     """Call OpenRouter chat completions API. Returns assistant message text.
@@ -180,8 +181,15 @@ def call_llm(
     When *script* is provided, model and max_tokens are overridden from
     koog-config.json (external config the bot cannot modify).
 
-    When *json_mode* is True and the resolved model starts with ``openai/``,
-    ``response_format: {"type": "json_object"}`` is added to the request body.
+    When *json_schema* is provided, the request uses STRICT structured-output
+    mode (``response_format: {"type": "json_schema", ...}``) — model output is
+    forced to conform to the schema. Used to prevent local distillers
+    (phi4-mini, gemma4:e2b, qwen2.5:7b) from emitting session summaries when
+    asked for a facts[] list. Falls back gracefully if the provider rejects
+    the schema (Ollama may not support all JSON Schema features).
+
+    When *json_mode* is True (and no schema given), uses the older loose
+    ``response_format: {"type": "json_object"}`` mode for OpenAI/Google/Ollama.
 
     *temperature*: deterministic-judging knob used by the LongMemEval paper-
     standard judge (temperature=0.0 for reproducibility). When omitted, the
@@ -225,9 +233,26 @@ def call_llm(
     }
     if temperature is not None:
         body["temperature"] = temperature
-    # json_mode: OpenAI dialect for cloud (openai/* models); Ollama's OpenAI-
-    # compat endpoint supports the same response_format key for instruct models.
-    if json_mode and (model.startswith("openai/") or is_ollama):
+    # Structured output. json_schema (strict) takes precedence over json_mode
+    # (loose). OpenAI / Google / Ollama OpenAI-compat all accept the
+    # response_format.json_schema shape. Strict mode bounces the response off
+    # the schema so local models can't drift into narrative output when the
+    # caller asked for a facts[] array — the empirically-observed failure
+    # mode for qwen2.5:7b and gemma4:e2b on LongMemEval-S.
+    if json_schema is not None:
+        body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": json_schema.get("title", "output"),
+                "schema": json_schema,
+                "strict": True,
+            },
+        }
+        # Ollama-native accepts the schema directly via top-level `format`;
+        # set both so whichever path the runtime takes, the constraint sticks.
+        if is_ollama:
+            body["format"] = json_schema
+    elif json_mode and (model.startswith("openai/") or model.startswith("google/") or is_ollama):
         body["response_format"] = {"type": "json_object"}
 
     try:
@@ -264,6 +289,7 @@ def call_llm_with_fallback(
     *,
     script: str | None = None,
     json_mode: bool = False,
+    json_schema: dict | None = None,
     retries: int = 1,
 ) -> str:
     """call_llm with automatic retry on failure (same model).
@@ -274,7 +300,10 @@ def call_llm_with_fallback(
     last_err: LLMError | None = None
     for attempt in range(1 + retries):
         try:
-            return call_llm(system_prompt, user_prompt, script=script, json_mode=json_mode)
+            return call_llm(
+                system_prompt, user_prompt,
+                script=script, json_mode=json_mode, json_schema=json_schema,
+            )
         except LLMError as e:
             last_err = e
             if attempt < retries:
