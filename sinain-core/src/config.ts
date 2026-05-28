@@ -205,16 +205,19 @@ export function loadConfig(): CoreConfig {
     if (!process.env.SINAIN_SMART_MODEL) process.env.SINAIN_SMART_MODEL = `ollama/${localLlm}`;
   }
 
+  const transcriptionInitialPrompt = env("TRANSCRIPTION_INITIAL_PROMPT", "");
   const transcriptionConfig: TranscriptionConfig = {
     backend: env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"],
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
     language: env("TRANSCRIPTION_LANGUAGE", "auto"),
+    initialPrompt: transcriptionInitialPrompt || undefined,
     local: {
       bin: env("LOCAL_WHISPER_BIN", "whisper-cli"),
       modelPath: resolvePath(env("LOCAL_WHISPER_MODEL", "~/models/ggml-large-v3-turbo.bin")),
       language: env("TRANSCRIPTION_LANGUAGE", "auto"),
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
+      initialPrompt: transcriptionInitialPrompt || undefined,
     },
   };
 

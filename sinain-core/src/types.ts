@@ -209,12 +209,22 @@ export interface TranscriptionConfig {
   openrouterApiKey: string;
   geminiModel: string;
   language: string;
+  /**
+   * Optional hotword/entity hint string passed into the transcription
+   * prompt. Modeled after Whisper's --prompt flag and AWS Transcribe /
+   * Deepgram / AssemblyAI custom-vocabulary APIs: biases the model toward
+   * preserving these proper nouns rather than substituting phonetic
+   * neighbors. Set via TRANSCRIPTION_INITIAL_PROMPT env var; can be a
+   * comma-separated list of names ("Ibrahim, Citibank, JetBrains, Deepak").
+   */
+  initialPrompt?: string;
   /** Local whisper-cpp settings (only used when backend=local) */
   local: {
     bin: string;
     modelPath: string;
     language: string;
     timeoutMs: number;
+    initialPrompt?: string;
   };
 }
 

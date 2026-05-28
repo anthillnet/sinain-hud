@@ -208,15 +208,29 @@ export class TranscriptionService extends EventEmitter {
               { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
               // TRANSCRIPTION_LANGUAGE="auto" (or empty) transcribes whatever
               // language is heard, preserving original. Any other value (e.g.
-              // "en-US") keeps the strict single-language gate — non-matching
-              // audio returns empty. Recording bench exposed that the strict
-              // gate discarded Russian audio, returning the gate-instruction
-              // text as the transcript and starving the distiller (live
-              // recording bench 2026-05-28: 1.33/5 sinain-memory, 8% recall —
-              // 92% of audio dropped). "auto" makes multilingual capture work.
-              { type: "text", text: this.config.language && this.config.language !== "auto"
-                ? `Transcribe this audio in ${this.config.language}. Output ONLY the transcript text, nothing else. If the audio is not in ${this.config.language}, output an empty string.`
-                : `Transcribe this audio. Output ONLY the transcript text in the language it was spoken, nothing else. If the audio is silent or unintelligible, output an empty string.` },
+              // "en-US") keeps the strict single-language gate.
+              //
+              // Entity-preservation directive (added 2026-05-28 after live
+              // bench surfaced "Ibrahim → Jeff Rains", "Citibank → City Bank"
+              // — gemini-audio was substituting unfamiliar proper nouns with
+              // phonetically-adjacent common names, mangling exactly the
+              // facts a memory system needs to capture). Modeled after
+              // AWS Transcribe / Deepgram / AssemblyAI custom-vocabulary
+              // patterns: tell the model to favor phonetic transcription
+              // over substitution when uncertain about a proper noun.
+              { type: "text", text: (() => {
+                const base = this.config.language && this.config.language !== "auto"
+                  ? `Transcribe this audio in ${this.config.language}.`
+                  : `Transcribe this audio in the language it was spoken.`;
+                const entityGuard = " Preserve proper nouns, person names, brand names, and company names EXACTLY as spoken. If unsure of a name's spelling, write the phonetic form — never substitute a similar-sounding common name. Numbers, dates, and quantities must be transcribed precisely.";
+                const hotwordCtx = this.config.initialPrompt
+                  ? ` Known proper nouns that may appear: ${this.config.initialPrompt}.`
+                  : "";
+                const guard = this.config.language && this.config.language !== "auto"
+                  ? ` If the audio is not in ${this.config.language}, output an empty string.`
+                  : ` If the audio is silent or unintelligible, output an empty string.`;
+                return `${base}${entityGuard}${hotwordCtx} Output ONLY the transcript text, nothing else.${guard}`;
+              })() },
             ],
           }],
         }),
