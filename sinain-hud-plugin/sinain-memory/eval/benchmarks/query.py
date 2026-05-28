@@ -195,8 +195,10 @@ def answer_question(
         speaker_filter = (question.metadata or {}).get("speaker_filter") or None
         facts = _query_knowledge(db_path, question.text, profile=profile, speaker_filter=speaker_filter)
         system = (
-            "Answer the question using ONLY the provided knowledge facts. "
-            "If the facts don't contain enough information to answer, say \"I don't know.\""
+            "Answer the question using the knowledge facts below. Synthesize "
+            "across related facts and make reasonable inferences the facts "
+            "support. Be concise and specific. Only say \"I don't know\" if the "
+            "facts are clearly unrelated to the question."
         )
         user = f"## Knowledge Facts\n{facts}\n\n## Question\n{question.text}"
 
