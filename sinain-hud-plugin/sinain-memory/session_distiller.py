@@ -31,6 +31,13 @@ from common import (
 # vs narrative paragraphs — the failure mode for qwen2.5:7b (0/2) and
 # gemma4:e2b (q1 0/1) on LongMemEval-S. Bounds string lengths so a model
 # can't pack a session summary into a single "fact" item.
+#
+# Diarization Lever 1 (2026-05-28): facts items may now be EITHER a bare string
+# (legacy shape) OR an object {text, attributedTo?, subject?}. attributedTo
+# carries the SPEAKER_NN tag when the transcript supplied speaker labels;
+# subject is the entity/person the fact is ABOUT (may differ from speaker).
+# Integrator detects shape and routes attributedTo into mentioned_by triples
+# (per-fact granularity, replacing batch-level fallback).
 DIGEST_SCHEMA = {
     "title": "SessionDigest",
     "type": "object",
@@ -42,7 +49,24 @@ DIGEST_SCHEMA = {
             # Per-fact bound: 250 chars is enough for "X has a degree in Y" or
             # "Citibank has 2400 IntelliJ subscriptions" but too short for a
             # paragraph-style summary.
-            "items": {"type": "string", "minLength": 10, "maxLength": 250},
+            # Lever 1: items are now `oneOf` either string OR fact-object.
+            # Distillers that ignore the new shape continue to emit strings;
+            # those that adopt it gain per-fact attribution.
+            "items": {
+                "oneOf": [
+                    {"type": "string", "minLength": 10, "maxLength": 250},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string", "minLength": 10, "maxLength": 250},
+                            "attributedTo": {"type": "string", "maxLength": 40},
+                            "subject": {"type": "string", "maxLength": 80},
+                        },
+                        "required": ["text"],
+                        "additionalProperties": False,
+                    },
+                ],
+            },
         },
         "decisions": {
             "type": "array",
@@ -88,6 +112,9 @@ The transcript contains feed items from sinain-core:
 - agent: sinain's analysis digests and HUD messages
 - openclaw: responses from the AI escalation system
 - system: system events and status messages
+- SPEAKER_NN (e.g. SPEAKER_00, SPEAKER_01): an identified speaker in transcribed \
+audio. The speaker tag is anonymous (no real name) but persistent within a session. \
+Use it to attribute claims when relevant — see facts schema below.
 
 Extract:
 1. whatHappened: 2-3 sentences summarizing what occurred in this session
@@ -100,10 +127,21 @@ IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHAT'S NEXT: commitments, action items, plans, deadlines
    If you have 5+ facts about one dimension and 0 about another that was discussed, \
 you are missing something. Breadth over depth.
-   Good: "The CTO of Al-Futaim previously worked at Citibank for 17 years as Director of IT in Singapore"
-   Good: "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
-   Good: "The meeting is 45 minutes, scheduled for Tuesday"
-   Bad: "client-understanding-key: True"
+
+   **Fact shape**: each item is either a plain string (legacy) OR an object \
+{"text": "...", "attributedTo": "SPEAKER_NN", "subject": "entity-name"}. Use the \
+object form when the transcript contains SPEAKER_NN tags; populate attributedTo with \
+the speaker who uttered the claim. subject is the entity the fact is ABOUT (may differ \
+from speaker — e.g. SPEAKER_01 says something about Ibrahim → attributedTo=SPEAKER_01, \
+subject=ibrahim). Omit attributedTo if uncertain; omit subject if the fact is general. \
+NEVER put SPEAKER_NN inside the text field — keep speaker info in the structured fields.
+
+   Good (object form): {"text": "Ibrahim worked at Citibank for 17 years as Director \
+of IT in Singapore", "attributedTo": "SPEAKER_01", "subject": "ibrahim"}
+   Good (object form): {"text": "The user has a degree in Business Administration", \
+"attributedTo": "SPEAKER_USER", "subject": "user"}
+   Good (legacy string): "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
+   Bad: "SPEAKER_01 said the CTO worked at Citibank" (don't bake the tag into text)
    Bad: five variations of "Al-Futaim is moving to the cloud"
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
 4. entities: named things discussed or interacted with — as objects with name \
@@ -121,7 +159,11 @@ If the session was idle or empty, say so briefly.
 Respond with ONLY a JSON object:
 {
   "whatHappened": "string",
-  "facts": ["self-contained factual sentence", ...],
+  "facts": [
+    {"text": "self-contained factual sentence", "attributedTo": "SPEAKER_NN", "subject": "entity-name"},
+    "or a plain string if no speaker context",
+    ...
+  ],
   "decisions": ["decision sentence with who/what/when", ...],
   "entities": [{"name": "citibank", "type": "org"}, {"name": "artom", "type": "person"}, ...],
   "patterns": ["reusable technique or workflow", ...],

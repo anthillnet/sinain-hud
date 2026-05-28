@@ -125,7 +125,33 @@ def _normalize_digest(digest: dict) -> dict:
 
     # String-list fields: coerce each element to a string; wrap dicts in
     # a single-element list of their JSON form; drop non-iterables.
-    for key in ("facts", "decisions", "patterns", "preferences"):
+    #
+    # Lever 1 exception: `facts` items may legitimately be objects of shape
+    # {text, attributedTo?, subject?}. Preserve those; stringify everything
+    # else as before.
+    def _coerce_fact_item(x):
+        if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"]:
+            clean = {"text": x["text"]}
+            at = x.get("attributedTo")
+            if isinstance(at, str) and at.strip():
+                clean["attributedTo"] = at.strip()
+            subj = x.get("subject")
+            if isinstance(subj, str) and subj.strip():
+                clean["subject"] = subj.strip()
+            return clean
+        return _to_str(x)
+
+    raw_facts = out.get("facts", [])
+    if isinstance(raw_facts, list):
+        out["facts"] = [_coerce_fact_item(x) for x in raw_facts if x not in (None, "", False)]
+    elif isinstance(raw_facts, dict):
+        out["facts"] = [_coerce_fact_item(v) for v in raw_facts.values() if v not in (None, "", False)]
+    elif isinstance(raw_facts, str):
+        out["facts"] = [raw_facts] if raw_facts else []
+    else:
+        out["facts"] = []
+
+    for key in ("decisions", "patterns", "preferences"):
         raw = out.get(key, [])
         if isinstance(raw, list):
             out[key] = [_to_str(x) for x in raw if x not in (None, "", False)]
@@ -483,17 +509,29 @@ def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
     return "general"
 
 
-def _facts_to_graph_ops(digest: dict) -> list[dict]:
+def _facts_to_graph_ops(
+    digest: dict,
+    transcript_speakers: list[str] | None = None,
+) -> list[dict]:
     """Convert ALL distiller output + raw feed items to graph ops.
 
     DETERMINISTIC — no LLM needed. Stores distilled knowledge (facts,
     decisions, patterns, preferences, summary) AND verbatim raw captures
     (audio quotes, agent analysis) so the triplestore is the single
     source of truth for session recall.
+
+    transcript_speakers: optional list of distinct speaker labels (e.g.
+        ["SPEAKER_00", "SPEAKER_01"]) active in the batch that produced
+        this digest. When non-empty, every distilled op gets
+        op["mentioned_by"] = transcript_speakers so _execute_graph_ops
+        can write mentioned_by triples. Verbatim audio ops get per-item
+        speaker granularity from raw_items below. See
+        .planning/phases/diarization-levers/00-PLAN.md Lever 4.
     """
     ops = []
     known_entities = digest.get("entities", [])
     raw_items = digest.pop("_rawItems", None) or []
+    batch_speakers = list(transcript_speakers or [])
 
     # Session anchor from whatHappened
     session_ts = digest.get("ts", "")[:16]  # "2026-05-07T10:08"
@@ -508,21 +546,43 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "domain": "session",
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": batch_speakers,
         })
 
     # Facts (distilled)
-    for fact_text in digest.get("facts", []):
-        # Defensive coercion 2026-05-27: local distillers emit non-string
-        # facts (dicts for typed SPO triples, sometimes bools/ints). Coerce
-        # to JSON string so the length check + storage work uniformly.
-        if not isinstance(fact_text, str):
+    #
+    # Lever 1 (2026-05-28): facts items can now be either strings (legacy) or
+    # objects {text, attributedTo?, subject?}. When an object carries
+    # attributedTo, route it into per-fact mentioned_by (single speaker,
+    # discriminative). When a string or no attributedTo, fall back to
+    # batch_speakers (Lever 4 coarse behavior preserved). When the object
+    # supplies subject, prefer it over heuristic entity extraction.
+    for fact_item in digest.get("facts", []):
+        attributed_to: str | None = None
+        explicit_subject: str | None = None
+        if isinstance(fact_item, str):
+            fact_text = fact_item
+        elif isinstance(fact_item, dict) and isinstance(fact_item.get("text"), str):
+            fact_text = fact_item["text"]
+            at = fact_item.get("attributedTo")
+            if isinstance(at, str) and at.strip():
+                attributed_to = at.strip()
+            subj = fact_item.get("subject")
+            if isinstance(subj, str) and subj.strip():
+                explicit_subject = subj.strip()
+        else:
+            # Defensive coercion (pre-2026-05-28 path): local distillers
+            # sometimes emit non-string facts (dicts for typed SPO triples,
+            # bools, ints). JSON-stringify so length checks + storage work.
             try:
-                fact_text = json.dumps(fact_text, ensure_ascii=False)
+                fact_text = json.dumps(fact_item, ensure_ascii=False)
             except (TypeError, ValueError):
-                fact_text = str(fact_text)
+                fact_text = str(fact_item)
+
         if not fact_text or len(fact_text) < 5:
             continue
-        entity = _extract_entity_from_fact(fact_text, known_entities)
+        entity = explicit_subject or _extract_entity_from_fact(fact_text, known_entities)
+        per_fact_speakers = [attributed_to] if attributed_to else batch_speakers
         ops.append({
             "op": "assert",
             "entity": entity,
@@ -531,6 +591,7 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.9,
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": per_fact_speakers,
         })
 
     # Decisions (distilled, lower confidence — time-bound)
@@ -551,6 +612,7 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.7,
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": batch_speakers,
         })
 
     # Patterns + Preferences (distilled)
@@ -566,9 +628,12 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.7,
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": batch_speakers,
         })
 
-    # Verbatim audio quotes (top 20 by length, > 30 chars)
+    # Verbatim audio quotes (top 20 by length, > 30 chars). Per-item speaker
+    # when present; falls back to batch-level when the source raw item has no
+    # speaker field (e.g. live capture before sherpa-onnx is wired in).
     audio = [i for i in raw_items
              if i.get("source") == "audio" and len(i.get("text", "")) > 30]
     for item in sorted(audio, key=lambda x: -len(x.get("text", "")))[:20]:
@@ -576,6 +641,8 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
         if len(text) < 20:
             continue
         entity = _extract_entity_from_fact(text, known_entities)
+        item_speaker = item.get("speaker")
+        speakers_for_op = [item_speaker] if item_speaker else batch_speakers
         ops.append({
             "op": "assert",
             "entity": entity,
@@ -584,9 +651,12 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.95,
             "kind": "verbatim",
             "session_ref": session_eid,
+            "mentioned_by": speakers_for_op,
         })
 
-    # Agent analysis responses (last 10, > 50 chars — verbatim)
+    # Agent analysis responses (last 10, > 50 chars — verbatim).
+    # Agent/openclaw sources are NOT human-spoken, so mentioned_by stays
+    # batch-level (or empty) — agents are not speakers.
     agents = [i for i in raw_items
               if i.get("source") in ("agent", "openclaw")
               and len(i.get("text", "")) > 50]
@@ -603,6 +673,7 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.8,
             "kind": "verbatim",
             "session_ref": session_eid,
+            "mentioned_by": [],
         })
 
     return ops
@@ -662,6 +733,16 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 session_ref = op_data.get("session_ref")
                 if session_ref:
                     store.assert_triple(tx, entity_id, "session", session_ref, value_type="ref")
+                # Diarization Lever 4: mentioned_by triples — one per distinct
+                # speaker active in the batch that produced this fact. Pure
+                # graph metadata, never enters fact text. Queries opt in via
+                # query_facts_hybrid(..., mentioned_by_speaker=[...]). See
+                # .planning/phases/diarization-levers/00-PLAN.md
+                mentioned_by = op_data.get("mentioned_by") or []
+                if mentioned_by:
+                    for spk in mentioned_by:
+                        if spk:
+                            store.assert_triple(tx, entity_id, "mentioned_by", spk)
                 # Auto-tag for keyword-based discovery
                 for tag in _extract_tags(value):
                     store.assert_triple(tx, entity_id, "tag", tag)
@@ -1127,9 +1208,29 @@ def main() -> None:
             facts_lines.append(f"- [{eid}] ({domain}, confidence={conf}) {val}")
         facts_text = f"\n\n## Existing Graph Facts (for reference — reinforce or retract as needed)\n" + "\n".join(facts_lines)
 
+    # ── Step 0.5: Pre-parse transcript once for downstream speaker + zero-LLM use ──
+    # Lever 4 (mentioned_by speaker triples) needs the distinct speaker set
+    # for this batch before _facts_to_graph_ops runs. We also reuse the parsed
+    # items in Step 1.5 below (zero-LLM extractors). Failing the parse here is
+    # non-fatal — fall back to empty list, which preserves prior behaviour.
+    transcript_items: list[dict] = []
+    transcript_speakers: list[str] = []
+    if args.transcript:
+        try:
+            transcript_items = json.loads(args.transcript)
+            if not isinstance(transcript_items, list):
+                transcript_items = []
+            transcript_speakers = sorted({
+                i.get("speaker") for i in transcript_items
+                if isinstance(i, dict) and isinstance(i.get("speaker"), str) and i.get("speaker")
+            })
+        except (json.JSONDecodeError, TypeError):
+            transcript_items = []
+            transcript_speakers = []
+
     # ── Step 1: DETERMINISTIC graph ops from distiller output (no LLM needed) ──
     # The distiller already extracted structured facts — conversion is mechanical.
-    graph_ops = _facts_to_graph_ops(digest)
+    graph_ops = _facts_to_graph_ops(digest, transcript_speakers=transcript_speakers)
     digest_ts = digest.get("ts", datetime.now(timezone.utc).isoformat())
 
     # ── Step 1.5: Zero-LLM typed-link + user-attribute extractor ──
@@ -1140,10 +1241,9 @@ def main() -> None:
     # that match high-signal patterns. Facts merge into graph_ops as ASSERT
     # ops at confidence=0.85 (below LLM-distilled 0.9 — they don't
     # dominate when both are present, but they cover gaps when LLM missed).
-    if args.transcript:
+    if transcript_items:
         try:
             from link_extraction import extract_user_attributes, extract_auto_edges
-            transcript_items = json.loads(args.transcript)
             user_facts = extract_user_attributes(transcript_items)
             for f in user_facts:
                 graph_ops.append({
@@ -1154,6 +1254,10 @@ def main() -> None:
                     "confidence": f["confidence"],
                     "domain": "user",
                     "kind": f.get("kind", "auto-extracted"),
+                    # Auto-extracted user attributes inherit batch-level speakers
+                    # (the regex extractor doesn't know which speaker uttered
+                    # the matched phrase — coarse but consistent).
+                    "mentioned_by": transcript_speakers,
                 })
             if user_facts:
                 print(f"  [zero-llm] user-attribute extractor: +{len(user_facts)} fact(s)",
@@ -1177,6 +1281,7 @@ def main() -> None:
                         "confidence": edge["confidence"],
                         "domain": "entity-relationship",
                         "kind": "auto-extracted",
+                        "mentioned_by": transcript_speakers,
                     })
                 if edges:
                     print(f"  [zero-llm] entity-relationship extractor: +{len(edges)} edge(s)",
