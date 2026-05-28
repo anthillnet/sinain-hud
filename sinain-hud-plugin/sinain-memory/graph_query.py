@@ -34,41 +34,18 @@ def query_facts_by_entities(
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Normalize keywords for tag matching
         keywords = [e.lower().replace(" ", "-") for e in entities]
-        placeholders = ",".join(["?" for _ in keywords])
 
-        # Primary: tag-based ranked search (AVET index)
-        rows = store._conn.execute(
-            f"""SELECT entity_id, COUNT(*) as matches
-                FROM triples
-                WHERE attribute = 'tag' AND NOT retracted
-                AND value IN ({placeholders})
-                GROUP BY entity_id
-                ORDER BY matches DESC
-                LIMIT ?""",
-            (*keywords, max_facts * 3),
-        ).fetchall()
+        # Primary: tag-based ranked search.
+        ranked = store.tag_ranked_search(keywords, limit=max_facts * 3)
+        fact_ids = [eid for eid, _ in ranked]
 
-        fact_ids = [r["entity_id"] for r in rows]
-
-        # Fallback: if tags found < max_facts, also search domain/entity_id (for untagged facts)
+        # Fallback: if tag matches < max_facts, search by domain / entity_id slug.
         if len(fact_ids) < max_facts:
-            domain_placeholders = ",".join(["?" for _ in keywords])
-            like_clauses = " OR ".join([f"entity_id LIKE ?" for _ in keywords])
-            entity_likes = [f"fact:{kw}%" for kw in keywords]
-
-            fallback_rows = store._conn.execute(
-                f"""SELECT DISTINCT entity_id FROM triples
-                    WHERE NOT retracted AND entity_id NOT IN ({','.join(['?' for _ in fact_ids]) or "''"})
-                    AND (
-                        (attribute = 'domain' AND value IN ({domain_placeholders}))
-                        OR ({like_clauses})
-                    )
-                    LIMIT ?""",
-                (*fact_ids, *keywords, *entity_likes, max_facts - len(fact_ids)),
-            ).fetchall()
-            fact_ids.extend(r["entity_id"] for r in fallback_rows)
+            fallback = store.entity_id_or_domain_search(
+                keywords, exclude_ids=fact_ids, limit=max_facts - len(fact_ids),
+            )
+            fact_ids.extend(fallback)
 
         # Load full attributes for each fact
         facts = []
@@ -83,7 +60,7 @@ def query_facts_by_entities(
                 fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
 
-        # Sort by confidence descending (tag ranking already done in SQL)
+        # Sort by confidence descending (tag ranking already done above)
         facts.sort(key=lambda f: float(f.get("confidence", "0")), reverse=True)
         store.close()
         return facts[:max_facts]
@@ -101,19 +78,9 @@ def query_top_facts(db_path: str, limit: int = 30) -> list[dict]:
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        rows = store._conn.execute(
-            """SELECT entity_id, CAST(value AS REAL) as conf
-               FROM triples
-               WHERE attribute = 'confidence' AND NOT retracted
-               AND entity_id LIKE 'fact:%'
-               ORDER BY conf DESC
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
-
+        top = store.top_facts_by_confidence(limit=limit)
         facts = []
-        for row in rows:
-            fid = row["entity_id"]
+        for fid, _conf in top:
             attrs = store.entity(fid)
             if not attrs:
                 continue
@@ -130,10 +97,11 @@ def query_top_facts(db_path: str, limit: int = 30) -> list[dict]:
 
 
 def query_facts_fts(db_path: str, query: str, max_facts: int = 10) -> list[dict]:
-    """Full-text search on fact values via FTS5 index.
+    """Substring search across fact `value` triples (Oxigraph backend).
 
-    Returns facts whose value field matches the query keywords.
-    Falls back to LIKE search if FTS5 is not available.
+    Replaces the SQLite FTS5 path with a CONTAINS-style scan in the SPARQL/RDF
+    layer. Accepts the same "term1 AND term2" / "term1 OR term2" syntax the
+    callers used to feed FTS5; default is AND across whitespace-split tokens.
     """
     if not Path(db_path).exists():
         return []
@@ -142,38 +110,7 @@ def query_facts_fts(db_path: str, query: str, max_facts: int = 10) -> list[dict]
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Try FTS5 first
-        try:
-            rows = store._conn.execute(
-                """SELECT DISTINCT t.entity_id
-                   FROM triples_fts fts
-                   JOIN triples t ON fts.rowid = t.id
-                   WHERE triples_fts MATCH ?
-                     AND t.attribute = 'value'
-                     AND NOT t.retracted
-                   LIMIT ?""",
-                (query, max_facts),
-            ).fetchall()
-        except Exception:
-            # FTS5 not available — fall back to LIKE search
-            keywords = [w.lower() for w in query.split() if len(w) > 2]
-            if not keywords:
-                store.close()
-                return []
-            # Match any keyword in value
-            conditions = " OR ".join(["LOWER(value) LIKE ?"] * len(keywords))
-            params = [f"%{k}%" for k in keywords] + [max_facts]
-            rows = store._conn.execute(
-                f"""SELECT DISTINCT entity_id
-                    FROM triples
-                    WHERE attribute = 'value'
-                      AND NOT retracted
-                      AND ({conditions})
-                    LIMIT ?""",
-                params,
-            ).fetchall()
-
-        entity_ids = [r["entity_id"] for r in rows]
+        entity_ids = store.fts_search(query, limit=max_facts)
         if not entity_ids:
             store.close()
             return []
@@ -292,12 +229,16 @@ def _cooccurring_entities(
     fact_ids: set[str],
     max_entities: int = 3,
 ) -> list[str]:
-    """Find entities that co-occur in the same distillation pass (shared first_seen timestamp)."""
+    """Find entities that co-occur in the same distillation pass (shared first_seen timestamp).
+
+    Dead-code path retained for API parity; query_facts_hybrid uses
+    expand_entity_community / session_co_occurrence instead.
+    """
     if not fact_ids:
         return []
 
     # Get first_seen timestamps for the input facts
-    timestamps = set()
+    timestamps: set[str] = set()
     for fid in list(fact_ids)[:20]:  # cap to avoid huge queries
         attrs = store.entity(fid)
         fs = attrs.get("first_seen", [])
@@ -309,19 +250,21 @@ def _cooccurring_entities(
     if not timestamps:
         return []
 
-    # Find other facts with same timestamps and extract their entity names
-    placeholders = ",".join("?" for _ in timestamps)
-    rows = store._conn.execute(
-        f"SELECT DISTINCT t2.value FROM triples t1 "
-        f"JOIN triples t2 ON t2.entity_id = t1.entity_id AND t2.attribute = 'entity' AND t2.retracted = 0 "
-        f"WHERE t1.attribute = 'first_seen' AND t1.value IN ({placeholders}) "
-        f"AND t1.retracted = 0 AND t1.entity_id LIKE 'fact:%' "
-        f"AND t1.entity_id NOT IN ({','.join('?' for _ in fact_ids)})",
-        list(timestamps) + list(fact_ids),
-    ).fetchall()
-
-    # Count co-occurrence per entity name
+    # Walk facts that share these timestamps; collect their `entity` attribute values.
+    fact_ids_set = set(fact_ids)
     counts: dict[str, int] = {}
+    co_facts = store.facts_by_first_seen(list(timestamps), limit=200)
+    rows: list[tuple[str]] = []
+    for f_eid in co_facts:
+        if f_eid in fact_ids_set:
+            continue
+        attrs = store.entity(f_eid)
+        names = attrs.get("entity", [])
+        if isinstance(names, str):
+            names = [names]
+        for name in names:
+            rows.append((name,))
+
     for (name,) in rows:
         counts[name] = counts.get(name, 0) + 1
     ranked = sorted(counts, key=lambda x: -counts[x])
@@ -481,17 +424,10 @@ def query_facts_hybrid(
         try:
             from triplestore import TripleStore
             _istore = TripleStore(db_path)
-            placeholders = ",".join("?" for _ in keywords)
-            rows = _istore._conn.execute(
-                f"""SELECT entity_id, COUNT(DISTINCT value) as matches
-                    FROM triples WHERE attribute = 'tag' AND NOT retracted
-                    AND value IN ({placeholders})
-                    GROUP BY entity_id HAVING COUNT(DISTINCT value) >= ?
-                    ORDER BY matches DESC LIMIT ?""",
-                (*keywords, len(keywords), candidate_limit),
-            ).fetchall()
-            for r in rows:
-                fid = r["entity_id"]
+            inter = _istore.tag_intersection(
+                keywords, min_matches=len(keywords), limit=candidate_limit,
+            )
+            for fid, _matches in inter:
                 attrs = _istore.entity(fid)
                 if attrs and "value" in attrs:
                     fact = {"entity_id": fid}
@@ -534,26 +470,11 @@ def query_facts_hybrid(
         try:
             from triplestore import TripleStore
             _sstore = TripleStore(db_path)
-            # Find sessions where facts about BOTH keywords exist
             kw_a, kw_b = keywords[0], keywords[1]
-            sess_rows = _sstore._conn.execute(
-                """SELECT DISTINCT t1.value as ts FROM triples t1
-                   JOIN triples t2 ON t2.attribute='first_seen' AND t2.value=t1.value AND t2.retracted=0
-                   WHERE t1.attribute='first_seen' AND t1.retracted=0
-                   AND t1.entity_id IN (SELECT entity_id FROM triples WHERE attribute='tag' AND value=? AND NOT retracted)
-                   AND t2.entity_id IN (SELECT entity_id FROM triples WHERE attribute='tag' AND value=? AND NOT retracted)
-                   LIMIT 10""",
-                (kw_a, kw_b),
-            ).fetchall()
-            if sess_rows:
-                ts_values = [r[0] for r in sess_rows]
-                ph = ",".join("?" for _ in ts_values)
-                fact_rows = _sstore._conn.execute(
-                    f"SELECT DISTINCT entity_id FROM triples WHERE attribute='first_seen' AND value IN ({ph}) AND NOT retracted AND entity_id LIKE 'fact:%' LIMIT 30",
-                    ts_values,
-                ).fetchall()
-                for r in fact_rows:
-                    eid = r[0]
+            ts_values = _sstore.session_co_occurrence(kw_a, kw_b, limit=10)
+            if ts_values:
+                fact_ids = _sstore.facts_by_first_seen(ts_values, limit=30)
+                for eid in fact_ids:
                     if eid not in graph_fact_ids:
                         community_fact_ids.add(eid)
             _sstore.close()
@@ -733,17 +654,9 @@ def domain_fact_counts(db_path: str) -> dict[str, int]:
     try:
         from triplestore import TripleStore
         store = TripleStore(db_path)
-
-        rows = store._conn.execute(
-            """SELECT value, COUNT(DISTINCT entity_id) as cnt
-               FROM triples
-               WHERE attribute = 'domain' AND NOT retracted
-               GROUP BY value
-               ORDER BY cnt DESC""",
-        ).fetchall()
-
+        counts = store.domain_fact_counts()
         store.close()
-        return {r["value"]: r["cnt"] for r in rows}
+        return counts
     except Exception:
         return {}
 

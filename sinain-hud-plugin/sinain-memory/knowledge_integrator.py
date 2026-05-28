@@ -141,12 +141,24 @@ def _normalize_digest(digest: dict) -> dict:
     ents = out.get("entities", [])
     if isinstance(ents, dict):
         # Some local models emit a flat dict of name → metadata.
-        out["entities"] = [{"name": k, **(v if isinstance(v, dict) else {"type": _to_str(v)})}
-                           for k, v in ents.items()]
+        ents_list = [{"name": k, **(v if isinstance(v, dict) else {"type": _to_str(v)})}
+                     for k, v in ents.items()]
     elif isinstance(ents, list):
-        out["entities"] = [e for e in ents if isinstance(e, dict)]
+        ents_list = [e for e in ents if isinstance(e, dict)]
     else:
-        out["entities"] = []
+        ents_list = []
+    # Each entity's `name` and `type` MUST be strings — local distillers
+    # sometimes emit bool / None / nested dict here, and downstream callers
+    # (e.g., _extract_entity_from_fact) call .lower() on the name.
+    out["entities"] = []
+    for e in ents_list:
+        clean = dict(e)
+        for k in ("name", "type"):
+            if k in clean and not isinstance(clean[k], str):
+                clean[k] = _to_str(clean[k])
+        # Drop entities with non-string name after coercion fallback (rare).
+        if isinstance(clean.get("name"), str) and clean["name"]:
+            out["entities"].append(clean)
 
     # Scalar fields — keep type or coerce.
     if not isinstance(out.get("whatHappened", ""), str):
@@ -341,30 +353,12 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
                 else:
                     keywords.append(str(e).lower().replace(" ", "-"))
             keywords = [k for k in keywords if k]
-            placeholders = ",".join(["?" for _ in keywords])
-            rows = store._conn.execute(
-                f"""SELECT entity_id, COUNT(*) as matches
-                    FROM triples
-                    WHERE attribute = 'tag' AND NOT retracted
-                    AND value IN ({placeholders})
-                    GROUP BY entity_id
-                    ORDER BY matches DESC
-                    LIMIT ?""",
-                (*keywords, limit),
-            ).fetchall()
-            fact_ids = [r["entity_id"] for r in rows]
+            ranked = store.tag_ranked_search(keywords, limit=limit)
+            fact_ids = [eid for eid, _ in ranked]
         else:
             # Top-N by confidence
-            rows = store._conn.execute(
-                """SELECT entity_id, CAST(value AS REAL) as conf
-                   FROM triples
-                   WHERE attribute = 'confidence' AND NOT retracted
-                   AND entity_id LIKE 'fact:%'
-                   ORDER BY conf DESC
-                   LIMIT ?""",
-                (limit,),
-            ).fetchall()
-            fact_ids = [r["entity_id"] for r in rows]
+            top = store.top_facts_by_confidence(limit=limit)
+            fact_ids = [eid for eid, _ in top]
 
         facts = []
         for fid in fact_ids:
@@ -1066,12 +1060,10 @@ def main() -> None:
         from triplestore import TripleStore
         store = TripleStore(db_path)
         # Get all fact entities that have a 'value' attribute
-        rows = store._conn.execute(
-            "SELECT DISTINCT entity_id FROM triples WHERE attribute = 'value' AND NOT retracted AND entity_id LIKE 'fact:%'"
-        ).fetchall()
+        fact_ids = sorted({eid for eid, _ in store.entities_with_attr("value")
+                           if eid.startswith("fact:")})
         tagged = 0
-        for row in rows:
-            fid = row["entity_id"]
+        for fid in fact_ids:
             attrs = store.entity(fid)
             value_text = attrs.get("value", [""])[0] if attrs else ""
             existing_tags = set(attrs.get("tag", [])) if attrs else set()
@@ -1083,7 +1075,7 @@ def main() -> None:
                     store.assert_triple(tx, fid, "tag", tag)
                 tagged += 1
         store.close()
-        output_json({"retagged": tagged, "total_facts": len(rows)})
+        output_json({"retagged": tagged, "total_facts": len(fact_ids)})
         return
 
     # Normal mode: integrate session digest
