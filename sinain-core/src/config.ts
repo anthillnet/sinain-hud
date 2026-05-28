@@ -209,11 +209,11 @@ export function loadConfig(): CoreConfig {
     backend: env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"],
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
-    language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
+    language: env("TRANSCRIPTION_LANGUAGE", "auto"),
     local: {
       bin: env("LOCAL_WHISPER_BIN", "whisper-cli"),
       modelPath: resolvePath(env("LOCAL_WHISPER_MODEL", "~/models/ggml-large-v3-turbo.bin")),
-      language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
+      language: env("TRANSCRIPTION_LANGUAGE", "auto"),
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
     },
   };

@@ -206,7 +206,17 @@ export class TranscriptionService extends EventEmitter {
             role: "user",
             content: [
               { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
-              { type: "text", text: `Transcribe this audio in ${this.config.language}. Output ONLY the transcript text, nothing else. If the audio is not in ${this.config.language}, output an empty string.` },
+              // TRANSCRIPTION_LANGUAGE="auto" (or empty) transcribes whatever
+              // language is heard, preserving original. Any other value (e.g.
+              // "en-US") keeps the strict single-language gate — non-matching
+              // audio returns empty. Recording bench exposed that the strict
+              // gate discarded Russian audio, returning the gate-instruction
+              // text as the transcript and starving the distiller (live
+              // recording bench 2026-05-28: 1.33/5 sinain-memory, 8% recall —
+              // 92% of audio dropped). "auto" makes multilingual capture work.
+              { type: "text", text: this.config.language && this.config.language !== "auto"
+                ? `Transcribe this audio in ${this.config.language}. Output ONLY the transcript text, nothing else. If the audio is not in ${this.config.language}, output an empty string.`
+                : `Transcribe this audio. Output ONLY the transcript text in the language it was spoken, nothing else. If the audio is silent or unintelligible, output an empty string.` },
             ],
           }],
         }),
