@@ -47,7 +47,7 @@ DIGEST_SCHEMA = {
             "type": "array",
             "maxItems": 20,
             # Per-fact bound: 250 chars is enough for "X has a degree in Y" or
-            # "Citibank has 2400 IntelliJ subscriptions" but too short for a
+            # "the nightly job processes ~12k records" but too short for a
             # paragraph-style summary.
             # Lever 1: items are now `oneOf` either string OR fact-object.
             # Distillers that ignore the new shape continue to emit strings;
@@ -149,7 +149,7 @@ queue over three weeks", "attributedTo": "SPEAKER_02", "subject": "sam"}
 4. entities: named things discussed or interacted with — as objects with name \
 (lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
 service, framework, error, whatever fits the context).
-   Examples: {"name": "citibank", "type": "org"}, {"name": "auth-module", "type": "file"}, \
+   Examples: {"name": "postgres", "type": "service"}, {"name": "auth-module", "type": "file"}, \
 {"name": "react-native", "type": "framework"}
 5. patterns: up to 3 reusable techniques or workflows (if any — skip if none)
 6. preferences: up to 3 user preferences or habits observed
@@ -167,7 +167,7 @@ Respond with ONLY a JSON object:
     ...
   ],
   "decisions": ["decision sentence with who/what/when", ...],
-  "entities": [{"name": "citibank", "type": "org"}, {"name": "artom", "type": "person"}, ...],
+  "entities": [{"name": "postgres", "type": "service"}, {"name": "maria", "type": "person"}, ...],
   "patterns": ["reusable technique or workflow", ...],
   "preferences": ["user preference or habit", ...],
   "isEmpty": false
