@@ -82,6 +82,32 @@ Two pre-reqs (PR-1 + PR-2 from the SPEC) can be promoted to standalone `/gsd-qui
 - `tools/sck-capture/` — Swift ScreenCaptureKit binary, needs universal-binary build script for DMG
 - `overlay/macos/Runner/` — Flutter+Swift overlay; needs `Info.plist` bundle-ID + Sparkle wiring + entitlements update
 
+## Progress (2026-05-29)
+
+Surfaced and scaffolded on branch `feat/dmg-distribution-scaffold`. The full
+milestone remains **gated** (do not open until v2.0 closes — see Notes below);
+this branch only lands the unblocked pieces:
+
+- ✅ **PR-1 + PR-2 fully implemented** (commit `289229d`). Env vars consolidated
+  to `SINAIN_LOCAL_*`, `llava`→`qwen2.5vl:7b` defaults, whisper path moved to
+  `~/.sinain/models/whisper/`. Type-checks + `flutter analyze` clean.
+- ✅ **Missing SPEC reconstructed** at `docs/dmg-distribution-spec.md` (the seed's
+  authoritative reference did not exist in the repo — now it does, with the 3
+  tiers, bundle layout, sign/notarize pipeline, download manager, wizard,
+  Homebrew, **8 open questions**, and verification checklist).
+- 🟡 **Phases 2–6 scaffolded as honest stubs** (clearly marked, non-functional
+  until external creds / fresh-Mac verification):
+  - Phase 2: `tools/dmg/` (stage-bundle, build-sck-universal, prewarm-embedding, PyInstaller spec)
+  - Phase 3: `.github/workflows/release-app.yml` (secret-gated; no-ops without Apple/Sparkle secrets)
+  - Phase 4: `sinain-core/src/distribution/download-manager.ts` (working resumable/integrity/atomic core; manifest fetch + wiring TODO) + `docs/distribution/{models-manifest.example.json,appcast.xml}`
+  - Phase 5: `overlay/lib/ui/first_run/` (tier model + tier-picker visual stub + design README)
+  - Phase 6: `Casks/sinain.rb` + `docs/dmg-launch-plan.md`
+
+**Still blocked on (cannot be done autonomously):** Apple Developer cert +
+notarytool key + Sparkle EdDSA key in GH Secrets; GitHub Pages hosting for
+appcast/manifest; verification on a fresh/clean Mac. The 8 open questions in
+SPEC §9 must be resolved in the discuss/plan phase before executing 2–6.
+
 ## Notes
 
 - The current SPEC has **8 open questions** (Section 9) and **2 pre-requisites** (Section 2) that the discuss/plan phase should address before any implementation work.

@@ -1,0 +1,19 @@
+{
+  "_comment": "SEED-001 Phase 4 SCAFFOLD. Schema for the hosted models manifest consumed by sinain-core/src/distribution/download-manager.ts (ModelManifestEntry[]). Hosted on GitHub Pages; the first-run wizard downloads tier-appropriate weights from it. Real urls/sha256 are filled in by release-app.yml at publish time. See docs/dmg-distribution-spec.md §5a.",
+  "schemaVersion": 1,
+  "models": [
+    {
+      "id": "whisper-large-v3-turbo",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+      "sha256": "PLACEHOLDER_fill_at_publish_time",
+      "sizeBytes": 1624555275,
+      "tier": "T1",
+      "destPath": "~/.sinain/models/whisper/ggml-large-v3-turbo.bin"
+    }
+  ],
+  "_ollamaModels": {
+    "_comment": "T2 Ollama models are NOT downloaded by the download-manager — the wizard pulls them via Ollama /api/pull. Listed here for documentation only.",
+    "analyzer": "phi4-mini",
+    "vision": "qwen2.5vl:7b"
+  }
+}
