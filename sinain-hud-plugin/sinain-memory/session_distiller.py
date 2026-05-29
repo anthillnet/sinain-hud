@@ -132,17 +132,19 @@ you are missing something. Breadth over depth.
 {"text": "...", "attributedTo": "SPEAKER_NN", "subject": "entity-name"}. Use the \
 object form when the transcript contains SPEAKER_NN tags; populate attributedTo with \
 the speaker who uttered the claim. subject is the entity the fact is ABOUT (may differ \
-from speaker — e.g. SPEAKER_01 says something about Ibrahim → attributedTo=SPEAKER_01, \
-subject=ibrahim). Omit attributedTo if uncertain; omit subject if the fact is general. \
+from speaker — e.g. SPEAKER_01 says something about Maria → attributedTo=SPEAKER_01, \
+subject=maria). Omit attributedTo if uncertain; omit subject if the fact is general. \
 NEVER put SPEAKER_NN inside the text field — keep speaker info in the structured fields.
 
-   Good (object form): {"text": "Ibrahim worked at Citibank for 17 years as Director \
-of IT in Singapore", "attributedTo": "SPEAKER_01", "subject": "ibrahim"}
-   Good (object form): {"text": "The user has a degree in Business Administration", \
+   (Examples below are generic ONLY to show the shape — they are not about any \
+particular topic; extract facts from the actual transcript, whatever its domain.)
+   Good (object form): {"text": "Sam migrated the payment service to the new retry \
+queue over three weeks", "attributedTo": "SPEAKER_02", "subject": "sam"}
+   Good (object form): {"text": "The user is allergic to penicillin", \
 "attributedTo": "SPEAKER_USER", "subject": "user"}
-   Good (legacy string): "Citibank has 2400 IntelliJ subscriptions and heavy TeamCity usage"
-   Bad: "SPEAKER_01 said the CTO worked at Citibank" (don't bake the tag into text)
-   Bad: five variations of "Al-Futaim is moving to the cloud"
+   Good (legacy string): "The build pipeline runs on GitHub Actions, ~12 min average"
+   Bad: "SPEAKER_02 said the service was migrated" (don't bake the tag into text)
+   Bad: five near-duplicate variations of the same claim
 3. decisions: up to 5 decisions or agreements made (who decided what, with any deadline)
 4. entities: named things discussed or interacted with — as objects with name \
 (lowercase-hyphenated slug) and type (freeform — person, org, tool, file, concept, \
