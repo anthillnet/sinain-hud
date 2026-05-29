@@ -90,28 +90,33 @@ The `setup-local.sh` wizard detects Ollama and offers to enable local vision aut
 brew install ollama
 
 # 2. Pull a vision model
-ollama pull llava
+ollama pull qwen2.5vl:7b
 
-# 3. Add to your .env
-echo "LOCAL_VISION_ENABLED=true" >> .env
-echo "LOCAL_VISION_MODEL=llava" >> .env
+# 3. Add to your .env (SINAIN_LOCAL_* is the primary namespace)
+echo "SINAIN_LOCAL_VISION=qwen2.5vl:7b" >> .env
 
 # 4. Start with local transcription + local vision
 ./start-local.sh
 ```
 
+> **Note:** `SINAIN_LOCAL_VISION` replaces the deprecated `LOCAL_VISION_ENABLED` /
+> `LOCAL_VISION_MODEL` pair. The legacy vars still work as a fallback, but new
+> setups should use `SINAIN_LOCAL_*`. Setting `SINAIN_LOCAL_MODE=true` derives
+> vision, analyzer, and transcription config in one shot.
+
 Startup confirms local vision:
 ```
-[local]   vision:   Ollama (llava) — local
+[local]   vision:   Ollama (qwen2.5vl:7b) — local
 ```
 
 ### Available models
 
 | Model | Size | Speed (warm) | Quality | Best for |
 |-------|------|-------------|---------|----------|
-| `llava` | 4.7 GB | ~2s/frame | Good | General use (recommended) |
+| `qwen2.5vl:7b` | 6.0 GB | ~3s/frame | Best | General use (recommended) |
 | `llama3.2-vision` | 7.9 GB | ~4s/frame | Best | Maximum accuracy |
 | `moondream` | 1.7 GB | ~1s/frame | Fair | Low-memory machines |
+| `llava` | 4.7 GB | ~2s/frame | Good | Legacy / fast fallback |
 
 ### Privacy mode compatibility
 
@@ -124,7 +129,7 @@ When local vision is enabled, sinain routes **all** agent analysis through Ollam
 | `strict` | Ollama if enabled, else OpenRouter | OpenRouter |
 | `paranoid` | **Ollama only** (cloud blocked) | None — fully local |
 
-With `PRIVACY_MODE=paranoid` and `LOCAL_VISION_ENABLED=true`, zero data leaves your machine.
+With `PRIVACY_MODE=paranoid` and `SINAIN_LOCAL_MODE=true`, zero data leaves your machine.
 
 ---
 
@@ -309,9 +314,9 @@ openclaw gateway --bind loopback --port 18789 --force &
 | Camera blocked in Google Meet | Ensure you're using the `ffmpeg`-based audio path (not `sox rec`) — see `start.sh` |
 | sinain-core not picking up `.env` changes | Touch any source file (`touch sinain-core/src/index.ts`) or restart the process |
 | `Ollama 500: no slots available` | Ollama is busy processing a previous frame. sinain auto-skips and retries next tick. Normal at high FPS. |
-| Vision shows "cloud (OpenRouter)" at startup | Set `LOCAL_VISION_ENABLED=true` in `.env` and restart |
+| Vision shows "cloud (OpenRouter)" at startup | Set `SINAIN_LOCAL_VISION=qwen2.5vl:7b` (or `SINAIN_LOCAL_MODE=true`) in `.env` and restart |
 | `local ollama failed` then falls back to OpenRouter | Ollama server may not be running. Start it: `ollama serve` |
-| 401 "User not found" in paranoid mode | OpenRouter API key is invalid or revoked. With `LOCAL_VISION_ENABLED=true`, this is expected — Ollama handles everything. |
+| 401 "User not found" in paranoid mode | OpenRouter API key is invalid or revoked. With `SINAIN_LOCAL_MODE=true`, this is expected — Ollama handles everything. |
 
 ---
 

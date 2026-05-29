@@ -71,7 +71,7 @@ For a fully offline setup, also set:
 ```env
 TRANSCRIPTION_BACKEND=local
 LOCAL_WHISPER_BIN=whisper-cli
-LOCAL_WHISPER_MODEL=~/models/ggml-large-v3-turbo.bin
+LOCAL_WHISPER_MODEL=~/.sinain/models/whisper/ggml-large-v3-turbo.bin
 ```
 
 ---
@@ -182,7 +182,7 @@ The bare agent (`sinain-agent/run.sh`) polls sinain-core for escalations and res
 ```env
 TRANSCRIPTION_BACKEND=local
 LOCAL_WHISPER_BIN=whisper-cli
-LOCAL_WHISPER_MODEL=~/models/ggml-large-v3-turbo.bin
+LOCAL_WHISPER_MODEL=~/.sinain/models/whisper/ggml-large-v3-turbo.bin
 ```
 
 Install: `brew install whisper-cpp`. Models: [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main).
