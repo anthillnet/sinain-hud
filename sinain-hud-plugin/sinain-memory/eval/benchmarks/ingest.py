@@ -26,6 +26,7 @@ def _scripts_dir() -> Path:
 _PIPELINE_VERSION_FILES: tuple[str, ...] = (
     "session_distiller.py",
     "knowledge_integrator.py",
+    "coreference.py",  # Stage A — changes to coref logic must invalidate the store cache
 )
 
 
@@ -85,8 +86,12 @@ def _content_hash(sessions: list[list[dict]]) -> str:
         + ":"
         + os.environ.get("SINAIN_ABLATE_MODE", "passthrough")
     )
+    # Stage A coref toggle — coref-on vs coref-off must land in different cache
+    # slots, else an A/B run would cache-hit the wrong store.
+    coref_salt = os.environ.get("SINAIN_COREF", "")
     return hashlib.sha256(
-        (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt).encode()
+        (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
+         + "|coref:" + coref_salt).encode()
     ).hexdigest()[:16]
 
 

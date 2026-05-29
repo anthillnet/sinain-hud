@@ -236,6 +236,16 @@ def main() -> None:
         })
         return
 
+    # Stage A (discourse reconstruction): resolve coreference across turns
+    # BEFORE the LLM sees the transcript, so pronouns become named entities
+    # regardless of distiller-model strength. No-op unless SINAIN_COREF=1; safe
+    # fallback to original items on any failure. See coreference.py.
+    try:
+        from coreference import resolve_items
+        items = resolve_items(items)
+    except Exception as e:
+        print(f"[coref] import failed (non-fatal): {e}", file=sys.stderr)
+
     # Format transcript
     transcript_text = _truncate_transcript(items)
 
