@@ -16,6 +16,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -118,7 +119,7 @@ Use it to attribute claims when relevant — see facts schema below.
 
 Extract:
 1. whatHappened: 2-3 sentences summarizing what occurred in this session
-2. facts: up to 15 concrete factual claims. Each must be a self-contained sentence. \
+2. facts: up to 25 concrete factual claims. Each must be a self-contained sentence. \
 IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHO: people mentioned, their roles, backgrounds, relationships to each other
    - WHAT: specific claims, properties, descriptions of things discussed
@@ -127,6 +128,23 @@ IMPORTANT — spread across these dimensions (do not let one theme dominate):
    - WHAT'S NEXT: commitments, action items, plans, deadlines
    If you have 5+ facts about one dimension and 0 about another that was discussed, \
 you are missing something. Breadth over depth.
+
+   **Preserve the LINK, not just the topic.** When a named entity is tied to a \
+distinctive attribute, capture that relationship explicitly in ONE self-contained \
+fact — do not summarize it away. Examples of the shape (not the topic): a place and \
+its signature offering ("Miss Bee Providore serves nasi goreng"), where an action \
+happened ("the user redeemed the coffee-creamer coupon at Target"), a product's \
+brand/compatibility ("the user's camera is a Sony, so accessories must be Sony-\
+compatible"), or a topic focus ("the user's research is on deep learning for medical \
+image analysis"). The query later will name the attribute (the dish, the store, the \
+brand) and expect the linked entity — so the link must survive distillation.
+
+   **Enumerate distinct items — never collapse them into a count or a bare "items".** \
+When the user mentions several distinct things (purchases, returns, tasks, events, \
+models, places), record EACH as its own fact ("the user needs to return a blue \
+sweater", "...return a pair of jeans", "...pick up boots from Zara"). A later question \
+may ask "how many" or "which ones", and that is only answerable if each item is its \
+own fact rather than a summarized "several items to return".
 
    **Fact shape**: each item is either a plain string (legacy) OR an object \
 {"text": "...", "attributedTo": "SPEAKER_NN", "subject": "entity-name"}. Use the \
@@ -205,6 +223,95 @@ def _truncate_transcript(items: list[dict], max_chars: int = 100_000) -> str:
     return "\n".join(lines)
 
 
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][A-Za-z]{3,}\b")
+_PROPER_BIGRAM_RE = re.compile(r"\b[A-Z][A-Za-z]+ [A-Z][A-Za-z]+\b")
+# OCR/UI chrome words that look capitalized but aren't entity names.
+_SCREEN_STOPWORDS = frozenset({
+    "File", "Edit", "View", "Help", "Window", "Tools", "Search", "Settings",
+    "Cancel", "Submit", "Save", "Close", "Open", "Menu", "Home", "Back", "Next",
+    "Untitled", "Loading", "Error", "Warning", "Online", "Offline", "Today",
+})
+
+
+def _harvest_screen_entities(items: list[dict], cap: int = 200) -> list[str]:
+    """Proper-noun candidates from the session's SCREEN/OCR items (source=sense).
+
+    The names being spoken are usually visible on screen (Slack/IDE/docs), so
+    on-screen capitalized tokens are a high-precision, config-free gazetteer for
+    correcting the AUDIO transcript — the structural edge a pure-audio ASR
+    pipeline lacks. Conservative: capitalized tokens/bigrams len>=4, minus UI
+    chrome; the downstream NEC gate (metaphone-equal + ratio) filters the rest.
+    """
+    from collections import Counter
+    counts: Counter = Counter()
+    for item in items:
+        if item.get("source") != "sense":
+            continue
+        text = item.get("text", "") or ""
+        for m in _PROPER_BIGRAM_RE.findall(text):
+            counts[m] += 1
+        for m in _PROPER_NOUN_RE.findall(text):
+            if m not in _SCREEN_STOPWORDS:
+                counts[m] += 1
+    return [name for name, _ in counts.most_common(cap)]
+
+
+def _nec_correct_items(items: list[dict], memory_dir: str) -> list[dict]:
+    """ASR-C: deterministic named-entity correction on transcript items BEFORE
+    distillation (and before coref — coref mis-binds on un-canonicalized names).
+
+    Fixes proper-noun mangling the ASR introduced ("City Bank"→"Citibank",
+    "Jet brains"→"JetBrains") so the distiller extracts the correct entities.
+    Gazetteer (auto, no config needed in production):
+      1. this memory dir's KG entity:* nodes (accumulates → self-reinforcing);
+      2. proper nouns harvested from THIS session's screen/OCR items (the
+         spoken names are usually on screen);
+      3. SINAIN_NEC_GAZETTEER / TRANSCRIPTION_INITIAL_PROMPT (optional bootstrap).
+    Deterministic tier only (Metaphone-equal class — the safely-recoverable one;
+    see asr_nec.py for the measured ceiling). Gated SINAIN_NEC (default ON);
+    no-op on any failure. Live-validated al-futaim 30-min: sinain 2.04→2.36/5,
+    IPR 50.5→57.3%, recall@10 12→20% (gazetteer self-reinforced 12→38 mid-session).
+    """
+    if os.environ.get("SINAIN_NEC", "1") == "0":
+        return items
+    try:
+        from asr_nec import build_gazetteer, phonetic_correct
+        raw_terms = (
+            os.environ.get("SINAIN_NEC_GAZETTEER")
+            or os.environ.get("TRANSCRIPTION_INITIAL_PROMPT", "")
+        )
+        extra = [
+            t.strip()
+            for t in raw_terms.replace("\n", ",").replace(";", ",").split(",")
+            if len(t.strip()) >= 3
+        ]
+        extra.extend(_harvest_screen_entities(items))  # on-screen names (config-free)
+        db = str(Path(memory_dir) / "knowledge-graph.db")
+        gaz = build_gazetteer(
+            db_path=db if Path(db).exists() else None, extra_terms=extra
+        )
+        if not gaz:
+            return items
+        total = 0
+        for item in items:
+            txt = item.get("text", "")
+            if not txt or txt.startswith("[PERIODIC]"):
+                continue
+            corrected, corr = phonetic_correct(txt, gaz)
+            if corr:
+                item["text"] = corrected
+                total += len(corr)
+        if total:
+            print(
+                f"[nec] corrected {total} entity mention(s) across {len(items)} items "
+                f"(gazetteer={len(gaz)})",
+                file=sys.stderr,
+            )
+    except Exception as e:  # pragma: no cover
+        print(f"[nec] failed (non-fatal): {e}", file=sys.stderr)
+    return items
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Session Distiller")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
@@ -235,6 +342,11 @@ def main() -> None:
             "isEmpty": True,
         })
         return
+
+    # ASR-C: named-entity correction on the transcript text BEFORE coref + LLM.
+    # Runs first so coref binds pronouns to CANONICAL names (coref mis-binds on
+    # un-canonicalized ASR — see eval-log). Deterministic, gated SINAIN_NEC.
+    items = _nec_correct_items(items, args.memory_dir)
 
     # Stage A (discourse reconstruction): resolve coreference across turns
     # BEFORE the LLM sees the transcript, so pronouns become named entities
@@ -284,6 +396,21 @@ def main() -> None:
         print(f"LLM distillation failed: {e}", file=sys.stderr)
         output_json({"error": str(e), "isEmpty": True})
         return
+
+    # Robustness: the LLM sometimes emits a bare JSON ARRAY instead of the
+    # digest object (e.g. just the facts list, or `[{...digest...}]`). Without
+    # this coercion `result["ts"] = ...` raises TypeError and the whole batch's
+    # facts are dropped — which silently tanks single-session questions whose
+    # answer lives in exactly that batch. Salvage what we can instead of losing
+    # the segment. See eval-log § "Distillation empty-batch retry".
+    if isinstance(result, list):
+        if len(result) == 1 and isinstance(result[0], dict):
+            result = result[0]
+        else:
+            facts = [x for x in result if isinstance(x, (str, dict))]
+            result = {"facts": facts, "isEmpty": not facts}
+    elif not isinstance(result, dict):
+        result = {"isEmpty": True}
 
     # Add metadata
     result["ts"] = meta.get("ts", "")

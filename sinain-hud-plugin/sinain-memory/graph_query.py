@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -405,6 +406,181 @@ def _format_results(facts: list[dict], format: str) -> list[dict]:
     return facts  # facts (default), structured/narrative fall through
 
 
+# Option D — state supersession (latest-value select). When a fact about the
+# same subject/property is revised across sessions (e.g. a 5K personal best
+# 27:00 → 25:50), `_fact_id` hashes entity:attribute:value so each value is a
+# DISTINCT fact. Both are stored and both reach the top-k (recall@10=1.0), and
+# the position-sensitive QA model then picks the STALE value. This is a
+# presentation problem, not a retrieval-recall one: collapse the evolving-state
+# cluster to its LATEST member at read time. Conservative AND-gate guards
+# against collapsing genuinely-distinct facts (catastrophic on the n=6 bench).
+# Read-time only, non-destructive to the store. See
+# .planning/phases/discourse-reconstruction/00-PLAN.md § Option D.
+# "Strong" value tokens — a measured/quantitative value that can EVOLVE (a 5K
+# time, a price, a count, a date). Deliberately EXCLUDES bare single digits so a
+# category marker like the "5" in "5K" — or an age like "son is 5" — never
+# counts as an evolving value (those would cause false collapses).
+_STRONG_VALUE_PATTERNS = [
+    re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),  # clock times / durations (25:50)
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),          # ISO dates
+    re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?"),        # currency ($1,200.00)
+    re.compile(r"\b\d+\.\d+\b"),                    # decimals (3.14)
+    re.compile(r"\b\d{2,}\b"),                      # multi-digit integers (27, 1200)
+]
+# Category markers — alphanumeric tokens that IDENTIFY which quantity is meant
+# (5k vs 10k, q3 vs q4, v2 vs v3, gpt4). If two facts carry DIFFERENT category
+# markers they describe DIFFERENT quantities → never collapse. This is what
+# separates "5K PB 27:12 → 25:50" (same 5k, evolves) from "5K 25:50 vs 10K
+# 52:00" (different races) — the case embedding similarity gets WRONG (0.80 >
+# the true pair's 0.76).
+_CATEGORY_TOKEN_RE = re.compile(r"\b(?:\d+[a-z]+|[a-z]+\d+)\b")
+
+
+def _strong_value_tokens(text: str) -> frozenset:
+    """Evolving-value tokens (times, dates, currency, multi-digit numbers)."""
+    toks: set = set()
+    low = (text or "").lower()
+    for pat in _STRONG_VALUE_PATTERNS:
+        toks.update(m.strip() for m in pat.findall(low))
+    return frozenset(toks)
+
+
+def _category_tokens(text: str) -> frozenset:
+    """Alphanumeric category markers (5k, q3, v2, gpt4) that name the quantity."""
+    return frozenset(_CATEGORY_TOKEN_RE.findall((text or "").lower()))
+
+
+def _parse_iso_ts(ts) -> "object | None":
+    """Parse first_seen / last_reinforced (ISO, possibly a 1-elem list) → datetime."""
+    if isinstance(ts, list):
+        ts = ts[0] if ts else ""
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def _supersede_evolving_facts(
+    results: list[dict],
+    embs_by_eid: dict | None = None,
+    sim_threshold: float = 0.75,
+) -> list[dict]:
+    """Collapse evolving-state fact clusters to their latest member (Option D).
+
+    Drops the OLDER fact of a pair only when ALL hold:
+      (a) evolving value — BOTH ``value``s carry a "strong" value token (clock
+          time / date / currency / multi-digit number) and those token sets
+          DIFFER. Single digits (the "5" in "5K", "son is 5") are excluded, so
+          category markers and small ages never look like evolving values.
+      (b) same quantity — the alphanumeric CATEGORY markers (5k, q3, v2…) match
+          between the two facts. ``5k``≠``10k`` ⇒ different quantities ⇒ keep
+          both. (Embedding similarity gets this WRONG: 5K-vs-10K sims 0.80 >
+          the true 5K-evolution pair's 0.76 — only the category guard separates
+          them.)
+      (c) topical match — value-embedding cosine sim >= sim_threshold. Floors
+          out structural twins of DIFFERENT subjects (Alice-30/Bob-45 ≈ 0.48,
+          rent/mortgage ≈ 0.68) while admitting the true pair (≈ 0.76).
+      (d) clear temporal order — both timestamps parse and differ; the LATER one
+          survives. Ties / unparseable → keep both (fail-safe).
+
+    No entity-string gate: the distiller files related facts under different
+    ``entity`` values ("5k run" vs "personal best time"), so an exact-match gate
+    would miss every real case. Subject discrimination comes from (a)+(b)+(c).
+
+    Raw excerpts (Option A) are never clustered. Reuses the bi-encoder vectors
+    in ``embs_by_eid`` when present; otherwise encodes the surviving values once
+    via the cached model, or no-ops if no embedding model is available.
+    """
+    if len(results) < 2:
+        return results
+
+    idxs = [
+        i for i, f in enumerate(results)
+        if f.get("source") != "raw-excerpt" and f.get("entity") != "excerpt"
+    ]
+    if len(idxs) < 2:
+        return results
+
+    try:
+        import numpy as np
+    except ImportError:
+        return results
+
+    embs_by_eid = embs_by_eid or {}
+    vecs: dict[int, object] = {}
+    need: list[int] = []
+    for i in idxs:
+        v = embs_by_eid.get(results[i].get("entity_id", ""))
+        if v is None:
+            need.append(i)
+        else:
+            vecs[i] = v
+    if need:
+        model = getattr(query_facts_hybrid, "_embed_model", None)
+        if model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                model = SentenceTransformer("all-MiniLM-L6-v2")
+                query_facts_hybrid._embed_model = model
+            except Exception:
+                return results  # no embeddings → can't safely cluster → no-op
+        enc = model.encode(
+            [results[i].get("value", "") for i in need], show_progress_bar=False
+        )
+        for k, i in enumerate(need):
+            vecs[i] = enc[k]
+
+    def _cos(a, b) -> float:
+        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+    dropped: set[int] = set()
+    for a in range(len(idxs)):
+        i = idxs[a]
+        if i in dropped:
+            continue
+        for b in range(a + 1, len(idxs)):
+            j = idxs[b]
+            if j in dropped:
+                continue
+            fi, fj = results[i], results[j]
+            vi, vj = fi.get("value", ""), fj.get("value", "")
+            # (a) both carry a strong value, and the values differ
+            si = _strong_value_tokens(vi)
+            sj = _strong_value_tokens(vj)
+            if not si or not sj or si == sj:
+                continue
+            # (b) same quantity — block ONLY when BOTH facts carry category
+            # markers that differ (5k vs 10k ⇒ different distances ⇒ keep both).
+            # An ASYMMETRIC pair — one fact has a marker, the other omits it
+            # ("27:12 in a charity 5K run" {5k} vs "personal best is 25:50" {}) —
+            # is NOT evidence of different quantities: absence of a marker can't
+            # disprove same-subject evolution, so defer to the topical-sim guard
+            # (c). Verified 2026-05-30 on q1 6a1eabeb: the stale 27:12 (2023-05-23,
+            # {5k}) vs gold 25:50 (2023-05-30, {}) pair was wrongly kept apart.
+            ci, cj = _category_tokens(vi), _category_tokens(vj)
+            if ci and cj and ci != cj:
+                continue
+            # (c) topical match
+            if _cos(vecs[i], vecs[j]) < sim_threshold:
+                continue
+            # (d) clear temporal order — later survives
+            pi = _parse_iso_ts(fi.get("last_reinforced") or fi.get("first_seen"))
+            pj = _parse_iso_ts(fj.get("last_reinforced") or fj.get("first_seen"))
+            if pi is None or pj is None or pi == pj:
+                continue
+            older = i if pi < pj else j
+            dropped.add(older)
+            if older == i:
+                break  # i is gone — advance the outer cursor
+
+    if not dropped:
+        return results
+    return [f for k, f in enumerate(results) if k not in dropped]
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -483,6 +659,20 @@ def query_facts_hybrid(
     if precision_mode not in ("fast", "balanced", "precise"):
         precision_mode = "balanced"
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
+
+    # Option D — state supersession (latest-value select). Default ON; the env
+    # flag is an ablation kill-switch only (best-retrieval-is-the-goal). It is
+    # query-side and must NOT become a `_content_hash` salt — that keeps A/B on
+    # identical cached graphs (graph_query.py is outside the pipeline hash).
+    import os as _os_d
+    supersede_enabled = _os_d.environ.get("SINAIN_SUPERSEDE", "1") != "0"
+    try:
+        supersede_floor = float(_os_d.environ.get("SINAIN_SUPERSEDE_FLOOR", "0.75"))
+    except ValueError:
+        supersede_floor = 0.75
+    # bi-encoder value vectors, keyed by entity_id — reused by supersession so
+    # it adds zero encode cost in the common (balanced) path.
+    _embs_by_eid: dict = {}
 
     # Layer 2 tiny-LLM query rewriter (opt-in via SINAIN_QUERY_REWRITER=1).
     # Augments the keyword list with model-derived key terms + synonyms BEFORE
@@ -884,6 +1074,10 @@ def query_facts_hybrid(
             for i, f in enumerate(rrf_candidates):
                 sim = float(np.dot(q_emb, embs[i + 1]) / (np.linalg.norm(q_emb) * np.linalg.norm(embs[i + 1]) + 1e-9))
                 scored.append((sim, f))
+                # Stash value vectors for Option D supersession (no re-encode).
+                eid = f.get("entity_id", "")
+                if eid:
+                    _embs_by_eid[eid] = embs[i + 1]
             scored.sort(key=lambda x: -x[0])
             # A1.6: when the cross-encoder runs next (precise mode), keep a
             # wider top-30 window so it re-ranks a real candidate set instead
@@ -906,7 +1100,83 @@ def query_facts_hybrid(
     # NOTE: graph expansion now happens BEFORE rerank (above) so neighbors
     # compete for rank instead of being raw-appended here. See the expansion
     # block after the speaker filter.
-    return _format_results(results[:max_facts], format)
+    final = results[:max_facts]
+
+    # Option D — collapse evolving-state clusters to their latest member so the
+    # position-sensitive QA model isn't handed a stale + current value of the
+    # same property side by side. Runs on the reranked top-k (so the survivor
+    # keeps its earned rank) and BEFORE the raw-excerpt append below (excerpts
+    # are excluded from clustering anyway).
+    if supersede_enabled:
+        final = _supersede_evolving_facts(final, _embs_by_eid, supersede_floor)
+
+    # Option A — raw episodic hybrid: the retrieval API also surfaces the most
+    # relevant RAW source excerpts (from the sidecar next to db_path) so QA can
+    # recover detail the distiller dropped (tables, dense lists, scatter). They
+    # ride the same return contract as facts, so EVERY consumer (QA, MCP tool,
+    # agent) gets them — not a bench-only QA hack. Gated by SINAIN_RAW_CHUNKS.
+    # See .planning/phases/discourse-reconstruction/00-PLAN.md § Memory architecture.
+    try:
+        from raw_store import retrieve_chunks
+        # Always-on: returns [] when no sidecar exists, so legacy stores are
+        # unaffected. Whether raw chunks are STORED at all is the privacy
+        # layer's call (separate concern) — not a retrieval-quality toggle.
+        import os as _os_rk
+        # k=8: chunks are now ~700-char windows (raw_store._window_split), not whole
+        # sessions, so the gold span sits among more, smaller candidates — retrieve
+        # more of them. The excerpt budget below still caps how many reach the prompt.
+        try:
+            _rk = int(_os_rk.environ.get("SINAIN_RAW_CHUNK_K", "8"))
+        except ValueError:
+            _rk = 8
+        for i, ch in enumerate(retrieve_chunks(db_path, query, k=_rk)):
+            final.append({
+                "entity_id": f"excerpt-{i}", "entity": "excerpt",
+                "value": ch, "source": "raw-excerpt",
+            })
+    except Exception:
+        pass
+
+    # Temporal binding (PRODUCTION path — runs for every caller, not bench-only):
+    # for date-math queries, embed each fact's session date into its value so the
+    # LLM can compute differences ("days between A and B"). The date is real
+    # metadata (first_seen = session date), the trigger is generic date-intent on
+    # the query (not question-specific), and it only fires on temporal phrasing →
+    # no noise for normal retrieval. Gated SINAIN_TEMPORAL_DATES (default on).
+    import os as _os_t
+    if _os_t.environ.get("SINAIN_TEMPORAL_DATES", "1") != "0":
+        ql = query.lower()
+        is_temporal = bool(re.search(
+            # duration / elapsed-time intent — any unit, not just days
+            r"how many (days|weeks|months|years)|how long"
+            r"|(days?|weeks?|months?|years?) (between|since|until|ago|passed|apart|later|earlier)"
+            r"|between .+ and |when did|what date|how much time"
+            # ordering / sequence intent — needs dates to sort events even though
+            # there's no "how many" phrasing (e.g. "which happened first?").
+            r"|order (from|of)|first to last|in (chronological|what) order"
+            r"|which .*(first|last|before|after|earliest|latest)"
+            r"|happened first|sequence of events"
+            # current-state / relocation intent — a knowledge-UPDATE where an older
+            # value (e.g. "moved to Chicago") is mentioned more often than the newer
+            # one ("moved back to the suburbs"). Dates let the QA prompt's
+            # "trust the most recent update" rule pick the latest over the frequent
+            # stale state. Supersession can't help — it's numeric-only, not
+            # categorical. Verified 2026-05-30 to fire ONLY on 830ce83f in the 18-q
+            # set (not on 51a45a95 "where did I redeem" or e47becba "what degree").
+            r"|where (do|does|did|is|are|has|have)\b.*(live|living|relocat|move|moved|moving)"
+            r"|relocat|moved? (to|back|away)|currently (live|living|located)"
+            r"|what.*(current|now|latest|these days)", ql,
+        ))
+        if is_temporal:
+            for f in final:
+                if f.get("source") == "raw-excerpt" or f.get("entity") == "excerpt":
+                    continue
+                d = _fact_date(f)
+                val = f.get("value", "")
+                if d and isinstance(val, str) and not val.startswith("["):
+                    f["value"] = f"[{d}] {val}"
+
+    return _format_results(final, format)
 
 
 def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
@@ -947,11 +1217,27 @@ def format_facts_text(facts: list[dict], max_chars: int = 500) -> str:
     return "\n".join(lines)
 
 
-def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
+def _fact_date(f: dict) -> str:
+    """YYYY-MM-DD from a fact's first_seen/last_reinforced (session date), or ''."""
+    ts = f.get("first_seen") or f.get("last_reinforced") or ""
+    if isinstance(ts, list):
+        ts = ts[0] if ts else ""
+    if isinstance(ts, str) and len(ts) >= 10:
+        return ts[:10]
+    return ""
+
+
+def format_facts_compact(facts: list[dict], max_chars: int = 1200, with_dates: bool = False) -> str:
     """Encode facts for efficient escalation context injection.
 
     Compact format: domain/entity: value (conf, Nx)
     Inspired by mempalace AAAK compression — fits 3-5x more facts per token budget.
+
+    with_dates: prepend each fact's session date "- [YYYY-MM-DD] entity: value"
+    so the QA model can do date math (temporal-reasoning questions). OFF by
+    default — dates are noise for non-temporal QA (the same reason conf/Nx were
+    removed), so only the temporal path turns this on. first_seen carries the
+    real session date in our ingestion (digest_ts = session ts).
 
     2026-05-28: Switched from "; "-separated single-line to newline-per-fact
     output. The single-line form caused gemini-2.5-flash to lose the first
@@ -973,9 +1259,18 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
     # sabotaging QA for every bench: noise tokens (conf, count, doubled
     # entity prefix) made gemini parse the line as opaque structured data
     # rather than as a fact statement.
+    # Partition: distilled facts vs Option A raw transcript excerpts. Excerpts
+    # were being silently truncated out — facts consumed the whole max_chars
+    # budget and excerpts (appended last, ~1200 chars each) never fit. They get
+    # a SEPARATE budget so the raw transcript (which often holds the gold the
+    # lossy distiller dropped) actually reaches the QA model. Diagnosed
+    # 2026-05-30: gold present in a retrieved excerpt but absent from the prompt.
+    fact_items = [f for f in facts if f.get("source") != "raw-excerpt" and f.get("entity") != "excerpt"]
+    excerpts = [f for f in facts if f.get("source") == "raw-excerpt" or f.get("entity") == "excerpt"]
+
     lines = []
     total = 0
-    for f in facts:
+    for f in fact_items:
         entity = (
             f.get("entity")
             or f.get("entity_id", "").split(":")[-1].rsplit("-", 1)[0]
@@ -988,11 +1283,37 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200) -> str:
         if not value:
             continue
 
-        line = f"- {entity}: {value}"
+        if with_dates:
+            d = _fact_date(f)
+            line = f"- [{d}] {entity}: {value}" if d else f"- {entity}: {value}"
+        else:
+            line = f"- {entity}: {value}"
         if total + len(line) + 1 > max_chars:
             break
         lines.append(line)
         total += len(line) + 1
+
+    # Raw transcript excerpts — dedicated budget (default 1800 chars,
+    # SINAIN_RAW_CHUNK_CHARS) so they're never crowded out by distilled facts.
+    if excerpts:
+        import os as _os_e
+        try:
+            exc_budget = int(_os_e.environ.get("SINAIN_RAW_CHUNK_CHARS", "3000"))
+        except ValueError:
+            exc_budget = 1800
+        et = 0
+        for e in excerpts:
+            v = (e.get("value", "") or "").strip()
+            if not v:
+                continue
+            seg = f"- (transcript excerpt) {v}"
+            if et + len(seg) + 1 > exc_budget:
+                seg = seg[: max(0, exc_budget - et - 1)]
+                if seg:
+                    lines.append(seg)
+                break
+            lines.append(seg)
+            et += len(seg) + 1
 
     return "\n".join(lines)
 

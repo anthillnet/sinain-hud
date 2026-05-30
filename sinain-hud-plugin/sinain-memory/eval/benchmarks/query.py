@@ -107,7 +107,13 @@ def _query_knowledge(
     # Profiles may return non-list shapes (narrative). Coerce to text in that case.
     if not isinstance(facts, list):
         return str(facts)[:1200]
-    return format_facts_compact(facts, max_chars=1200)
+    # Temporal binding is applied in graph_query.query_facts_hybrid (the shared
+    # PRODUCTION path) — it embeds the session date into the fact value for
+    # date-math queries, so it's already in `facts` here. No bench-only logic.
+    # 2000 (was 1200): with MAX_FACTS_PER_QUERY=20, widen the fact budget so the
+    # additional gold-bearing facts at rank 11-20 actually reach the prompt rather
+    # than being truncated. Excerpts keep their own separate budget downstream.
+    return format_facts_compact(facts, max_chars=2000)
 
 
 def _get_retrieved_facts(
@@ -195,12 +201,36 @@ def answer_question(
         speaker_filter = (question.metadata or {}).get("speaker_filter") or None
         facts = _query_knowledge(db_path, question.text, profile=profile, speaker_filter=speaker_filter)
         system = (
-            "Answer the question using the knowledge facts below. Synthesize "
-            "across related facts and make reasonable inferences the facts "
-            "support. Be concise and specific. Only say \"I don't know\" if the "
-            "facts are clearly unrelated to the question."
+            "Answer the question using the knowledge facts and transcript "
+            "excerpts below. The knowledge facts are your curated memory: "
+            "deduplicated and kept up to date to the latest known state — treat "
+            "them as the primary source, especially for questions about "
+            "someone's current situation or what changed. Transcript excerpts "
+            "are verbatim raw source: use them to recover specific details the "
+            "facts omit, or when a fact is framed as a goal/plan rather than a "
+            "completed outcome. If an excerpt and a fact disagree about the "
+            "current state, trust the fact — it reflects the most recent update, "
+            "while excerpts may quote a superseded earlier state. Synthesize "
+            "across items and make reasonable inferences they support. Be "
+            "concise and specific. Only say \"I don't know\" if the answer is "
+            "genuinely absent from BOTH the facts and the excerpts."
         )
-        user = f"## Knowledge Facts\n{facts}\n\n## Question\n{question.text}"
+        # Temporal "now" anchor: elapsed-time / "X ago" / ordering questions need
+        # a reference date. In the bench that's question_date (when the user asks);
+        # in production it's the wall clock — identical role, so production-faithful.
+        # The facts already carry their event date ("[YYYY-MM-DD] ...") via
+        # graph_query's temporal binding when the query shows date intent.
+        import re as _re_t
+        _qmeta = question.metadata or {}
+        _qdate = (_qmeta.get("question_date") or "").split(" ")[0].replace("/", "-")
+        _temporal = bool(_re_t.search(
+            r"how many (days|weeks|months|years)|(days?|weeks?|months?|years?) ago"
+            r"|how long|days? (between|since|until)|order (from|of)|first to last"
+            r"|which .*(first|last|before|after|earliest|latest)|when did",
+            question.text.lower(),
+        ))
+        _now_line = f"Today's date is {_qdate}.\n\n" if (_temporal and _qdate) else ""
+        user = f"{_now_line}## Knowledge Facts\n{facts}\n\n## Question\n{question.text}"
 
     elif condition == "full-context":
         assert full_context, "full_context required for full-context condition"
@@ -224,8 +254,12 @@ def answer_question(
         raise ValueError(f"Unknown condition: {condition}")
 
     try:
-        # temperature=0 — eval reproducibility. Same retrieved facts must
-        # produce the same answer, or run-to-run comparisons are noise.
+        # temperature=0 + fixed seed — eval reproducibility. Same retrieved facts
+        # MUST produce the same answer, or run-to-run paper_label deltas are noise
+        # (observed 2026-05-29: gemini flipped q1 1↔0 on identical input at temp=0
+        # with no seed). Seed override: SINAIN_QA_SEED.
+        import os as _os
+        qa_seed = int(_os.environ.get("SINAIN_QA_SEED", "42"))
         return call_llm(
             system_prompt=system,
             user_prompt=user,
@@ -235,6 +269,7 @@ def answer_question(
             # content; 300 budget produced empty responses on longer prompts).
             max_tokens=1000,
             temperature=0.0,
+            seed=qa_seed,
         ).strip()
     except Exception as e:
         return f"(error: {e})"

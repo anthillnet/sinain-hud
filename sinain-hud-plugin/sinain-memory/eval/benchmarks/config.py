@@ -22,7 +22,14 @@ JUDGE_MODEL = "openai/gpt-4o-2024-08-06"
 
 # Retrieval
 K_VALUES = [1, 3, 5, 10]
-MAX_FACTS_PER_QUERY = 10
+# 20 (was 10): the recall@10 *metric* is fixed at 10, but QA accuracy isn't — a
+# gold fact that imperfect ranking placed at rank 11-20 never entered the prompt
+# at max_facts=10. Diagnostic (2026-05-30) showed gold-keyword density jumps from
+# top-10 to top-50 on several r@10=0 fails (89527b6b 25→50%, 06878be2 42→79%,
+# 75832dbd 22→66%, gpt4_59149c77 50→67%) → the fact exists, it just wasn't shown.
+# Compact one-line facts dilute QA far less than verbose excerpts, so widening the
+# window is safe. The fact budget in _query_knowledge is widened to match.
+MAX_FACTS_PER_QUERY = 20
 
 # Ingestion
 DISTILLER_TIMEOUT_S = 30
