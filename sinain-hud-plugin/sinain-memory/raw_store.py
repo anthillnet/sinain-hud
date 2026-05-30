@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -130,22 +131,88 @@ def append_chunks(store_path: str, chunks: list[str]) -> int:
     return len(chunks)
 
 
+_LEX_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_LEX_STOP = frozenset(
+    "the a an of to in on for and or is are was were be been i you he she it we they "
+    "me my your with at by from this that what when where how many much who which did "
+    "do does has have had will would can could about into out up down".split()
+)
+
+
+def _lex_tokens(text: str) -> list[str]:
+    return [t for t in _LEX_TOKEN_RE.findall((text or "").lower())
+            if t not in _LEX_STOP and len(t) > 2]
+
+
 def retrieve_chunks(store_path: str, query: str, k: int = 3, max_chars: int = 1200) -> list[str]:
-    """Return the top-k raw chunks most similar to `query` (cosine), each
-    truncated to max_chars. Empty list if no sidecar / on error."""
+    """Return the top-k raw chunks for `query` via HYBRID retrieval: semantic
+    (cosine over MiniLM embeddings) fused with lexical (BM25-style term overlap)
+    by Reciprocal Rank Fusion. Each truncated to max_chars. Empty on no sidecar.
+
+    Why hybrid: pure cosine misses chunks whose answer is a rare literal token the
+    embedding averages away — e.g. "the suburbs" out-ranked by frequent "Chicago"
+    windows, or a "Target"/"coupon" chunk. Lexical scoring surfaces those; semantic
+    catches paraphrase. This mirrors the FACT path (graph_query fuses FTS5/BM25 +
+    embedding), so the excerpt path now uses the same principled fusion. Pure-cosine
+    behaviour is recoverable via SINAIN_RAW_CHUNK_LEX=0."""
     sidecar = _sidecar_path(store_path)
     if not sidecar.exists() or not query.strip():
         return []
     try:
+        import math
         import numpy as np
         recs = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
         if not recs:
             return []
+        # --- semantic ranking ---
         mat = np.array([r["emb"] for r in recs], dtype=float)
         q = np.array(_model().encode([query], show_progress_bar=False)[0], dtype=float)
         sims = mat @ q / (np.linalg.norm(mat, axis=1) * (np.linalg.norm(q) + 1e-9) + 1e-9)
-        order = sims.argsort()[::-1][:k]
-        return [recs[i]["text"][:max_chars] for i in order]
+        sem_order = list(sims.argsort()[::-1])
+
+        lex_on = os.environ.get("SINAIN_RAW_CHUNK_LEX", "1") != "0"
+        if not lex_on:
+            return [recs[i]["text"][:max_chars] for i in sem_order[:k]]
+
+        # --- lexical (BM25) ranking over the same chunks ---
+        qtok = set(_lex_tokens(query))
+        if qtok:
+            docs = [_lex_tokens(r["text"]) for r in recs]
+            N = len(docs)
+            avgdl = (sum(len(d) for d in docs) / N) or 1.0
+            df: dict[str, int] = {}
+            for d in docs:
+                for t in set(d) & qtok:
+                    df[t] = df.get(t, 0) + 1
+            k1, b = 1.5, 0.75
+            bm25 = np.zeros(N, dtype=float)
+            for i, d in enumerate(docs):
+                if not d:
+                    continue
+                dl = len(d)
+                from collections import Counter
+                tf = Counter(d)
+                s = 0.0
+                for t in qtok:
+                    f = tf.get(t, 0)
+                    if not f:
+                        continue
+                    idf = math.log(1 + (N - df[t] + 0.5) / (df[t] + 0.5))
+                    s += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * dl / avgdl))
+                bm25[i] = s
+            lex_order = list(bm25.argsort()[::-1])
+        else:
+            lex_order = sem_order
+
+        # --- Reciprocal Rank Fusion of the two rankings ---
+        C = 60
+        rrf: dict[int, float] = {}
+        for rank, i in enumerate(sem_order):
+            rrf[i] = rrf.get(i, 0.0) + 1.0 / (C + rank)
+        for rank, i in enumerate(lex_order):
+            rrf[i] = rrf.get(i, 0.0) + 1.0 / (C + rank)
+        fused = sorted(rrf, key=lambda i: -rrf[i])[:k]
+        return [recs[i]["text"][:max_chars] for i in fused]
     except Exception as e:
         print(f"[raw_store] retrieve failed (non-fatal): {e}", file=sys.stderr)
         return []
