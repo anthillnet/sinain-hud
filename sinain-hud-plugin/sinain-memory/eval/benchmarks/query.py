@@ -100,6 +100,10 @@ def _query_knowledge(
         kwargs = _resolve_profile_kwargs(profile)
         if speaker_filter:
             kwargs["mentioned_by_speaker"] = list(speaker_filter)
+        # (HyDE excerpt retrieval was tested 2026-05-30 and REVERTED: no gain on the
+        # excerpt-miss targets — the gold info simply isn't in any retrievable window
+        # — and it adds a per-query LLM call, a production cost not worth zero benefit.
+        # graph_query still accepts chunk_query=None for future use.)
         facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY, **kwargs)
     if not facts:
         return "(no facts retrieved)"
