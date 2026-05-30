@@ -219,6 +219,28 @@ def answer_question(
             "concise and specific. Only say \"I don't know\" if the answer is "
             "genuinely absent from BOTH the facts and the excerpts."
         )
+        # T2-PREF / T1-COUNT — INTENT-SCOPED guidance (only appended for the matching
+        # query class, so it can't distract other questions the way the earlier GLOBAL
+        # tailoring sentence regressed counting). General behaviours, not gold hacks.
+        import re as _re_i
+        _ql = question.text.lower()
+        if _re_i.search(r"\b(recommend|suggest|suggestion|advise|advice|what should|which .*should|ideas for|tips (for|on))\b", _ql):
+            system += (
+                " This question asks for a RECOMMENDATION. FIRST scan the facts for "
+                "the user's specific constraint — the exact device/brand they own, "
+                "the narrow sub-field they work in, the platform they use — and state "
+                "it. THEN make every recommendation explicitly consistent with that "
+                "constraint (e.g. accessories compatible with that exact device; "
+                "resources in that exact sub-field), never generic category advice. "
+                "If the user owns a specific brand, your suggestions MUST be for that "
+                "brand; if their work is in a specific niche, your suggestions MUST be "
+                "in that niche."
+            )
+        # NOTE: a COUNT-intent instruction was tested (T1-COUNT QA-framing) and
+        # REVERTED — it regressed gpt4_59c863d7 (re-derived a wrong count on facts
+        # that were already right) and did NOT fix 0a995998/6d550036 (those are
+        # distillation gaps — missing items — and ground-truth qualification, not
+        # counting mechanics). Counting needs T1-RECON/re-distill, not QA framing.
         # Temporal "now" anchor: elapsed-time / "X ago" / ordering questions need
         # a reference date. In the bench that's question_date (when the user asks);
         # in production it's the wall clock — identical role, so production-faithful.
