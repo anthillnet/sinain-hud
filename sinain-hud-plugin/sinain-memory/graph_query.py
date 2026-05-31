@@ -971,7 +971,10 @@ def query_facts_hybrid(
                 pass
 
     # Sort by RRF score descending
-    sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)
+    # Deterministic ordering: fused score (desc), then entity_id (asc) so equal-score
+    # ties at the top-k boundary resolve identically across runs regardless of upstream
+    # candidate-assembly / SPARQL order — reproducible retrieval (production correctness).
+    sorted_ids = sorted(rrf_scores, key=lambda e: (-rrf_scores[e], e))
 
     # Build fact lookup from all candidates
     fact_map: dict[str, dict] = {}
