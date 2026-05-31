@@ -50,6 +50,9 @@ def main():
         present = [k for k in gk if k in blob]
         print("=" * 70)
         print(f"{q.id} | gold={q.gold_answer[:70]!r}")
+        print(f"  TOTAL distilled facts retrieved: {len(facts)}")
+        for f in facts[:6]:
+            print(f"    · {(f.get('value','') or '')[:90]}")
         print(f"  gold-kw in distilled facts: {len(present)}/{len(gk)}  {present[:8]}")
         # show facts that share any gold kw
         for f in facts[:50]:

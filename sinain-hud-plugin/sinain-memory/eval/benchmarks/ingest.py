@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from subprocess import run, PIPE, TimeoutExpired
@@ -27,6 +28,8 @@ _PIPELINE_VERSION_FILES: tuple[str, ...] = (
     "session_distiller.py",
     "knowledge_integrator.py",
     "coreference.py",  # Stage A — changes to coref logic must invalidate the store cache
+    "entity_canonicalizer.py",  # E1 — phonetic/fuzzy entity merge affects graph nodes
+    "asr_nec.py",  # ASR-C — named-entity correction rewrites transcript pre-distill
 )
 
 
@@ -89,9 +92,16 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     # Stage A coref toggle — coref-on vs coref-off must land in different cache
     # slots, else an A/B run would cache-hit the wrong store.
     coref_salt = os.environ.get("SINAIN_COREF", "")
+    # E1 entity-canonicalization toggle — default ON. Mixed in so a CANON on/off
+    # A/B doesn't cache-hit the wrong store. Default "1" so the normal (E1-on)
+    # path gets a stable slot distinct from any legacy CANON-absent cache.
+    canon_salt = os.environ.get("SINAIN_CANON", "1")
+    # ASR-C named-entity correction toggle — default ON; rewrites transcript
+    # pre-distill so NEC on/off must land in distinct cache slots.
+    nec_salt = os.environ.get("SINAIN_NEC", "1")
     return hashlib.sha256(
         (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
-         + "|coref:" + coref_salt).encode()
+         + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt).encode()
     ).hexdigest()[:16]
 
 
@@ -181,6 +191,22 @@ def ingest_instance(
     """
     ch = _content_hash(instance.sessions)
     cache_path = cache_dir / "stores" / f"{ch}.db"
+
+    # Option A (raw episodic hybrid): write a raw-chunk sidecar from the source
+    # sessions — independent of distillation, so it populates even on cache-hit.
+    try:
+        sys.path.insert(0, str(_scripts_dir()))
+        from raw_store import write_chunks
+        chunk_texts = []
+        for sess in instance.sessions:
+            parts = [(t.get("content") or t.get("text") or "") for t in sess]
+            parts = [p for p in parts if p]
+            if parts:
+                chunk_texts.append("\n".join(parts))
+        n_raw = write_chunks(str(cache_path), chunk_texts)
+        print(f"[ingest] raw_store: wrote {n_raw} chunk(s) sidecar for {cache_path.name}", file=sys.stderr)
+    except Exception as e:
+        print(f"[ingest] raw_store write FAILED (non-fatal): {e}", file=sys.stderr)
 
     if cache_path.exists():
         return cache_path

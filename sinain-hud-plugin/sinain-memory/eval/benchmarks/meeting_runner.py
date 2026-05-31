@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -58,8 +59,14 @@ def run_meeting_benchmark(
     instances = adapter.load_dataset(str(data_dir))
 
     if meeting_filter:
-        instances = [i for i in instances if meeting_filter in i.id]
-        print(f"[meeting] filtered to {len(instances)} meeting(s) matching '{meeting_filter}'")
+        # Prefer an EXACT stem match (id == "meeting-<stem>") so e.g.
+        # `--meeting al-futaim-prep` selects ONLY the 25-q file and not also
+        # `al-futaim-prep-5min` (substring). Fall back to substring for partial
+        # names. Fixes the eval-log stem-match gotcha (n=37 → n=25).
+        exact = [i for i in instances if i.id == f"meeting-{meeting_filter}"]
+        instances = exact if exact else [i for i in instances if meeting_filter in i.id]
+        print(f"[meeting] filtered to {len(instances)} meeting(s) matching '{meeting_filter}'"
+              f"{' (exact)' if exact else ' (substring)'}")
 
     if not instances:
         print("[meeting] no meeting data found — check data/meeting/ directory")
@@ -145,30 +152,42 @@ def run_meeting_benchmark(
                 continue
 
             print(f"  [{cond}] generating answer...")
-            answer_text = answer_question(
-                question, cond,
-                db_path=db_path,
-                full_context=full_context,
-                model=qa_model,
-                profile=profile,
-            )
+            # Self-consistency voting (SINAIN_QA_VOTES, default 5): the QA model
+            # is non-deterministic at temp=0, so a single 1-5 judge score is
+            # noisy (±0.3+ run-to-run). Sample k answers, judge each, take the
+            # MEAN score — the comparison-stable signal. k=1 == old behavior.
+            n_votes = max(1, int(os.environ.get("SINAIN_QA_VOTES", "5")))
+            v_scores: list[float] = []
+            v_f1s: list[float] = []
+            v_texts: list[str] = []
+            for _v in range(n_votes):
+                a_text = answer_question(
+                    question, cond,
+                    db_path=db_path,
+                    full_context=full_context,
+                    model=qa_model,
+                    profile=profile,
+                )
+                v_texts.append(a_text)
+                v_f1s.append(token_f1(a_text, question.gold_answer))
+                jr = judge_qa(
+                    question.text, question.gold_answer, a_text,
+                    condition=cond, model=judge_model,
+                )
+                if jr and jr.get("score") is not None:
+                    v_scores.append(float(jr["score"]))
 
-            f1 = token_f1(answer_text, question.gold_answer)
-
-            judge_result = judge_qa(
-                question.text, question.gold_answer, answer_text,
-                condition=cond, model=judge_model,
-            )
-            score = judge_result["score"] if judge_result else None
-            reasoning = judge_result["reasoning"] if judge_result else None
+            score = round(sum(v_scores) / len(v_scores), 2) if v_scores else None
+            f1 = round(sum(v_f1s) / len(v_f1s), 4) if v_f1s else 0.0
 
             answers[cond] = {
-                "text": answer_text[:500],
+                "text": v_texts[0][:500] if v_texts else "",
                 "score": score,
-                "f1": round(f1, 4),
-                "reasoning": reasoning,
+                "f1": f1,
+                "reasoning": None,
+                "vote_split": {"scores": v_scores, "k": len(v_scores)},
             }
-            print(f"    score={score}/5 f1={f1:.2f}")
+            print(f"    score={score}/5 (k={len(v_scores)}) f1={f1:.2f}")
 
         entry = {
             "id": qid,

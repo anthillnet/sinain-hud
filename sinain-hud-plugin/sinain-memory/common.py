@@ -175,6 +175,7 @@ def call_llm(
     json_mode: bool = False,
     json_schema: dict | None = None,
     temperature: float | None = None,
+    seed: int | None = None,
 ) -> str:
     """Call OpenRouter chat completions API. Returns assistant message text.
 
@@ -233,6 +234,13 @@ def call_llm(
     }
     if temperature is not None:
         body["temperature"] = temperature
+    # Reproducibility: a fixed seed + temperature=0 makes greedy decoding
+    # repeatable (OpenRouter passes seed to providers that honor it; Ollama's
+    # OpenAI-compat endpoint maps it to options.seed). Without it, eval QA
+    # answers jitter run-to-run on borderline questions even at temp=0, which
+    # makes n=6 paper_label deltas indistinguishable from noise.
+    if seed is not None:
+        body["seed"] = seed
     # Structured output. json_schema (strict) takes precedence over json_mode
     # (loose). OpenAI / Google / Ollama OpenAI-compat all accept the
     # response_format.json_schema shape. Strict mode bounces the response off

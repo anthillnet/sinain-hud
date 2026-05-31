@@ -326,3 +326,81 @@ python3 -m eval.benchmarks.meeting_runner --db /tmp/af-test/memory/knowledge-gra
   (12) → split by `mtg-af-*` vs `5m-*` id prefix, or move the 5-min QA aside.
 - **Bench-DB bloat**: each store is a ~126 MB Oxigraph dir but only ~1.1 MB is real data (RocksDB
   overhead); 127 stores ≈ 16 GB. Production is one shared store — not affected.
+
+---
+
+## Running iteratively + live logs (fail-fast — don't wait for 6 questions)
+
+Two rules that save time and make mid-run diagnosis possible:
+
+### 1. Unbuffered output to a logfile — NEVER pipe the launch through `tail`/`grep`
+Python buffers stdout to a pipe (block-buffered), so `... | tail -2` shows **nothing until the process
+exits** (this hid a whole run's progress this session). Instead force unbuffered + redirect to a file
+you can `Read`/`tail -f` live:
+```bash
+PYTHONUNBUFFERED=1 python3 -u -m eval.benchmarks.runner \
+    --benchmarks longmemeval --conditions sinain-memory --subset 1 --stratified --judge-mode paper \
+    --output-dir eval/benchmarks/results/<run> \
+    > eval/benchmarks/results/<run>/run.log 2>&1 &
+# then watch it live:
+tail -f eval/benchmarks/results/<run>/run.log
+```
+The runner prints per question: `[retrieval] <id>: content_recall@1=.. @10=.. top facts: …`, the
+generated answer, and `paper_label=`. So you see q1's retrieval + answer + label **before** q2 starts.
+
+### 2. Start with `--subset 1`, verify, THEN scale with `--resume`
+Run ONE question first to catch breakage immediately (bad ingest, empty distill, import error, wrong
+profile) instead of after 6 × (ingest + QA + judge):
+```bash
+# 1) one question — inspect run.log: did it ingest? retrieve real facts? answer sanely?
+... --subset 1 --stratified ... > run.log 2>&1
+# 2) if good, scale up reusing the completed question (--resume keeps partial results)
+... --subset 6 --stratified --resume ... >> run.log 2>&1
+```
+`--resume` reads existing partial results in `--output-dir` so q1 isn't re-run.
+
+### Mid-run health checks (when something looks stuck)
+- Process alive + working: `pgrep -fl eval.benchmarks.runner` ; local distill activity:
+  `tail ~/.ollama/logs/server.log` (each `/v1/chat/completions` line = one distill/QA call + its latency).
+- Local qwen is SLOW (~12–37s/call, BATCH_SIZE=1 session → many calls). A 6-q local run is ~1 hr; a
+  1-q run is the fast sanity check. Cloud is minutes.
+- Per-question diagnosis once a question lands: see the "Diagnosis method" section above
+  (recall@10=0 → not retrieved/distilled; recall@10=1 + wrong → QA/synthesis or distill quality).
+
+---
+
+## Trick: rebuild the production transcript from capture logs (avoid a 28-min re-capture)
+
+To iterate **distillation/retrieval** on a real production capture, you do NOT need to re-play the video.
+The live capture logs every ASR result to `~/.sinain-bench/<timestamp>/logs/core.log` as:
+`[<iso-ts>] [transcribe] transcript (<ms>ms): "<text>"`. Rebuild the transcript from those lines and
+re-distill offline — the production-ASR text (errors baked in) is preserved, so it's the correct input
+for distiller-change A/Bs. (This is NOT the GT `.txt`, which is QA-reference only. Note: the rebuilt
+text is the AUDIO path only; screen-OCR/sense meta came separately and is mostly noise.)
+
+```bash
+CAP=~/.sinain-bench/<timestamp>/logs/core.log
+# (a) plain transcript (one line per ASR segment):
+grep -oE 'transcript \([0-9]+ms\): ".*"' "$CAP" | sed -E 's/^[^"]*"//; s/"$//' > /tmp/prod-transcript.txt
+# (b) formatted for distill-offline.py — [HH:MM:SS] SPEAKER_00 blocks w/ real relative timestamps:
+python3 - "$CAP" <<'PY'
+import re, sys
+from pathlib import Path
+from datetime import datetime
+raw = Path(sys.argv[1]).read_text(errors="ignore")
+pat = re.compile(r'\[([\d:.T-]+Z)\] \[transcribe\] transcript \(\d+ms\): "(.*)"')
+rows = [(datetime.fromisoformat(m.group(1).replace("Z", "+00:00")), m.group(2)) for m in pat.finditer(raw)]
+t0 = rows[0][0]; out = []
+for ts, txt in rows:
+    s = int((ts - t0).total_seconds()); h, r = divmod(s, 3600); m, sec = divmod(r, 60)
+    out.append(f"[{h:02d}:{m:02d}:{sec:02d}] SPEAKER_00\n{txt}\n")
+Path("/tmp/prod-formatted.txt").write_text("\n".join(out))
+print(f"wrote {len(rows)} segments")
+PY
+# (c) re-distill OFFLINE (no re-capture); cloud distiller by default, or SINAIN_BENCH_MODEL for local:
+python3 ../../tools/distill-offline.py --transcript /tmp/prod-formatted.txt --out-dir /tmp/redistill --label-mode none
+python3 -m eval.benchmarks.meeting_runner --db /tmp/redistill/memory/knowledge-graph.db \
+    --conditions sinain-memory --meeting <stem> --output-dir eval/benchmarks/results/<run>
+```
+Caveat: the offline-batched path is noisier than live (random empty-batch ~1/5) — for keep/drop on
+distiller changes, weight the LongMemEval signal; re-capture only to validate the final end-to-end number.

@@ -138,6 +138,7 @@ def judge_paper(
             temperature=0.0,
             max_tokens=10,
             json_mode=False,
+            seed=12345,  # reproducible binary verdict (see common.call_llm seed)
         )
     except LLMError as e:
         print(f"[warn] longmemeval_judge call_llm failed for {question_id}: {e}", file=sys.stderr)

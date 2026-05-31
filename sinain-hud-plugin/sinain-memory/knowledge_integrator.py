@@ -18,6 +18,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -276,7 +277,24 @@ def _find_matching_entity(
         if ratio >= best_ratio:
             best_ratio = ratio
             best_match = node_id
-    return best_match
+    if best_match is not None:
+        return best_match
+
+    # E1 — phonetic + fuzzy canonicalization. Catches variants below the 0.90
+    # difflib floor that weak distillers / ASR produce ("city-bank"↔"citibank",
+    # "ibraheem"↔"ibrahim") — the entity-graph fragmentation that hurts local
+    # mode most. Metaphone gate + RapidFuzz confirm + a prefix/suffix guard that
+    # generalizes _DEDUP_SKIP_PAIRS. Default ON; SINAIN_CANON=0 ablates (and is
+    # mixed into the bench cache key so on/off land in distinct store slots).
+    if os.environ.get("SINAIN_CANON", "1") != "0":
+        try:
+            from entity_canonicalizer import phonetic_fuzzy_match
+            hit = phonetic_fuzzy_match(name, existing_names, _DEDUP_SKIP_PAIRS)
+            if hit is not None:
+                return existing_names[hit]
+        except Exception:
+            pass
+    return None
 
 
 def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_facts: list[dict]) -> list[dict]:
@@ -1291,6 +1309,25 @@ def main() -> None:
 
     # Dedup + execute
     graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts, digest_entities=digest_entities)
+
+    # Option A (PRODUCTION raw-episodic storage): append this batch's raw
+    # transcript as a chunk so retrieval can recover detail the lossy distiller
+    # dropped (the gold often survives in the transcript even when distillation
+    # omits it). Gated SINAIN_RAW_CHUNKS (default on). Skipped for bench temp
+    # dirs — bench stores chunks via ingest.py at the cache path (a temp-dir
+    # sidecar would be lost in the cache copytree).
+    if os.environ.get("SINAIN_RAW_CHUNKS", "1") != "0" and transcript_items \
+            and "sinain-bench-" not in str(db_path):
+        try:
+            from raw_store import append_chunks
+            _txt = "\n".join(
+                (it.get("text") or it.get("content") or "")
+                for it in transcript_items if isinstance(it, dict)
+            ).strip()
+            if _txt:
+                append_chunks(db_path, [_txt])
+        except Exception as e:
+            print(f"  [raw_store] append failed (non-fatal): {e}", file=sys.stderr)
 
     # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
     # at our scale (<200 facts). Individual facts are more retrievable than merged ones.

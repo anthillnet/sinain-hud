@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -334,46 +335,69 @@ def run_benchmark(
                 continue
 
             print(f"  [{cond}] generating answer...")
-            answer_text = answer_question(
-                question, cond,
-                db_path=str(db_path) if db_path else None,
-                full_context=full_context,
-                knowledge_doc=knowledge_doc,
-                model=qa_model,
-                profile=profile,
-            )
+            # Self-consistency voting (SINAIN_QA_VOTES, default 5). The QA model
+            # (gemini-2.5-flash) is NOT deterministic even at temperature=0 +
+            # seed (verified 2026-05-29 — provider ignores seed), so a single
+            # answer makes n=6 paper_label deltas indistinguishable from jitter.
+            # We sample k answers, judge each, and take the MAJORITY label; the
+            # vote_split (incl. mean) is the real, comparison-stable signal.
+            # k=1 reproduces the old single-shot behavior. Retrieval is computed
+            # once above (deterministic) — only the QA+judge step is repeated.
+            n_votes = max(1, int(os.environ.get("SINAIN_QA_VOTES", "5")))
+            samples: list[tuple[str, float, object]] = []
+            for _v in range(n_votes):
+                a_text = answer_question(
+                    question, cond,
+                    db_path=str(db_path) if db_path else None,
+                    full_context=full_context,
+                    knowledge_doc=knowledge_doc,
+                    model=qa_model,
+                    profile=profile,
+                )
+                a_f1 = token_f1(a_text, question.gold_answer)
+                if judge_mode == "paper":
+                    lbl: object = 1 if judge_paper(
+                        question_type=question.category,
+                        question_id=question.id,
+                        question=question.text,
+                        gold=question.gold_answer,
+                        response=a_text,
+                    ) else 0
+                else:
+                    jr = judge_qa(
+                        question.text, question.gold_answer, a_text,
+                        condition=cond, model=judge_model,
+                    )
+                    lbl = jr["score"] if jr else None
+                samples.append((a_text, a_f1, lbl))
 
-            # Score
-            f1 = token_f1(answer_text, question.gold_answer)
-
-            ans_entry: dict = {
-                "text": answer_text[:500],
-                "f1": round(f1, 4),
-            }
+            texts = [s[0] for s in samples]
+            mean_f1 = round(sum(s[1] for s in samples) / len(samples), 4)
+            ans_entry: dict = {"f1": mean_f1}
 
             if judge_mode == "paper":
-                # Paper-protocol binary judge (EVAL-04). Stores paper_label
-                # alongside any future legacy fields.
-                label = judge_paper(
-                    question_type=question.category,
-                    question_id=question.id,
-                    question=question.text,
-                    gold=question.gold_answer,
-                    response=answer_text,
-                )
-                ans_entry["paper_label"] = 1 if label else 0
-                # Keep score=None so legacy aggregator skips this row cleanly.
+                labels = [s[2] for s in samples if s[2] is not None]
+                ones = sum(1 for x in labels if x == 1)
+                # strict majority (tie → 0, conservative)
+                maj = 1 if labels and ones * 2 > len(labels) else 0
+                rep = next((t for t, _, x in samples if x == maj), texts[0])
+                ans_entry["text"] = rep[:500]
+                ans_entry["paper_label"] = maj
                 ans_entry["score"] = None
                 ans_entry["reasoning"] = None
-                print(f"    paper_label={'1' if label else '0'} f1={f1:.2f}")
+                ans_entry["vote_split"] = {
+                    "labels": labels, "ones": ones, "k": len(labels),
+                    "mean": round(ones / len(labels), 3) if labels else None,
+                }
+                print(f"    paper_label={maj} ({ones}/{len(labels)}) f1={mean_f1:.2f}")
             else:
-                judge_result = judge_qa(
-                    question.text, question.gold_answer, answer_text,
-                    condition=cond, model=judge_model,
-                )
-                ans_entry["score"] = judge_result["score"] if judge_result else None
-                ans_entry["reasoning"] = judge_result["reasoning"] if judge_result else None
-                print(f"    score={ans_entry['score']}/5 f1={f1:.2f}")
+                nums = [x for x in (s[2] for s in samples) if isinstance(x, (int, float))]
+                sc = round(sum(nums) / len(nums), 2) if nums else None
+                ans_entry["text"] = texts[0][:500]
+                ans_entry["score"] = sc
+                ans_entry["reasoning"] = None
+                ans_entry["vote_split"] = {"scores": nums, "k": len(nums), "mean": sc}
+                print(f"    score={sc}/5 (k={len(nums)}) f1={mean_f1:.2f}")
 
             answers[cond] = ans_entry
 
