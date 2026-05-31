@@ -22,6 +22,13 @@ import re
 import sys
 from pathlib import Path
 
+# all-MiniLM is pre-cached locally; never phone HuggingFace Hub at runtime. An
+# unguarded hub-check on cold store rebuilds hung the bench (iter 6). All our
+# embeddings are local or via OpenRouter — HF is only all-MiniLM's distribution
+# origin, not a runtime service. setdefault lets a first-time setup override.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 _embed_model = None
 
 # all-MiniLM-L6-v2 truncates input at 256 tokens (~1000 chars): a whole-session

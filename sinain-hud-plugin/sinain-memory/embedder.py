@@ -24,6 +24,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# all-MiniLM (local fallback) is pre-cached; never phone HuggingFace Hub at
+# runtime — an unguarded hub-check on cold rebuilds hung the bench (iter 6).
+# Primary embeddings are OpenRouter; HF is only the fallback model's origin.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 
 # ── Privacy helpers ───────────────────────────────────────────────────────────
 

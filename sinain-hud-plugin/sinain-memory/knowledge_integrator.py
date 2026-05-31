@@ -607,7 +607,8 @@ def _facts_to_graph_ops(
             "attribute": "value",
             "value": fact_text,
             "confidence": 0.9,
-            "kind": "distilled",
+            "kind": (fact_item.get("kind") if isinstance(fact_item, dict)
+                     and fact_item.get("kind") else "distilled"),
             "session_ref": session_eid,
             "mentioned_by": per_fact_speakers,
         })

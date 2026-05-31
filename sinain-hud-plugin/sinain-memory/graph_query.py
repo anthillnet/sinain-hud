@@ -12,9 +12,17 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
+
+# all-MiniLM is pre-cached locally; never phone HuggingFace Hub at runtime. An
+# unguarded hub-check on cold store rebuilds hung the bench (iter 6). All our
+# embeddings are local or via OpenRouter — HF is only the model's distribution
+# origin, not a runtime service. setdefault lets a first-time setup override.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 
 def query_facts_by_entities(
@@ -581,6 +589,50 @@ def _supersede_evolving_facts(
     return [f for k, f in enumerate(results) if k not in dropped]
 
 
+def _recon_topical_guard(results, query_text=None):
+    """Topical-fallback guard for kind=recon consolidated current-state facts.
+
+    Consolidated (kind=recon) facts summarize an entity's *current state*
+    (residence, job, status). They help ONLY questions about that
+    entity/attribute; for unrelated questions they are noise that occupies the
+    final max_facts slots and pushes precise distilled facts out of the prompt
+    (the 6a1eabeb / 6aeb4375 regression: gold sat behind irrelevant recon facts).
+
+    Rule (deterministic, token-based -- no embeddings, no LLM): a recon fact keeps
+    its rank only when topically relevant to the query, i.e. a salient non-generic
+    subject token, an attribute token, or a value content token appears in the
+    query. Otherwise it is demoted below all other facts so the max_facts cut
+    drops it first. Relevant recon facts (subject "rachel" for "where does Rachel
+    live") keep rank, preserving the 830ce83f / d7c942c3 fixes. No-op (safe) when
+    no fact carries kind=='recon'.
+    """
+    if not results or not query_text:
+        return results
+    import re
+    generic = {"user", "i", "me", "my", "mine", "we", "us", "our", "you", "your",
+               "they", "them", "someone", "person", "people"}
+    stop = {"the", "a", "an", "of", "to", "in", "on", "at", "is", "are", "was",
+            "were", "and", "or", "for", "with", "currently", "now", "uses", "use",
+            "using", "used", "lives", "live", "lived", "living", "has", "have",
+            "had", "been", "that", "this", "as", "by", "from", "her", "his",
+            "their", "its", "into", "about", "be", "do", "does", "did", "am"}
+    q = set(re.findall(r"[a-z0-9]+", (query_text or "").lower()))
+    inline, demoted = [], []
+    for f in results:
+        if f.get("kind") != "recon":
+            inline.append(f)
+            continue
+        subj = str(f.get("subject") or f.get("entity") or "").lower()
+        attr = str(f.get("attribute") or f.get("predicate") or "").lower()
+        val = str(f.get("value") or f.get("text") or "").lower()
+        st = set(re.findall(r"[a-z0-9]+", subj)) - generic
+        at = set(re.findall(r"[a-z0-9]+", attr)) - stop
+        vt = set(re.findall(r"[a-z0-9]+", val)) - stop - generic
+        relevant = bool((st & q) or (at & q) or (vt & q))
+        (inline if relevant else demoted).append(f)
+    return inline + demoted
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -1103,6 +1155,11 @@ def query_facts_hybrid(
     # NOTE: graph expansion now happens BEFORE rerank (above) so neighbors
     # compete for rank instead of being raw-appended here. See the expansion
     # block after the speaker filter.
+    # Read-side kind=recon topical-fallback guard: demote query-irrelevant
+    # consolidated current-state facts before the max_facts cut so they don't
+    # crowd precise distilled facts out (6a1eabeb/6aeb4375), while keeping
+    # relevant ones (830ce83f/d7c942c3). See HANDOFF-recon-t1.md.
+    results = _recon_topical_guard(results, query)
     final = results[:max_facts]
 
     # Option D — collapse evolving-state clusters to their latest member so the

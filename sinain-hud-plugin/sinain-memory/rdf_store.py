@@ -510,7 +510,7 @@ class RdfStore:
             VALUES ?tag {{ {values_clause} }}
         }}
         GROUP BY ?eid
-        ORDER BY DESC(?matches)
+        ORDER BY DESC(?matches) ?eid
         LIMIT {int(limit)}
         """
         out: list[tuple[str, int]] = []
@@ -539,7 +539,7 @@ class RdfStore:
         }}
         GROUP BY ?eid
         HAVING (COUNT(DISTINCT ?tag) >= {int(min_matches)})
-        ORDER BY DESC(?matches)
+        ORDER BY DESC(?matches) ?eid
         LIMIT {int(limit)}
         """
         out: list[tuple[str, int]] = []
@@ -569,7 +569,9 @@ class RdfStore:
             except (AttributeError, ValueError, TypeError):
                 conf = 0.0
             rows.append((eid, conf))
-        rows.sort(key=lambda r: -r[1])
+        # Deterministic tie-break: equal-confidence facts (most share 0.9)
+        # ordered by eid so the top-N pool is stable across processes.
+        rows.sort(key=lambda r: (-r[1], r[0]))
         return rows[: int(limit)]
 
     def fts_search(self, query: str, limit: int) -> list[str]:
@@ -657,7 +659,10 @@ class RdfStore:
             elif present != len(tokens):
                 continue
             scored.append((_bm25(text, dl), eid))
-        scored.sort(key=lambda x: -x[0])
+        # Deterministic tie-break: equal-BM25 docs sorted by eid, not by
+        # arbitrary RocksDB iteration order (T1-DETERMINISM — retrieval ties
+        # are the run-to-run variance ceiling).
+        scored.sort(key=lambda x: (-x[0], x[1]))
         return [eid for _, eid in scored[: int(limit)]]
 
     def entity_id_or_domain_search(
@@ -733,7 +738,7 @@ class RdfStore:
             ?eid sinain:first_seen ?ts .
             VALUES ?ts {{ {values_clause} }}
             FILTER(STRSTARTS(STR(?eid), "{NS_FACT}"))
-        }} LIMIT {int(limit)}
+        }} ORDER BY ?eid LIMIT {int(limit)}
         """
         out: list[str] = []
         for row in self._store.query(sparql):
