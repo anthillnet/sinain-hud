@@ -234,7 +234,12 @@ def answer_question(
                 "resources in that exact sub-field), never generic category advice. "
                 "If the user owns a specific brand, your suggestions MUST be for that "
                 "brand; if their work is in a specific niche, your suggestions MUST be "
-                "in that niche."
+                "in that niche. The facts may not name the question's exact subject "
+                "(your precise 'setup', that city, tonight's options) — do NOT refuse, "
+                "hedge, or say your information is insufficient when ANY relevant "
+                "preference, taste, brand, or constraint fact is present. Lead with that "
+                "preference and give a confident recommendation grounded in it; only "
+                "decline if NO relevant preference or constraint fact exists at all."
             )
         # NOTE: a COUNT-intent instruction was tested (T1-COUNT QA-framing) and
         # REVERTED — it regressed gpt4_59c863d7 (re-derived a wrong count on facts
