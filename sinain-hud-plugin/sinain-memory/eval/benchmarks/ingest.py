@@ -298,18 +298,22 @@ def ingest_instance(
         # T1-RECON: cross-session consolidation pass (gated SINAIN_RECON, default OFF).
         # Reads the just-built graph, asks ONE LLM call for enumeration + current-state
         # summary facts, and integrates them via the proven integrator path. Fail-open.
+        sys.stderr.write(f"[recon-wire] SINAIN_RECON={os.environ.get('SINAIN_RECON')!r}\n")
         if os.environ.get("SINAIN_RECON") == "1":
+            sys.stderr.write(f"[recon-wire] running on {mem_dir / 'knowledge-graph.db'}\n")
             try:
                 import reconstruct
                 _recon_digest = reconstruct.build_consolidated_digest(
                     str(mem_dir / "knowledge-graph.db"))
+                _rn = len((_recon_digest or {}).get("facts") or [])
+                sys.stderr.write(f"[recon-wire] consolidated {_rn} facts\n")
                 if _recon_digest and _recon_digest.get("facts"):
                     _run_script("knowledge_integrator.py", [
                         "--memory-dir", str(mem_dir),
                         "--digest", json.dumps(_recon_digest),
                     ], INTEGRATOR_TIMEOUT_S)
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"[recon-wire] FAILED: {type(e).__name__}: {e}\n")
 
         # Copy the resulting Oxigraph store directory to cache.
         # rdf_store persists as a directory (Oxigraph RocksDB tree), not a
