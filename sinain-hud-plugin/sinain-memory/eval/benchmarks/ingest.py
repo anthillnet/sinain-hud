@@ -99,9 +99,14 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     # ASR-C named-entity correction toggle — default ON; rewrites transcript
     # pre-distill so NEC on/off must land in distinct cache slots.
     nec_salt = os.environ.get("SINAIN_NEC", "1")
+    # T1-RECON cross-session consolidation toggle — default OFF. Env-gated salt (NOT a
+    # _PIPELINE_VERSION_FILES entry) so RECON-off cache-hits existing stores and only
+    # RECON-on opens a fresh slot. (When iterating reconstruct.py, rm the recon store.)
+    recon_salt = os.environ.get("SINAIN_RECON", "")
     return hashlib.sha256(
         (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
-         + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt).encode()
+         + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt
+         + "|recon:" + recon_salt).encode()
     ).hexdigest()[:16]
 
 
@@ -289,6 +294,22 @@ def ingest_instance(
                 "--digest", json.dumps(digest),
                 "--transcript", json.dumps(combined),
             ], INTEGRATOR_TIMEOUT_S)
+
+        # T1-RECON: cross-session consolidation pass (gated SINAIN_RECON, default OFF).
+        # Reads the just-built graph, asks ONE LLM call for enumeration + current-state
+        # summary facts, and integrates them via the proven integrator path. Fail-open.
+        if os.environ.get("SINAIN_RECON") == "1":
+            try:
+                import reconstruct
+                _recon_digest = reconstruct.build_consolidated_digest(
+                    str(mem_dir / "knowledge-graph.db"))
+                if _recon_digest and _recon_digest.get("facts"):
+                    _run_script("knowledge_integrator.py", [
+                        "--memory-dir", str(mem_dir),
+                        "--digest", json.dumps(_recon_digest),
+                    ], INTEGRATOR_TIMEOUT_S)
+            except Exception:
+                pass
 
         # Copy the resulting Oxigraph store directory to cache.
         # rdf_store persists as a directory (Oxigraph RocksDB tree), not a
