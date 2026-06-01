@@ -67,6 +67,7 @@ def _query_knowledge(
     profile: str | None = None,
     gold_keywords: list[str] | None = None,
     speaker_filter: list[str] | None = None,
+    max_facts: int | None = None,
 ) -> str:
     """Query sinain knowledge graph for benchmark evaluation.
 
@@ -104,7 +105,7 @@ def _query_knowledge(
         # excerpt-miss targets — the gold info simply isn't in any retrievable window
         # — and it adds a per-query LLM call, a production cost not worth zero benefit.
         # graph_query still accepts chunk_query=None for future use.)
-        facts = query_facts_hybrid(db_path, question, max_facts=MAX_FACTS_PER_QUERY, **kwargs)
+        facts = query_facts_hybrid(db_path, question, max_facts=(max_facts or MAX_FACTS_PER_QUERY), **kwargs)
     if not facts:
         return "(no facts retrieved)"
 
@@ -203,7 +204,17 @@ def answer_question(
         assert db_path, "db_path required for sinain-memory condition"
         # Lever 4: per-question speaker filter from QA metadata.
         speaker_filter = (question.metadata or {}).get("speaker_filter") or None
-        facts = _query_knowledge(db_path, question.text, profile=profile, speaker_filter=speaker_filter)
+        # T1-COUNT: "how many" questions undercount because fixed top-k truncates the
+        # distinct items (the items ARE in the store — verified: 0a995998 blazer/sweater/
+        # boots, gpt4_59c863d7 the kits). Retrieve WIDE so every distinct item reaches the
+        # prompt, then instruct the QA to count DISTINCT items (same item mentioned in
+        # several facts = ONE). Read-side, deterministic, general (intent-gated).
+        import re as _re_c
+        _is_count = bool(_re_c.search(r"\bhow many\b|\bnumber of\b", question.text.lower()))
+        facts = _query_knowledge(
+            db_path, question.text, profile=profile, speaker_filter=speaker_filter,
+            max_facts=45 if _is_count else None,
+        )
         system = (
             "Answer the question using the knowledge facts and transcript "
             "excerpts below. The knowledge facts are your curated memory: "
@@ -241,11 +252,18 @@ def answer_question(
                 "preference and give a confident recommendation grounded in it; only "
                 "decline if NO relevant preference or constraint fact exists at all."
             )
-        # NOTE: a COUNT-intent instruction was tested (T1-COUNT QA-framing) and
-        # REVERTED — it regressed gpt4_59c863d7 (re-derived a wrong count on facts
-        # that were already right) and did NOT fix 0a995998/6d550036 (those are
-        # distillation gaps — missing items — and ground-truth qualification, not
-        # counting mechanics). Counting needs T1-RECON/re-distill, not QA framing.
+        # T1-COUNT (re-enabled with WIDE retrieval, 2026-06-01): with deterministic
+        # distillation the items ARE present; the prior failure was top-k truncation
+        # (undercount), now fixed by max_facts=45 above. Instruct distinct-item counting
+        # so multiple facts about the SAME item don't inflate or split the count.
+        if _is_count:
+            system += (
+                " This question asks HOW MANY. Identify each DISTINCT item the facts "
+                "support (e.g. distinct objects, projects, purchases), treating multiple "
+                "facts about the SAME item as ONE. List the distinct items briefly, then "
+                "state the total count. Count every distinct item the facts mention — do "
+                "not stop at the first few."
+            )
         # Temporal "now" anchor: elapsed-time / "X ago" / ordering questions need
         # a reference date. In the bench that's question_date (when the user asks);
         # in production it's the wall clock — identical role, so production-faithful.
