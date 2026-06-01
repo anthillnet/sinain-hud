@@ -139,6 +139,14 @@ def _normalize_digest(digest: dict) -> dict:
             subj = x.get("subject")
             if isinstance(subj, str) and subj.strip():
                 clean["subject"] = subj.strip()
+            # Preserve provenance kind (e.g. "recon" from T1-RECON consolidation).
+            # This allow-list rebuild previously DROPPED `kind`, so consolidated
+            # current-state facts reached _facts_to_graph_ops untagged and defaulted
+            # to "distilled" — the root cause of the read-side recon guard being a
+            # no-op (zero kind=recon ever persisted).
+            kind = x.get("kind")
+            if isinstance(kind, str) and kind.strip():
+                clean["kind"] = kind.strip()
             return clean
         return _to_str(x)
 
@@ -349,6 +357,22 @@ def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_fa
         attribute = op.get("attribute", "")
         value = op.get("value", "")
         fact_id = _fact_id(entity, attribute, value)
+
+        # T1-RECON: consolidated current-state facts (kind=recon) run in a SECOND
+        # integrator pass AFTER the main graph exists, so they are almost always
+        # embedding-similar to an existing distilled fact. Letting the dedup below
+        # convert them to a `reinforce` collapses them into that distilled fact and
+        # DROPS the kind=recon provenance — which makes the read-side topical guard a
+        # no-op (root cause of RECON-on 24/36: zero recon facts ever persisted). Keep
+        # recon asserts as distinct facts (only intra-batch exact-value dedup applies)
+        # so they carry kind=recon and the guard can demote/keep them per query.
+        if op.get("kind") == "recon":
+            if value in seen_values_set or fact_id in seen_fact_ids:
+                continue
+            result.append(op)
+            seen_fact_ids.add(fact_id)
+            seen_values_set.add(value)
+            continue
 
         # Exact hash match
         if fact_id in existing_id_set or fact_id in seen_fact_ids:
