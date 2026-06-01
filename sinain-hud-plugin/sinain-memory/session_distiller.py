@@ -384,12 +384,22 @@ def main() -> None:
     # and confirms phi/cloud don't regress under the constraint.
     use_schema = os.environ.get("SINAIN_STRUCTURED_DISTILLER", "1") != "0"
     try:
+        # Greedy + fixed seed → deterministic distillation: re-ingesting the same
+        # haystack yields the SAME facts run-to-run. Previously omitted (provider
+        # default temperature ~1.0), which made every re-distill sample different
+        # facts — the real driver of LongMemEval run-to-run variance (e.g. "5K"
+        # mis-distilled "55k" one run, a "$400,000" callback caught only some runs).
+        # SINAIN_DISTILL_SEED overrides; SINAIN_DISTILL_TEMP loosens for ablation.
+        _dtemp = float(os.environ.get("SINAIN_DISTILL_TEMP", "0.0"))
+        _dseed = int(os.environ.get("SINAIN_DISTILL_SEED", "42"))
         raw = call_llm_with_fallback(
             SYSTEM_PROMPT,
             user_prompt,
             script="session_distiller",
             json_mode=True,
             json_schema=DIGEST_SCHEMA if use_schema else None,
+            temperature=_dtemp,
+            seed=_dseed,
         )
         result = extract_json(raw)
     except (ValueError, LLMError) as e:

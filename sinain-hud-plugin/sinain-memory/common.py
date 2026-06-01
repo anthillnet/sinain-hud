@@ -299,11 +299,19 @@ def call_llm_with_fallback(
     json_mode: bool = False,
     json_schema: dict | None = None,
     retries: int = 1,
+    temperature: float | None = None,
+    seed: int | None = None,
 ) -> str:
     """call_llm with automatic retry on failure (same model).
 
     Tries the configured model. On LLMError (timeout, HTTP error, empty
     response), retries up to *retries* times with the same model.
+
+    *temperature* / *seed* forward to call_llm for reproducible greedy decoding.
+    The distiller passes temperature=0.0 + a fixed seed so re-ingesting the same
+    haystack yields the SAME facts run-to-run (was provider-default temperature →
+    the dominant source of LongMemEval run-to-run variance, mis-attributed to the
+    QA model). QA already does this in eval/benchmarks/query.py.
     """
     last_err: LLMError | None = None
     for attempt in range(1 + retries):
@@ -311,6 +319,7 @@ def call_llm_with_fallback(
             return call_llm(
                 system_prompt, user_prompt,
                 script=script, json_mode=json_mode, json_schema=json_schema,
+                temperature=temperature, seed=seed,
             )
         except LLMError as e:
             last_err = e
