@@ -38,7 +38,11 @@ _embed_model = None
 # indexed. Content-agnostic (no turn/table special-casing). Shared by write_chunks
 # (bench) and append_chunks (production) → identical chunking in both paths.
 _WINDOW_CHARS = 700      # ~180 tokens, safely under the 256-token encoder limit
-_WINDOW_OVERLAP = 120    # carry tail context so a fact split across a boundary survives
+_WINDOW_OVERLAP = 260    # carry tail context so a fact split across a boundary survives
+# 260 (was 120): a value-bearing sentence ("...pre-approved for $400,000 from Wells
+# Fargo?") was severed across a window boundary, so the recon raw-backstop never saw the
+# intact amount (852ce960). 260 ≥ our 240-char raw-mention cap, so any matchable sentence
+# now lands intact in at least one window. Cost: ~modestly more chunk overlap.
 
 
 def _model():
