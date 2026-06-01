@@ -102,7 +102,11 @@ def _fact_texts(db_path: str) -> list[str]:
         except Exception:
             pass
     # Sort oldest→newest so the LLM sees temporal order (empty dates sort first).
-    rows.sort(key=lambda r: r[0])
+    # Tie-break by value so SAME-date facts feed in a STABLE order regardless of
+    # store iteration order (RocksDB/SPARQL scan order differs between the temp
+    # build-DB and the cached copy) — otherwise the temp=0 consolidation LLM gets
+    # a different input ordering and drifts (e.g. Rachel "Chicago" vs "suburbs").
+    rows.sort(key=lambda r: (r[0], r[1]))
     # de-dup identical values, keep (earliest) order; prefix with date.
     seen, uniq = set(), []
     for fs, v in rows:
@@ -182,7 +186,7 @@ def _raw_state_mentions(db_path: str, limit: int = 30) -> list[str]:
     # several raw mentions give different values for the same attribute
     # (e.g. "$350,000" in an Aug session vs "$400,000" in a Nov session →
     # current = $400,000). Recency overrides frequency.
-    matches.sort(key=lambda m: m[0])
+    matches.sort(key=lambda m: (m[0], m[1]))  # (chunk_id, sentence) — stable order
     # Keep the NEWEST `limit` mentions (the latest value-states must survive the
     # cap — an old session dense with amounts must not crowd out a later update),
     # still presented oldest→newest so the recency ordering reads correctly.
