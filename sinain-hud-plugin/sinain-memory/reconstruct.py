@@ -43,12 +43,14 @@ _SYSTEM = (
     "supported by the input facts.\n"
     "Task — CURRENT-STATE: for EACH distinct person or entity named in the facts (the user "
     "AND named others such as friends, family, colleagues — e.g. 'Rachel', 'Mom'), if any "
-    "attribute (location/residence, job, relationship, status, possession) is stated or "
-    "changes over time, output ONE sentence stating the LATEST value and naming that person "
-    "or entity explicitly (e.g. 'Rachel currently lives in the suburbs'; 'The user currently "
-    "works as a senior software engineer'). When a person MOVED or RELOCATED, the destination "
-    "of the most recent move is their current location — state it even if only one fact "
-    "mentions the move.\n"
+    "attribute (location/residence, job, relationship, status, possession, or a numeric "
+    "amount/value such as a pre-approved/approved amount, price, salary, rate or total) is "
+    "stated or changes over time, output ONE sentence stating the LATEST value and naming that "
+    "person or entity explicitly (e.g. 'Rachel currently lives in the suburbs'; 'The user "
+    "currently works as a senior software engineer'; 'The user's Wells Fargo mortgage "
+    "pre-approval amount is $400,000'). When a person MOVED/RELOCATED or an amount was REVISED, "
+    "the most recent destination/value is the current truth — state it even if only one fact "
+    "or transcript sentence mentions it.\n"
     "Each input fact is prefixed with its date as [YYYY-MM-DD] and the facts are ordered "
     "OLDEST→NEWEST. When two facts about the same entity+attribute conflict (e.g. two different "
     "residences for Rachel), the one with the LATER date is the current truth — use it and "
@@ -112,9 +114,20 @@ def _fact_texts(db_path: str) -> list[str]:
 
 
 _STATE_PATTERNS = re.compile(
-    r"\b(moved (?:back )?(?:to|into)|relocat\w+ to|now lives? (?:in|at)|"
+    r"\b(?:"
+    # location / job / status changes
+    r"moved (?:back )?(?:to|into)|relocat\w+ to|now lives? (?:in|at)|"
     r"just moved|recently moved|moved away|moved out|switched to|"
-    r"started (?:working|a new job)|now works? (?:at|as)|got a new (?:job|place|apartment))\b",
+    r"started (?:working|a new job)|now works? (?:at|as)|got a new (?:job|place|apartment)|"
+    # numeric / monetary value-updates (knowledge-update over amounts: approvals,
+    # prices, salaries, totals — the LATEST stated value is the current truth).
+    # Each requires a following digit so plain prose ("approved for the loan")
+    # doesn't match; closing-cost fee line-items don't carry these verbs.
+    r"(?:pre-?approved|approved|qualified) for \$?\d|"
+    r"(?:increased|raised|lowered|changed|updated|bumped|dropped|revised) (?:to|from) \$?\d|"
+    r"now (?:earns?|makes?|costs?|pays?|owes?) \$?\d|"
+    r"new (?:salary|rate|price|budget|total|amount|limit)\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -137,7 +150,7 @@ def _raw_state_mentions(db_path: str, limit: int = 30) -> list[str]:
         return []
     if not sidecar.exists():
         return []
-    out: list[str] = []
+    matches: list[tuple[int, str]] = []  # (chunk_id, sentence)
     seen: set[str] = set()
     try:
         for line in sidecar.open():
@@ -145,18 +158,31 @@ def _raw_state_mentions(db_path: str, limit: int = 30) -> list[str]:
                 rec = json.loads(line)
             except Exception:
                 continue
+            # chunk id == session index == chronological order (sessions are
+            # ingested oldest→newest), so it is a reliable recency key even though
+            # the sidecar carries no explicit date.
+            try:
+                cid = int(rec.get("id", 0))
+            except Exception:
+                cid = 0
             for sent in re.split(r"(?<=[.!?])\s+", rec.get("text", "")):
                 s = sent.strip()
                 if 12 < len(s) < 240 and _STATE_PATTERNS.search(s):
                     key = s.lower()
                     if key not in seen:
                         seen.add(key)
-                        out.append(s)
-                        if len(out) >= limit:
-                            return out
+                        matches.append((cid, s))
     except Exception:
         pass
-    return out
+    # Oldest→newest so the consolidator can pick the LATEST stated value when
+    # several raw mentions give different values for the same attribute
+    # (e.g. "$350,000" in an Aug session vs "$400,000" in a Nov session →
+    # current = $400,000). Recency overrides frequency.
+    matches.sort(key=lambda m: m[0])
+    # Keep the NEWEST `limit` mentions (the latest value-states must survive the
+    # cap — an old session dense with amounts must not crowd out a later update),
+    # still presented oldest→newest so the recency ordering reads correctly.
+    return [s for _cid, s in matches[-limit:]]
 
 
 def _parse_json(text: str) -> dict:
@@ -195,9 +221,11 @@ def build_consolidated_digest(db_path: str) -> dict:
         raw_block = ""
         if raw_mentions:
             raw_block = (
-                "\n\nAdditional VERBATIM transcript sentences (raw source — these may "
-                "contain the LATEST state the numbered facts above missed; treat them as "
-                "the most recent evidence when they state a move/change):\n"
+                "\n\nAdditional VERBATIM transcript sentences (raw source), ordered "
+                "OLDEST→NEWEST. These may contain the LATEST state/value the numbered "
+                "facts above missed. When several state the SAME attribute or amount with "
+                "different values (e.g. an earlier '$350,000' and a later '$400,000' "
+                "pre-approval), the LAST one listed is the current truth — use it:\n"
                 + "\n".join(f"R{i+1}. {s}" for i, s in enumerate(raw_mentions))
             )
         from common import call_llm
