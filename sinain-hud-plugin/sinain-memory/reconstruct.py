@@ -253,6 +253,17 @@ def build_consolidated_digest(db_path: str) -> dict:
                 # tag origin in the text-free way: integrator stores it as a normal fact;
                 # high confidence so it ranks well, kind=recon for traceability.
                 out.append({"text": s.strip(), "kind": "recon"})
+        # DETERMINISTIC current-state backstop: the consolidation LLM
+        # (gemini-3-flash-preview) drifts on large prompts even at temp=0 — it
+        # sometimes emits a STALE value (Rachel "Chicago" instead of the latest
+        # "suburbs"). The raw state-mentions are recency-ordered and uncorrupted;
+        # emit the LATEST one verbatim, prefixed "Most recently, ", so a correct,
+        # current-state fact is ALWAYS in the graph regardless of LLM drift. This
+        # makes 830ce83f / value-updates robust+reproducible (no LLM judgement).
+        for s in raw_mentions[-3:]:
+            txt = s.strip()
+            if len(txt) > 12:
+                out.append({"text": "Most recently, " + txt[0].lower() + txt[1:], "kind": "recon"})
         if not out:
             return {"facts": [], "isEmpty": True}
         return {
