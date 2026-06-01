@@ -124,11 +124,17 @@ def _resolve_distiller_timeout() -> int:
     one of those was the answer-session (session[7], "45 minutes commute")
     → graph missing answer → QA returned "I don't know" → paper_label=0.
     60s catches the tail without masking genuine hangs.
+
+    2026-06-01: even 60s dropped a batch on gpt4_fa19884c during a full 36-q
+    re-distill (sequential distills contend for the memory-constrained box, so
+    tail latency stretches past 60s). Bumped to 90s; the distill loop also
+    retries once at 2x on failure, so a transient slow batch no longer silently
+    loses its facts. Genuine hangs still surface (loop gives up after the retry).
     """
     bench_model = os.environ.get("SINAIN_BENCH_MODEL", "")
     if bench_model.startswith("ollama/"):
-        return 90
-    return 60
+        return 120
+    return 90
 
 
 def _resolve_batch_size() -> int:
@@ -266,6 +272,19 @@ def ingest_instance(
                     "--transcript", json.dumps(combined),
                     "--session-meta", meta,
                 ], _resolve_distiller_timeout())
+                # Retry once at 2x budget on timeout/failure. A dropped batch
+                # permanently loses its facts (no resume below), silently sinking
+                # any question whose answer lives in that batch (gpt4_fa19884c:
+                # 60s timeout → graph missing the answer → QA "I don't know").
+                # The retry recovers transient model latency / bench contention.
+                if not digest_json:
+                    print(f"  [distill] batch {batch_idx} empty/timeout — retry @2x",
+                          file=sys.stderr)
+                    digest_json = _run_script("session_distiller.py", [
+                        "--memory-dir", str(mem_dir),
+                        "--transcript", json.dumps(combined),
+                        "--session-meta", meta,
+                    ], _resolve_distiller_timeout() * 2)
 
             if not digest_json:
                 continue
