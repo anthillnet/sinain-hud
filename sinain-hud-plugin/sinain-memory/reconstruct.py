@@ -126,7 +126,11 @@ _STATE_PATTERNS = re.compile(
     r"(?:pre-?approved|approved|qualified) for \$?\d|"
     r"(?:increased|raised|lowered|changed|updated|bumped|dropped|revised) (?:to|from) \$?\d|"
     r"now (?:earns?|makes?|costs?|pays?|owes?) \$?\d|"
-    r"new (?:salary|rate|price|budget|total|amount|limit)\b"
+    r"new (?:salary|rate|price|budget|total|amount|limit)\b|"
+    # personal records / best times (knowledge-update over a value, often a clock
+    # time MM:SS the distiller mislabels — raw is the uncorrupted source, recency
+    # ordering picks the latest). e.g. "personal best time of 25:50".
+    r"(?:personal best|personal record|best time|new record)[^.!?]{0,60}\d"
     r")",
     re.IGNORECASE,
 )

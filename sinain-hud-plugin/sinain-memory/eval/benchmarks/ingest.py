@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -192,6 +193,54 @@ def _run_script(script_name: str, args: list[str], timeout: int) -> str | None:
         return None
 
 
+_DIGIT_UNIT_RE = re.compile(r"\b(\d{1,4})(\s?)(k|km|mi|m)\b", re.IGNORECASE)
+
+
+def _ground_quantities(text: str, source_low: str) -> str:
+    """Correct digit-repetition hallucinations in distance/quantity tokens against
+    the source transcript. Deterministic + conservative: only rewrites a token that
+    is ABSENT from the source when collapsing a run of repeated digits yields a
+    variant that IS present verbatim (e.g. distiller wrote "55k" but the transcript
+    only says "5k" → "5k"). Never touches legitimately-computed values (no source
+    variant ⇒ left unchanged). Fixes the gemini "5K"→"55k" class that splits one
+    evolving metric into two and hides the latest value (6a1eabeb)."""
+    if not text or not source_low:
+        return text
+
+    def _fix(m: "re.Match") -> str:
+        tok = m.group(0)
+        if tok.lower() in source_low:
+            return tok
+        digits, sep, unit = m.group(1), m.group(2), m.group(3)
+        collapsed = re.sub(r"(\d)\1+", r"\1", digits)
+        if collapsed != digits:
+            cand = f"{collapsed}{sep}{unit}"
+            if cand.lower() in source_low:
+                return cand
+        return tok
+
+    return _DIGIT_UNIT_RE.sub(_fix, text)
+
+
+def _ground_digest_facts(digest: dict, source_low: str) -> dict:
+    """Apply _ground_quantities to every fact text in a digest (in place-ish)."""
+    if not isinstance(digest, dict):
+        return digest
+    facts = digest.get("facts")
+    if isinstance(facts, list):
+        new = []
+        for f in facts:
+            if isinstance(f, str):
+                new.append(_ground_quantities(f, source_low))
+            elif isinstance(f, dict) and isinstance(f.get("text"), str):
+                f = {**f, "text": _ground_quantities(f["text"], source_low)}
+                new.append(f)
+            else:
+                new.append(f)
+        digest = {**digest, "facts": new}
+    return digest
+
+
 def ingest_instance(
     instance: BenchmarkInstance,
     cache_dir: Path,
@@ -308,6 +357,12 @@ def ingest_instance(
             # it and runs the gbrain Proposal A zero-LLM extractors
             # (extract_user_attributes + extract_auto_edges) post-LLM. Topic-
             # robust safety net for weak distillers that drop facts.
+            # Source-grounding: correct digit-repetition quantity hallucinations
+            # (e.g. "55k"→"5k") against THIS batch's transcript before integration.
+            _src_low = " ".join(
+                (t.get("content") or t.get("text") or "") for t in combined
+            ).lower()
+            digest = _ground_digest_facts(digest, _src_low)
             _run_script("knowledge_integrator.py", [
                 "--memory-dir", str(mem_dir),
                 "--digest", json.dumps(digest),
@@ -327,6 +382,13 @@ def ingest_instance(
                 _rn = len((_recon_digest or {}).get("facts") or [])
                 sys.stderr.write(f"[recon-wire] consolidated {_rn} facts\n")
                 if _recon_digest and _recon_digest.get("facts"):
+                    # Ground recon facts against the FULL haystack transcript
+                    # (consolidation can re-introduce "55k" from any session).
+                    _full_low = " ".join(
+                        (t.get("content") or t.get("text") or "")
+                        for sess in instance.sessions for t in sess
+                    ).lower()
+                    _recon_digest = _ground_digest_facts(_recon_digest, _full_low)
                     _run_script("knowledge_integrator.py", [
                         "--memory-dir", str(mem_dir),
                         "--digest", json.dumps(_recon_digest),
