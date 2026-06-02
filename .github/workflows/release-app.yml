@@ -10,13 +10,17 @@ name: Release App (DMG)
 # (bundle staging) and the secrets are done. See docs/dmg-distribution-spec.md §4.
 #
 # Required GitHub Secrets (none provisioned yet):
-#   APPLE_CERT_P12_BASE64        Developer ID Application cert (.p12, base64)
-#   APPLE_CERT_PASSWORD          .p12 password
-#   APPLE_TEAM_ID                Apple Developer Team ID
-#   APPLE_NOTARY_KEY_ID          App Store Connect API key id (notarytool)
-#   APPLE_NOTARY_KEY_ISSUER_ID   App Store Connect issuer id
-#   APPLE_NOTARY_KEY_P8_BASE64   App Store Connect .p8 key (base64)
-#   SPARKLE_ED_PRIVATE_KEY       EdDSA private key for signing the appcast
+#   APPLE_CERT_P12_BASE64          Developer ID Application cert (.p12, base64)
+#   APPLE_CERT_PASSWORD            .p12 password
+#   APPLE_TEAM_ID                  Apple Developer Team ID
+#   APPLE_ID                       Apple ID email (notarytool auth)
+#   APPLE_APP_SPECIFIC_PASSWORD    app-specific password (xxxx-xxxx-xxxx-xxxx)
+#   SPARKLE_ED_PRIVATE_KEY         EdDSA private key for signing the appcast
+#
+# Notarization uses the app-specific-password method (account.apple.com →
+# Sign-In and Security → App-Specific Passwords), not an App Store Connect API
+# key — simpler for an individual direct-distribution account. See
+# docs/dmg-distribution-spec.md §4.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -40,7 +44,7 @@ jobs:
         id: preflight
         env:
           HAVE_CERT: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
-          HAVE_NOTARY: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 != '' }}
+          HAVE_NOTARY: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
           HAVE_SPARKLE: ${{ secrets.SPARKLE_ED_PRIVATE_KEY != '' }}
         run: |
           if [ "$HAVE_CERT" != "true" ] || [ "$HAVE_NOTARY" != "true" ] || [ "$HAVE_SPARKLE" != "true" ]; then
@@ -129,12 +133,18 @@ jobs:
       - name: Notarize + staple
         if: steps.preflight.outputs.ready == 'true'
         env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          APPLE_NOTARY_KEY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_KEY_ISSUER_ID }}
-          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
         run: |
-          # TODO(Phase 3): xcrun notarytool submit --wait && xcrun stapler staple
+          # TODO(Phase 3): wire build/Sinain.dmg as the notarize target. Auth via
+          # app-specific password (account.apple.com), not an API key.
+          #   xcrun notarytool submit build/Sinain.dmg \
+          #     --apple-id "$APPLE_ID" \
+          #     --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          #     --team-id "$APPLE_TEAM_ID" \
+          #     --wait
+          #   xcrun stapler staple build/Sinain.dmg
           echo "::error::notarize step not implemented — Phase 3"
           exit 1
 

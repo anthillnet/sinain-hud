@@ -120,20 +120,32 @@ GitHub Actions workflow `release-app.yml` (triggered by `app-v*` tags), on
 2. `stage-bundle.sh` → assemble `Sinain.app`.
 3. `codesign --deep --options runtime` every binary + framework with the Developer ID Application cert (hardened runtime).
 4. Build DMG (`create-dmg` or `hdiutil`).
-5. `xcrun notarytool submit --wait` → `xcrun stapler staple`.
+5. `xcrun notarytool submit --wait` → `xcrun stapler staple` (auth via app-specific password).
 6. Verify: `spctl --assess --type install` + `codesign --verify --deep --strict`.
 7. Upload to GitHub Releases + publish Sparkle appcast (§5).
+
+> **This is direct distribution, not the App Store.** The DMG is downloaded from
+> GitHub Releases / the landing page and dragged to Applications — no App Store
+> listing, no App Review. The Developer ID cert + notarization are still required:
+> they're what lets Gatekeeper open a downloaded app without the "unidentified
+> developer" block. They are *not* App-Store-only.
 
 **Required GH Secrets** (placeholders documented in the workflow; pipeline is
 non-functional until provisioned):
 
-| Secret | Purpose |
-|--------|---------|
-| `APPLE_CERT_P12_BASE64` | Developer ID Application cert (.p12, base64) |
-| `APPLE_CERT_PASSWORD` | .p12 password |
-| `APPLE_TEAM_ID` | Apple Developer Team ID |
-| `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_KEY_ISSUER_ID` / `APPLE_NOTARY_KEY_P8_BASE64` | App Store Connect API key for notarytool |
-| `SPARKLE_ED_PRIVATE_KEY` | EdDSA key for signing appcast updates (§5) |
+| Secret | Purpose | Where to get it |
+|--------|---------|-----------------|
+| `APPLE_CERT_P12_BASE64` | Developer ID Application cert (.p12, base64) | developer.apple.com → Certificates → Developer ID Application (G2 Sub-CA) |
+| `APPLE_CERT_PASSWORD` | .p12 password | set during Keychain export |
+| `APPLE_TEAM_ID` | Apple Developer Team ID | developer.apple.com → Membership |
+| `APPLE_ID` | Apple ID email for notarytool | your Apple ID |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password (`xxxx-xxxx-xxxx-xxxx`) | account.apple.com → Sign-In and Security → App-Specific Passwords |
+| `SPARKLE_ED_PRIVATE_KEY` | EdDSA key for signing appcast updates (§5) | Sparkle `bin/generate_keys` |
+
+> **Notarization auth:** uses the **app-specific password** method, not an App
+> Store Connect API key. The API-key "Team Keys" tab is gated behind the
+> Admin/Account Holder role and is unnecessary for a single-maintainer direct-
+> distribution setup. `notarytool` accepts `--apple-id / --password / --team-id`.
 
 Exit criterion: a signed DMG passes Gatekeeper on a *fresh* Mac (no dev tools,
 quarantine bit set) — open question Q1 covers how we test this without a clean
