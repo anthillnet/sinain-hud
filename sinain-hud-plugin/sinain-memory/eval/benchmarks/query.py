@@ -68,6 +68,7 @@ def _query_knowledge(
     gold_keywords: list[str] | None = None,
     speaker_filter: list[str] | None = None,
     max_facts: int | None = None,
+    max_chars: int = 2000,
 ) -> str:
     """Query sinain knowledge graph for benchmark evaluation.
 
@@ -118,7 +119,11 @@ def _query_knowledge(
     # 2000 (was 1200): with MAX_FACTS_PER_QUERY=20, widen the fact budget so the
     # additional gold-bearing facts at rank 11-20 actually reach the prompt rather
     # than being truncated. Excerpts keep their own separate budget downstream.
-    return format_facts_compact(facts, max_chars=2000)
+    # T1-COUNT v2: counting questions pass a LARGER budget (caller sets max_chars)
+    # so all distinct items reach the prompt — max_facts=45 retrieval is defeated by
+    # a 2000-char cap (~25 facts), which silently truncated the tail items and caused
+    # undercounts (gpt4_59c863d7: 2 of 5 kits never reached the QA).
+    return format_facts_compact(facts, max_chars=max_chars)
 
 
 def _get_retrieved_facts(
@@ -214,6 +219,9 @@ def answer_question(
         facts = _query_knowledge(
             db_path, question.text, profile=profile, speaker_filter=speaker_filter,
             max_facts=45 if _is_count else None,
+            # T1-COUNT v2: counting needs every distinct item in-prompt, so lift the
+            # 2000-char cap (~25 facts) that truncated tail items. 5000 ≈ all 45.
+            max_chars=5000 if _is_count else 2000,
         )
         system = (
             "Answer the question using the knowledge facts and transcript "
@@ -275,7 +283,14 @@ def answer_question(
         _temporal = bool(_re_t.search(
             r"how many (days|weeks|months|years)|(days?|weeks?|months?|years?) ago"
             r"|how long|days? (between|since|until)|order (from|of)|first to last"
-            r"|which .*(first|last|before|after|earliest|latest)|when did",
+            r"|which .*(first|last|before|after|earliest|latest)|when did"
+            # Relative-time WINDOW phrases ("in the last month", "this week", "recently",
+            # "past N days"): any question scoped to a window needs a now-reference to
+            # decide which events fall inside it (production-faithful — the live system
+            # has the wall clock). Fixes count-within-window Qs (3a704032: plants
+            # acquired "in the last month" — without 'today' the QA can't bound it).
+            r"|(in |over |during )?the (last|past|previous|recent) (day|week|month|year)"
+            r"|this (week|month|year)|recently|past \d+ (days?|weeks?|months?)",
             question.text.lower(),
         ))
         _now_line = f"Today's date is {_qdate}.\n\n" if (_temporal and _qdate) else ""

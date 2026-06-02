@@ -123,6 +123,17 @@ _STATE_PATTERNS = re.compile(
     r"moved (?:back )?(?:to|into)|relocat\w+ to|now lives? (?:in|at)|"
     r"just moved|recently moved|moved away|moved out|switched to|"
     r"started (?:working|a new job)|now works? (?:at|as)|got a new (?:job|place|apartment)|"
+    # possession / usage / method changes — a person adopting/abandoning a tool,
+    # app, brand, or routine is a current-state update just like a relocation
+    # (e.g. "my mom is using the same grocery list app as me now"). Without these
+    # the backstop only saw location/job/money changes and the stale prior value
+    # (mom "still on paper") won the deterministic current-state pick (d7c942c3).
+    r"now (?:uses?|using|has|owns?|prefers?|drives?|plays?|goes? (?:to|by))|"
+    r"(?:started|began) (?:using|to use)|switched (?:over )?to using|"
+    r"is (?:now |currently )?(?:using|on) (?:the |a |an )?|"
+    r"(?:also |now )?using the same|"
+    r"recently (?:got|bought|adopted|started|switched)|"
+    r"no longer (?:uses?|using|has)|stopped using|"
     # numeric / monetary value-updates (knowledge-update over amounts: approvals,
     # prices, salaries, totals — the LATEST stated value is the current truth).
     # Each requires a following digit so plain prose ("approved for the loan")
@@ -260,7 +271,20 @@ def build_consolidated_digest(db_path: str) -> dict:
         # emit the LATEST one verbatim, prefixed "Most recently, ", so a correct,
         # current-state fact is ALWAYS in the graph regardless of LLM drift. This
         # makes 830ce83f / value-updates robust+reproducible (no LLM judgement).
-        for s in raw_mentions[-3:]:
+        # Verbatim emit, split by value-type (supersession applied to the emit):
+        #   - CATEGORICAL mentions (no money/number) → emit the last 5. Categorical
+        #     state changes (mom "now uses the app") aren't self-contradicting, and
+        #     d7c942c3 needs enough current-state framing to beat stale distilled
+        #     "mom prefers paper" facts (it FAILS with only the last 3).
+        #   - NUMERIC/VALUE mentions ($400k, "four") → emit ONLY the single latest.
+        #     Older values ($350k, "three") are SUPERSEDED — emitting them floods the
+        #     QA with stale competitors and regressed 852ce960/6aeb4375 at a wider tail.
+        # raw_mentions is already oldest→newest, so [-1:] / [-5:] take the latest.
+        _num = re.compile(r"\$\s?\d|\b\d{2,}\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b", re.IGNORECASE)
+        _cat = [s for s in raw_mentions if not _num.search(s)]
+        _numeric = [s for s in raw_mentions if _num.search(s)]
+        _emit = _cat[-5:] + _numeric[-1:]
+        for s in _emit:
             txt = s.strip()
             if len(txt) > 12:
                 out.append({"text": "Most recently, " + txt[0].lower() + txt[1:], "kind": "recon"})
