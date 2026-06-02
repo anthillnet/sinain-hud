@@ -434,7 +434,12 @@ _STRONG_VALUE_PATTERNS = [
     re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?"),        # currency ($1,200.00)
     re.compile(r"\b\d+\.\d+\b"),                    # decimals (3.14)
     re.compile(r"\b\d{2,}\b"),                      # multi-digit integers (27, 1200)
+    # word-numbers (count evolutions distill as words: "tried three"->"four").
+    # Normalized to digits below so "three"!="3" never blocks a real collapse.
+    re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b"),
 ]
+_WORDNUM = {"zero":"0","one":"1","two":"2","three":"3","four":"4","five":"5","six":"6",
+            "seven":"7","eight":"8","nine":"9","ten":"10","eleven":"11","twelve":"12"}
 # Category markers — alphanumeric tokens that IDENTIFY which quantity is meant
 # (5k vs 10k, q3 vs q4, v2 vs v3, gpt4). If two facts carry DIFFERENT category
 # markers they describe DIFFERENT quantities → never collapse. This is what
@@ -449,7 +454,9 @@ def _strong_value_tokens(text: str) -> frozenset:
     toks: set = set()
     low = (text or "").lower()
     for pat in _STRONG_VALUE_PATTERNS:
-        toks.update(m.strip() for m in pat.findall(low))
+        for m in pat.findall(low):
+            m = m.strip()
+            toks.add(_WORDNUM.get(m, m))  # normalize word-numbers to digits
     return frozenset(toks)
 
 
