@@ -1328,6 +1328,34 @@ def format_facts_compact(facts: list[dict], max_chars: int = 1200, with_dates: b
     fact_items = [f for f in facts if f.get("source") != "raw-excerpt" and f.get("entity") != "excerpt"]
     excerpts = [f for f in facts if f.get("source") == "raw-excerpt" or f.get("entity") == "excerpt"]
 
+    # Salience-ordered assembly (production retrieval quality): within the
+    # char budget, lead with SPECIFIC/answer-bearing facts and demote GENERIC
+    # definitional background ("X is a process", "advanced technologies optimize
+    # …") to the tail so it is truncated first, not the answer. Diagnosis
+    # (2026-06-02, geometry sweep): qa_reasoning_bound fails had the gold present
+    # but BURIED under topically-similar generic noise (6ae235be: Lake-Charles
+    # process facts crowded out by generic yield-advice). Stable demotion keeps
+    # the retrieval relevance order among non-generic facts; only clearly-generic
+    # facts move to the back. Read-side, deterministic, model-agnostic.
+    import re as _re_s
+    _GENERIC_S = _re_s.compile(
+        r"\b(?:is a |are |can be |should be |is the process|is used to|"
+        r"is recommended|are known|typically|generally|usually|"
+        r"helps? (?:to )?(?:increase|reduce|improve|optimize)|"
+        r"can (?:increase|reduce|improve|optimize|enhance|help))\b",
+        _re_s.IGNORECASE,
+    )
+    _USER_S = _re_s.compile(r"\b(?:the user|user's|i |my |we )\b", _re_s.IGNORECASE)
+
+    def _demote(f) -> int:
+        v = (f.get("value", "") or "")
+        if _USER_S.search(v):
+            return 0            # user-centric → lead
+        if _GENERIC_S.search(v):
+            return 2            # generic definitional/advice → tail
+        return 1                # specific non-user fact → middle
+    fact_items = sorted(fact_items, key=_demote)  # stable → preserves rank within tier
+
     lines = []
     total = 0
     for f in fact_items:

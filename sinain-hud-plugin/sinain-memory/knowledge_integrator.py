@@ -551,6 +551,79 @@ def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
     return "general"
 
 
+_GENERIC_PRED = re.compile(
+    # definitional / how-to / general-knowledge predicate shapes the distiller
+    # volunteers as background (NOT about the user): "Bee balm repels pests",
+    # "Turkey wraps can be refrigerated", "Atmospheric distillation is a process".
+    r"\b(?:is|are|was|were|can be|could be|should be|may be|repels?|provides?|"
+    r"offers?|involves?|includes?|consists?|requires?|contains?|refers?|"
+    r"helps?|prevents?|reduces?|improves?|means?|denotes?|typically|generally|"
+    r"usually|often|are known|is known|is a type|is the process)\b",
+    re.IGNORECASE,
+)
+_USER_REF = re.compile(r"\b(?:the user(?:'s|s')?|the user is|user's)\b", re.IGNORECASE)
+
+
+def _fact_text_of(f) -> str:
+    if isinstance(f, str):
+        return f
+    if isinstance(f, dict):
+        t = f.get("text")
+        return t if isinstance(t, str) else ""
+    return ""
+
+
+def _salience_filter(facts: list) -> list:
+    """Deterministic, model-agnostic salience gate (T3-FORGET 'salience-gated
+    writes'; eval-log STAGES rule — NOT a distiller-prompt instruction, so it
+    works regardless of which model distilled or whether it complied).
+
+    LLM distillation of long sessions is non-deterministic (~70% of facts vary
+    run-to-run); the volatile tail is INCIDENTAL world-trivia the assistant
+    volunteered ("Bee balm repels hornworm", "Frida Kahlo underwent surgeries"),
+    while the stable core is the user-centric / asked-about material. Dropping the
+    incidental tail raises precision (fewer retrieval distractors → the salient
+    facts rank more reliably → answers stabilize) AND shrinks the volatile set.
+
+    CONSERVATIVE — drops a fact only when ALL hold, so central/asked-about topics
+    and user facts always survive (raw chunks backstop anything dropped):
+      (a) it does NOT reference the user, AND
+      (b) it matches a generic-knowledge predicate shape, AND
+      (c) its subject entity is NOT shared with any user-referencing fact in this
+          batch (i.e. it is not part of the user's own context/topic).
+    """
+    if not isinstance(facts, list) or len(facts) < 2:
+        return facts
+    texts = [_fact_text_of(f) for f in facts]
+    # subjects/entities that co-occur with a user-referencing fact → protected
+    def _subj(f, txt):
+        s = f.get("subject") if isinstance(f, dict) else ""
+        if isinstance(s, str) and s.strip():
+            return s.strip().lower()
+        # fallback: capitalized lead phrase
+        m = re.match(r"\s*([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})", txt)
+        return m.group(1).lower() if m else ""
+    user_subjects = set()
+    for f, txt in zip(facts, texts):
+        if _USER_REF.search(txt):
+            sj = _subj(f, txt)
+            if sj:
+                user_subjects.add(sj)
+    kept = []
+    for f, txt in zip(facts, texts):
+        if not txt:
+            kept.append(f)
+            continue
+        is_user = bool(_USER_REF.search(txt))
+        is_generic = bool(_GENERIC_PRED.search(txt))
+        sj = _subj(f, txt)
+        connected = sj in user_subjects if sj else False
+        if (not is_user) and is_generic and (not connected):
+            continue  # drop isolated, non-user, definitional trivia
+        kept.append(f)
+    return kept
+
+
 def _facts_to_graph_ops(
     digest: dict,
     transcript_speakers: list[str] | None = None,
@@ -599,7 +672,7 @@ def _facts_to_graph_ops(
     # discriminative). When a string or no attributedTo, fall back to
     # batch_speakers (Lever 4 coarse behavior preserved). When the object
     # supplies subject, prefer it over heuristic entity extraction.
-    for fact_item in digest.get("facts", []):
+    for fact_item in _salience_filter(digest.get("facts", [])):
         attributed_to: str | None = None
         explicit_subject: str | None = None
         if isinstance(fact_item, str):
