@@ -204,6 +204,90 @@ def _raw_state_mentions(db_path: str, limit: int = 30) -> list[str]:
     return [s for _cid, s in matches[-limit:]]
 
 
+# T1-RECON entity-attribution: deterministic (no-LLM) extractor for structured
+# "Entity:\n* item\n* item" lists — a common shape in explanations. The distiller
+# routinely DROPS the subject→attribute-list link (6ae235be: it never stored
+# "(Lake Charles, uses, alkylation)", only a vague summary) and windowed chunking
+# splits the header from its bullets, so retrieval delivers fragments the answer
+# model mis-attributes (alkylation read under a neighbouring refinery's cross-ref).
+# This rebuilds ONE clean attributed fact per header so the link survives.
+_ATTR_HEADER = re.compile(r"^\s*(?:\d+[.)]\s*)?([A-Z][\w '&/().-]{2,60}?):\s*$")
+_ATTR_BULLET = re.compile(r"^\s*(?:[*\-•]|\d+[.)])\s+(.+?)\s*$")
+
+
+def _extract_attribution_facts(text: str, min_items: int = 2, max_items: int = 12) -> list[str]:
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _ATTR_HEADER.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        header = m.group(1).strip()
+        items: list[str] = []
+        j = i + 1
+        while j < len(lines):
+            if _ATTR_HEADER.match(lines[j]):  # next "Entity:" section → stop
+                break
+            bm = _ATTR_BULLET.match(lines[j])
+            if bm:
+                name = bm.group(1).split(":", 1)[0].strip()  # item NAME before its description
+                if 1 < len(name) < 80:
+                    items.append(name)
+                j += 1
+            elif lines[j].strip() == "":
+                j += 1
+            else:
+                break
+        if len(items) >= min_items:
+            # dedup preserving order
+            seen, uniq = set(), []
+            for it in items[:max_items]:
+                k = it.lower()
+                if k not in seen:
+                    seen.add(k); uniq.append(it)
+            out.append(f"{header} includes: " + ", ".join(uniq) + ".")
+        i = max(j, i + 1)
+    return out
+
+
+def _attribution_facts(db_path: str, limit: int = 12) -> list[str]:
+    """Read raw chunks, reconstruct contiguous text, and extract entity-attribution
+    facts. Chunks are windowed (header/bullets may span a boundary) so we parse the
+    ORDERED concatenation; facts are deduped. Content-agnostic, deterministic."""
+    try:
+        from raw_store import _sidecar_path
+        sidecar = _sidecar_path(db_path)
+    except Exception:
+        return []
+    if not sidecar.exists():
+        return []
+    rows: list[tuple[int, str]] = []
+    try:
+        for line in sidecar.open():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            try:
+                cid = int(rec.get("id", 0))
+            except Exception:
+                cid = 0
+            rows.append((cid, rec.get("text", "")))
+    except Exception:
+        return []
+    rows.sort(key=lambda r: r[0])
+    joined = "\n".join(t for _c, t in rows)
+    facts = _extract_attribution_facts(joined)
+    # dedup (overlapping windows can re-emit the same list) preserving order
+    seen, uniq = set(), []
+    for f in facts:
+        if f.lower() not in seen:
+            seen.add(f.lower()); uniq.append(f)
+    return uniq[:limit]
+
+
 def _parse_json(text: str) -> dict:
     text = (text or "").strip()
     try:
@@ -225,7 +309,7 @@ def _parse_json(text: str) -> dict:
     return {}
 
 
-def build_consolidated_digest(db_path: str) -> dict:
+def build_consolidated_digest(db_path: str, raw_text: str | None = None) -> dict:
     """Read the store, ask one LLM call for enumeration + current-state consolidations,
     and return a synthetic digest for the integrator. Fail-open: {} -> caller skips."""
     try:
@@ -288,6 +372,18 @@ def build_consolidated_digest(db_path: str) -> dict:
             txt = s.strip()
             if len(txt) > 12:
                 out.append({"text": "Most recently, " + txt[0].lower() + txt[1:], "kind": "recon"})
+        # T1-RECON entity-attribution: clean "Entity includes: a, b, c" facts from
+        # structured raw lists, so a subject→attribute-list link the distiller dropped
+        # (and chunking split) survives and retrieval delivers it correctly attributed
+        # (6ae235be: Lake Charles → atmospheric distillation, FCC, alkylation, hydrotreating).
+        # Prefer the caller's intact session text (the windowed raw chunks split the
+        # header from its bullets); fall back to the chunk-concatenation otherwise.
+        _attr = _extract_attribution_facts(raw_text) if raw_text else _attribution_facts(db_path)
+        _seen_attr = set()
+        for s in _attr:
+            if len(s) > 12 and s.lower() not in _seen_attr:
+                _seen_attr.add(s.lower())
+                out.append({"text": s, "kind": "recon"})
         if not out:
             return {"facts": [], "isEmpty": True}
         return {

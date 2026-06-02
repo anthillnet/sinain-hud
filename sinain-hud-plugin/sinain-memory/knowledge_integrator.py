@@ -614,6 +614,12 @@ def _salience_filter(facts: list) -> list:
         if not txt:
             kept.append(f)
             continue
+        # Exempt consolidated/attribution facts (kind=recon): they are already
+        # curated cross-session summaries (e.g. "Lake Charles includes: …") and
+        # legitimately use generic predicates ("includes"); never drop them.
+        if isinstance(f, dict) and f.get("kind") == "recon":
+            kept.append(f)
+            continue
         is_user = bool(_USER_REF.search(txt))
         is_generic = bool(_GENERIC_PRED.search(txt))
         sj = _subj(f, txt)

@@ -377,8 +377,15 @@ def ingest_instance(
             sys.stderr.write(f"[recon-wire] running on {mem_dir / 'knowledge-graph.db'}\n")
             try:
                 import reconstruct
+                # Pass the INTACT session text (turn contents joined with newlines)
+                # so T1-RECON entity-attribution can parse "Entity:\n* item" lists
+                # before windowed chunking splits the header from its bullets.
+                _raw_text = "\n".join(
+                    (t.get("content") or t.get("text") or "")
+                    for sess in instance.sessions for t in sess
+                )
                 _recon_digest = reconstruct.build_consolidated_digest(
-                    str(mem_dir / "knowledge-graph.db"))
+                    str(mem_dir / "knowledge-graph.db"), raw_text=_raw_text)
                 _rn = len((_recon_digest or {}).get("facts") or [])
                 sys.stderr.write(f"[recon-wire] consolidated {_rn} facts\n")
                 if _recon_digest and _recon_digest.get("facts"):
