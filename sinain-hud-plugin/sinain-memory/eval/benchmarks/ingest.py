@@ -92,7 +92,7 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     )
     # Stage A coref toggle — coref-on vs coref-off must land in different cache
     # slots, else an A/B run would cache-hit the wrong store.
-    coref_salt = os.environ.get("SINAIN_COREF", "")
+    coref_salt = os.environ.get("SINAIN_COREF", "1")  # default-ON (see coreference.py)
     # E1 entity-canonicalization toggle — default ON. Mixed in so a CANON on/off
     # A/B doesn't cache-hit the wrong store. Default "1" so the normal (E1-on)
     # path gets a stable slot distinct from any legacy CANON-absent cache.

@@ -121,7 +121,10 @@ def resolve_items(items: list[dict]) -> list[dict]:
     Mentions are noun phrases that never span a newline, so joining items with
     '\\n' and splitting the resolved doc back by '\\n' preserves the 1:1 item
     mapping (replacements only change span contents, not newline count)."""
-    if os.environ.get("SINAIN_COREF", "").lower() not in ("1", "true", "yes"):
+    # Default-ON (2026-06-02): cross-turn pronoun resolution is a deterministic
+    # production-robustness stage (validated: "He migrated" -> "Sam migrated"),
+    # now that E1 entity-canonicalization is on. Set SINAIN_COREF=0 to disable.
+    if os.environ.get("SINAIN_COREF", "1").lower() not in ("1", "true", "yes"):
         return items
     if not items:
         return items

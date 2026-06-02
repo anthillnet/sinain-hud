@@ -300,6 +300,29 @@ class RdfStore:
                 removed += 1
         return removed
 
+    # ----- T1-SUPERSEDE: bi-temporal soft-retract -----
+
+    def soft_retract_triple(
+        self, tx, entity_id: str, superseded_by: str | None = None, valid_to: str | None = None
+    ) -> None:
+        """Mark a fact as no-longer-current WITHOUT deleting it (bi-temporal
+        supersession, eval-log T1-SUPERSEDE). The fact keeps all its quads — so
+        history / as-of queries still see it — but gains a ``valid_to`` timestamp
+        and (optionally) a ``supersededBy`` pointer to the fact that replaced it.
+        Current-state reads exclude facts that carry ``valid_to`` (see
+        ``is_current`` / ``entity_as_of``). Reversible: drop the valid_to quad to
+        re-instate. RDF-idiomatic (reify on the existing fact node), no quad delete."""
+        from datetime import datetime, timezone
+        vt = valid_to or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        self.assert_triple(tx, entity_id, "valid_to", vt)
+        if superseded_by:
+            self.assert_triple(tx, entity_id, "supersededBy", superseded_by, value_type="ref")
+
+    @staticmethod
+    def is_current(attrs: dict) -> bool:
+        """A fact is CURRENT iff it carries no ``valid_to`` (not yet superseded)."""
+        return not attrs.get("valid_to")
+
     # ----- Entity reads -----
 
     def entity(self, entity_id: str, as_of_tx: int | None = None) -> dict[str, list[str]]:
@@ -313,7 +336,21 @@ class RdfStore:
         return out
 
     def entity_as_of(self, entity_id: str, date) -> dict[str, list[str]]:
-        return self.entity(entity_id)
+        """Real bi-temporal as-of read: return the entity's attributes only if it
+        was VALID at ``date`` — i.e. it has no ``valid_to``, or its ``valid_to`` is
+        AFTER ``date`` (it was still current then). Empty dict if it was already
+        superseded by ``date``. ``date`` is an ISO string (compared lexically, which
+        is correct for ISO-8601). Current-state callers pass no date and use
+        ``entity`` + ``is_current``."""
+        attrs = self.entity(entity_id)
+        vt = attrs.get("valid_to")
+        if not vt:
+            return attrs
+        try:
+            vt0 = vt[0] if isinstance(vt, list) else vt
+            return attrs if str(vt0) > str(date) else {}
+        except Exception:
+            return attrs
 
     def entities_with_attr(
         self, attribute: str, as_of_tx: int | None = None

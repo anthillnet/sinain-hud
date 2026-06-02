@@ -1168,6 +1168,23 @@ def query_facts_hybrid(
     # keeps its earned rank) and BEFORE the raw-excerpt append below (excerpts
     # are excluded from clustering anyway).
     if supersede_enabled:
+        # T1-SUPERSEDE bi-temporal: drop facts soft-retracted at write time
+        # (carry a ``valid_to``) from CURRENT-STATE results — they were superseded
+        # by a later/consolidated fact. Historical/as-of queries use entity_as_of
+        # and are unaffected. Cheap (≤max_facts small reads); no-op when nothing is
+        # superseded (the common case), so it can't regress normal retrieval.
+        try:
+            _vstore = TripleStore(db_path)
+            _kept = []
+            for _f in final:
+                _eid = _f.get("entity_id", "")
+                if _eid and _vstore.entity(_eid).get("valid_to"):
+                    continue  # superseded → exclude from current state
+                _kept.append(_f)
+            _vstore.close()
+            final = _kept
+        except Exception:
+            pass
         final = _supersede_evolving_facts(final, _embs_by_eid, supersede_floor)
 
     # Option A — raw episodic hybrid: the retrieval API also surfaces the most

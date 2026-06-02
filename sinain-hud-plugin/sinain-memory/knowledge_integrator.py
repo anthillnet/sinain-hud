@@ -500,10 +500,13 @@ def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
             for tag in _extract_tags(merged_value):
                 store.assert_triple(tx, new_eid, "tag", tag)
 
-            # Retract original individual facts
+            # T1-SUPERSEDE: SOFT-retract the merged-away originals (mark valid_to +
+            # supersededBy=consolidated fact) instead of hard-deleting. The data
+            # survives for history/as-of/undo; current-state reads exclude it. The
+            # consolidated fact carries the same info, so dropping originals from
+            # current retrieval is loss-free.
             for old_eid, _ in facts:
-                for attr_name in list(store.entity(old_eid).keys()):
-                    store.retract_triple(tx, old_eid, attr_name)
+                store.soft_retract_triple(tx, old_eid, superseded_by=new_eid)
 
             consolidated += 1
             print(f"  [consolidate] {entity_name}: {len(facts)} facts → 1 ({len(merged_value)} chars)", file=sys.stderr)
@@ -845,6 +848,11 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 store.assert_triple(tx, entity_id, "value", value)
                 store.assert_triple(tx, entity_id, "confidence", str(confidence))
                 store.assert_triple(tx, entity_id, "first_seen", digest_ts)
+                # T1-SUPERSEDE bi-temporal: occurred_at = EVENT time (the session's
+                # timestamp), distinct from wall-clock ingest time. Lets latest-state
+                # queries pick the most-recent value by when it HAPPENED, not when it
+                # was distilled. (digest_ts is the session ts in this pipeline.)
+                store.assert_triple(tx, entity_id, "occurred_at", digest_ts)
                 store.assert_triple(tx, entity_id, "last_reinforced", digest_ts)
                 store.assert_triple(tx, entity_id, "reinforce_count", "1")
                 if domain:
@@ -920,11 +928,10 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 tx = store.begin_tx("knowledge_integrator", metadata=json.dumps({
                     "op": "retract", "entity_id": entity_id, "reason": reason, "digest_ts": digest_ts
                 }))
-                # Retract all attributes of this entity
-                attrs = store.entity(entity_id)
-                for attr_name, values in attrs.items():
-                    for val in values:
-                        store.retract_triple(tx, entity_id, attr_name, val)
+                # T1-SUPERSEDE: SOFT-retract (mark valid_to) instead of hard-delete,
+                # so a distiller-driven retraction is reversible and visible to
+                # as-of/history queries; current-state reads exclude it.
+                store.soft_retract_triple(tx, entity_id)
                 stats["retracted"] += 1
 
         # --- Build entity graph layer (two-layer model) ---
