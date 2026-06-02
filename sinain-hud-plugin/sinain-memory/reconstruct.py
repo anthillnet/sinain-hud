@@ -367,7 +367,32 @@ def build_consolidated_digest(db_path: str, raw_text: str | None = None) -> dict
         _num = re.compile(r"\$\s?\d|\b\d{2,}\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b", re.IGNORECASE)
         _cat = [s for s in raw_mentions if not _num.search(s)]
         _numeric = [s for s in raw_mentions if _num.search(s)]
-        _emit = _cat[-5:] + _numeric[-1:]
+        # Per-context supersession (replaces the fragile global numeric[-1:] which
+        # silently dropped $400k when an unrelated later number existed). Cluster
+        # numeric mentions by value-CONTEXT (content words minus numbers/stopwords);
+        # within each cluster keep only the LATEST mention (current value beats stale:
+        # $400k over $350k), but DIFFERENT contexts (a closing-cost figure) keep their
+        # own latest so they never displace each other. raw_mentions is oldest→newest,
+        # so the last-seen per cluster is the latest. Deterministic, no-LLM.
+        _STOP = {"the","user","and","for","with","from","that","this","their","they","has","have",
+                 "was","are","will","would","been","into","over","per","new","old","now","most",
+                 "recently","currently","about","than","more","less","also","still","just"}
+        def _ctx_sig(s):
+            s2 = re.sub(r"\$|\d|,|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|k|m)\b",
+                        " ", s.lower())
+            return {w for w in re.findall(r"[a-z]{3,}", s2) if w not in _STOP}
+        _clusters = []  # [{sig:set, latest:str}]
+        for s in _numeric:
+            sig = _ctx_sig(s)
+            for cl in _clusters:
+                if len(sig & cl["sig"]) >= 2:  # ≥2 shared context words → same thing
+                    cl["sig"] |= sig
+                    cl["latest"] = s  # oldest→newest order ⇒ keep the latest
+                    break
+            else:
+                _clusters.append({"sig": sig, "latest": s})
+        _numeric_emit = [cl["latest"] for cl in _clusters]
+        _emit = _cat[-5:] + _numeric_emit
         for s in _emit:
             txt = s.strip()
             if len(txt) > 12:
