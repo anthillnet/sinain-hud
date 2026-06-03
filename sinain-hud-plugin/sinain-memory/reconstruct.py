@@ -288,6 +288,115 @@ def _attribution_facts(db_path: str, limit: int = 12) -> list[str]:
     return uniq[:limit]
 
 
+# ── T1-RECON #3: change-point supersession ───────────────────────────────────
+# Generalizes TWO earlier hacks into ONE principled test (IG_features.md #3):
+#   (a) per-context numeric latest-keep (the old 142ad0c cluster-and-keep-latest), and
+#   (b) the crude global categorical `_cat[-5:]` recency window (which had NO supersession
+#       at all — stale pre-change categorical values could survive in the emit).
+# We treat each (entity, attribute) as a value time-series, cluster mentions by their
+# value-CONTEXT, find the most-recent change-point per cluster, and emit only the CURRENT
+# regime — superseded pre-change values ($350k before $400k; 'mom on paper' before 'mom
+# uses the app') are dropped so they can't flood the QA with stale competitors. This is the
+# deterministic, short-stream analogue of Bayesian online change-point detection (Adams &
+# MacKay 2007): one test covering categorical AND numeric supersession. No LLM.
+_RECON_STOP = {
+    "the", "user", "and", "for", "with", "from", "that", "this", "their", "they",
+    "has", "have", "was", "are", "will", "would", "been", "into", "over", "per",
+    "new", "old", "now", "most", "recently", "currently", "about", "than", "more",
+    "less", "also", "still", "just",
+}
+_WORD_NUM = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+    "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12",
+}
+_NUM_RE = re.compile(
+    r"\$\s?\d|\b\d{2,}\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+    re.IGNORECASE,
+)
+# strip numbers / number-words / money / unit-suffixes to leave the value-CONTEXT tokens
+_CTX_STRIP = re.compile(
+    r"\$|\d|,|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|k|m)\b",
+    re.IGNORECASE,
+)
+
+
+def _ctx_sig(s: str) -> set[str]:
+    """Value-CONTEXT signature: content words with numbers/number-words/money removed.
+    Mentions about the same (entity, attribute) share this context (e.g. 'mom', 'grocery',
+    'list'); the differing tokens are the value that evolves over time."""
+    s2 = _CTX_STRIP.sub(" ", s.lower())
+    return {w for w in re.findall(r"[a-z]{3,}", s2) if w not in _RECON_STOP}
+
+
+def _value_key(s: str) -> tuple[frozenset, frozenset]:
+    """(numbers, content-tokens) representation used to detect a change-point.
+    numbers: normalized money/multi-digit values + word-numbers (so '$400k'/'400000' and
+    'three'/'3' compare correctly). Uses the SAME number semantics as the numeric classifier
+    `_NUM_RE` — an INCIDENTAL single bare digit ('session 6', 'on day 3') is NOT a value, so
+    it must not look like a value-change and trigger a spurious change-point.
+    content-tokens: non-stopword tokens (the categorical value carrier)."""
+    low = re.sub(r",", "", s.lower())
+    nums = {re.sub(r"[^\d.]", "", x) for x in re.findall(r"\$\s?\d[\d.]*|\b\d{2,}\b", low)}
+    nums |= {_WORD_NUM[w] for w in re.findall(r"[a-z]+", low) if w in _WORD_NUM}
+    toks = {w for w in re.findall(r"[a-z]{3,}", low) if w not in _RECON_STOP}
+    return frozenset(nums), frozenset(toks)
+
+
+def _last_changepoint(values: list[tuple[frozenset, frozenset]], jac_theta: float = 0.5) -> int:
+    """Index of the MOST RECENT regime change in an (oldest→newest) value stream; 0 if
+    stable. A change-point is where the value shifts: for a numeric mention the number set
+    changes; for a categorical mention the content-token set diverges past a Jaccard
+    dissimilarity threshold. Returning the LAST change-point (not the first) means a value
+    that flickers then settles still resolves to its final, current regime."""
+    last = 0
+    for i in range(1, len(values)):
+        n0, t0 = values[i - 1]
+        n1, t1 = values[i]
+        if n0 or n1:                       # numeric stream: value = the number(s)
+            changed = (n0 != n1)
+        else:                              # categorical stream: value = token set
+            union = len(t0 | t1) or 1
+            changed = (len(t0 & t1) / union) < jac_theta
+        if changed:
+            last = i
+    return last
+
+
+def _changepoint_supersede(mentions: list[str], cat_window: int = 5) -> list[str]:
+    """Select the CURRENT-regime state mentions to emit, suppressing superseded values.
+    `mentions` MUST be oldest→newest. Numeric clusters emit their single current value
+    (preserves 852ce960: $400k over $350k); categorical clusters emit their current-state
+    framings, globally capped to the most-recent `cat_window` (preserves d7c942c3's need
+    for enough current framing while dropping pre-change 'paper' mentions). Deterministic."""
+    # 1. cluster by shared value-context (≥2 shared signature words → same attribute)
+    clusters: list[dict] = []  # {sig:set, members:[(orig_idx, sentence)]}
+    for idx, s in enumerate(mentions):
+        sig = _ctx_sig(s)
+        for cl in clusters:
+            if len(sig & cl["sig"]) >= 2:
+                cl["sig"] |= sig
+                cl["members"].append((idx, s))
+                break
+        else:
+            clusters.append({"sig": sig, "members": [(idx, s)]})
+    # 2. per cluster: drop pre-change-point (superseded) mentions, keep current regime
+    cat_current: list[tuple[int, str]] = []   # (orig_idx, sentence)
+    num_emit: list[str] = []
+    for cl in clusters:
+        members = cl["members"]
+        cp = _last_changepoint([_value_key(s) for _i, s in members])
+        regime = members[cp:]                  # current regime only
+        nums_in_regime = [s for _i, s in regime if _NUM_RE.search(s)]
+        if nums_in_regime:
+            num_emit.append(nums_in_regime[-1])   # numeric: the latest current value
+        else:
+            cat_current.extend(regime)            # categorical: current-state framings
+    # 3. categorical: keep the most-recent cat_window across all clusters (orig order)
+    cat_current.sort(key=lambda m: m[0])
+    cat_emit = [s for _i, s in cat_current[-cat_window:]]
+    return cat_emit + num_emit
+
+
 def _parse_json(text: str) -> dict:
     text = (text or "").strip()
     try:
@@ -355,44 +464,14 @@ def build_consolidated_digest(db_path: str, raw_text: str | None = None) -> dict
         # emit the LATEST one verbatim, prefixed "Most recently, ", so a correct,
         # current-state fact is ALWAYS in the graph regardless of LLM drift. This
         # makes 830ce83f / value-updates robust+reproducible (no LLM judgement).
-        # Verbatim emit, split by value-type (supersession applied to the emit):
-        #   - CATEGORICAL mentions (no money/number) → emit the last 5. Categorical
-        #     state changes (mom "now uses the app") aren't self-contradicting, and
-        #     d7c942c3 needs enough current-state framing to beat stale distilled
-        #     "mom prefers paper" facts (it FAILS with only the last 3).
-        #   - NUMERIC/VALUE mentions ($400k, "four") → emit ONLY the single latest.
-        #     Older values ($350k, "three") are SUPERSEDED — emitting them floods the
-        #     QA with stale competitors and regressed 852ce960/6aeb4375 at a wider tail.
-        # raw_mentions is already oldest→newest, so [-1:] / [-5:] take the latest.
-        _num = re.compile(r"\$\s?\d|\b\d{2,}\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b", re.IGNORECASE)
-        _cat = [s for s in raw_mentions if not _num.search(s)]
-        _numeric = [s for s in raw_mentions if _num.search(s)]
-        # Per-context supersession (replaces the fragile global numeric[-1:] which
-        # silently dropped $400k when an unrelated later number existed). Cluster
-        # numeric mentions by value-CONTEXT (content words minus numbers/stopwords);
-        # within each cluster keep only the LATEST mention (current value beats stale:
-        # $400k over $350k), but DIFFERENT contexts (a closing-cost figure) keep their
-        # own latest so they never displace each other. raw_mentions is oldest→newest,
-        # so the last-seen per cluster is the latest. Deterministic, no-LLM.
-        _STOP = {"the","user","and","for","with","from","that","this","their","they","has","have",
-                 "was","are","will","would","been","into","over","per","new","old","now","most",
-                 "recently","currently","about","than","more","less","also","still","just"}
-        def _ctx_sig(s):
-            s2 = re.sub(r"\$|\d|,|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|k|m)\b",
-                        " ", s.lower())
-            return {w for w in re.findall(r"[a-z]{3,}", s2) if w not in _STOP}
-        _clusters = []  # [{sig:set, latest:str}]
-        for s in _numeric:
-            sig = _ctx_sig(s)
-            for cl in _clusters:
-                if len(sig & cl["sig"]) >= 2:  # ≥2 shared context words → same thing
-                    cl["sig"] |= sig
-                    cl["latest"] = s  # oldest→newest order ⇒ keep the latest
-                    break
-            else:
-                _clusters.append({"sig": sig, "latest": s})
-        _numeric_emit = [cl["latest"] for cl in _clusters]
-        _emit = _cat[-5:] + _numeric_emit
+        # #3 CHANGE-POINT SUPERSESSION: cluster the recency-ordered state-mentions by
+        # value-context, detect the most-recent change-point per cluster, and emit only
+        # the CURRENT regime — numeric clusters emit their single current value ($400k,
+        # not $350k → 852ce960), categorical clusters emit their current-state framings
+        # capped to the most-recent 5 with pre-change values dropped (mom "uses the app",
+        # not "prefers paper" → d7c942c3). One principled test replaces the two earlier
+        # value-type-split hacks. See _changepoint_supersede above. Deterministic, no-LLM.
+        _emit = _changepoint_supersede(raw_mentions)
         for s in _emit:
             txt = s.strip()
             if len(txt) > 12:
