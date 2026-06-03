@@ -108,10 +108,16 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     # _PIPELINE_VERSION_FILES entry) so canon-off cache-hits existing stores and only
     # canon-on opens a fresh slot. (When iterating _manifold_canonicalize_graph, rm the store.)
     manifold_salt = os.environ.get("SINAIN_MANIFOLD_CANON", "")
+    # #1 surprisal salience gate toggle — default OFF. Env-gated salt (NOT hashed) so
+    # surprisal-off cache-hits existing stores; surprisal-on (+ its θ/g_floor) opens a fresh slot.
+    surprisal_salt = (os.environ.get("SINAIN_SURPRISAL_SALIENCE", "")
+                      + os.environ.get("SINAIN_SALIENCE_LR_THETA", "")
+                      + os.environ.get("SINAIN_SALIENCE_GFLOOR", ""))
     return hashlib.sha256(
         (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
          + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt
-         + "|recon:" + recon_salt + "|mcanon:" + manifold_salt).encode()
+         + "|recon:" + recon_salt + "|mcanon:" + manifold_salt
+         + "|surp:" + surprisal_salt).encode()
     ).hexdigest()[:16]
 
 
@@ -419,6 +425,19 @@ def ingest_instance(
                 sys.stderr.write(f"[manifold-wire] soft-retracted {_r} paraphrase fact(s)\n")
             except Exception as e:
                 sys.stderr.write(f"[manifold-wire] FAILED: {type(e).__name__}: {e}\n")
+
+        # #1 SURPRISAL SALIENCE PRUNE (gated SINAIN_SURPRISAL_SALIENCE, default OFF). Graph-wide
+        # post-pass (needs the full user manifold). Soft-retracts low-information world-trivia.
+        # Runs after recon+manifold; skips recon/verbatim. Fail-open. Bakes into the cached store.
+        if os.environ.get("SINAIN_SURPRISAL_SALIENCE") == "1":
+            try:
+                import knowledge_integrator as _ki
+                _lr = float(os.environ.get("SINAIN_SALIENCE_LR_THETA", "0.0"))
+                _gf = float(os.environ.get("SINAIN_SALIENCE_GFLOOR", "0.0"))
+                _p = _ki._surprisal_prune_graph(str(mem_dir / "knowledge-graph.db"), _lr, _gf)
+                sys.stderr.write(f"[surprisal-wire] pruned {_p} low-information fact(s)\n")
+            except Exception as e:
+                sys.stderr.write(f"[surprisal-wire] FAILED: {type(e).__name__}: {e}\n")
 
         # Copy the resulting Oxigraph store directory to cache.
         # rdf_store persists as a directory (Oxigraph RocksDB tree), not a

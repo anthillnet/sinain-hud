@@ -701,12 +701,23 @@ def _salience_filter(facts: list) -> list:
     CONSERVATIVE — drops a fact only when ALL hold, so central/asked-about topics
     and user facts always survive (raw chunks backstop anything dropped):
       (a) it does NOT reference the user, AND
-      (b) it matches a generic-knowledge predicate shape, AND
+      (b) it is "generic-leaning", AND
       (c) its subject entity is NOT shared with any user-referencing fact in this
           batch (i.e. it is not part of the user's own context/topic).
+
+    "Generic-leaning" (criterion b) has two implementations:
+      * DEFAULT — a regex generic-knowledge predicate shape (hand-built proxy).
+      * #1 SURPRISAL (SINAIN_SURPRISAL_SALIENCE=1) — the principled information-content
+        gate: embed the fact, score its kNN density on a FROZEN generic-knowledge manifold
+        (generic_background) and on the in-batch user facts; drop when the surprisal log-
+        ratio LR = score_user − score_generic < θ AND generic_density ≥ g_floor (two-sided
+        guard so a novel-but-salient fact far from BOTH manifolds is never dropped). θ /
+        g_floor via SINAIN_SALIENCE_LR_THETA / SINAIN_SALIENCE_GFLOOR. Fail-open to the
+        regex gate if embeddings are unavailable.
     """
     if not isinstance(facts, list) or len(facts) < 2:
         return facts
+    import os as _os
     texts = [_fact_text_of(f) for f in facts]
     # subjects/entities that co-occur with a user-referencing fact → protected
     def _subj(f, txt):
@@ -722,25 +733,145 @@ def _salience_filter(facts: list) -> list:
             sj = _subj(f, txt)
             if sj:
                 user_subjects.add(sj)
+
+    # #1 surprisal scores (per fact, aligned to `facts`): (LR, generic_density). None unless
+    # the mode is on AND embeddings + frozen background are available (else regex fallback).
+    sal = None
+    if False:  # #1 surprisal runs GRAPH-WIDE (_surprisal_prune_graph), not per-session:
+        # a single session's ~10 facts give too few user vecs for a reliable LR. Per-session
+        # stays the regex gate; the surprisal pass operates on the accumulated graph at end-of-ingest.
+        try:
+            from embed_client import embed
+            from generic_background import salience_scores
+            fact_vecs = embed(texts)
+            if fact_vecs:
+                user_vecs = [fact_vecs[i] for i, t in enumerate(texts) if _USER_REF.search(t)]
+                sal = salience_scores(fact_vecs, user_vecs)
+        except Exception:
+            sal = None
+    # θ=0.0 → drop a non-user fact only when it is closer to the GENERIC manifold than to the
+    # user's own content (surprisal log-ratio < 0). Calibrated on real stores: this catches the
+    # incidental world-trivia tail (CLI definitions, history, generic how-tos) at ~1.5% drop with
+    # ZERO user/salient facts touched. g_floor defaults to 0.0 (guard OFF): score_generic is
+    # corpus-limited (a frozen background can't cover every trivia domain), so requiring high
+    # generic-density backfires by PROTECTING corpus-missing trivia; the robust signal is the LR
+    # itself (driven by score_user). g_floor>0 is available as an extra-precision tightener.
+    lr_theta = float(_os.environ.get("SINAIN_SALIENCE_LR_THETA", "0.0"))
+    g_floor = float(_os.environ.get("SINAIN_SALIENCE_GFLOOR", "0.0"))
+
     kept = []
-    for f, txt in zip(facts, texts):
+    for i, (f, txt) in enumerate(zip(facts, texts)):
         if not txt:
             kept.append(f)
             continue
-        # Exempt consolidated/attribution facts (kind=recon): they are already
-        # curated cross-session summaries (e.g. "Lake Charles includes: …") and
-        # legitimately use generic predicates ("includes"); never drop them.
+        # Exempt consolidated/attribution facts (kind=recon): already curated cross-session
+        # summaries that legitimately use generic predicates ("includes"); never drop them.
         if isinstance(f, dict) and f.get("kind") == "recon":
             kept.append(f)
             continue
-        is_user = bool(_USER_REF.search(txt))
-        is_generic = bool(_GENERIC_PRED.search(txt))
+        # Hard protections (both modes): never drop user facts or the user's own topics.
+        if _USER_REF.search(txt):
+            kept.append(f)
+            continue
         sj = _subj(f, txt)
-        connected = sj in user_subjects if sj else False
-        if (not is_user) and is_generic and (not connected):
-            continue  # drop isolated, non-user, definitional trivia
+        if sj and sj in user_subjects:
+            kept.append(f)
+            continue
+        # criterion (b): generic-leaning?
+        if sal is not None:
+            lr, g_density = sal[i]
+            if (lr < lr_theta) and (g_density >= g_floor):
+                continue  # surprisal: generic-leaning AND not user-relevant → drop trivia
+        elif _GENERIC_PRED.search(txt):
+            continue  # default regex gate
         kept.append(f)
     return kept
+
+
+def _surprisal_prune_graph(db_path: str, lr_theta: float = 0.0, g_floor: float = 0.0) -> int:
+    """#1: graph-wide information-content (surprisal) salience prune.
+
+    The volatile ~70% distillation tail is INCIDENTAL world-trivia the assistant volunteered
+    (CLI definitions, history asides, generic how-tos) — content HIGH-probability under a generic
+    LM, i.e. near-zero pointwise mutual information with THIS user. Approximate the surprisal
+    log-ratio LR = log P(f|user) - log P(f|generic) with embedding kNN densities: score_user on
+    the accumulated USER-referencing facts, score_generic on a FROZEN generic-knowledge corpus
+    (generic_background). Soft-retract a non-user, non-recon fact when LR < lr_theta (closer to
+    the generic manifold than to the user's own content) and, if g_floor>0, score_generic>=g_floor.
+
+    Runs GRAPH-WIDE (not per-session): the LR needs the full user manifold — one session's ~10
+    facts give an unreliable estimate (the regex `_salience_filter` stays per-session). Mirrors
+    #2's structure. Hard protections: never drop user-referencing facts, kind in {recon,verbatim},
+    already-retracted, already-consolidated, or a fact whose subject co-occurs with a user fact.
+    Soft-retract = reversible; raw-chunk backstop covers anything dropped. Calibrated on real
+    stores: theta=0 drops ~1-2% (genuine trivia, zero user/salient). Deterministic, fail-open.
+    Gated by SINAIN_SURPRISAL_SALIENCE in the caller."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        from generic_background import salience_scores
+        store = TripleStore(db_path)
+        items: list[tuple[str, str]] = []  # (fact_id, value)
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a:
+                continue
+            k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
+            if k in ("recon", "verbatim"):
+                continue
+            if a.get("valid_to"):
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if not (v and isinstance(v, str) and len(v) > 8):
+                continue
+            if ";" in v and len(v) > 100:
+                continue  # already consolidated
+            items.append((fid, v))
+        if len(items) < 5:
+            store.close()
+            return 0
+        texts = [v for _, v in items]
+        vecs = embed(texts)
+        if not vecs or len(vecs) != len(items):
+            store.close()
+            return 0
+        user_idx = [i for i, t in enumerate(texts) if _USER_REF.search(t)]
+        user_vecs = [vecs[i] for i in user_idx]
+        if len(user_vecs) < 3:
+            store.close()
+            return 0  # too few user facts to estimate the user manifold reliably
+        user_subjects = set()
+        for i in user_idx:
+            m = re.match(r"\s*([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})", texts[i])
+            if m:
+                user_subjects.add(m.group(1).lower())
+        sal = salience_scores(vecs, user_vecs)
+        if sal is None:
+            store.close()
+            return 0
+        pruned = 0
+        tx = store.begin_tx("surprisal-prune")
+        for i, (fid, v) in enumerate(items):
+            if _USER_REF.search(v):
+                continue  # hard-protect user facts
+            m = re.match(r"\s*([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})", v)
+            if m and m.group(1).lower() in user_subjects:
+                continue  # the user's own topic
+            lr, g_density = sal[i]
+            if lr < lr_theta and (g_floor <= 0.0 or g_density >= g_floor):
+                store.soft_retract_triple(tx, fid)  # superseded=None -> just mark valid_to
+                pruned += 1
+        store.commit_tx(tx)
+        store.close()
+        if pruned:
+            print(f"  [surprisal] pruned {pruned} low-information (generic-trivia) fact(s)",
+                  file=sys.stderr)
+        return pruned
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [surprisal] failed (fail-open): {e}", file=sys.stderr)
+        return 0
 
 
 def _facts_to_graph_ops(
