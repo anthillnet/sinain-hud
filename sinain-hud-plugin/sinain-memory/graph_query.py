@@ -694,6 +694,10 @@ def _recon_supersede_contradictions(
                 continue
             if not (r_ents & _recon_entity_tokens(D.get("value", ""))):
                 continue  # different subject → never retract
+            if _strong_value_tokens(D.get("value", "")):
+                continue  # carries a date/time/number → temporal/numeric ANCHOR, not a
+                          # categorical value; leave it (numeric supersede handles those
+                          # with proper temporal-order guards). Protects dated event facts.
             if topic_lo <= _cos(r_emb, d_emb) < agree_hi:
                 drop.add(j)
     if not drop:
@@ -1071,7 +1075,21 @@ def query_facts_hybrid(
     # recall for matching question shapes; single-lookup defaults are
     # preserved unchanged.
     q_lc = query.lower()
-    if any(p in q_lc for p in (
+    # Temporal-DURATION questions ("how many days/weeks/months ago", "how many months
+    # have passed since", "how many days passed between") phrase with "how many" but are
+    # NOT enumeration counting — they need a precise dated ANCHOR fact, not a diverse set.
+    # Route them to temporal FIRST so the counting candidate-boost and #5 DPP (which prune
+    # the dated anchor as "redundant", regressing 71017276 / 0bc8ad92) never misfire.
+    _is_duration = bool(re.search(
+        r"how many (?:days?|weeks?|months?|years?|hours?|minutes?|nights?)\b", q_lc
+    )) or any(p in q_lc for p in (
+        "how long ago", "how long has", "how long since", "passed between",
+        "passed since", "days passed", "weeks passed", "months passed", "years passed",
+    ))
+    if _is_duration:
+        candidate_limit = max(candidate_limit, max_facts * 4)
+        question_class = "temporal"
+    elif any(p in q_lc for p in (
         "how many", "count of", "number of", "how often",
         "list all", "list every", "all of the", "list the",
     )):
@@ -1418,7 +1436,9 @@ def query_facts_hybrid(
         # (Rachel Chicago->suburbs, mom paper->app) leave the stale distilled fact in the
         # prompt to out-rank the recon fact. Drop the stale fact when a recon current-state
         # fact contradicts it (same entity, middle cosine band). Toggle SINAIN_RECON_RETRACT=0.
-        if _os_d.environ.get("SINAIN_RECON_RETRACT", "1") != "0":
+        # Skip on temporal questions: they need every dated event (incl. historical
+        # ones #3b might read as "stale"), so retraction must not run there.
+        if _os_d.environ.get("SINAIN_RECON_RETRACT", "1") != "0" and question_class != "temporal":
             final = _recon_supersede_contradictions(final, _embs_by_eid)
 
     # Option A — raw episodic hybrid: the retrieval API also surfaces the most
