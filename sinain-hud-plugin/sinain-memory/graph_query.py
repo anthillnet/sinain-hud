@@ -670,6 +670,72 @@ def _entropy_weight(scores: list[float], w_lo: float = 0.6, w_hi: float = 1.6) -
     return w_lo + (w_hi - w_lo) * (1.0 - h_norm)
 
 
+def _dpp_greedy_map(sim, quality, max_k: int, eps: float = 1e-4) -> list[int]:
+    """#5: fast greedy MAP inference for a Determinantal Point Process (Chen et al.
+    2018). Returns indices of a high-quality, DIVERSE subset — the set whose
+    feature-space volume (det of the DPP kernel submatrix) is greatest. Kernel
+    L_ij = quality_i · sim_ij · quality_j, so selection balances relevance (quality)
+    against redundancy (pairwise cosine similarity). Greedy stops when the marginal
+    log-det gain of every remaining item falls below ``eps`` — i.e. every leftover is
+    a near-duplicate of something already chosen. Deterministic (argmax ties → lowest
+    index). The rigorous set-level generalization of MMR / Option-D pairwise collapse."""
+    import numpy as np
+    q = np.asarray(quality, dtype=float)
+    S = np.asarray(sim, dtype=float)
+    n = len(q)
+    if n == 0:
+        return []
+    L = (q[:, None] * S) * q[None, :]
+    d2 = np.diag(L).astype(float).copy()      # marginal gains d_i^2
+    ci = np.zeros((min(max_k, n), n))         # incremental Cholesky rows
+    selected: list[int] = []
+    j = int(np.argmax(d2))
+    for _ in range(min(max_k, n)):
+        if d2[j] <= eps:
+            break
+        k = len(selected)
+        if k > 0:
+            ei = (L[j, :] - ci[:k, :].T @ ci[:k, j]) / np.sqrt(d2[j])
+        else:
+            ei = L[j, :] / np.sqrt(d2[j])
+        ci[k, :] = ei
+        d2 = d2 - ei ** 2
+        selected.append(j)
+        d2[selected] = -np.inf                # never reselect
+        j = int(np.argmax(d2))
+    return selected
+
+
+def _dpp_select_counting(results: list[dict], embs_by_eid: dict, max_k: int) -> list[dict]:
+    """Diversity-select the final fact budget for a COUNTING query so it holds DISTINCT
+    instances rather than near-duplicates of the same one (which inflate/deflate counts).
+    Uses the embeddings already stashed by the bi-encoder rerank (no re-encode); quality
+    is the incoming relevance RANK (earlier = higher) so the diverse set still favors the
+    most relevant instances. Returns survivors in original relevance order. Falls back to
+    the input (no-op) when embeddings are unavailable."""
+    import numpy as np
+    embs, idxs = [], []
+    for i, f in enumerate(results):
+        e = embs_by_eid.get(f.get("entity_id", ""))
+        if e is not None:
+            embs.append(np.asarray(e, dtype=float))
+            idxs.append(i)
+    if len(embs) <= max_k:
+        return results                         # nothing to prune
+    M = np.vstack(embs)
+    unit = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-9)
+    S = np.clip(unit @ unit.T, 0.0, 1.0)       # cosine Gram (≥0)
+    n = len(idxs)
+    rank_q = np.exp(2.0 * (1.0 - np.arange(n) / max(1, n - 1)))   # relevance-tilted quality
+    chosen = _dpp_greedy_map(S, rank_q, max_k=max_k)
+    if not chosen:
+        return results
+    keep_local = sorted(chosen)                # original relevance order
+    keep_global = {idxs[c] for c in keep_local}
+    # keep DPP-selected embedded facts (in order) + any non-embedded facts (rare) in place
+    return [f for i, f in enumerate(results) if i in keep_global or embs_by_eid.get(f.get("entity_id", "")) is None]
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -1185,8 +1251,13 @@ def query_facts_hybrid(
             scored.sort(key=lambda x: -x[0])
             # A1.6: when the cross-encoder runs next (precise mode), keep a
             # wider top-30 window so it re-ranks a real candidate set instead
-            # of just the bi-encoder's top-10. Otherwise narrow to max_facts.
-            keep = max(max_facts * 3, 30) if precision_mode == "precise" else max_facts
+            # of just the bi-encoder's top-10. #5: counting also needs a wide
+            # window so the downstream DPP has a real pool to diversify from
+            # (else the bi-encoder pre-narrows to max_facts and DPP is a no-op).
+            # Otherwise narrow to max_facts.
+            keep = (max(max_facts * 3, 30)
+                    if (precision_mode == "precise" or question_class == "counting")
+                    else max_facts)
             results = [f for _, f in scored[:keep]]
         except ImportError:
             pass  # sentence-transformers not installed — use RRF order
@@ -1209,6 +1280,16 @@ def query_facts_hybrid(
     # crowd precise distilled facts out (6a1eabeb/6aeb4375), while keeping
     # relevant ones (830ce83f/d7c942c3). See HANDOFF-recon-t1.md.
     results = _recon_topical_guard(results, query)
+    # #5 DPP set-selection: for COUNTING queries, spend the final max_facts budget on
+    # DISTINCT instances rather than near-duplicates of the same one (the geometric root
+    # of count inflation/deflation). Greedy MAP-DPP over the cosine Gram of the already-
+    # computed fact embeddings; relevance-tilted quality keeps the most relevant instances.
+    # Gated to counting (where duplicate-instance confusion is the failure mode) so it can't
+    # disturb other classes. Toggle SINAIN_DPP_COUNTING=0. No-op if embeddings unavailable.
+    if (question_class == "counting"
+            and os.environ.get("SINAIN_DPP_COUNTING", "1").lower() in ("1", "true", "yes")
+            and len(results) > max_facts and _embs_by_eid):
+        results = _dpp_select_counting(results, _embs_by_eid, max_facts)
     final = results[:max_facts]
 
     # Option D — collapse evolving-state clusters to their latest member so the
