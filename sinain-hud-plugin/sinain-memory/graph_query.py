@@ -604,6 +604,103 @@ def _supersede_evolving_facts(
     return [f for k, f in enumerate(results) if k not in dropped]
 
 
+_RECON_ROLE = {
+    "mom", "mother", "dad", "father", "sister", "brother", "wife", "husband", "son",
+    "daughter", "grandma", "grandmother", "grandpa", "grandfather", "friend", "boss",
+    "colleague", "partner", "girlfriend", "boyfriend", "aunt", "uncle", "cousin",
+    "neighbor", "neighbour", "manager", "roommate", "coworker", "sibling", "parent",
+    "spouse", "fiance", "fiancee", "landlord", "doctor", "therapist", "dog", "cat", "pet",
+}
+_RECON_ENT_STOP = {
+    "the", "user", "users", "this", "that", "their", "they", "there", "then", "what",
+    "when", "where", "who", "why", "how", "and", "but", "for", "with", "from", "also",
+    "new", "most", "now", "yes", "i", "my", "me", "it",
+}
+_RECON_CURRENT_MARKERS = (
+    "currently", "now ", "recently", "most recently", "current ", "latest",
+    "no longer", "these days", "has switched", "switched to", "moved to", "moved back",
+)
+
+
+def _recon_entity_tokens(text: str) -> set[str]:
+    """Salient SUBJECT tokens of a fact: proper nouns (Capitalized) + kin/role words,
+    minus generics. 'The user's mom ...' -> {mom}; 'Rachel ...' -> {rachel}. Excludes
+    the generic 'user' so a recon fact about one person can't retract the user's own
+    (or another person's) facts."""
+    toks = {m.lower() for m in re.findall(r"\b[A-Z][a-z]{2,}\b", text or "")}
+    toks -= _RECON_ENT_STOP
+    low = (text or "").lower()
+    for r in _RECON_ROLE:
+        if re.search(r"\b" + re.escape(r) + r"\b", low):
+            toks.add(r)
+    return toks
+
+
+def _recon_supersede_contradictions(
+    results: list[dict],
+    embs_by_eid: dict | None = None,
+    topic_lo: float = 0.70,
+    agree_hi: float = 0.88,
+) -> list[dict]:
+    """#3b: drop a STALE distilled fact when a kind=recon CURRENT-STATE fact asserts a
+    DIFFERENT value for the same entity+attribute. The existing evolving-value supersede
+    (_supersede_evolving_facts) fires only on STRONG value tokens (numbers/dates), so it
+    misses CATEGORICAL changes (Rachel Chicago->suburbs, mom paper->app) — which then leave
+    the stale distilled fact in the prompt, out-ranking the correct recon fact, and the QA
+    model answers with the stale value (root cause of 830ce83f / d7c942c3 regressions).
+
+    We anchor on the recon current-state fact R and drop a distilled fact D when:
+      (1) D shares a SPECIFIC entity with R (proper noun / kin role; generic 'user' excluded);
+      (2) value-embedding cosine(R,D) is in the MIDDLE band [topic_lo, agree_hi):
+            >= agree_hi -> D restates the SAME value (agrees) -> keep;
+            <  topic_lo -> unrelated attribute -> keep;
+            middle      -> same attribute, DIFFERENT value -> stale -> drop.
+    Bounds are empirically set (Chicago 0.851 / paper 0.739 land in-band; the agreeing
+    suburbs restatement 0.919 and the user's own app facts stay out). Read-side, reversible,
+    deterministic. Toggle SINAIN_RECON_RETRACT=0."""
+    embs_by_eid = embs_by_eid or {}
+    recon = [
+        i for i, f in enumerate(results)
+        if str(f.get("kind", "")) == "recon"
+        and any(m in str(f.get("value", "")).lower() for m in _RECON_CURRENT_MARKERS)
+        and embs_by_eid.get(f.get("entity_id", "")) is not None
+    ]
+    if not recon:
+        return results
+    try:
+        import numpy as np
+    except ImportError:
+        return results
+
+    def _cos(a, b) -> float:
+        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+    drop: set[int] = set()
+    for ri in recon:
+        R = results[ri]
+        r_emb = embs_by_eid[R.get("entity_id", "")]
+        r_ents = _recon_entity_tokens(R.get("value", "")) - {"user"}
+        if not r_ents:
+            continue  # no specific entity to anchor on → too risky, skip
+        for j, D in enumerate(results):
+            if j == ri or j in drop:
+                continue
+            if str(D.get("kind", "")) == "recon":
+                continue
+            if D.get("source") == "raw-excerpt" or D.get("entity") == "excerpt":
+                continue
+            d_emb = embs_by_eid.get(D.get("entity_id", ""))
+            if d_emb is None:
+                continue
+            if not (r_ents & _recon_entity_tokens(D.get("value", ""))):
+                continue  # different subject → never retract
+            if topic_lo <= _cos(r_emb, d_emb) < agree_hi:
+                drop.add(j)
+    if not drop:
+        return results
+    return [f for k, f in enumerate(results) if k not in drop]
+
+
 def _recon_topical_guard(results, query_text=None):
     """Topical-fallback guard for kind=recon consolidated current-state facts.
 
@@ -1316,6 +1413,13 @@ def query_facts_hybrid(
         except Exception:
             pass
         final = _supersede_evolving_facts(final, _embs_by_eid, supersede_floor)
+        # #3b CATEGORICAL contradiction-retraction: _supersede_evolving_facts only fires
+        # on STRONG value tokens (numbers/dates), so categorical current-state changes
+        # (Rachel Chicago->suburbs, mom paper->app) leave the stale distilled fact in the
+        # prompt to out-rank the recon fact. Drop the stale fact when a recon current-state
+        # fact contradicts it (same entity, middle cosine band). Toggle SINAIN_RECON_RETRACT=0.
+        if _os_d.environ.get("SINAIN_RECON_RETRACT", "1") != "0":
+            final = _recon_supersede_contradictions(final, _embs_by_eid)
 
     # Option A — raw episodic hybrid: the retrieval API also surfaces the most
     # relevant RAW source excerpts (from the sidecar next to db_path) so QA can
