@@ -518,6 +518,116 @@ def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
         return 0
 
 
+def _manifold_canonicalize_graph(db_path: str, tau: float = 0.90) -> int:
+    """#2: graph-wide spherical-medoid canonicalization (IG_features.md).
+
+    The distiller rephrases the SAME fact differently each run and across sessions, so the
+    graph accumulates paraphrase clusters that bloat retrieval and make the stored set drift
+    run-to-run (the ~70% distillation non-determinism). Embed all current facts, cluster on
+    the unit hypersphere (connected components at cosine >= tau — deterministic, order-
+    invariant), and keep ONE canonical representative per cluster: the spherical MEDOID (the
+    member nearest the cluster's geodesic/Fréchet centre, i.e. max summed cosine to the rest).
+    Non-medoids are SOFT-retracted (valid_to + supersededBy → excluded from current-state
+    reads, preserved for history/undo; reversible, loss-free since the medoid carries the same
+    meaning). Converts run-to-run STRING variance into SEMANTIC stability (measure with
+    semantic Jaccard, not byte Jaccard).
+
+    Set-level upgrade of the pairwise Mem0 dedup; the Fréchet-mean idea (Karcher 1977) on the
+    sphere, realised as the discrete medoid since facts are text (no synthesised mean fact).
+    Local embeddings (works without sinain-core /embed). Skips kind in {recon, verbatim},
+    already-retracted, and already-consolidated facts. Deterministic, fail-open.
+    Gated by SINAIN_MANIFOLD_CANON in the caller."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        store = TripleStore(db_path)
+        facts: list[tuple[str, str, float]] = []  # (fact_id, value, confidence)
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a:
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if not (v and isinstance(v, str) and len(v) > 8):
+                continue
+            k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
+            if k in ("recon", "verbatim"):
+                continue  # recon = trusted current-state (keep distinct); verbatim = raw
+            if a.get("valid_to"):
+                continue  # already superseded
+            if ";" in v and len(v) > 100:
+                continue  # already consolidated
+            c = a.get("confidence", ["0.8"]); c = c[0] if isinstance(c, list) else c
+            try:
+                conf = float(c or 0.8)
+            except (TypeError, ValueError):
+                conf = 0.8
+            facts.append((fid, v, conf))
+        if len(facts) < 2:
+            store.close()
+            return 0
+        vecs = embed([f[1] for f in facts])
+        if not vecs or len(vecs) != len(facts):
+            store.close()
+            return 0  # no embeddings → cannot cluster → no-op
+
+        n = len(facts)
+
+        def _cos(a, b) -> float:
+            return sum(x * y for x, y in zip(a, b))
+
+        # Connected components at cosine >= tau (vectors are unit-normalised → dot = cosine).
+        # Components are invariant to fact iteration order (RocksDB scan order varies), so the
+        # canonicalization result is deterministic regardless of store layout.
+        parent = list(range(n))
+
+        def _find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _cos(vecs[i], vecs[j]) >= tau:
+                    ri, rj = _find(i), _find(j)
+                    if ri != rj:
+                        parent[max(ri, rj)] = min(ri, rj)
+
+        clusters: dict[int, list[int]] = {}
+        for k in range(n):
+            clusters.setdefault(_find(k), []).append(k)
+
+        retracted = 0
+        merged_clusters = 0
+        tx = store.begin_tx("manifold-canon")
+        for members in clusters.values():
+            if len(members) < 2:
+                continue
+            merged_clusters += 1
+
+            def _centrality(m: int, _members=members) -> tuple:
+                s = round(sum(_cos(vecs[m], vecs[o]) for o in _members if o != m), 6)
+                # max centrality; tie-break: higher confidence, then value text (deterministic)
+                return (s, facts[m][2], facts[m][1])
+
+            medoid = max(members, key=_centrality)
+            for m in members:
+                if m != medoid:
+                    store.soft_retract_triple(tx, facts[m][0], superseded_by=facts[medoid][0])
+                    retracted += 1
+        store.commit_tx(tx)
+        store.close()
+        if retracted:
+            print(f"  [manifold] canonicalized {retracted} paraphrase(s) → medoid across "
+                  f"{merged_clusters} cluster(s)", file=sys.stderr)
+        return retracted
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [manifold] failed (fail-open): {e}", file=sys.stderr)
+        return 0
+
+
 def _now_iso() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")

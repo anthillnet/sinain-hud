@@ -104,10 +104,14 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     # _PIPELINE_VERSION_FILES entry) so RECON-off cache-hits existing stores and only
     # RECON-on opens a fresh slot. (When iterating reconstruct.py, rm the recon store.)
     recon_salt = os.environ.get("SINAIN_RECON", "")
+    # #2 manifold canonicalization toggle — default OFF. Env-gated salt (NOT a
+    # _PIPELINE_VERSION_FILES entry) so canon-off cache-hits existing stores and only
+    # canon-on opens a fresh slot. (When iterating _manifold_canonicalize_graph, rm the store.)
+    manifold_salt = os.environ.get("SINAIN_MANIFOLD_CANON", "")
     return hashlib.sha256(
         (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
          + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt
-         + "|recon:" + recon_salt).encode()
+         + "|recon:" + recon_salt + "|mcanon:" + manifold_salt).encode()
     ).hexdigest()[:16]
 
 
@@ -402,6 +406,19 @@ def ingest_instance(
                     ], INTEGRATOR_TIMEOUT_S)
             except Exception as e:
                 sys.stderr.write(f"[recon-wire] FAILED: {type(e).__name__}: {e}\n")
+
+        # #2 MANIFOLD CANONICALIZATION (gated SINAIN_MANIFOLD_CANON, default OFF). Runs LAST
+        # (after recon) so it sees the final fact set; kind=recon facts are skipped (kept
+        # distinct). Collapses paraphrase clusters to their spherical medoid (soft-retract
+        # the rest) for run-to-run semantic stability. Fail-open. Bakes into the cached store.
+        if os.environ.get("SINAIN_MANIFOLD_CANON") == "1":
+            try:
+                import knowledge_integrator
+                _r = knowledge_integrator._manifold_canonicalize_graph(
+                    str(mem_dir / "knowledge-graph.db"))
+                sys.stderr.write(f"[manifold-wire] soft-retracted {_r} paraphrase fact(s)\n")
+            except Exception as e:
+                sys.stderr.write(f"[manifold-wire] FAILED: {type(e).__name__}: {e}\n")
 
         # Copy the resulting Oxigraph store directory to cache.
         # rdf_store persists as a directory (Oxigraph RocksDB tree), not a
