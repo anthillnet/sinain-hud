@@ -611,8 +611,14 @@ class RdfStore:
         rows.sort(key=lambda r: (-r[1], r[0]))
         return rows[: int(limit)]
 
-    def fts_search(self, query: str, limit: int) -> list[str]:
+    def fts_search(self, query: str, limit: int, with_scores: bool = False):
         """Keyword search across all `value` triples, ranked by Okapi BM25.
+
+        Returns ranked entity ids (default). With ``with_scores=True`` returns
+        ``[(eid, bm25_score)]`` instead — the BM25 scores are computed anyway but
+        normally discarded; the entropy-weighted fusion (#4) needs the score
+        DISTRIBUTION to gauge how peaked (discriminating) this query's keyword
+        match is. Default return shape is unchanged so existing callers are safe.
 
         The legacy path was a pure-Python contains-filter that returned the
         *first* `limit` matches in arbitrary RocksDB iteration order — no
@@ -700,7 +706,10 @@ class RdfStore:
         # arbitrary RocksDB iteration order (T1-DETERMINISM — retrieval ties
         # are the run-to-run variance ceiling).
         scored.sort(key=lambda x: (-x[0], x[1]))
-        return [eid for _, eid in scored[: int(limit)]]
+        top = scored[: int(limit)]
+        if with_scores:
+            return [(eid, sc) for sc, eid in top]
+        return [eid for _, eid in top]
 
     def entity_id_or_domain_search(
         self,

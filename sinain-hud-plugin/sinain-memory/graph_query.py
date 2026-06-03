@@ -105,12 +105,17 @@ def query_top_facts(db_path: str, limit: int = 30) -> list[dict]:
         return []
 
 
-def query_facts_fts(db_path: str, query: str, max_facts: int = 10) -> list[dict]:
+def query_facts_fts(db_path: str, query: str, max_facts: int = 10,
+                    with_scores: bool = False) -> list[dict]:
     """Substring search across fact `value` triples (Oxigraph backend).
 
     Replaces the SQLite FTS5 path with a CONTAINS-style scan in the SPARQL/RDF
     layer. Accepts the same "term1 AND term2" / "term1 OR term2" syntax the
     callers used to feed FTS5; default is AND across whitespace-split tokens.
+
+    With ``with_scores=True`` each returned fact carries ``_fts_score`` (its Okapi
+    BM25 relevance) so the entropy-weighted fusion (#4) can measure how peaked this
+    query's keyword match is. Default leaves the score off (no caller impact).
     """
     if not Path(db_path).exists():
         return []
@@ -119,20 +124,23 @@ def query_facts_fts(db_path: str, query: str, max_facts: int = 10) -> list[dict]
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        entity_ids = store.fts_search(query, limit=max_facts)
-        if not entity_ids:
+        ranked = store.fts_search(query, limit=max_facts, with_scores=with_scores)
+        if not ranked:
             store.close()
             return []
 
         # Fetch full attributes for matched entities
         facts = []
-        for eid in entity_ids:
+        for item in ranked:
+            eid, score = item if with_scores else (item, None)
             attrs = store.entity(eid)
             fact = {"entity_id": eid, "entity": eid.split(":")[-1].rsplit("-", 1)[0] if ":" in eid else eid}
             for attr, values in attrs.items():
                 if attr == "tag":
                     continue
                 fact[attr] = values[0] if len(values) == 1 else values
+            if with_scores:
+                fact["_fts_score"] = score
             facts.append(fact)
 
         store.close()
@@ -640,6 +648,28 @@ def _recon_topical_guard(results, query_text=None):
     return inline + demoted
 
 
+def _entropy_weight(scores: list[float], w_lo: float = 0.6, w_hi: float = 1.6) -> float:
+    """#4: map a channel's score distribution to a fusion weight via normalized Shannon
+    entropy. A PEAKED (low-entropy) distribution = the channel discriminates confidently
+    → up-weight toward w_hi; a FLAT (uniform, high-entropy) distribution = the channel is
+    ambiguous/noisy → down-weight toward w_lo. The clarity-score idea (Cronen-Townsend
+    2002: KL of a focused vs background LM) applied to read-side fusion. Bounds are kept
+    near 1.0 so the reweight stays the same magnitude as the RRF rungs the additive graph/
+    decay bonuses are calibrated against. Returns 1.0 (neutral) when entropy is undefined
+    (<2 positive scores). Deterministic, no learned parameters."""
+    vals = [s for s in scores if s and s > 0]
+    if len(vals) < 2:
+        return 1.0
+    total = sum(vals)
+    if total <= 0:
+        return 1.0
+    import math
+    ps = [v / total for v in vals]
+    h = -sum(p * math.log(p) for p in ps if p > 0)
+    h_norm = h / math.log(len(vals))          # [0,1]: 1 = uniform/flat, 0 = peaked
+    return w_lo + (w_hi - w_lo) * (1.0 - h_norm)
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -894,14 +924,15 @@ def query_facts_hybrid(
         question_class = "default"
 
     # Change C: FTS5 AND mode for multi-keyword queries
+    # #4: request BM25 scores so the fusion can entropy-weight the fts channel.
     if len(keywords) > 1:
         fts_and_query = " AND ".join(keywords)
-        fts_results = query_facts_fts(db_path, fts_and_query, max_facts=candidate_limit)
+        fts_results = query_facts_fts(db_path, fts_and_query, max_facts=candidate_limit, with_scores=True)
         if len(fts_results) < candidate_limit:
-            fts_or = query_facts_fts(db_path, " OR ".join(keywords), max_facts=candidate_limit)
+            fts_or = query_facts_fts(db_path, " OR ".join(keywords), max_facts=candidate_limit, with_scores=True)
             fts_results.extend(fts_or)
     else:
-        fts_results = query_facts_fts(db_path, query, max_facts=candidate_limit)
+        fts_results = query_facts_fts(db_path, query, max_facts=candidate_limit, with_scores=True)
 
     tag_results = query_facts_by_entities(db_path, expanded_keywords, max_facts=candidate_limit) if expanded_keywords else []
     top_results = query_top_facts(db_path, limit=candidate_limit)
@@ -943,15 +974,26 @@ def query_facts_hybrid(
     top_ranked = _ranked_ids(top_results)
     intersection_ranked = _ranked_ids(intersection_results)
 
-    # Reciprocal Rank Fusion: RRF(d) = Σ 1/(k + rank_i(d))
+    # Reciprocal Rank Fusion: RRF(d) = Σ w_i · 1/(k + rank_i(d))
+    # #4 ENTROPY-WEIGHTED FUSION: flat RRF trusts all channels equally. The fts
+    # channel carries a real BM25 relevance distribution; weight it by query-clarity
+    # — a PEAKED (low-entropy) BM25 means the keyword query discriminates well, so
+    # trust fts MORE; a FLAT (high-entropy) BM25 means the query is ambiguous, so
+    # lean on the graph/tag/top channels instead. The other channels lack a genuine
+    # query-relevance score (top_facts is a query-agnostic confidence prior; tag/
+    # intersection are coarse match-counts), so they stay neutral (w=1.0) rather than
+    # have a distribution fabricated for them. Bounded, parameter-light, deterministic.
+    # Toggle: SINAIN_ENTROPY_FUSION=0 disables (falls back to flat RRF). See _entropy_weight.
     K = 60
     rrf_scores: dict[str, float] = {}
-    tiers = [fts_ranked, tag_ranked, top_ranked]
+    _entropy_on = os.environ.get("SINAIN_ENTROPY_FUSION", "1").lower() in ("1", "true", "yes")
+    fts_w = _entropy_weight([f.get("_fts_score") or 0.0 for f in fts_results]) if _entropy_on else 1.0
+    weighted_tiers = [(fts_ranked, fts_w), (tag_ranked, 1.0), (top_ranked, 1.0)]
     if intersection_ranked:
-        tiers.append(intersection_ranked)
-    for ranked_list in tiers:
+        weighted_tiers.append((intersection_ranked, 1.0))
+    for ranked_list, w in weighted_tiers:
         for rank, eid in enumerate(ranked_list):
-            rrf_scores[eid] = rrf_scores.get(eid, 0.0) + 1.0 / (K + rank)
+            rrf_scores[eid] = rrf_scores.get(eid, 0.0) + w * (1.0 / (K + rank))
 
     # Change D: Session co-occurrence for multi-entity queries
     if len(keywords) >= 2 and time.monotonic() - t0 < 1.0:
