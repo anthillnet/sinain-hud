@@ -113,11 +113,16 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     surprisal_salt = (os.environ.get("SINAIN_SURPRISAL_SALIENCE", "")
                       + os.environ.get("SINAIN_SALIENCE_LR_THETA", "")
                       + os.environ.get("SINAIN_SALIENCE_GFLOOR", ""))
+    # #6 coverage gap-fill toggle — default OFF. Env-gated salt (NOT hashed).
+    gapfill_salt = os.environ.get("SINAIN_GAPFILL", "")
+    # #6b recurrence importance toggle — default OFF.
+    recurrence_salt = os.environ.get("SINAIN_RECURRENCE", "") + os.environ.get("SINAIN_RECURRENCE_DROP", "")
     return hashlib.sha256(
         (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
          + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt
          + "|recon:" + recon_salt + "|mcanon:" + manifold_salt
-         + "|surp:" + surprisal_salt).encode()
+         + "|surp:" + surprisal_salt + "|gap:" + gapfill_salt
+         + "|recur:" + recurrence_salt).encode()
     ).hexdigest()[:16]
 
 
@@ -438,6 +443,30 @@ def ingest_instance(
                 sys.stderr.write(f"[surprisal-wire] pruned {_p} low-information fact(s)\n")
             except Exception as e:
                 sys.stderr.write(f"[surprisal-wire] FAILED: {type(e).__name__}: {e}\n")
+
+        # #6 COVERAGE GAP-FILL (gated SINAIN_GAPFILL, default OFF). Runs LAST so it fills
+        # against the final fact set; emits kind=gapfill (exempt from #1/#2). Bakes uncovered,
+        # anchor-bearing source sentences as first-class facts. Fail-open.
+        if os.environ.get("SINAIN_GAPFILL") == "1":
+            try:
+                import knowledge_integrator as _ki
+                _g = _ki._coverage_gapfill_graph(str(mem_dir / "knowledge-graph.db"))
+                sys.stderr.write(f"[gapfill-wire] added {_g} coverage gap-fill fact(s)\n")
+            except Exception as e:
+                sys.stderr.write(f"[gapfill-wire] FAILED: {type(e).__name__}: {e}\n")
+
+        # #6b ONLINE RECURRENCE IMPORTANCE (gated SINAIN_RECURRENCE, default OFF). Scores each
+        # fact by forward cross-chunk recurrence (writes `recurrence`); SINAIN_RECURRENCE_DROP=1
+        # also soft-retracts the isolated one-off volatile tail. Fail-open.
+        if os.environ.get("SINAIN_RECURRENCE") == "1":
+            try:
+                import knowledge_integrator as _ki
+                _drop = os.environ.get("SINAIN_RECURRENCE_DROP") == "1"
+                _w = _ki._recurrence_importance_graph(str(mem_dir / "knowledge-graph.db"),
+                                                      drop_isolated=_drop)
+                sys.stderr.write(f"[recurrence-wire] scored {_w} fact(s)\n")
+            except Exception as e:
+                sys.stderr.write(f"[recurrence-wire] FAILED: {type(e).__name__}: {e}\n")
 
         # Copy the resulting Oxigraph store directory to cache.
         # rdf_store persists as a directory (Oxigraph RocksDB tree), not a

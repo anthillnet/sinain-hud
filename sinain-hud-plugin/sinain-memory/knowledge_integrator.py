@@ -552,8 +552,8 @@ def _manifold_canonicalize_graph(db_path: str, tau: float = 0.90) -> int:
             if not (v and isinstance(v, str) and len(v) > 8):
                 continue
             k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
-            if k in ("recon", "verbatim"):
-                continue  # recon = trusted current-state (keep distinct); verbatim = raw
+            if k in ("recon", "verbatim", "gapfill"):
+                continue  # recon=current-state, verbatim=raw, gapfill=#6 coverage facts (all kept distinct)
             if a.get("valid_to"):
                 continue  # already superseded
             if ";" in v and len(v) > 100:
@@ -819,7 +819,7 @@ def _surprisal_prune_graph(db_path: str, lr_theta: float = 0.0, g_floor: float =
             if not a:
                 continue
             k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
-            if k in ("recon", "verbatim"):
+            if k in ("recon", "verbatim", "gapfill"):
                 continue
             if a.get("valid_to"):
                 continue
@@ -871,6 +871,244 @@ def _surprisal_prune_graph(db_path: str, lr_theta: float = 0.0, g_floor: float =
         return pruned
     except Exception as e:  # FAIL-OPEN — never break ingestion
         print(f"  [surprisal] failed (fail-open): {e}", file=sys.stderr)
+        return 0
+
+
+_GAPFILL_MONTHS = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|"
+    r"december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b", re.IGNORECASE)
+_GAPFILL_NUM = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\$\s?\d|\b\d{2,}\b", re.IGNORECASE)
+_GAPFILL_WORDNUM = re.compile(
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b", re.IGNORECASE)
+
+
+def _has_salience_anchor(s: str) -> bool:
+    """A source sentence is worth gap-filling only if it carries an answer-bearing ANCHOR —
+    a date, money/number, month, word-number, or a named entity (a capitalized word that is
+    NOT the sentence's first token). Generic prose without an anchor is not filled."""
+    if _GAPFILL_NUM.search(s) or _GAPFILL_MONTHS.search(s) or _GAPFILL_WORDNUM.search(s):
+        return True
+    toks = s.split()
+    return any(re.match(r"[A-Z][a-z]{2,}", t) for t in toks[1:])
+
+
+def _coverage_gapfill_graph(db_path: str, max_fill: int = 15, cover_floor: float = 0.62,
+                            user_floor: float = 0.28, min_len: int = 20, max_len: int = 300) -> int:
+    """#6: coverage-gated verbatim gap-fill (the salvageable fragment of OT coverage distillation).
+
+    The distiller DROPS salient source regions. Compute each source sentence's coverage_gap =
+    1 − max cosine to any current fact (the cheap source→summary 1-NN / Chamfer term of the
+    optimal-transport coverage objective — no Sinkhorn). Emit a sentence VERBATIM as a kind=gapfill
+    fact when it is (a) UNCOVERED (max-cosine-to-fact < cover_floor), (b) carries a salience ANCHOR
+    (date / number / named entity), AND (c) is USER-RELEVANT (top-k cosine to the user's own facts
+    ≥ user_floor). Criterion (c) is ESSENTIAL: coverage_gap alone surfaces narrative/fiction NOISE
+    the distiller correctly dropped (those are uncovered too); the user-proximity gate keeps only
+    the user's genuinely-dropped facts ("I just got back from a tour at MoMA …": user_prox≈0.37)
+    and rejects fiction ("Matt put a hand on his shoulder": ≈0.19). Deterministic, no LLM; unlike
+    the query-driven raw-chunk backstop, bakes the fact retrievable regardless of query phrasing.
+    Skipped by #1/#2 (kind=gapfill). Fail-open. Gated SINAIN_GAPFILL.
+
+    NOTE: does NOT recover facts whose answer lives in session METADATA rather than text (e.g. a
+    visit DATE carried by occurred_at, not the sentence) — that is the #8 temporal-index lever."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        from raw_store import _sidecar_path
+        sidecar = _sidecar_path(db_path)
+        if not sidecar.exists():
+            return 0
+        # source sentences carrying an anchor (chunk-id ordered), deduped
+        seen: set[str] = set()
+        src: list[tuple[int, str]] = []
+        for line in sidecar.open():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            try:
+                cid = int(rec.get("id", 0))
+            except Exception:
+                cid = 0
+            for sent in re.split(r"(?<=[.!?])\s+", rec.get("text", "")):
+                s = sent.strip()
+                if min_len < len(s) < max_len and _has_salience_anchor(s):
+                    key = s.lower()
+                    if key not in seen:
+                        seen.add(key)
+                        src.append((cid, s))
+        if not src:
+            return 0
+        store = TripleStore(db_path)
+        facts: list[str] = []
+        ufacts: list[str] = []
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a or a.get("valid_to"):
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if v and isinstance(v, str) and len(v) > 8:
+                facts.append(v)
+                if _USER_REF.search(v):
+                    ufacts.append(v)
+        if not facts or len(ufacts) < 3:
+            store.close()
+            return 0  # need a user manifold for the relevance gate
+        fvecs = embed(facts)
+        svecs = embed([s for _, s in src])
+        uvecs = embed(ufacts)
+        if not fvecs or not svecs or not uvecs or len(svecs) != len(src):
+            store.close()
+            return 0
+
+        def _cos(a, b) -> float:
+            return sum(x * y for x, y in zip(a, b))
+
+        def _topk_mean(vec, pool, k=5):
+            ss = sorted((_cos(vec, p) for p in pool), reverse=True)[:max(1, min(k, len(pool)))]
+            return sum(ss) / len(ss)
+
+        gaps = []  # (max_cosine, cid, sentence) — lower max_cosine = more uncovered
+        for i, (cid, s) in enumerate(src):
+            mc = max(_cos(svecs[i], fv) for fv in fvecs)
+            if mc >= cover_floor:
+                continue  # already covered by a fact
+            if _topk_mean(svecs[i], uvecs) < user_floor:
+                continue  # not user-relevant → narrative/fiction noise, not a salient gap
+            gaps.append((mc, cid, s))
+        if not gaps:
+            store.close()
+            return 0
+        gaps.sort(key=lambda g: (g[0], g[1]))  # most-uncovered first; cid tie-break (deterministic)
+        added = 0
+        tx = store.begin_tx("coverage-gapfill")
+        for mc, cid, s in gaps[:max_fill]:
+            ent = _extract_entity_from_fact(s, []) or "general"
+            fid = _fact_id(ent, "gapfill", s)
+            if store.entity(fid):
+                continue
+            store.assert_triple(tx, fid, "entity", ent)
+            store.assert_triple(tx, fid, "attribute", "gapfill")
+            store.assert_triple(tx, fid, "value", s)
+            store.assert_triple(tx, fid, "kind", "gapfill")
+            store.assert_triple(tx, fid, "confidence", "0.75")
+            store.assert_triple(tx, fid, "first_seen", _now_iso())
+            for tag in _extract_tags(s):
+                store.assert_triple(tx, fid, "tag", tag)
+            added += 1
+        store.commit_tx(tx)
+        store.close()
+        if added:
+            print(f"  [gapfill] added {added} coverage gap-fill fact(s)", file=sys.stderr)
+        return added
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [gapfill] failed (fail-open): {e}", file=sys.stderr)
+        return 0
+
+
+def _recurrence_importance_graph(db_path: str, tau: float = 0.55, drop_isolated: bool = False) -> int:
+    """#6b: ONLINE forward-recurrence importance (the streaming reframe of OT coverage).
+
+    Importance is not a property of a fact in isolation — it is REVEALED OVER TIME by how much
+    SUBSEQUENT content returns to a fact's semantic region. Process the source chunks in temporal
+    order (sidecar chunk_id = session order); a fact's `recurrence` = the number of DISTINCT source
+    chunks that contain a sentence with cos ≥ tau to it. A recurring theme the user revisits
+    (mortgage, the job, mom's list) accumulates returns → high recurrence → the stable, important
+    core. A one-off (a single fiction line, incidental trivia) is never revisited → recurrence≈1 →
+    the volatile tail. This is the self-exciting / Hawkes-process view (one mention raises the rate
+    of future mentions; importance = the excitation) and the SEMANTIC, forward-looking generalization
+    of the exact-match `reinforce_count` Sinain already tracks. Unlike static coverage gap-fill, it
+    needs no generic corpus and no user manifold, and it does NOT surface fiction noise (fiction
+    isn't revisited).
+
+    Writes the `recurrence` attribute on every fact (a production-usable importance signal for
+    retrieval ranking / retention). With drop_isolated=True, ALSO soft-retracts the isolated
+    volatile tail (recurrence ≤ 1) — but only for non-user, non-recon/gapfill facts WITHOUT a
+    strong value anchor, so user facts, dated/numeric anchors and curated facts are always kept.
+    Deterministic, fail-open. Gated SINAIN_RECURRENCE in the caller."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        from raw_store import _sidecar_path
+        sidecar = _sidecar_path(db_path)
+        if not sidecar.exists():
+            return 0
+        # source chunks in order; each chunk → its sentences
+        chunks: list[list[str]] = []
+        for line in sidecar.open():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", rec.get("text", ""))
+                     if 12 < len(s.strip()) < 300]
+            if sents:
+                chunks.append(sents)
+        if len(chunks) < 2:
+            return 0
+        store = TripleStore(db_path)
+        items: list[tuple[str, str]] = []  # (fact_id, value)
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a or a.get("valid_to"):
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if v and isinstance(v, str) and len(v) > 8:
+                items.append((fid, v))
+        if not items:
+            store.close()
+            return 0
+        fvecs = embed([v for _, v in items])
+        # embed each chunk's sentences (flatten with chunk index)
+        flat, owner = [], []
+        for ci, sents in enumerate(chunks):
+            for s in sents:
+                flat.append(s); owner.append(ci)
+        svecs = embed(flat)
+        if not fvecs or not svecs:
+            store.close()
+            return 0
+
+        def _cos(a, b) -> float:
+            return sum(x * y for x, y in zip(a, b))
+
+        # recurrence[f] = # distinct chunks with a sentence cos≥tau to f
+        recur = [0] * len(items)
+        for fi in range(len(items)):
+            hit_chunks = set()
+            fv = fvecs[fi]
+            for si in range(len(flat)):
+                if _cos(fv, svecs[si]) >= tau:
+                    hit_chunks.add(owner[si])
+            recur[fi] = len(hit_chunks)
+
+        written = 0
+        dropped = 0
+        tx = store.begin_tx("recurrence-importance")
+        for fi, (fid, v) in enumerate(items):
+            store.assert_triple(tx, fid, "recurrence", str(recur[fi]))
+            written += 1
+            if drop_isolated and recur[fi] <= 1:
+                if _USER_REF.search(v):
+                    continue
+                if _strong_value_tokens(v):
+                    continue
+                a = store.entity(fid)
+                k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
+                if k in ("recon", "verbatim", "gapfill"):
+                    continue
+                store.soft_retract_triple(tx, fid)  # isolated one-off, no anchor → volatile tail
+                dropped += 1
+        store.commit_tx(tx)
+        store.close()
+        print(f"  [recurrence] scored {written} fact(s); soft-retracted {dropped} isolated one-off(s)",
+              file=sys.stderr)
+        return written
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [recurrence] failed (fail-open): {e}", file=sys.stderr)
         return 0
 
 
