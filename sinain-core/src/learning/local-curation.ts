@@ -397,6 +397,28 @@ export class LocalCurationService {
       } catch (err: any) {
         warn(TAG, `knowledge integration failed: ${err.message?.slice(0, 200)}`);
       }
+
+      // Step 3: T1-RECON consolidation (entity-attribution, categorical
+      // current-state + per-context numeric supersession). Runs over the live KG
+      // and integrates derived facts via the same path, so escalation context +
+      // KG/MCP queries see them. Default-ON in production (set SINAIN_RECON=0 to
+      // disable); fail-open. See reconstruct.py.
+      if ((process.env.SINAIN_RECON ?? "1") !== "0") {
+        try {
+          const reconOut = execFileSync("python3", [
+            resolve(this.scriptsDir, "reconstruct.py"),
+            "--memory-dir", this.memoryDir,
+            "--transcript", JSON.stringify(transcript),
+          ], {
+            timeout: 60_000,
+            encoding: "utf-8",
+            env: { ...process.env, PYTHONPATH: this.scriptsDir, SINAIN_RECON: "1" },
+          });
+          log(TAG, `recon consolidated: ${reconOut.trim().slice(0, 120)}`);
+        } catch (err: any) {
+          warn(TAG, `recon stage failed (non-fatal): ${err.message?.slice(0, 160)}`);
+        }
+      }
       return true;
     } catch (err: any) {
       warn(TAG, `distillation failed: ${err.message?.slice(0, 200)}`);

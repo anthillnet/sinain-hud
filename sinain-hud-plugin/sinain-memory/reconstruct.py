@@ -426,7 +426,49 @@ def build_consolidated_digest(db_path: str, raw_text: str | None = None) -> dict
         return {"facts": [], "isEmpty": True}
 
 
+def _cli_run_and_integrate(memory_dir: str, transcript_json: str) -> dict:
+    """Production entry (called by sinain-core LocalCurationService): run the
+    T1-RECON consolidation over the live KG and integrate the resulting facts via
+    the proven knowledge_integrator path — so entity-attribution, categorical
+    current-state, and per-context numeric supersession facts enter the SAME graph
+    that escalation context + KG/MCP queries read. Mirrors eval ingest.py's recon
+    block. Fail-open."""
+    import subprocess
+    from pathlib import Path
+    db_path = str(Path(memory_dir) / "knowledge-graph.db")
+    if not Path(db_path).exists():
+        return {"error": "knowledge-graph.db not found", "integrated": 0}
+    raw_text = ""
+    try:
+        items = json.loads(transcript_json) if transcript_json else []
+        raw_text = "\n".join((it.get("content") or it.get("text") or "") for it in items)
+    except Exception:
+        pass
+    digest = build_consolidated_digest(db_path, raw_text=raw_text or None)
+    facts = (digest or {}).get("facts") or []
+    if not facts:
+        return {"integrated": 0, "isEmpty": True}
+    scripts = str(Path(__file__).resolve().parent)
+    try:
+        subprocess.run(
+            ["python3", str(Path(scripts) / "knowledge_integrator.py"),
+             "--memory-dir", memory_dir, "--digest", json.dumps(digest)],
+            timeout=60, capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": scripts},
+        )
+    except Exception as e:
+        return {"error": str(e)[:160], "integrated": 0}
+    return {"integrated": len(facts)}
+
+
 if __name__ == "__main__":
-    # Manual probe: python3 reconstruct.py <store.db>
-    d = build_consolidated_digest(sys.argv[1])
-    print(json.dumps(d, indent=2, ensure_ascii=False))
+    import argparse
+    ap = argparse.ArgumentParser(description="T1-RECON consolidation stage")
+    ap.add_argument("db", nargs="?", help="store db path (legacy probe mode)")
+    ap.add_argument("--memory-dir", help="production: build + integrate recon facts")
+    ap.add_argument("--transcript", default="", help="production: session feed-items JSON (raw_text)")
+    a = ap.parse_args()
+    if a.memory_dir:
+        print(json.dumps(_cli_run_and_integrate(a.memory_dir, a.transcript), ensure_ascii=False))
+    else:  # legacy: just print the digest for inspection
+        print(json.dumps(build_consolidated_digest(a.db), indent=2, ensure_ascii=False))
