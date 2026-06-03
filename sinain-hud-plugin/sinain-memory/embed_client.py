@@ -18,8 +18,39 @@ EMBED_TIMEOUT_S = 5
 SIMILARITY_THRESHOLD = 0.78  # calibrated: catches rephrased facts, rejects different facts
 
 
+_LOCAL_MODEL = None  # cached SentenceTransformer (loaded once per process)
+_LOCAL_MODEL_TRIED = False
+
+
+def _embed_local(texts: list[str]) -> list[list[float]] | None:
+    """Fallback: embed with local all-MiniLM-L6-v2 (the SAME model sinain-core's /embed
+    serves, and the one graph_query's bi-encoder uses). Returns NORMALIZED vectors so
+    cosine() (dot product) is correct. Loads the model once per process; None if
+    sentence-transformers isn't installed. This is what makes the write-path semantic
+    dedup actually run during the eval (where sinain-core /embed is not up) — before this,
+    find_duplicates_batch silently no-op'd and only exact-string dedup ever fired."""
+    global _LOCAL_MODEL, _LOCAL_MODEL_TRIED
+    if _LOCAL_MODEL is None:
+        if _LOCAL_MODEL_TRIED:
+            return None
+        _LOCAL_MODEL_TRIED = True
+        try:
+            from sentence_transformers import SentenceTransformer
+            _LOCAL_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            return None
+    try:
+        embs = _LOCAL_MODEL.encode(
+            texts, show_progress_bar=False, normalize_embeddings=True
+        )
+        return [list(map(float, v)) for v in embs]
+    except Exception:
+        return None
+
+
 def embed(texts: list[str]) -> list[list[float]] | None:
-    """Embed texts via sinain-core /embed endpoint. Returns None if unavailable."""
+    """Embed texts via sinain-core /embed endpoint, falling back to a local model when the
+    endpoint is unreachable (the eval/bench case). Returns None only if BOTH are unavailable."""
     try:
         data = json.dumps({"texts": texts}).encode()
         req = urllib.request.Request(
@@ -38,7 +69,7 @@ def embed(texts: list[str]) -> list[list[float]] | None:
                 embeddings.append(floats)
             return embeddings
     except Exception:
-        return None
+        return _embed_local(texts)
 
 
 def cosine(a: list[float], b: list[float]) -> float:
