@@ -14,7 +14,7 @@ RESET='\033[0m'
 fail() { echo -e "${BOLD}[local]${RESET} ${RED}✗${RESET} $*"; exit 1; }
 log()  { echo -e "${BOLD}[local]${RESET} $*"; }
 
-# Source .env (same file sinain-core reads) to pick up LOCAL_VISION_* etc.
+# Source .env (same file sinain-core reads) to pick up SINAIN_LOCAL_* etc.
 for _env_file in "$SCRIPT_DIR/.env" "$HOME/.sinain/.env"; do
   if [ -f "$_env_file" ]; then
     while IFS='=' read -r _k _v; do
@@ -29,7 +29,7 @@ for _env_file in "$SCRIPT_DIR/.env" "$HOME/.sinain/.env"; do
   fi
 done
 
-MODEL_DIR="$HOME/models"
+MODEL_DIR="$HOME/.sinain/models/whisper"
 MODEL_NAME="ggml-large-v3-turbo.bin"
 MODEL_PATH="${LOCAL_WHISPER_MODEL:-$MODEL_DIR/$MODEL_NAME}"
 MODEL_PATH="${MODEL_PATH/#\~/$HOME}"
@@ -56,9 +56,9 @@ log "  backend:  whisper-cpp"
 log "  model:    $MODEL_PATH"
 log "  bin:      $LOCAL_WHISPER_BIN"
 
-# Local vision check
-if [ "${LOCAL_VISION_ENABLED:-}" = "true" ]; then
-  VISION_MODEL="${LOCAL_VISION_MODEL:-llava}"
+# Local vision check (SINAIN_LOCAL_* primary, LOCAL_VISION_* legacy fallback)
+if [ "${SINAIN_LOCAL_MODE:-}" = "true" ] || [ -n "${SINAIN_LOCAL_VISION:-}" ] || [ "${LOCAL_VISION_ENABLED:-}" = "true" ]; then
+  VISION_MODEL="${SINAIN_LOCAL_VISION:-${LOCAL_VISION_MODEL:-qwen2.5vl:7b}}"
   if command -v ollama &>/dev/null; then
     if curl -sf http://localhost:11434/api/tags &>/dev/null; then
       log "  vision:   Ollama ($VISION_MODEL) — local"

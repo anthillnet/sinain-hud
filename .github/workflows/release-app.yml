@@ -1,0 +1,174 @@
+name: Release App (DMG)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEED-001 Phase 3: signed + notarized Sinain.dmg pipeline.
+#
+# STATUS: SCAFFOLD. This workflow is NON-FUNCTIONAL until the Apple + Sparkle
+# secrets below are provisioned in repo settings. Steps are present but the
+# build/stage/sign/notarize commands call scaffold stubs (tools/dmg/*.sh) that
+# currently exit non-zero on purpose. Do NOT enable on a real tag until Phase 2
+# (bundle staging) and the secrets are done. See docs/dmg-distribution-spec.md §4.
+#
+# Required GitHub Secrets (none provisioned yet):
+#   APPLE_CERT_P12_BASE64          Developer ID Application cert (.p12, base64)
+#   APPLE_CERT_PASSWORD            .p12 password
+#   APPLE_TEAM_ID                  Apple Developer Team ID
+#   APPLE_ID                       Apple ID email (notarytool auth)
+#   APPLE_APP_SPECIFIC_PASSWORD    app-specific password (xxxx-xxxx-xxxx-xxxx)
+#   SPARKLE_ED_PRIVATE_KEY         EdDSA private key for signing the appcast
+#
+# Notarization uses the app-specific-password method (account.apple.com →
+# Sign-In and Security → App-Specific Passwords), not an App Store Connect API
+# key — simpler for an individual direct-distribution account. See
+# docs/dmg-distribution-spec.md §4.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - 'app-v*'
+  workflow_dispatch: {}  # manual trigger for dry-runs while scaffolding
+
+permissions:
+  contents: write
+
+jobs:
+  build-sign-notarize:
+    name: Build, Sign & Notarize DMG
+    runs-on: macos-latest
+
+    # Guard: refuse to run until secrets exist. Remove once provisioned (Phase 3).
+    # The job no-ops cleanly instead of failing a tag push mid-scaffold.
+    steps:
+      - name: Preflight — secrets present?
+        id: preflight
+        env:
+          HAVE_CERT: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
+          HAVE_NOTARY: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
+          HAVE_SPARKLE: ${{ secrets.SPARKLE_ED_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$HAVE_CERT" != "true" ] || [ "$HAVE_NOTARY" != "true" ] || [ "$HAVE_SPARKLE" != "true" ]; then
+            echo "::warning::DMG release secrets not provisioned — this workflow is a scaffold (SEED-001 Phase 3). Skipping build."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.preflight.outputs.ready == 'true'
+
+      # ── Build all components ────────────────────────────────────────────────
+      - uses: subosito/flutter-action@v2
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Build overlay (Flutter)
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: overlay
+        run: flutter pub get && flutter build macos --release
+
+      - name: Build sinain-core
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: sinain-core
+        run: npm ci && npm run build
+
+      - name: Build sense_client (PyInstaller)
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          pip install pyinstaller
+          pip install -r sense_client/requirements.txt || true
+          pyinstaller tools/dmg/sense_client.spec   # TODO(Phase 2): verify spec
+
+      - name: Build universal sck-capture
+        if: steps.preflight.outputs.ready == 'true'
+        run: ./tools/dmg/build-sck-universal.sh      # TODO(Phase 2): stub
+
+      - name: Pre-warm embedding model
+        if: steps.preflight.outputs.ready == 'true'
+        run: ./tools/dmg/prewarm-embedding.sh        # TODO(Phase 2): stub
+
+      # ── Stage bundle ────────────────────────────────────────────────────────
+      - name: Stage Sinain.app bundle
+        if: steps.preflight.outputs.ready == 'true'
+        run: ./tools/dmg/stage-bundle.sh             # TODO(Phase 2): stub
+
+      # ── Sign ────────────────────────────────────────────────────────────────
+      - name: Import Developer ID cert
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          # TODO(Phase 3): create temp keychain, import .p12, unlock.
+          echo "::error::sign step not implemented — Phase 3"
+          exit 1
+
+      - name: Codesign (hardened runtime)
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          # TODO(Phase 3): codesign --deep --options runtime every binary + framework.
+          echo "::error::codesign step not implemented — Phase 3"
+          exit 1
+
+      # ── DMG + Notarize ──────────────────────────────────────────────────────
+      - name: Build DMG
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          # TODO(Phase 3): create-dmg / hdiutil → build/Sinain.dmg
+          echo "::error::dmg step not implemented — Phase 3"
+          exit 1
+
+      - name: Notarize + staple
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # TODO(Phase 3): wire build/Sinain.dmg as the notarize target. Auth via
+          # app-specific password (account.apple.com), not an API key.
+          #   xcrun notarytool submit build/Sinain.dmg \
+          #     --apple-id "$APPLE_ID" \
+          #     --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          #     --team-id "$APPLE_TEAM_ID" \
+          #     --wait
+          #   xcrun stapler staple build/Sinain.dmg
+          echo "::error::notarize step not implemented — Phase 3"
+          exit 1
+
+      - name: Verify Gatekeeper
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          # TODO(Phase 3): spctl --assess --type install + codesign --verify --deep --strict
+          echo "::error::verify step not implemented — Phase 3"
+          exit 1
+
+      # ── Publish ─────────────────────────────────────────────────────────────
+      - name: Sign + publish Sparkle appcast
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          # TODO(Phase 4): sign DMG with EdDSA key, update docs/distribution/appcast.xml,
+          # publish appcast + models-manifest.json to GitHub Pages.
+          echo "::error::appcast step not implemented — Phase 4"
+          exit 1
+
+      - name: Upload DMG to GitHub Releases
+        if: steps.preflight.outputs.ready == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Sinain.dmg
+          generate_release_notes: true

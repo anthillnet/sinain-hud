@@ -1,7 +1,7 @@
 """Ollama Vision — local multimodal inference for screen scene understanding.
 
-Provides a thin client for Ollama's vision models (llava, llama3.2-vision,
-moondream, nanollava). Used by sense_client for scene descriptions and
+Provides a thin client for Ollama's vision models (qwen2.5vl, llama3.2-vision,
+moondream, llava). Used by sense_client for scene descriptions and
 optionally by sinain-core's agent analyzer for local vision analysis.
 
 Falls back gracefully when Ollama is unavailable — never crashes the pipeline.
@@ -37,7 +37,7 @@ class OllamaVision:
 
     def __init__(
         self,
-        model: str = "llava",
+        model: str = "qwen2.5vl:7b",
         base_url: str = "http://localhost:11434",
         timeout: float = 30.0,
         max_tokens: int = 200,

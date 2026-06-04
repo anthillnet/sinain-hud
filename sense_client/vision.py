@@ -56,7 +56,7 @@ class VisionProvider(ABC):
 class OllamaVisionProvider(VisionProvider):
     """Local vision via Ollama HTTP API."""
 
-    def __init__(self, model: str = "llava", base_url: str = "http://localhost:11434",
+    def __init__(self, model: str = "qwen2.5vl:7b", base_url: str = "http://localhost:11434",
                  timeout: float = 10.0, max_tokens: int = 200):
         from .ollama_vision import OllamaVision
         self._client = OllamaVision(model=model, base_url=base_url,
@@ -172,19 +172,30 @@ def create_vision(config: dict) -> Optional[VisionProvider]:
 
     Priority:
     1. Paranoid privacy or no API key → local only (Ollama)
-    2. LOCAL_VISION_ENABLED=true → local (Ollama)
+    2. SINAIN_LOCAL_MODE=true / SINAIN_LOCAL_VISION set → local (Ollama)
     3. API key available → cloud (OpenRouter)
     4. Nothing available → None (vision disabled, OCR still works)
+
+    Env-var namespace: SINAIN_LOCAL_* is primary. The legacy LOCAL_VISION_*
+    vars are still honored as a fallback for older .env files; sinain-core's
+    config.ts also bridges SINAIN_LOCAL_* → LOCAL_VISION_* for compatibility.
     """
     privacy = os.environ.get("PRIVACY_MODE", "off")
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     vision_cfg = config.get("vision", {})
 
+    # Primary: SINAIN_LOCAL_MODE / SINAIN_LOCAL_VISION. Legacy: LOCAL_VISION_*.
     local_enabled = (
         vision_cfg.get("enabled", False)
+        or os.environ.get("SINAIN_LOCAL_MODE", "").lower() == "true"
+        or bool(os.environ.get("SINAIN_LOCAL_VISION", ""))
         or os.environ.get("LOCAL_VISION_ENABLED", "").lower() == "true"
     )
-    local_model = os.environ.get("LOCAL_VISION_MODEL", vision_cfg.get("model", "llava"))
+    local_model = (
+        os.environ.get("SINAIN_LOCAL_VISION")
+        or os.environ.get("LOCAL_VISION_MODEL")
+        or vision_cfg.get("model", "qwen2.5vl:7b")
+    )
     local_url = vision_cfg.get("ollamaUrl", "http://localhost:11434")
     local_timeout = vision_cfg.get("timeout", 10.0)
 
