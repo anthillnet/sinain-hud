@@ -41,38 +41,142 @@ bold "3 · Staging sck-capture (arm64)"
 cp "$REPO/tools/sck-capture/sck-capture" "$RES/sck-capture/sck-capture"
 chmod +x "$RES/sck-capture/sck-capture"
 
-bold "4 · Writing launch-backend.sh"
+bold "3b · Staging agent runtime (sinain-agent + sinain-mcp-server)"
+# Bare-agent runtime: run.sh dispatches escalations/spawns to a local coding
+# CLI (claude/codex/…) using MCP tools from sinain-mcp-server. Tiny source;
+# the MCP server needs its own prod deps (@modelcontextprotocol/sdk). tsx (to
+# run the .ts MCP entry) already ships in sinain-core/node_modules/.bin.
+cp -R "$REPO/sinain-agent" "$RES/sinain-agent"
+rm -rf "$RES/sinain-agent/agents.json"  # never bundle a user's agents.json
+cp -R "$REPO/sinain-mcp-server" "$RES/sinain-mcp-server"
+rm -rf "$RES/sinain-mcp-server/node_modules"
+( cd "$RES/sinain-mcp-server" && "$RES/node/bin/node" "$(command -v npm)" install --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
+  || fail "prod npm install failed in sinain-mcp-server stage"
+
+bold "3c · Staging Python pipelines (sense_client + sinain-memory knowledge)"
+# Screen capture/OCR (sense_client) and the knowledge-graph distillation
+# scripts (sinain-memory) run on the user's system python3. A self-contained
+# PyInstaller build for consumer Macs without the deps is future work (Q3).
+cp -R "$REPO/sense_client" "$RES/sense_client"
+cp -R "$REPO/sinain-hud-plugin/sinain-memory" "$RES/sinain-memory"
+find "$RES/sense_client" "$RES/sinain-memory" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+bold "4 · Writing launch-backend.sh (supervisor: core + bare agent)"
 cat > "$RES/scripts/launch-backend.sh" <<'LAUNCH'
 #!/usr/bin/env bash
-# Bundled-backend launcher — spawned by the overlay .app on startup.
-# Resolves paths relative to this bundle so nothing depends on the user's PATH.
-set -euo pipefail
+# Bundled-backend supervisor — spawned by the overlay .app on startup.
+# Starts sinain-core, waits for health, then starts the bare agent (run.sh).
+# Resolves all paths inside the bundle so nothing depends on the user's PATH.
+set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"          # …/Resources/scripts
 RES="$(cd "$HERE/.." && pwd)"                   # …/Resources
 NODE="$RES/node/bin/node"
 CORE="$RES/sinain-core"
+AGENT_DIR="$RES/sinain-agent"
 
-# sinain-core resolves the sck-capture binary from ~/.sinain/sck-capture first
-# (capture-spawner-macos.ts), so symlink the bundled binary there on launch.
-mkdir -p "$HOME/.sinain/sck-capture" "$HOME/.sinain/capture"
+# Augment PATH: bundled node first, then where user CLIs (claude/codex/…)
+# typically live — the app's launchd PATH is just /usr/bin:/bin and wouldn't
+# find them, leaving the agent roster empty.
+export PATH="$RES/node/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$HOME/.deno/bin:$PATH"
+
+# sinain-core resolves the sck-capture binary from ~/.sinain/sck-capture first.
+mkdir -p "$HOME/.sinain/sck-capture" "$HOME/.sinain/capture" "$HOME/.openclaw/workspace"
 ln -sf "$RES/sck-capture/sck-capture" "$HOME/.sinain/sck-capture/sck-capture"
 
-# Load user config from ~/.sinain/.env (written by the first-run wizard), the
-# same way the npm launcher does — the bundle's cwd has no .env of its own.
+# Load user config from ~/.sinain/.env (written by the first-run wizard).
 ENV_FILE="$HOME/.sinain/.env"
 if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
+  set -a; . "$ENV_FILE"; set +a
 fi
 
-# Keep model/embedding caches out of the (read-only, signed) bundle.
 export NODE_ENV=production
+export SINAIN_CORE_URL="http://localhost:${PORT:-9500}"
+export SINAIN_WORKSPACE="${SINAIN_WORKSPACE:-$HOME/.openclaw/workspace}"
 export SINAIN_MEMORY_DIR="${SINAIN_MEMORY_DIR:-$HOME/.sinain/memory}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HOME/.sinain/models/embedding}"
-cd "$CORE"
-exec "$NODE" dist/index.js
+# Pin the bare agent's roster file to user home (the bundle dir is read-only in
+# the signed .app; run.sh seeds it from the bundled agents.example.json).
+export AGENTS_CONFIG_PATH="$HOME/.sinain/agents.json"
+
+# Initialise the knowledge graph on first run so entity detection is live from
+# the start (otherwise it stays disabled until the first distillation writes a db).
+mkdir -p "$SINAIN_MEMORY_DIR"
+KG_DB="$SINAIN_MEMORY_DIR/knowledge-graph.db"
+if [ ! -f "$KG_DB" ] && [ -d "$RES/sinain-memory" ] && command -v python3 >/dev/null 2>&1; then
+  PYTHONPATH="$RES/sinain-memory" python3 -c "from triplestore import TripleStore; TripleStore('$KG_DB')" 2>/dev/null \
+    && echo "[launch] initialised knowledge graph → $KG_DB"
+fi
+
+# Resolve the MCP config (template uses ../relative paths that break in a
+# bundle) into ~/.sinain with absolute paths, and point run.sh at it.
+RESOLVED_MCP="$HOME/.sinain/mcp-config.json"
+cat > "$RESOLVED_MCP" <<JSON
+{
+  "mcpServers": {
+    "sinain": {
+      "command": "$RES/sinain-core/node_modules/.bin/tsx",
+      "args": ["$RES/sinain-mcp-server/index.ts"],
+      "env": {
+        "SINAIN_CORE_URL": "$SINAIN_CORE_URL",
+        "SINAIN_WORKSPACE": "$SINAIN_WORKSPACE"
+      }
+    }
+  }
+}
+JSON
+export MCP_CONFIG="$RESOLVED_MCP"
+
+# ── Supervise: start core, then bare agent + sense_client; kill all on signal ─
+CORE_PID=""; AGENT_PID=""; SENSE_PID=""
+cleanup() {
+  [ -n "$SENSE_PID" ] && kill "$SENSE_PID" 2>/dev/null
+  [ -n "$AGENT_PID" ] && kill "$AGENT_PID" 2>/dev/null
+  [ -n "$CORE_PID" ]  && kill "$CORE_PID"  2>/dev/null
+  # run.sh's own TERM trap stops the OpenRouter proxy it may have started.
+  exit 0
+}
+trap cleanup TERM INT
+
+( cd "$CORE" && exec "$NODE" dist/index.js ) &
+CORE_PID=$!
+
+# Wait for core health before starting dependents (they exit if core is down).
+for _i in $(seq 1 40); do
+  curl -sf "$SINAIN_CORE_URL/health" >/dev/null 2>&1 && break
+  sleep 1
+done
+
+# Start the bare agent. CWD = bundled sinain-agent so settings.json's relative
+# ./hooks/approve-tool.sh resolves.
+if [ -f "$AGENT_DIR/run.sh" ]; then
+  ( cd "$AGENT_DIR" && exec bash run.sh ) &
+  AGENT_PID=$!
+fi
+
+# Start sense_client (screen capture → OCR → POST /sense). Probe for a python3
+# that actually has the scientific deps (PIL/numpy/skimage) — a machine may have
+# several python3 installs and only one carries them. A bundled PyInstaller
+# build (future, Q3) removes this dependency on the user's environment.
+SENSE_PY=""
+for _py in "${SINAIN_PYTHON:-}" \
+           /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
+           /opt/homebrew/bin/python3 /usr/local/bin/python3 \
+           "$(command -v python3 || true)" \
+           /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do
+  [ -n "${_py:-}" ] && [ -x "$_py" ] || continue
+  # Full startup import set: numpy + PIL + skimage + Quartz (pyobjc). Checking
+  # only numpy/PIL would pick a python3 that later crashes on `import Quartz`.
+  if "$_py" -c "import numpy, PIL, skimage, Quartz" >/dev/null 2>&1; then SENSE_PY="$_py"; break; fi
+done
+if [ -n "$SENSE_PY" ] && [ -d "$RES/sense_client" ]; then
+  ( cd "$RES" && exec "$SENSE_PY" -m sense_client ) &
+  SENSE_PID=$!
+  echo "[launch] sense_client started ($SENSE_PY)"
+else
+  echo "[launch] sense_client skipped — no python3 with PIL/numpy found"
+fi
+
+wait "$CORE_PID"
 LAUNCH
 chmod +x "$RES/scripts/launch-backend.sh"
 
