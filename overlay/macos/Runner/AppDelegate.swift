@@ -41,6 +41,32 @@ class AppDelegate: FlutterAppDelegate {
             binaryMessenger: controller.engine.binaryMessenger
         )
 
+        // Backend control channel — lets the first-run wizard restart the
+        // bundled backend after writing ~/.sinain/.env (SEED-001 Stage 5).
+        let backendChannel = FlutterMethodChannel(
+            name: "sinain_hud/backend",
+            binaryMessenger: controller.engine.binaryMessenger
+        )
+        backendChannel.setMethodCallHandler { [weak self] call, result in
+            guard let self = self else { result(false); return }
+            switch call.method {
+            case "isBundled":
+                result(self.backend.isBundled)
+            case "restart":
+                self.backend.stop()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.backend.start()
+                    result(true)
+                }
+            case "start":
+                self.backend.start(); result(true)
+            case "stop":
+                self.backend.stop(); result(true)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
         configureWindow()
         registerHotkeys()
 
@@ -252,6 +278,9 @@ final class BackendLauncher {
         let url = resourceURL.appendingPathComponent("scripts/launch-backend.sh")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
+
+    /// True when this build bundles its own backend (packaged DMG).
+    var isBundled: Bool { launchScriptURL != nil }
 
     /// Start the bundled backend if present. Safe to call when unbundled (no-op).
     func start() {

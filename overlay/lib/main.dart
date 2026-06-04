@@ -6,8 +6,10 @@ import 'core/constants.dart';
 import 'core/services/onboarding_service.dart';
 import 'core/models/hud_settings.dart';
 import 'core/services/settings_service.dart';
+import 'core/services/first_run_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/window_service.dart';
+import 'ui/first_run/first_run_wizard.dart';
 import 'ui/overlay_shell.dart';
 
 /// Global key for OverlayShell so hotkey handler can trigger state changes.
@@ -45,6 +47,10 @@ Future<void> _startApp() async {
   final onboardingService = OnboardingService();
   await onboardingService.init();
 
+  // First-run wizard gate (packaged DMG only — no-op under `flutter run`).
+  final firstRunService = FirstRunService();
+  await firstRunService.init();
+
   final wsService = WebSocketService(url: settingsService.settings.wsUrl);
 
   // Configure native window
@@ -52,9 +58,9 @@ Future<void> _startApp() async {
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
 
-  // During onboarding, resize window for the wizard panel
-  if (!onboardingService.isComplete) {
-    await windowService.setWindowFrame(100, 200, 320, 380);
+  // During onboarding or first-run setup, resize window for the wizard panel
+  if (firstRunService.needsSetup || !onboardingService.isComplete) {
+    await windowService.setWindowFrame(100, 200, 340, 420);
   }
 
   // Restore persisted position (if saved)
@@ -120,6 +126,7 @@ Future<void> _startApp() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: onboardingService),
+        ChangeNotifierProvider.value(value: firstRunService),
         ChangeNotifierProvider.value(value: settingsService),
         ChangeNotifierProvider.value(value: wsService),
         Provider.value(value: windowService),
@@ -154,7 +161,24 @@ class SinainHudApp extends StatelessWidget {
       ),
       home: Scaffold(
         backgroundColor: Colors.transparent,
-        body: OverlayShell(key: overlayShellKey),
+        body: Consumer<FirstRunService>(
+          builder: (context, firstRun, _) {
+            if (firstRun.needsSetup) {
+              return Center(
+                child: FirstRunWizard(
+                  service: firstRun,
+                  onComplete: () {
+                    // Shrink the window back to the default eye/chat size; the
+                    // needsSetup flip rebuilds this Consumer into OverlayShell.
+                    Provider.of<WindowService>(context, listen: false)
+                        .setWindowFrame(100, 200, 320, 380);
+                  },
+                ),
+              );
+            }
+            return OverlayShell(key: overlayShellKey);
+          },
+        ),
       ),
     );
   }
