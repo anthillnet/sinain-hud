@@ -61,6 +61,17 @@ cp -R "$REPO/sense_client" "$RES/sense_client"
 cp -R "$REPO/sinain-hud-plugin/sinain-memory" "$RES/sinain-memory"
 find "$RES/sense_client" "$RES/sinain-memory" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
+bold "3d · Staging whisper-cli (local transcription, T1/T2)"
+# Self-contained arm64 whisper.cpp binary (system frameworks only). The model
+# downloads at runtime (T1/T2) via provision-whisper.sh.
+if [ -f "$REPO/tools/whisper/whisper-cli" ]; then
+  mkdir -p "$RES/whisper"
+  cp "$REPO/tools/whisper/whisper-cli" "$RES/whisper/whisper-cli"
+  chmod +x "$RES/whisper/whisper-cli"
+else
+  echo "  ⚠ tools/whisper/whisper-cli missing — run tools/whisper/build-whisper.sh (local STT will be unavailable)"
+fi
+
 bold "4 · Writing launch-backend.sh (supervisor: core + bare agent)"
 cat > "$RES/scripts/launch-backend.sh" <<'LAUNCH'
 #!/usr/bin/env bash
@@ -138,6 +149,25 @@ else
   echo "[launch] python provisioning failed — sense_client + knowledge pages degraded"
 fi
 
+# ── Local-mode model provisioning (tier-gated, background) ───────────────────
+# Runs in the background so core/overlay stay responsive; local features come
+# online when downloads finish. All idempotent + resumable. T1 (local STT) →
+# whisper model; T2 (full local) → whisper + Ollama SLMs.
+PROV_PIDS=""
+if [ "${TRANSCRIPTION_BACKEND:-}" = "local" ]; then
+  [ -x "$RES/whisper/whisper-cli" ] && export LOCAL_WHISPER_BIN="${LOCAL_WHISPER_BIN:-$RES/whisper/whisper-cli}"
+  if [ -x "$HERE/provision-whisper.sh" ]; then
+    echo "[launch] local transcription — ensuring whisper model (background)…"
+    bash "$HERE/provision-whisper.sh" "$HOME/.sinain/models/whisper" &
+    PROV_PIDS="$PROV_PIDS $!"
+  fi
+fi
+if [ "${SINAIN_LOCAL_MODE:-}" = "true" ] && [ -x "$HERE/provision-ollama.sh" ]; then
+  echo "[launch] full-local mode — ensuring Ollama SLMs (background)…"
+  bash "$HERE/provision-ollama.sh" &
+  PROV_PIDS="$PROV_PIDS $!"
+fi
+
 # Initialise the knowledge graph on first run so entity detection is live from
 # the start (otherwise it stays disabled until the first distillation writes a db).
 mkdir -p "$SINAIN_MEMORY_DIR"
@@ -173,6 +203,8 @@ cleanup() {
   [ -n "$SENSE_PID" ] && kill "$SENSE_PID" 2>/dev/null
   [ -n "$AGENT_PID" ] && kill "$AGENT_PID" 2>/dev/null
   [ -n "$CORE_PID" ]  && kill "$CORE_PID"  2>/dev/null
+  # Stop any in-flight model downloads (resumable on next launch).
+  [ -n "${PROV_PIDS:-}" ] && kill $PROV_PIDS 2>/dev/null
   # run.sh's own TERM trap stops the OpenRouter proxy it may have started.
   exit 0
 }
@@ -207,8 +239,10 @@ fi
 wait "$CORE_PID"
 LAUNCH
 chmod +x "$RES/scripts/launch-backend.sh"
-cp "$REPO/tools/dmg/provision-python.sh" "$RES/scripts/provision-python.sh"
-chmod +x "$RES/scripts/provision-python.sh"
+for _ps in provision-python.sh provision-whisper.sh provision-ollama.sh; do
+  cp "$REPO/tools/dmg/$_ps" "$RES/scripts/$_ps"
+  chmod +x "$RES/scripts/$_ps"
+done
 
 bold "✓ Staged backend → $RES"
 du -sh "$RES" 2>/dev/null | awk '{print "  size: "$1}'
