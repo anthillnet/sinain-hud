@@ -29,11 +29,21 @@ mkdir -p "$(dirname "$OUT_APP")"
 cp -R "$SRC_APP" "$OUT_APP"
 
 bold "Embedding bundled backend into Contents/Resources/"
-# Copy each staged top-level dir (node, sinain-core, sck-capture, scripts) in.
-for item in node sinain-core sck-capture scripts; do
-  [ -e "$STAGE_RES/$item" ] || fail "missing staged item: $item"
+# Copy EVERY staged top-level item (node, sinain-core, sck-capture, scripts,
+# sinain-agent, sinain-mcp-server, sense_client, sinain-memory, …). Iterating
+# the stage dir rather than a hardcoded list so new staged components can't be
+# silently dropped from the bundle.
+staged_any=false
+for path in "$STAGE_RES"/*; do
+  [ -e "$path" ] || continue
+  item="$(basename "$path")"
   rm -rf "$OUT_APP/Contents/Resources/$item"
-  cp -R "$STAGE_RES/$item" "$OUT_APP/Contents/Resources/$item"
+  cp -R "$path" "$OUT_APP/Contents/Resources/$item"
+  staged_any=true
+done
+$staged_any || fail "no staged items found in $STAGE_RES"
+for required in node/bin/node sinain-core sck-capture scripts/launch-backend.sh; do
+  [ -e "$OUT_APP/Contents/Resources/$required" ] || fail "bundle missing required item: $required"
 done
 chmod +x "$OUT_APP/Contents/Resources/scripts/launch-backend.sh"
 chmod +x "$OUT_APP/Contents/Resources/node/bin/node"

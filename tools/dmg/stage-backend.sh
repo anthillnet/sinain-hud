@@ -74,6 +74,14 @@ NODE="$RES/node/bin/node"
 CORE="$RES/sinain-core"
 AGENT_DIR="$RES/sinain-agent"
 
+# Capture all backend output (core + agent + sense_client) to a rotating log so
+# failures are diagnosable — the overlay spawns this script with no stdout sink.
+mkdir -p "$HOME/.sinain/logs"
+LOG="$HOME/.sinain/logs/backend.log"
+[ -f "$LOG" ] && [ "$(wc -c <"$LOG" 2>/dev/null || echo 0)" -gt 5000000 ] && mv "$LOG" "$LOG.1"
+exec >>"$LOG" 2>&1
+echo "===== backend launch $(date '+%Y-%m-%d %H:%M:%S') ====="
+
 # Augment PATH: bundled node first, then where user CLIs (claude/codex/…)
 # typically live — the app's launchd PATH is just /usr/bin:/bin and wouldn't
 # find them, leaving the agent roster empty.
@@ -164,9 +172,14 @@ for _py in "${SINAIN_PYTHON:-}" \
            "$(command -v python3 || true)" \
            /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do
   [ -n "${_py:-}" ] && [ -x "$_py" ] || continue
-  # Full startup import set: numpy + PIL + skimage + Quartz (pyobjc). Checking
-  # only numpy/PIL would pick a python3 that later crashes on `import Quartz`.
-  if "$_py" -c "import numpy, PIL, skimage, Quartz" >/dev/null 2>&1; then SENSE_PY="$_py"; break; fi
+  # Discriminating deps: numpy (filters dep-less pythons) + Quartz/pyobjc
+  # (filters pythons missing the macOS bindings, e.g. 3.10). Kept light — the
+  # heavy skimage import is left to sense_client itself. Two tries to absorb a
+  # transient first-import hiccup.
+  if "$_py" -c "import numpy, Quartz" >/dev/null 2>&1 \
+     || "$_py" -c "import numpy, Quartz" >/dev/null 2>&1; then
+    SENSE_PY="$_py"; echo "[launch] sense python: $_py"; break
+  fi
 done
 if [ -n "$SENSE_PY" ] && [ -d "$RES/sense_client" ]; then
   ( cd "$RES" && exec "$SENSE_PY" -m sense_client ) &
