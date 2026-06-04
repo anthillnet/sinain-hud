@@ -24,6 +24,46 @@ from pathlib import Path
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+# Preference-shape detection (shared by the dd0c94c preference augmentation and the #7-PREF
+# scaffold). NOTE: _USER_REF was referenced at the preference-augment site but never defined or
+# imported here — the surrounding `except Exception: pass` silently swallowed the NameError, so
+# that augmentation had been DEAD since dd0c94c. Defining it here revives it. Mirrors
+# knowledge_integrator._USER_REF.
+_USER_REF = re.compile(r"\b(?:the user(?:'s|s')?|the user is|user's)\b", re.IGNORECASE)
+_PREF_PRED = re.compile(r"\b(prefer|prefers|like|likes|love|loves|enjoy|enjoys|"
+                        r"favou?rite|interested in|into|a fan of|want|wants|own|owns|"
+                        r"use[sd]?|dislike|dislikes|avoid|avoids|hate|hates)\b", re.IGNORECASE)
+
+
+def _preference_scaffold(results: list[dict], max_constraints: int = 8):
+    """#7-PREF: the sufficient statistic for a recommendation request is the user's domain-relevant
+    preference CONSTRAINT-SET. The failure here is answer-side, not retrieval (on 0edc2aef the gold
+    preference WAS retrieved yet QA answered "no info about your preferences") — so the fix is
+    framing: collect the preference facts already in `results` and present them as an explicit,
+    labelled constraint list with an anti-abstention directive, so the QA model recognises it HAS
+    the preferences and must apply them. Deterministic-fill-only: every constraint is verbatim from
+    a retrieved fact. Returns None when no preference facts are present (fail-safe off)."""
+    seen = set(); cons = []
+    for f in results:
+        if f.get("kind") == "scaffold" or f.get("source") == "raw-excerpt":
+            continue
+        _v = f.get("value", "")
+        _v = _v[0] if isinstance(_v, list) else _v
+        _v = str(_v).strip()
+        if _v and _USER_REF.search(_v) and _PREF_PRED.search(_v):
+            key = _v[:60].lower()
+            if key not in seen:
+                seen.add(key); cons.append(_v[:160])
+        if len(cons) >= max_constraints:
+            break
+    if not cons:
+        return None
+    _lst = "; ".join(f"{i + 1}. {c}" for i, c in enumerate(cons))
+    return {"entity_id": "scaffold:preference", "kind": "scaffold",
+            "value": ("You DO have information about the user's preferences — base your "
+                      "recommendation on them; do NOT reply that you lack preference information. "
+                      f"Known user preferences relevant to this request: {_lst}.")}
+
 
 def query_facts_by_entities(
     db_path: str,
@@ -1453,15 +1493,18 @@ def query_facts_hybrid(
     # crowd precise distilled facts out (6a1eabeb/6aeb4375), while keeping
     # relevant ones (830ce83f/d7c942c3). See HANDOFF-recon-t1.md.
     results = _recon_topical_guard(results, query)
-    # PREFERENCE augmentation: for a recommendation request, always surface the user's
-    # preference facts (so QA applies them instead of abstaining "no info about your
-    # preferences"). Pull user-referencing facts carrying a preference predicate and prepend
-    # any not already present. Deterministic; bounded.
-    if is_preference:
+    # #7-PREF preference hardening: for a recommendation request, surface the user's preference
+    # facts AND prepend a constraint-set scaffold with an anti-abstention directive (the failure is
+    # answer-side: gold pref retrieved, QA still abstains). Two parts: (a) pull user-referencing
+    # preference facts not already retrieved [revives dd0c94c — its _USER_REF was undefined, so the
+    # except-swallowed NameError left it DEAD]; (b) prepend the _preference_scaffold head-fact.
+    # Per-shape sub-gate SINAIN_SCAFFOLD_PREF (default OFF until A/B-validated) under the
+    # SINAIN_SCAFFOLD master; gating the whole block keeps the dd0c94c revival inert on a bench
+    # resume. Deterministic; bounded; fail-safe off.
+    if (is_preference
+            and _os_d.environ.get("SINAIN_SCAFFOLD", "1") != "0"
+            and _os_d.environ.get("SINAIN_SCAFFOLD_PREF", "0") != "0"):
         try:
-            _pred = re.compile(r"\b(prefer|prefers|like|likes|love|loves|enjoy|enjoys|"
-                               r"favou?rite|interested in|into|a fan of|want|wants|own|owns|"
-                               r"use[sd]?|dislike|dislikes|avoid|avoids|hate|hates)\b", re.I)
             _have = {f.get("entity_id", "") for f in results}
             _pstore = TripleStore(db_path)
             _pf = []
@@ -1472,7 +1515,7 @@ def query_facts_hybrid(
                 if not _a or _a.get("valid_to"):
                     continue
                 _v = _a.get("value", [""]); _v = _v[0] if isinstance(_v, list) else _v
-                if _v and _USER_REF.search(_v) and _pred.search(_v):
+                if _v and _USER_REF.search(_v) and _PREF_PRED.search(_v):
                     _pf.append({"entity_id": _fid, "value": _v,
                                 "kind": (_a.get("kind", [""])[0] if isinstance(_a.get("kind"), list) else _a.get("kind", ""))})
                 if len(_pf) >= max_facts:
@@ -1480,6 +1523,13 @@ def query_facts_hybrid(
             _pstore.close()
             if _pf:
                 results = _pf + results  # preference facts lead so QA grounds on them
+        except Exception:
+            pass
+        # (b) constraint-set scaffold over the now-augmented results (incl. the retrieved gold pref)
+        try:
+            _ps = _preference_scaffold(results)
+            if _ps is not None:
+                results = [_ps] + results
         except Exception:
             pass
     # #7 TEMPORAL TIMELINE SCAFFOLD: present the dated events (the sufficient statistic for a
