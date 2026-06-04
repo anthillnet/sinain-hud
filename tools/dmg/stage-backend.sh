@@ -57,8 +57,20 @@ CORE="$RES/sinain-core"
 mkdir -p "$HOME/.sinain/sck-capture" "$HOME/.sinain/capture"
 ln -sf "$RES/sck-capture/sck-capture" "$HOME/.sinain/sck-capture/sck-capture"
 
-# User config lives at ~/.sinain/.env (written by the first-run wizard).
+# Load user config from ~/.sinain/.env (written by the first-run wizard), the
+# same way the npm launcher does — the bundle's cwd has no .env of its own.
+ENV_FILE="$HOME/.sinain/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+
+# Keep model/embedding caches out of the (read-only, signed) bundle.
 export NODE_ENV=production
+export SINAIN_MEMORY_DIR="${SINAIN_MEMORY_DIR:-$HOME/.sinain/memory}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HOME/.sinain/models/embedding}"
 cd "$CORE"
 exec "$NODE" dist/index.js
 LAUNCH

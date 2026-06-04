@@ -10,11 +10,15 @@ class AppDelegate: FlutterAppDelegate {
     // Flutter method channel for sending hotkey events to Dart
     private var hotkeyChannel: FlutterMethodChannel?
 
+    // SEED-001 Stage 4 — bundled backend supervisor (packaged DMG only).
+    private let backend = BackendLauncher()
+
     override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
 
     override func applicationWillTerminate(_ notification: Notification) {
+        backend.stop()
         for ref in hotKeyRefs {
             if let ref = ref {
                 UnregisterEventHotKey(ref)
@@ -24,6 +28,10 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
+        // Start the bundled backend ASAP so it's healthy by the time the
+        // overlay's WebSocket tries to connect. No-op in dev builds.
+        backend.start()
+
         let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
         let registrar = controller.registrar(forPlugin: "WindowControlPlugin")
         WindowControlPlugin.register(with: registrar)
@@ -224,5 +232,56 @@ class AppDelegate: FlutterAppDelegate {
         default:
             break
         }
+    }
+}
+
+/// Spawns and supervises the bundled sinain-core backend.
+///
+/// SEED-001 Stage 4. In a packaged DMG build, the overlay .app is the entry
+/// point and must start the backend itself. This looks for the staged launch
+/// script at `Contents/Resources/scripts/launch-backend.sh` and runs it. When
+/// that script is absent — i.e. `flutter run` during development, where
+/// `start.sh` already launched core — it does nothing.
+final class BackendLauncher {
+    private var process: Process?
+
+    /// Path to the bundled launch script, or nil when not running from a
+    /// packaged bundle (development mode).
+    private var launchScriptURL: URL? {
+        guard let resourceURL = Bundle.main.resourceURL else { return nil }
+        let url = resourceURL.appendingPathComponent("scripts/launch-backend.sh")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Start the bundled backend if present. Safe to call when unbundled (no-op).
+    func start() {
+        guard let script = launchScriptURL else {
+            NSLog("[SinainHUD] BackendLauncher: no bundled backend — assuming core started externally (dev mode)")
+            return
+        }
+        guard process == nil else { return }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
+        proc.arguments = [script.path]
+        proc.terminationHandler = { p in
+            NSLog("[SinainHUD] BackendLauncher: backend exited with status \(p.terminationStatus)")
+        }
+        do {
+            try proc.run()
+            process = proc
+            NSLog("[SinainHUD] BackendLauncher: spawned bundled backend (pid \(proc.processIdentifier))")
+        } catch {
+            NSLog("[SinainHUD] BackendLauncher: failed to spawn backend: \(error)")
+        }
+    }
+
+    /// Terminate the backend on app quit. sinain-core kills its own sck-capture
+    /// child on SIGTERM.
+    func stop() {
+        guard let proc = process, proc.isRunning else { return }
+        proc.terminate() // SIGTERM
+        process = nil
+        NSLog("[SinainHUD] BackendLauncher: sent SIGTERM to backend")
     }
 }

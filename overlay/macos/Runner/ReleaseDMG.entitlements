@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  SEED-001 Stage 4/6 — entitlements for the PACKAGED DMG build.
+
+  Differs from Release.entitlements: NO app-sandbox. The packaged overlay spawns
+  the bundled sinain-core (node) backend and reads/writes ~/.sinain/, which the
+  sandbox would block. Developer ID + notarization do NOT require sandboxing
+  (only the Mac App Store does). Hardened runtime is still applied at sign time.
+
+  The JIT/library-validation entitlements let the bundled Node (V8) run under
+  hardened runtime and let the app exec a separately-signed helper binary.
+-->
+<dict>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
