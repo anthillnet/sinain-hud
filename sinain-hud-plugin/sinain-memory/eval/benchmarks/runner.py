@@ -208,6 +208,7 @@ def run_benchmark(
     conditions: list[str],
     *,
     subset: int | None = None,
+    offset: int = 0,
     qa_model: str = QA_MODEL,
     judge_model: str = JUDGE_MODEL,
     judge_mode: str = "paper",
@@ -244,6 +245,13 @@ def run_benchmark(
     for inst in instances:
         for q in inst.questions:
             all_questions.append((inst, q))
+
+    # Batch slicing (additive; offset=0 is a no-op). Questions load in deterministic dataset
+    # order, so all_questions[offset:offset+subset] is a stable slice across runs — the basis
+    # for batched full-500 evaluation (run_lme_batched.sh). Applied BEFORE stratified/subset so
+    # a non-stratified batch is exactly the contiguous slice [offset : offset+subset].
+    if offset:
+        all_questions = all_questions[offset:]
 
     if subset:
         if stratified:
@@ -452,6 +460,9 @@ def main() -> None:
                         help="Comma-separated benchmark names (longmemeval, locomo)")
     parser.add_argument("--conditions", default="sinain-memory,full-context,knowledge-doc",
                         help="Comma-separated conditions to evaluate")
+    parser.add_argument("--offset", type=int, default=0,
+                        help="Skip the first N questions (dataset order) before subset. Enables "
+                             "batched full-500 eval: --offset 50 --subset 50 = slice [50:100].")
     parser.add_argument("--subset", type=int, default=None,
                         help="Run only first N questions (for dev iteration)")
     parser.add_argument("--qa-model", default=QA_MODEL, help="Model for QA generation")
@@ -532,6 +543,7 @@ def main() -> None:
             summary, details = run_benchmark(
                 bench_name, conditions,
                 subset=args.subset,
+                offset=args.offset,
                 qa_model=args.qa_model,
                 judge_model=args.judge_model,
                 judge_mode=args.judge_mode,
