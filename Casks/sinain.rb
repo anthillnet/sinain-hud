@@ -28,9 +28,10 @@ cask "sinain" do
   # Knowledge graph + config + downloaded models live under ~/.sinain.
   # `zap` is opt-in (brew uninstall --zap); the wizard/uninstaller should still
   # prompt before deleting the knowledge graph — it is user-owned data (SPEC §9 Q8).
+  # Bundle id confirmed from a real signed build: com.sinain.hud
   zap trash: [
     "~/.sinain",
-    "~/Library/Preferences/com.geravant.sinain.plist",
-    "~/Library/Caches/com.geravant.sinain",
+    "~/Library/Preferences/com.sinain.hud.plist",
+    "~/Library/Caches/com.sinain.hud",
   ]
 end
