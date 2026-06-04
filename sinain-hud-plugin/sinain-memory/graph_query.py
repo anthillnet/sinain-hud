@@ -1578,6 +1578,11 @@ def query_facts_hybrid(
                 results = [_cs] + results
         except Exception:
             pass
+    # (2026-06-04) Arithmetic reduction scaffold (sum/mean/argmax) was tried here and DROPPED as
+    # overfit: AGGREGATION/SUPERLATIVE are operand-SELECTION-bound (which $ facts are bike expenses),
+    # the same semantic-predicate + recall problem as counting — code computes the arithmetic fine but
+    # selects the wrong operands. The bottleneck is RETRIEVAL RECALL of the gold-supporting facts, not
+    # answer computation. See ig/reduction.py (library kept, not wired) + DESIGN-IG7 §Validation.
     # #5 DPP set-selection: for COUNTING queries, spend the final max_facts budget on
     # DISTINCT instances rather than near-duplicates of the same one (the geometric root
     # of count inflation/deflation). Greedy MAP-DPP over the cosine Gram of the already-
@@ -1643,11 +1648,40 @@ def query_facts_hybrid(
             _rk = int(_os_rk.environ.get("SINAIN_RAW_CHUNK_K", "8"))
         except ValueError:
             _rk = 8
-        for i, ch in enumerate(retrieve_chunks(db_path, query, k=_rk)):
-            final.append({
-                "entity_id": f"excerpt-{i}", "entity": "excerpt",
-                "value": ch, "source": "raw-excerpt",
-            })
+        # COST-INTENT reformulation: spending-aggregate questions ("how much total did I spend on X")
+        # are phrased at the AGGREGATE altitude, but the evidence lives at the purchase-EVENT altitude
+        # ("I bought my helmet for $120"). A single semantic query misses the scattered purchase
+        # moments (recall@10=0 on gpt4_d84a3211 — incl. a $120 the distiller dropped but raw preserved);
+        # an ADDITIONAL cost-intent query recovers them (validated 3/3 vs 0/3). Honest: generic spending
+        # vocabulary + the question's own content words, NO gold item names. Gated SINAIN_COST_QUERY.
+        _chunk_queries = [query]
+        if (_os_rk.environ.get("SINAIN_COST_QUERY", "0") != "0"
+                and re.search(r"how much\b.*(spen[dt]|cost|money|paid|pay)|total\b.*(spen[dt]|cost|money)", query.lower())):
+            # Drop BOTH question framing AND abstract aggregate nouns (expenses/cost/spending/money) —
+            # those are the AGGREGATE-altitude words that mismatch the purchase-event evidence; keep the
+            # concrete DOMAIN noun (bike/workshop/gift). Then add purchase-event vocabulary. General.
+            _frame = {"how", "much", "many", "total", "money", "have", "has", "i", "did", "do", "what",
+                      "was", "is", "spent", "spend", "on", "in", "since", "the", "start", "of", "year",
+                      "a", "to", "for", "my", "me", "all", "combined", "altogether",
+                      "related", "expenses", "expense", "cost", "costs", "spending", "pay", "paid"}
+            _content = [w for w in re.findall(r"[a-z]+", query.lower()) if w not in _frame]
+            if _content:
+                # cost-intent query LEADS: for a spending question its chunks (the actual purchase
+                # events) are the relevant evidence, while the literal query's chunks are noise — so
+                # they must survive the downstream excerpt cap, which keeps the first few.
+                _chunk_queries.insert(0, " ".join(_content) + " cost price paid bought purchased spent dollars expense")
+        _seen_ch = set(); _ci = 0
+        for _cq in _chunk_queries:
+            for ch in retrieve_chunks(db_path, _cq, k=_rk):
+                _key = ch if isinstance(ch, str) else str(ch)
+                if _key in _seen_ch:
+                    continue
+                _seen_ch.add(_key)
+                final.append({
+                    "entity_id": f"excerpt-{_ci}", "entity": "excerpt",
+                    "value": ch, "source": "raw-excerpt",
+                })
+                _ci += 1
     except Exception:
         pass
 
