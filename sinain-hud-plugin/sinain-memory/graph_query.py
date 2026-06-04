@@ -1115,6 +1115,16 @@ def query_facts_hybrid(
             is_preference = is_preference_query(query)
         except Exception:
             is_preference = False
+    # #7: geometric temporal-duration detection → prepend a deterministic dated TIMELINE scaffold
+    # so QA reads the dates off it (the sufficient statistic) instead of hallucinating the
+    # arithmetic. Gated SINAIN_SCAFFOLD (default on); fail-safe off.
+    is_duration = False
+    if _os_d.environ.get("SINAIN_SCAFFOLD", "1") != "0":
+        try:
+            from intent_exemplars import is_duration_query
+            is_duration = is_duration_query(query)
+        except Exception:
+            is_duration = False
 
     # Change C: FTS5 AND mode for multi-keyword queries
     # #4: request BM25 scores so the fusion can entropy-weight the fts channel.
@@ -1434,6 +1444,34 @@ def query_facts_hybrid(
             _pstore.close()
             if _pf:
                 results = _pf + results  # preference facts lead so QA grounds on them
+        except Exception:
+            pass
+    # #7 TEMPORAL TIMELINE SCAFFOLD: present the dated events (the sufficient statistic for a
+    # duration question) as one sorted timeline fact, so QA reads exact dates off it rather than
+    # hallucinating them (gpt4_fa19884c computed "11 days" from wrong dates; gold 6). Built from
+    # the retrieved facts' occurred_at (every fact carries one). Deterministic.
+    if is_duration:
+        try:
+            _ev = []  # (date10, value)
+            for _f in results[:max_facts * 2]:
+                _oc = _f.get("occurred_at") or _f.get("first_seen")
+                _oc = _oc[0] if isinstance(_oc, list) else _oc
+                _v = _f.get("value", "")
+                _v = _v[0] if isinstance(_v, list) else _v
+                if _oc and isinstance(_oc, str) and len(_oc) >= 10 and _v and _f.get("source") != "raw-excerpt":
+                    _ev.append((_oc[:10], str(_v)))
+            # dedup by date+value, sort oldest→newest, cap
+            _seen = set(); _u = []
+            for d, v in sorted(_ev):
+                key = (d, v[:40].lower())
+                if key not in _seen:
+                    _seen.add(key); _u.append((d, v))
+            if len(_u) >= 2:
+                _tl = "; ".join(f"{d}: {v[:90]}" for d, v in _u[:12])
+                _scaf = {"entity_id": "scaffold:timeline", "kind": "scaffold",
+                         "value": ("Dated event timeline (oldest to newest) — use these EXACT dates "
+                                   "to compute any duration: " + _tl)}
+                results = [_scaf] + results
         except Exception:
             pass
     # #5 DPP set-selection: for COUNTING queries, spend the final max_facts budget on
