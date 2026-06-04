@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/services/first_run_service.dart';
+import '../../core/services/window_service.dart';
 import 'install_tier.dart';
 import 'tier_selection_view.dart';
 
@@ -66,7 +68,14 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // Drag anywhere on the panel to move the (frameless, non-system-movable)
+    // window — mirrors eye_widget / overlay_shell. Taps still reach buttons.
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanUpdate: (d) => context
+          .read<WindowService>()
+          .moveWindowBy(d.delta.dx, -d.delta.dy),
+      child: Container(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(12),
@@ -96,6 +105,7 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
             ),
           ],
         ],
+      ),
       ),
     );
   }

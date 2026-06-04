@@ -58,6 +58,20 @@ class AppDelegate: FlutterAppDelegate {
                     self.backend.start()
                     result(true)
                 }
+            case "relaunch":
+                // Used by the first-run wizard: after writing ~/.sinain/.env,
+                // relaunch so the app boots through the normal startup path
+                // (correct window sizing + key window) with config present.
+                self.backend.stop()
+                let bundlePath = Bundle.main.bundlePath
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/bin/sh")
+                task.arguments = ["-c", "sleep 1; open \"\(bundlePath)\""]
+                try? task.run()
+                result(true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    NSApp.terminate(nil)
+                }
             case "start":
                 self.backend.start(); result(true)
             case "stop":

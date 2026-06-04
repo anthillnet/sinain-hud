@@ -45,14 +45,16 @@ class FirstRunService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Persist the wizard's choices to `~/.sinain/.env` and restart the backend.
+  /// Persist the wizard's choices to `~/.sinain/.env`, then relaunch the app so
+  /// it boots through the normal startup path with config present. Relaunch is
+  /// more robust than an in-place handoff (correct window sizing + key window).
   Future<void> completeSetup(InstallTier tier, {String? openRouterKey}) async {
     final vars = _envForTier(tier, openRouterKey: openRouterKey);
     await _writeEnv(vars);
     _envExists = true;
     _completed = true;
-    await restartBackend();
     notifyListeners();
+    await relaunchApp();
   }
 
   /// Map a tier choice to env vars — mirrors sinain-hud-plugin/onboard.js so the
@@ -97,7 +99,16 @@ class FirstRunService extends ChangeNotifier {
     debugPrint('[first-run] wrote $_envPath (${vars.length} vars)');
   }
 
-  /// Restart the bundled backend so it reloads ~/.sinain/.env.
+  /// Relaunch the whole app (used after first-run setup writes config).
+  Future<void> relaunchApp() async {
+    try {
+      await _channel.invokeMethod('relaunch');
+    } on PlatformException catch (e) {
+      debugPrint('[first-run] relaunch failed: $e');
+    }
+  }
+
+  /// Restart just the bundled backend so it reloads ~/.sinain/.env.
   Future<void> restartBackend() async {
     try {
       await _channel.invokeMethod('restart');
