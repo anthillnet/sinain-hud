@@ -93,6 +93,11 @@ LOG="$HOME/.sinain/logs/backend.log"
 exec >>"$LOG" 2>&1
 echo "===== backend launch $(date '+%Y-%m-%d %H:%M:%S') ====="
 
+# Reset per-launch provisioning status (the overlay polls these files for the
+# setup-progress banner; stale 'done' files from a prior run shouldn't linger).
+mkdir -p "$HOME/.sinain/provisioning"
+rm -f "$HOME/.sinain/provisioning/"*.status 2>/dev/null || true
+
 # Augment PATH: bundled node first, then where user CLIs (claude/codex/…)
 # typically live — the app's launchd PATH is just /usr/bin:/bin and wouldn't
 # find them, leaving the agent roster empty.

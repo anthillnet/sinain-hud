@@ -13,9 +13,14 @@ LLM="${SINAIN_LOCAL_LLM:-phi4-mini}"
 VISION="${SINAIN_LOCAL_VISION:-qwen2.5vl:7b}"
 HOST="${OLLAMA_HOST:-http://localhost:11434}"
 
+# Progress status the overlay reads.
+PS="$HOME/.sinain/provisioning"
+pstatus() { mkdir -p "$PS"; printf '%s|%s|%s\n' "$1" "${2:-}" "${3:-}" > "$PS/ollama.status"; }
+
 if ! command -v ollama >/dev/null 2>&1; then
   echo "[provision-ollama] Ollama is not installed."
   echo "[provision-ollama] Install it from https://ollama.com/download (or 'brew install ollama'), then relaunch Sinain."
+  pstatus error "" "Ollama not installed — see ollama.com/download"
   exit 2
 fi
 
@@ -33,17 +38,44 @@ if ! curl -sf "$HOST/api/tags" >/dev/null 2>&1; then
   exit 1
 fi
 
+MODELS="$LLM $VISION"
+TOTAL=2
+idx=0
 rc=0
-for model in "$LLM" "$VISION"; do
+for model in $MODELS; do
+  idx=$((idx + 1))
   if curl -sf "$HOST/api/tags" 2>/dev/null | grep -q "\"name\":\"${model}"; then
     echo "[provision-ollama] $model already present"
-  else
-    echo "[provision-ollama] pulling $model (multi-GB)…"
-    if ! ollama pull "$model"; then
-      echo "[provision-ollama] ✗ failed to pull $model"
-      rc=1
-    fi
+    continue
   fi
+  echo "[provision-ollama] pulling $model (multi-GB)…"
+  pstatus active 0 "Downloading local model $idx/$TOTAL: $model"
+  # Stream the pull via the API; a single python3 (stdlib json) translates each
+  # progress frame into the overlay status file (per-layer completed/total %).
+  curl -sN "$HOST/api/pull" -H 'Content-Type: application/json' \
+       -d "{\"name\":\"$model\"}" 2>/dev/null \
+  | python3 -c '
+import sys, json, os
+ps = os.path.expanduser("~/.sinain/provisioning"); os.makedirs(ps, exist_ok=True)
+f = os.path.join(ps, "ollama.status"); label = sys.argv[1]
+ok = False
+for line in sys.stdin:
+    try: d = json.loads(line)
+    except Exception: continue
+    if d.get("error"): break
+    if d.get("status") == "success": ok = True
+    c, t = d.get("completed"), d.get("total")
+    pct = str(int(c * 100 / t)) if c and t else ""
+    open(f, "w").write("active|%s|%s" % (pct, label))
+sys.exit(0 if ok else 1)
+' "Downloading local model $idx/$TOTAL: $model" || rc=1
+  # Confirm it landed
+  curl -sf "$HOST/api/tags" 2>/dev/null | grep -q "\"name\":\"${model}" || rc=1
 done
-[ "$rc" = 0 ] && echo "[provision-ollama] ✓ local models ready: $LLM, $VISION"
+if [ "$rc" = 0 ]; then
+  echo "[provision-ollama] ✓ local models ready: $LLM, $VISION"
+  pstatus done 100 "Local models ready"
+else
+  pstatus error "" "A local model failed to download"
+fi
 exit "$rc"

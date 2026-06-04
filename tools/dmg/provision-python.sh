@@ -13,9 +13,18 @@ PYROOT="${1:-$HOME/.sinain/python}"
 PYBIN="$PYROOT/bin/python3"
 DEPS="numpy scikit-image pillow pytesseract requests pyobjc-framework-Quartz pyobjc-framework-Vision"
 
+# Progress status the overlay reads (~/.sinain/provisioning/<comp>.status →
+# "state|pct|label"). The overlay polls the file directly, so progress shows
+# even while sinain-core hasn't started yet.
+PS="$HOME/.sinain/provisioning"
+pstatus() { mkdir -p "$PS"; printf '%s|%s|%s\n' "$1" "${2:-}" "${3:-}" > "$PS/python.status"; }
+fail_status() { pstatus error "" "$1"; }
+trap 'fail_status "Python setup failed"' ERR
+
 # Already provisioned and importable?
 if [ -x "$PYBIN" ] && "$PYBIN" -c "import numpy, Quartz, skimage, PIL" >/dev/null 2>&1; then
   echo "[provision-python] already provisioned: $PYBIN"
+  pstatus done 100 "Python ready"
   exit 0
 fi
 
@@ -26,6 +35,7 @@ URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PB
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+pstatus active 10 "Downloading Python runtime"
 echo "[provision-python] downloading CPython ${PYVER} (arm64, ~25MB)…"
 if ! curl -fSL --retry 3 "$URL" -o "$TMP/py.tar.gz"; then
   echo "[provision-python] ✗ download failed: $URL"; exit 1
@@ -37,14 +47,17 @@ tar -xzf "$TMP/py.tar.gz" -C "$TMP"   # install_only layout extracts to $TMP/pyt
 rm -rf "$PYROOT"; mkdir -p "$(dirname "$PYROOT")"
 mv "$TMP/python" "$PYROOT"
 
+pstatus active 40 "Installing vision packages"
 echo "[provision-python] installing deps (numpy, scikit-image, pyobjc, …, ~150MB)…"
 if ! "$PYBIN" -m pip install --quiet --disable-pip-version-check $DEPS; then
-  echo "[provision-python] ✗ pip install failed"; exit 1
+  echo "[provision-python] ✗ pip install failed"; fail_status "Package install failed"; exit 1
 fi
 
 if "$PYBIN" -c "import numpy, Quartz, skimage, PIL, requests" >/dev/null 2>&1; then
   echo "[provision-python] ✓ ready: $PYBIN"
+  pstatus done 100 "Python ready"
   exit 0
 fi
 echo "[provision-python] ✗ dependency verification failed"
+fail_status "Python verification failed"
 exit 1
