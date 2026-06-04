@@ -837,6 +837,42 @@ def _dpp_select_counting(results: list[dict], embs_by_eid: dict, max_k: int) -> 
     return [f for i, f in enumerate(results) if i in keep_global or embs_by_eid.get(f.get("entity_id", "")) is None]
 
 
+def _count_scaffold(results: list[dict], embs_by_eid: dict, dedup_cos: float = 0.78,
+                    max_scan: int = 64):
+    """#7-COUNT: the sufficient statistic for a "how many X" question is the cardinality of the
+    DEDUPLICATED member set. The LLM's documented counting failure is duplicate-instance
+    confusion (near-duplicate mentions of the same item double-/under-counted); dedup is exactly
+    the part code does reliably and the model does not. Greedy semantic dedup over the candidate
+    facts' embeddings (already stashed by the rerank — no re-encode): a fact opens a NEW distinct
+    member iff its cosine to every kept member is < dedup_cos. Returns a scaffold fact dict that
+    ENUMERATES the distinct members and states the deduplicated total N — a true statement about
+    the retrieved set (deterministic-fill-only: code proves dedup, the QA model still applies the
+    semantic predicate of which members match). Returns None (no scaffold) when < 2 distinct
+    members or embeddings unavailable — a wrong/empty scaffold is worse than none."""
+    import numpy as np
+    members = []  # (label, unit_vec)
+    for f in results[:max_scan]:
+        if f.get("kind") == "scaffold" or f.get("source") == "raw-excerpt":
+            continue
+        e = embs_by_eid.get(f.get("entity_id", ""))
+        if e is None:
+            continue
+        v = np.asarray(e, dtype=float)
+        v = v / (np.linalg.norm(v) + 1e-9)
+        if any(float(v @ mv) >= dedup_cos for _, mv in members):
+            continue  # near-duplicate of an existing member → same item, don't recount
+        _val = f.get("value", "")
+        _val = _val[0] if isinstance(_val, list) else _val
+        members.append((str(_val)[:70], v))
+    if len(members) < 2:
+        return None
+    _lst = "; ".join(f"{i + 1}. {lbl}" for i, (lbl, _) in enumerate(members))
+    return {"entity_id": "scaffold:count", "kind": "scaffold",
+            "value": (f"Distinct items found for this question after deduplication ({len(members)} "
+                      f"total): {_lst}. Count only those that match the question; the "
+                      f"deduplicated total is {len(members)}.")}
+
+
 def query_facts_hybrid(
     db_path: str,
     query: str,
@@ -1472,6 +1508,24 @@ def query_facts_hybrid(
                          "value": ("Dated event timeline (oldest to newest) — use these EXACT dates "
                                    "to compute any duration: " + _tl)}
                 results = [_scaf] + results
+        except Exception:
+            pass
+    # #7-COUNT scaffold: for COUNTING queries, compute the sufficient statistic (cardinality of the
+    # deduplicated member set) in code and prepend it as a head-fact, so QA reads the dedup'd
+    # enumeration off it instead of mis-counting near-duplicate mentions (the documented counting
+    # failure #5 only partially addresses — DPP diversifies the budget but never STATES N). Reuses
+    # the existing counting trigger (same as #5 DPP) so the two stay aligned. Per-shape sub-gate
+    # SINAIN_SCAFFOLD_COUNT (default OFF until A/B-validated) under the SINAIN_SCAFFOLD master;
+    # deterministic, fail-safe off.
+    if (question_class == "counting"
+            and _os_d.environ.get("SINAIN_SCAFFOLD", "1") != "0"
+            and _os_d.environ.get("SINAIN_SCAFFOLD_COUNT", "0") != "0"
+            and _embs_by_eid):
+        try:
+            _dc = float(_os_d.environ.get("SINAIN_COUNT_DEDUP_COS", "0.78"))
+            _cs = _count_scaffold(results, _embs_by_eid, dedup_cos=_dc)
+            if _cs is not None:
+                results = [_cs] + results
         except Exception:
             pass
     # #5 DPP set-selection: for COUNTING queries, spend the final max_facts budget on
