@@ -111,23 +111,31 @@ export AGENTS_CONFIG_PATH="$HOME/.sinain/agents.json"
 # BOTH sense_client AND sinain-core's knowledge scripts (page_renderer,
 # distillers) via SINAIN_PYTHON — core defaults to bare "python3" otherwise,
 # which may resolve to a dep-less interpreter and silently fail page rendering.
+PROVISIONED_PY="$HOME/.sinain/python/bin/python3"
 SENSE_PY=""
 for _py in "${SINAIN_PYTHON:-}" \
+           "$PROVISIONED_PY" \
            /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
            /opt/homebrew/bin/python3 /usr/local/bin/python3 \
            "$(command -v python3 || true)" \
            /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do
   [ -n "${_py:-}" ] && [ -x "$_py" ] || continue
-  if "$_py" -c "import numpy, Quartz" >/dev/null 2>&1 \
-     || "$_py" -c "import numpy, Quartz" >/dev/null 2>&1; then
-    SENSE_PY="$_py"; break
-  fi
+  if "$_py" -c "import numpy, Quartz" >/dev/null 2>&1; then SENSE_PY="$_py"; break; fi
 done
+# Nothing usable on this Mac → provision a self-contained Python (download a
+# relocatable CPython + pip-install the deps). One-time, ~2 min. This is what
+# lets the DMG main path work without any pre-existing Python on the user's Mac.
+if [ -z "$SENSE_PY" ] && [ -x "$HERE/provision-python.sh" ]; then
+  echo "[launch] no Python with deps found — provisioning a self-contained one (one-time, ~2 min)…"
+  if bash "$HERE/provision-python.sh" "$HOME/.sinain/python"; then
+    SENSE_PY="$PROVISIONED_PY"
+  fi
+fi
 if [ -n "$SENSE_PY" ]; then
   export SINAIN_PYTHON="$SENSE_PY"
-  echo "[launch] python (sense + knowledge scripts): $SENSE_PY"
+  echo "[launch] python (sense + knowledge): $SENSE_PY"
 else
-  echo "[launch] no full-dep python3 found — sense_client + knowledge pages degraded"
+  echo "[launch] python provisioning failed — sense_client + knowledge pages degraded"
 fi
 
 # Initialise the knowledge graph on first run so entity detection is live from
@@ -199,6 +207,8 @@ fi
 wait "$CORE_PID"
 LAUNCH
 chmod +x "$RES/scripts/launch-backend.sh"
+cp "$REPO/tools/dmg/provision-python.sh" "$RES/scripts/provision-python.sh"
+chmod +x "$RES/scripts/provision-python.sh"
 
 bold "✓ Staged backend → $RES"
 du -sh "$RES" 2>/dev/null | awk '{print "  size: "$1}'
