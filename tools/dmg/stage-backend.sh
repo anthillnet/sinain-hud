@@ -106,12 +106,37 @@ export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HOME/.sinain/models/embedding}
 # the signed .app; run.sh seeds it from the bundled agents.example.json).
 export AGENTS_CONFIG_PATH="$HOME/.sinain/agents.json"
 
+# Pick a python3 that has the full dep set (numpy + Quartz/pyobjc). A machine
+# may have several python3 installs and only one carries them. This one drives
+# BOTH sense_client AND sinain-core's knowledge scripts (page_renderer,
+# distillers) via SINAIN_PYTHON — core defaults to bare "python3" otherwise,
+# which may resolve to a dep-less interpreter and silently fail page rendering.
+SENSE_PY=""
+for _py in "${SINAIN_PYTHON:-}" \
+           /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
+           /opt/homebrew/bin/python3 /usr/local/bin/python3 \
+           "$(command -v python3 || true)" \
+           /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do
+  [ -n "${_py:-}" ] && [ -x "$_py" ] || continue
+  if "$_py" -c "import numpy, Quartz" >/dev/null 2>&1 \
+     || "$_py" -c "import numpy, Quartz" >/dev/null 2>&1; then
+    SENSE_PY="$_py"; break
+  fi
+done
+if [ -n "$SENSE_PY" ]; then
+  export SINAIN_PYTHON="$SENSE_PY"
+  echo "[launch] python (sense + knowledge scripts): $SENSE_PY"
+else
+  echo "[launch] no full-dep python3 found — sense_client + knowledge pages degraded"
+fi
+
 # Initialise the knowledge graph on first run so entity detection is live from
 # the start (otherwise it stays disabled until the first distillation writes a db).
 mkdir -p "$SINAIN_MEMORY_DIR"
 KG_DB="$SINAIN_MEMORY_DIR/knowledge-graph.db"
-if [ ! -f "$KG_DB" ] && [ -d "$RES/sinain-memory" ] && command -v python3 >/dev/null 2>&1; then
-  PYTHONPATH="$RES/sinain-memory" python3 -c "from triplestore import TripleStore; TripleStore('$KG_DB')" 2>/dev/null \
+KG_PY="${SINAIN_PYTHON:-python3}"
+if [ ! -f "$KG_DB" ] && [ -d "$RES/sinain-memory" ]; then
+  PYTHONPATH="$RES/sinain-memory" "$KG_PY" -c "from triplestore import TripleStore; TripleStore('$KG_DB')" 2>/dev/null \
     && echo "[launch] initialised knowledge graph → $KG_DB"
 fi
 
@@ -161,32 +186,14 @@ if [ -f "$AGENT_DIR/run.sh" ]; then
   AGENT_PID=$!
 fi
 
-# Start sense_client (screen capture → OCR → POST /sense). Probe for a python3
-# that actually has the scientific deps (PIL/numpy/skimage) — a machine may have
-# several python3 installs and only one carries them. A bundled PyInstaller
-# build (future, Q3) removes this dependency on the user's environment.
-SENSE_PY=""
-for _py in "${SINAIN_PYTHON:-}" \
-           /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
-           /opt/homebrew/bin/python3 /usr/local/bin/python3 \
-           "$(command -v python3 || true)" \
-           /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do
-  [ -n "${_py:-}" ] && [ -x "$_py" ] || continue
-  # Discriminating deps: numpy (filters dep-less pythons) + Quartz/pyobjc
-  # (filters pythons missing the macOS bindings, e.g. 3.10). Kept light — the
-  # heavy skimage import is left to sense_client itself. Two tries to absorb a
-  # transient first-import hiccup.
-  if "$_py" -c "import numpy, Quartz" >/dev/null 2>&1 \
-     || "$_py" -c "import numpy, Quartz" >/dev/null 2>&1; then
-    SENSE_PY="$_py"; echo "[launch] sense python: $_py"; break
-  fi
-done
+# Start sense_client (screen capture → OCR → POST /sense), reusing the python3
+# picked above (SENSE_PY). CWD = Resources so `-m sense_client` imports it.
 if [ -n "$SENSE_PY" ] && [ -d "$RES/sense_client" ]; then
   ( cd "$RES" && exec "$SENSE_PY" -m sense_client ) &
   SENSE_PID=$!
   echo "[launch] sense_client started ($SENSE_PY)"
 else
-  echo "[launch] sense_client skipped — no python3 with PIL/numpy found"
+  echo "[launch] sense_client skipped — no full-dep python3"
 fi
 
 wait "$CORE_PID"

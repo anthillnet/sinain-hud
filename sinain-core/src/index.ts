@@ -29,6 +29,14 @@ import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
 
+/**
+ * Python interpreter for the sinain-memory scripts (graph_query, page_renderer,
+ * distillers). In a packaged build the launcher sets SINAIN_PYTHON to the one
+ * interpreter that has the deps — bare "python3" can resolve to a dep-less
+ * install and make knowledge pages silently fall back to empty.
+ */
+const PYTHON_BIN = process.env.SINAIN_PYTHON || "python3";
+
 /** Resolve workspace path, expanding leading ~ to HOME. */
 function resolveWorkspace(): string {
   const raw = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
@@ -70,7 +78,7 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
     try {
       const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-      const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
+      const out = execFileSync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" }).trim();
       if (out) {
         const parsed = JSON.parse(out);
         const facts = parsed.facts || parsed;
@@ -141,7 +149,7 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
       ], { timeout: 5000, encoding: "utf-8" });
       const parsed = JSON.parse(out);
@@ -206,7 +214,7 @@ async function searchEntitiesMulti(query: string, limit: number): Promise<unknow
   for (const dbPath of resolveKnowledgeDbPaths()) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath,
         "--search-entities", query,
         "--search-limit", String(limit * 2), // 2x then de-dup
@@ -257,7 +265,7 @@ async function exportConceptBundle(
     if (opts.includePage) args.push("--include-page");
     try {
       // 30s budget — large 2-hop exports can take time on big graphs.
-      const { stdout } = await pExecFile("python3", args,
+      const { stdout } = await pExecFile(PYTHON_BIN, args,
         { timeout: 30_000, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
       const parsed = JSON.parse(stdout);
       // If the export found at least one entity (the root), return it.
@@ -299,7 +307,7 @@ async function importConceptBundle(
   ];
   const { spawn } = await import("node:child_process");
   return await new Promise((resolve) => {
-    const child = spawn("python3", args, { timeout: 30_000 });
+    const child = spawn(PYTHON_BIN, args, { timeout: 30_000 });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c: Buffer) => { stdout += c.toString("utf-8"); });
@@ -348,7 +356,7 @@ async function retractOrRestoreFact(
       if (opts.undoToken) args.push("--undo-token", opts.undoToken);
     }
     try {
-      const { stdout } = await pExecFile("python3", args, { timeout: 10_000, encoding: "utf-8" });
+      const { stdout } = await pExecFile(PYTHON_BIN, args, { timeout: 10_000, encoding: "utf-8" });
       const parsed = JSON.parse(stdout);
       if (parsed.ok) return parsed;
       // If error is "fact not found" try the next DB; otherwise return the error
@@ -384,7 +392,7 @@ async function renderEntityPageMulti(
     if (opts.refresh) args.push("--refresh");
     try {
       // 60s budget — LLM rendering for large entities can take 20-30s.
-      const { stdout } = await pExecFile("python3", args, { timeout: 60_000, encoding: "utf-8" });
+      const { stdout } = await pExecFile(PYTHON_BIN, args, { timeout: 60_000, encoding: "utf-8" });
       const parsed = JSON.parse(stdout);
       if (parsed.fact_count > 0) return parsed;
     } catch (e) {
@@ -411,7 +419,7 @@ async function graphChildrenMulti(entity: string): Promise<unknown> {
   for (const dbPath of resolveKnowledgeDbPaths()) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath,
         "--graph-children", entity,
         "--graph-limit", "50",
@@ -458,7 +466,7 @@ if not result:
     result = store.entity_as_of("${entity}", d)
 print(json.dumps({k: v for k, v in result.items()}, ensure_ascii=False))
 `;
-      const out = execFileSync("python3", ["-c", pyCode], {
+      const out = execFileSync(PYTHON_BIN, ["-c", pyCode], {
         timeout: 5000, encoding: "utf-8",
       }).trim();
       if (out && out !== "{}") return out;
@@ -486,7 +494,7 @@ async function exportKnowledgeMulti(domain: string | null, max: number): Promise
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
       ], { timeout: 5000, encoding: "utf-8" });
       const parsed = JSON.parse(out);
@@ -608,7 +616,7 @@ store.close()
 print(json.dumps(stats))
 `;
 
-    const result = execFileSync("python3", ["-c", script], {
+    const result = execFileSync(PYTHON_BIN, ["-c", script], {
       input: JSON.stringify(graphOps),
       timeout: 10_000,
       encoding: "utf-8",
