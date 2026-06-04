@@ -1103,6 +1103,18 @@ def query_facts_hybrid(
         question_class = "temporal"
     else:
         question_class = "default"
+    # GEOMETRIC preference/recommendation detection (not regex): a "recommend X for me"
+    # question fails by abstaining when the user's preference facts aren't retrieved (query
+    # vocabulary is distant from how preferences are stored). Detect via proximity to a frozen
+    # exemplar manifold, then augment retrieval with the user's preference facts. Gated
+    # SINAIN_PREF_AUGMENT (default on); fail-safe off if embeddings unavailable.
+    is_preference = False
+    if _os_d.environ.get("SINAIN_PREF_AUGMENT", "1") != "0":
+        try:
+            from intent_exemplars import is_preference_query
+            is_preference = is_preference_query(query)
+        except Exception:
+            is_preference = False
 
     # Change C: FTS5 AND mode for multi-keyword queries
     # #4: request BM25 scores so the fusion can entropy-weight the fts channel.
@@ -1395,6 +1407,35 @@ def query_facts_hybrid(
     # crowd precise distilled facts out (6a1eabeb/6aeb4375), while keeping
     # relevant ones (830ce83f/d7c942c3). See HANDOFF-recon-t1.md.
     results = _recon_topical_guard(results, query)
+    # PREFERENCE augmentation: for a recommendation request, always surface the user's
+    # preference facts (so QA applies them instead of abstaining "no info about your
+    # preferences"). Pull user-referencing facts carrying a preference predicate and prepend
+    # any not already present. Deterministic; bounded.
+    if is_preference:
+        try:
+            _pred = re.compile(r"\b(prefer|prefers|like|likes|love|loves|enjoy|enjoys|"
+                               r"favou?rite|interested in|into|a fan of|want|wants|own|owns|"
+                               r"use[sd]?|dislike|dislikes|avoid|avoids|hate|hates)\b", re.I)
+            _have = {f.get("entity_id", "") for f in results}
+            _pstore = TripleStore(db_path)
+            _pf = []
+            for _fid, _ in _pstore.entities_with_attr("value"):
+                if not str(_fid).startswith("fact:") or _fid in _have:
+                    continue
+                _a = _pstore.entity(_fid)
+                if not _a or _a.get("valid_to"):
+                    continue
+                _v = _a.get("value", [""]); _v = _v[0] if isinstance(_v, list) else _v
+                if _v and _USER_REF.search(_v) and _pred.search(_v):
+                    _pf.append({"entity_id": _fid, "value": _v,
+                                "kind": (_a.get("kind", [""])[0] if isinstance(_a.get("kind"), list) else _a.get("kind", ""))})
+                if len(_pf) >= max_facts:
+                    break
+            _pstore.close()
+            if _pf:
+                results = _pf + results  # preference facts lead so QA grounds on them
+        except Exception:
+            pass
     # #5 DPP set-selection: for COUNTING queries, spend the final max_facts budget on
     # DISTINCT instances rather than near-duplicates of the same one (the geometric root
     # of count inflation/deflation). Greedy MAP-DPP over the cosine Gram of the already-
