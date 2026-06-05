@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../ui/first_run/install_tier.dart';
 
@@ -51,6 +52,11 @@ class FirstRunService extends ChangeNotifier {
   Future<void> completeSetup(InstallTier tier, {String? openRouterKey}) async {
     final vars = _envForTier(tier, openRouterKey: openRouterKey);
     await _writeEnv(vars);
+    // Mark the legacy OnboardingService complete too — this wizard already
+    // collected the key, so the old connecting/permissions/orientation flow is
+    // redundant and would otherwise trap the user after relaunch.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarding_complete', true);
     _envExists = true;
     _completed = true;
     notifyListeners();
