@@ -197,6 +197,11 @@ agent_has_mcp() {
   type=$(prof_get_or "$check" type "$check")
   case "$type" in
     claude|openclaude|codex|goose) return 0 ;;
+    # Hermes is an MCP client, but headless tool approval (calling back into
+    # sinain_respond) depends on its yolo/approval config. Default to pipe
+    # mode (self-contained text oracle); opt in to the claude-style MCP flow
+    # with HERMES_USE_MCP=true once approval is configured (see startup block).
+    hermes) [ "${HERMES_USE_MCP:-false}" = "true" ] && return 0 || return 1 ;;
     junie) $JUNIE_HAS_MCP ;;
     *) return 1 ;;
   esac
@@ -330,6 +335,16 @@ invoke_agent() {
           --no-session \
           --max-turns "$turns"
         ;;
+      hermes)
+        # MCP mode (reached only when HERMES_USE_MCP=true — see agent_has_mcp).
+        # Hermes loads the sinain MCP server from ~/.hermes/config.yaml
+        # (registered at startup) and calls sinain_respond / sinain_knowledge_query
+        # itself, mirroring the claude flow. `-z/--oneshot` prints only the final
+        # text to stdout and auto-bypasses approvals (no TTY hang). Turn budget
+        # comes from config.yaml (max_turns, default 60) — there's no top-level
+        # --max-turns flag. `--toolsets`/`-t` can narrow tools if needed.
+        "$bin" -z "$prompt"
+        ;;
       aider)
         return 1  # No MCP support — caller falls back to invoke_pipe
         ;;
@@ -375,6 +390,17 @@ invoke_pipe() {
       ;;
     aider)
       "$bin" --yes -m "$msg"
+      ;;
+    hermes)
+      # Hermes one-shot: `-z/--oneshot` sends a single prompt and prints ONLY
+      # the final response text to stdout (no banner/spinner/tool previews,
+      # no session-id line) — and auto-bypasses tool approvals, so it never
+      # hangs waiting on a TTY. Tools, memory, and skills still load. The
+      # escalation message already includes full screen/audio/digest context,
+      # so Hermes answers as a self-contained oracle using its own configured
+      # model (set via `hermes model`/`hermes setup`) — no sinain MCP needed.
+      # For the richer flow where Hermes calls sinain tools, set HERMES_USE_MCP=true.
+      "$bin" -z "$msg" 2>/dev/null
       ;;
     *)
       # Generic: pipe message to stdin to whatever binary the profile names
@@ -455,6 +481,46 @@ print('  sinain extension added to ' + config_path)
   fi
 fi
 
+# Hermes: auto-register sinain MCP server in ~/.hermes/config.yaml (opt-in).
+# Only when HERMES_USE_MCP=true and hermes is the selected agent — pipe mode
+# (the default) is a black-box text oracle and needs none of this. Hermes
+# reads MCP servers from config.yaml under the `mcp_servers` key (stdio:
+# command + args + env). ruamel.yaml (a Hermes core dep) preserves the
+# user's comments/formatting; falls back to PyYAML if unavailable.
+if [ "${HERMES_USE_MCP:-false}" = "true" ] && [ "$AGENT" = "hermes" ]; then
+  TSX_BIN="$(cd "$SCRIPT_DIR/.." && pwd)/sinain-core/node_modules/.bin/tsx"
+  MCP_ENTRY="$(cd "$SCRIPT_DIR/.." && pwd)/sinain-mcp-server/index.ts"
+  HERMES_CONFIG="${HERMES_CONFIG_DIR:-$HOME/.hermes}/config.yaml"
+  if [ -f "$HERMES_CONFIG" ] && ! grep -q "sinain:" "$HERMES_CONFIG" 2>/dev/null; then
+    echo "Registering sinain MCP server with hermes ($HERMES_CONFIG)..."
+    python3 -c "
+import sys
+try:
+    from ruamel.yaml import YAML
+    _y = YAML()
+    load = _y.load
+    def dump(cfg, f): _y.dump(cfg, f)
+except Exception:
+    import yaml as _py
+    load = _py.safe_load
+    def dump(cfg, f): _py.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+path, tsx, entry, core, ws = sys.argv[1:6]
+with open(path) as f:
+    cfg = load(f) or {}
+cfg.setdefault('mcp_servers', {})['sinain'] = {
+    'command': tsx,
+    'args': [entry],
+    'env': {'SINAIN_CORE_URL': core, 'SINAIN_WORKSPACE': ws},
+}
+with open(path, 'w') as f:
+    dump(cfg, f)
+print('  sinain mcp_server added to ' + path)
+" "$HERMES_CONFIG" "$TSX_BIN" "$MCP_ENTRY" "$CORE_URL" "$WORKSPACE"
+  elif [ ! -f "$HERMES_CONFIG" ]; then
+    echo "  ⚠ HERMES_USE_MCP=true but $HERMES_CONFIG missing — run \`hermes setup\` first"
+  fi
+fi
+
 # Ollama warmup — pin the backing model so each agent invocation hits hot weights.
 # openclaude + Ollama via the OpenAI-compat endpoint does NOT forward keep_alive,
 # so we ping Ollama's native /api/generate once with keep_alive=-1 (persistent).
@@ -498,7 +564,7 @@ fi
 # Built-in defaults are 1:1 (profile name == binary == type). Users can
 # override fields or add custom profiles by editing sinain-agent/agents.json.
 # Profiles whose binaries aren't in PATH are silently skipped.
-for default_name in claude openclaude codex goose junie aider; do
+for default_name in claude openclaude codex goose junie aider hermes; do
   prof_set "$default_name" bin "$default_name"
   prof_set "$default_name" type "$default_name"
 done
