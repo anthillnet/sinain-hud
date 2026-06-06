@@ -112,7 +112,8 @@ is optional.
     "codex":  { "type": "codex" },
     "goose":  { "type": "goose" },
     "junie":  { "type": "junie" },
-    "aider":  { "type": "aider" }
+    "aider":  { "type": "aider" },
+    "hermes": { "type": "hermes" }
   }
 }
 ```
@@ -156,6 +157,7 @@ The `type` field is the dispatch contract. Two families:
 | `goose` | Block's Goose. MCP support via `extensions:` block. |
 | `junie` | JetBrains Junie. MCP support via `--mcp-location` (newer versions). |
 | `aider` | Pipe mode only — receives escalation text on stdin, writes response to stdout. |
+| `hermes` | NousResearch [Hermes](https://github.com/NousResearch/Hermes-Agent) — the evolution of OpenClaw, but it dropped OpenClaw's WS RPC contract, so it's dispatched as a *local CLI*, **not** a gateway. Pipe mode by default (`hermes -z`); opt-in MCP mode with `HERMES_USE_MCP=true`. See [Hermes: pipe vs MCP mode](#hermes-pipe-vs-mcp-mode). |
 
 For local CLIs, the bare agent (`run.sh`) invokes the binary on each
 escalation/spawn. The `bin` field selects which executable to run; defaults
@@ -178,6 +180,30 @@ invokes a binary — gateway profiles have no `bin`.
 > but the connection still uses the first profile's URL. True per-profile
 > WS clients (one client per gateway URL, lazy construction on selection)
 > is a planned follow-up.
+
+### Hermes: pipe vs MCP mode
+
+[Hermes](https://github.com/NousResearch/Hermes-Agent) is NousResearch's
+self-improving agent — the evolution of OpenClaw. **It does not speak
+OpenClaw's WS RPC protocol** (Hermes moved to a one-shot CLI / MCP / ACP
+surface), so despite the lineage it is *not* a `type: "openclaw"` gateway.
+It slots into the local-CLI lane via its headless one-shot flag, `-z/--oneshot`,
+which prints only the final response to stdout and auto-bypasses tool
+approvals (so it never hangs waiting on a TTY).
+
+It runs in one of two modes:
+
+| Mode | When | How it works |
+|---|---|---|
+| **Pipe** (default) | `HERMES_USE_MCP` unset | `run.sh` polls the escalation, hands Hermes the full message text (`hermes -z "$msg"`), captures stdout, and POSTs the response. The escalation already carries screen/audio/digest context, so Hermes answers as a self-contained oracle using its own model, memory, and skills (set via `hermes model` / `hermes setup`). No sinain MCP registration needed. |
+| **MCP** (opt-in) | `HERMES_USE_MCP=true` | `run.sh` registers `sinain-mcp-server` into `~/.hermes/config.yaml` (`mcp_servers`) at startup and routes through the MCP path, so Hermes calls `sinain_respond` / `sinain_knowledge_query` itself — mirroring the `claude` flow. Requires Hermes' headless tool-approval to be configured. |
+
+**Setup.** Install Hermes (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`, or clone + `./setup-hermes.sh`), then `hermes model` to pick a provider/model. Once `hermes` is on your `PATH`, the `hermes` profile appears in the overlay roster automatically — it's a built-in 1:1 profile, no `agents.json` edit required.
+
+**Latency note.** In pipe mode Hermes runs its full agentic loop (default
+`max_turns: 60` in `~/.hermes/config.yaml`) per escalation, so a complex one
+can take longer / cost more than a single LLM call. Narrow it with a lower
+`max_turns` or a restricted toolset (`-t`) if HUD responsiveness matters.
 
 ## Shell aliases aren't binaries
 
@@ -397,7 +423,7 @@ behaves a certain way:
 | WS connection params | `sinain-core/src/config.ts` (uses `findGatewayProfile`) | First openclaw-typed profile's URLs become `openclawConfig` |
 | Roster (bare agent side) | `sinain-agent/run.sh` | Skips PATH-existence filter for openclaw-typed profiles |
 | Defensive skip guard | `sinain-agent/run.sh` | Bare agent refuses to invoke when `prof_get_or "$ESC_AGENT" type` is `openclaw` |
-| MCP detection | `sinain-agent/run.sh:agent_has_mcp` | Routes claude/openclaude/codex/goose via MCP path; junie conditional; aider/openclaw via pipe path |
+| MCP detection | `sinain-agent/run.sh:agent_has_mcp` | Routes claude/openclaude/codex/goose via MCP path; junie conditional; hermes via pipe by default (MCP when `HERMES_USE_MCP=true`); aider/openclaw via pipe path |
 
 All five layers consult `agents.json` (or its loaded view) — a single
 source of truth.
