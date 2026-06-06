@@ -40,17 +40,23 @@ def object_class(question: str) -> str | None:
     if mi is None:
         return None
     out: list[str] = []
+    prev_hyphen = False
     for t in toks[mi + 1:]:
-        if t.pos_ in ("VERB", "AUX") or t.lower_ in ("do", "did", "have", "has", "i", "i've"):
+        # a hyphenated compound modifier ("health-RELATED devices") parses RELATED as a verb;
+        # don't let it terminate the class — keep it as part of the phrase.
+        is_compound_verb = t.pos_ in ("VERB", "AUX") and prev_hyphen
+        if (t.pos_ in ("VERB", "AUX") and not is_compound_verb) or t.lower_ in ("do", "did", "have", "has", "i", "i've"):
             break
         if t.is_punct:
+            prev_hyphen = t.text in ("-", "–")
             continue
         # carry "items OF clothing", "types OF citrus" — a bare head noun ("items", "types",
         # "pieces") is too generic; the prep complement is the real class.
-        if t.pos_ in ("NOUN", "PROPN", "ADJ", "CCONJ") or t.lower_ in ("or", "of"):
+        if t.pos_ in ("NOUN", "PROPN", "ADJ", "CCONJ") or t.lower_ in ("or", "of") or is_compound_verb:
             out.append(t.text)
         elif out:
             break
+        prev_hyphen = False
     return " ".join(out).strip().lower() or None
 
 
@@ -59,12 +65,17 @@ def question_action_verbs(question: str) -> set[str]:
     'own' -> {own}). Light/aux verbs dropped. Empty for stative questions ('how many fish are
     there'), which then lean on the class-noun signal instead."""
     doc = _NLP(question)
-    return {t.lemma_.lower() for t in doc
-            if t.pos_ == "VERB" and t.lemma_.lower() not in _SKIP_VERBS}
+    return {t.lemma_.lower() for i, t in enumerate(doc)
+            if t.pos_ == "VERB" and t.lemma_.lower() not in _SKIP_VERBS
+            and not (i > 0 and doc[i - 1].text in ("-", "–"))}  # skip "health-RELATED" compound
 
 
 _CLASS_STOP = {"many", "total", "number", "kind", "kinds", "type", "types", "item", "items",
-               "piece", "pieces", "day", "days", "time", "times", "store"}
+               "piece", "pieces", "store",
+               # generic temporal nouns — as class tokens they match every dated sentence
+               # ("waking up 6 weeks ago", "moved in last month") instead of the real class
+               "day", "days", "time", "times", "week", "weeks", "month", "months",
+               "year", "years", "hour", "hours", "week.", "typical"}
 
 
 def question_class_tokens(question: str) -> set[str]:
