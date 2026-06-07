@@ -46,12 +46,19 @@ jobs:
       #    misconfigured repo no-ops cleanly instead of failing mid-build.
       - name: Preflight — signing secrets present?
         id: preflight
+        # Gate on EVERY secret the later steps consume, so a misconfigured repo
+        # no-ops cleanly instead of hard-failing mid-build under `set -euo pipefail`.
+        # APPLE_CERT_PASSWORD is intentionally excluded — a password-less .p12 is
+        # valid (security import -P "" works), so an empty value must not skip.
         env:
           HAVE_CERT: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
           HAVE_NOTARY: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
+          HAVE_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+          HAVE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
         run: |
-          if [ "$HAVE_CERT" != "true" ] || [ "$HAVE_NOTARY" != "true" ]; then
-            echo "::warning::DMG signing secrets not provisioned (APPLE_CERT_P12_BASE64 / APPLE_APP_SPECIFIC_PASSWORD) — skipping build."
+          if [ "$HAVE_CERT" != "true" ] || [ "$HAVE_NOTARY" != "true" ] \
+             || [ "$HAVE_APPLE_ID" != "true" ] || [ "$HAVE_TEAM_ID" != "true" ]; then
+            echo "::warning::DMG signing secrets not fully provisioned (need APPLE_CERT_P12_BASE64, APPLE_APP_SPECIFIC_PASSWORD, APPLE_ID, APPLE_TEAM_ID) — skipping build."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -146,12 +153,22 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --keychain "$KEYCHAIN"
 
-      # ── Sign every Mach-O, build DMG, notarize, staple, verify Gatekeeper ───
+      # ── Sign every Mach-O, build DMG, notarize, staple ──────────────────────
       - name: Sign + build + notarize DMG
         if: steps.preflight.outputs.ready == 'true'
         env:
           NOTARY_KEYCHAIN: ${{ env.KEYCHAIN }}   # build-full-dmg.sh passes this to notarytool
         run: ./tools/dmg/build-full-dmg.sh build/Sinain.app sinain-notary
+
+      # build-full-dmg.sh runs spctl with `|| true` (lenient for local dev). In
+      # CI we gate the release on it: a non-assessable DMG must fail the job and
+      # never be published. `stapler validate` re-confirms the stapled ticket.
+      - name: Verify Gatekeeper (strict)
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          spctl --assess --type open --context context:primary-signature -vv build/Sinain.dmg
+          xcrun stapler validate build/Sinain.dmg
 
       # ── Publish (only on a tag push) ────────────────────────────────────────
       - name: Compute release name
