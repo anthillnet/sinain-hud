@@ -200,10 +200,11 @@ It runs in one of two modes:
 
 **Setup.** Install Hermes (`curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`, or clone + `./setup-hermes.sh`), then `hermes model` to pick a provider/model. Once `hermes` is on your `PATH`, the `hermes` profile appears in the overlay roster automatically — it's a built-in 1:1 profile, no `agents.json` edit required.
 
-**Latency note.** In pipe mode Hermes runs its full agentic loop (default
-`max_turns: 60` in `~/.hermes/config.yaml`) per escalation, so a complex one
-can take longer / cost more than a single LLM call. Narrow it with a lower
-`max_turns` or a restricted toolset (`-t`) if HUD responsiveness matters.
+**Latency note.** In pipe mode Hermes runs its full agentic loop — bounded by
+`max_turns` in `~/.hermes/config.yaml` (which defaults high; check your
+installed value) — per escalation, so a complex one can take longer / cost
+more than a single LLM call. Lower `max_turns` or restrict the toolset (`-t`)
+if HUD responsiveness matters.
 
 ## Shell aliases aren't binaries
 
