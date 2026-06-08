@@ -17,14 +17,27 @@ distilled catches the toaster raw-windowing fragments; union is complete). See
 .planning/INVESTIGATION-unscatter-multisession.md.
 """
 from __future__ import annotations
-import json, re, urllib.request
+import json, os, re, urllib.request
 import spacy
 from embed_client import embed
 from ig.linalg import cosine, unit
 
 _NLP = spacy.load("en_core_web_sm")
-_ACT = {"replace", "fix", "repair", "buy", "purchase", "get", "acquire", "install", "donate",
-        "upgrade", "build", "add", "sell", "attend", "download", "adopt", "make"}
+# Broad user-action verbs. Recall-oriented: the per-object membership gate
+# (category_members) provides precision, so extraction can cast wide across the
+# predicate families reduction questions actually use — acquire/change AND
+# use/consume/experience ("how many citrus fruits did I USE", "how many museums
+# did I VISIT") — rather than acquisition only. Universal (not per-question).
+_ACT = {
+    # acquire / change / dispose
+    "replace", "fix", "repair", "buy", "purchase", "get", "acquire", "install",
+    "donate", "upgrade", "build", "add", "sell", "adopt", "make", "order", "rent",
+    "find", "receive", "own",
+    # use / consume / experience
+    "use", "try", "eat", "drink", "cook", "plant", "grow", "read", "watch", "play",
+    "take", "attend", "visit", "download", "join", "start", "complete", "finish",
+    "tour", "explore", "taste", "wear",
+}
 _OLLAMA = "http://localhost:11434/api/chat"
 _FIRST = ("user", "i", "we")
 _FIRST_POSS = {"my", "our", "mine", "ours"}
@@ -147,7 +160,10 @@ def enrich(distilled_facts: list[str], raw_chunks: list[str],
 def count_category(edges, domain_keywords: list[str], domain_phrase: str,
                    ctx_floor=0.32, dedup_cos=0.80):
     """Count distinct objects in the queried category. Category = FACT CONTEXT (source mentions a
-    domain keyword) OR source-embed near the domain phrase — NOT bare-object geometry. Dedup by emb."""
+    domain keyword) OR source-embed near the domain phrase — NOT bare-object geometry. Dedup by emb.
+
+    NOTE: source-context membership over-admits (any action in a domain-mentioning window counts).
+    Prefer category_members() below, which judges the OBJECT taxonomically via a small-model gate."""
     dv = unit(embed([domain_phrase])[0])
     members, names = [], []
     for e in edges:
@@ -159,4 +175,86 @@ def count_category(edges, domain_keywords: list[str], domain_phrase: str,
         if any(cosine(oe, m) >= dedup_cos for m in members):
             continue
         members.append(oe); names.append(e["object"])
+    return names
+
+
+def _singular(phrase: str) -> str:
+    """Crude singularization of the category head ('plants' -> 'plant',
+    'citrus fruits' -> 'citrus fruit') so the membership prompt reads naturally."""
+    words = phrase.strip().split()
+    if words:
+        w = words[-1]
+        if w.endswith("ies"):
+            words[-1] = w[:-3] + "y"
+        elif w.endswith("ses") or w.endswith("xes") or w.endswith("zes"):
+            words[-1] = w[:-2]
+        elif w.endswith("s") and not w.endswith("ss"):
+            words[-1] = w[:-1]
+    return " ".join(words)
+
+
+def _member_gate(objects: list[str], category_phrase: str,
+                 model=None, sz=10) -> list[str]:
+    """Per-object TAXONOMIC membership judgment: 'is <object> a kind of <category>?'.
+
+    This is the precision layer embeddings cannot provide — 'bookshelf' is NOT near
+    'furniture' in cosine space, yet a capable small model KNOWS it (handoff: qwen2.5
+    ≈ 93% on real-sentence categorization; phi4-mini was unreliable). Model is
+    configurable via SINAIN_MEMBER_MODEL (default qwen2.5:7b). One-shot prompt +
+    singular category. Batched yes/no; returns the affirmed subset, order preserved.
+    Fail-open: on SLM error the batch passes through unfiltered (a dead gate degrades
+    to over-admitting, never silently drops members)."""
+    model = model or os.environ.get("SINAIN_MEMBER_MODEL", "qwen2.5:7b")
+    cat = _singular(category_phrase)
+    keep: list[str] = []
+    for s in range(0, len(objects), sz):
+        ch = objects[s:s + sz]
+        p = (f"For each numbered item, answer 'N. yes' if the item itself is a kind of "
+             f"{cat}, otherwise 'N. no'. Judge the item only, ignore context.\n"
+             f"Example for category 'fruit': '1. apple' -> '1. yes'; '2. spoon' -> '2. no'.\n\n"
+             + "\n".join(f"{i+1}. {o}" for i, o in enumerate(ch)))
+        body = json.dumps({"model": model, "messages": [{"role": "user", "content": p}],
+                           "stream": False, "options": {"temperature": 0, "num_predict": 160}}).encode()
+        try:
+            out = json.load(urllib.request.urlopen(urllib.request.Request(
+                _OLLAMA, data=body, headers={"Content-Type": "application/json"}),
+                timeout=60))["message"]["content"]
+        except Exception:
+            keep.extend(ch)  # fail-open: don't drop on gate failure
+            continue
+        verdict = {}
+        for ln in out.splitlines():
+            m = re.match(r"\s*(\d+)", ln)
+            if m:
+                verdict[int(m.group(1)) - 1] = ("yes" in ln.lower())
+        for i, o in enumerate(ch):
+            if verdict.get(i, False):
+                keep.append(o)
+    return keep
+
+
+def category_members(edges, category_phrase: str, model=None,
+                     dedup_cos=0.80, member_gate: bool = True) -> list[str]:
+    """Resolve the distinct member set for `category_phrase` from typed edges.
+
+    Coverage: dedup ALL candidate objects by embedding (no source-context prefilter,
+    so members whose window doesn't name the category aren't dropped).
+    Precision: a per-object membership gate (_member_gate) keeps only true members.
+    This is the coverage×precision synthesis the prior count_category lacked."""
+    objs = [e["object"] for e in edges if e.get("object")]
+    if not objs:
+        return []
+    try:
+        embs = [unit(v) for v in embed(objs)]
+    except Exception:
+        embs = [None] * len(objs)
+    members, names = [], []
+    for o, oe in zip(objs, embs):
+        if oe is not None and any(cosine(oe, m) >= dedup_cos for m in members):
+            continue
+        if oe is not None:
+            members.append(oe)
+        names.append(o)
+    if member_gate and names:
+        names = _member_gate(names, category_phrase, model)
     return names
