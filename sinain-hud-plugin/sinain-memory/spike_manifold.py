@@ -41,7 +41,9 @@ class Map(nn.Module):
 
 
 def main():
-    D = json.load(open("/tmp/manifold_data.json"))
+    src = sys.argv[1] if len(sys.argv) > 1 else "/tmp/manifold_data.json"
+    print(f"[data] {src}", file=sys.stderr)
+    D = json.load(open(src))
     emb = {k: torch.tensor(v, dtype=torch.float32) for k, v in D["emb"].items()}
     objects = [o for o in D["objects"] if o in emb]
     cats = [c for c in D["categories"] if c in emb]
@@ -53,9 +55,12 @@ def main():
     print(f"vocab: {len(objects)} objs, {len(cats)} cats, {len(isa)} is-a edges "
           f"({len(train_isa)} train, held-out objs={len(held)})", file=sys.stderr)
 
-    X = torch.stack([emb[s] for s in objects + cats])
-    idx = {s: i for i, s in enumerate(objects + cats)}
-    cat_idx = torch.tensor([idx[c] for c in cats])
+    # Vocab = every node that appears as an object, category, OR is-a endpoint
+    # (the backbone adds intermediate nodes not in the object/category lists).
+    nodes = sorted((set(objects) | set(cats) | {s for e in isa for s in e}) & set(emb))
+    X = torch.stack([emb[s] for s in nodes])
+    idx = {s: i for i, s in enumerate(nodes)}
+    cat_idx = torch.tensor([idx[c] for c in cats], dtype=torch.long)
 
     f = Map(b=10)
     opt = torch.optim.Adam(f.parameters(), lr=5e-3, weight_decay=1e-5)
@@ -84,7 +89,7 @@ def main():
     f.eval()
     with torch.no_grad():
         P = f(X)
-    Pall = {s: P[idx[s]] for s in objects + cats}
+    Pall = {s: P[idx[s]] for s in nodes}
 
     # Calibrate the membership radius from the TRAINING positive is-a distances:
     # a test object is a member of category c if it sits within the typical
