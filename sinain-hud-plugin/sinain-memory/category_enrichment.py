@@ -233,6 +233,146 @@ def _member_gate(objects: list[str], category_phrase: str,
     return keep
 
 
+def _slug(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
+
+
+def _ctokens(phrase: str) -> set[str]:
+    """Singularized content tokens of a category phrase, for read-time matching
+    a query ('plants') against stored hub labels ('plant', 'houseplant')."""
+    toks = set()
+    for w in re.findall(r"[a-z]{3,}", (phrase or "").lower()):
+        if w in _STOP_CAT:
+            continue
+        toks.add(w)
+        toks.add(re.sub(r"s$", "", w))  # crude singular
+    return toks
+
+
+_STOP_CAT = {"the", "different", "types", "type", "kind", "kinds", "piece", "pieces",
+             "many", "much", "have", "did", "related", "various"}
+
+
+def type_categories(edges, model_script: str = "session_distiller"):
+    """WRITE-TIME category typing. Assign 1-3 hypernym category labels to each
+    distinct user-action object, REUSING the distiller's configured model
+    (call_llm(script=...) → one model in any mode, never a 2nd resident model;
+    in local mode it's the local distiller, cloud mode the cloud distiller).
+
+    The taxonomic knowledge ('bookshelf' is furniture; 'fender stratocaster' is a
+    musical instrument) is baked in HERE, once per ingestion, with the GPU already
+    warm — so read time (query_category_members) is a pure structural walk with no
+    LLM and no second stream. Returns edges annotated with `categories: [...]`.
+    Deterministic (temp 0, seed). Fail-open: returns edges with empty categories."""
+    objs = sorted({e["object"] for e in edges if e.get("object")})
+    if not objs:
+        return []
+    from common import call_llm
+    sys_p = ("You label everyday objects with their general categories for a personal "
+             "memory index. For each numbered item output 'N: cat1, cat2' — 1 to 3 broad "
+             "category nouns the item is a KIND OF (general to specific), lowercased and "
+             "singular. Examples: 'peace lily' -> '1: plant, houseplant'; 'fender "
+             "stratocaster' -> '2: musical instrument, guitar'; 'fitbit versa' -> "
+             "'3: device, fitness tracker'. Judge the item itself.")
+    cats: dict[str, list[str]] = {}
+    sz = 20  # batch so the response can't truncate on a big haystack's object set
+    for s in range(0, len(objs), sz):
+        chunk = objs[s:s + sz]
+        user_p = "\n".join(f"{i+1}. {o}" for i, o in enumerate(chunk))
+        try:
+            out = call_llm(sys_p, user_p, script=model_script, temperature=0.0,
+                           seed=42, max_tokens=600)
+        except Exception:
+            out = ""
+        for ln in out.splitlines():
+            m = re.match(r"\s*(\d+)\s*[:.)\-]\s*(.+)", ln)
+            if not m:
+                continue
+            idx = int(m.group(1)) - 1
+            if 0 <= idx < len(chunk):
+                labels = [c.strip().lower() for c in re.split(r"[,;/|]", m.group(2)) if c.strip()]
+                cats[chunk[idx]] = labels[:3]
+    return [{**e, "categories": cats.get(e.get("object"), [])} for e in edges]
+
+
+def persist_typed_edges(db_path: str, typed_edges, occurred_at: str):
+    """Persist write-time typed edges as a structural category-hub index:
+        entity:<obj>  value=<name> kind=action-object user_action=<verb> occurred_at
+        entity:<obj>  member_of -> category:<label>   (ref)
+        category:<label>  kind=category-hub value=<label>
+    Read-time counting is then backrefs(category:<label>, 'member_of'). Returns
+    (n_objects, n_membership_edges)."""
+    from triplestore import TripleStore
+    store = TripleStore(db_path)
+    n_obj = n_edge = 0
+    try:
+        tx = store.begin_tx("typed-edges", metadata=json.dumps({"occurred_at": occurred_at}))
+        for e in typed_edges:
+            obj = (e.get("object") or "").strip()
+            if not obj:
+                continue
+            oid = "entity:" + _slug(obj)
+            store.assert_triple(tx, oid, "value", obj)
+            store.assert_triple(tx, oid, "kind", "action-object")
+            if e.get("relation"):
+                store.assert_triple(tx, oid, "user_action", e["relation"])
+            store.assert_triple(tx, oid, "occurred_at", occurred_at)
+            n_obj += 1
+            for cat in e.get("categories", []):
+                cat = (cat or "").strip().lower()
+                if not cat:
+                    continue
+                cid = "category:" + _slug(cat)
+                store.assert_triple(tx, cid, "kind", "category-hub")
+                store.assert_triple(tx, cid, "value", cat)
+                store.assert_triple(tx, oid, "member_of", cid, value_type="ref")
+                n_edge += 1
+        store.commit_tx(tx)
+    finally:
+        store.close()
+    return n_obj, n_edge
+
+
+def query_category_members(db_path: str, category_phrase: str,
+                           sim_floor: float = 0.55) -> list[str]:
+    """READ-TIME structural walk (NO heavy LLM): distinct action-objects whose
+    stored category hub MATCHES the query phrase, by token overlap OR embedding
+    similarity. The hard taxonomic work (object->category) was done at write time,
+    so read-time matching is only category-query <-> category-label ('plants' vs
+    'houseplant'/'flower'), where embeddings ARE reliable — a cheap MiniLM compare,
+    already on the retrieval hot path, not a second LLM stream."""
+    from triplestore import TripleStore
+    store = TripleStore(db_path)
+    try:
+        want = _ctokens(category_phrase)
+        if not want:
+            return []
+        hubs = [(cid, label) for cid, label in store.entities_with_attr("value")
+                if cid.startswith("category:")]
+        if not hubs:
+            return []
+        # token-overlap matches (free) + embedding matches (cheap MiniLM)
+        matched = {cid for cid, label in hubs if want & _ctokens(label)}
+        try:
+            qv = unit(embed([category_phrase])[0])
+            lvs = embed([label for _, label in hubs])
+            for (cid, _label), lv in zip(hubs, lvs):
+                if cosine(qv, unit(lv)) >= sim_floor:
+                    matched.add(cid)
+        except Exception:
+            pass  # token-overlap still applies if embeddings are unavailable
+        members: dict[str, str] = {}
+        for cid in matched:
+            for oid, _attr in store.backrefs(cid, "member_of"):
+                attrs = store.entity(oid)
+                name = (attrs.get("value") or [""])[0]
+                if name:
+                    members[oid] = name
+        return list(members.values())
+    finally:
+        store.close()
+
+
 def category_members(edges, category_phrase: str, model=None,
                      dedup_cos=0.80, member_gate: bool = True) -> list[str]:
     """Resolve the distinct member set for `category_phrase` from typed edges.

@@ -1919,6 +1919,31 @@ def main() -> None:
         except Exception as e:
             print(f"  [raw_store] append failed (non-fatal): {e}", file=sys.stderr)
 
+    # ── Step 1.7: Write-time typed-edge category enrichment (SINAIN_TYPED_EDGES) ──
+    # Type user-action objects with their category AT WRITE TIME — reusing the
+    # distiller's configured model (category_enrichment.type_categories →
+    # call_llm(script="session_distiller"), so ONE model in any mode, never a 2nd
+    # resident model / 2nd local stream). Recall: broad SVO over raw ∪ distilled.
+    # Precision: the typer's taxonomic labels (bookshelf→furniture) baked in now.
+    # Read time (graph_query / reductions) then resolves "how many X" by a pure
+    # structural backrefs walk over category:* hubs — no read-time LLM. Fail-open.
+    if os.environ.get("SINAIN_TYPED_EDGES") == "1":
+        try:
+            from category_enrichment import enrich, type_categories, persist_typed_edges
+            _raw = [(it.get("text") or it.get("content") or "")
+                    for it in transcript_items if isinstance(it, dict)]
+            _dist = [(f.get("text") if isinstance(f, dict) else f)
+                     for f in (digest.get("facts") or [])]
+            _edges = enrich(_dist, _raw, gate=False)
+            if _edges:
+                _typed = type_categories(_edges)
+                n_obj, n_edge = persist_typed_edges(db_path, _typed, digest_ts)
+                _ncat = len({c for e in _typed for c in e.get("categories", [])})
+                print(f"  [typed-edges] {n_obj} action-objects, {_ncat} categories, "
+                      f"{n_edge} membership edges", file=sys.stderr)
+        except Exception as e:
+            print(f"  [typed-edges] failed (non-fatal): {e}", file=sys.stderr)
+
     # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
     # at our scale (<200 facts). Individual facts are more retrievable than merged ones.
     # Keep facts separate — dedup handles true duplicates, different facts stay distinct.
