@@ -96,6 +96,44 @@ def _sidecar_path(store_path: str) -> Path:
     return Path(str(store_path) + ".raw-chunks.jsonl")
 
 
+def _window_chunks(chunks: list[str], session_offset: int = 0) -> list[tuple[str, int, int]]:
+    """Window each input text, carrying (text, session_id, window_idx) so the
+    retrieve path can stitch adjacent windows of the SAME source session back
+    together (P1). Each element of `chunks` is one source session; window_idx is
+    that window's position within its session. session_offset makes ids globally
+    unique across append batches."""
+    out: list[tuple[str, int, int]] = []
+    sid = session_offset
+    for c in chunks:
+        if not (c and c.strip()):
+            continue
+        windows = _window_split(c)
+        for wi, w in enumerate(windows):
+            out.append((w, sid, wi))
+        sid += 1
+    return out
+
+
+def _scan_sidecar(sidecar: Path) -> tuple[int, int]:
+    """Single pass over an existing sidecar: returns (chunk_count, max_session_id).
+    Used by append_chunks to continue both the global chunk id and the session id
+    without colliding across batches. (-1 session id => no prior records.)"""
+    count = 0
+    max_sid = -1
+    if sidecar.exists():
+        for ln in sidecar.read_text().splitlines():
+            if not ln.strip():
+                continue
+            count += 1
+            try:
+                sid = json.loads(ln).get("session_id")
+                if sid is not None:
+                    max_sid = max(max_sid, int(sid))
+            except Exception:
+                pass
+    return count, max_sid
+
+
 def write_chunks(store_path: str, chunks: list[str]) -> int:
     """Embed and persist raw chunks for a store. Idempotent: skips if the
     sidecar already exists. `chunks` is a list of raw text strings (e.g. one
@@ -103,19 +141,21 @@ def write_chunks(store_path: str, chunks: list[str]) -> int:
     sidecar = _sidecar_path(store_path)
     if sidecar.exists():
         return 0
-    chunks = [w for c in chunks if c and c.strip() for w in _window_split(c)]
-    if not chunks:
+    windowed = _window_chunks(chunks)  # [(text, session_id, window_idx), ...]
+    if not windowed:
         return 0
+    texts = [w[0] for w in windowed]
     try:
-        embs = _model().encode(chunks, show_progress_bar=False)
+        embs = _model().encode(texts, show_progress_bar=False)
     except Exception as e:
         print(f"[raw_store] embed failed (non-fatal): {e}", file=sys.stderr)
         return 0
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     with open(sidecar, "w") as f:
-        for i, (text, emb) in enumerate(zip(chunks, embs)):
-            f.write(json.dumps({"id": i, "text": text, "emb": [float(x) for x in emb]}) + "\n")
-    return len(chunks)
+        for i, ((text, sid, wi), emb) in enumerate(zip(windowed, embs)):
+            f.write(json.dumps({"id": i, "session_id": sid, "window_idx": wi,
+                                "text": text, "emb": [float(x) for x in emb]}) + "\n")
+    return len(windowed)
 
 
 def append_chunks(store_path: str, chunks: list[str]) -> int:
@@ -123,23 +163,23 @@ def append_chunks(store_path: str, chunks: list[str]) -> int:
     write_chunks (idempotent bulk), this APPENDS — each distillation batch adds
     its transcript chunk, with ids continuing from the existing count. Returns
     number appended (0 if empty / on embed failure)."""
-    chunks = [w for c in chunks if c and c.strip() for w in _window_split(c)]
-    if not chunks:
-        return 0
     sidecar = _sidecar_path(store_path)
-    start = 0
-    if sidecar.exists():
-        start = sum(1 for ln in sidecar.read_text().splitlines() if ln.strip())
+    start, max_sid = _scan_sidecar(sidecar)
+    windowed = _window_chunks(chunks, session_offset=max_sid + 1)
+    if not windowed:
+        return 0
+    texts = [w[0] for w in windowed]
     try:
-        embs = _model().encode(chunks, show_progress_bar=False)
+        embs = _model().encode(texts, show_progress_bar=False)
     except Exception as e:
         print(f"[raw_store] append embed failed (non-fatal): {e}", file=sys.stderr)
         return 0
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     with open(sidecar, "a") as f:
-        for j, (text, emb) in enumerate(zip(chunks, embs)):
-            f.write(json.dumps({"id": start + j, "text": text, "emb": [float(x) for x in emb]}) + "\n")
-    return len(chunks)
+        for j, ((text, sid, wi), emb) in enumerate(zip(windowed, embs)):
+            f.write(json.dumps({"id": start + j, "session_id": sid, "window_idx": wi,
+                                "text": text, "emb": [float(x) for x in emb]}) + "\n")
+    return len(windowed)
 
 
 _LEX_TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -153,6 +193,55 @@ _LEX_STOP = frozenset(
 def _lex_tokens(text: str) -> list[str]:
     return [t for t in _LEX_TOKEN_RE.findall((text or "").lower())
             if t not in _LEX_STOP and len(t) > 2]
+
+
+def _stitch_and_budget(recs: list[dict], anchor_idxs: list[int], max_chars: int) -> list[str]:
+    """Assemble final excerpts from ranked anchor record indices.
+
+    SINAIN_RAW_STITCH=1 expands each anchor to its adjacent same-session windows
+    [wi-1, wi, wi+1] so a detail split across a window boundary (or the sentence
+    just before/after the hit) is recovered — the P1 fix for distiller detail
+    loss. SINAIN_EXCERPT_BUDGET caps total returned chars so stitching can't blow
+    the prompt. With stitch off AND no budget set, this returns exactly the
+    pre-P1 output: each anchor truncated to max_chars, in rank order."""
+    stitch = os.environ.get("SINAIN_RAW_STITCH", "0") == "1"
+    budget_env = os.environ.get("SINAIN_EXCERPT_BUDGET")
+    budget = int(budget_env) if (budget_env and budget_env.isdigit()) else None
+
+    pos: dict[tuple, int] = {}
+    if stitch:
+        for idx, r in enumerate(recs):
+            sid, wi = r.get("session_id"), r.get("window_idx")
+            if sid is not None and wi is not None:
+                pos[(sid, wi)] = idx
+
+    ordered: list[int] = []
+    seen: set[int] = set()
+    for a in anchor_idxs:
+        group = [a]
+        if stitch:
+            r = recs[a]
+            sid, wi = r.get("session_id"), r.get("window_idx")
+            if sid is not None and wi is not None:
+                group = [g for g in (pos.get((sid, wi - 1)), a, pos.get((sid, wi + 1)))
+                         if g is not None]
+        for g in group:
+            if g not in seen:
+                seen.add(g)
+                ordered.append(g)
+
+    out: list[str] = []
+    used = 0
+    for idx in ordered:
+        t = recs[idx]["text"][:max_chars]
+        if budget is not None and used + len(t) > budget:
+            t = t[: max(0, budget - used)]
+            if t:
+                out.append(t)
+            break
+        out.append(t)
+        used += len(t)
+    return out
 
 
 def retrieve_chunks(store_path: str, query: str, k: int = 3, max_chars: int = 1200) -> list[str]:
@@ -183,7 +272,7 @@ def retrieve_chunks(store_path: str, query: str, k: int = 3, max_chars: int = 12
 
         lex_on = os.environ.get("SINAIN_RAW_CHUNK_LEX", "1") != "0"
         if not lex_on:
-            return [recs[i]["text"][:max_chars] for i in sem_order[:k]]
+            return _stitch_and_budget(recs, [int(i) for i in sem_order[:k]], max_chars)
 
         # --- lexical (BM25) ranking over the same chunks ---
         qtok = set(_lex_tokens(query))
@@ -223,7 +312,7 @@ def retrieve_chunks(store_path: str, query: str, k: int = 3, max_chars: int = 12
         for rank, i in enumerate(lex_order):
             rrf[i] = rrf.get(i, 0.0) + 1.0 / (C + rank)
         fused = sorted(rrf, key=lambda i: -rrf[i])[:k]
-        return [recs[i]["text"][:max_chars] for i in fused]
+        return _stitch_and_budget(recs, [int(i) for i in fused], max_chars)
     except Exception as e:
         print(f"[raw_store] retrieve failed (non-fatal): {e}", file=sys.stderr)
         return []
