@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/app_control.dart';
 import '../../core/services/first_run_service.dart';
 import '../../core/services/window_service.dart';
 import 'install_tier.dart';
@@ -102,6 +103,21 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
             Text(
               _error!,
               style: const TextStyle(fontSize: 11, color: Color(0xFFFF6B6B)),
+            ),
+          ],
+          if (_step != _Step.finishing) ...[
+            const SizedBox(height: 14),
+            Center(
+              child: GestureDetector(
+                onTap: quitApp,
+                child: Text(
+                  'Quit',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white.withValues(alpha: 0.35),
+                  ),
+                ),
+              ),
             ),
           ],
         ],

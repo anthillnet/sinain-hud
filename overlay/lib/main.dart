@@ -63,8 +63,8 @@ Future<void> _startApp() async {
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
 
-  // During onboarding or first-run setup, resize window for the wizard panel
-  if (firstRunService.needsSetup || !onboardingService.isComplete) {
+  // During first-run setup, resize window for the wizard panel.
+  if (firstRunService.needsSetup) {
     await windowService.setWindowFrame(100, 200, 340, 420);
   }
 

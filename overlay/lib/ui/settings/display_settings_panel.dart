@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/app_control.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
@@ -202,6 +203,32 @@ class DisplaySettingsPanel extends StatelessWidget {
                 max: 2,
                 divisions: 2,
                 onChanged: (v) => ws.setResponseSize(_sizeValues[v.round()]),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
+          const SizedBox(height: 8),
+
+          // Quit Sinain
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: quitApp,
+              child: Row(
+                children: [
+                  const Icon(Icons.power_settings_new, size: 12, color: Color(0xFFFF6B6B)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Quit Sinain',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 10,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

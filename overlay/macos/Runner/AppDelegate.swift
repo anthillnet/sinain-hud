@@ -76,6 +76,11 @@ class AppDelegate: FlutterAppDelegate {
                 self.backend.start(); result(true)
             case "stop":
                 self.backend.stop(); result(true)
+            case "quit":
+                // Graceful quit: applicationWillTerminate stops the bundled
+                // backend (SIGTERM → core kills its own children).
+                result(true)
+                DispatchQueue.main.async { NSApp.terminate(nil) }
             default:
                 result(FlutterMethodNotImplemented)
             }
