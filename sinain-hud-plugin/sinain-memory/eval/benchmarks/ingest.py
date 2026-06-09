@@ -117,12 +117,16 @@ def _content_hash(sessions: list[list[dict]]) -> str:
     gapfill_salt = os.environ.get("SINAIN_GAPFILL", "")
     # #6b recurrence importance toggle — default OFF.
     recurrence_salt = os.environ.get("SINAIN_RECURRENCE", "") + os.environ.get("SINAIN_RECURRENCE_DROP", "")
+    # Tier-1 write-time slot supersession toggle — default OFF. Env-gated salt (NOT
+    # hashed) so slot-off cache-hits existing stores and only slot-on opens a fresh
+    # slot — required for a correct reingest A/B (supersession is write-time).
+    slot_salt = os.environ.get("SINAIN_SLOT_SUPERSEDE", "")
     return hashlib.sha256(
         (raw + "|" + model_salt + "|" + pipeline_salt + "|" + ablate_salt
          + "|coref:" + coref_salt + "|canon:" + canon_salt + "|nec:" + nec_salt
          + "|recon:" + recon_salt + "|mcanon:" + manifold_salt
          + "|surp:" + surprisal_salt + "|gap:" + gapfill_salt
-         + "|recur:" + recurrence_salt).encode()
+         + "|recur:" + recurrence_salt + "|slot:" + slot_salt).encode()
     ).hexdigest()[:16]
 
 
