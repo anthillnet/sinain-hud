@@ -26,6 +26,13 @@ export interface CommandDeps {
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
+  /** Start the local bare-agent runner for the selected escalation agent. */
+  onStartLocalAgent?: (agent?: string) => {
+    ok: boolean;
+    agent?: string;
+    alreadyRunning?: boolean;
+    error?: string;
+  };
 }
 
 /**
@@ -209,6 +216,30 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         wsHandler.broadcast(`⚠ ${result.error ?? "set_agent failed"}`, "normal");
       }
       log(TAG, `set_agent lane=${lane} agent=${agent || "<off>"} (ok=${result.ok})`);
+      break;
+    }
+    case "start_local_agent": {
+      const agent = (msg as any).agent;
+      if (agent !== undefined && typeof agent !== "string") {
+        log(TAG, "start_local_agent: invalid agent field");
+        break;
+      }
+      if (!deps.onStartLocalAgent) {
+        log(TAG, "start_local_agent: no handler wired");
+        wsHandler.broadcast("⚠ Local agent launcher is not available", "high");
+        break;
+      }
+      const result = deps.onStartLocalAgent(agent);
+      if (!result.ok) {
+        wsHandler.broadcast(`⚠ ${result.error ?? "Failed to start local agent"}`, "high");
+        log(TAG, `start_local_agent failed: ${result.error ?? "unknown error"}`);
+      } else if (result.alreadyRunning) {
+        wsHandler.broadcast(`Local agent already running: ${result.agent ?? "default"}`, "normal");
+        log(TAG, `start_local_agent ignored; already running (${result.agent ?? "default"})`);
+      } else {
+        wsHandler.broadcast(`Starting local escalation agent: ${result.agent ?? "default"}`, "normal");
+        log(TAG, `start_local_agent launched (${result.agent ?? "default"})`);
+      }
       break;
     }
     case "open_settings": {

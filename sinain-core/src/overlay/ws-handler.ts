@@ -40,7 +40,7 @@ export class WsHandler {
     escalation: "active",
     connection: "disconnected",
     responseSize: "medium",
-    agents: { available: [], escalationAgent: "", spawnAgent: "" },
+    agents: { available: [], escalationAgent: "", spawnAgent: "", registered: false },
   };
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();

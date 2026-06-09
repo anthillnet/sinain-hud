@@ -26,6 +26,14 @@ class DisplaySettingsPanel extends StatelessWidget {
   static const _sizeLabels = ['S', 'M', 'L'];
   static const _sizeValues = ['small', 'medium', 'large'];
 
+  Future<void> _openSessionLog(BuildContext context) async {
+    final ws = context.read<WebSocketService>();
+    final error = await openCurrentSessionLog();
+    if (error != null) {
+      ws.showSystemAlert(error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
@@ -39,9 +47,7 @@ class DisplaySettingsPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: Color(accentColor).withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: Color(accentColor).withValues(alpha: 0.3)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -68,8 +74,11 @@ class DisplaySettingsPanel extends StatelessWidget {
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
                     onTap: onClose,
-                    child: Icon(Icons.close, size: 12,
-                        color: Colors.white.withValues(alpha: 0.4)),
+                    child: Icon(
+                      Icons.close,
+                      size: 12,
+                      color: Colors.white.withValues(alpha: 0.4),
+                    ),
                   ),
                 ),
               ),
@@ -152,7 +161,8 @@ class DisplaySettingsPanel extends StatelessWidget {
                       border: isSelected
                           ? Border.all(color: Colors.white, width: 2)
                           : Border.all(
-                              color: Colors.white.withValues(alpha: 0.15)),
+                              color: Colors.white.withValues(alpha: 0.15),
+                            ),
                     ),
                   ),
                 ),
@@ -210,6 +220,34 @@ class DisplaySettingsPanel extends StatelessWidget {
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
           const SizedBox(height: 8),
 
+          // Current session log
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => _openSessionLog(context),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.article_outlined,
+                    size: 12,
+                    color: Colors.white.withValues(alpha: 0.55),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Open Session Log',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 10,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+
           // Quit Sinain
           MouseRegion(
             cursor: SystemMouseCursors.click,
@@ -217,7 +255,11 @@ class DisplaySettingsPanel extends StatelessWidget {
               onTap: quitApp,
               child: Row(
                 children: [
-                  const Icon(Icons.power_settings_new, size: 12, color: Color(0xFFFF6B6B)),
+                  const Icon(
+                    Icons.power_settings_new,
+                    size: 12,
+                    color: Color(0xFFFF6B6B),
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     'Quit Sinain',

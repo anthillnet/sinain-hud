@@ -1,4 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { loadAgentsConfig, isGatewayProfile, gatewayProfileNames } from "./agents-loader.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
@@ -28,6 +33,8 @@ import { log, warn, error } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = resolve(MODULE_DIR, "..", "..");
 
 /**
  * Python interpreter for the sinain-memory scripts (graph_query, page_renderer,
@@ -47,6 +54,41 @@ function resolveWorkspace(): string {
 function resolveLocalMemoryDir(): string {
   const raw = process.env.SINAIN_MEMORY_DIR || `${process.env.HOME}/.sinain/memory`;
   return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
+}
+
+function resolveLocalAgentScript(): string | null {
+  const candidates = [
+    resolve(PACKAGE_ROOT, "sinain-agent", "run.sh"),
+    resolve(process.cwd(), "..", "sinain-agent", "run.sh"),
+    resolve(process.cwd(), "sinain-agent", "run.sh"),
+  ];
+  return candidates.find((path) => existsSync(path)) ?? null;
+}
+
+function writeLocalAgentMcpConfig(port: number): string {
+  const tmpDir = resolve(homedir(), ".sinain", "tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const tsxBin = resolve(PACKAGE_ROOT, "sinain-core", "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+  const configPath = resolve(tmpDir, "mcp-config.json");
+  const config = {
+    mcpServers: {
+      sinain: {
+        command: tsxBin,
+        args: [resolve(PACKAGE_ROOT, "sinain-mcp-server", "index.ts")],
+        env: {
+          SINAIN_CORE_URL: process.env.SINAIN_CORE_URL || `http://localhost:${port}`,
+          SINAIN_WORKSPACE: resolveWorkspace(),
+        },
+      },
+    },
+  };
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return configPath;
+}
+
+function pipeLocalAgentOutput(stream: NodeJS.ReadableStream, sink: (line: string) => void): void {
+  const rl = createInterface({ input: stream });
+  rl.on("line", sink);
 }
 
 /**
@@ -850,9 +892,12 @@ async function main() {
   });
 
   systemAudioPipeline.on("tcc-denied", () => {
-    // Banner already printed by pipeline.ts. Initiate graceful shutdown so
-    // sinain exits cleanly rather than continuing with audio dead.
-    shutdown("TCC-DENIED").catch(() => process.exit(1));
+    warn(TAG, "system audio permission denied; continuing with audio muted");
+    wsHandler.updateState({ audio: "muted" });
+    wsHandler.broadcast(
+      "⚠ System audio capture needs macOS Screen Recording permission. Sinain is still running; enable permission, restart Terminal if prompted, then toggle audio again.",
+      "urgent",
+    );
   });
 
   systemAudioPipeline.on("muted", () => {
@@ -976,9 +1021,13 @@ async function main() {
     available: string[];
     escalationAgent: string;
     spawnAgent: string;
-  } = { available: [], escalationAgent: "", spawnAgent: "" };
+    registered: boolean;
+  } = { available: [], escalationAgent: "", spawnAgent: "", registered: false };
+  let localAgentProcess: ReturnType<typeof spawn> | null = null;
+  let localAgentName = "";
+  let shuttingDown = false;
 
-  function registerBareAgent(availableList: string[], current: string): void {
+  function registerBareAgent(availableList: string[], current: string, registered = true): void {
     const clean = availableList.filter((a) => typeof a === "string" && AGENT_NAME_RE.test(a));
     // Inject every gateway-style profile (any agents.json profile with
     // `type: "openclaw"`) into the roster — they have no local binary, so
@@ -1003,6 +1052,7 @@ async function main() {
       }
     }
     bareAgentState.available = clean;
+    bareAgentState.registered = registered;
     // If neither lane is set yet (fresh boot), adopt the bare agent's
     // reported current. If state survives from a prior register call AND
     // the agent still exists in the roster, keep it; otherwise fall back
@@ -1027,6 +1077,83 @@ async function main() {
     }
   }
 
+  function startLocalAgent(requestedAgent?: string): {
+    ok: boolean;
+    agent?: string;
+    alreadyRunning?: boolean;
+    error?: string;
+  } {
+    if (localAgentProcess && !localAgentProcess.killed && localAgentProcess.exitCode === null) {
+      return { ok: true, agent: localAgentName, alreadyRunning: true };
+    }
+
+    const agent = (requestedAgent?.trim()
+      || bareAgentState.escalationAgent
+      || escalatorAgentsCfg?.default
+      || process.env.SINAIN_AGENT
+      || "claude");
+    if (!AGENT_NAME_RE.test(agent)) {
+      return { ok: false, error: `Invalid agent name "${agent}"` };
+    }
+    if (isGatewayProfile(escalatorAgentsCfg, agent)) {
+      return { ok: false, error: `Agent "${agent}" is a gateway profile; local runner is not needed` };
+    }
+    if (bareAgentState.available.length > 0 && !bareAgentState.available.includes(agent)) {
+      return { ok: false, error: `Agent "${agent}" not available` };
+    }
+
+    const runSh = resolveLocalAgentScript();
+    if (!runSh) {
+      return { ok: false, error: "sinain-agent/run.sh not found" };
+    }
+
+    const mcpConfigPath = writeLocalAgentMcpConfig(config.port);
+    const coreUrl = process.env.SINAIN_CORE_URL || `http://localhost:${config.port}`;
+    const child = spawn("bash", [runSh], {
+      cwd: dirname(runSh),
+      env: {
+        ...process.env,
+        MCP_CONFIG: mcpConfigPath,
+        SINAIN_AGENT: agent,
+        SINAIN_CORE_URL: coreUrl,
+        ESCALATION_TRANSPORT: "http",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    localAgentProcess = child;
+    localAgentName = agent;
+    log(TAG, `local agent start requested: agent=${agent} script=${runSh} mcp=${mcpConfigPath}`);
+    pipeLocalAgentOutput(child.stdout, (line) => log("agent", line));
+    pipeLocalAgentOutput(child.stderr, (line) => warn("agent", line));
+
+    child.once("error", (err) => {
+      if (localAgentProcess === child) {
+        localAgentProcess = null;
+        localAgentName = "";
+      }
+      warn(TAG, `local agent failed to start: ${err.message}`);
+      wsHandler.broadcast(`⚠ Local agent failed to start: ${err.message.slice(0, 120)}`, "high");
+    });
+
+    child.once("exit", (code, signal) => {
+      if (localAgentProcess !== child) return;
+      localAgentProcess = null;
+      localAgentName = "";
+      if (bareAgentState.registered) {
+        bareAgentState.registered = false;
+        wsHandler.updateState({ agents: { ...bareAgentState } });
+      }
+      const exitText = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      log(TAG, `local agent exited (${exitText})`);
+      if (!shuttingDown && code !== 0) {
+        wsHandler.broadcast(`⚠ Local agent exited (${exitText})`, "high");
+      }
+    });
+
+    return { ok: true, agent };
+  }
+
   // Pre-populate the roster from agents.json profiles so launchers that
   // don't run the bare-agent process (e.g. start.sh / start-local.sh) still
   // surface the user's configured profiles in the overlay's agent picker.
@@ -1039,7 +1166,7 @@ async function main() {
       .filter((n) => AGENT_NAME_RE.test(n));
     if (profileNames.length > 0) {
       const defaultAgent = escalatorAgentsCfg.default ?? profileNames[0];
-      registerBareAgent(profileNames, defaultAgent);
+      registerBareAgent(profileNames, defaultAgent, false);
       log(TAG, `roster pre-populated from agents.json: ${profileNames.join(",")}`);
     }
   }
@@ -1172,11 +1299,7 @@ async function main() {
     getBareAgentConfig: () => ({
       escalationAgent: bareAgentState.escalationAgent,
       spawnAgent: bareAgentState.spawnAgent,
-      // Tells the bare agent whether core still has its roster. On core
-      // restart this flips to false until the next /bareagent/register POST
-      // — distinguishes "user picked Off/Off" (registered=true, lanes="")
-      // from "core forgot about us" (registered=false).
-      registered: bareAgentState.available.length > 0,
+      registered: bareAgentState.registered,
     }),
 
     // Knowledge graph integration (checks both local and workspace DBs)
@@ -1252,7 +1375,7 @@ async function main() {
         return false;
       }
     },
-    onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
+      onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
       // Empty-string agent = Off (lane disabled). Non-empty agent must be
       // in the current roster; stale overlay state can send something that
       // isn't available — reject with a clear error.
@@ -1303,6 +1426,7 @@ async function main() {
       log(TAG, `set_agent lane=${lane} agent=${displayAgent}`);
       return { ok: true };
     },
+    onStartLocalAgent: (agent?: string) => startLocalAgent(agent),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
@@ -1369,6 +1493,7 @@ async function main() {
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
+    shuttingDown = true;
     clearInterval(bufferGaugeTimer);
     if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
     costTracker.stop();
@@ -1379,6 +1504,9 @@ async function main() {
     if (micPipeline) micPipeline.stop();
     transcription.destroy();
     escalator.stop();
+    if (localAgentProcess && localAgentProcess.exitCode === null) {
+      localAgentProcess.kill("SIGTERM");
+    }
     signalCollector?.destroy();
     feedbackStore?.destroy();
     traceStore?.destroy();

@@ -6,7 +6,7 @@ import type { AnalysisConfig, AgentEntry, ContextWindow, EscalationMode, Context
 import type { Profiler } from "../profiler.js";
 import type { CostTracker } from "../cost/tracker.js";
 import { buildContextWindow, RICHNESS_PRESETS } from "./context-window.js";
-import { analyzeContext } from "./analyzer.js";
+import { analyzeContext, AnalysisAuthError } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
 import { log, warn, error, debug } from "../log.js";
@@ -88,6 +88,7 @@ export class AgentLoop extends EventEmitter {
   private latestDigest: AgentEntry | null = null;
   private lastTickFeedVersion = 0;
   private lastTickSenseVersion = 0;
+  private authErrorNotified = false;
 
   private stats = {
     totalCalls: 0,
@@ -415,7 +416,11 @@ export class AgentLoop extends EventEmitter {
       });
 
     } catch (err: any) {
-      error(TAG, "tick error:", err.message || err);
+      if (err instanceof AnalysisAuthError) {
+        this.handleAuthError(err);
+      } else {
+        error(TAG, "tick error:", err.message || err);
+      }
       traceCtx?.endSpan({ status: "error", error: err.message });
       traceCtx?.finish({ totalLatencyMs: Date.now() - Date.now(), llmLatencyMs: 0, llmInputTokens: 0, llmOutputTokens: 0, llmCost: 0, escalated: false, escalationScore: 0, contextScreenEvents: 0, contextAudioEntries: 0, contextRichness: richness, digestLength: 0, hudChanged: false });
     } finally {
@@ -423,6 +428,18 @@ export class AgentLoop extends EventEmitter {
       this.firstTick = false;
       this.lastRunTs = Date.now();
     }
+  }
+
+  private handleAuthError(err: AnalysisAuthError): void {
+    const msg = "Sinain paused analysis: OpenRouter rejected the API key. Update OPENROUTER_API_KEY in ~/.sinain/.env, then restart Sinain.";
+    warn(TAG, `${msg} (${err.message})`);
+    this.deps.agentConfig.enabled = false;
+    if (!this.authErrorNotified) {
+      this.authErrorNotified = true;
+      this.deps.feedBuffer.push(`⚠ ${msg}`, "urgent", "system", "stream");
+      this.deps.onHudUpdate(`⚠ ${msg}`);
+    }
+    this.stop();
   }
 
   // ── Private: startup recap tick from persistent knowledge ──
@@ -500,7 +517,11 @@ export class AgentLoop extends EventEmitter {
         log(TAG, `recap tick (${Date.now() - startTs}ms, ${result.tokensIn}in+${result.tokensOut}out tok) hud="${result.hud}"`);
       }
     } catch (err: any) {
-      debug(TAG, "recap tick error:", err.message || err);
+      if (err instanceof AnalysisAuthError) {
+        this.handleAuthError(err);
+      } else {
+        debug(TAG, "recap tick error:", err.message || err);
+      }
     } finally {
       this.running = false;
       // Do NOT update lastRunTs — normal cooldown should not be affected by recap

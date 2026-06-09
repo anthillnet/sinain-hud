@@ -23,7 +23,8 @@ void main() async {
     FlutterError.presentError(details);
     debugPrint('[overlay] ⚠ FlutterError: ${details.exceptionAsString()}');
     if (details.stack != null) {
-      debugPrint('[overlay] ${details.stack.toString().split('\n').take(5).join('\n')}');
+      debugPrint(
+          '[overlay] ${details.stack.toString().split('\n').take(5).join('\n')}');
     }
   };
 
@@ -42,7 +43,8 @@ Future<void> _startApp() async {
   final settingsService = SettingsService();
   await settingsService.init();
 
-  debugPrint('[overlay] settings loaded: state=${settingsService.settings.overlayState.name} '
+  debugPrint(
+      '[overlay] settings loaded: state=${settingsService.settings.overlayState.name} '
       'fontSize=${settingsService.settings.fontSize} '
       'accentColor=0x${settingsService.settings.accentColor.toRadixString(16)}');
 
@@ -75,7 +77,11 @@ Future<void> _startApp() async {
       windowService.setWindowFrame(100, 200, 360, 230);
     } else if (!firstRunService.needsSetup) {
       final s = settingsService.settings;
-      final w = s.overlayState == HudState.chat ? s.chatWidth : 48.0;
+      final w = s.overlayState == HudState.chat
+          ? s.chatWidth
+          : s.overlayState == HudState.controls
+              ? 360.0
+              : 48.0;
       final h = s.overlayState == HudState.chat ? s.chatHeight : 48.0;
       final x = s.eyeX >= 0 ? s.eyeX : 100.0;
       final y = s.eyeY >= 0 ? s.eyeY : 200.0;
@@ -83,16 +89,21 @@ Future<void> _startApp() async {
       if (s.overlayState == HudState.chat) windowService.makeKeyWindow();
     }
   }
-  if (provisioningService.visible) await windowService.setWindowFrame(100, 200, 360, 230);
+
+  if (provisioningService.visible) {
+    await windowService.setWindowFrame(100, 200, 360, 230);
+  }
   provisioningService.addListener(syncProvisioningWindow);
 
   // Restore persisted position (if saved)
   if (settingsService.settings.eyeX >= 0) {
     final s = settingsService.settings;
     // Size depends on saved state
-    final w = s.overlayState == HudState.chat ? s.chatWidth
-        : s.overlayState == HudState.controls ? 280.0
-        : 48.0;
+    final w = s.overlayState == HudState.chat
+        ? s.chatWidth
+        : s.overlayState == HudState.controls
+            ? 360.0
+            : 48.0;
     final h = s.overlayState == HudState.chat ? s.chatHeight : 48.0;
     await windowService.setWindowFrame(s.eyeX, s.eyeY, w, h);
   }
@@ -204,8 +215,9 @@ class SinainHudApp extends StatelessWidget {
               return Center(
                 child: ProvisioningBanner(
                   service: provisioning,
-                  onDrag: (d) => Provider.of<WindowService>(context, listen: false)
-                      .moveWindowBy(d.delta.dx, -d.delta.dy),
+                  onDrag: (d) =>
+                      Provider.of<WindowService>(context, listen: false)
+                          .moveWindowBy(d.delta.dx, -d.delta.dy),
                 ),
               );
             }

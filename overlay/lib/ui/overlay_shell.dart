@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/app_control.dart';
 import '../core/models/hud_settings.dart';
 import '../core/services/settings_service.dart';
 import '../core/services/websocket_service.dart';
@@ -218,12 +219,22 @@ class OverlayShellState extends State<OverlayShell> {
       case HudState.eye:
         _windowService.setWindowFrame(eyeRight - 48, eyeBottom, 48, 48);
       case HudState.controls:
-        const controlsW = 320.0;
-        _windowService.setWindowFrame(eyeRight - controlsW, eyeBottom, controlsW, 48);
+        const controlsW = 360.0;
+        _windowService.setWindowFrame(
+          eyeRight - controlsW,
+          eyeBottom,
+          controlsW,
+          48,
+        );
       case HudState.chat:
         final chatW = _settingsService.settings.chatWidth;
         final chatH = _settingsService.settings.chatHeight;
-        _windowService.setWindowFrame(eyeRight - chatW, eyeBottom, chatW, chatH);
+        _windowService.setWindowFrame(
+          eyeRight - chatW,
+          eyeBottom,
+          chatW,
+          chatH,
+        );
       case HudState.hidden:
         break;
     }
@@ -290,7 +301,8 @@ class OverlayShellState extends State<OverlayShell> {
     // retired — the packaged DMG's first-run wizard handles setup, and macOS
     // requests permissions on demand. This removes the "You're all set / hotkeys"
     // screen that trapped users after the wizard.
-    context.watch<SettingsService>(); // rebuild on privacy mode change (eye color)
+    context
+        .watch<SettingsService>(); // rebuild on privacy mode change (eye color)
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
     }
@@ -322,95 +334,146 @@ class OverlayShellState extends State<OverlayShell> {
   Widget _buildControlsBar() {
     final ws = context.watch<WebSocketService>();
 
-    return GestureDetector(
-      onPanStart: _onDragStart,
-      onPanUpdate: _onDragUpdate,
-      onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
-      child: Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 8),
-            _toggleIcon(
-              icon: ws.screenState == 'active' ? Icons.visibility : Icons.visibility_off,
-              active: ws.screenState == 'active',
-              onTap: () => ws.sendCommand('toggle_screen'),
-              tooltip: 'Toggle screen capture',
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 300 || constraints.maxHeight < 48) {
+          return const SizedBox.shrink();
+        }
+        return GestureDetector(
+          onPanStart: _onDragStart,
+          onPanUpdate: _onDragUpdate,
+          onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
+          child: Container(
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(24),
             ),
-            _toggleIcon(
-              icon: ws.audioState == 'active' ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-              active: ws.audioState == 'active',
-              onTap: () => ws.sendCommand('toggle_audio'),
-              tooltip: 'Toggle audio capture',
-            ),
-            _toggleIcon(
-              icon: ws.micState == 'active' ? Icons.mic : Icons.mic_off,
-              active: ws.micState == 'active',
-              onTap: () => ws.sendCommand('toggle_mic'),
-              tooltip: 'Toggle microphone',
-            ),
-            _toggleIcon(
-              // Both the icon AND its active-tint reflect the combined state:
-              // active only when escalation is running AND at least one agent
-              // is registered. Empty roster → dim, flash_off — signals
-              // "nothing is answering" even if escalation mode isn't explicitly
-              // paused.
-              icon: (ws.escalationState == 'active' && ws.availableAgents.isNotEmpty) ? Icons.flash_on : Icons.flash_off,
-              active: ws.escalationState == 'active' && ws.availableAgents.isNotEmpty,
-              onTap: () => setState(() => _showAgentPicker = !_showAgentPicker),
-              tooltip: 'Agent selector — which agent handles each lane',
-            ),
-            const Spacer(),
-            // Cost counter (replaces DEMO badge when cost > 0)
-            if (ws.totalCost > 0)
-              _costText(ws.totalCost)
-            // Demo badge (only when no cost data yet)
-            else if (!_settingsService.settings.privacyMode)
-              HudTooltip(
-                message: 'Toggle privacy mode',
-                child: GestureDetector(
-                  onTap: _toggleDemoMode,
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Text('DEMO', style: TextStyle(
-                        fontFamily: 'JetBrainsMono', fontSize: 9, fontWeight: FontWeight.bold,
-                        color: _redEye.withValues(alpha: 0.8),
-                      )),
+            child: Row(
+              children: [
+                const SizedBox(width: 8),
+                _quitIcon(small: true),
+                const SizedBox(width: 4),
+                _toggleIcon(
+                  icon: ws.screenState == 'active'
+                      ? Icons.visibility
+                      : Icons.visibility_off,
+                  active: ws.screenState == 'active',
+                  onTap: () => ws.sendCommand('toggle_screen'),
+                  small: true,
+                  tooltip: 'Toggle screen capture',
+                ),
+                _toggleIcon(
+                  icon: ws.audioState == 'active'
+                      ? Icons.volume_up_rounded
+                      : Icons.volume_off_rounded,
+                  active: ws.audioState == 'active',
+                  onTap: () => ws.sendCommand('toggle_audio'),
+                  small: true,
+                  tooltip: 'Toggle audio capture',
+                ),
+                _toggleIcon(
+                  icon: ws.micState == 'active' ? Icons.mic : Icons.mic_off,
+                  active: ws.micState == 'active',
+                  onTap: () => ws.sendCommand('toggle_mic'),
+                  small: true,
+                  tooltip: 'Toggle microphone',
+                ),
+                _toggleIcon(
+                  // Both the icon AND its active-tint reflect the combined state:
+                  // active only when escalation is running AND at least one agent
+                  // is registered. Empty roster → dim, flash_off — signals
+                  // "nothing is answering" even if escalation mode isn't explicitly
+                  // paused.
+                  icon: (ws.escalationState == 'active' &&
+                          ws.availableAgents.isNotEmpty)
+                      ? Icons.flash_on
+                      : Icons.flash_off,
+                  active: ws.escalationState == 'active' &&
+                      ws.availableAgents.isNotEmpty,
+                  onTap: () =>
+                      setState(() => _showAgentPicker = !_showAgentPicker),
+                  small: true,
+                  tooltip: 'Agent selector — which agent handles each lane',
+                ),
+                const Spacer(),
+                // Cost counter (replaces DEMO badge when cost > 0)
+                if (ws.totalCost > 0)
+                  _costText(ws.totalCost)
+                // Demo badge (only when no cost data yet)
+                else if (!_settingsService.settings.privacyMode)
+                  HudTooltip(
+                    message: 'Toggle privacy mode',
+                    child: GestureDetector(
+                      onTap: _toggleDemoMode,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Text(
+                            'DEMO',
+                            style: TextStyle(
+                              fontFamily: 'JetBrainsMono',
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: _redEye.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                _plainIcon(
+                  Icons.psychology_outlined,
+                  _openKnowledgeUI,
+                  small: true,
+                  tooltip: 'Open knowledge browser',
+                ),
+                _plainIcon(
+                  Icons.settings,
+                  _openSettings,
+                  small: true,
+                  tooltip: 'Settings',
+                ),
+                _plainIcon(
+                  Icons.chevron_left,
+                  () => _transitionTo(HudState.eye),
+                  small: true,
+                  tooltip: 'Collapse',
+                ),
+                _plainIcon(
+                  Icons.open_in_full,
+                  () => _transitionTo(HudState.chat),
+                  small: true,
+                  tooltip: 'Expand to chat',
+                ),
+                const SizedBox(width: 4),
+                // Eye animation
+                HudTooltip(
+                  message: 'Collapse to eye',
+                  child: GestureDetector(
+                    onTap: () => _transitionTo(HudState.eye),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.black.withValues(alpha: 0.3),
+                      ),
+                      child: IdleAnimation(
+                        size: 32,
+                        pupilDilation: _pupilDilation,
+                        color: _eyeColor,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            _plainIcon(Icons.psychology_outlined, _openKnowledgeUI, tooltip: 'Open knowledge browser'),
-            _plainIcon(Icons.settings, _openSettings, tooltip: 'Settings'),
-            _plainIcon(Icons.chevron_left, () => _transitionTo(HudState.eye), tooltip: 'Collapse'),
-            _plainIcon(Icons.open_in_full, () => _transitionTo(HudState.chat), tooltip: 'Expand to chat'),
-            const SizedBox(width: 4),
-            // Eye animation
-            HudTooltip(
-              message: 'Collapse to eye',
-              child: GestureDetector(
-                onTap: () => _transitionTo(HudState.eye),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black.withValues(alpha: 0.3),
-                  ),
-                  child: IdleAnimation(size: 32, pupilDilation: _pupilDilation, color: _eyeColor),
-                ),
-              ),
+                const SizedBox(width: 4),
+              ],
             ),
-            const SizedBox(width: 4),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -419,6 +482,17 @@ class OverlayShellState extends State<OverlayShell> {
   Widget _buildChatPanel() {
     final ws = context.watch<WebSocketService>();
 
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 300 || constraints.maxHeight < 180) {
+          return const SizedBox.shrink();
+        }
+        return _buildChatPanelContent(ws);
+      },
+    );
+  }
+
+  Widget _buildChatPanelContent(WebSocketService ws) {
     final chatContent = Container(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.85),
@@ -436,23 +510,36 @@ class OverlayShellState extends State<OverlayShell> {
               padding: const EdgeInsets.symmetric(horizontal: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(8),
+                ),
               ),
               child: Row(
                 children: [
+                  _quitIcon(small: true),
+                  const SizedBox(width: 4),
                   // Collapse
-                  _plainIcon(Icons.expand_more, () => _transitionTo(HudState.controls), small: true, tooltip: 'Collapse to controls'),
+                  _plainIcon(
+                    Icons.expand_more,
+                    () => _transitionTo(HudState.controls),
+                    small: true,
+                    tooltip: 'Collapse to controls',
+                  ),
                   const SizedBox(width: 2),
                   // Capture toggles
                   _toggleIcon(
-                    icon: ws.screenState == 'active' ? Icons.visibility : Icons.visibility_off,
+                    icon: ws.screenState == 'active'
+                        ? Icons.visibility
+                        : Icons.visibility_off,
                     active: ws.screenState == 'active',
                     onTap: () => ws.sendCommand('toggle_screen'),
                     small: true,
                     tooltip: 'Toggle screen capture',
                   ),
                   _toggleIcon(
-                    icon: ws.audioState == 'active' ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                    icon: ws.audioState == 'active'
+                        ? Icons.volume_up_rounded
+                        : Icons.volume_off_rounded,
                     active: ws.audioState == 'active',
                     onTap: () => ws.sendCommand('toggle_audio'),
                     small: true,
@@ -466,9 +553,14 @@ class OverlayShellState extends State<OverlayShell> {
                     tooltip: 'Toggle microphone',
                   ),
                   _toggleIcon(
-                    icon: (ws.escalationState == 'active' && ws.availableAgents.isNotEmpty) ? Icons.flash_on : Icons.flash_off,
-                    active: ws.escalationState == 'active' && ws.availableAgents.isNotEmpty,
-                    onTap: () => setState(() => _showAgentPicker = !_showAgentPicker),
+                    icon: (ws.escalationState == 'active' &&
+                            ws.availableAgents.isNotEmpty)
+                        ? Icons.flash_on
+                        : Icons.flash_off,
+                    active: ws.escalationState == 'active' &&
+                        ws.availableAgents.isNotEmpty,
+                    onTap: () =>
+                        setState(() => _showAgentPicker = !_showAgentPicker),
                     small: true,
                     tooltip: 'Agent selector — which agent handles each lane',
                   ),
@@ -488,13 +580,20 @@ class OverlayShellState extends State<OverlayShell> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           child: _settingsService.settings.privacyMode
-                              ? Icon(Icons.videocam_off, size: 12,
-                                  color: Colors.white.withValues(alpha: 0.3))
-                              : Text('DEMO', style: TextStyle(
-                                  fontFamily: 'JetBrainsMono', fontSize: 8,
-                                  fontWeight: FontWeight.bold,
-                                  color: _redEye.withValues(alpha: 0.8),
-                                )),
+                              ? Icon(
+                                  Icons.videocam_off,
+                                  size: 12,
+                                  color: Colors.white.withValues(alpha: 0.3),
+                                )
+                              : Text(
+                                  'DEMO',
+                                  style: TextStyle(
+                                    fontFamily: 'JetBrainsMono',
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                    color: _redEye.withValues(alpha: 0.8),
+                                  ),
+                                ),
                         ),
                       ),
                     ),
@@ -510,8 +609,11 @@ class OverlayShellState extends State<OverlayShell> {
                         behavior: HitTestBehavior.opaque,
                         child: Padding(
                           padding: const EdgeInsets.all(4),
-                          child: Icon(Icons.psychology_outlined, size: 12,
-                              color: Colors.white.withValues(alpha: 0.5)),
+                          child: Icon(
+                            Icons.psychology_outlined,
+                            size: 12,
+                            color: Colors.white.withValues(alpha: 0.5),
+                          ),
                         ),
                       ),
                     ),
@@ -522,15 +624,20 @@ class OverlayShellState extends State<OverlayShell> {
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
-                        onTap: () => setState(() => _showDisplaySettings = !_showDisplaySettings),
+                        onTap: () => setState(
+                          () => _showDisplaySettings = !_showDisplaySettings,
+                        ),
                         onLongPress: _openSettings,
                         behavior: HitTestBehavior.opaque,
                         child: Padding(
                           padding: const EdgeInsets.all(4),
-                          child: Icon(Icons.settings, size: 12,
-                              color: _showDisplaySettings
-                                  ? _accentColor
-                                  : Colors.white.withValues(alpha: 0.5)),
+                          child: Icon(
+                            Icons.settings,
+                            size: 12,
+                            color: _showDisplaySettings
+                                ? _accentColor
+                                : Colors.white.withValues(alpha: 0.5),
+                          ),
                         ),
                       ),
                     ),
@@ -548,7 +655,11 @@ class OverlayShellState extends State<OverlayShell> {
                           shape: BoxShape.circle,
                           color: Colors.black.withValues(alpha: 0.3),
                         ),
-                        child: IdleAnimation(size: 28, pupilDilation: _pupilDilation, color: _eyeColor),
+                        child: IdleAnimation(
+                          size: 28,
+                          pupilDilation: _pupilDilation,
+                          color: _eyeColor,
+                        ),
                       ),
                     ),
                   ),
@@ -585,6 +696,8 @@ class OverlayShellState extends State<OverlayShell> {
           // agent task is blocked waiting for user approval. Hidden (zero
           // height) when no tasks are pending. Mirrors Tasks tab — does not
           // remove tasks from that view.
+          const _AgentAvailabilityBanner(),
+          const _SystemAlertBanner(),
           const PermissionBanner(),
           // Command input
           CommandInput(
@@ -604,14 +717,30 @@ class OverlayShellState extends State<OverlayShell> {
     return Stack(
       children: [
         chatContent,
-        _resizeHandle(Alignment.centerLeft, SystemMouseCursors.resizeLeft, 'left',
-            (dx, dy) => _windowService.resizeWindowBy(-dx, 0, anchorRight: true)),
-        _resizeHandle(Alignment.centerRight, SystemMouseCursors.resizeRight, 'right',
-            (dx, dy) => _windowService.resizeWindowBy(dx, 0)),
-        _resizeHandle(Alignment.topCenter, SystemMouseCursors.resizeUp, 'top',
-            (dx, dy) => _windowService.resizeWindowBy(0, -dy)),
-        _resizeHandle(Alignment.bottomCenter, SystemMouseCursors.resizeDown, 'bottom',
-            (dx, dy) => _windowService.resizeWindowBy(0, dy, anchorTop: true)),
+        _resizeHandle(
+          Alignment.centerLeft,
+          SystemMouseCursors.resizeLeft,
+          'left',
+          (dx, dy) => _windowService.resizeWindowBy(-dx, 0, anchorRight: true),
+        ),
+        _resizeHandle(
+          Alignment.centerRight,
+          SystemMouseCursors.resizeRight,
+          'right',
+          (dx, dy) => _windowService.resizeWindowBy(dx, 0),
+        ),
+        _resizeHandle(
+          Alignment.topCenter,
+          SystemMouseCursors.resizeUp,
+          'top',
+          (dx, dy) => _windowService.resizeWindowBy(0, -dy),
+        ),
+        _resizeHandle(
+          Alignment.bottomCenter,
+          SystemMouseCursors.resizeDown,
+          'bottom',
+          (dx, dy) => _windowService.resizeWindowBy(0, dy, anchorTop: true),
+        ),
       ],
     );
   }
@@ -635,7 +764,10 @@ class OverlayShellState extends State<OverlayShell> {
           onPanUpdate: _isMacOS
               ? (_) {} // keep alive for gesture arena, native handles tracking
               : (details) {
-                  if (details.delta.dx.abs() < 1.0 && details.delta.dy.abs() < 1.0) return;
+                  if (details.delta.dx.abs() < 1.0 &&
+                      details.delta.dy.abs() < 1.0) {
+                    return;
+                  }
                   onDragFallback(details.delta.dx, details.delta.dy);
                 },
           onPanEnd: _isMacOS ? null : (_) => _persistChatSize(),
@@ -677,9 +809,7 @@ class OverlayShellState extends State<OverlayShell> {
           child: Icon(
             icon,
             size: size,
-            color: active
-                ? _accentColor
-                : Colors.white.withValues(alpha: 0.3),
+            color: active ? _accentColor : Colors.white.withValues(alpha: 0.3),
           ),
         ),
       ),
@@ -697,14 +827,50 @@ class OverlayShellState extends State<OverlayShell> {
       child: Text(
         '\$${cost.toStringAsFixed(4)}',
         style: TextStyle(
-          fontFamily: 'JetBrainsMono', fontSize: 9,
+          fontFamily: 'JetBrainsMono',
+          fontSize: 9,
           color: Colors.white.withValues(alpha: 0.35),
         ),
       ),
     );
   }
 
-  Widget _plainIcon(IconData icon, VoidCallback onTap, {bool small = false, String? tooltip}) {
+  Widget _quitIcon({bool small = false}) {
+    final dot = small ? 13.0 : 16.0;
+    final iconSize = small ? 8.0 : 10.0;
+    final pad = small ? 5.0 : 7.0;
+    Widget child = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: quitApp,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: EdgeInsets.all(pad),
+          child: Container(
+            width: dot,
+            height: dot,
+            decoration: const BoxDecoration(
+              color: Color(0xFFFF5F57),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.close,
+              size: iconSize,
+              color: Colors.black.withValues(alpha: 0.55),
+            ),
+          ),
+        ),
+      ),
+    );
+    return HudTooltip(message: 'Quit Sinain', child: child);
+  }
+
+  Widget _plainIcon(
+    IconData icon,
+    VoidCallback onTap, {
+    bool small = false,
+    String? tooltip,
+  }) {
     final size = small ? 12.0 : 16.0;
     final pad = small ? 4.0 : 8.0;
     Widget child = MouseRegion(
@@ -714,7 +880,11 @@ class OverlayShellState extends State<OverlayShell> {
         behavior: HitTestBehavior.opaque,
         child: Padding(
           padding: EdgeInsets.all(pad),
-          child: Icon(icon, size: size, color: Colors.white.withValues(alpha: 0.5)),
+          child: Icon(
+            icon,
+            size: size,
+            color: Colors.white.withValues(alpha: 0.5),
+          ),
         ),
       ),
     );
@@ -722,5 +892,170 @@ class OverlayShellState extends State<OverlayShell> {
       child = HudTooltip(message: tooltip, child: child);
     }
     return child;
+  }
+}
+
+class _AgentAvailabilityBanner extends StatelessWidget {
+  const _AgentAvailabilityBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.watch<WebSocketService>();
+    final text = _warningText(ws);
+    if (text == null) return const SizedBox.shrink();
+    final showStartButton = _showStartButton(ws);
+
+    const color = Color(0xFFFFAA00);
+    return Container(
+      height: 38,
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.flash_off, size: 13, color: color.withValues(alpha: 0.9)),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 10,
+                color: color.withValues(alpha: 0.95),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (showStartButton) ...[
+            const SizedBox(width: 6),
+            _startButton(ws, color),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _startButton(WebSocketService ws, Color color) {
+    final agent = ws.escalationAgent;
+    final label = agent.isEmpty ? 'Start local agent' : 'Start $agent';
+    return HudTooltip(
+      message: label,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () {
+            ws.startLocalAgent(agent);
+            ws.showSystemAlert(
+              agent.isEmpty
+                  ? 'Starting local escalation agent...'
+                  : 'Starting local escalation agent: $agent',
+              priority: FeedPriority.high,
+            );
+          },
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: 26,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: color.withValues(alpha: 0.38)),
+            ),
+            child: Icon(
+              Icons.play_arrow_rounded,
+              size: 16,
+              color: color.withValues(alpha: 0.95),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String? _warningText(WebSocketService ws) {
+    if (!ws.connected) return null;
+    if (ws.escalationState != 'active') return 'Escalation is paused';
+    if (ws.availableAgents.isEmpty) return 'No escalation agent connected';
+    if (ws.escalationAgent.isEmpty) return 'No escalation agent selected';
+    if (!ws.agentRegistered) {
+      return 'Escalation agent not connected: ${ws.escalationAgent}';
+    }
+    return null;
+  }
+
+  bool _showStartButton(WebSocketService ws) {
+    if (!ws.connected || ws.escalationState != 'active' || ws.agentRegistered) {
+      return false;
+    }
+    return ws.escalationAgent.isNotEmpty || ws.availableAgents.isEmpty;
+  }
+}
+
+class _SystemAlertBanner extends StatelessWidget {
+  const _SystemAlertBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.watch<WebSocketService>();
+    final text = ws.systemAlertText;
+    if (text == null || text.isEmpty) return const SizedBox.shrink();
+
+    final urgent = ws.systemAlertPriority == FeedPriority.urgent;
+    final color = urgent ? const Color(0xFFFF3344) : const Color(0xFFFFAA00);
+
+    return Container(
+      height: 44,
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.38)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline, size: 14, color: color),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 10,
+                color: color,
+                height: 1.2,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 6),
+          HudTooltip(
+            message: 'Dismiss',
+            child: GestureDetector(
+              onTap: ws.clearSystemAlert,
+              behavior: HitTestBehavior.opaque,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: Icon(
+                    Icons.close,
+                    size: 12,
+                    color: color.withValues(alpha: 0.75),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

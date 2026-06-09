@@ -31,11 +31,14 @@ class WebSocketService extends ChangeNotifier {
   List<String> _availableAgents = const [];
   String _escalationAgent = '';
   String _spawnAgent = '';
+  bool _agentRegistered = false;
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
   double _totalCost = 0.0;
   int _costCallCount = 0;
   bool _costDisplayEnabled = false;
+  String? _systemAlertText;
+  FeedPriority _systemAlertPriority = FeedPriority.normal;
 
   final _feedController = StreamController<FeedItem>.broadcast();
   final _agentFeedController = StreamController<FeedItem>.broadcast();
@@ -80,9 +83,12 @@ class WebSocketService extends ChangeNotifier {
   List<String> get availableAgents => _availableAgents;
   String get escalationAgent => _escalationAgent;
   String get spawnAgent => _spawnAgent;
+  bool get agentRegistered => _agentRegistered;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
   bool get costDisplayEnabled => _costDisplayEnabled;
+  String? get systemAlertText => _systemAlertText;
+  FeedPriority get systemAlertPriority => _systemAlertPriority;
 
   /// Persistent feed items that survive widget rebuilds.
   /// FeedView can read from this on mount to restore state.
@@ -100,6 +106,14 @@ class WebSocketService extends ChangeNotifier {
   /// agent isn't available (stale overlay state).
   void setAgent(String lane, String agent) {
     sendCommand('set_agent', {'lane': lane, 'agent': agent});
+  }
+
+  void startLocalAgent([String? agent]) {
+    final params = <String, dynamic>{};
+    if (agent != null && agent.isNotEmpty) {
+      params['agent'] = agent;
+    }
+    sendCommand('start_local_agent', params.isEmpty ? null : params);
   }
 
   void toggleAudioFeed() {
@@ -128,6 +142,22 @@ class WebSocketService extends ChangeNotifier {
 
   void requestCopy(String activeTab) {
     _copyController.add(activeTab);
+  }
+
+  void clearSystemAlert() {
+    if (_systemAlertText == null) return;
+    _systemAlertText = null;
+    _systemAlertPriority = FeedPriority.normal;
+    notifyListeners();
+  }
+
+  void showSystemAlert(
+    String text, {
+    FeedPriority priority = FeedPriority.high,
+  }) {
+    _systemAlertText = text;
+    _systemAlertPriority = priority;
+    notifyListeners();
   }
 
   WebSocketService({this.url = 'ws://localhost:9500'});
@@ -185,14 +215,25 @@ class WebSocketService extends ChangeNotifier {
       final type = json['type'] as String?;
       switch (type) {
         case 'feed':
-          final item = FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
-          _log('FEED [${item.channel.name}]: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
-          if (!_audioFeedEnabled && (item.text.startsWith('[📝]') || item.text.startsWith('[🔊]') || item.text.startsWith('[🎤]'))) break;
-          if (!_screenFeedEnabled && item.text.startsWith('[👁]')) break;
+          final item =
+              FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
+          _log(
+              'FEED [${item.channel.name}]: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
+          _captureSystemAlert(item);
+          if (!_audioFeedEnabled &&
+              (item.text.startsWith('[📝]') ||
+                  item.text.startsWith('[🔊]') ||
+                  item.text.startsWith('[🎤]'))) {
+            break;
+          }
+          if (!_screenFeedEnabled && item.text.startsWith('[👁]')) {
+            break;
+          }
           if (item.channel == FeedChannel.agent) {
             agentFeedItems.add(item);
             if (agentFeedItems.length > _maxFeedItems) {
-              agentFeedItems.removeRange(0, agentFeedItems.length - _maxFeedItems);
+              agentFeedItems.removeRange(
+                  0, agentFeedItems.length - _maxFeedItems);
             }
             _agentFeedController.add(item);
           } else {
@@ -232,15 +273,29 @@ class WebSocketService extends ChangeNotifier {
           }
           final agents = statusData['agents'] as Map<String, dynamic>?;
           if (agents != null) {
-            final newAvail = (agents['available'] as List?)?.cast<String>() ?? const <String>[];
+            final newAvail = (agents['available'] as List?)?.cast<String>() ??
+                const <String>[];
             final newEsc = agents['escalationAgent'] as String? ?? '';
             final newSpawn = agents['spawnAgent'] as String? ?? '';
+            final newRegistered = agents['registered'] as bool? ?? false;
             if (newAvail.join(',') != _availableAgents.join(',') ||
                 newEsc != _escalationAgent ||
-                newSpawn != _spawnAgent) {
+                newSpawn != _spawnAgent ||
+                newRegistered != _agentRegistered) {
+              final wasRegistered = _agentRegistered;
               _availableAgents = newAvail;
               _escalationAgent = newEsc;
               _spawnAgent = newSpawn;
+              _agentRegistered = newRegistered;
+              if (newRegistered &&
+                  !wasRegistered &&
+                  (_systemAlertText?.startsWith(
+                        'Starting local escalation agent',
+                      ) ??
+                      false)) {
+                _systemAlertText = null;
+                _systemAlertPriority = FeedPriority.normal;
+              }
               notifyListeners();
             }
           }
@@ -248,7 +303,8 @@ class WebSocketService extends ChangeNotifier {
           break;
         case 'spawn_task':
           final task = SpawnTask.fromJson(json);
-          _log('SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
+          _log(
+              'SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
           // Update the canonical map first, then notify listeners so the
           // tab-indicator badge can re-read pendingAttentionCount before
           // the stream subscriber rebuilds the list view.
@@ -296,6 +352,8 @@ class WebSocketService extends ChangeNotifier {
   void _onDone() {
     _log('WebSocket closed');
     _connected = false;
+    _systemAlertText = 'Sinain disconnected from the backend. Reconnecting...';
+    _systemAlertPriority = FeedPriority.high;
     notifyListeners();
     _scheduleReconnect();
   }
@@ -329,12 +387,14 @@ class WebSocketService extends ChangeNotifier {
 
   void sendUserCommand(String text) {
     send({'type': 'user_command', 'text': text});
-    _log('User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+    _log(
+        'User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
   void sendSpawnCommand(String text) {
     send({'type': 'spawn_command', 'text': text});
-    _log('Spawn command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+    _log(
+        'Spawn command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
   void disconnect() {
@@ -362,5 +422,24 @@ class WebSocketService extends ChangeNotifier {
 
   void _log(String msg) {
     if (kDebugMode) print('[WebSocketService] $msg');
+  }
+
+  void _captureSystemAlert(FeedItem item) {
+    final text = item.text.trim();
+    final lower = text.toLowerCase();
+    final isAlert = item.priority == FeedPriority.urgent ||
+        text.startsWith('⚠') ||
+        lower.contains(' error') ||
+        lower.contains(' failed') ||
+        lower.contains(' rejected') ||
+        lower.contains(' paused analysis') ||
+        lower.contains('unauthorized') ||
+        lower.contains('http 401');
+    if (!isAlert) return;
+    _systemAlertText = text;
+    _systemAlertPriority = item.priority == FeedPriority.normal
+        ? FeedPriority.high
+        : item.priority;
+    notifyListeners();
   }
 }
