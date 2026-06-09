@@ -71,7 +71,15 @@ rm -rf "$STAGING"
 codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 
 bold "6/7 · Notarizing (uploads to Apple — can take several minutes for a large bundle)"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+# NOTARY_KEYCHAIN (optional): point notarytool at a specific keychain holding
+# the stored credential profile. Unset locally (uses the login keychain, where
+# `notarytool store-credentials sinain-notary` wrote it); set by CI to the
+# ephemeral signing keychain. Built as an args array so the flag is added only
+# when set, and the keychain path is passed as one argument even if it contains
+# spaces (local behavior is unchanged when NOTARY_KEYCHAIN is unset).
+NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+[ -n "${NOTARY_KEYCHAIN:-}" ] && NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN")
+xcrun notarytool submit "$DMG" "${NOTARY_ARGS[@]}" --wait
 xcrun stapler staple "$DMG"
 
 bold "7/7 · Verifying Gatekeeper"
