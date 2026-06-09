@@ -28,10 +28,12 @@ name: Release App (DMG)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  push:
-    tags:
-      - 'macos-v*'
-  workflow_dispatch: {}  # manual dry run (no tag → release upload is skipped)
+  # Fires when a macOS release is published — reliable regardless of how the
+  # tag/release was created (git push, `gh release create`, or the Releases UI),
+  # unlike `push: tags` which API-created tags don't reliably emit.
+  release:
+    types: [published]
+  workflow_dispatch: {}  # manual dry run (no release → upload is skipped)
 
 permissions:
   contents: write
@@ -40,6 +42,12 @@ jobs:
   build-sign-notarize:
     name: Build, Sign & Notarize DMG
     runs-on: macos-latest
+    # A `release: published` event also fires for overlay-v* / sck-capture-v*
+    # releases — only build the DMG for macos-v* ones. workflow_dispatch always
+    # runs (dry run).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'macos-v')
 
     steps:
       # ── Guard: refuse to run until the Apple signing secrets exist, so a
@@ -170,17 +178,12 @@ jobs:
           spctl --assess --type open --context context:primary-signature -vv build/Sinain.dmg
           xcrun stapler validate build/Sinain.dmg
 
-      # ── Publish (only on a tag push) ────────────────────────────────────────
-      - name: Compute release name
-        if: steps.preflight.outputs.ready == 'true' && startsWith(github.ref, 'refs/tags/')
-        id: rel
-        run: echo "name=Sinain for macOS v${GITHUB_REF_NAME#macos-v}" >> "$GITHUB_OUTPUT"
-
-      - name: Publish DMG to GitHub Releases
-        if: steps.preflight.outputs.ready == 'true' && startsWith(github.ref, 'refs/tags/')
+      # ── Attach the DMG to the triggering release (real runs only; dry-run
+      #    workflow_dispatch skips this). Uploads the asset onto the existing
+      #    release without touching its name/notes (the publisher owns those).
+      - name: Attach DMG to the release
+        if: steps.preflight.outputs.ready == 'true' && github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ steps.rel.outputs.name }}
+          tag_name: ${{ github.event.release.tag_name }}
           files: build/Sinain.dmg
-          make_latest: true
-          generate_release_notes: true
