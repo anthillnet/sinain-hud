@@ -1353,8 +1353,13 @@ def _slot_supersede_one(store, tx, new_eid, value, occurred_at) -> int:
             tmpl_old = _slot_tokens(_mask_template(old_val))
             if not tmpl_old:
                 continue
-            overlap = len(tmpl_new & tmpl_old) / max(1, min(len(tmpl_new), len(tmpl_old)))
-            if overlap < 0.7:                       # same slot template
+            # Jaccard (symmetric, near-identity): a true slot update is the SAME
+            # statement differing ONLY in the masked scalar. Strict threshold so
+            # cumulative facts that merely share a scalar ("bought a ROAD bike in
+            # @date" vs "...MOUNTAIN bike...") — which differ in the OBJECT — are
+            # NOT merged (they'd score ~0.6, below 0.9).
+            jac = len(tmpl_new & tmpl_old) / max(1, len(tmpl_new | tmpl_old))
+            if jac < 0.9:
                 continue
             ots = a.get("occurred_at") or a.get("first_seen") or [""]
             ots = ots[0] if isinstance(ots, list) else ots
@@ -1407,14 +1412,14 @@ def slot_supersede_sweep(db_path: str) -> int:
                     continue
                 if vi.strip().lower() == vj.strip().lower():
                     continue
-                if len(mi & mj) / max(1, min(len(mi), len(mj))) < 0.7:
+                if len(mi & mj) / max(1, len(mi | mj)) < 0.9:   # Jaccard near-identity
                     continue
+                retracted += 1
                 if ti >= tj:                      # i newer -> retract j
                     store.soft_retract_triple(tx, ej, superseded_by=ei, valid_to=ti); dead.add(ej)
                 else:                             # j newer -> retract i
                     store.soft_retract_triple(tx, ei, superseded_by=ej, valid_to=tj); dead.add(ei)
                     break
-                retracted += 1
         store.commit_tx(tx)
         return retracted
     finally:
