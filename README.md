@@ -30,7 +30,7 @@ The HUD overlay is invisible to screen capture — never appears in screenshots,
 
 Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents on the fly — no restart, no context loss.
 
-- Tested with Claude Code, OpenClaude, Codex, Goose, and Junie. Any MCP-compatible agent works.
+- Tested with Claude Code, OpenClaude, Codex, Goose, Junie, and [Hermes](https://github.com/NousResearch/Hermes-Agent) (NousResearch). Most agents connect over MCP; pipe-mode agents like aider and Hermes work without it too.
 - Pick agents in the overlay's flash-icon selector — spawn tasks can route to any profile in your roster.
 - Add custom profiles (personal Claude config, alternate models) by editing [`agents.json`](docs/AGENT-ROSTER.md). The roster is the source of truth.
 - Knowledge modules travel with you — export from one machine, import on another.
