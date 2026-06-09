@@ -46,6 +46,7 @@ The context analysis loop runs every 3–30 seconds inside sinain-core. It sends
 | `ANALYSIS_MAX_TOKENS` | `800` | Max output tokens |
 | `ANALYSIS_TEMPERATURE` | `0.3` | LLM temperature (0–1) |
 | `ANALYSIS_TIMEOUT` | `15000` | Request timeout in ms |
+| `REGIONS_ENABLED` | `true` | Region eyes (Grammarly mode): detect actionable screen areas each tick and show clickable eye icons in the overlay. No extra LLM calls. See [GRAMMARLY-MODE.md](GRAMMARLY-MODE.md). |
 
 ### OpenRouter (default)
 
