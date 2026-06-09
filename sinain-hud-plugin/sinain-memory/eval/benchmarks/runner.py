@@ -260,6 +260,7 @@ def run_benchmark(
     conditions: list[str],
     *,
     subset: int | None = None,
+    qids: list | None = None,
     offset: int = 0,
     qa_model: str = QA_MODEL,
     judge_model: str = JUDGE_MODEL,
@@ -304,6 +305,11 @@ def run_benchmark(
     # a non-stratified batch is exactly the contiguous slice [offset : offset+subset].
     if offset:
         all_questions = all_questions[offset:]
+
+    if qids:
+        qset = {q.strip() for q in qids if q.strip()}
+        all_questions = [(inst, q) for inst, q in all_questions if getattr(q, "id", None) in qset]
+        print(f"[runner] --qids filter -> {len(all_questions)} questions", flush=True)
 
     if subset:
         if stratified:
@@ -528,6 +534,8 @@ def main() -> None:
                              "batched full-500 eval: --offset 50 --subset 50 = slice [50:100].")
     parser.add_argument("--subset", type=int, default=None,
                         help="Run only first N questions (for dev iteration)")
+    parser.add_argument("--qids", default=None,
+                        help="Comma-separated question ids to run (targeted A/B); overrides subset selection")
     parser.add_argument("--qa-model", default=QA_MODEL, help="Model for QA generation")
     parser.add_argument("--judge-model", default=JUDGE_MODEL, help="Model for QA judging")
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
@@ -606,6 +614,7 @@ def main() -> None:
             summary, details = run_benchmark(
                 bench_name, conditions,
                 subset=args.subset,
+                qids=(args.qids.split(",") if args.qids else None),
                 offset=args.offset,
                 qa_model=args.qa_model,
                 judge_model=args.judge_model,
