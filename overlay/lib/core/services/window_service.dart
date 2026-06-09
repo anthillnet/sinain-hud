@@ -1,8 +1,14 @@
+import 'dart:async';
 import 'package:flutter/services.dart';
 
 /// Platform channel wrapper for the native Swift WindowControlPlugin.
 class WindowService {
   static const _channel = MethodChannel('sinain_hud/window');
+
+  final _regionTapController = StreamController<String>.broadcast();
+
+  /// Region eye taps from native panels (Grammarly mode). Emits region ids.
+  Stream<String> get regionTapStream => _regionTapController.stream;
 
   Future<void> setTransparent() async {
     try {
@@ -174,8 +180,60 @@ class WindowService {
             (args['w'] as num).toDouble(),
             (args['h'] as num).toDouble(),
           );
+        case 'onRegionTap':
+          final args = call.arguments as Map;
+          final id = args['id'] as String?;
+          if (id != null && id.isNotEmpty) _regionTapController.add(id);
       }
     });
+  }
+
+  // ── Region eyes (Grammarly mode) ──
+
+  /// Full screen size in points: {'w', 'h'} (for frame→screen bbox scaling).
+  Future<Map<String, double>?> getScreenSize() async {
+    try {
+      final result = await _channel.invokeMethod('getScreenSize');
+      if (result is Map) {
+        return {
+          'w': (result['w'] as num).toDouble(),
+          'h': (result['h'] as num).toDouble(),
+        };
+      }
+    } catch (e) {
+      _log('getScreenSize failed: $e');
+    }
+    return null;
+  }
+
+  /// Reconcile the native region-eye panel set against [eyes].
+  /// Each entry: {'id': String, 'x': double, 'y': double, 'state': String}
+  /// with x/y in top-left-origin screen points. Panels for ids absent from
+  /// the list are closed; existing ones are repositioned/restyled.
+  Future<void> showRegionEyes(List<Map<String, dynamic>> eyes) async {
+    try {
+      await _channel.invokeMethod('showRegionEyes', {'eyes': eyes});
+    } catch (e) {
+      _log('showRegionEyes failed: $e');
+    }
+  }
+
+  /// Update one eye's badge state: 'idle' | 'working' | 'ready' | 'failed'.
+  Future<void> updateRegionEye(String id, String state) async {
+    try {
+      await _channel.invokeMethod('updateRegionEye', {'id': id, 'state': state});
+    } catch (e) {
+      _log('updateRegionEye failed: $e');
+    }
+  }
+
+  /// Close all region eye panels.
+  Future<void> clearRegionEyes() async {
+    try {
+      await _channel.invokeMethod('clearRegionEyes');
+    } catch (e) {
+      _log('clearRegionEyes failed: $e');
+    }
   }
 
   void _log(String msg) {

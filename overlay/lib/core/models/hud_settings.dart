@@ -21,6 +21,9 @@ class HudSettings {
   double fontSize;
   int accentColor;
 
+  /// Grammarly mode: show clickable region eyes at actionable screen areas.
+  bool regionsEnabled;
+
   HudSettings({
     this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
@@ -32,6 +35,7 @@ class HudSettings {
     this.chatHeight = 293,
     this.fontSize = 12.0,
     this.accentColor = 0xFF00FF88,
+    this.regionsEnabled = true,
   });
 
   HudTab get nextTab {
@@ -51,6 +55,7 @@ class HudSettings {
     double? chatHeight,
     double? fontSize,
     int? accentColor,
+    bool? regionsEnabled,
   }) {
     return HudSettings(
       overlayState: overlayState ?? this.overlayState,
@@ -63,6 +68,7 @@ class HudSettings {
       chatHeight: chatHeight ?? this.chatHeight,
       fontSize: fontSize ?? this.fontSize,
       accentColor: accentColor ?? this.accentColor,
+      regionsEnabled: regionsEnabled ?? this.regionsEnabled,
     );
   }
 }

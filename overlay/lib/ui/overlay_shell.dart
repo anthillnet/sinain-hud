@@ -16,7 +16,10 @@ import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
+import 'regions/region_action_banner.dart';
+import 'regions/region_eye_controller.dart';
 import '../core/models/feed_item.dart';
+import '../core/models/region_highlight.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -57,6 +60,11 @@ class OverlayShellState extends State<OverlayShell> {
 
   // Command input focus
   final _commandFocusNode = FocusNode();
+
+  // Grammarly mode: native region eyes (macOS only)
+  RegionEyeController? _regionEyes;
+  // Region whose action banner is showing in the chat (set on eye tap)
+  RegionHighlight? _activeRegion;
 
   @override
   void initState() {
@@ -106,6 +114,19 @@ class OverlayShellState extends State<OverlayShell> {
       setState(() => _pendingAttention = n);
     };
     ws.addListener(_wsListener!);
+
+    // Region eyes (Grammarly mode) — native NSPanels, macOS only
+    if (_isMacOS) {
+      _regionEyes = RegionEyeController(
+        windowService: _windowService,
+        ws: ws,
+        settingsService: _settingsService,
+        onRegionTap: (region, pos) {
+          setState(() => _activeRegion = region);
+          _openChatNearRegion(pos.dx, pos.dy);
+        },
+      )..start();
+    }
   }
 
   static const _redEye = Color(0xFFFF3344);
@@ -240,8 +261,36 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
+  /// Move the HUD next to a region eye (top-left-origin screen point) and
+  /// open the chat there. Used by region eye taps — the chat becomes the
+  /// viewport for that region's conversation.
+  Future<void> _openChatNearRegion(double x, double y) async {
+    if (_state == HudState.hidden) toggleVisibility(true);
+
+    final screen = await _windowService.getScreenSize();
+    final chatW = _settingsService.settings.chatWidth;
+    final chatH = _settingsService.settings.chatHeight;
+    if (screen != null) {
+      final screenW = screen['w']!;
+      final screenH = screen['h']!;
+      // Chat below the eye, right edge roughly aligned with it
+      final left = (x + 48 - chatW).clamp(8.0, screenW - chatW - 8);
+      final top = (y + 56).clamp(8.0, screenH - chatH - 8);
+      final macY = screenH - top - chatH; // top-left → macOS bottom-left origin
+      await _windowService.setWindowFrame(left, macY, chatW, chatH);
+    }
+
+    if (_state != HudState.chat) {
+      HudTooltip.dismissAll();
+      setState(() => _state = HudState.chat);
+      _settingsService.setHudState(HudState.chat);
+    }
+    _windowService.makeKeyWindow();
+  }
+
   @override
   void dispose() {
+    _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
@@ -692,6 +741,20 @@ class OverlayShellState extends State<OverlayShell> {
               ],
             ),
           ),
+          // Region action banner — issue + suggested approach for the last
+          // tapped region eye. The agent task only launches from its explicit
+          // Run button (eye taps never auto-spawn).
+          if (_activeRegion != null)
+            RegionActionBanner(
+              region: _activeRegion!,
+              accentColor: _settingsService.settings.accentColor,
+              onRun: () {
+                final region = _activeRegion!;
+                setState(() => _activeRegion = null);
+                _regionEyes?.spawn(region);
+              },
+              onDismiss: () => setState(() => _activeRegion = null),
+            ),
           // Permission banner — visible above the input field whenever an
           // agent task is blocked waiting for user approval. Hidden (zero
           // height) when no tasks are pending. Mirrors Tasks tab — does not

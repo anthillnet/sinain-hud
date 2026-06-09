@@ -217,6 +217,39 @@ class DisplaySettingsPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+
+          // Region eyes (Grammarly mode) toggle
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => settings.setRegionsEnabled(
+                  !settings.settings.regionsEnabled),
+              child: Row(
+                children: [
+                  Text(
+                    'REGION EYES',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 9,
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    settings.settings.regionsEnabled
+                        ? Icons.toggle_on
+                        : Icons.toggle_off,
+                    size: 22,
+                    color: settings.settings.regionsEnabled
+                        ? Color(accentColor)
+                        : Colors.white.withValues(alpha: 0.3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
           const SizedBox(height: 8),
 

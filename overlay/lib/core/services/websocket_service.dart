@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/feed_item.dart';
+import '../models/region_highlight.dart';
 import '../models/spawn_task.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
@@ -47,6 +48,7 @@ class WebSocketService extends ChangeNotifier {
   final _spawnTaskController = StreamController<SpawnTask>.broadcast();
   final _copyController = StreamController<String>.broadcast();
   final _thinkingController = StreamController<bool>.broadcast();
+  final _regionController = StreamController<List<RegionHighlight>>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
@@ -55,6 +57,11 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
+  Stream<List<RegionHighlight>> get regionStream => _regionController.stream;
+
+  /// Latest full region set (Grammarly mode). Read on mount; updates via
+  /// [regionStream].
+  List<RegionHighlight> regions = const [];
 
   // Canonical spawn-task map. TasksView still consumes the stream for
   // incremental rendering, but the map gives the AGT/TSK tab indicator
@@ -313,6 +320,16 @@ class WebSocketService extends ChangeNotifier {
           if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
           break;
+        case 'region_highlight':
+          final list = (json['regions'] as List? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(RegionHighlight.fromJson)
+              .where((r) => r.id.isNotEmpty)
+              .toList();
+          _log('REGION_HIGHLIGHT: ${list.length} regions [${list.map((r) => r.id).join(", ")}]');
+          regions = list;
+          _regionController.add(list);
+          break;
         case 'thinking':
           _thinkingController.add(json['active'] as bool? ?? false);
           break;
@@ -391,10 +408,13 @@ class WebSocketService extends ChangeNotifier {
         'User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
-  void sendSpawnCommand(String text) {
-    send({'type': 'spawn_command', 'text': text});
-    _log(
-        'Spawn command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+  void sendSpawnCommand(String text, {String? regionId}) {
+    send({
+      'type': 'spawn_command',
+      'text': text,
+      if (regionId != null) 'regionId': regionId,
+    });
+    _log('Spawn command sent${regionId != null ? " (region=$regionId)" : ""}: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
   void disconnect() {
@@ -417,6 +437,7 @@ class WebSocketService extends ChangeNotifier {
     _scrollController.close();
     _spawnTaskController.close();
     _copyController.close();
+    _regionController.close();
     super.dispose();
   }
 
