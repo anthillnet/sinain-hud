@@ -14,6 +14,7 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
+import { RegionTracker, buildRegionSpawnTask } from "./agent/region-tracker.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -781,6 +782,11 @@ async function main() {
     isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
   });
 
+  // ── Region tracker (Grammarly mode) ──
+  // Ingests LLM-detected regions every tick, resolves bboxes from sense
+  // events, broadcasts the set to the overlay when it changes.
+  const regionTracker = new RegionTracker();
+
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
     feedBuffer,
@@ -799,6 +805,16 @@ async function main() {
     },
     onSituationUpdate: (content) => {
       escalator.pushSituationMd(content);
+    },
+    onRegions: (regions, contextWindow) => {
+      const changed = regionTracker.update(regions, contextWindow);
+      if (changed) {
+        wsHandler.broadcastRaw({
+          type: "region_highlight",
+          regions: changed,
+          ts: Date.now(),
+        });
+      }
     },
     // Gate SITUATION.md writes (and the subsequent push) on a gateway lane
     // being active — see escalator.shouldDriveGateway. Users with no openclaw
@@ -1348,8 +1364,19 @@ async function main() {
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
     },
-    onSpawnCommand: (text) => {
-      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+    onSpawnCommand: (text, regionId) => {
+      let task = text;
+      let label = "user-command";
+      if (regionId) {
+        const region = regionTracker.get(regionId);
+        if (region) {
+          // Overlay text for region taps is a synthesized feed echo, not a
+          // user note — the region itself carries the task content.
+          task = buildRegionSpawnTask(region, agentLoop.getDigest()?.digest);
+          label = region.action ? `region-${region.action}` : "region";
+        }
+      }
+      escalator.dispatchSpawnTask(task, label, { regionId }).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
         wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
       });

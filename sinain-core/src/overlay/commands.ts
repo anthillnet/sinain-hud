@@ -17,8 +17,8 @@ export interface CommandDeps {
   onUserMessage: (text: string) => Promise<void>;
   /** Queue a user command to augment the next escalation */
   onUserCommand: (text: string) => void;
-  /** Spawn a background agent task */
-  onSpawnCommand?: (text: string) => void;
+  /** Spawn a background agent task. regionId present when a region eye initiated it. */
+  onSpawnCommand?: (text: string, regionId?: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
@@ -71,7 +71,8 @@ export function setupCommands(deps: CommandDeps): void {
       }
       case "spawn_command": {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
-        log(TAG, `spawn command received: "${preview}"`);
+        const regionId = typeof msg.regionId === "string" && msg.regionId ? msg.regionId : undefined;
+        log(TAG, `spawn command received: "${preview}"${regionId ? ` (region=${regionId})` : ""}`);
         // Echo spawn command to all overlay clients as a feed item (green in UI)
         wsHandler.broadcastRaw({
           type: "feed",
@@ -82,7 +83,7 @@ export function setupCommands(deps: CommandDeps): void {
           sender: "spawn",
         } as any);
         if (deps.onSpawnCommand) {
-          deps.onSpawnCommand(msg.text);
+          deps.onSpawnCommand(msg.text, regionId);
         } else {
           log(TAG, `spawn command ignored — no handler configured`);
           wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");

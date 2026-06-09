@@ -150,20 +150,39 @@ def encode_image(img: Image.Image, max_kb: int, max_px: int = 0) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def frame_dims(frame) -> list | None:
+    """[w, h] of a PIL Image or numpy array frame (None if unknown)."""
+    try:
+        if hasattr(frame, "width"):
+            return [frame.width, frame.height]
+        shape = getattr(frame, "shape", None)
+        if shape is not None and len(shape) >= 2:
+            return [int(shape[1]), int(shape[0])]
+    except Exception:
+        pass
+    return None
+
+
 def package_full_frame(frame: Image.Image, max_px: int = 384) -> dict:
     """Package a full frame as a small thumbnail for context events."""
     return {
         "data": encode_image(frame, max_kb=200, max_px=max_px),
         "bbox": [0, 0, frame.width, frame.height],
+        "frame_size": frame_dims(frame),
         "thumb": True,
     }
 
 
-def package_roi(roi, thumb: bool = True) -> dict:
-    """Package an ROI as a small thumbnail for text/visual events."""
+def package_roi(roi, thumb: bool = True, frame_size: list | None = None) -> dict:
+    """Package an ROI as a small thumbnail for text/visual events.
+
+    bbox is in capture-frame pixels; frame_size ([w, h] of the full frame)
+    lets consumers scale bbox to screen coordinates.
+    """
     return {
         "data": encode_image(roi.image, max_kb=60, max_px=384),
         "bbox": list(roi.bbox),
+        "frame_size": frame_size,
         "thumb": True,
     }
 

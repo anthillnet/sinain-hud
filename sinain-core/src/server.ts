@@ -1685,6 +1685,7 @@ export function createAppServer(deps: ServerDeps) {
         // Extract image data from ROI if present
         const imageData = data.roi?.data || undefined;
         const imageBbox = data.roi?.bbox || undefined;
+        const frameSize = Array.isArray(data.roi?.frame_size) ? data.roi.frame_size : undefined;
 
         const event = senseBuffer.push({
           type: data.type,
@@ -1692,6 +1693,7 @@ export function createAppServer(deps: ServerDeps) {
           ocr: data.ocr || "",
           imageData,
           imageBbox,
+          frameSize,
           meta: {
             ssim: data.meta?.ssim ?? 0,
             app: data.meta?.app || "unknown",
@@ -2792,6 +2794,7 @@ export function createAppServer(deps: ServerDeps) {
             // Full event (backwards compatible)
             const imageData = msg.roi?.data || undefined;
             const imageBbox = msg.roi?.bbox || undefined;
+            const frameSize = Array.isArray(msg.roi?.frame_size) ? msg.roi.frame_size : undefined;
 
             const event = senseBuffer.push({
               type: msg.type,
@@ -2799,6 +2802,7 @@ export function createAppServer(deps: ServerDeps) {
               ocr: msg.ocr || "",
               imageData,
               imageBbox,
+              frameSize,
               meta: {
                 ssim: msg.meta?.ssim ?? 0,
                 app: msg.meta?.app || "unknown",

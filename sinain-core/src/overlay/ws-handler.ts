@@ -7,6 +7,7 @@ import type {
   FeedMessage,
   StatusMessage,
   SpawnTaskMessage,
+  RegionHighlightMessage,
   CostMessage,
   CostSnapshot,
   Priority,
@@ -45,6 +46,7 @@ export class WsHandler {
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
   private latestCostMsg: CostMessage | null = null;
+  private latestRegionMsg: RegionHighlightMessage | null = null;
 
   constructor() {
     this.startHeartbeat();
@@ -96,6 +98,11 @@ export class WsHandler {
     }
     if (this.spawnTaskBuffer.size > 0) {
       log(TAG, `replayed ${this.spawnTaskBuffer.size} spawn tasks to new client`);
+    }
+
+    // Replay current region set (Grammarly mode eyes survive overlay restarts)
+    if (this.latestRegionMsg && this.latestRegionMsg.regions.length > 0) {
+      this.sendTo(ws, this.latestRegionMsg);
     }
 
     // Replay current cost snapshot (or send zeroed snapshot so client resets)
@@ -176,6 +183,9 @@ export class WsHandler {
       this.spawnTaskBuffer.set(taskMsg.taskId, taskMsg);
       this.pruneSpawnTasks();
       log(TAG, `spawn_task buffered: taskId=${taskMsg.taskId}, status=${taskMsg.status}, buffer=${this.spawnTaskBuffer.size}, clients=${this.clients.size}`);
+    }
+    if (msg.type === "region_highlight") {
+      this.latestRegionMsg = msg;
     }
     this.broadcastMessage(msg);
   }

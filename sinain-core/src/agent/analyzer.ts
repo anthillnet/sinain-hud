@@ -1,4 +1,4 @@
-import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand } from "../types.js";
+import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand, RawRegion } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
 import { log } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
@@ -86,11 +86,40 @@ Rules:
 - CRITICAL: Output ONLY the JSON object, nothing else.`;
 
 /**
+ * Regions section appended to the system prompt when Grammarly mode is on.
+ * Screen OCR lines are prefixed with [S<id>] so the model can anchor each
+ * region to the sense event it was observed in — the model never invents
+ * coordinates; sinain-core resolves the bbox from the referenced event.
+ */
+const REGIONS_SECTION = `
+
+Optional "regions" field — actionable issues visible on screen:
+{"hud":"...","digest":"...","regions":[{"issue":"...","tip":"...","action":"fix","sourceId":12}]}
+
+Emit a region ONLY when you can offer concrete help with something specific on screen:
+- An error or warning (terminal error, build failure, red underline, stack trace)
+- A fixable problem (typo, bug, inefficient code, missing import, broken config)
+- A question or form the user appears stuck on
+Each region:
+- "issue": short label of what's wrong (max 10 words, quote the specific text)
+- "tip": one actionable sentence — what an agent could do about it
+- "action": "fix" | "explain" | "research" — the kind of help
+- "sourceId": the number from the [S<id>] prefix of the screen line where you saw it
+Rules: do NOT invent issues — omit "regions" entirely when nothing is genuinely
+actionable (most ticks). Never emit a region for content that is merely
+interesting. Do not repeat a region for an issue that no longer appears on screen.`;
+
+const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
+
+/**
  * Build the dynamic user prompt (changes every tick).
  * Contains the current context data: screen OCR, audio transcripts, app state.
  */
-function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null): string {
+function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
   const now = Date.now();
+
+  // [S<id>] prefix lets the LLM anchor regions to a sense event (Grammarly mode)
+  const srcTag = (e: { id?: number }) => withSourceIds && e.id !== undefined ? `[S${e.id}] ` : "";
 
   // Privacy gating: check levels for openrouter destination
   let screenLines: string;
@@ -105,7 +134,7 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
         const ocr = e.ocr ? applyLevel(rawOcr, ocrLevel, "ocr") : "(no text)";
         const title = e.meta.windowTitle ? applyLevel(e.meta.windowTitle, titlesLevel, "titles") : "";
         const titlePart = title ? ` [${title}]` : "";
-        return `[${ago}s ago] [${app}]${titlePart} ${ocr || "(no text)"}`;
+        return `${srcTag(e)}[${ago}s ago] [${app}]${titlePart} ${ocr || "(no text)"}`;
       })
       .join("\n");
   } catch {
@@ -115,7 +144,7 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
         const app = normalizeAppName(e.meta.app);
         const ago = Math.round((now - (e.ts || now)) / 1000);
         const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
-        return `[${ago}s ago] [${app}] ${ocr}`;
+        return `${srcTag(e)}[${ago}s ago] [${app}] ${ocr}`;
       })
       .join("\n");
   }
@@ -192,6 +221,27 @@ function parseTask(parsed: any): string | undefined {
   return parsed.task.trim();
 }
 
+const REGION_ACTIONS = new Set(["fix", "explain", "research"]);
+const MAX_REGIONS = 3;
+
+/**
+ * Parse regions from LLM response (Grammarly mode).
+ */
+function parseRegions(parsed: any): RawRegion[] | undefined {
+  if (!Array.isArray(parsed.regions) || parsed.regions.length === 0) return undefined;
+  const regions = parsed.regions
+    .filter((r: any) => typeof r?.issue === "string" && r.issue.trim() &&
+                        typeof r?.tip === "string" && r.tip.trim())
+    .slice(0, MAX_REGIONS)
+    .map((r: any): RawRegion => ({
+      issue: r.issue.trim().slice(0, 200),
+      tip: r.tip.trim().slice(0, 300),
+      action: REGION_ACTIONS.has(r.action) ? r.action : undefined,
+      sourceId: Number.isInteger(r.sourceId) ? r.sourceId : undefined,
+    }));
+  return regions.length > 0 ? regions : undefined;
+}
+
 /**
  * Call the LLM (OpenRouter) to analyze the context window.
  * Supports model chain: primary + fallbacks.
@@ -202,7 +252,8 @@ export async function analyzeContext(
   config: AnalysisConfig,
   recorderStatus: RecorderStatus | null = null,
 ): Promise<AgentResult> {
-  const userPrompt = buildUserPrompt(contextWindow, recorderStatus);
+  const userPrompt = buildUserPrompt(contextWindow, recorderStatus, config.regionsEnabled);
+  const systemPrompt = config.regionsEnabled ? SYSTEM_PROMPT_WITH_REGIONS : SYSTEM_PROMPT;
 
   // Apply privacy gating for images based on provider
   let images = contextWindow.images || [];
@@ -212,7 +263,7 @@ export async function analyzeContext(
   } catch { /* privacy not initialized, keep images */ }
 
   if (config.provider === "ollama") {
-    return await callOllama(SYSTEM_PROMPT, userPrompt, images, config);
+    return await callOllama(systemPrompt, userPrompt, images, config);
   }
 
   // OpenRouter path: model chain with fallbacks
@@ -229,7 +280,7 @@ export async function analyzeContext(
   let lastError: Error | null = null;
   for (const model of models) {
     try {
-      return await callOpenRouter(SYSTEM_PROMPT, userPrompt, images, model, config);
+      return await callOpenRouter(systemPrompt, userPrompt, images, model, config);
     } catch (err: any) {
       if (err instanceof AnalysisAuthError) throw err;
       lastError = err;
@@ -316,6 +367,7 @@ async function callOpenRouter(
         digest: parsed.digest || "\u2014",
         record: parseRecord(parsed),
         task: parseTask(parsed),
+        regions: parseRegions(parsed),
         latencyMs,
         tokensIn: data.usage?.prompt_tokens || 0,
         tokensOut: data.usage?.completion_tokens || 0,
@@ -336,6 +388,7 @@ async function callOpenRouter(
               digest: parsed.digest || "\u2014",
               record: parseRecord(parsed),
               task: parseTask(parsed),
+              regions: parseRegions(parsed),
               latencyMs,
               tokensIn: data.usage?.prompt_tokens || 0,
               tokensOut: data.usage?.completion_tokens || 0,
@@ -425,6 +478,7 @@ async function callOllama(
         digest: parsed.digest || "\u2014",
         record: parseRecord(parsed),
         task: parseTask(parsed),
+        regions: parseRegions(parsed),
         latencyMs,
         tokensIn, tokensOut,
         model: config.model,
@@ -441,6 +495,7 @@ async function callOllama(
               digest: parsed.digest || "\u2014",
               record: parseRecord(parsed),
               task: parseTask(parsed),
+              regions: parseRegions(parsed),
               latencyMs,
               tokensIn, tokensOut,
               model: config.model,

@@ -85,8 +85,14 @@ export class Escalator {
   private lastSpawnTs = 0;
   private static readonly SPAWN_COOLDOWN_MS = 60_000; // 60 seconds between duplicate spawns
 
-  // Prevent concurrent spawn RPCs (sibling spawns only — never blocks regular escalations)
-  private spawnInFlight = false;
+  // Bound concurrent spawn RPCs (sibling spawns only — never blocks regular
+  // escalations). >1 so parallel region-eye taps each get their own subagent.
+  private static readonly MAX_CONCURRENT_SPAWNS = 3;
+  private spawnsInFlight = 0;
+
+  // regionId per in-flight spawn task — echoed on every spawn_task broadcast
+  // so the overlay can route status to the originating region eye's badge.
+  private regionByTask = new Map<string, string>();
 
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
@@ -630,7 +636,7 @@ ${recentLines.join("\n")}`;
       slotDepth: this.slot.depth,
       slotInFlight: this.slot.inFlightId,
       httpPendingId: this.httpPending?.id ?? null,
-      spawnInFlight: this.spawnInFlight,
+      spawnsInFlight: this.spawnsInFlight,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
@@ -644,10 +650,11 @@ ${recentLines.join("\n")}`;
    * Creates a unique child session key and sends the task directly to the gateway
    * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
-  async dispatchSpawnTask(task: string, label?: string): Promise<void> {
-    // Prevent sibling spawn RPCs from piling up (independent from escalation queue)
-    if (this.spawnInFlight) {
-      log(TAG, `spawn-task skipped — spawn RPC already in-flight`);
+  async dispatchSpawnTask(task: string, label?: string, opts?: { regionId?: string }): Promise<void> {
+    // Bound sibling spawn RPCs (independent from escalation queue)
+    if (this.spawnsInFlight >= Escalator.MAX_CONCURRENT_SPAWNS) {
+      log(TAG, `spawn-task skipped — ${this.spawnsInFlight} spawn RPCs already in-flight`);
+      this.deps.wsHandler.broadcast(`⚠ Spawn limit reached (${Escalator.MAX_CONCURRENT_SPAWNS} running) — try again shortly`, "normal");
       return;
     }
 
@@ -668,6 +675,7 @@ ${recentLines.join("\n")}`;
     const startedAt = Date.now();
     const labelStr = label ? ` (label: "${label}")` : "";
     const idemKey = `spawn-task-${Date.now()}`;
+    if (opts?.regionId) this.regionByTask.set(taskId, opts.regionId);
 
     // Generate a unique child session key — bypasses the main agent entirely
     const childSessionKey = `agent:main:subagent:${randomUUID()}`;
@@ -718,10 +726,10 @@ ${recentLines.join("\n")}`;
       return;
     }
 
-    // ★ Set spawnInFlight BEFORE first await — cleared in finally regardless of outcome.
-    // Dedicated lane flag: never touches the escalation queue so regular escalations
-    // continue unblocked while this spawn RPC is pending.
-    this.spawnInFlight = true;
+    // ★ Increment BEFORE first await — decremented in finally regardless of outcome.
+    // Dedicated lane counter: never touches the escalation queue so regular escalations
+    // continue unblocked while spawn RPCs are pending.
+    this.spawnsInFlight++;
     try {
       // Send directly to a new child session via the gateway agent RPC
       const result = await this.wsClient.sendRpc("agent", {
@@ -785,7 +793,7 @@ ${recentLines.join("\n")}`;
       error(TAG, `spawn-task failed: ${err.message}`);
       this.broadcastTaskEvent(taskId, "failed", label, startedAt);
     } finally {
-      this.spawnInFlight = false;
+      this.spawnsInFlight = Math.max(0, this.spawnsInFlight - 1);
     }
   }
 
@@ -1069,6 +1077,7 @@ ${recentLines.join("\n")}`;
   ): void {
     const now = Date.now();
     const isTerminal = status === "completed" || status === "failed" || status === "timeout";
+    const regionId = this.regionByTask.get(taskId);
     const msg: SpawnTaskMessage = {
       type: "spawn_task",
       taskId,
@@ -1077,9 +1086,11 @@ ${recentLines.join("\n")}`;
       startedAt: startedAt || now,
       ...(isTerminal ? { completedAt: now } : {}),
       ...(resultPreview ? { resultPreview: resultPreview.slice(0, 200) } : {}),
+      ...(regionId ? { regionId } : {}),
     };
     log(TAG, `broadcast spawn_task: taskId=${taskId}, status=${status}, clients=${this.deps.wsHandler.clientCount}`);
     this.deps.wsHandler.broadcastRaw(msg);
+    if (isTerminal) this.regionByTask.delete(taskId);
   }
 
   private pushResponse(output: string, context?: ContextWindow | null): void {

@@ -242,6 +242,7 @@ export function loadConfig(): CoreConfig {
     cooldownMs: intEnv("AGENT_COOLDOWN_MS", 10000),
     maxAgeMs: intEnv("AGENT_MAX_AGE_MS", 120000),
     historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
+    regionsEnabled: boolEnv("REGIONS_ENABLED", true),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.
