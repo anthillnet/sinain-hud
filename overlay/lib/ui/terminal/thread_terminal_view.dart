@@ -142,40 +142,62 @@ class ThreadTerminalSession {
       }
     }
 
+    // A distinctive token from the seed path (the random mcp temp-dir name)
+    // — if it shows up on screen after we type, our text landed; if not, it
+    // was eaten (e.g. by a trust dialog that appeared late) and we retry.
+    var seedDone = false;
+    var attemptInFlight = false;
+    var attempts = 0;
     var lastOutputAt = DateTime.now();
-    void maybeTypeSeed() {
-      if (seedTyped || session.exited) return;
+
+    void attemptSeed() {
+      if (seedDone || seedTyped || attemptInFlight || session.exited) return;
       final scr = currentScreen();
-      final hit = modalNeedles.where((r) => r.hasMatch(scr)).toList();
-      if (hit.isNotEmpty) {
-        // A modal owns the keyboard — wait for the user to answer it. We read
-        // the live screen each tick, so this stops matching the moment the
-        // dialog is gone.
+      if (modalNeedles.any((r) => r.hasMatch(scr))) {
+        // A modal owns the keyboard — wait for it to clear (user answers, or
+        // it auto-dismisses). Reading the live buffer means this stops the
+        // moment the dialog is gone.
         if (kDebugMode) print('[seed] modal on screen — retry 1.5s');
         settle?.cancel();
-        settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
+        settle = Timer(const Duration(milliseconds: 1500), attemptSeed);
         return;
       }
-      // Never type mid-redraw — require output quiet for 800ms first, so the
-      // input box exists and raw-mode init won't flush the bytes.
       final quietFor = DateTime.now().difference(lastOutputAt).inMilliseconds;
       if (quietFor < 800) {
-        if (kDebugMode) print('[seed] still redrawing (${quietFor}ms) — wait');
         settle?.cancel();
-        settle = Timer(const Duration(milliseconds: 900), maybeTypeSeed);
+        settle = Timer(const Duration(milliseconds: 900), attemptSeed);
         return;
       }
-      seedTyped = true;
+      if (attempts >= 5) {
+        if (kDebugMode) print('[seed] gave up after $attempts attempts');
+        seedTyped = true; // stop trying
+        return;
+      }
+      attempts++;
+      attemptInFlight = true;
       settle?.cancel();
-      cap?.cancel();
-      if (kDebugMode) print('[seed] typing pointer for $seedFile');
-      // Text first, Enter separately — a single chunk can trip the TUI's
-      // paste heuristics (observed: openclaude submitting AND leaving a
-      // duplicate copy in the input field).
+      final token = seedFile.split('/').where((s) => s.isNotEmpty).toList();
+      final probe = token.length >= 2 ? token[token.length - 2] : seedFile;
+      if (kDebugMode) print('[seed] attempt $attempts — typing pointer');
       pty.write(const Utf8Encoder()
           .convert('Read $seedFile and follow its instructions.'));
       Timer(const Duration(milliseconds: 400), () {
         if (!session.exited) pty.write(const Utf8Encoder().convert('\r'));
+      });
+      // Verify: did our unique token reach the screen? If not, the keystrokes
+      // were eaten — retry (a late dialog will now be visible and waited out).
+      Timer(const Duration(milliseconds: 2500), () {
+        attemptInFlight = false;
+        if (seedDone || session.exited) return;
+        if (currentScreen().contains(probe)) {
+          seedDone = true;
+          seedTyped = true;
+          cap?.cancel();
+          if (kDebugMode) print('[seed] confirmed on screen ✓');
+        } else {
+          if (kDebugMode) print('[seed] not on screen — re-attempt');
+          attemptSeed();
+        }
       });
     }
 
@@ -187,8 +209,9 @@ class ThreadTerminalSession {
       if (seedTyped) return;
       lastOutputAt = DateTime.now();
       if (seedFile.isNotEmpty) {
+        if (seedDone || seedTyped) return;
         settle?.cancel();
-        settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
+        settle = Timer(const Duration(milliseconds: 800), attemptSeed);
         return;
       }
       carry += data;
@@ -202,9 +225,9 @@ class ThreadTerminalSession {
         // timer started now fires into an empty screen and types before the
         // TUI (and its trust dialog) exists. The agent's OWN output (next
         // chunks, seedFile.isNotEmpty branch) arms settle, so the screen
-        // buffer always has real content when maybeTypeSeed checks it. cap
+        // buffer always has real content when attemptSeed checks it. cap
         // is a long safety net for an agent that somehow emits nothing.
-        cap = Timer(const Duration(seconds: 12), maybeTypeSeed);
+        cap = Timer(const Duration(seconds: 12), attemptSeed);
       } else if (carry.length > 4096) {
         carry = carry.substring(carry.length - 256);
       }
