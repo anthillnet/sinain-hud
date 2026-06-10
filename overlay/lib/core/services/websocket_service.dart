@@ -183,6 +183,12 @@ class WebSocketService extends ChangeNotifier {
       _channel!.ready.then((_) {
         _connected = true;
         _retryCount = 0;
+        // Reconnect succeeded — dismiss the stale disconnect banner (other
+        // alerts, e.g. the local-agent warning, are left alone).
+        if (_systemAlertText?.startsWith('Sinain disconnected') ?? false) {
+          _systemAlertText = null;
+          _systemAlertPriority = FeedPriority.normal;
+        }
         notifyListeners();
         _log('Connected to $url');
 
