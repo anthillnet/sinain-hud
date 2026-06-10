@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -674,6 +674,14 @@ print(json.dumps(stats))
 
 async function main() {
   log(TAG, "sinain-core starting...");
+  // Version banner: core package version + (DMG installs) bundle identifiers
+  // exported by launch-backend.sh. Source runs show "source".
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(MODULE_DIR, "..", "package.json"), "utf-8"));
+    const dmgV = process.env.SINAIN_DMG_VERSION || "source";
+    const buildId = process.env.SINAIN_BUILD_ID || "source";
+    log(TAG, `versions: core=${pkg.version} dmg=${dmgV} build=${buildId} node=${process.version}`);
+  } catch { /* version banner is best-effort */ }
 
   // ── Load config ──
   const config = loadConfig();

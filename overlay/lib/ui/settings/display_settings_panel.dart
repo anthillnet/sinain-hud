@@ -4,6 +4,8 @@ import '../../core/app_control.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/update_check_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../hud_tooltip.dart';
 
 /// Compact display-settings popover for font size and accent color.
@@ -252,6 +254,38 @@ class DisplaySettingsPanel extends StatelessWidget {
           const SizedBox(height: 10),
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
           const SizedBox(height: 8),
+
+          // Update available (DMG installs — checked daily against the
+          // latest macos-v* release; DMGs have no auto-update)
+          if (context.watch<UpdateCheckService>().availableVersion != null) ...[
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => launchUrl(
+                  Uri.parse(UpdateCheckService.downloadUrl),
+                  mode: LaunchMode.externalApplication,
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.system_update_alt,
+                        size: 12, color: Color(accentColor)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Update available: v${context.watch<UpdateCheckService>().availableVersion} — download',
+                      style: TextStyle(
+                        fontFamily: HudConstants.monoFont,
+                        fontFamilyFallback: HudConstants.monoFontFallbacks,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(accentColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
 
           // Current session log
           MouseRegion(

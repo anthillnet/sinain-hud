@@ -92,6 +92,11 @@ LOG="$HOME/.sinain/logs/backend.log"
 [ -f "$LOG" ] && [ "$(wc -c <"$LOG" 2>/dev/null || echo 0)" -gt 5000000 ] && mv "$LOG" "$LOG.1"
 exec >>"$LOG" 2>&1
 echo "===== backend launch $(date '+%Y-%m-%d %H:%M:%S') ====="
+# Version banner — exported so every child (core, sense_client, agent) can
+# log which build it is running.
+[ -f "$RES/BUILD_ID" ] && export SINAIN_BUILD_ID="$(cat "$RES/BUILD_ID")"
+[ -f "$RES/DMG_VERSION" ] && export SINAIN_DMG_VERSION="$(cat "$RES/DMG_VERSION")"
+echo "[launch] versions: dmg=${SINAIN_DMG_VERSION:-n/a} build=${SINAIN_BUILD_ID:-n/a}"
 
 # Reset per-launch provisioning status (the overlay polls these files for the
 # setup-progress banner; stale 'done' files from a prior run shouldn't linger).
@@ -277,6 +282,14 @@ done
 _git_sha="$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 echo "${_git_sha}-$(date -u +%Y%m%d%H%M%S)" > "$RES/BUILD_ID"
 echo "    build stamp: $(cat "$RES/BUILD_ID")"
+
+# DMG release version (CI passes SINAIN_DMG_VERSION=macos-vX.Y.Z) — the
+# overlay's in-app update check reads Resources/DMG_VERSION and compares it
+# against the latest macos-v* GitHub release. Local builds may omit it.
+if [ -n "${SINAIN_DMG_VERSION:-}" ]; then
+  echo "${SINAIN_DMG_VERSION#macos-v}" > "$RES/DMG_VERSION"
+  echo "    dmg version: $(cat "$RES/DMG_VERSION")"
+fi
 
 bold "✓ Staged backend → $RES"
 du -sh "$RES" 2>/dev/null | awk '{print "  size: "$1}'

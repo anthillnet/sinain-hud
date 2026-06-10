@@ -157,6 +157,9 @@ def main():
     _privacy_images_openrouter = os.environ.get("PRIVACY_IMAGES_OPENROUTER", "full")
 
     log("sense_client started")
+    log(f"versions: dmg={os.environ.get('SINAIN_DMG_VERSION', 'source')} "
+        f"build={os.environ.get('SINAIN_BUILD_ID', 'source')} "
+        f"python={sys.version.split()[0]}")
     log(f"  relay: {config['relay']['url']}")
     log(f"  fps: {config['capture']['fps']}, scale: {config['capture']['scale']}")
     log(f"  ocr backend: {config['ocr'].get('backend', 'auto')}")
