@@ -857,6 +857,16 @@ PY
   # not the overlay-routed PreToolUse hook from sinain-agent/.claude.
   spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS} ToolSearch"
   echo "⌨ thread terminal — agent=$profile ($type), scope=${INTERACTIVE_REGION:-main}"
+  # Debug: SINAIN_TERM_DRYRUN=1 prints the resolved invocation instead of
+  # exec'ing the agent — for diagnosing seeding/lane issues from a shell.
+  if [ -n "${SINAIN_TERM_DRYRUN:-}" ]; then
+    echo "bin=$bin"
+    echo "mcp_config=$MCP_CONFIG"
+    echo "allowed=$spawn_allowed"
+    echo "--- task (${#task} chars) ---"
+    printf '%s\n' "$task"
+    exit 0
+  fi
   case "$type" in
     claude|openclaude)
       # --allowedTools is variadic: unquoted, it swallows the trailing
