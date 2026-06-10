@@ -142,6 +142,7 @@ class ThreadTerminalSession {
       'yes,itrust',
     ];
 
+    var lastOutputAt = DateTime.now();
     void maybeTypeSeed() {
       if (seedTyped || session.exited) return;
       final norm = screen.toLowerCase().replaceAll(RegExp(r'\s+'), '');
@@ -155,6 +156,17 @@ class ThreadTerminalSession {
         }
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
+        return;
+      }
+      // Never type mid-redraw. The 1.5s modal-retry timer can fire while the
+      // TUI is still repainting just after the user answered a dialog — the
+      // input box isn't ready yet and raw-mode init would flush the bytes.
+      // Require output to have been quiet for 800ms first.
+      final quietFor = DateTime.now().difference(lastOutputAt).inMilliseconds;
+      if (quietFor < 800) {
+        if (kDebugMode) print('[seed] still redrawing (${quietFor}ms) — wait');
+        settle?.cancel();
+        settle = Timer(const Duration(milliseconds: 900), maybeTypeSeed);
         return;
       }
       seedTyped = true;
@@ -177,6 +189,7 @@ class ThreadTerminalSession {
         .listen((data) {
       terminal.write(data);
       if (seedTyped) return;
+      lastOutputAt = DateTime.now();
       if (seedFile.isNotEmpty) {
         // Track the current screen. If this chunk contains a screen-clear,
         // drop everything before the LAST one — a repaint means the prior
