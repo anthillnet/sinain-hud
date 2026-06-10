@@ -868,22 +868,36 @@ PY
     exit 0
   fi
   case "$type" in
-    claude|openclaude)
+    claude)
       # --allowedTools is variadic: unquoted, it swallows the trailing
       # positional prompt as more tool names and the session starts unseeded.
-      # One quoted arg (space-separated list) keeps the task as the prompt.
+      # One quoted arg (space-separated list) keeps the task as the prompt;
+      # claude's TUI auto-submits it as the first message.
       exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed" "$task"
+      ;;
+    openclaude)
+      # The openclaude fork's TUI drops BOTH the positional prompt and
+      # --append-system-prompt (verified under a scripted PTY; upstream
+      # claude submits the positional). Seed via the overlay instead: write
+      # the task to a file and emit a marker line — the thread terminal
+      # watches for it and types a pointer message once the TUI is ready.
+      SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
+      printf '%s' "$task" > "$SEED_FILE"
+      echo "⟦SINAIN-SEED:$SEED_FILE⟧"
+      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed"
       ;;
     codex)
       exec "$bin" "$task"
       ;;
     hermes)
       # `hermes chat` is a full interactive TUI but takes no initial-prompt
-      # flag (-q answers once and exits). It has the sinain MCP server
-      # registered in ~/.hermes/config.yaml, so it can pull the same
-      # context itself — tell the user how to ask for it.
-      echo "ℹ hermes accepts no seed prompt — open with e.g.:"
-      echo "  'Check the current sinain context (sinain_get_digest / sinain_get_context) and give me a one-line read.'"
+      # flag (-q answers once and exits). Same overlay-typed seed mechanism
+      # as openclaude — marker line + seed file, the terminal types the
+      # pointer once the TUI is up. Hermes already has the sinain MCP
+      # server registered in ~/.hermes/config.yaml for deeper context.
+      SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
+      printf '%s' "$task" > "$SEED_FILE"
+      echo "⟦SINAIN-SEED:$SEED_FILE⟧"
       exec "$bin" chat
       ;;
     *)

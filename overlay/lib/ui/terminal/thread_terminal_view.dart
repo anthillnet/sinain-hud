@@ -107,10 +107,34 @@ class ThreadTerminalSession {
     final session =
         ThreadTerminalSession._(terminal, controller, pty, command, args);
 
+    // Some agent TUIs (openclaude, hermes) accept no seed prompt via CLI —
+    // run.sh writes the context to a file and emits ⟦SINAIN-SEED:<path>⟧;
+    // we type a pointer message into the TUI once it has had time to start.
+    // The TTY input queue buffers keystrokes, so timing is forgiving.
+    var seedHandled = false;
+    var carry = '';
+    final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
     pty.output
         .cast<List<int>>()
         .transform(const Utf8Decoder(allowMalformed: true))
-        .listen(terminal.write);
+        .listen((data) {
+      terminal.write(data);
+      if (seedHandled) return;
+      carry += data;
+      final m = seedMarker.firstMatch(carry);
+      if (m != null) {
+        seedHandled = true;
+        final seedFile = m.group(1)!;
+        Future.delayed(const Duration(seconds: 4), () {
+          if (session.exited) return;
+          pty.write(const Utf8Encoder()
+              .convert('Read $seedFile and follow its instructions.\r'));
+        });
+        carry = '';
+      } else if (carry.length > 4096) {
+        carry = carry.substring(carry.length - 256);
+      }
+    });
     pty.exitCode.then((code) {
       session.exited = true;
       terminal.write('\r\n\x1b[90m[shell exited ($code) — close and reopen '
