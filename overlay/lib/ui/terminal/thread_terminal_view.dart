@@ -25,21 +25,36 @@ bool get terminalSpikeEnabled =>
 /// One live shell session: emulator state + PTY. Cached per thread so the
 /// process survives tab switches — only an explicit close kills it.
 class ThreadTerminalSession {
-  ThreadTerminalSession._(this.terminal, this.controller, this._pty);
+  ThreadTerminalSession._(
+      this.terminal, this.controller, this._pty, this.command, this.args);
 
   final Terminal terminal;
   final TerminalController controller;
   final Pty _pty;
+  // Launch spec, kept so an exited session respawns the same way even when
+  // the caller (e.g. a widget rebuild) doesn't pass it again.
+  final String? command;
+  final List<String>? args;
   bool exited = false;
 
   static final Map<String, ThreadTerminalSession> _sessions = {};
 
   /// Get (or spawn) the session for a thread. [command]/[args] only apply
   /// when the session doesn't exist yet — default is the user's login shell.
+  /// A session whose process has exited is dropped and respawned fresh.
   static ThreadTerminalSession of(String threadId,
-          {String? command, List<String>? args, String? banner}) =>
-      _sessions.putIfAbsent(threadId,
-          () => _spawn(threadId, command: command, args: args, banner: banner));
+      {String? command, List<String>? args, String? banner}) {
+    final cached = _sessions[threadId];
+    if (cached != null && !cached.exited) return cached;
+    final session = _spawn(
+      threadId,
+      command: command ?? cached?.command,
+      args: args ?? cached?.args,
+      banner: banner,
+    );
+    _sessions[threadId] = session;
+    return session;
+  }
 
   /// Locate sinain-agent/run.sh: DMG bundle Resources first, then explicit
   /// env override, then dev-repo locations relative to the cwd flutter run
@@ -89,7 +104,8 @@ class ThreadTerminalSession {
       workingDirectory: Platform.environment['HOME'],
       environment: env,
     );
-    final session = ThreadTerminalSession._(terminal, controller, pty);
+    final session =
+        ThreadTerminalSession._(terminal, controller, pty, command, args);
 
     pty.output
         .cast<List<int>>()
