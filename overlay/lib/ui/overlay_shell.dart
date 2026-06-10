@@ -978,6 +978,10 @@ class OverlayShellState extends State<OverlayShell> {
                         args: runSh != null
                             ? [runSh, '--interactive-region', region.id]
                             : null,
+                        banner: runSh == null
+                            ? '⚠ sinain-agent/run.sh not found — plain shell. '
+                                'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent/run.sh'
+                            : null,
                       );
                       setState(() {
                         _startedRegionThreads.add(region.id);

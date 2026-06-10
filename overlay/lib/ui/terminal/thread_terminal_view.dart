@@ -37,9 +37,9 @@ class ThreadTerminalSession {
   /// Get (or spawn) the session for a thread. [command]/[args] only apply
   /// when the session doesn't exist yet — default is the user's login shell.
   static ThreadTerminalSession of(String threadId,
-          {String? command, List<String>? args}) =>
-      _sessions.putIfAbsent(
-          threadId, () => _spawn(threadId, command: command, args: args));
+          {String? command, List<String>? args, String? banner}) =>
+      _sessions.putIfAbsent(threadId,
+          () => _spawn(threadId, command: command, args: args, banner: banner));
 
   /// Locate sinain-agent/run.sh: DMG bundle Resources first, then explicit
   /// env override, then dev-repo locations relative to the cwd flutter run
@@ -59,9 +59,10 @@ class ThreadTerminalSession {
   }
 
   static ThreadTerminalSession _spawn(String threadId,
-      {String? command, List<String>? args}) {
+      {String? command, List<String>? args, String? banner}) {
     final terminal = Terminal(maxLines: 10000);
     final controller = TerminalController();
+    if (banner != null) terminal.write('\x1b[33m$banner\x1b[0m\r\n');
     final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
     final pty = Pty.start(
       command ?? shell,
