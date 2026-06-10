@@ -18,6 +18,7 @@ import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
 import 'regions/region_action_banner.dart';
 import 'regions/region_eye_controller.dart';
+import 'terminal/thread_terminal_view.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 
@@ -69,6 +70,8 @@ class OverlayShellState extends State<OverlayShell> {
   // Selected chat tab: null = MAIN feed, otherwise a region thread id.
   // Each ROI is its own conversation; the input routes to the active tab.
   String? _activeThread;
+  // SPIKE: tabs currently showing a terminal instead of the chat feed.
+  final Set<String> _terminalThreads = {};
   // Regions whose thread already started (Run pressed / follow-up sent)
   final Set<String> _startedRegionThreads = {};
 
@@ -301,13 +304,19 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _closeThread(String id) {
     context.read<WebSocketService>().closeRegionThread(id);
+    ThreadTerminalSession.close(id); // kill the thread's PTY, if any
     setState(() {
+      _terminalThreads.remove(id);
       if (_activeThread == id) {
         _activeThread = null;
         _activeRegion = null;
       }
     });
   }
+
+  /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
+  /// spike can be exercised without waiting for a region thread.
+  String get _activeTabKey => _activeThread ?? 'main';
 
   /// True while any spawn task for this region is still in flight.
   bool _regionWorking(WebSocketService ws, String regionId) {
@@ -325,7 +334,9 @@ class OverlayShellState extends State<OverlayShell> {
       ...ws.regionThreadLabels.keys,
       if (_activeRegion != null) _activeRegion!.id,
     }.toList();
-    if (ids.isEmpty) return const SizedBox.shrink();
+    // SPIKE: with the terminal enabled the row is always shown so the ⌨
+    // toggle is reachable from MAIN even before any region thread exists.
+    if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
 
     String labelFor(String id) {
       var label = ws.regionThreadLabels[id];
@@ -423,6 +434,21 @@ class OverlayShellState extends State<OverlayShell> {
                 selected: _activeThread == id,
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
+              ),
+            // SPIKE: chat ⇄ terminal toggle for the active tab.
+            if (terminalSpikeEnabled)
+              pill(
+                text: _terminalThreads.contains(_activeTabKey)
+                    ? '💬 chat'
+                    : '⌨ term',
+                selected: _terminalThreads.contains(_activeTabKey),
+                onTap: () => setState(() {
+                  if (_terminalThreads.contains(_activeTabKey)) {
+                    _terminalThreads.remove(_activeTabKey);
+                  } else {
+                    _terminalThreads.add(_activeTabKey);
+                  }
+                }),
               ),
           ],
         ),
@@ -895,17 +921,22 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                _activeThread == null
-                    ? const FeedView(
-                        channel: FeedChannel.agent,
-                        emptyLabel: 'awaiting sinain…',
+                _terminalThreads.contains(_activeTabKey)
+                    ? ThreadTerminalView(
+                        key: ValueKey('term-$_activeTabKey'),
+                        threadId: _activeTabKey,
                       )
-                    : FeedView(
-                        key: ValueKey('thread-$_activeThread'),
-                        regionId: _activeThread,
-                        channel: FeedChannel.agent,
-                        emptyLabel: 'no messages yet — press ⚡ Run',
-                      ),
+                    : _activeThread == null
+                        ? const FeedView(
+                            channel: FeedChannel.agent,
+                            emptyLabel: 'awaiting sinain…',
+                          )
+                        : FeedView(
+                            key: ValueKey('thread-$_activeThread'),
+                            regionId: _activeThread,
+                            channel: FeedChannel.agent,
+                            emptyLabel: 'no messages yet — press ⚡ Run',
+                          ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),

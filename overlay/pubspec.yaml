@@ -18,6 +18,11 @@ dependencies:
   hotkey_manager: ^0.2.0
   flutter_markdown_plus: ^1.0.7
   url_launcher: ^6.3.0
+  # Thread-terminal spike: pure-Flutter terminal emulator + native PTY.
+  # Both MIT, both terminal.studio. Pure Flutter = renders inside the private
+  # NSPanel, so capture-invisibility is inherited (no platform view needed).
+  xterm: ^4.0.0
+  flutter_pty: ^0.4.1
 
 dev_dependencies:
   flutter_test:
