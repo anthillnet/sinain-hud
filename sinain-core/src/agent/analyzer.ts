@@ -224,6 +224,19 @@ function parseTask(parsed: any): string | undefined {
   return parsed.task.trim();
 }
 
+/** Coerce an LLM response field to display text. Small local models
+ *  occasionally emit objects/arrays for hud/digest — stringify rather than
+ *  crash downstream consumers (digest.toLowerCase in the escalation scorer). */
+function asText(v: unknown, fallback: string): string {
+  if (typeof v === "string") return v.trim() ? v : fallback;
+  if (v === undefined || v === null) return fallback;
+  try {
+    return JSON.stringify(v).slice(0, 2000);
+  } catch {
+    return fallback;
+  }
+}
+
 const REGION_ACTIONS = new Set(["fix", "explain", "research"]);
 const MAX_REGIONS = 3;
 
@@ -366,8 +379,8 @@ async function callOpenRouter(
       const parsed = JSON.parse(jsonStr);
       const apiCost = typeof data.usage?.cost === "number" ? data.usage.cost : undefined;
       return {
-        hud: parsed.hud || "\u2014",
-        digest: parsed.digest || "\u2014",
+        hud: asText(parsed.hud, "\u2014"),
+        digest: asText(parsed.digest, "\u2014"),
         record: parseRecord(parsed),
         task: parseTask(parsed),
         regions: parseRegions(parsed),
@@ -387,8 +400,8 @@ async function callOpenRouter(
           const parsed = JSON.parse(match[0]);
           if (parsed.hud) {
             return {
-              hud: parsed.hud,
-              digest: parsed.digest || "\u2014",
+              hud: asText(parsed.hud, "\u2014"),
+              digest: asText(parsed.digest, "\u2014"),
               record: parseRecord(parsed),
               task: parseTask(parsed),
               regions: parseRegions(parsed),
@@ -477,8 +490,8 @@ async function callOllama(
       const jsonStr = content.replace(/^```\w*\s*\n?/, "").replace(/\n?\s*```\s*$/, "").trim();
       const parsed = JSON.parse(jsonStr);
       return {
-        hud: parsed.hud || "\u2014",
-        digest: parsed.digest || "\u2014",
+        hud: asText(parsed.hud, "\u2014"),
+        digest: asText(parsed.digest, "\u2014"),
         record: parseRecord(parsed),
         task: parseTask(parsed),
         regions: parseRegions(parsed),
@@ -494,8 +507,8 @@ async function callOllama(
           const parsed = JSON.parse(match[0]);
           if (parsed.hud) {
             return {
-              hud: parsed.hud,
-              digest: parsed.digest || "\u2014",
+              hud: asText(parsed.hud, "\u2014"),
+              digest: asText(parsed.digest, "\u2014"),
               record: parseRecord(parsed),
               task: parseTask(parsed),
               regions: parseRegions(parsed),
