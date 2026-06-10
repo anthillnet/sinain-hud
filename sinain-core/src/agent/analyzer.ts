@@ -100,6 +100,8 @@ Emit a region ONLY when you can offer concrete help with something specific on s
 - An error or warning (terminal error, build failure, red underline, stack trace)
 - A fixable problem (typo, bug, inefficient code, missing import, broken config)
 - A question or form the user appears stuck on
+- Something you could research, draft, or explain for the user (a topic they
+  are reading about, an email or doc they are writing, an unfamiliar concept)
 Each region:
 - "issue": short label of what's wrong (max 10 words, quote the specific text)
 - "tip": one actionable sentence — what an agent could do about it

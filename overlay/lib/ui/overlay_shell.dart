@@ -128,6 +128,9 @@ class OverlayShellState extends State<OverlayShell> {
         ws: ws,
         settingsService: _settingsService,
         onRegionTap: (region, pos) {
+          // Register the tab immediately so it persists in the unified tab
+          // bar even before the thread starts or another ROI is selected.
+          ws.registerRegionThread(region.id, region.issue);
           setState(() {
             _activeRegion = region;
             _activeThread = region.id; // select this region's tab

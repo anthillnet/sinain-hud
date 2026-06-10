@@ -76,6 +76,15 @@ class WebSocketService extends ChangeNotifier {
   Stream<(String, FeedItem)> get regionThreadItemStream =>
       _regionThreadController.stream;
 
+  /// Register a region tab (eye tapped). The tab persists across ROI/tab
+  /// switches — the bar is one united list for all states — until explicitly
+  /// closed via [closeRegionThread].
+  void registerRegionThread(String regionId, String label) {
+    if (regionThreadLabels.containsKey(regionId)) return;
+    regionThreadLabels[regionId] = label;
+    notifyListeners();
+  }
+
   /// Drop a region thread (tab closed). Server-side session is unaffected.
   void closeRegionThread(String regionId) {
     regionThreads.remove(regionId);
