@@ -197,8 +197,14 @@ class ThreadTerminalSession {
         seedFile = m.group(1)!;
         if (kDebugMode) print('[seed] marker seen → $seedFile');
         carry = '';
-        settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
-        cap = Timer(const Duration(seconds: 6), maybeTypeSeed);
+        // Do NOT arm settle here. run.sh prints the marker just before
+        // exec'ing the agent, so the agent hasn't drawn anything yet — a
+        // timer started now fires into an empty screen and types before the
+        // TUI (and its trust dialog) exists. The agent's OWN output (next
+        // chunks, seedFile.isNotEmpty branch) arms settle, so the screen
+        // buffer always has real content when maybeTypeSeed checks it. cap
+        // is a long safety net for an agent that somehow emits nothing.
+        cap = Timer(const Duration(seconds: 12), maybeTypeSeed);
       } else if (carry.length > 4096) {
         carry = carry.substring(carry.length - 256);
       }
