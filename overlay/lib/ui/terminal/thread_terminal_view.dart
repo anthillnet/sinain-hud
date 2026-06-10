@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -107,30 +108,47 @@ class ThreadTerminalSession {
     final session =
         ThreadTerminalSession._(terminal, controller, pty, command, args);
 
-    // Some agent TUIs (openclaude, hermes) accept no seed prompt via CLI —
-    // run.sh writes the context to a file and emits ⟦SINAIN-SEED:<path>⟧;
-    // we type a pointer message into the TUI once it has had time to start.
-    // The TTY input queue buffers keystrokes, so timing is forgiving.
-    var seedHandled = false;
+    // Some agent TUIs (claude, openclaude, hermes) accept no seed prompt via
+    // CLI — run.sh writes the context to a file and emits ⟦SINAIN-SEED:<p>⟧;
+    // we type a pointer message into the TUI once it's ready. "Ready" =
+    // output quiescent for 800ms after the marker (the TUI finished its
+    // initial render — typing earlier risks the raw-mode init flushing the
+    // TTY input queue), with a 6s hard cap for TUIs that keep animating.
+    var seedFile = '';
+    var seedTyped = false;
     var carry = '';
+    Timer? settle;
+    Timer? cap;
     final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
+    void typeSeed() {
+      if (seedTyped || session.exited) return;
+      seedTyped = true;
+      settle?.cancel();
+      cap?.cancel();
+      pty.write(const Utf8Encoder()
+          .convert('Read $seedFile and follow its instructions.\r'));
+    }
+
     pty.output
         .cast<List<int>>()
         .transform(const Utf8Decoder(allowMalformed: true))
         .listen((data) {
       terminal.write(data);
-      if (seedHandled) return;
+      if (seedTyped) return;
+      if (seedFile.isNotEmpty) {
+        // Marker seen — every new chunk means the TUI is still drawing;
+        // (re)arm the quiescence timer.
+        settle?.cancel();
+        settle = Timer(const Duration(milliseconds: 800), typeSeed);
+        return;
+      }
       carry += data;
       final m = seedMarker.firstMatch(carry);
       if (m != null) {
-        seedHandled = true;
-        final seedFile = m.group(1)!;
-        Future.delayed(const Duration(seconds: 4), () {
-          if (session.exited) return;
-          pty.write(const Utf8Encoder()
-              .convert('Read $seedFile and follow its instructions.\r'));
-        });
+        seedFile = m.group(1)!;
         carry = '';
+        settle = Timer(const Duration(milliseconds: 800), typeSeed);
+        cap = Timer(const Duration(seconds: 6), typeSeed);
       } else if (carry.length > 4096) {
         carry = carry.substring(carry.length - 256);
       }
