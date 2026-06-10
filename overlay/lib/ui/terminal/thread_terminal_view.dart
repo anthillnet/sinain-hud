@@ -131,23 +131,25 @@ class ThreadTerminalSession {
     void maybeTypeSeed() {
       if (seedTyped || session.exited) return;
       if (modal.hasMatch(tail)) {
-        // A modal is on screen: stop the timers and let the user answer.
-        // The post-dialog redraw produces output, which re-arms the
-        // quiescence timer; only fresh output is considered then.
-        tail = '';
+        // A modal owns the keyboard (claude's folder-trust check, theme
+        // picker). Don't type into it — retry shortly. Retrying (rather
+        // than waiting for output to re-arm settle) means a modal the user
+        // leaves on screen can't deadlock seeding.
+        if (kDebugMode) print('[seed] modal on screen — retry in 1.5s');
         settle?.cancel();
-        cap?.cancel();
+        settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
         return;
       }
       seedTyped = true;
       settle?.cancel();
       cap?.cancel();
+      if (kDebugMode) print('[seed] typing pointer for $seedFile');
       // Text first, Enter separately — a single chunk can trip the TUI's
       // paste heuristics (observed: openclaude submitting AND leaving a
       // duplicate copy in the input field).
       pty.write(const Utf8Encoder()
           .convert('Read $seedFile and follow its instructions.'));
-      Timer(const Duration(milliseconds: 300), () {
+      Timer(const Duration(milliseconds: 400), () {
         if (!session.exited) pty.write(const Utf8Encoder().convert('\r'));
       });
     }
@@ -171,6 +173,7 @@ class ThreadTerminalSession {
       final m = seedMarker.firstMatch(carry);
       if (m != null) {
         seedFile = m.group(1)!;
+        if (kDebugMode) print('[seed] marker seen → $seedFile');
         carry = '';
         settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
         cap = Timer(const Duration(seconds: 6), maybeTypeSeed);
