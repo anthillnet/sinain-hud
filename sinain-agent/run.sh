@@ -883,7 +883,7 @@ PY
       # watches for it and types a pointer message once the TUI is ready.
       SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
       printf '%s' "$task" > "$SEED_FILE"
-      echo "⟦SINAIN-SEED:$SEED_FILE⟧"
+      echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
       exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed"
       ;;
     codex)
@@ -897,7 +897,7 @@ PY
       # server registered in ~/.hermes/config.yaml for deeper context.
       SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
       printf '%s' "$task" > "$SEED_FILE"
-      echo "⟦SINAIN-SEED:$SEED_FILE⟧"
+      echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
       exec "$bin" chat
       ;;
     *)
