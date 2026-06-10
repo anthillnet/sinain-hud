@@ -2,8 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- No app-sandbox: matches ReleaseDMG.entitlements (the shipped app).
+	     The sandbox blocks PTY shells (thread-terminal spike: exec → 255)
+	     and the ~/.sinain writes the packaged app performs. -->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<false/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
