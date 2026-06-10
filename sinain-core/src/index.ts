@@ -1128,15 +1128,29 @@ async function main() {
 
     const mcpConfigPath = writeLocalAgentMcpConfig(config.port);
     const coreUrl = process.env.SINAIN_CORE_URL || `http://localhost:${config.port}`;
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      MCP_CONFIG: mcpConfigPath,
+      SINAIN_AGENT: agent,
+      SINAIN_CORE_URL: coreUrl,
+      ESCALATION_TRANSPORT: "http",
+    };
+    // Strip Claude Code session vars that leak in when sinain-core itself was
+    // launched from inside a Claude Code / agent session. They redirect the
+    // spawned CLI agents (claude, openclaude) to the parent session's config
+    // dir, where their own credentials don't exist — surfacing as
+    // "No cookie auth credentials found" 401s on every invocation.
+    // (Profile-level CLAUDE_CODE_* overrides are unaffected: run.sh applies
+    // them per profile after this spawn.)
+    for (const key of Object.keys(childEnv)) {
+      if (key.startsWith("CLAUDE_CODE_") || key === "CLAUDE_CONFIG_DIR" ||
+          key === "CLAUDECODE" || key === "AI_AGENT") {
+        delete childEnv[key];
+      }
+    }
     const child = spawn("bash", [runSh], {
       cwd: dirname(runSh),
-      env: {
-        ...process.env,
-        MCP_CONFIG: mcpConfigPath,
-        SINAIN_AGENT: agent,
-        SINAIN_CORE_URL: coreUrl,
-        ESCALATION_TRANSPORT: "http",
-      },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
