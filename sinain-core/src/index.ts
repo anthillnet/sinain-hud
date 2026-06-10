@@ -1265,10 +1265,24 @@ async function main() {
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
 
-    getRegionTask: (regionId: string) => {
+    getRegionTask: async (regionId: string) => {
       const region = regionTracker.get(regionId);
       if (!region) return null;
-      return buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+      // Enrich the terminal seed with knowledge-graph facts about the issue's
+      // topic + app — same store the escalation enrichment uses. Best-effort:
+      // an empty/failed query still yields a useful seed.
+      let knowledge = "";
+      try {
+        const entities = [
+          ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
+          ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i)
+            .filter((w) => w.length > 3).slice(0, 5),
+        ];
+        if (entities.length > 0) {
+          knowledge = await queryKnowledgeFactsMulti(entities, 8);
+        }
+      } catch { /* enrichment is optional */ }
+      return buildRegionTaskText(region, agentLoop.getDigest()?.digest, undefined, knowledge);
     },
 
     getHealthPayload: () => {

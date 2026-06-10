@@ -53,6 +53,32 @@ function anchorByText(issue: string, screen: ScreenEvent[]): ScreenEvent | undef
   return bestScore >= 1 ? best : undefined;
 }
 
+/** Refine the anchor from the event's change-region bbox to the exact OCR
+ *  LINE matching the issue text. The change-region can span half a screen —
+ *  an eye at its corner sits nowhere near the problem. Line boxes come from
+ *  Vision OCR (full-frame pixel coords, same space as imageBbox). */
+function refineToLine(
+  issue: string,
+  src: ScreenEvent,
+): [number, number, number, number] | undefined {
+  const lines = src.ocrLines;
+  if (!lines?.length) return undefined;
+  const tokens = issue.toLowerCase().split(/[^a-z0-9_а-яё]+/i).filter(t => t.length >= 3);
+  if (tokens.length === 0) return undefined;
+  let best: { score: number; bbox: [number, number, number, number] } | undefined;
+  for (const l of lines) {
+    if (!Array.isArray(l.bbox) || l.bbox.length !== 4 || !l.text) continue;
+    const lt = l.text.toLowerCase();
+    const score = tokens.reduce((n, t) => n + (lt.includes(t) ? 1 : 0), 0);
+    if (score > 0 && (!best || score > best.score)) {
+      best = { score, bbox: l.bbox };
+    }
+  }
+  // Require a solid match: at least 2 tokens, or all of them for short issues.
+  const need = Math.min(2, tokens.length);
+  return best && best.score >= need ? best.bbox : undefined;
+}
+
 export interface RegionTrackerOpts {
   /** Drop a region after this many ticks without re-detection (default 2) */
   maxMissedTicks?: number;
@@ -123,7 +149,10 @@ export class RegionTracker {
         debug(TAG, `skip unanchored region: "${r.issue}"`);
         continue;
       }
-      const bbox = src!.imageBbox as [number, number, number, number];
+      // Snap to the exact OCR line when its text matches the issue — the
+      // change-region bbox is only the fallback granularity.
+      const lineBbox = refineToLine(r.issue, src!);
+      const bbox = lineBbox ?? (src!.imageBbox as [number, number, number, number]);
       const frameSize = src!.frameSize && src!.frameSize.length === 2
         ? src!.frameSize as [number, number]
         : undefined;
@@ -189,6 +218,7 @@ export function buildRegionTaskText(
   region: RegionHighlight,
   latestDigest?: string,
   userNote?: string,
+  knowledge?: string,
 ): string {
   const parts = [
     `[Region — ${region.action ?? "help"}] ${region.issue}`,
@@ -200,9 +230,18 @@ export function buildRegionTaskText(
   if (latestDigest) {
     parts.push(`\nCurrent situation:\n${latestDigest}`);
   }
+  if (knowledge?.trim()) {
+    parts.push(`\nRelevant long-term knowledge about the user/topic:\n${knowledge.trim()}`);
+  }
   if (userNote?.trim()) {
     parts.push(`\nUser note: ${userNote.trim()}`);
   }
+  parts.push(
+    `\nYou have sinain MCP tools for deeper context: sinain_knowledge_query ` +
+    `(long-term facts about entities/topics), sinain_get_context (current ` +
+    `screen/audio), sinain_get_digest (situation summary). Query them when ` +
+    `the seed above isn't enough.`,
+  );
   parts.push(`\nAct on the specific issue above. Be concrete and concise.`);
   return parts.join("\n");
 }

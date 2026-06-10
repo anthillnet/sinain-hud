@@ -216,6 +216,10 @@ export interface SenseEvent {
   imageData?: string;   // base64 JPEG thumbnail (stripped from older events)
   imageBbox?: number[]; // [x, y, w, h] of the captured region
   frameSize?: number[]; // [w, h] of the full capture frame (bbox coordinate space)
+  /** Per-line OCR boxes in full-frame pixels (top-left origin) — lets the
+   *  region tracker anchor an eye at the exact line of an issue instead of
+   *  the whole change-region. */
+  ocrLines?: { text: string; bbox: [number, number, number, number] }[];
   meta: {
     ssim: number;
     app: string;
