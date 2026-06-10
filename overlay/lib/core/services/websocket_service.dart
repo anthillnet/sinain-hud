@@ -144,6 +144,13 @@ class WebSocketService extends ChangeNotifier {
     sendCommand('set_agent', {'lane': lane, 'agent': agent});
   }
 
+  /// Hold ambient escalations for [seconds] — the user is actively
+  /// interacting (visible thread terminal). Chat messages set this
+  /// server-side; this covers terminal sessions. Throttled by callers.
+  void sendUserBusy([int seconds = 180]) {
+    sendCommand('user_busy', {'seconds': seconds});
+  }
+
   void startLocalAgent([String? agent]) {
     final params = <String, dynamic>{};
     if (agent != null && agent.isNotEmpty) {

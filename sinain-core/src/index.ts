@@ -1396,6 +1396,7 @@ async function main() {
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
     },
+    onUserBusy: (ms) => escalator.noteUserBusy(ms),
     onSetAutoDetect: (enabled) => {
       config.agentConfig.regionsEnabled = enabled;
       if (!enabled) {

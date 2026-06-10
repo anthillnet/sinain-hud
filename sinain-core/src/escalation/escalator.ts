@@ -114,6 +114,8 @@ export class Escalator {
   // User command to inject into the next escalation
   private pendingUserCommand: UserCommand | null = null;
   private static readonly USER_COMMAND_EXPIRY_MS = 120_000; // 2 minutes
+  /** Ambient-escalation quiet window after a user interaction. */
+  private static readonly USER_BUSY_MS = 120_000;
 
   // HTTP spawn queue — for bare agents that poll (mirrors httpPending for escalation)
   private spawnHttpPending: { id: string; task: string; label: string; ts: number } | null = null;
@@ -168,8 +170,23 @@ export class Escalator {
   }
 
   /** Queue a user command to inject into the next escalation. */
+  /** Ambient escalations are suppressed until this timestamp. User-initiated
+   *  commands always pass — this only quiets the periodic digest-driven
+   *  escalations while the user is actively conversing (chat or terminal). */
+  private suppressAmbientUntil = 0;
+
+  /** Mark the user as actively interacting for the next [ms] milliseconds.
+   *  Called on every chat message and (throttled) while a thread terminal
+   *  is visible. Extends but never shortens the current window. */
+  noteUserBusy(ms: number): void {
+    this.suppressAmbientUntil = Math.max(this.suppressAmbientUntil, Date.now() + ms);
+  }
+
   setUserCommand(text: string, source: "text" | "voice" = "text"): void {
     this.pendingUserCommand = { text, ts: Date.now(), source };
+    // A chat message means the user is mid-conversation: hold ambient
+    // escalations so the dialogue isn't interleaved with periodic digests.
+    this.noteUserBusy(Escalator.USER_BUSY_MS);
     const preview = text.length > 60 ? text.slice(0, 60) + "…" : text;
     this.deps.feedBuffer.push(`⌘ Command queued: ${preview}`, "normal", "system", "stream");
     this.deps.wsHandler.broadcast(`⌘ Command queued: ${preview}`, "normal");
@@ -294,6 +311,15 @@ export class Escalator {
 
     if (!escalate && !hasUserCommand) {
       log(TAG, `tick #${entry.id}: not escalating (mode=${this.deps.escalationConfig.mode}, score=${score.total}, hud="${entry.hud.slice(0, 40)}")`);
+      return;
+    }
+
+    // Activity-aware quiet period: the user is mid-conversation (recent chat
+    // message or an open thread terminal) — ambient escalations wait, their
+    // own messages still pass.
+    if (!hasUserCommand && Date.now() < this.suppressAmbientUntil) {
+      const left = Math.round((this.suppressAmbientUntil - Date.now()) / 1000);
+      log(TAG, `tick #${entry.id}: ambient escalation suppressed (user active, ~${left}s left)`);
       return;
     }
 

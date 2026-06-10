@@ -72,6 +72,8 @@ class OverlayShellState extends State<OverlayShell> {
   String? _activeThread;
   // SPIKE: tabs currently showing a terminal instead of the chat feed.
   final Set<String> _terminalThreads = {};
+  // Refreshes core's ambient-escalation quiet window while a terminal is up.
+  Timer? _busyTimer;
   // Regions whose thread already started (Run pressed / follow-up sent)
   final Set<String> _startedRegionThreads = {};
 
@@ -89,6 +91,16 @@ class OverlayShellState extends State<OverlayShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _resizeWindowForState(_state);
       if (_state == HudState.chat) _windowService.makeKeyWindow();
+    });
+
+    // While a thread terminal is visible the user is conversing with an
+    // agent — keep refreshing the ambient-escalation quiet window (core
+    // holds it ~3 min per ping; chat messages refresh it server-side).
+    _busyTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_terminalThreads.contains(_activeTabKey) &&
+          _state != HudState.hidden) {
+        context.read<WebSocketService>().sendUserBusy();
+      }
     });
 
     // Native drag/resize callbacks (macOS only)
@@ -318,6 +330,36 @@ class OverlayShellState extends State<OverlayShell> {
   /// spike can be exercised without waiting for a region thread.
   String get _activeTabKey => _activeThread ?? 'main';
 
+  /// Open (or surface) the terminal for a tab: MAIN gets the escalation-lane
+  /// agent seeded with the current digest; a region tab gets the spawn-lane
+  /// agent seeded with the composed region context — the same seeds chat
+  /// mode uses. run.sh resolves lanes/profiles; the session is cached, so
+  /// re-opening an existing tab just switches the view back.
+  void _openTerminalForTab(String tabKey) {
+    final runSh = ThreadTerminalSession.findRunSh();
+    final isMain = tabKey == 'main';
+    ThreadTerminalSession.of(
+      tabKey,
+      command: runSh != null ? 'bash' : null,
+      args: runSh != null
+          ? [
+              runSh,
+              if (isMain) '--interactive-main' else '--interactive-region',
+              if (!isMain) tabKey,
+            ]
+          : null,
+      banner: runSh == null
+          ? '⚠ sinain-agent/run.sh not found — plain shell. '
+              'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent/run.sh'
+          : null,
+    );
+    context.read<WebSocketService>().sendUserBusy();
+    setState(() {
+      if (!isMain) _startedRegionThreads.add(tabKey);
+      _terminalThreads.add(tabKey);
+    });
+  }
+
   /// True while any spawn task for this region is still in flight.
   bool _regionWorking(WebSocketService ws, String regionId) {
     for (final t in ws.spawnTasks.values) {
@@ -435,20 +477,23 @@ class OverlayShellState extends State<OverlayShell> {
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
               ),
-            // SPIKE: chat ⇄ terminal toggle for the active tab.
+            // SPIKE: chat ⇄ terminal toggle for the active tab. Terminal
+            // mode launches the tab's lane agent seeded with the same
+            // context chat mode uses (escalation lane for MAIN, spawn lane
+            // for regions). Toggling back to chat keeps the session alive.
             if (terminalSpikeEnabled)
               pill(
                 text: _terminalThreads.contains(_activeTabKey)
                     ? '💬 chat'
                     : '⌨ term',
                 selected: _terminalThreads.contains(_activeTabKey),
-                onTap: () => setState(() {
+                onTap: () {
                   if (_terminalThreads.contains(_activeTabKey)) {
-                    _terminalThreads.remove(_activeTabKey);
+                    setState(() => _terminalThreads.remove(_activeTabKey));
                   } else {
-                    _terminalThreads.add(_activeTabKey);
+                    _openTerminalForTab(_activeTabKey);
                   }
-                }),
+                },
               ),
           ],
         ),
@@ -485,6 +530,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   @override
   void dispose() {
+    _busyTimer?.cancel();
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _contentSub?.cancel();
@@ -969,25 +1015,7 @@ class OverlayShellState extends State<OverlayShell> {
               // agent and seeds it with the same composed region context the
               // headless Run sends (GET /region/:id/task on core).
               onTerminal: terminalSpikeEnabled
-                  ? () {
-                      final region = _activeRegion!;
-                      final runSh = ThreadTerminalSession.findRunSh();
-                      ThreadTerminalSession.of(
-                        region.id,
-                        command: runSh != null ? 'bash' : null,
-                        args: runSh != null
-                            ? [runSh, '--interactive-region', region.id]
-                            : null,
-                        banner: runSh == null
-                            ? '⚠ sinain-agent/run.sh not found — plain shell. '
-                                'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent/run.sh'
-                            : null,
-                      );
-                      setState(() {
-                        _startedRegionThreads.add(region.id);
-                        _terminalThreads.add(region.id);
-                      });
-                    }
+                  ? () => _openTerminalForTab(_activeRegion!.id)
                   : null,
               onDismiss: () => setState(() => _activeRegion = null),
             ),
