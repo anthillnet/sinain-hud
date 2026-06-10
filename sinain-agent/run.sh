@@ -21,10 +21,14 @@ case "${1:-}" in
 esac
 
 # Load .env as fallback — does NOT override vars already in the environment
-# (e.g. vars set by the launcher from ~/.sinain/.env)
-# Load project root .env (single config for all subsystems)
-ENV_FILE="$SCRIPT_DIR/../.env"
-if [ -f "$ENV_FILE" ]; then
+# (e.g. vars set by the launcher from ~/.sinain/.env).
+# Candidates in priority order: project root .env (dev), then ~/.sinain/.env
+# (wizard-written user config). The second matters when run.sh is invoked
+# directly — e.g. the overlay's thread terminal — without start.sh/
+# launch-backend.sh having exported the user env first (profile env like
+# OPENAI_API_KEY="${OPENROUTER_API_KEY}" expands empty otherwise → 401s).
+for ENV_FILE in "$SCRIPT_DIR/../.env" "$HOME/.sinain/.env"; do
+  [ -f "$ENV_FILE" ] || continue
   while IFS='=' read -r key val; do
     # Skip comments and blank lines
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
@@ -39,7 +43,7 @@ if [ -f "$ENV_FILE" ]; then
       export "$key=$val"
     fi
   done < "$ENV_FILE"
-fi
+done
 
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
