@@ -867,31 +867,29 @@ PY
     printf '%s\n' "$task"
     exit 0
   fi
+  # Unified seeding for ALL agent TUIs: write the task to a file and emit
+  # the ⟦SINAIN-SEED:<path>⟧ marker — the overlay thread terminal types a
+  # pointer message into the TUI once it's ready (output quiescence + modal
+  # detection on the Dart side). One mechanism instead of per-CLI prompt
+  # flags, which proved unreliable (claude's trust modal eats positionals,
+  # openclaude drops them entirely, hermes/codex have no usable flag).
   case "$type" in
-    claude|openclaude)
-      # Neither TUI reliably accepts a seed via CLI (openclaude drops both
-      # the positional prompt and --append-system-prompt — verified under a
-      # scripted PTY; current claude builds don't auto-submit the positional
-      # in interactive mode either). Seed via the overlay instead: write the
-      # task to a file and emit a marker line — the thread terminal watches
-      # for it and types a pointer message once the TUI is ready.
+    claude|openclaude|codex|hermes)
       SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
       printf '%s' "$task" > "$SEED_FILE"
       echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+      ;;
+  esac
+  case "$type" in
+    claude|openclaude)
       exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed"
       ;;
     codex)
-      exec "$bin" "$task"
+      exec "$bin"
       ;;
     hermes)
-      # `hermes chat` is a full interactive TUI but takes no initial-prompt
-      # flag (-q answers once and exits). Same overlay-typed seed mechanism
-      # as openclaude — marker line + seed file, the terminal types the
-      # pointer once the TUI is up. Hermes already has the sinain MCP
-      # server registered in ~/.hermes/config.yaml for deeper context.
-      SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
-      printf '%s' "$task" > "$SEED_FILE"
-      echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+      # Hermes already has the sinain MCP server registered in
+      # ~/.hermes/config.yaml for deeper context pulls.
       exec "$bin" chat
       ;;
     *)
