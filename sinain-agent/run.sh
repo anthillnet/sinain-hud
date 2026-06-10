@@ -815,7 +815,8 @@ You have sinain MCP tools (sinain_get_context for screen/audio detail, sinain_kn
   # mcp-config.json uses repo-relative paths (../sinain-core/…) that resolve
   # against the agent's cwd. Headless polling runs from sinain-agent/ so they
   # work; the interactive terminal starts in $HOME — rewrite to absolute.
-  MCP_ABS=$(mktemp /tmp/sinain-mcp-XXXXXX.json)
+  # BSD mktemp needs trailing Xs (no suffix) — use a temp dir to keep .json
+  MCP_ABS="$(mktemp -d /tmp/sinain-mcp-XXXXXX)/mcp.json"
   python3 - "$MCP_CONFIG" "$SCRIPT_DIR" > "$MCP_ABS" <<'PY'
 import json, os, sys
 path, base = sys.argv[1], sys.argv[2]
