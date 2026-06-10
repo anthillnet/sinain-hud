@@ -812,6 +812,23 @@ You have sinain MCP tools (sinain_get_context for screen/audio detail, sinain_kn
   fi
   apply_profile_env "$profile"
   model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
+  # mcp-config.json uses repo-relative paths (../sinain-core/…) that resolve
+  # against the agent's cwd. Headless polling runs from sinain-agent/ so they
+  # work; the interactive terminal starts in $HOME — rewrite to absolute.
+  MCP_ABS=$(mktemp /tmp/sinain-mcp-XXXXXX.json)
+  python3 - "$MCP_CONFIG" "$SCRIPT_DIR" > "$MCP_ABS" <<'PY'
+import json, os, sys
+path, base = sys.argv[1], sys.argv[2]
+cfg = json.load(open(path))
+for s in (cfg.get("mcpServers") or {}).values():
+    c = s.get("command", "")
+    if c.startswith("."):
+        s["command"] = os.path.normpath(os.path.join(base, c))
+    s["args"] = [os.path.normpath(os.path.join(base, a)) if a.startswith(".") else a
+                 for a in (s.get("args") or [])]
+print(json.dumps(cfg))
+PY
+  MCP_CONFIG="$MCP_ABS"
   # Same pre-approved whitelist as headless spawns. NOTE: no --settings —
   # interactive sessions should use the agent's native terminal approval UX,
   # not the overlay-routed PreToolUse hook from sinain-agent/.claude.
