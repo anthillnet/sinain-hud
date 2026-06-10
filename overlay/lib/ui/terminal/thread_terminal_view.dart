@@ -117,16 +117,23 @@ class ThreadTerminalSession {
     var seedFile = '';
     var seedTyped = false;
     var carry = '';
-    var tail = ''; // rolling ANSI-stripped output, for dialog detection
+    var screen = ''; // ANSI-stripped text of the CURRENT screen (since last clear)
     Timer? settle;
     Timer? cap;
     final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
     final ansi = RegExp(r'\x1b\[[0-9;:?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)');
+    // Full-screen-clear sequences a TUI emits when it repaints (dialog →
+    // main view): ESC[2J, ESC[3J, ESC[H ESC[J, RIS (ESCc), alt-screen
+    // enter/leave. We reset `screen` at the LAST of these per chunk so the
+    // buffer only ever holds the CURRENT screen — otherwise a dismissed
+    // dialog's text lingers and matches forever.
+    final clearScreen = RegExp(
+        r'\x1b\[[0-3]?J|\x1bc|\x1b\[\?1049[hl]');
     // Startup modals (claude's folder-trust check, theme pickers) own the
     // keyboard — typing into them answers the dialog and the seed is lost.
     // TUIs position each word with cursor moves, so ANSI-stripped text has
     // NO reliable spaces ("trust this folder" → "trustthisfolder"). Match
-    // against a whitespace-stripped, lowercased tail with space-free needles.
+    // against a whitespace-stripped, lowercased screen with space-free needles.
     const modalNeedles = [
       'trustthisfolder',
       'doyoutrust',
@@ -135,25 +142,17 @@ class ThreadTerminalSession {
       'yes,itrust',
     ];
 
-    var sawModal = false;
     void maybeTypeSeed() {
       if (seedTyped || session.exited) return;
-      final norm = tail.toLowerCase().replaceAll(RegExp(r'\s+'), '');
-      if (modalNeedles.any(norm.contains)) {
-        // A modal owns the keyboard (claude's folder-trust check, theme
-        // picker). Don't type into it — clear the tail and retry. Clearing
-        // means the stale dialog text won't keep matching after the user
-        // answers (the post-answer redraw refills tail with fresh output).
-        if (kDebugMode) print('[seed] modal on screen — retry in 1.5s');
-        sawModal = true;
-        tail = '';
-        settle?.cancel();
-        settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
-        return;
-      }
-      if (sawModal && norm.isEmpty) {
-        // Modal was up and nothing has redrawn since — it's still on screen,
-        // statically waiting for the user. Keep waiting; don't type blind.
+      final norm = screen.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      final hit = modalNeedles.where(norm.contains).toList();
+      if (hit.isNotEmpty) {
+        // A modal owns the keyboard — wait for the user to answer it. The
+        // post-answer screen clear resets `screen`, so this stops matching
+        // once the dialog is gone.
+        if (kDebugMode) {
+          print('[seed] modal needle=$hit — retry 1.5s');
+        }
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
         return;
@@ -179,10 +178,16 @@ class ThreadTerminalSession {
       terminal.write(data);
       if (seedTyped) return;
       if (seedFile.isNotEmpty) {
-        // Marker seen — every new chunk means the TUI is still drawing;
-        // track recent output and (re)arm the quiescence timer.
-        tail += data.replaceAll(ansi, '');
-        if (tail.length > 2000) tail = tail.substring(tail.length - 2000);
+        // Track the current screen. If this chunk contains a screen-clear,
+        // drop everything before the LAST one — a repaint means the prior
+        // screen (e.g. a dismissed trust dialog) is gone.
+        final clearMatches = clearScreen.allMatches(data).toList();
+        if (clearMatches.isNotEmpty) {
+          screen = data.substring(clearMatches.last.end).replaceAll(ansi, '');
+        } else {
+          screen += data.replaceAll(ansi, '');
+        }
+        if (screen.length > 4000) screen = screen.substring(screen.length - 4000);
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
         return;
