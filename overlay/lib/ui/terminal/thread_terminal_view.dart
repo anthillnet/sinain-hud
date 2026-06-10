@@ -124,18 +124,36 @@ class ThreadTerminalSession {
     final ansi = RegExp(r'\x1b\[[0-9;:?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)');
     // Startup modals (claude's folder-trust check, theme pickers) own the
     // keyboard — typing into them answers the dialog and the seed is lost.
-    final modal = RegExp(
-        r'trust this folder|Do you trust|Enter to confirm.*Esc|Esc to cancel',
-        caseSensitive: false);
+    // TUIs position each word with cursor moves, so ANSI-stripped text has
+    // NO reliable spaces ("trust this folder" → "trustthisfolder"). Match
+    // against a whitespace-stripped, lowercased tail with space-free needles.
+    const modalNeedles = [
+      'trustthisfolder',
+      'doyoutrust',
+      'esctocancel',
+      'entertoconfirm',
+      'yes,itrust',
+    ];
 
+    var sawModal = false;
     void maybeTypeSeed() {
       if (seedTyped || session.exited) return;
-      if (modal.hasMatch(tail)) {
+      final norm = tail.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      if (modalNeedles.any(norm.contains)) {
         // A modal owns the keyboard (claude's folder-trust check, theme
-        // picker). Don't type into it — retry shortly. Retrying (rather
-        // than waiting for output to re-arm settle) means a modal the user
-        // leaves on screen can't deadlock seeding.
+        // picker). Don't type into it — clear the tail and retry. Clearing
+        // means the stale dialog text won't keep matching after the user
+        // answers (the post-answer redraw refills tail with fresh output).
         if (kDebugMode) print('[seed] modal on screen — retry in 1.5s');
+        sawModal = true;
+        tail = '';
+        settle?.cancel();
+        settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
+        return;
+      }
+      if (sawModal && norm.isEmpty) {
+        // Modal was up and nothing has redrawn since — it's still on screen,
+        // statically waiting for the user. Keep waiting; don't type blind.
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
         return;
