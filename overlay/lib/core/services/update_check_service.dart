@@ -43,6 +43,7 @@ class UpdateCheckService extends ChangeNotifier {
     try {
       installedVersion ??= _readInstalledVersion();
       if (installedVersion == null) return; // not a DMG install
+      if (_networkOptedOut()) return; // paranoid / full-local: no beacons
 
       final latest = await _fetchLatestDmgVersion();
       if (latest == null) return;
@@ -56,6 +57,28 @@ class UpdateCheckService extends ChangeNotifier {
     } catch (e) {
       if (kDebugMode) print('[UpdateCheck] failed: $e');
     }
+  }
+
+  /// Honor the privacy promise: in paranoid mode or full-local mode the user
+  /// chose "nothing leaves my machine" — that includes update-check requests
+  /// to the GitHub API. Reads the same ~/.sinain/.env the backend uses.
+  bool _networkOptedOut() {
+    try {
+      final home = Platform.environment['HOME'] ?? '';
+      if (home.isEmpty) return false;
+      final env = File('$home/.sinain/.env');
+      if (!env.existsSync()) return false;
+      for (final line in env.readAsLinesSync()) {
+        final l = line.trim();
+        if (l.startsWith('PRIVACY_MODE=') && l.endsWith('paranoid')) {
+          return true;
+        }
+        if (l.startsWith('SINAIN_LOCAL_MODE=') && l.endsWith('true')) {
+          return true;
+        }
+      }
+    } catch (_) {/* unreadable env — default to checking */}
+    return false;
   }
 
   String? _readInstalledVersion() {
