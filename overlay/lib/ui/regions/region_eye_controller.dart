@@ -6,6 +6,26 @@ import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/window_service.dart';
 
+/// Shift [pos] down in eye-sized steps until it no longer overlaps any of
+/// the already-[placed] eyes, wrapping to the top edge at the bottom of the
+/// screen. Bounded — gives up (accepts overlap) on a saturated screen.
+/// Pure function so the collision behavior is unit-testable.
+Offset resolveEyeCollision(Offset pos, Iterable<Offset> placed, double screenH,
+    {double eyeSize = 48}) {
+  final gap = eyeSize + 8;
+  bool collides(Offset p) => placed.any(
+      (o) => (o.dx - p.dx).abs() < eyeSize && (o.dy - p.dy).abs() < eyeSize);
+  var candidate = pos;
+  for (var attempts = 0; collides(candidate) && attempts < 40; attempts++) {
+    var next = candidate.translate(0, gap);
+    if (next.dy > screenH - eyeSize - 8) {
+      next = Offset(candidate.dx, 8.0); // wrap to the top edge
+    }
+    candidate = next;
+  }
+  return candidate;
+}
+
 /// Orchestrates Grammarly-mode region eyes (macOS).
 ///
 /// Listens to region_highlight updates, positions native eye panels at the
@@ -110,7 +130,7 @@ class RegionEyeController {
       );
       // De-overlap: regions anchored to the same sense event share a bbox —
       // shift colliding eyes downward so each stays visible and tappable.
-      pos = _resolveCollision(pos, screenH);
+      pos = resolveEyeCollision(pos, _eyePositions.values, screenH);
       _eyePositions[r.id] = pos;
       eyes.add({
         'id': r.id,
@@ -120,24 +140,6 @@ class RegionEyeController {
       });
     }
     await windowService.showRegionEyes(eyes);
-  }
-
-  /// Shift [pos] down in eye-sized steps until it no longer overlaps any
-  /// already-placed eye, wrapping to the top edge at the bottom of the
-  /// screen. Bounded — gives up (accepts overlap) on a saturated screen.
-  Offset _resolveCollision(Offset pos, double screenH) {
-    const gap = _eyeSize + 8;
-    bool collides(Offset p) => _eyePositions.values.any(
-        (o) => (o.dx - p.dx).abs() < _eyeSize && (o.dy - p.dy).abs() < _eyeSize);
-    var candidate = pos;
-    for (var attempts = 0; collides(candidate) && attempts < 40; attempts++) {
-      var next = candidate.translate(0, gap);
-      if (next.dy > screenH - _eyeSize - 8) {
-        next = Offset(candidate.dx, 8.0); // wrap to the top edge
-      }
-      candidate = next;
-    }
-    return candidate;
   }
 
   void _onTap(String id) {
