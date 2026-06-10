@@ -7,6 +7,7 @@ on:
       - 'docs/**'
       - 'firebase.json'
       - '.firebaserc'
+      - 'RELEASE_VERSIONS.json'
 
 permissions:
   checks: write
@@ -17,6 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Render the DMG download CTA from RELEASE_VERSIONS.json (with a
+      # fallback to the newest published macos-v* release) — the committed
+      # URL in docs/index.html is never authoritative.
+      - name: Render download link
+        run: ./tools/site/set-dmg-link.sh
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
