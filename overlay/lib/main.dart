@@ -9,6 +9,7 @@ import 'core/services/settings_service.dart';
 import 'core/services/first_run_service.dart';
 import 'core/services/provisioning_service.dart';
 import 'core/services/websocket_service.dart';
+import 'core/services/update_check_service.dart';
 import 'core/services/window_service.dart';
 import 'ui/first_run/first_run_wizard.dart';
 import 'ui/first_run/provisioning_banner.dart';
@@ -59,6 +60,10 @@ Future<void> _startApp() async {
   final provisioningService = ProvisioningService();
 
   final wsService = WebSocketService(url: settingsService.settings.wsUrl);
+
+  // In-app update check (DMG installs only — no-op elsewhere). DMG installs
+  // have no auto-update; this surfaces "update available" in display settings.
+  final updateCheckService = UpdateCheckService()..start();
 
   // Configure native window
   await windowService.setTransparent();
@@ -164,6 +169,7 @@ Future<void> _startApp() async {
         ChangeNotifierProvider.value(value: provisioningService),
         ChangeNotifierProvider.value(value: settingsService),
         ChangeNotifierProvider.value(value: wsService),
+        ChangeNotifierProvider.value(value: updateCheckService),
         Provider.value(value: windowService),
       ],
       child: const SinainHudApp(),

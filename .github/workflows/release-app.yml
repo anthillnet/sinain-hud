@@ -125,6 +125,10 @@ jobs:
       # ── Stage backend + assemble the .app ───────────────────────────────────
       - name: Stage self-contained backend
         if: steps.preflight.outputs.ready == 'true'
+        env:
+          # Baked into Resources/DMG_VERSION — the overlay's in-app update
+          # check compares it against the latest macos-v* release.
+          SINAIN_DMG_VERSION: ${{ inputs.tag || github.event.release.tag_name || '' }}
         run: ./tools/dmg/stage-backend.sh
 
       - name: Assemble Sinain.app

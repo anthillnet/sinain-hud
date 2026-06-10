@@ -278,5 +278,13 @@ _git_sha="$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown
 echo "${_git_sha}-$(date -u +%Y%m%d%H%M%S)" > "$RES/BUILD_ID"
 echo "    build stamp: $(cat "$RES/BUILD_ID")"
 
+# DMG release version (CI passes SINAIN_DMG_VERSION=macos-vX.Y.Z) — the
+# overlay's in-app update check reads Resources/DMG_VERSION and compares it
+# against the latest macos-v* GitHub release. Local builds may omit it.
+if [ -n "${SINAIN_DMG_VERSION:-}" ]; then
+  echo "${SINAIN_DMG_VERSION#macos-v}" > "$RES/DMG_VERSION"
+  echo "    dmg version: $(cat "$RES/DMG_VERSION")"
+fi
+
 bold "✓ Staged backend → $RES"
 du -sh "$RES" 2>/dev/null | awk '{print "  size: "$1}'
