@@ -29,6 +29,8 @@ export interface CommandDeps {
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
+  /** Hold ambient escalations for [ms] — user is actively interacting. */
+  onUserBusy?: (ms: number) => void;
   /** Start the local bare-agent runner for the selected escalation agent. */
   onStartLocalAgent?: (agent?: string) => {
     ok: boolean;
@@ -256,6 +258,20 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         log(TAG, `auto-detect issues ${enabled ? "enabled" : "disabled"}`);
       } else {
         log(TAG, `set_auto_detect: no handler wired`);
+      }
+      break;
+    }
+    case "user_busy": {
+      // Overlay signals active user interaction (visible thread terminal,
+      // throttled). Holds ambient escalations; user commands still pass.
+      // seconds <= 0 releases the quiet window immediately (user left the
+      // terminal view); absent defaults to 120.
+      const raw = Number((msg as any).seconds);
+      const seconds = isNaN(raw) ? 120 : Math.min(Math.max(raw, 0), 600);
+      if (deps.onUserBusy) {
+        deps.onUserBusy(seconds * 1000);
+      } else {
+        log(TAG, `user_busy: no handler wired`);
       }
       break;
     }

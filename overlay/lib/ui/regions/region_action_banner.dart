@@ -17,6 +17,10 @@ class RegionActionBanner extends StatelessWidget {
   final VoidCallback onRun;
   final VoidCallback onDismiss;
 
+  /// SPIKE (thread terminal): open this region as an interactive agent
+  /// terminal instead of a chat thread. Hidden when null (gate off).
+  final VoidCallback? onTerminal;
+
   const RegionActionBanner({
     super.key,
     required this.region,
@@ -24,6 +28,7 @@ class RegionActionBanner extends StatelessWidget {
     required this.threadStarted,
     required this.onRun,
     required this.onDismiss,
+    this.onTerminal,
   });
 
   String get _runLabel {
@@ -140,6 +145,37 @@ class RegionActionBanner extends StatelessWidget {
                 ),
               ),
             ),
+          if (!threadStarted && onTerminal != null) ...[
+            const SizedBox(width: 4),
+            HudTooltip(
+              message:
+                  'Open an interactive terminal with the spawn agent + this region\'s context',
+              child: GestureDetector(
+                onTap: onTerminal,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      border:
+                          Border.all(color: accent.withValues(alpha: 0.45)),
+                    ),
+                    child: Text(
+                      '⌨ Term',
+                      style: TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: 9,
+                        color: accent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(width: 6),
           HudTooltip(
             message: 'Dismiss',

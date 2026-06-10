@@ -18,6 +18,7 @@ import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
 import 'regions/region_action_banner.dart';
 import 'regions/region_eye_controller.dart';
+import 'terminal/thread_terminal_view.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 
@@ -69,6 +70,10 @@ class OverlayShellState extends State<OverlayShell> {
   // Selected chat tab: null = MAIN feed, otherwise a region thread id.
   // Each ROI is its own conversation; the input routes to the active tab.
   String? _activeThread;
+  // SPIKE: tabs currently showing a terminal instead of the chat feed.
+  final Set<String> _terminalThreads = {};
+  // Refreshes core's ambient-escalation quiet window while a terminal is up.
+  Timer? _busyTimer;
   // Regions whose thread already started (Run pressed / follow-up sent)
   final Set<String> _startedRegionThreads = {};
 
@@ -86,6 +91,16 @@ class OverlayShellState extends State<OverlayShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _resizeWindowForState(_state);
       if (_state == HudState.chat) _windowService.makeKeyWindow();
+    });
+
+    // While a thread terminal is visible the user is conversing with an
+    // agent — keep refreshing the ambient-escalation quiet window (core
+    // holds it ~3 min per ping; chat messages refresh it server-side).
+    _busyTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_terminalThreads.contains(_activeTabKey) &&
+          _state != HudState.hidden) {
+        context.read<WebSocketService>().sendUserBusy();
+      }
     });
 
     // Native drag/resize callbacks (macOS only)
@@ -297,15 +312,66 @@ class OverlayShellState extends State<OverlayShell> {
         _activeRegion = live;
       }
     });
+    _syncBusyState();
   }
 
   void _closeThread(String id) {
     context.read<WebSocketService>().closeRegionThread(id);
+    ThreadTerminalSession.close(id); // kill the thread's PTY, if any
     setState(() {
+      _terminalThreads.remove(id);
       if (_activeThread == id) {
         _activeThread = null;
         _activeRegion = null;
       }
+    });
+    _syncBusyState();
+  }
+
+  /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
+  /// spike can be exercised without waiting for a region thread.
+  String get _activeTabKey => _activeThread ?? 'main';
+
+  /// Tell core whether the user is conversing in a terminal right now.
+  /// Visible terminal → hold ambient escalations (refreshed by the 30s
+  /// heartbeat); anything else → release the quiet window immediately so
+  /// returning to chat doesn't leave a stale ~3 min suppression tail.
+  void _syncBusyState() {
+    final ws = context.read<WebSocketService>();
+    if (_terminalThreads.contains(_activeTabKey) && _state != HudState.hidden) {
+      ws.sendUserBusy();
+    } else {
+      ws.sendUserBusy(0);
+    }
+  }
+
+  /// Open (or surface) the terminal for a tab: MAIN gets the escalation-lane
+  /// agent seeded with the current digest; a region tab gets the spawn-lane
+  /// agent seeded with the composed region context — the same seeds chat
+  /// mode uses. run.sh resolves lanes/profiles; the session is cached, so
+  /// re-opening an existing tab just switches the view back.
+  void _openTerminalForTab(String tabKey) {
+    final runSh = ThreadTerminalSession.findRunSh();
+    final isMain = tabKey == 'main';
+    ThreadTerminalSession.of(
+      tabKey,
+      command: runSh != null ? 'bash' : null,
+      args: runSh != null
+          ? [
+              runSh,
+              if (isMain) '--interactive-main' else '--interactive-region',
+              if (!isMain) tabKey,
+            ]
+          : null,
+      banner: runSh == null
+          ? '⚠ sinain-agent/run.sh not found — plain shell. '
+              'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent/run.sh'
+          : null,
+    );
+    context.read<WebSocketService>().sendUserBusy();
+    setState(() {
+      if (!isMain) _startedRegionThreads.add(tabKey);
+      _terminalThreads.add(tabKey);
     });
   }
 
@@ -325,7 +391,9 @@ class OverlayShellState extends State<OverlayShell> {
       ...ws.regionThreadLabels.keys,
       if (_activeRegion != null) _activeRegion!.id,
     }.toList();
-    if (ids.isEmpty) return const SizedBox.shrink();
+    // SPIKE: with the terminal enabled the row is always shown so the ⌨
+    // toggle is reachable from MAIN even before any region thread exists.
+    if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
 
     String labelFor(String id) {
       var label = ws.regionThreadLabels[id];
@@ -424,6 +492,25 @@ class OverlayShellState extends State<OverlayShell> {
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
               ),
+            // SPIKE: chat ⇄ terminal toggle for the active tab. Terminal
+            // mode launches the tab's lane agent seeded with the same
+            // context chat mode uses (escalation lane for MAIN, spawn lane
+            // for regions). Toggling back to chat keeps the session alive.
+            if (terminalSpikeEnabled)
+              pill(
+                text: _terminalThreads.contains(_activeTabKey)
+                    ? '💬 chat'
+                    : '⌨ term',
+                selected: _terminalThreads.contains(_activeTabKey),
+                onTap: () {
+                  if (_terminalThreads.contains(_activeTabKey)) {
+                    setState(() => _terminalThreads.remove(_activeTabKey));
+                  } else {
+                    _openTerminalForTab(_activeTabKey);
+                  }
+                  _syncBusyState();
+                },
+              ),
           ],
         ),
       ),
@@ -459,6 +546,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   @override
   void dispose() {
+    _busyTimer?.cancel();
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _contentSub?.cancel();
@@ -895,17 +983,22 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                _activeThread == null
-                    ? const FeedView(
-                        channel: FeedChannel.agent,
-                        emptyLabel: 'awaiting sinain…',
+                _terminalThreads.contains(_activeTabKey)
+                    ? ThreadTerminalView(
+                        key: ValueKey('term-$_activeTabKey'),
+                        threadId: _activeTabKey,
                       )
-                    : FeedView(
-                        key: ValueKey('thread-$_activeThread'),
-                        regionId: _activeThread,
-                        channel: FeedChannel.agent,
-                        emptyLabel: 'no messages yet — press ⚡ Run',
-                      ),
+                    : _activeThread == null
+                        ? const FeedView(
+                            channel: FeedChannel.agent,
+                            emptyLabel: 'awaiting sinain…',
+                          )
+                        : FeedView(
+                            key: ValueKey('thread-$_activeThread'),
+                            regionId: _activeThread,
+                            channel: FeedChannel.agent,
+                            emptyLabel: 'no messages yet — press ⚡ Run',
+                          ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),
@@ -933,6 +1026,13 @@ class OverlayShellState extends State<OverlayShell> {
                 setState(() => _startedRegionThreads.add(region.id));
                 _regionEyes?.run(region);
               },
+              // SPIKE: interactive terminal variant of Run — the PTY launches
+              // run.sh --interactive-region, which resolves the spawn-lane
+              // agent and seeds it with the same composed region context the
+              // headless Run sends (GET /region/:id/task on core).
+              onTerminal: terminalSpikeEnabled
+                  ? () => _openTerminalForTab(_activeRegion!.id)
+                  : null,
               onDismiss: () => setState(() => _activeRegion = null),
             ),
           // Permission banner — visible above the input field whenever an

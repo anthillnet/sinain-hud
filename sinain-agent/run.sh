@@ -3,11 +3,32 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Interactive thread-terminal modes (the overlay's thread terminal runs
+# these — no polling, no roster registration; see branch below the proxy
+# block):
+#   --interactive-region <id>  spawn-lane agent + composed region context
+#   --interactive-main         escalation-lane agent + current digest
+INTERACTIVE_MODE=""
+INTERACTIVE_REGION=""
+case "${1:-}" in
+  --interactive-region)
+    INTERACTIVE_MODE="region"
+    INTERACTIVE_REGION="${2:?usage: run.sh --interactive-region <regionId>}"
+    ;;
+  --interactive-main)
+    INTERACTIVE_MODE="main"
+    ;;
+esac
+
 # Load .env as fallback — does NOT override vars already in the environment
-# (e.g. vars set by the launcher from ~/.sinain/.env)
-# Load project root .env (single config for all subsystems)
-ENV_FILE="$SCRIPT_DIR/../.env"
-if [ -f "$ENV_FILE" ]; then
+# (e.g. vars set by the launcher from ~/.sinain/.env).
+# Candidates in priority order: project root .env (dev), then ~/.sinain/.env
+# (wizard-written user config). The second matters when run.sh is invoked
+# directly — e.g. the overlay's thread terminal — without start.sh/
+# launch-backend.sh having exported the user env first (profile env like
+# OPENAI_API_KEY="${OPENROUTER_API_KEY}" expands empty otherwise → 401s).
+for ENV_FILE in "$SCRIPT_DIR/../.env" "$HOME/.sinain/.env"; do
+  [ -f "$ENV_FILE" ] || continue
   while IFS='=' read -r key val; do
     # Skip comments and blank lines
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
@@ -22,7 +43,7 @@ if [ -f "$ENV_FILE" ]; then
       export "$key=$val"
     fi
   done < "$ENV_FILE"
-fi
+done
 
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
@@ -653,8 +674,10 @@ fi
 ESC_AGENT="$AGENT"
 SPAWN_AGENT="$AGENT"
 
-# Register roster with sinain-core (fire-and-forget; core may not be ready)
-if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
+# Register roster with sinain-core (fire-and-forget; core may not be ready).
+# Skipped in interactive mode: a second register would echo `current=$AGENT`
+# back to core and reset the user's per-lane selections.
+if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ] && [ -z "$INTERACTIVE_MODE" ]; then
   REGISTER_PAYLOAD=$(python3 -c "
 import json, sys
 available = sys.argv[1].split(' ') if sys.argv[1] else []
@@ -755,6 +778,126 @@ if $PROXY_NEEDED; then
       echo "  ⚠ OPENAI_BASE_URL points at :$PROXY_PORT but $PROXY_SCRIPT missing"
     fi
   fi
+fi
+
+# --- Interactive thread terminal (region or main) ---
+# Resolve the lane's CURRENT agent from core's config piggyback (read-only
+# peek at /escalation/pending — same field the poll loop uses), fetch the
+# seed context, and exec the agent CLI in its own REPL. The user converses
+# with the lane's agent directly in the terminal.
+if [ -n "$INTERACTIVE_MODE" ]; then
+  if [ "$INTERACTIVE_MODE" = "region" ]; then
+    lane_field="spawnAgent"
+  else
+    lane_field="escalationAgent"
+  fi
+  lane=$(curl -sf -m 2 "$CORE_URL/escalation/pending" \
+    | python3 -c "import sys,json; print((json.load(sys.stdin).get('config') or {}).get('$lane_field',''))" 2>/dev/null || true)
+  profile="${lane:-$AGENT}"
+  bin=$(prof_get_or "$profile" bin "$profile")
+  type=$(prof_get_or "$profile" type "$profile")
+  # Not every roster agent has an interactive CLI (aider is pipe-only,
+  # openclaw is gateway-routed). Substitute the first interactive-capable
+  # profile rather than dropping the user into a context-less plain shell.
+  case "$type" in
+    claude|openclaude|codex|hermes) ;;
+    *)
+      for _alt in "${ALL_PROFILES[@]:-}"; do
+        _t=$(prof_get_or "$_alt" type "$_alt")
+        case "$_t" in claude|openclaude|codex|hermes) ;; *) continue ;; esac
+        command -v "$(prof_get_or "$_alt" bin "$_alt")" >/dev/null 2>&1 || continue
+        echo "⚠ lane agent '$profile' ($type) has no interactive mode — using '$_alt' for this terminal"
+        profile="$_alt"
+        type="$_t"
+        bin=$(prof_get_or "$_alt" bin "$_alt")
+        break
+      done
+      ;;
+  esac
+  if [ "$INTERACTIVE_MODE" = "region" ]; then
+    task=$(curl -sf -m 5 "$CORE_URL/region/$INTERACTIVE_REGION/task" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
+    if [ -z "$task" ]; then
+      task="(The screen-region context expired before this terminal opened. Ask the user what they need help with on screen.)"
+    fi
+  else
+    # MAIN: seed with the current situation digest — the same context the
+    # ambient escalation would carry. The agent pulls more via MCP itself.
+    digest=$(curl -sf -m 3 "$CORE_URL/agent/digest" \
+      | python3 -c "import sys,json; d=json.load(sys.stdin).get('digest') or {}; print(d.get('digest') or '')" 2>/dev/null || true)
+    task="You are the sinain HUD agent in an INTERACTIVE terminal session with the user (ambient escalations hold while they're here, their messages come to you directly).
+
+Current situation digest:
+${digest:-(no digest yet — quiet session so far)}
+
+You have sinain MCP tools (sinain_get_context for screen/audio detail, sinain_knowledge_query for long-term facts). Open with a one-line read of the situation, then ask what they need."
+  fi
+  apply_profile_env "$profile"
+  model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
+  # mcp-config.json uses repo-relative paths (../sinain-core/…) that resolve
+  # against the agent's cwd. Headless polling runs from sinain-agent/ so they
+  # work; the interactive terminal starts in $HOME — rewrite to absolute.
+  # BSD mktemp needs trailing Xs (no suffix) — use a temp dir to keep .json
+  MCP_ABS="$(mktemp -d /tmp/sinain-mcp-XXXXXX)/mcp.json"
+  python3 - "$MCP_CONFIG" "$SCRIPT_DIR" > "$MCP_ABS" <<'PY'
+import json, os, sys
+path, base = sys.argv[1], sys.argv[2]
+cfg = json.load(open(path))
+for s in (cfg.get("mcpServers") or {}).values():
+    c = s.get("command", "")
+    if c.startswith("."):
+        s["command"] = os.path.normpath(os.path.join(base, c))
+    s["args"] = [os.path.normpath(os.path.join(base, a)) if a.startswith(".") else a
+                 for a in (s.get("args") or [])]
+print(json.dumps(cfg))
+PY
+  MCP_CONFIG="$MCP_ABS"
+  # Same pre-approved whitelist as headless spawns. NOTE: no --settings —
+  # interactive sessions should use the agent's native terminal approval UX,
+  # not the overlay-routed PreToolUse hook from sinain-agent/.claude.
+  spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS} ToolSearch"
+  echo "⌨ thread terminal — agent=$profile ($type), scope=${INTERACTIVE_REGION:-main}"
+  # Debug: SINAIN_TERM_DRYRUN=1 prints the resolved invocation instead of
+  # exec'ing the agent — for diagnosing seeding/lane issues from a shell.
+  if [ -n "${SINAIN_TERM_DRYRUN:-}" ]; then
+    echo "bin=$bin"
+    echo "mcp_config=$MCP_CONFIG"
+    echo "allowed=$spawn_allowed"
+    echo "--- task (${#task} chars) ---"
+    printf '%s\n' "$task"
+    exit 0
+  fi
+  # Unified seeding for ALL agent TUIs: write the task to a file and emit
+  # the ⟦SINAIN-SEED:<path>⟧ marker — the overlay thread terminal types a
+  # pointer message into the TUI once it's ready (output quiescence + modal
+  # detection on the Dart side). One mechanism instead of per-CLI prompt
+  # flags, which proved unreliable (claude's trust modal eats positionals,
+  # openclaude drops them entirely, hermes/codex have no usable flag).
+  case "$type" in
+    claude|openclaude|codex|hermes)
+      SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
+      printf '%s' "$task" > "$SEED_FILE"
+      echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+      ;;
+  esac
+  case "$type" in
+    claude|openclaude)
+      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed"
+      ;;
+    codex)
+      exec "$bin"
+      ;;
+    hermes)
+      # Hermes already has the sinain MCP server registered in
+      # ~/.hermes/config.yaml for deeper context pulls.
+      exec "$bin" chat
+      ;;
+    *)
+      echo "⚠ agent type '$type' has no interactive terminal mode — plain shell instead"
+      echo "  (region context lost; use the chat Run button for this agent)"
+      exec "${SHELL:-/bin/zsh}" -il
+      ;;
+  esac
 fi
 
 echo "sinain bare agent started"
