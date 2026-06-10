@@ -218,16 +218,16 @@ class DisplaySettingsPanel extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // Region eyes (Grammarly mode) toggle
+          // Auto-detect issues (Grammarly mode region eyes) toggle
           MouseRegion(
             cursor: SystemMouseCursors.click,
             child: GestureDetector(
-              onTap: () => settings.setRegionsEnabled(
-                  !settings.settings.regionsEnabled),
+              onTap: () => settings.setAutoDetectIssues(
+                  !settings.settings.autoDetectIssues),
               child: Row(
                 children: [
                   Text(
-                    'REGION EYES',
+                    'AUTO-DETECT ISSUES',
                     style: TextStyle(
                       fontFamily: HudConstants.monoFont,
                       fontFamilyFallback: HudConstants.monoFontFallbacks,
@@ -237,11 +237,11 @@ class DisplaySettingsPanel extends StatelessWidget {
                   ),
                   const Spacer(),
                   Icon(
-                    settings.settings.regionsEnabled
+                    settings.settings.autoDetectIssues
                         ? Icons.toggle_on
                         : Icons.toggle_off,
                     size: 22,
-                    color: settings.settings.regionsEnabled
+                    color: settings.settings.autoDetectIssues
                         ? Color(accentColor)
                         : Colors.white.withValues(alpha: 0.3),
                   ),

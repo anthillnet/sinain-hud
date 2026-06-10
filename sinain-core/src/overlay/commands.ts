@@ -26,6 +26,9 @@ export interface CommandDeps {
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
+  /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
+   *  The overlay's settings toggle is the source of truth. */
+  onSetAutoDetect?: (enabled: boolean) => void;
   /** Start the local bare-agent runner for the selected escalation agent. */
   onStartLocalAgent?: (agent?: string) => {
     ok: boolean;
@@ -243,6 +246,16 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       } else {
         wsHandler.broadcast(`Starting local escalation agent: ${result.agent ?? "default"}`, "normal");
         log(TAG, `start_local_agent launched (${result.agent ?? "default"})`);
+      }
+      break;
+    }
+    case "set_auto_detect": {
+      const enabled = (msg as any).enabled === true;
+      if (deps.onSetAutoDetect) {
+        deps.onSetAutoDetect(enabled);
+        log(TAG, `auto-detect issues ${enabled ? "enabled" : "disabled"}`);
+      } else {
+        log(TAG, `set_auto_detect: no handler wired`);
       }
       break;
     }

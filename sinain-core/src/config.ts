@@ -248,7 +248,9 @@ export function loadConfig(): CoreConfig {
     cooldownMs: intEnv("AGENT_COOLDOWN_MS", 10000),
     maxAgeMs: intEnv("AGENT_MAX_AGE_MS", 120000),
     historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
-    regionsEnabled: boolEnv("REGIONS_ENABLED", true),
+    // Auto-detect issues (Grammarly mode region eyes). Boot default only —
+    // the overlay's "AUTO-DETECT ISSUES" toggle is authoritative at runtime.
+    regionsEnabled: boolEnv("AUTO_DETECT_ISSUES", false),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.

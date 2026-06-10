@@ -63,13 +63,23 @@ class RegionEyeController {
     required this.onRegionTap,
   });
 
-  bool get _enabled => settingsService.settings.regionsEnabled;
+  bool get _enabled => settingsService.settings.autoDetectIssues;
+
+  bool _lastEnabled = false;
+  bool _wasConnected = false;
+  VoidCallback? _wsListener;
 
   void start() {
     _regionSub = ws.regionStream.listen(_onRegions);
     _tapSub = windowService.regionTapStream.listen(_onTap);
     _taskSub = ws.spawnTaskStream.listen(_onSpawnTask);
+    _lastEnabled = _enabled;
     _settingsListener = () {
+      if (_enabled == _lastEnabled) return;
+      _lastEnabled = _enabled;
+      // The overlay toggle is the source of truth — push to core so the
+      // analyzer only spends prompt tokens on regions when enabled.
+      _pushEnableState();
       if (!_enabled) {
         windowService.clearRegionEyes();
       } else if (ws.regions.isNotEmpty) {
@@ -77,9 +87,24 @@ class RegionEyeController {
       }
     };
     settingsService.addListener(_settingsListener!);
+    // Sync the toggle to core on every (re)connect — core may have restarted
+    // with the boot default (AUTO_DETECT_ISSUES, off).
+    _wsListener = () {
+      if (ws.connected && !_wasConnected) _pushEnableState();
+      _wasConnected = ws.connected;
+    };
+    ws.addListener(_wsListener!);
+    if (ws.connected) {
+      _wasConnected = true;
+      _pushEnableState();
+    }
     // Late join: core replays the current region set on connect, but if it
     // arrived before this controller started, render what's already cached.
     if (ws.regions.isNotEmpty) _onRegions(ws.regions);
+  }
+
+  void _pushEnableState() {
+    ws.sendCommand('set_auto_detect', {'enabled': _enabled});
   }
 
   void dispose() {
@@ -88,6 +113,9 @@ class RegionEyeController {
     _taskSub?.cancel();
     if (_settingsListener != null) {
       settingsService.removeListener(_settingsListener!);
+    }
+    if (_wsListener != null) {
+      ws.removeListener(_wsListener!);
     }
     windowService.clearRegionEyes();
   }

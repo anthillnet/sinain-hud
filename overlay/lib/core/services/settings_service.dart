@@ -14,7 +14,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyChatHeight = 'chat_height';
   static const _keyFontSize = 'font_size';
   static const _keyAccentColor = 'accent_color';
-  static const _keyRegionsEnabled = 'regions_enabled';
+  static const _keyAutoDetectIssues = 'auto_detect_issues';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -34,7 +34,7 @@ class SettingsService extends ChangeNotifier {
       chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
       accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
-      regionsEnabled: _prefs.getBool(_keyRegionsEnabled) ?? true,
+      autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
     );
     notifyListeners();
   }
@@ -115,9 +115,9 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setRegionsEnabled(bool value) async {
-    _settings.regionsEnabled = value;
-    await _prefs.setBool(_keyRegionsEnabled, value);
+  Future<void> setAutoDetectIssues(bool value) async {
+    _settings.autoDetectIssues = value;
+    await _prefs.setBool(_keyAutoDetectIssues, value);
     notifyListeners();
   }
 }

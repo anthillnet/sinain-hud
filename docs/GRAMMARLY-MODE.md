@@ -76,7 +76,8 @@ ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/fai
   `SpawnTaskMessage`, `frameSize` on `SenseEvent`, `regionsEnabled` on
   `AnalysisConfig`.
 - `agent/analyzer.ts` — `REGIONS_SECTION` appended to the system prompt when
-  `REGIONS_ENABLED` (default true); `[S<id>]` prefixes on screen lines;
+  `AUTO_DETECT_ISSUES` (default false, runtime-toggled from the overlay);
+  `[S<id>]` prefixes on screen lines;
   `parseRegions()` (max 3, validated action enum, sourceId).
 - `agent/region-tracker.ts` — `RegionTracker`: stable content-hash ids, bbox
   resolution from the referenced sense event, expiry after 2 missed ticks or
@@ -113,8 +114,8 @@ ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/fai
 - `ui/overlay_shell.dart` — `_openChatNearRegion(x, y)`: moves the HUD next
   to the eye (top-left → macOS bottom-left conversion) and opens chat;
   holds the active region for the banner.
-- `ui/settings/display_settings_panel.dart` — REGION EYES toggle
-  (default ON, persisted).
+- `ui/settings/display_settings_panel.dart` — AUTO-DETECT ISSUES toggle
+  (default OFF, persisted; pushed to core at runtime via `set_auto_detect`).
 
 ### overlay (Swift, macOS)
 - `macos/Runner/RegionEyePool.swift` — pool of non-activating floating
@@ -152,10 +153,12 @@ ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/fai
 
 ## Gating
 
-- Core: `REGIONS_ENABLED=true|false` (.env) — when off, the LLM isn't even
-  asked for regions (no prompt tokens spent).
-- Overlay: "REGION EYES" toggle in display settings (default ON) — when off,
-  panels are cleared and broadcasts ignored.
+- Overlay: "AUTO-DETECT ISSUES" toggle in display settings (default OFF) —
+  the source of truth. Pushed to core at runtime (`set_auto_detect`), synced
+  on every reconnect; when off, the LLM isn't even asked for regions (no
+  prompt tokens spent) and eye panels are cleared.
+- Core: `AUTO_DETECT_ISSUES=true|false` (.env) — boot default only, for
+  headless runs before an overlay connects.
 
 ## Future work (deliberately deferred)
 
@@ -179,5 +182,5 @@ ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/fai
 4. **Badge routing**: result must flip only the originating eye to ✓.
 5. **Privacy**: eyes must be invisible in a screen recording
    (sharingType = .none).
-6. **Gating**: REGION EYES toggle off → panels disappear immediately;
-   REGIONS_ENABLED=false → no `regions` field requested from the LLM.
+6. **Gating**: AUTO-DETECT ISSUES toggle off → panels disappear immediately
+   and the LLM stops being asked for regions (toggle state is pushed to core).

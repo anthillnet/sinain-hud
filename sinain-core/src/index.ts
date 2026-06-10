@@ -1382,6 +1382,14 @@ async function main() {
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
     },
+    onSetAutoDetect: (enabled) => {
+      config.agentConfig.regionsEnabled = enabled;
+      if (!enabled) {
+        // Clear tracked regions + native eyes immediately
+        regionTracker.clear();
+        wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
+      }
+    },
     onSpawnCommand: (text, regionId) => {
       let task = text;
       let label = "user-command";
