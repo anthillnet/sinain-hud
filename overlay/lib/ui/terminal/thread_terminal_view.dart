@@ -117,16 +117,39 @@ class ThreadTerminalSession {
     var seedFile = '';
     var seedTyped = false;
     var carry = '';
+    var tail = ''; // rolling ANSI-stripped output, for dialog detection
     Timer? settle;
     Timer? cap;
     final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
-    void typeSeed() {
+    final ansi = RegExp(r'\x1b\[[0-9;:?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)');
+    // Startup modals (claude's folder-trust check, theme pickers) own the
+    // keyboard — typing into them answers the dialog and the seed is lost.
+    final modal = RegExp(
+        r'trust this folder|Do you trust|Enter to confirm.*Esc|Esc to cancel',
+        caseSensitive: false);
+
+    void maybeTypeSeed() {
       if (seedTyped || session.exited) return;
+      if (modal.hasMatch(tail)) {
+        // A modal is on screen: stop the timers and let the user answer.
+        // The post-dialog redraw produces output, which re-arms the
+        // quiescence timer; only fresh output is considered then.
+        tail = '';
+        settle?.cancel();
+        cap?.cancel();
+        return;
+      }
       seedTyped = true;
       settle?.cancel();
       cap?.cancel();
+      // Text first, Enter separately — a single chunk can trip the TUI's
+      // paste heuristics (observed: openclaude submitting AND leaving a
+      // duplicate copy in the input field).
       pty.write(const Utf8Encoder()
-          .convert('Read $seedFile and follow its instructions.\r'));
+          .convert('Read $seedFile and follow its instructions.'));
+      Timer(const Duration(milliseconds: 300), () {
+        if (!session.exited) pty.write(const Utf8Encoder().convert('\r'));
+      });
     }
 
     pty.output
@@ -137,9 +160,11 @@ class ThreadTerminalSession {
       if (seedTyped) return;
       if (seedFile.isNotEmpty) {
         // Marker seen — every new chunk means the TUI is still drawing;
-        // (re)arm the quiescence timer.
+        // track recent output and (re)arm the quiescence timer.
+        tail += data.replaceAll(ansi, '');
+        if (tail.length > 2000) tail = tail.substring(tail.length - 2000);
         settle?.cancel();
-        settle = Timer(const Duration(milliseconds: 800), typeSeed);
+        settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
         return;
       }
       carry += data;
@@ -147,8 +172,8 @@ class ThreadTerminalSession {
       if (m != null) {
         seedFile = m.group(1)!;
         carry = '';
-        settle = Timer(const Duration(milliseconds: 800), typeSeed);
-        cap = Timer(const Duration(seconds: 6), typeSeed);
+        settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
+        cap = Timer(const Duration(seconds: 6), maybeTypeSeed);
       } else if (carry.length > 4096) {
         carry = carry.substring(carry.length - 256);
       }
