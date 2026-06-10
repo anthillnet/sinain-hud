@@ -792,6 +792,24 @@ if [ -n "$INTERACTIVE_MODE" ]; then
   profile="${lane:-$AGENT}"
   bin=$(prof_get_or "$profile" bin "$profile")
   type=$(prof_get_or "$profile" type "$profile")
+  # Not every roster agent has an interactive CLI (hermes/aider run in
+  # oneshot/pipe mode). Substitute the first interactive-capable profile
+  # rather than dropping the user into a context-less plain shell.
+  case "$type" in
+    claude|openclaude|codex) ;;
+    *)
+      for _alt in "${ALL_PROFILES[@]:-}"; do
+        _t=$(prof_get_or "$_alt" type "$_alt")
+        case "$_t" in claude|openclaude|codex) ;; *) continue ;; esac
+        command -v "$(prof_get_or "$_alt" bin "$_alt")" >/dev/null 2>&1 || continue
+        echo "⚠ lane agent '$profile' ($type) has no interactive mode — using '$_alt' for this terminal"
+        profile="$_alt"
+        type="$_t"
+        bin=$(prof_get_or "$_alt" bin "$_alt")
+        break
+      done
+      ;;
+  esac
   if [ "$INTERACTIVE_MODE" = "region" ]; then
     task=$(curl -sf -m 5 "$CORE_URL/region/$INTERACTIVE_REGION/task" \
       | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
