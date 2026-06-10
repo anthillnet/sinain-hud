@@ -787,6 +787,11 @@ Response guidelines: 5-10 sentences, address errors first, reference specific sc
 
 # --- Main loop ---
 
+# Consecutive-drop tracking for the escalation lane (see DROP handling below).
+LAST_DROP_ID=""
+DROP_STREAK=0
+MAX_DROP_RETRIES="${SINAIN_MAX_DROP_RETRIES:-3}"
+
 while true; do
   # Poll for pending escalation
   ESC=$(curl -sf "$CORE_URL/escalation/pending" 2>/dev/null || echo '{"ok":false}')
@@ -851,8 +856,27 @@ while true; do
         echo "$RESPONSE"
         echo ""
       } >> /tmp/sinain-drops.log
+      # A dropped escalation stays httpPending in sinain-core and is re-offered
+      # every poll — without a cap, a persistently broken agent (e.g. auth that
+      # works in a terminal but not under launchd) is re-invoked into the same
+      # failure every few seconds, indefinitely. After N consecutive drops of
+      # the SAME id, ack core to clear it and tell the user what's broken.
+      if [ "$ESC_ID" = "$LAST_DROP_ID" ]; then
+        DROP_STREAK=$((DROP_STREAK + 1))
+      else
+        LAST_DROP_ID="$ESC_ID"
+        DROP_STREAK=1
+      fi
+      if [ "$DROP_STREAK" -ge "$MAX_DROP_RETRIES" ]; then
+        echo "[$(date +%H:%M:%S)] ⚠ abandoning $ESC_ID after $DROP_STREAK failed invocations of '$ESC_AGENT'"
+        post_response "$ESC_ID" "⚠ Agent '$ESC_AGENT' failed $DROP_STREAK times in a row (see /tmp/sinain-drops.log). If it works in your terminal but not here, its auth may rely on shell-profile env vars — restart Sinain, or switch the escalation lane to another agent." 2>/dev/null || true
+        LAST_DROP_ID=""
+        DROP_STREAK=0
+      fi
     else
       echo "[$(date +%H:%M:%S)] Responded ($ESCALATION_COUNT total): ${RESPONSE:0:120}..."
+      LAST_DROP_ID=""
+      DROP_STREAK=0
     fi
     echo ""
   fi
