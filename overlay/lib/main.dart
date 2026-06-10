@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -58,6 +60,18 @@ Future<void> _startApp() async {
 
   // Local-mode setup progress (polls ~/.sinain/provisioning/*.status).
   final provisioningService = ProvisioningService();
+
+  // Version banner — which HUD build is running (DMG installs carry
+  // Resources/DMG_VERSION + BUILD_ID; source runs log "source").
+  try {
+    final res = File(Platform.resolvedExecutable).parent.parent.path;
+    String rd(String f) {
+      final file = File('$res/Resources/$f');
+      return file.existsSync() ? file.readAsStringSync().trim() : 'source';
+    }
+    debugPrint('[overlay] versions: dmg=${rd('DMG_VERSION')} '
+        'build=${rd('BUILD_ID')} mode=${kReleaseMode ? "release" : "debug"}');
+  } catch (_) {/* banner is best-effort */}
 
   final wsService = WebSocketService(url: settingsService.settings.wsUrl);
 

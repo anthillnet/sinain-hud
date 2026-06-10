@@ -92,6 +92,11 @@ LOG="$HOME/.sinain/logs/backend.log"
 [ -f "$LOG" ] && [ "$(wc -c <"$LOG" 2>/dev/null || echo 0)" -gt 5000000 ] && mv "$LOG" "$LOG.1"
 exec >>"$LOG" 2>&1
 echo "===== backend launch $(date '+%Y-%m-%d %H:%M:%S') ====="
+# Version banner — exported so every child (core, sense_client, agent) can
+# log which build it is running.
+[ -f "$RES/BUILD_ID" ] && export SINAIN_BUILD_ID="$(cat "$RES/BUILD_ID")"
+[ -f "$RES/DMG_VERSION" ] && export SINAIN_DMG_VERSION="$(cat "$RES/DMG_VERSION")"
+echo "[launch] versions: dmg=${SINAIN_DMG_VERSION:-n/a} build=${SINAIN_BUILD_ID:-n/a}"
 
 # Reset per-launch provisioning status (the overlay polls these files for the
 # setup-progress banner; stale 'done' files from a prior run shouldn't linger).
