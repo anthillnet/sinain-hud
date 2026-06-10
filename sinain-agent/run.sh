@@ -859,7 +859,10 @@ PY
   echo "⌨ thread terminal — agent=$profile ($type), scope=${INTERACTIVE_REGION:-main}"
   case "$type" in
     claude|openclaude)
-      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools $spawn_allowed "$task"
+      # --allowedTools is variadic: unquoted, it swallows the trailing
+      # positional prompt as more tool names and the session starts unseeded.
+      # One quoted arg (space-separated list) keeps the task as the prompt.
+      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed" "$task"
       ;;
     codex)
       exec "$bin" "$task"
