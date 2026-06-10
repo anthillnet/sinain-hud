@@ -362,10 +362,10 @@ class WebSocketService extends ChangeNotifier {
           final prevAttention = pendingAttentionCount;
           _spawnTasks[task.taskId] = task;
           // Region tasks: the label is the region issue — use it as the
-          // thread tab title.
-          if (task.regionId != null &&
-              regionThreadLabels[task.regionId!] != task.label) {
-            regionThreadLabels[task.regionId!] = task.label;
+          // thread tab title. Always notify so the tab pill's working/done
+          // indicator tracks status changes.
+          if (task.regionId != null) {
+            regionThreadLabels.putIfAbsent(task.regionId!, () => task.label);
             notifyListeners();
           }
           if (pendingAttentionCount != prevAttention) notifyListeners();

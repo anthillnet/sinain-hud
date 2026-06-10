@@ -309,6 +309,14 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
+  /// True while any spawn task for this region is still in flight.
+  bool _regionWorking(WebSocketService ws, String regionId) {
+    for (final t in ws.spawnTasks.values) {
+      if (t.regionId == regionId && !t.isTerminal) return true;
+    }
+    return false;
+  }
+
   /// Horizontal tab bar: MAIN + one pill per region thread. Hidden until the
   /// first region conversation exists.
   Widget _buildThreadTabs(WebSocketService ws) {
@@ -408,7 +416,10 @@ class OverlayShellState extends State<OverlayShell> {
             ),
             for (final id in ids)
               pill(
-                text: '👁 ${labelFor(id)}',
+                // ⟳ while this region's task is in flight — visible feedback
+                // that the agent is working even if the eye expired meanwhile
+                text:
+                    '${_regionWorking(ws, id) ? "⟳" : "👁"} ${labelFor(id)}',
                 selected: _activeThread == id,
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
