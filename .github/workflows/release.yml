@@ -1,0 +1,67 @@
+name: Release All
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Unified release: push one tag (vX.Y.Z) and every artifact ships at once —
+# overlay zip (macOS + Windows), npm package, sck-capture binary, and the
+# signed/notarized DMG. Each component workflow is reused via workflow_call
+# and creates its own prefixed release (overlay-vX.Y.Z, sck-capture-vX.Y.Z,
+# macos-vX.Y.Z), so the npm launcher's hardcoded tag-prefix lookups keep
+# working unchanged.
+#
+# The per-component triggers (tag push / release:published) still work for
+# one-off releases; GITHUB_TOKEN-created releases don't re-trigger them, so
+# nothing builds twice.
+#
+# Usage:
+#   git tag v3.0.0 && git push origin v3.0.0
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Derive version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  overlay:
+    name: Overlay
+    needs: version
+    uses: ./.github/workflows/release-overlay.yml
+    with:
+      tag: overlay-v${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  npm:
+    name: npm
+    needs: version
+    uses: ./.github/workflows/release-npm.yml
+    with:
+      tag: npm-v${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  sck-capture:
+    name: sck-capture
+    needs: version
+    uses: ./.github/workflows/release-sck-capture.yml
+    with:
+      tag: sck-capture-v${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  dmg:
+    name: DMG
+    needs: version
+    uses: ./.github/workflows/release-app.yml
+    with:
+      tag: macos-v${{ needs.version.outputs.version }}
+    secrets: inherit
