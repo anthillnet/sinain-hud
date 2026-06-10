@@ -103,6 +103,36 @@ echo "[launch] versions: dmg=${SINAIN_DMG_VERSION:-n/a} build=${SINAIN_BUILD_ID:
 mkdir -p "$HOME/.sinain/provisioning"
 rm -f "$HOME/.sinain/provisioning/"*.status 2>/dev/null || true
 
+# Import the user's login-shell environment. GUI apps inherit launchd's bare
+# env, but agent CLIs depend on vars exported in shell profiles — e.g. a
+# claude apiKeyHelper that reads VAULT_ADDR works in the user's terminal but
+# 401s under Sinain without this (issue #144). Same approach as VS Code's
+# shell-env resolution: run an interactive login shell, print env, import
+# vars we don't already have. perl alarm = hard 10s cap so a hung .zshrc
+# can't block backend startup.
+USER_SHELL="${SHELL:-/bin/zsh}"
+SHELL_ENV="$(perl -e '$p=fork; if(!$p){exec @ARGV or exit 127} $SIG{ALRM}=sub{kill 9,$p; exit 1}; alarm 10; waitpid $p,0; exit $?>>8' "$USER_SHELL" -ilc 'command env' 2>/dev/null </dev/null || true)"
+if [ -n "$SHELL_ENV" ]; then
+  IMPORTED=0
+  SHELL_PATH=""
+  while IFS= read -r line; do
+    case "$line" in *=*) ;; *) continue ;; esac   # skip multi-line value spillover
+    k="${line%%=*}"
+    case "$k" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+    if [ "$k" = "PATH" ]; then SHELL_PATH="${line#*=}"; continue; fi
+    case "$k" in HOME|USER|LOGNAME|SHELL|PWD|OLDPWD|SHLVL|TMPDIR|_|TERM|XPC_FLAGS|XPC_SERVICE_NAME) continue ;; esac
+    printenv "$k" >/dev/null 2>&1 && continue     # never clobber launchd/our own vars
+    export "$k=${line#*=}"
+    IMPORTED=$((IMPORTED + 1))
+  done <<< "$SHELL_ENV"
+  # Shell PATH goes last so bundle + launchd entries keep precedence;
+  # it picks up nvm/asdf/custom install dirs the hardcoded list misses.
+  [ -n "$SHELL_PATH" ] && export PATH="$PATH:$SHELL_PATH"
+  echo "[launch] imported $IMPORTED env vars from login shell ($USER_SHELL)"
+else
+  echo "[launch] ⚠ could not read login-shell env — agent CLIs may miss profile vars (auth helpers etc.)"
+fi
+
 # Augment PATH: bundled node first, then where user CLIs (claude/codex/…)
 # typically live — the app's launchd PATH is just /usr/bin:/bin and wouldn't
 # find them, leaving the agent roster empty.
