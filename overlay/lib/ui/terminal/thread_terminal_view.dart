@@ -64,6 +64,22 @@ class ThreadTerminalSession {
     final controller = TerminalController();
     if (banner != null) terminal.write('\x1b[33m$banner\x1b[0m\r\n');
     final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
+    // Strip Claude-session vars before spawning: when the overlay itself was
+    // launched from a Claude Code shell (dev: flutter run), CLAUDE_CONFIG_DIR
+    // & co. leak into Platform.environment and break agent auth in the
+    // terminal (401 "No cookie auth credentials"). Mirrors the strip in
+    // sinain-core startLocalAgent; profile-level overrides are reapplied by
+    // run.sh's apply_profile_env afterwards.
+    final env = {
+      for (final e in Platform.environment.entries)
+        if (!e.key.startsWith('CLAUDE_CODE_') &&
+            e.key != 'CLAUDE_CONFIG_DIR' &&
+            e.key != 'CLAUDECODE' &&
+            e.key != 'AI_AGENT')
+          e.key: e.value,
+      'TERM': 'xterm-256color',
+      'SINAIN_THREAD': threadId,
+    };
     final pty = Pty.start(
       command ?? shell,
       // default: interactive login — same env the user's terminal has
@@ -71,11 +87,7 @@ class ThreadTerminalSession {
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,
       workingDirectory: Platform.environment['HOME'],
-      environment: {
-        ...Platform.environment,
-        'TERM': 'xterm-256color',
-        'SINAIN_THREAD': threadId,
-      },
+      environment: env,
     );
     final session = ThreadTerminalSession._(terminal, controller, pty);
 
