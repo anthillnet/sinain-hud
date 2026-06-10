@@ -115,10 +115,16 @@ export class RegionTracker {
         src = anchorByText(r.issue, ctx.screen) ?? src;
       }
       const anchored = src && hasPartialBbox(src);
-      const bbox = anchored
-        ? src!.imageBbox as [number, number, number, number]
-        : undefined;
-      const frameSize = anchored && src!.frameSize && src!.frameSize.length === 2
+      // Precise-or-nothing: an eye is only useful next to the thing it points
+      // at. If we can't resolve a localized bbox (sourceId echo or OCR text
+      // match), drop the region rather than corner-stack a misplaced eye that
+      // misleads and distracts. Looser emission upstream keeps the supply up.
+      if (!anchored) {
+        debug(TAG, `skip unanchored region: "${r.issue}"`);
+        continue;
+      }
+      const bbox = src!.imageBbox as [number, number, number, number];
+      const frameSize = src!.frameSize && src!.frameSize.length === 2
         ? src!.frameSize as [number, number]
         : undefined;
 

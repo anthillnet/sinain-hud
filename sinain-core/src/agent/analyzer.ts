@@ -96,21 +96,25 @@ const REGIONS_SECTION = `
 Optional "regions" field — actionable issues visible on screen:
 {"hud":"...","digest":"...","regions":[{"issue":"...","tip":"...","action":"fix","sourceId":12}]}
 
-Emit a region ONLY when you can offer concrete help with something specific on screen:
+Emit a region whenever a specific thing on screen is one where an agent could
+genuinely help — be generous, not just for hard errors:
 - An error or warning (terminal error, build failure, red underline, stack trace)
 - A fixable problem (typo, bug, inefficient code, missing import, broken config)
-- A question or form the user appears stuck on
-- Something you could research, draft, or explain for the user (a topic they
-  are reading about, an email or doc they are writing, an unfamiliar concept)
+- A question, form, or step the user appears to be working through
+- Anything you could research, draft, explain, summarize, or improve: a topic or
+  term they are reading, an email/message/doc they are writing, code they are
+  editing, a setting or command they seem unsure about, a decision they face
 Each region:
-- "issue": short label of what's wrong (max 10 words, quote the specific text)
+- "issue": short label of the specific thing (max 10 words, quote the on-screen text)
 - "tip": one actionable sentence — what an agent could do about it
 - "action": "fix" | "explain" | "research" — the kind of help
-- "sourceId": REQUIRED — copy the number from the [S<id>] prefix of the exact
-  screen line where you saw the issue ("[S12] ..." → "sourceId":12)
-Rules: do NOT invent issues — omit "regions" entirely when nothing is genuinely
-actionable (most ticks). Never emit a region for content that is merely
-interesting. Do not repeat a region for an issue that no longer appears on screen.`;
+- "sourceId": REQUIRED and critical — copy the number from the [S<id>] prefix of
+  the EXACT screen line where the thing appears ("[S12] ..." → "sourceId":12).
+  The eye is placed at that line; a wrong or missing id means the region is
+  dropped, so always anchor to the most specific [S<id>] line you can see.
+Rules: the thing must be concrete and actually visible on screen — never invent
+issues or emit for an empty/idle screen. One region per distinct thing (max 3).
+Do not repeat a region for something that no longer appears on screen.`;
 
 const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
 
