@@ -1,10 +1,9 @@
 name: Release All
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Unified release: push one tag (v<product-version>, e.g. v0.3.0 — named after
-# the DMG/product version) and every component ships at once — overlay zips
-# (macOS + Windows), npm package, sck-capture binary, and the signed/notarized
-# DMG.
+# Unified release: merge a RELEASE_VERSIONS.json bump to main and every
+# changed component ships at once — overlay zips (macOS + Windows), npm
+# package, sck-capture binary, and the signed/notarized DMG.
 #
 # Versioning: each component keeps its OWN series, declared in
 # RELEASE_VERSIONS.json at the tagged commit (dmg 0.x, overlay 2.x, npm 1.x,
@@ -18,15 +17,17 @@ name: Release All
 # one-off releases; GITHUB_TOKEN-created releases don't re-trigger them, so
 # nothing builds twice.
 #
-# Usage:
-#   edit RELEASE_VERSIONS.json (bump shipped components) && commit
-#   git tag v0.3.0 && git push origin v0.3.0
+# Usage: PR a RELEASE_VERSIONS.json bump → merge to main. Done.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
+  # Merge-driven: releasing IS merging a RELEASE_VERSIONS.json bump to main.
+  # The plan job skips components whose release already exists, so any other
+  # change to the file is a no-op. workflow_dispatch is the manual fallback.
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths: ['RELEASE_VERSIONS.json']
+  workflow_dispatch: {}
 
 permissions:
   contents: write

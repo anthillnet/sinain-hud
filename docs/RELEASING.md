@@ -19,16 +19,12 @@ Each component keeps its **own series**. Bump only what ships:
 Components whose release tag already exists are skipped by the workflow, so
 unchanged entries cost nothing.
 
-### 2. Push the trigger tag → everything builds at once
+### 2. Merge → everything builds at once
 
-```bash
-git checkout main && git pull
-git tag v<dmg-version>        # the v* tag is named after the product/DMG version
-git push origin v<dmg-version>
-```
-
-This runs `.github/workflows/release.yml` ("Release All"): a plan job reads
-`RELEASE_VERSIONS.json` at the tagged commit, then fans out via
+Releasing IS merging the `RELEASE_VERSIONS.json` bump to main. The merge
+push triggers `.github/workflows/release.yml` ("Release All") — no tag
+needed (`workflow_dispatch` is the manual fallback): a plan job reads
+`RELEASE_VERSIONS.json` on main, then fans out via
 `workflow_call` to the component workflows, each creating its own prefixed
 release — `overlay-vX` (macOS+Windows zips), `npm-vX` (registry publish),
 `sck-capture-vX` (binary), `macos-vX` (**signed + notarized DMG** — the slow
