@@ -108,3 +108,22 @@ jobs:
     with:
       tag: ${{ needs.plan.outputs.dmg_tag }}
     secrets: inherit
+
+  # Re-deploy the landing page once the DMG is published so the download CTA
+  # points at the new version with no manual step (and no 404 window — the
+  # render script falls back to the newest existing release).
+  site:
+    name: Update sinain.com download link
+    needs: [dmg]
+    if: always() && (needs.dmg.result == 'success' || needs.dmg.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render download link
+        run: ./tools/site/set-dmg-link.sh
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SINAIN_EB918 }}
+          channelId: live
+          projectId: sinain-eb918
