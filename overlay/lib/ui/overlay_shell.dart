@@ -312,6 +312,7 @@ class OverlayShellState extends State<OverlayShell> {
         _activeRegion = live;
       }
     });
+    _syncBusyState();
   }
 
   void _closeThread(String id) {
@@ -324,11 +325,25 @@ class OverlayShellState extends State<OverlayShell> {
         _activeRegion = null;
       }
     });
+    _syncBusyState();
   }
 
   /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
   /// spike can be exercised without waiting for a region thread.
   String get _activeTabKey => _activeThread ?? 'main';
+
+  /// Tell core whether the user is conversing in a terminal right now.
+  /// Visible terminal → hold ambient escalations (refreshed by the 30s
+  /// heartbeat); anything else → release the quiet window immediately so
+  /// returning to chat doesn't leave a stale ~3 min suppression tail.
+  void _syncBusyState() {
+    final ws = context.read<WebSocketService>();
+    if (_terminalThreads.contains(_activeTabKey) && _state != HudState.hidden) {
+      ws.sendUserBusy();
+    } else {
+      ws.sendUserBusy(0);
+    }
+  }
 
   /// Open (or surface) the terminal for a tab: MAIN gets the escalation-lane
   /// agent seeded with the current digest; a region tab gets the spawn-lane
@@ -493,6 +508,7 @@ class OverlayShellState extends State<OverlayShell> {
                   } else {
                     _openTerminalForTab(_activeTabKey);
                   }
+                  _syncBusyState();
                 },
               ),
           ],

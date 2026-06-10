@@ -264,7 +264,10 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
     case "user_busy": {
       // Overlay signals active user interaction (visible thread terminal,
       // throttled). Holds ambient escalations; user commands still pass.
-      const seconds = Math.min(Math.max(Number((msg as any).seconds) || 120, 10), 600);
+      // seconds <= 0 releases the quiet window immediately (user left the
+      // terminal view); absent defaults to 120.
+      const raw = Number((msg as any).seconds);
+      const seconds = isNaN(raw) ? 120 : Math.min(Math.max(raw, 0), 600);
       if (deps.onUserBusy) {
         deps.onUserBusy(seconds * 1000);
       } else {

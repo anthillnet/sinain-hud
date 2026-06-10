@@ -177,8 +177,16 @@ export class Escalator {
 
   /** Mark the user as actively interacting for the next [ms] milliseconds.
    *  Called on every chat message and (throttled) while a thread terminal
-   *  is visible. Extends but never shortens the current window. */
+   *  is visible. Positive values extend but never shorten the window;
+   *  ms <= 0 releases it immediately (user returned to idle chat view). */
   noteUserBusy(ms: number): void {
+    if (ms <= 0) {
+      if (this.suppressAmbientUntil > Date.now()) {
+        log(TAG, "ambient escalation quiet window released");
+      }
+      this.suppressAmbientUntil = 0;
+      return;
+    }
     this.suppressAmbientUntil = Math.max(this.suppressAmbientUntil, Date.now() + ms);
   }
 
