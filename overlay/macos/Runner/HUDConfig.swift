@@ -4,7 +4,7 @@ struct HUDConfig {
     // Default sizes per overlay state
     static let eyeSize: CGFloat = 48
     static let controlsBarHeight: CGFloat = 48
-    static let controlsBarWidth: CGFloat = 280
+    static let controlsBarWidth: CGFloat = 360
     static let defaultChatWidth: CGFloat = 427
     static let defaultChatHeight: CGFloat = 293
 

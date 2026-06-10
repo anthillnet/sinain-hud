@@ -1,9 +1,16 @@
 import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
-import { log, error } from "../log.js";
+import { log } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 
 const TAG = "agent";
+
+export class AnalysisAuthError extends Error {
+  constructor(readonly status: number, body: string) {
+    super(`OpenRouter authentication failed (HTTP ${status}): ${body.slice(0, 200)}`);
+    this.name = "AnalysisAuthError";
+  }
+}
 
 /**
  * Model-specific timeouts in milliseconds.
@@ -224,6 +231,7 @@ export async function analyzeContext(
     try {
       return await callOpenRouter(SYSTEM_PROMPT, userPrompt, images, model, config);
     } catch (err: any) {
+      if (err instanceof AnalysisAuthError) throw err;
       lastError = err;
       log(TAG, `model ${model} failed: ${err.message || err}, trying next...`);
     }
@@ -284,6 +292,9 @@ async function callOpenRouter(
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+      if (response.status === 401) {
+        throw new AnalysisAuthError(response.status, body);
+      }
       throw new Error(`HTTP ${response.status}: ${body.slice(0, 200)}`);
     }
 

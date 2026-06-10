@@ -9,6 +9,7 @@ class AppDelegate: FlutterAppDelegate {
 
     // Flutter method channel for sending hotkey events to Dart
     private var hotkeyChannel: FlutterMethodChannel?
+    private var backendChannel: FlutterMethodChannel?
 
     // SEED-001 Stage 4 — bundled backend supervisor (packaged DMG only).
     private let backend = BackendLauncher()
@@ -43,11 +44,11 @@ class AppDelegate: FlutterAppDelegate {
 
         // Backend control channel — lets the first-run wizard restart the
         // bundled backend after writing ~/.sinain/.env (SEED-001 Stage 5).
-        let backendChannel = FlutterMethodChannel(
+        backendChannel = FlutterMethodChannel(
             name: "sinain_hud/backend",
             binaryMessenger: controller.engine.binaryMessenger
         )
-        backendChannel.setMethodCallHandler { [weak self] call, result in
+        backendChannel?.setMethodCallHandler { [weak self] call, result in
             guard let self = self else { result(false); return }
             switch call.method {
             case "isBundled":
@@ -81,6 +82,8 @@ class AppDelegate: FlutterAppDelegate {
                 // backend (SIGTERM → core kills its own children).
                 result(true)
                 DispatchQueue.main.async { NSApp.terminate(nil) }
+            case "openLog":
+                result(self.openSessionLog())
             default:
                 result(FlutterMethodNotImplemented)
             }
@@ -90,6 +93,41 @@ class AppDelegate: FlutterAppDelegate {
         registerHotkeys()
 
         super.applicationDidFinishLaunching(notification)
+    }
+
+    private func openSessionLog() -> [String: Any] {
+        let envPath = ProcessInfo.processInfo.environment["SINAIN_SESSION_LOG"]
+        let defaultURL = FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent(".sinain/logs/backend.log")
+        let logURL = (envPath?.isEmpty == false)
+            ? URL(fileURLWithPath: envPath!)
+            : defaultURL
+
+        let dirURL = logURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: dirURL,
+                withIntermediateDirectories: true
+            )
+            if !FileManager.default.fileExists(atPath: logURL.path) {
+                let header = "# Sinain session log\n# No backend output has been written for this session yet.\n"
+                try header.write(to: logURL, atomically: true, encoding: .utf8)
+            }
+        } catch {
+            return [
+                "opened": false,
+                "path": logURL.path,
+                "error": "Cannot prepare log file: \(error.localizedDescription)"
+            ]
+        }
+
+        if NSWorkspace.shared.open(logURL) {
+            return ["opened": true, "path": logURL.path]
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([logURL])
+        return ["opened": true, "path": logURL.path]
     }
 
     private func configureWindow() {

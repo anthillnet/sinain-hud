@@ -28,6 +28,7 @@ export interface StatusMessage {
     available: string[];
     escalationAgent: string;
     spawnAgent: string;
+    registered: boolean;
   };
 }
 
@@ -414,6 +415,7 @@ export interface BridgeState {
     available: string[];
     escalationAgent: string;
     spawnAgent: string;
+    registered: boolean;
   };
 }
 
