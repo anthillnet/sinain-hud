@@ -44,19 +44,14 @@ gh api repos/anthillnet/sinain-hud/releases/tags/macos-v<ver> --jq '.assets[].na
 # must list Sinain.dmg
 ```
 
-### 4. Propagate to sinain.com — the step everyone forgets
+### 4. sinain.com updates itself
 
-The download CTA in `docs/index.html` is hard-pinned:
-
-```
-https://github.com/anthillnet/sinain-hud/releases/download/macos-v<ver>/Sinain.dmg
-```
-
-- PR a one-line bump of that URL to the new `macos-v<ver>`.
-- **Merge only after step 3 confirms the asset** — the link 404s until the
-  release is published.
-- Merging to main triggers the Firebase hosting deploy
-  (`firebase-hosting-merge.yml`) — no manual deploy step.
+The download CTA is rendered at deploy time by `tools/site/set-dmg-link.sh`
+from `RELEASE_VERSIONS.json` (falling back to the newest *published*
+`macos-v*` release, so the live link never 404s mid-build). It runs in both
+deploy paths: the merge-triggered Firebase deploy and release.yml's `site`
+job, which re-deploys right after the DMG publishes. The committed URL in
+`docs/index.html` is not authoritative — no manual link bump.
 
 ### 5. Verify live
 
