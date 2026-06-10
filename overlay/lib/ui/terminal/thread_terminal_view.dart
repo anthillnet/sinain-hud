@@ -117,51 +117,47 @@ class ThreadTerminalSession {
     var seedFile = '';
     var seedTyped = false;
     var carry = '';
-    var screen = ''; // ANSI-stripped text of the CURRENT screen (since last clear)
     Timer? settle;
     Timer? cap;
     final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
-    final ansi = RegExp(r'\x1b\[[0-9;:?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)');
-    // Full-screen-clear sequences a TUI emits when it repaints (dialog →
-    // main view): ESC[2J, ESC[3J, ESC[H ESC[J, RIS (ESCc), alt-screen
-    // enter/leave. We reset `screen` at the LAST of these per chunk so the
-    // buffer only ever holds the CURRENT screen — otherwise a dismissed
-    // dialog's text lingers and matches forever.
-    final clearScreen = RegExp(
-        r'\x1b\[[0-3]?J|\x1bc|\x1b\[\?1049[hl]');
     // Startup modals (claude's folder-trust check, theme pickers) own the
     // keyboard — typing into them answers the dialog and the seed is lost.
-    // TUIs position each word with cursor moves, so ANSI-stripped text has
-    // NO reliable spaces ("trust this folder" → "trustthisfolder"). Match
-    // against a whitespace-stripped, lowercased screen with space-free needles.
-    const modalNeedles = [
-      'trustthisfolder',
-      'doyoutrust',
-      'esctocancel',
-      'entertoconfirm',
-      'yes,itrust',
+    // We read the ACTUAL rendered screen from xterm's buffer (not raw bytes:
+    // claude redraws by overwriting lines with cursor moves, so a hand-rolled
+    // byte buffer would keep stale dialog text forever). The buffer already
+    // reflects overwrites, so a dismissed dialog's text is gone. Words are
+    // space-separated there, so match normal phrases case-insensitively.
+    final modalNeedles = [
+      RegExp(r'trust\s+this\s+folder', caseSensitive: false),
+      RegExp(r'do you trust', caseSensitive: false),
+      RegExp(r'esc to cancel', caseSensitive: false),
+      RegExp(r'enter to confirm', caseSensitive: false),
     ];
+
+    String currentScreen() {
+      try {
+        return terminal.buffer.getText();
+      } catch (_) {
+        return '';
+      }
+    }
 
     var lastOutputAt = DateTime.now();
     void maybeTypeSeed() {
       if (seedTyped || session.exited) return;
-      final norm = screen.toLowerCase().replaceAll(RegExp(r'\s+'), '');
-      final hit = modalNeedles.where(norm.contains).toList();
+      final scr = currentScreen();
+      final hit = modalNeedles.where((r) => r.hasMatch(scr)).toList();
       if (hit.isNotEmpty) {
-        // A modal owns the keyboard — wait for the user to answer it. The
-        // post-answer screen clear resets `screen`, so this stops matching
-        // once the dialog is gone.
-        if (kDebugMode) {
-          print('[seed] modal needle=$hit — retry 1.5s');
-        }
+        // A modal owns the keyboard — wait for the user to answer it. We read
+        // the live screen each tick, so this stops matching the moment the
+        // dialog is gone.
+        if (kDebugMode) print('[seed] modal on screen — retry 1.5s');
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 1500), maybeTypeSeed);
         return;
       }
-      // Never type mid-redraw. The 1.5s modal-retry timer can fire while the
-      // TUI is still repainting just after the user answered a dialog — the
-      // input box isn't ready yet and raw-mode init would flush the bytes.
-      // Require output to have been quiet for 800ms first.
+      // Never type mid-redraw — require output quiet for 800ms first, so the
+      // input box exists and raw-mode init won't flush the bytes.
       final quietFor = DateTime.now().difference(lastOutputAt).inMilliseconds;
       if (quietFor < 800) {
         if (kDebugMode) print('[seed] still redrawing (${quietFor}ms) — wait');
@@ -191,16 +187,6 @@ class ThreadTerminalSession {
       if (seedTyped) return;
       lastOutputAt = DateTime.now();
       if (seedFile.isNotEmpty) {
-        // Track the current screen. If this chunk contains a screen-clear,
-        // drop everything before the LAST one — a repaint means the prior
-        // screen (e.g. a dismissed trust dialog) is gone.
-        final clearMatches = clearScreen.allMatches(data).toList();
-        if (clearMatches.isNotEmpty) {
-          screen = data.substring(clearMatches.last.end).replaceAll(ansi, '');
-        } else {
-          screen += data.replaceAll(ansi, '');
-        }
-        if (screen.length > 4000) screen = screen.substring(screen.length - 4000);
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 800), maybeTypeSeed);
         return;
