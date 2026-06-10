@@ -868,19 +868,13 @@ PY
     exit 0
   fi
   case "$type" in
-    claude)
-      # --allowedTools is variadic: unquoted, it swallows the trailing
-      # positional prompt as more tool names and the session starts unseeded.
-      # One quoted arg (space-separated list) keeps the task as the prompt;
-      # claude's TUI auto-submits it as the first message.
-      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed" "$task"
-      ;;
-    openclaude)
-      # The openclaude fork's TUI drops BOTH the positional prompt and
-      # --append-system-prompt (verified under a scripted PTY; upstream
-      # claude submits the positional). Seed via the overlay instead: write
-      # the task to a file and emit a marker line — the thread terminal
-      # watches for it and types a pointer message once the TUI is ready.
+    claude|openclaude)
+      # Neither TUI reliably accepts a seed via CLI (openclaude drops both
+      # the positional prompt and --append-system-prompt — verified under a
+      # scripted PTY; current claude builds don't auto-submit the positional
+      # in interactive mode either). Seed via the overlay instead: write the
+      # task to a file and emit a marker line — the thread terminal watches
+      # for it and types a pointer message once the TUI is ready.
       SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
       printf '%s' "$task" > "$SEED_FILE"
       echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
