@@ -344,12 +344,12 @@ def _expand_keywords_semantic(
     """
     import time as _t
     try:
-        from sentence_transformers import SentenceTransformer
         import numpy as np
+        from common import load_sentence_transformer
         from triplestore import TripleStore
 
         if not hasattr(_expand_keywords_semantic, "_model"):
-            _expand_keywords_semantic._model = SentenceTransformer("all-MiniLM-L6-v2")
+            _expand_keywords_semantic._model = load_sentence_transformer("all-MiniLM-L6-v2")
         model = _expand_keywords_semantic._model
 
         # Cache entity names + embeddings (refresh every 5 min)
@@ -606,10 +606,10 @@ def query_facts_hybrid(
 
     results = rrf_candidates[:max_facts]
     try:
-        from sentence_transformers import SentenceTransformer
         import numpy as np
+        from common import load_sentence_transformer
         if not hasattr(query_facts_hybrid, "_embed_model"):
-            query_facts_hybrid._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+            query_facts_hybrid._embed_model = load_sentence_transformer("all-MiniLM-L6-v2")
         model = query_facts_hybrid._embed_model
         texts = [query] + [f.get("value", "") for f in rrf_candidates]
         embs = model.encode(texts, show_progress_bar=False)

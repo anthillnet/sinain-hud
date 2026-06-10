@@ -7,6 +7,7 @@ import type {
   FeedMessage,
   StatusMessage,
   SpawnTaskMessage,
+  RegionHighlightMessage,
   CostMessage,
   CostSnapshot,
   Priority,
@@ -45,6 +46,7 @@ export class WsHandler {
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
   private latestCostMsg: CostMessage | null = null;
+  private latestRegionMsg: RegionHighlightMessage | null = null;
 
   constructor() {
     this.startHeartbeat();
@@ -98,6 +100,11 @@ export class WsHandler {
       log(TAG, `replayed ${this.spawnTaskBuffer.size} spawn tasks to new client`);
     }
 
+    // Replay current region set (Grammarly mode eyes survive overlay restarts)
+    if (this.latestRegionMsg && this.latestRegionMsg.regions.length > 0) {
+      this.sendTo(ws, this.latestRegionMsg);
+    }
+
     // Replay current cost snapshot (or send zeroed snapshot so client resets)
     this.sendTo(ws, this.latestCostMsg ?? {
       type: "cost" as const,
@@ -137,14 +144,16 @@ export class WsHandler {
     });
   }
 
-  /** Broadcast a feed message to all connected overlays. */
-  broadcast(text: string, priority: Priority = "normal", channel: FeedChannel = "stream"): void {
+  /** Broadcast a feed message to all connected overlays.
+   *  regionId routes the message to a region thread tab (Grammarly mode). */
+  broadcast(text: string, priority: Priority = "normal", channel: FeedChannel = "stream", regionId?: string): void {
     const msg: FeedMessage = {
       type: "feed",
       text,
       priority,
       ts: Date.now(),
       channel,
+      ...(regionId ? { regionId } : {}),
     };
     this.replayBuffer.push(msg);
     if (this.replayBuffer.length > MAX_REPLAY) {
@@ -176,6 +185,9 @@ export class WsHandler {
       this.spawnTaskBuffer.set(taskMsg.taskId, taskMsg);
       this.pruneSpawnTasks();
       log(TAG, `spawn_task buffered: taskId=${taskMsg.taskId}, status=${taskMsg.status}, buffer=${this.spawnTaskBuffer.size}, clients=${this.clients.size}`);
+    }
+    if (msg.type === "region_highlight") {
+      this.latestRegionMsg = msg;
     }
     this.broadcastMessage(msg);
   }

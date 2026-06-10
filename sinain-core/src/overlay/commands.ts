@@ -17,8 +17,8 @@ export interface CommandDeps {
   onUserMessage: (text: string) => Promise<void>;
   /** Queue a user command to augment the next escalation */
   onUserCommand: (text: string) => void;
-  /** Spawn a background agent task */
-  onSpawnCommand?: (text: string) => void;
+  /** Spawn a background agent task. regionId present when a region eye initiated it. */
+  onSpawnCommand?: (text: string, regionId?: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
@@ -26,6 +26,9 @@ export interface CommandDeps {
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
+  /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
+   *  The overlay's settings toggle is the source of truth. */
+  onSetAutoDetect?: (enabled: boolean) => void;
   /** Start the local bare-agent runner for the selected escalation agent. */
   onStartLocalAgent?: (agent?: string) => {
     ok: boolean;
@@ -71,8 +74,11 @@ export function setupCommands(deps: CommandDeps): void {
       }
       case "spawn_command": {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
-        log(TAG, `spawn command received: "${preview}"`);
-        // Echo spawn command to all overlay clients as a feed item (green in UI)
+        const regionId = typeof msg.regionId === "string" && msg.regionId ? msg.regionId : undefined;
+        log(TAG, `spawn command received: "${preview}"${regionId ? ` (region=${regionId})` : ""}`);
+        // Echo spawn command to all overlay clients as a feed item (green in
+        // UI). Region thread messages carry regionId → overlay routes the
+        // echo to that region's tab instead of the main feed.
         wsHandler.broadcastRaw({
           type: "feed",
           text: `⚡ ${msg.text}`,
@@ -80,9 +86,10 @@ export function setupCommands(deps: CommandDeps): void {
           ts: Date.now(),
           channel: "agent",
           sender: "spawn",
+          ...(regionId ? { regionId } : {}),
         } as any);
         if (deps.onSpawnCommand) {
-          deps.onSpawnCommand(msg.text);
+          deps.onSpawnCommand(msg.text, regionId);
         } else {
           log(TAG, `spawn command ignored — no handler configured`);
           wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");
@@ -239,6 +246,16 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       } else {
         wsHandler.broadcast(`Starting local escalation agent: ${result.agent ?? "default"}`, "normal");
         log(TAG, `start_local_agent launched (${result.agent ?? "default"})`);
+      }
+      break;
+    }
+    case "set_auto_detect": {
+      const enabled = (msg as any).enabled === true;
+      if (deps.onSetAutoDetect) {
+        deps.onSetAutoDetect(enabled);
+        log(TAG, `auto-detect issues ${enabled ? "enabled" : "disabled"}`);
+      } else {
+        log(TAG, `set_auto_detect: no handler wired`);
       }
       break;
     }

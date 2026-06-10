@@ -12,10 +12,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export let loadedEnvPath: string | undefined;
 
 function loadDotEnv(): void {
-  // Try sinain-core/.env first, then project root .env
+  // Try sinain-core/.env first, then project root .env, then the wizard's
+  // ~/.sinain/.env. The npx launcher normally injects ~/.sinain/.env via the
+  // process environment, but direct runs (node dist/index.js, npm run dev)
+  // bypass the launcher — without this fallback they silently miss
+  // OPENROUTER_API_KEY etc. (agents.json is already read from ~/.sinain).
+  const home = process.env.HOME || process.env.USERPROFILE || "";
   const candidates = [
     resolve(__dirname, "..", ".env"),
     resolve(__dirname, "..", "..", ".env"),
+    ...(home ? [resolve(home, ".sinain", ".env")] : []),
   ];
   for (const envPath of candidates) {
     if (!existsSync(envPath)) continue;
@@ -242,6 +248,9 @@ export function loadConfig(): CoreConfig {
     cooldownMs: intEnv("AGENT_COOLDOWN_MS", 10000),
     maxAgeMs: intEnv("AGENT_MAX_AGE_MS", 120000),
     historyLimit: intEnv("AGENT_HISTORY_LIMIT", 50),
+    // Auto-detect issues (Grammarly mode region eyes). Boot default only —
+    // the overlay's "AUTO-DETECT ISSUES" toggle is authoritative at runtime.
+    regionsEnabled: boolEnv("AUTO_DETECT_ISSUES", false),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.

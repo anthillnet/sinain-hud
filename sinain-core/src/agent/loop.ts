@@ -23,6 +23,9 @@ export interface AgentLoopDeps {
   onAnalysis: (entry: AgentEntry, contextWindow: ContextWindow) => void;
   /** Called to broadcast HUD line to overlay. */
   onHudUpdate: (text: string) => void;
+  /** Called every tick with the LLM's raw regions (undefined when none) so
+   *  the region tracker can ingest new ones and expire stale ones. */
+  onRegions?: (regions: import("../types.js").RawRegion[] | undefined, contextWindow: ContextWindow) => void;
   /** Optional: tracer to record spans. */
   onTraceStart?: (tickId: number) => TraceContext | null;
   /** Optional: get current recorder status for prompt injection. */
@@ -390,6 +393,11 @@ export class AgentLoop extends EventEmitter {
       if (this.deps.shouldWriteSituation?.() ?? true) {
         const situationContent = writeSituationMd(this.deps.situationMdPath, contextWindow, digest, entry, escalationScore, recorderStatus);
         this.deps.onSituationUpdate?.(situationContent);
+      }
+
+      // Region tracking (Grammarly mode) — every tick, so expiry advances
+      if (this.deps.agentConfig.regionsEnabled) {
+        this.deps.onRegions?.(result.regions, contextWindow);
       }
 
       // Notify for escalation check

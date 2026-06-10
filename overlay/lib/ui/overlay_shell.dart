@@ -16,7 +16,10 @@ import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
+import 'regions/region_action_banner.dart';
+import 'regions/region_eye_controller.dart';
 import '../core/models/feed_item.dart';
+import '../core/models/region_highlight.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -57,6 +60,17 @@ class OverlayShellState extends State<OverlayShell> {
 
   // Command input focus
   final _commandFocusNode = FocusNode();
+
+  // Grammarly mode: native region eyes (macOS only)
+  RegionEyeController? _regionEyes;
+  // Region whose action banner is showing in the chat (set on eye tap).
+  // While set, the chat input routes to that region's agent thread.
+  RegionHighlight? _activeRegion;
+  // Selected chat tab: null = MAIN feed, otherwise a region thread id.
+  // Each ROI is its own conversation; the input routes to the active tab.
+  String? _activeThread;
+  // Regions whose thread already started (Run pressed / follow-up sent)
+  final Set<String> _startedRegionThreads = {};
 
   @override
   void initState() {
@@ -106,6 +120,25 @@ class OverlayShellState extends State<OverlayShell> {
       setState(() => _pendingAttention = n);
     };
     ws.addListener(_wsListener!);
+
+    // Region eyes (Grammarly mode) — native NSPanels, macOS only
+    if (_isMacOS) {
+      _regionEyes = RegionEyeController(
+        windowService: _windowService,
+        ws: ws,
+        settingsService: _settingsService,
+        onRegionTap: (region, pos) {
+          // Register the tab immediately so it persists in the unified tab
+          // bar even before the thread starts or another ROI is selected.
+          ws.registerRegionThread(region.id, region.issue);
+          setState(() {
+            _activeRegion = region;
+            _activeThread = region.id; // select this region's tab
+          });
+          _openChatNearRegion(pos.dx, pos.dy);
+        },
+      )..start();
+    }
   }
 
   static const _redEye = Color(0xFFFF3344);
@@ -240,8 +273,193 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
+  /// Send a follow-up message to a region's agent thread (stable per-ROI
+  /// session core-side) and flip its eye badge to working.
+  void _sendToRegionThread(String regionId, String text) {
+    setState(() => _startedRegionThreads.add(regionId));
+    context.read<WebSocketService>().sendSpawnCommand(text, regionId: regionId);
+    _regionEyes?.markWorking(regionId);
+  }
+
+  /// Switch the chat to a thread tab (null = MAIN feed).
+  void _selectThread(String? id) {
+    final ws = context.read<WebSocketService>();
+    setState(() {
+      _activeThread = id;
+      if (id == null) {
+        _activeRegion = null;
+      } else if (_activeRegion?.id != id) {
+        // Re-resolve the live region for the banner (null if expired)
+        RegionHighlight? live;
+        for (final r in ws.regions) {
+          if (r.id == id) live = r;
+        }
+        _activeRegion = live;
+      }
+    });
+  }
+
+  void _closeThread(String id) {
+    context.read<WebSocketService>().closeRegionThread(id);
+    setState(() {
+      if (_activeThread == id) {
+        _activeThread = null;
+        _activeRegion = null;
+      }
+    });
+  }
+
+  /// True while any spawn task for this region is still in flight.
+  bool _regionWorking(WebSocketService ws, String regionId) {
+    for (final t in ws.spawnTasks.values) {
+      if (t.regionId == regionId && !t.isTerminal) return true;
+    }
+    return false;
+  }
+
+  /// Horizontal tab bar: MAIN + one pill per region thread. Hidden until the
+  /// first region conversation exists.
+  Widget _buildThreadTabs(WebSocketService ws) {
+    final ids = <String>{
+      ...ws.regionThreads.keys,
+      ...ws.regionThreadLabels.keys,
+      if (_activeRegion != null) _activeRegion!.id,
+    }.toList();
+    if (ids.isEmpty) return const SizedBox.shrink();
+
+    String labelFor(String id) {
+      var label = ws.regionThreadLabels[id];
+      if (label == null || label.isEmpty) {
+        for (final r in ws.regions) {
+          if (r.id == id) {
+            label = r.issue;
+            break;
+          }
+        }
+      }
+      if ((label == null || label.isEmpty) && _activeRegion?.id == id) {
+        label = _activeRegion!.issue;
+      }
+      label ??= 'region';
+      return label.length > 18 ? '${label.substring(0, 18)}…' : label;
+    }
+
+    Widget pill({
+      required String text,
+      required bool selected,
+      required VoidCallback onTap,
+      VoidCallback? onClose,
+    }) {
+      final accent = _accentColor;
+      return Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: selected
+                    ? accent.withValues(alpha: 0.15)
+                    : Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected
+                      ? accent.withValues(alpha: 0.5)
+                      : Colors.white.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    text,
+                    style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 9,
+                      color: selected
+                          ? accent
+                          : Colors.white.withValues(alpha: 0.55),
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  if (onClose != null) ...[
+                    const SizedBox(width: 5),
+                    GestureDetector(
+                      onTap: onClose,
+                      child: Icon(Icons.close,
+                          size: 9,
+                          color: Colors.white.withValues(alpha: 0.4)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            pill(
+              text: 'MAIN',
+              selected: _activeThread == null,
+              onTap: () => _selectThread(null),
+            ),
+            for (final id in ids)
+              pill(
+                // ⟳ while this region's task is in flight — visible feedback
+                // that the agent is working even if the eye expired meanwhile
+                text:
+                    '${_regionWorking(ws, id) ? "⟳" : "👁"} ${labelFor(id)}',
+                selected: _activeThread == id,
+                onTap: () => _selectThread(id),
+                onClose: () => _closeThread(id),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Move the HUD next to a region eye (top-left-origin screen point) and
+  /// open the chat there. Used by region eye taps — the chat becomes the
+  /// viewport for that region's conversation.
+  Future<void> _openChatNearRegion(double x, double y) async {
+    if (_state == HudState.hidden) toggleVisibility(true);
+
+    final screen = await _windowService.getScreenSize();
+    final chatW = _settingsService.settings.chatWidth;
+    final chatH = _settingsService.settings.chatHeight;
+    if (screen != null) {
+      final screenW = screen['w']!;
+      final screenH = screen['h']!;
+      // Chat below the eye, right edge roughly aligned with it
+      final left = (x + 48 - chatW).clamp(8.0, screenW - chatW - 8);
+      final top = (y + 56).clamp(8.0, screenH - chatH - 8);
+      final macY = screenH - top - chatH; // top-left → macOS bottom-left origin
+      await _windowService.setWindowFrame(left, macY, chatW, chatH);
+    }
+
+    if (_state != HudState.chat) {
+      HudTooltip.dismissAll();
+      setState(() => _state = HudState.chat);
+      _settingsService.setHudState(HudState.chat);
+    }
+    _windowService.makeKeyWindow();
+  }
+
   @override
   void dispose() {
+    _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
@@ -668,19 +886,26 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             ),
           ),
-          // Tab content (Agent feed / Tasks) with display settings overlay
+          // Thread tabs — MAIN + one per region conversation (Grammarly
+          // mode). Hidden until the first region thread exists.
+          _buildThreadTabs(ws),
+          // Tab content with display settings overlay. MAIN shows the agent
+          // feed; a region tab shows only that ROI's conversation (main
+          // escalations do not pour into region threads).
           Expanded(
             child: Stack(
               children: [
-                // Tasks tab deactivated for launch — Agent feed is the only
-                // visible surface. Permissions live on PermissionBanner above
-                // the chat input, so the Tasks tab adds no unique surface.
-                // Re-enable by restoring the Consumer<SettingsService> wrapper
-                // and switching index back to activeTab.
-                const FeedView(
-                  channel: FeedChannel.agent,
-                  emptyLabel: 'awaiting sinain…',
-                ),
+                _activeThread == null
+                    ? const FeedView(
+                        channel: FeedChannel.agent,
+                        emptyLabel: 'awaiting sinain…',
+                      )
+                    : FeedView(
+                        key: ValueKey('thread-$_activeThread'),
+                        regionId: _activeThread,
+                        channel: FeedChannel.agent,
+                        emptyLabel: 'no messages yet — press ⚡ Run',
+                      ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),
@@ -692,6 +917,24 @@ class OverlayShellState extends State<OverlayShell> {
               ],
             ),
           ),
+          // Region action banner — issue + suggested approach, shown on the
+          // region's tab while the region is still detected on screen. The
+          // thread only starts from its explicit Run button.
+          if (_activeThread != null &&
+              _activeRegion != null &&
+              _activeRegion!.id == _activeThread)
+            RegionActionBanner(
+              region: _activeRegion!,
+              accentColor: _settingsService.settings.accentColor,
+              threadStarted:
+                  _startedRegionThreads.contains(_activeRegion!.id),
+              onRun: () {
+                final region = _activeRegion!;
+                setState(() => _startedRegionThreads.add(region.id));
+                _regionEyes?.run(region);
+              },
+              onDismiss: () => setState(() => _activeRegion = null),
+            ),
           // Permission banner — visible above the input field whenever an
           // agent task is blocked waiting for user approval. Hidden (zero
           // height) when no tasks are pending. Mirrors Tasks tab — does not
@@ -699,14 +942,25 @@ class OverlayShellState extends State<OverlayShell> {
           const _AgentAvailabilityBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
-          // Command input
+          // Command input — routes to the active thread tab: region tab →
+          // that ROI's conversation, MAIN → the regular escalation flow.
           CommandInput(
             externalFocusNode: _commandFocusNode,
             onSubmit: (text) {
-              context.read<WebSocketService>().sendUserCommand(text);
+              final thread = _activeThread;
+              if (thread != null) {
+                _sendToRegionThread(thread, text);
+              } else {
+                context.read<WebSocketService>().sendUserCommand(text);
+              }
             },
             onSpawn: (text) {
-              context.read<WebSocketService>().sendSpawnCommand(text);
+              final thread = _activeThread;
+              if (thread != null) {
+                _sendToRegionThread(thread, text);
+              } else {
+                context.read<WebSocketService>().sendSpawnCommand(text);
+              }
             },
           ),
         ],

@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/feed_item.dart';
+import '../models/region_highlight.dart';
 import '../models/spawn_task.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
@@ -47,6 +48,7 @@ class WebSocketService extends ChangeNotifier {
   final _spawnTaskController = StreamController<SpawnTask>.broadcast();
   final _copyController = StreamController<String>.broadcast();
   final _thinkingController = StreamController<bool>.broadcast();
+  final _regionController = StreamController<List<RegionHighlight>>.broadcast();
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
@@ -55,6 +57,40 @@ class WebSocketService extends ChangeNotifier {
   Stream<String> get scrollStream => _scrollController.stream;
   Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
+  Stream<List<RegionHighlight>> get regionStream => _regionController.stream;
+
+  /// Latest full region set (Grammarly mode). Read on mount; updates via
+  /// [regionStream].
+  List<RegionHighlight> regions = const [];
+
+  // ── Region threads (Grammarly mode) ──
+  // Each ROI has its own conversation with the escalation agent. Messages
+  // tagged with regionId land here instead of the main feed; the HUD shows
+  // them as tabs.
+  final Map<String, List<FeedItem>> regionThreads = {};
+  final Map<String, String> regionThreadLabels = {};
+  final _regionThreadController =
+      StreamController<(String, FeedItem)>.broadcast();
+
+  /// (regionId, item) pairs as region thread messages arrive.
+  Stream<(String, FeedItem)> get regionThreadItemStream =>
+      _regionThreadController.stream;
+
+  /// Register a region tab (eye tapped). The tab persists across ROI/tab
+  /// switches — the bar is one united list for all states — until explicitly
+  /// closed via [closeRegionThread].
+  void registerRegionThread(String regionId, String label) {
+    if (regionThreadLabels.containsKey(regionId)) return;
+    regionThreadLabels[regionId] = label;
+    notifyListeners();
+  }
+
+  /// Drop a region thread (tab closed). Server-side session is unaffected.
+  void closeRegionThread(String regionId) {
+    regionThreads.remove(regionId);
+    regionThreadLabels.remove(regionId);
+    notifyListeners();
+  }
 
   // Canonical spawn-task map. TasksView still consumes the stream for
   // incremental rendering, but the map gives the AGT/TSK tab indicator
@@ -176,6 +212,12 @@ class WebSocketService extends ChangeNotifier {
       _channel!.ready.then((_) {
         _connected = true;
         _retryCount = 0;
+        // Reconnect succeeded — dismiss the stale disconnect banner (other
+        // alerts, e.g. the local-agent warning, are left alone).
+        if (_systemAlertText?.startsWith('Sinain disconnected') ?? false) {
+          _systemAlertText = null;
+          _systemAlertPriority = FeedPriority.normal;
+        }
         notifyListeners();
         _log('Connected to $url');
 
@@ -229,7 +271,16 @@ class WebSocketService extends ChangeNotifier {
           if (!_screenFeedEnabled && item.text.startsWith('[👁]')) {
             break;
           }
-          if (item.channel == FeedChannel.agent) {
+          if (item.regionId != null) {
+            // Region thread message — route to its tab, not the main feed
+            final thread = regionThreads.putIfAbsent(item.regionId!, () => []);
+            thread.add(item);
+            if (thread.length > _maxFeedItems) {
+              thread.removeRange(0, thread.length - _maxFeedItems);
+            }
+            _regionThreadController.add((item.regionId!, item));
+            notifyListeners(); // tab bar may need to appear/update
+          } else if (item.channel == FeedChannel.agent) {
             agentFeedItems.add(item);
             if (agentFeedItems.length > _maxFeedItems) {
               agentFeedItems.removeRange(
@@ -310,8 +361,25 @@ class WebSocketService extends ChangeNotifier {
           // the stream subscriber rebuilds the list view.
           final prevAttention = pendingAttentionCount;
           _spawnTasks[task.taskId] = task;
+          // Region tasks: the label is the region issue — use it as the
+          // thread tab title. Always notify so the tab pill's working/done
+          // indicator tracks status changes.
+          if (task.regionId != null) {
+            regionThreadLabels.putIfAbsent(task.regionId!, () => task.label);
+            notifyListeners();
+          }
           if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
+          break;
+        case 'region_highlight':
+          final list = (json['regions'] as List? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(RegionHighlight.fromJson)
+              .where((r) => r.id.isNotEmpty)
+              .toList();
+          _log('REGION_HIGHLIGHT: ${list.length} regions [${list.map((r) => r.id).join(", ")}]');
+          regions = list;
+          _regionController.add(list);
           break;
         case 'thinking':
           _thinkingController.add(json['active'] as bool? ?? false);
@@ -391,10 +459,13 @@ class WebSocketService extends ChangeNotifier {
         'User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
-  void sendSpawnCommand(String text) {
-    send({'type': 'spawn_command', 'text': text});
-    _log(
-        'Spawn command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+  void sendSpawnCommand(String text, {String? regionId}) {
+    send({
+      'type': 'spawn_command',
+      'text': text,
+      if (regionId != null) 'regionId': regionId,
+    });
+    _log('Spawn command sent${regionId != null ? " (region=$regionId)" : ""}: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
   void disconnect() {
@@ -417,6 +488,8 @@ class WebSocketService extends ChangeNotifier {
     _scrollController.close();
     _spawnTaskController.close();
     _copyController.close();
+    _regionController.close();
+    _regionThreadController.close();
     super.dispose();
   }
 

@@ -10,6 +10,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
     private var dragMonitor: Any?
     private var resizeMonitor: Any?
 
+    /// Region eye panels (Grammarly mode) — created lazily on first use.
+    private lazy var regionEyes = RegionEyePool(channel: channel)
+
     static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: channelName,
@@ -36,6 +39,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             if #available(macOS 12.0, *) {
                 window.sharingType = enabled ? .none : .readOnly
             }
+            // Demo mode applies to every capture-invisible surface, not just
+            // the main HUD — region eye panels follow the same toggle.
+            regionEyes.setPrivacyMode(enabled: enabled)
             result(nil)
 
         case "setAlwaysOnTop":
@@ -158,6 +164,25 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         case "beginNativeResize":
             let edge = args?["edge"] as? String ?? "right"
             beginNativeResize(window: window, edge: edge)
+            result(nil)
+
+        case "getScreenSize":
+            let frame = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
+            result(["w": frame.size.width, "h": frame.size.height])
+
+        case "showRegionEyes":
+            let eyes = args?["eyes"] as? [[String: Any]] ?? []
+            regionEyes.reconcile(eyes)
+            result(nil)
+
+        case "updateRegionEye":
+            let id = args?["id"] as? String ?? ""
+            let state = args?["state"] as? String ?? "idle"
+            regionEyes.update(id: id, state: state)
+            result(nil)
+
+        case "clearRegionEyes":
+            regionEyes.clear()
             result(nil)
 
         default:

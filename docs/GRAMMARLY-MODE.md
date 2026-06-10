@@ -1,205 +1,186 @@
-# Grammarly Mode — Region Eye Design
+# Grammarly Mode — Region Eyes (v2)
 
-Region eyes detect actionable screen areas (errors, fixable code, questions) and show clickable sinain eye icons at those positions. Each eye can spawn an agent task and will eventually become a standalone 3-state HUD (Eye → Controls → Chat).
+Region eyes surface actionable screen areas (errors, typos, fixable code,
+stuck questions) as small clickable sinain eye icons positioned at the real
+screen location of the issue. Tapping an eye opens the main HUD chat next to
+the region, showing the detected issue and the suggested approach; the user
+explicitly starts a **per-region agent thread** from there (taps never
+auto-run). Each ROI gets its own conversation, routed via the spawn lane —
+dedicate a separate spawn agent in the overlay's lane selector to keep
+region tasks from queueing behind escalations.
 
-## Architecture
+This is the v2 redesign on top of current main. It replaces the v1 prototype
+from `feat/region-multi-window` (grid-positioned placeholder eyes, text-blob
+context, per-region multi-engine windows planned but never built).
+
+## Design principles
+
+1. **The LLM never invents coordinates.** Screen OCR lines in the analyzer
+   prompt are prefixed with `[S<id>]` (the SenseEvent id). The LLM anchors
+   each region by echoing `sourceId`; sinain-core resolves the bbox from that
+   event's `imageBbox` + `frameSize` (capture-frame pixels, sent by
+   sense_client). Regions without a resolvable bbox stack in the top-right
+   screen corner.
+
+2. **Stable region identity.** `regionId = "r-" + sha256(normalized issue)[0:10]`.
+   The same issue re-detected on a later tick keeps its id — no eye flicker.
+   The overlay reconciles panels by id (create/move/remove deltas only).
+
+3. **Main HUD as viewport, eyes as tabs.** Tapping an eye opens the HUD chat
+   near the region with a region action banner (issue + tip + explicit Run
+   button). Region threads run in parallel (up to 3 concurrent in flight),
+   each region's status routes back to its eye badge (idle → working →
+   ready/failed); responses land in the chat feed and the tasks pipeline.
+   No multi-engine Flutter windows, no cross-engine channels.
+
+4. **One thread per ROI, routed via the spawn lane.** Run sends the region
+   to the spawn-lane agent under a stable session key
+   `agent:main:region:<regionId>`. Both lanes point at the same agent by
+   default; dedicating a separate spawn agent in the overlay's lane selector
+   keeps region tasks from queueing behind escalations on a slow sequential
+   agent. While a region tab is active, the chat input routes follow-ups
+   into that same session — the agent keeps per-region conversation history
+   (gateway agents; bare CLI agents are stateless per call). The first
+   message carries the full region context (issue + tip + source OCR + the
+   *current* digest), assembled core-side at Run time, never a stale blob
+   baked at detection.
+
+5. **Zero added LLM cost.** Regions piggyback on the existing analysis tick
+   via an optional `regions` field in the response JSON.
+
+## Data flow
 
 ```
-Agent tick → regions[] with pre-built spawnContext → WS → overlay
-  ↓
-RegionEyeApp (Eye 48×48) — appears at ROI position
-  ↓ user tap
-RegionEyeApp (Controls 280×120) — shows issue/tip + spinner, fires spawn
-  ↓ ~200ms: Phase 1 accepted (non-blocking)
-  ↓ 5-45s: Phase 2 completes async
-RegionEyeApp (Chat ~300×400) — shows result, optional follow-up input
+sense_client ──POST /sense {roi: {bbox, frame_size}}──▶ SenseBuffer (imageBbox, frameSize)
+                                                              │
+agent tick: prompt lines tagged [S<id>] ──▶ LLM ──▶ {hud, digest, regions:[{issue, tip, action, sourceId}]}
+                                                              │
+RegionTracker (stable ids, bbox resolution, TTL expiry) ──▶ ws: region_highlight {regions:[{id, issue, tip, action, bbox, frameSize}]}
+                                                              │
+overlay RegionEyeController ──▶ scale bbox frame→screen ──▶ native RegionEyePool (48×48 NSPanels, sharingType=.none)
+                                                              │ tap
+chat opens near region + RegionActionBanner (issue, tip, ⚡ Run)
+                                                              │ explicit Run (and thread follow-ups from chat input)
+ws: spawn_command {text, regionId} ──▶ core: first message = region context from tracker, then user text
+                                                              │
+escalator.dispatchSpawnTask(task, label, {regionId, sessionKey: "agent:main:region:<id>", route: "spawn"})
+                                                              │
+ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/failed) + chat feed response
 ```
 
-Data flow: sense_client ROI detection → sinain-core agent LLM → `region_highlight` WS message → overlay creates `desktop_multi_window` Flutter windows → native Swift configures each as 48×48 transparent floating NSPanel with privacy mode.
+## Components
 
----
+### sinain-core
+- `types.ts` — `RawRegion` (LLM output), `RegionHighlight` (tracked, with
+  bbox), `RegionHighlightMessage`, `regionId` on `SpawnCommandMessage` /
+  `SpawnTaskMessage`, `frameSize` on `SenseEvent`, `regionsEnabled` on
+  `AnalysisConfig`.
+- `agent/analyzer.ts` — `REGIONS_SECTION` appended to the system prompt when
+  `AUTO_DETECT_ISSUES` (default false, runtime-toggled from the overlay);
+  `[S<id>]` prefixes on screen lines;
+  `parseRegions()` (max 3, validated action enum, sourceId).
+- `agent/region-tracker.ts` — `RegionTracker`: stable content-hash ids, bbox
+  resolution from the referenced sense event, expiry after 2 missed ticks or
+  5 min, change detection (broadcast only on diff). `buildRegionSpawnTask()`:
+  spawn-time context assembly.
+- `agent/loop.ts` — `onRegions` callback fired every tick (also with
+  undefined, so expiry advances).
+- `index.ts` — wires tracker → `region_highlight` broadcast; region-aware
+  `onSpawnCommand` (regionId → tracked region → task text).
+- `overlay/ws-handler.ts` — replays the latest region set to late-joining
+  overlay clients.
+- `escalation/escalator.ts` — `spawnsInFlight` counter (max 3 concurrent,
+  was a single boolean), `regionByTask` map echoes `regionId` on every
+  `spawn_task` broadcast (cleared on terminal status).
+- `overlay/commands.ts` — extracts `regionId` from `spawn_command`.
 
-## Phase 1: Backend — Parallel Spawns + Non-blocking RPC ✅
+### sense_client
+- `sender.py` — `frame_size: [w, h]` included in the `roi` payload
+  (`package_roi` / `package_full_frame`); bbox stays in capture-frame pixels.
 
-**Status**: Completed. Branch: `fix/goose-bare-agent`
+### overlay (Flutter, macOS)
+- `core/models/region_highlight.dart` — wire model.
+- `core/services/websocket_service.dart` — `region_highlight` → `regionStream`
+  + cached `regions`; `regionId` on `SpawnTask`; `sendSpawnCommand(text,
+  regionId:)`.
+- `core/services/window_service.dart` — `getScreenSize`, `showRegionEyes`,
+  `updateRegionEye`, `clearRegionEyes`, `regionTapStream` (native
+  `onRegionTap` callback).
+- `ui/regions/region_eye_controller.dart` — orchestration: bbox scaling
+  (screen/frame), corner stacking fallback, tap → open chat near region,
+  explicit `spawn()`, spawn_task status → eye badge, settings gate.
+- `ui/regions/region_action_banner.dart` — banner above the chat input:
+  issue + tip + ⚡ Run button (the only spawn trigger) + dismiss.
+- `ui/overlay_shell.dart` — `_openChatNearRegion(x, y)`: moves the HUD next
+  to the eye (top-left → macOS bottom-left conversion) and opens chat;
+  holds the active region for the banner.
+- `ui/settings/display_settings_panel.dart` — AUTO-DETECT ISSUES toggle
+  (default OFF, persisted; pushed to core at runtime via `set_auto_detect`).
 
-### 1a. SpawnQueue replaces spawnInFlight boolean ✅
+### overlay (Swift, macOS)
+- `macos/Runner/RegionEyePool.swift` — pool of non-activating floating
+  NSPanels keyed by region id; `sharingType = .none` (invisible to screen
+  capture); native-drawn eye with state border + badge (idle green / working
+  orange pulse / ready green ✓ / failed red); taps → method channel.
+- `macos/Runner/WindowControlPlugin.swift` — `getScreenSize`,
+  `showRegionEyes`, `updateRegionEye`, `clearRegionEyes` cases.
 
-- `SpawnQueue` (maxConcurrent:5, maxQueued:10) wired into `escalator.ts`
-- Multiple ROI spawns can run in parallel
-- **File**: `sinain-core/src/escalation/escalator.ts`
+## Interaction model (eyes as tabs, one thread per ROI)
 
-### 1b. Async two-phase RPC ✅
+- Tap an eye → HUD chat opens next to the region with the **region action
+  banner**: the detected issue, the suggested approach, and a ⚡ Run button.
+  Nothing runs yet.
+- Press **⚡ Run** → the region's thread starts: eye turns orange (working),
+  the first message (full region context) goes to the spawn-lane agent under
+  session `agent:main:region:<id>` (pick a dedicated spawn agent in the lane
+  selector to keep region replies fast). The banner stays, showing a
+  "👁 thread" tag — the chat input now routes follow-ups into this region's
+  thread, and the tab pill shows ⟳ while the task is in flight. Dismiss (×)
+  to return the input to the main flow.
+- Tap another eye while the first is working → its own banner shows; running
+  threads keep going independently (each has its own session). The HUD
+  re-anchors to the new region.
+- A response arrives → that region's eye badge flips to **ready** (green,
+  dilated pupil) without hijacking the current view; the response lands in
+  the chat feed (and the tasks pipeline).
+- Tap a **working/ready** eye → HUD chat opens near it; follow-ups continue
+  that thread.
+- Eyes disappear when the issue stops being detected (2 ticks) or after
+  5 min; in-flight responses still land in the chat feed, and the thread
+  session survives server-side.
+- Duplicate launches are debounced overlay-side and fingerprint-deduped
+  core-side; at most 3 region messages in flight at once.
 
-- `dispatchSpawnTask` uses `sendAgentRpcSplit()` instead of synchronous `sendRpc`
-- Phase 1 (~200ms): delivery confirmed, queue slot freed immediately
-- Phase 2 (5-45s): result handled async via `.then()`, never blocks
-- `sendAgentRpcSplit` extended with `extraParams` for `lane`, `extraSystemPrompt`, `label`
-- **File**: `sinain-core/src/escalation/openclaw-ws.ts`
+## Gating
 
-### 1c. regionId routing ✅
+- Overlay: "AUTO-DETECT ISSUES" toggle in display settings (default OFF) —
+  the source of truth. Pushed to core at runtime (`set_auto_detect`), synced
+  on every reconnect; when off, the LLM isn't even asked for regions (no
+  prompt tokens spent) and eye panels are cleared.
+- Core: `AUTO_DETECT_ISSUES=true|false` (.env) — boot default only, for
+  headless runs before an overlay connects.
 
-- `regionId` added to `SpawnCommandMessage` and `SpawnTaskMessage` types
-- Commands handler extracts and passes `regionId` through the pipeline
-- `broadcastTaskEvent` includes `regionId` for overlay window targeting
-- **Files**: `sinain-core/src/types.ts`, `sinain-core/src/overlay/commands.ts`
+## Future work (deliberately deferred)
 
-### 1d. Pre-built spawnContext with full context ✅
-
-- When agent emits regions, `buildEscalationMessage()` serializes the full context window (screen OCR, audio transcripts, errors, app history) into each region's `spawnContext`
-- `spawnContext` and `regionId` passed through `region_highlight` WS message
-- Replaces the old approach of referencing `sinain_get_context` MCP tool (which OpenClaw subagents don't have access to)
-- **Files**: `sinain-core/src/agent/loop.ts`, `sinain-core/src/index.ts`
-
----
-
-## Phase 1.5: Flutter Multi-Window Foundation ✅
-
-**Status**: Completed. Branch: `feat/region-multi-window`
-
-### Multi-window via desktop_multi_window ✅
-
-- Each region eye is a separate Flutter engine window
-- Native Swift configures windows via `FlutterMultiWindowPlugin.setOnWindowCreatedCallback`
-- 48×48, borderless, transparent, floating, privacy mode (`sharingType = .none`)
-- Method channel `sinain_hud/region_window` for position/show/drag/tap
-- **Files**: `overlay/macos/Runner/AppDelegate.swift`, `overlay/lib/main.dart`, `overlay/lib/ui/regions/region_eye_app.dart`
-
-### Native drag support ✅
-
-- NSEvent monitor for smooth native drag on region eye windows
-- `beginDrag` handler in AppDelegate's `configureRegionWindow`
-
-### Tap → spawn pipeline ✅
-
-- Tap events forwarded from secondary engine → Swift → main engine via `mainWindowChannel`
-- Main engine's `WindowService.regionTapStream` receives taps
-- `OverlayShell` subscribes and dispatches spawn commands
-- 2-second tap debounce prevents flood
-
-### ROI coordinate scaling ✅
-
-- Sense ROI bboxes flow through sinain-core to overlay
-- `frameSize` included in `region_highlight` message
-- Overlay computes `screenSize / frameSize` scale factor via `getScreenSize` native call
-- Eyes positioned at actual ROI screen locations
-
----
-
-## Phase 2: Region Window 3-State UI (TODO)
-
-### 2a. Extend native secondary window capabilities
-
-**File**: `overlay/macos/Runner/AppDelegate.swift` (`configureRegionWindow`)
-
-Add to the method channel handler:
-- `setWindowFrame` — resize window for Controls (280×120) and Chat (~300×400) states
-- `makeKey` — `window.makeKeyAndOrderFront(nil)` for text input in Chat state
-- `resignKey` — return focus when collapsing
-
-Add static dictionary for cross-engine communication:
-```swift
-static var regionChannels: [String: FlutterMethodChannel] = [:]
-```
-Register each secondary engine's channel keyed by region ID when the Dart side calls `setPosition`.
-
-### 2b. Add pushRegionState to WindowControlPlugin
-
-**File**: `overlay/macos/Runner/WindowControlPlugin.swift`
-
-New case in `handle()`:
-```swift
-case "pushRegionState":
-    let regionId = args?["regionId"] as? String ?? ""
-    if let ch = AppDelegate.regionChannels[regionId] {
-        ch.invokeMethod("onStateUpdate", arguments: args)
-    }
-    result(nil)
-```
-
-This bridges the main Flutter engine → Swift → secondary Flutter engine.
-
-### 2c. Route spawn_task events by regionId in OverlayShell
-
-**File**: `overlay/lib/ui/overlay_shell.dart`
-
-- Subscribe to `ws.spawnTaskStream`
-- When a `spawn_task` message has a `regionId`, call `_windowService.pushRegionState(regionId, taskData)`
-- In `_handleRegionTap()`: use pre-built `spawnContext` from region highlight instead of assembling text; include `regionId` in the spawn command
-- In `_createRegionWindows()`: pass `spawnContext` in the args JSON
-
-### 2d. Transform RegionEyeApp to 3-state
-
-**File**: `overlay/lib/ui/regions/region_eye_app.dart`
-
-Add `RegionState { eye, controls, chat }` enum and state machine:
-
-- **Eye** (48×48): Current behavior. Tap → transition to Controls, fire spawn command via channel
-- **Controls** (280×120): Show issue text, tip, action type, spinner while spawn in flight. Data already in `_regionData`. Listen for `onStateUpdate` from native channel
-- **Chat** (~300×400): Show spawn result (scrollable), optional follow-up input via `CommandInput`. Call `makeKey` for text focus. Dismiss → back to Eye
-
-### 2e. New widget files
-
-- `overlay/lib/ui/regions/region_controls.dart` — Compact card: issue, tip, action buttons, spinner
-- `overlay/lib/ui/regions/region_chat.dart` — Result display + optional CommandInput for follow-ups
-
----
-
-## Phase 3: Pre-computation + Instant Feedback (TODO)
-
-### 3a. Pre-assembled spawnContext ✅ (done in Phase 1d)
-
-Already wired. Full context window serialized via `buildEscalationMessage("rich")` when regions are emitted.
-
-### 3b. Instant transition on tap
-
-On tap:
-1. RegionEyeApp transitions to Controls state IMMEDIATELY (issue/tip from cached `_regionData`)
-2. Sends `spawn_command` with pre-built `spawnContext` + `regionId` via native channel
-3. Main window forwards to sinain-core WS
-4. sinain-core: `sendAgentRpcSplit` → `acceptedPromise` resolves in ~200ms
-5. `broadcastTaskEvent("spawned", regionId)` → main window routes to region window → spinner shows
-6. Phase 2 completes (5-45s) → `broadcastTaskEvent("completed", regionId, resultPreview)` → region window transitions to Chat with result
-
-**Perceived latency**: Eye → Controls is instant (0ms). Controls shows spinner. Result arrives in 5-45s (irreducible agent processing time).
-
----
-
-## Phase 4: Polish (TODO)
-
-- Clean up region windows when new `region_highlight` replaces old (close stale windows)
-- Handle dismiss while spawn in flight (don't lose result — buffer it)
-- Multiple taps debounce already in place (2s cooldown in RegionEyeApp)
-- Consider auto-dismiss after N seconds of inactivity
-- Persist region chat position on drag
-
----
-
-## Files Summary
-
-| File | Changes | Status |
-|------|---------|--------|
-| `sinain-core/src/escalation/escalator.ts` | SpawnQueue, sendAgentRpcSplit, regionId | ✅ |
-| `sinain-core/src/escalation/openclaw-ws.ts` | extraParams on sendAgentRpcSplit | ✅ |
-| `sinain-core/src/escalation/spawn-queue.ts` | regionId on SpawnEntry | ✅ |
-| `sinain-core/src/types.ts` | regionId, spawnContext on message types | ✅ |
-| `sinain-core/src/overlay/commands.ts` | Extract regionId from spawn_command | ✅ |
-| `sinain-core/src/agent/loop.ts` | Full spawnContext via buildEscalationMessage | ✅ |
-| `sinain-core/src/index.ts` | Pass spawnContext in region_highlight | ✅ |
-| `overlay/macos/Runner/AppDelegate.swift` | configureRegionWindow, setWindowFrame/makeKey | ✅ base, TODO resize/key |
-| `overlay/macos/Runner/WindowControlPlugin.swift` | pushRegionState handler | TODO |
-| `overlay/lib/ui/overlay_shell.dart` | Route spawn_task by regionId, use spawnContext | TODO |
-| `overlay/lib/ui/regions/region_eye_app.dart` | 3-state machine (Eye/Controls/Chat) | TODO |
-| `overlay/lib/ui/regions/region_controls.dart` | New: Controls card widget | TODO |
-| `overlay/lib/ui/regions/region_chat.dart` | New: Chat panel widget | TODO |
-| `overlay/lib/core/services/websocket_service.dart` | Parse regionId from spawn_task | TODO |
-| `overlay/lib/core/models/region_highlight.dart` | Add spawnContext field | TODO |
+- Per-region chat windows (3-state Eye → Controls → Chat) — the regionId
+  threading, parallel spawn lane, and tracker are the prerequisites; the
+  main-HUD viewport can be upgraded without rework.
+- Windows parity (`WDA_EXCLUDEFROMCAPTURE` popups in the C++ runner).
+- Word-level bbox anchoring (needs OCR word boxes from the vision pipeline).
+- Per-region conversation history (currently the shared chat feed).
 
 ## Verification
 
-1. **Parallel spawns**: Tap two different region eyes rapidly — both should show spinners, both should receive results independently
-2. **Latency**: From tap to "spawned" status should be <500ms (Phase 1 only)
-3. **3-state transition**: Eye → Controls (instant) → Chat (when result arrives) → Eye (dismiss)
-4. **Main window free**: Main overlay should remain responsive and unblocked during region spawns
-5. **Text input**: Chat state in region window should accept keyboard input for follow-up commands
-6. **Result routing**: Spawn result should appear only in the region window that initiated it, not in the main feed (or optionally in both)
+1. **Anchoring**: open a terminal with an error visible → eye should appear
+   near the error region (sense ROI), not in a fixed grid.
+2. **Stability**: same error across several ticks → the eye must not flicker
+   or change id (`regions` log line in sinain-core shows the id set).
+3. **Explicit spawn**: tapping an eye must only open the chat + banner —
+   no task may launch until ⚡ Run is pressed.
+4. **Parallel spawns**: run two regions back-to-back → both badges go
+   orange, both results arrive independently (`spawnsInFlight` in /health).
+4. **Badge routing**: result must flip only the originating eye to ✓.
+5. **Privacy**: eyes must be invisible in a screen recording
+   (sharingType = .none).
+6. **Gating**: AUTO-DETECT ISSUES toggle off → panels disappear immediately
+   and the LLM stops being asked for regions (toggle state is pushed to core).

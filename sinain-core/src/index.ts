@@ -14,6 +14,7 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
+import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -781,6 +782,14 @@ async function main() {
     isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
   });
 
+  // ── Region tracker (Grammarly mode) ──
+  // Ingests LLM-detected regions every tick, resolves bboxes from sense
+  // events, broadcasts the set to the overlay when it changes.
+  const regionTracker = new RegionTracker();
+  // Region ids whose per-ROI agent thread already got the full region
+  // context (first message); follow-ups send just the user's text.
+  const startedRegionThreads = new Set<string>();
+
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
     feedBuffer,
@@ -799,6 +808,16 @@ async function main() {
     },
     onSituationUpdate: (content) => {
       escalator.pushSituationMd(content);
+    },
+    onRegions: (regions, contextWindow) => {
+      const changed = regionTracker.update(regions, contextWindow);
+      if (changed) {
+        wsHandler.broadcastRaw({
+          type: "region_highlight",
+          regions: changed,
+          ts: Date.now(),
+        });
+      }
     },
     // Gate SITUATION.md writes (and the subsequent push) on a gateway lane
     // being active — see escalator.shouldDriveGateway. Users with no openclaw
@@ -1109,16 +1128,31 @@ async function main() {
 
     const mcpConfigPath = writeLocalAgentMcpConfig(config.port);
     const coreUrl = process.env.SINAIN_CORE_URL || `http://localhost:${config.port}`;
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      MCP_CONFIG: mcpConfigPath,
+      SINAIN_AGENT: agent,
+      SINAIN_CORE_URL: coreUrl,
+      ESCALATION_TRANSPORT: "http",
+    };
+    // Strip Claude Code session vars that leak in when sinain-core itself was
+    // launched from inside a Claude Code / agent session. They redirect the
+    // spawned CLI agents (claude, openclaude) to the parent session's config
+    // dir, where their own credentials don't exist — surfacing as
+    // "No cookie auth credentials found" 401s on every invocation.
+    // (Profile-level CLAUDE_CODE_* overrides are unaffected: run.sh applies
+    // them per profile after this spawn.)
+    for (const key of Object.keys(childEnv)) {
+      if (key.startsWith("CLAUDE_CODE_") || key === "CLAUDE_CONFIG_DIR" ||
+          key === "CLAUDECODE" || key === "AI_AGENT") {
+        delete childEnv[key];
+      }
+    }
     const child = spawn("bash", [runSh], {
       cwd: dirname(runSh),
-      env: {
-        ...process.env,
-        MCP_CONFIG: mcpConfigPath,
-        SINAIN_AGENT: agent,
-        SINAIN_CORE_URL: coreUrl,
-        ESCALATION_TRANSPORT: "http",
-      },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     localAgentProcess = child;
@@ -1348,8 +1382,39 @@ async function main() {
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
     },
-    onSpawnCommand: (text) => {
-      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+    onSetAutoDetect: (enabled) => {
+      config.agentConfig.regionsEnabled = enabled;
+      if (!enabled) {
+        // Clear tracked regions + native eyes immediately
+        regionTracker.clear();
+        wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
+      }
+    },
+    onSpawnCommand: (text, regionId) => {
+      let task = text;
+      let label = "user-command";
+      const opts: { regionId?: string; sessionKey?: string; route?: "spawn" | "escalation" } = { regionId };
+      if (regionId) {
+        // Region thread: each ROI gets its own stable agent session, routed
+        // via the SPAWN lane. Both lanes point at the same agent by default,
+        // but the overlay's per-lane selector can dedicate a separate spawn
+        // agent so region tasks never queue behind escalations on a slow
+        // sequential agent. First message carries the full region context;
+        // follow-ups are the user's text and continue the same session.
+        opts.sessionKey = `agent:main:region:${regionId}`;
+        opts.route = "spawn";
+        const region = regionTracker.get(regionId);
+        label = region?.issue ? region.issue.slice(0, 48) : "region";
+        if (!startedRegionThreads.has(regionId)) {
+          startedRegionThreads.add(regionId);
+          if (region) {
+            // Overlay text on Run is a synthesized feed echo, not a user
+            // note — the region itself carries the task content.
+            task = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+          }
+        }
+      }
+      escalator.dispatchSpawnTask(task, label, opts).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
         wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
       });

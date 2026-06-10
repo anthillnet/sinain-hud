@@ -10,6 +10,11 @@ export interface FeedMessage {
   priority: Priority;
   ts: number;
   channel: FeedChannel;
+  /** Message origin shown in the overlay ("user" | "spawn" | agent default) */
+  sender?: string;
+  /** Region thread this message belongs to — the overlay routes it to that
+   *  region's tab instead of the main feed (Grammarly mode). */
+  regionId?: string;
 }
 
 /** sinain-core → Overlay: status update */
@@ -53,6 +58,47 @@ export interface SpawnTaskMessage {
   question?: string;
   /** Tool permission request (status=awaiting_permission) */
   permission?: { tool: string; input: Record<string, unknown> };
+  /** Region eye that initiated this spawn (overlay routes status to its badge) */
+  regionId?: string;
+}
+
+// ── Region highlights (Grammarly mode) ──
+
+export type RegionAction = "fix" | "explain" | "research";
+
+/** Raw region as emitted by the analyzer LLM (no coordinates — the LLM
+ *  references the sense event it derived the issue from via sourceId). */
+export interface RawRegion {
+  issue: string;
+  tip: string;
+  action?: RegionAction;
+  /** SenseEvent.id the issue was observed in (from numbered prompt lines) */
+  sourceId?: number;
+}
+
+/** Tracked region with stable identity and resolved coordinates. */
+export interface RegionHighlight {
+  /** Stable id derived from normalized issue text (survives re-detection) */
+  id: string;
+  issue: string;
+  tip: string;
+  action?: RegionAction;
+  /** [x, y, w, h] in capture-frame pixels (absent → overlay stacks in corner) */
+  bbox?: [number, number, number, number];
+  /** [w, h] of the capture frame bbox is expressed in (for screen scaling) */
+  frameSize?: [number, number];
+  /** OCR text of the source sense event (context for spawn) */
+  sourceOcr?: string;
+  /** App the region was detected in */
+  app?: string;
+}
+
+/** sinain-core → Overlay: current set of actionable screen regions.
+ *  Full-state broadcast; overlay diffs by region id. */
+export interface RegionHighlightMessage {
+  type: "region_highlight";
+  regions: RegionHighlight[];
+  ts: number;
 }
 
 /** Overlay → sinain-core: user typed a message */
@@ -91,6 +137,8 @@ export interface UserCommandMessage {
 export interface SpawnCommandMessage {
   type: "spawn_command";
   text: string;
+  /** Region eye that initiated the spawn (status events echo it back) */
+  regionId?: string;
 }
 
 /** Overlay → sinain-core: reply to a spawn question */
@@ -136,7 +184,7 @@ export interface CostSnapshot {
   startedAt: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage;
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage | RegionHighlightMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -167,6 +215,7 @@ export interface SenseEvent {
   ocr: string;
   imageData?: string;   // base64 JPEG thumbnail (stripped from older events)
   imageBbox?: number[]; // [x, y, w, h] of the captured region
+  frameSize?: number[]; // [w, h] of the full capture frame (bbox coordinate space)
   meta: {
     ssim: number;
     app: string;
@@ -276,6 +325,8 @@ export interface AnalysisConfig {
   cooldownMs: number;
   maxAgeMs: number;
   historyLimit: number;
+  /** Grammarly mode: ask the LLM for actionable screen regions each tick */
+  regionsEnabled: boolean;
 }
 
 /** @deprecated Use AnalysisConfig */
@@ -293,6 +344,8 @@ export interface AgentResult {
   parsedOk: boolean;
   /** Actual USD cost returned by OpenRouter (undefined if not available). */
   cost?: number;
+  /** Actionable screen regions detected this tick (Grammarly mode) */
+  regions?: RawRegion[];
 }
 
 export interface AgentEntry extends AgentResult {

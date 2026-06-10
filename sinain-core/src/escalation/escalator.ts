@@ -85,8 +85,14 @@ export class Escalator {
   private lastSpawnTs = 0;
   private static readonly SPAWN_COOLDOWN_MS = 60_000; // 60 seconds between duplicate spawns
 
-  // Prevent concurrent spawn RPCs (sibling spawns only — never blocks regular escalations)
-  private spawnInFlight = false;
+  // Bound concurrent spawn RPCs (sibling spawns only — never blocks regular
+  // escalations). >1 so parallel region-eye taps each get their own subagent.
+  private static readonly MAX_CONCURRENT_SPAWNS = 3;
+  private spawnsInFlight = 0;
+
+  // regionId per in-flight spawn task — echoed on every spawn_task broadcast
+  // so the overlay can route status to the originating region eye's badge.
+  private regionByTask = new Map<string, string>();
 
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
@@ -597,11 +603,14 @@ ${recentLines.join("\n")}`;
     const label = this.spawnHttpPending.label;
     const startedAt = this.spawnHttpPending.ts;
 
-    // Push result to HUD feed
+    // Push result to HUD feed (region results route to their thread tab)
+    const regionId = this.regionByTask.get(id);
     const maxLen = 3000;
-    const text = `[🔧 ${label}] ${result.trim().slice(0, maxLen)}`;
+    const text = regionId
+      ? result.trim().slice(0, maxLen)
+      : `[🔧 ${label}] ${result.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
-    this.deps.wsHandler.broadcast(text, "high", "agent");
+    this.deps.wsHandler.broadcast(text, "high", "agent", regionId);
 
     // Broadcast completion
     this.broadcastTaskEvent(id, "completed", label, startedAt, result.slice(0, 200));
@@ -630,7 +639,7 @@ ${recentLines.join("\n")}`;
       slotDepth: this.slot.depth,
       slotInFlight: this.slot.inFlightId,
       httpPendingId: this.httpPending?.id ?? null,
-      spawnInFlight: this.spawnInFlight,
+      spawnsInFlight: this.spawnsInFlight,
       cooldownMs: this.deps.escalationConfig.cooldownMs,
       staleMs: this.deps.escalationConfig.staleMs,
       pendingSpawnTasks: this.pendingSpawnTasks.size,
@@ -644,10 +653,24 @@ ${recentLines.join("\n")}`;
    * Creates a unique child session key and sends the task directly to the gateway
    * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
-  async dispatchSpawnTask(task: string, label?: string): Promise<void> {
-    // Prevent sibling spawn RPCs from piling up (independent from escalation queue)
-    if (this.spawnInFlight) {
-      log(TAG, `spawn-task skipped — spawn RPC already in-flight`);
+  async dispatchSpawnTask(
+    task: string,
+    label?: string,
+    opts?: {
+      regionId?: string;
+      /** Stable session override — region threads reuse one session per ROI
+       *  so follow-up messages continue the same conversation. */
+      sessionKey?: string;
+      /** Which overlay lane selection routes this task. Region threads use
+       *  "escalation" (the currently selected escalation agent); default
+       *  "spawn". */
+      route?: "spawn" | "escalation";
+    },
+  ): Promise<void> {
+    // Bound sibling spawn RPCs (independent from escalation queue)
+    if (this.spawnsInFlight >= Escalator.MAX_CONCURRENT_SPAWNS) {
+      log(TAG, `spawn-task skipped — ${this.spawnsInFlight} spawn RPCs already in-flight`);
+      this.deps.wsHandler.broadcast(`⚠ Spawn limit reached (${Escalator.MAX_CONCURRENT_SPAWNS} running) — try again shortly`, "normal");
       return;
     }
 
@@ -668,9 +691,11 @@ ${recentLines.join("\n")}`;
     const startedAt = Date.now();
     const labelStr = label ? ` (label: "${label}")` : "";
     const idemKey = `spawn-task-${Date.now()}`;
+    if (opts?.regionId) this.regionByTask.set(taskId, opts.regionId);
 
-    // Generate a unique child session key — bypasses the main agent entirely
-    const childSessionKey = `agent:main:subagent:${randomUUID()}`;
+    // Child session key — unique per task by default; region threads pass a
+    // stable per-ROI key so the agent keeps that region's conversation.
+    const childSessionKey = opts?.sessionKey ?? `agent:main:subagent:${randomUUID()}`;
 
     this.outboundBytes += Buffer.byteLength(task);
     this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
@@ -693,35 +718,39 @@ ${recentLines.join("\n")}`;
     //   - any other non-empty agent → HTTP queue for bare agent polling
     //   - empty (Off) → drop; the spawn poll skip in run.sh should already
     //     prevent us from getting here.
-    const spawnAgent = this.deps.getSpawnAgent?.() || "";
-    const spawnIsGateway = this.deps.isGatewayAgent?.(spawnAgent) ?? false;
-    if (spawnIsGateway) {
+    const laneName = opts?.route === "escalation" ? "escalation" : "spawn";
+    const laneAgent = opts?.route === "escalation"
+      ? (this.deps.getEscalationAgent?.() || "")
+      : (this.deps.getSpawnAgent?.() || "");
+    const laneIsGateway = this.deps.isGatewayAgent?.(laneAgent) ?? false;
+    if (laneIsGateway) {
       if (!this.wsClient.isConnected) {
-        log(TAG, `spawn-task ${taskId}: dropped — gateway agent "${spawnAgent}" selected but WS disconnected`);
+        log(TAG, `spawn-task ${taskId}: dropped — gateway agent "${laneAgent}" selected but WS disconnected`);
         this.deps.wsHandler.broadcast(
-          `⚠ Gateway disconnected — spawn task dropped. Pick a local agent or check the ${spawnAgent} gateway.`,
+          `⚠ Gateway disconnected — task dropped. Pick a local agent or check the ${laneAgent} gateway.`,
           "high",
         );
         return;
       }
       // Fall through to gateway dispatch below.
-    } else if (spawnAgent) {
-      // Local bare-agent path: queue for polling.
+    } else if (laneAgent) {
+      // Local bare-agent path: queue for polling. Note: bare CLI agents are
+      // stateless per call — region threads don't keep history on this path.
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
       this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
-      log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${spawnAgent})`);
+      log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${laneName}:${laneAgent})`);
       return;
     } else {
-      log(TAG, `spawn-task ${taskId}: dropped — lane is Off (spawnAgent="")`);
+      log(TAG, `spawn-task ${taskId}: dropped — ${laneName} lane is Off`);
       return;
     }
 
-    // ★ Set spawnInFlight BEFORE first await — cleared in finally regardless of outcome.
-    // Dedicated lane flag: never touches the escalation queue so regular escalations
-    // continue unblocked while this spawn RPC is pending.
-    this.spawnInFlight = true;
+    // ★ Increment BEFORE first await — decremented in finally regardless of outcome.
+    // Dedicated lane counter: never touches the escalation queue so regular escalations
+    // continue unblocked while spawn RPCs are pending.
+    this.spawnsInFlight++;
     try {
       // Send directly to a new child session via the gateway agent RPC
       const result = await this.wsClient.sendRpc("agent", {
@@ -741,10 +770,14 @@ ${recentLines.join("\n")}`;
       const payloads = result?.payload?.result?.payloads;
       const runId = result?.payload?.runId || taskId;
 
+      // Region thread responses skip the "label:" prefix — they render inside
+      // the region's own tab where the label is already the tab title.
+      const regionId = opts?.regionId;
+      const prefix = regionId ? "" : `${label || "Background task"}:\n`;
       if (Array.isArray(payloads) && payloads.length > 0) {
         const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
         if (output) {
-          this.pushResponse(`${label || "Background task"}:\n${output}`);
+          this.pushResponse(`${prefix}${output}`, null, regionId);
           this.broadcastTaskEvent(taskId, "completed", label, startedAt, output);
         } else {
           log(TAG, `spawn-task: ${payloads.length} payloads but empty text, trying chat.history`);
@@ -752,7 +785,7 @@ ${recentLines.join("\n")}`;
           this.broadcastTaskEvent(taskId, "completed", label, startedAt,
             historyText || "task completed (no output)");
           if (historyText) {
-            this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+            this.pushResponse(`${prefix}${historyText}`, null, regionId);
           }
         }
       } else {
@@ -760,7 +793,7 @@ ${recentLines.join("\n")}`;
         log(TAG, `spawn-task: no payloads, fetching chat.history for child=${childSessionKey}`);
         const historyText = await this.fetchChildResult(childSessionKey);
         if (historyText) {
-          this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+          this.pushResponse(`${prefix}${historyText}`, null, regionId);
           this.broadcastTaskEvent(taskId, "completed", label, startedAt, historyText);
         } else {
           this.broadcastTaskEvent(taskId, "completed", label, startedAt,
@@ -785,7 +818,7 @@ ${recentLines.join("\n")}`;
       error(TAG, `spawn-task failed: ${err.message}`);
       this.broadcastTaskEvent(taskId, "failed", label, startedAt);
     } finally {
-      this.spawnInFlight = false;
+      this.spawnsInFlight = Math.max(0, this.spawnsInFlight - 1);
     }
   }
 
@@ -1069,6 +1102,7 @@ ${recentLines.join("\n")}`;
   ): void {
     const now = Date.now();
     const isTerminal = status === "completed" || status === "failed" || status === "timeout";
+    const regionId = this.regionByTask.get(taskId);
     const msg: SpawnTaskMessage = {
       type: "spawn_task",
       taskId,
@@ -1077,19 +1111,21 @@ ${recentLines.join("\n")}`;
       startedAt: startedAt || now,
       ...(isTerminal ? { completedAt: now } : {}),
       ...(resultPreview ? { resultPreview: resultPreview.slice(0, 200) } : {}),
+      ...(regionId ? { regionId } : {}),
     };
     log(TAG, `broadcast spawn_task: taskId=${taskId}, status=${status}, clients=${this.deps.wsHandler.clientCount}`);
     this.deps.wsHandler.broadcastRaw(msg);
+    if (isTerminal) this.regionByTask.delete(taskId);
   }
 
-  private pushResponse(output: string, context?: ContextWindow | null): void {
+  private pushResponse(output: string, context?: ContextWindow | null, regionId?: string): void {
     // Allow longer responses for coding contexts
     const { coding } = context ? isCodingContext(context) : { coding: false };
     const maxLen = coding ? 4000 : 3000;
 
     const text = `[🤖] ${output.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
-    this.deps.wsHandler.broadcast(text, "high", "agent");
+    this.deps.wsHandler.broadcast(text, "high", "agent", regionId);
     this.stats.totalResponses++;
     this.deps.profiler?.gauge("escalation.totalResponses", this.stats.totalResponses);
     this.stats.lastResponseTs = Date.now();

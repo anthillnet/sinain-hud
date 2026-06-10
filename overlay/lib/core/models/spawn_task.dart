@@ -12,6 +12,8 @@ class SpawnTask {
   String? question;
   /// Tool permission request (status=awaitingPermission)
   SpawnPermission? permission;
+  /// Region eye that initiated this spawn (status routes to its badge)
+  final String? regionId;
 
   SpawnTask({
     required this.taskId,
@@ -23,6 +25,7 @@ class SpawnTask {
     this.opacity = 1.0,
     this.question,
     this.permission,
+    this.regionId,
   });
 
   factory SpawnTask.fromJson(Map<String, dynamic> json) {
@@ -41,6 +44,7 @@ class SpawnTask {
       permission: json['permission'] is Map
           ? SpawnPermission.fromJson(json['permission'] as Map<String, dynamic>)
           : null,
+      regionId: json['regionId'] as String?,
     );
   }
 

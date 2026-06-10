@@ -30,7 +30,7 @@ from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
 from .ocr import OCRResult, create_ocr
 from .gate import DecisionGate, SenseEvent, SenseObservation, SenseMeta
-from .sender import SenseSender, package_full_frame, package_roi
+from .sender import SenseSender, package_full_frame, package_roi, frame_dims
 from .app_detector import AppDetector
 from .config import load_config
 from .privacy import apply_privacy
@@ -394,7 +394,7 @@ def main():
         elif event.type == "context":
             event.roi = package_full_frame(use_frame)
         elif use_rois:
-            event.roi = package_roi(use_rois[0])
+            event.roi = package_roi(use_rois[0], frame_size=frame_dims(use_frame))
         else:
             # Fallback: send full frame thumbnail for text-only events
             event.roi = package_full_frame(use_frame)

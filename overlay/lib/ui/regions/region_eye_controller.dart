@@ -1,0 +1,221 @@
+import 'dart:async';
+import 'dart:ui';
+import '../../core/models/region_highlight.dart';
+import '../../core/models/spawn_task.dart';
+import '../../core/services/settings_service.dart';
+import '../../core/services/websocket_service.dart';
+import '../../core/services/window_service.dart';
+
+/// Shift [pos] down in eye-sized steps until it no longer overlaps any of
+/// the already-[placed] eyes, wrapping to the top edge at the bottom of the
+/// screen. Bounded — gives up (accepts overlap) on a saturated screen.
+/// Pure function so the collision behavior is unit-testable.
+Offset resolveEyeCollision(Offset pos, Iterable<Offset> placed, double screenH,
+    {double eyeSize = 48}) {
+  final gap = eyeSize + 8;
+  bool collides(Offset p) => placed.any(
+      (o) => (o.dx - p.dx).abs() < eyeSize && (o.dy - p.dy).abs() < eyeSize);
+  var candidate = pos;
+  for (var attempts = 0; collides(candidate) && attempts < 40; attempts++) {
+    var next = candidate.translate(0, gap);
+    if (next.dy > screenH - eyeSize - 8) {
+      next = Offset(candidate.dx, 8.0); // wrap to the top edge
+    }
+    candidate = next;
+  }
+  return candidate;
+}
+
+/// Orchestrates Grammarly-mode region eyes (macOS).
+///
+/// Listens to region_highlight updates, positions native eye panels at the
+/// scaled bbox locations, and maps spawn_task status events back onto eye
+/// badges. The main HUD is the viewport: tapping an eye opens the chat near
+/// the region with the issue + suggested approach ([onRegionTap]) — the user
+/// launches the agent task explicitly from there via [spawn]. Eyes act as
+/// tabs with status badges while tasks run in parallel.
+class RegionEyeController {
+  final WindowService windowService;
+  final WebSocketService ws;
+  final SettingsService settingsService;
+
+  /// Tapped region + its eye position (top-left origin screen points).
+  /// The shell opens the chat there and shows the region action banner.
+  final void Function(RegionHighlight region, Offset pos) onRegionTap;
+
+  static const double _eyeSize = 48;
+
+  StreamSubscription<List<RegionHighlight>>? _regionSub;
+  StreamSubscription<String>? _tapSub;
+  StreamSubscription<SpawnTask>? _taskSub;
+  VoidCallback? _settingsListener;
+
+  final Map<String, RegionHighlight> _regions = {};
+  final Map<String, Offset> _eyePositions = {};
+  // 'idle' | 'working' | 'ready' | 'failed' — survives region set refreshes
+  final Map<String, String> _eyeStates = {};
+  DateTime _lastTap = DateTime.fromMillisecondsSinceEpoch(0);
+
+  RegionEyeController({
+    required this.windowService,
+    required this.ws,
+    required this.settingsService,
+    required this.onRegionTap,
+  });
+
+  bool get _enabled => settingsService.settings.autoDetectIssues;
+
+  bool _lastEnabled = false;
+  bool _wasConnected = false;
+  VoidCallback? _wsListener;
+
+  void start() {
+    _regionSub = ws.regionStream.listen(_onRegions);
+    _tapSub = windowService.regionTapStream.listen(_onTap);
+    _taskSub = ws.spawnTaskStream.listen(_onSpawnTask);
+    _lastEnabled = _enabled;
+    _settingsListener = () {
+      if (_enabled == _lastEnabled) return;
+      _lastEnabled = _enabled;
+      // The overlay toggle is the source of truth — push to core so the
+      // analyzer only spends prompt tokens on regions when enabled.
+      _pushEnableState();
+      if (!_enabled) {
+        windowService.clearRegionEyes();
+      } else if (ws.regions.isNotEmpty) {
+        _onRegions(ws.regions);
+      }
+    };
+    settingsService.addListener(_settingsListener!);
+    // Sync the toggle to core on every (re)connect — core may have restarted
+    // with the boot default (AUTO_DETECT_ISSUES, off).
+    _wsListener = () {
+      if (ws.connected && !_wasConnected) _pushEnableState();
+      _wasConnected = ws.connected;
+    };
+    ws.addListener(_wsListener!);
+    if (ws.connected) {
+      _wasConnected = true;
+      _pushEnableState();
+    }
+    // Late join: core replays the current region set on connect, but if it
+    // arrived before this controller started, render what's already cached.
+    if (ws.regions.isNotEmpty) _onRegions(ws.regions);
+  }
+
+  void _pushEnableState() {
+    ws.sendCommand('set_auto_detect', {'enabled': _enabled});
+  }
+
+  void dispose() {
+    _regionSub?.cancel();
+    _tapSub?.cancel();
+    _taskSub?.cancel();
+    if (_settingsListener != null) {
+      settingsService.removeListener(_settingsListener!);
+    }
+    if (_wsListener != null) {
+      ws.removeListener(_wsListener!);
+    }
+    windowService.clearRegionEyes();
+  }
+
+  Future<void> _onRegions(List<RegionHighlight> regions) async {
+    if (!_enabled) return;
+
+    _regions
+      ..clear()
+      ..addEntries(regions.map((r) => MapEntry(r.id, r)));
+    // Drop badge state for regions that disappeared
+    _eyeStates.removeWhere((id, _) => !_regions.containsKey(id));
+    _eyePositions.clear();
+
+    final screen = await windowService.getScreenSize();
+    final screenW = screen?['w'] ?? 1440;
+    final screenH = screen?['h'] ?? 900;
+
+    var cornerSlot = 0;
+    final eyes = <Map<String, dynamic>>[];
+    for (final r in regions) {
+      Offset pos;
+      if (r.bbox != null && r.frameSize != null &&
+          r.frameSize![0] > 0 && r.frameSize![1] > 0) {
+        final sx = screenW / r.frameSize![0];
+        final sy = screenH / r.frameSize![1];
+        // Eye at the bbox's top-right corner, just outside the content
+        pos = Offset(
+          (r.bbox![0] + r.bbox![2]) * sx - _eyeSize / 2,
+          r.bbox![1] * sy - _eyeSize / 4,
+        );
+      } else {
+        // No anchor — stack below the top-right corner
+        pos = Offset(screenW - _eyeSize - 16, 72.0 + cornerSlot * (_eyeSize + 8));
+        cornerSlot++;
+      }
+      pos = Offset(
+        pos.dx.clamp(8.0, screenW - _eyeSize - 8),
+        pos.dy.clamp(8.0, screenH - _eyeSize - 8),
+      );
+      // De-overlap: regions anchored to the same sense event share a bbox —
+      // shift colliding eyes downward so each stays visible and tappable.
+      pos = resolveEyeCollision(pos, _eyePositions.values, screenH);
+      _eyePositions[r.id] = pos;
+      eyes.add({
+        'id': r.id,
+        'x': pos.dx,
+        'y': pos.dy,
+        'state': _eyeStates[r.id] ?? 'idle',
+      });
+    }
+    await windowService.showRegionEyes(eyes);
+  }
+
+  void _onTap(String id) {
+    final region = _regions[id];
+    final pos = _eyePositions[id];
+    if (region == null || pos == null) return;
+
+    // Debounce double-taps
+    final now = DateTime.now();
+    if (now.difference(_lastTap).inMilliseconds < 500) return;
+    _lastTap = now;
+
+    // Never auto-run — surface the issue + suggested approach in the chat
+    // and let the user launch the thread explicitly (see run()).
+    onRegionTap(region, pos);
+  }
+
+  /// Start the region's agent thread — called from the region action
+  /// banner's explicit Run button. Core routes it to the currently selected
+  /// escalation agent under a stable per-ROI session, so follow-ups continue
+  /// the same conversation.
+  void run(RegionHighlight region) {
+    final state = _eyeStates[region.id] ?? 'idle';
+    if (state == 'working') return; // already running
+    markWorking(region.id);
+    // Text is the user-visible feed echo; core assembles the real first
+    // message from the tracked region (issue + tip + source OCR + digest).
+    ws.sendSpawnCommand('[👁 ${region.action ?? "help"}] ${region.issue}',
+        regionId: region.id);
+  }
+
+  /// Flip a region's eye badge to working — used for thread follow-ups sent
+  /// from the chat input (the shell sends the message itself).
+  void markWorking(String regionId) {
+    _eyeStates[regionId] = 'working';
+    windowService.updateRegionEye(regionId, 'working');
+  }
+
+  void _onSpawnTask(SpawnTask task) {
+    final id = task.regionId;
+    if (id == null || !_regions.containsKey(id)) return;
+    final state = switch (task.status) {
+      SpawnTaskStatus.completed => 'ready',
+      SpawnTaskStatus.failed || SpawnTaskStatus.timeout => 'failed',
+      _ => 'working',
+    };
+    if (_eyeStates[id] == state) return;
+    _eyeStates[id] = state;
+    windowService.updateRegionEye(id, state);
+  }
+}

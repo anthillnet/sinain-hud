@@ -25,6 +25,29 @@ class LLMError(Exception):
     pass
 
 
+def load_sentence_transformer(name: str = "all-MiniLM-L6-v2"):
+    """Load a sentence-transformers model without contacting the HF Hub.
+
+    Privacy: huggingface_hub pings the Hub for repo metadata on every model
+    load (the "unauthenticated requests to the HF Hub" warning) even when the
+    weights are fully cached. When the model is already in the local cache we
+    force offline mode so nothing leaves the machine; the first-ever run
+    still downloads normally. The env vars must be set BEFORE huggingface_hub
+    is imported — some versions read them into constants at import time — so
+    call this instead of importing sentence_transformers directly.
+    """
+    repo = name if "/" in name else f"sentence-transformers/{name}"
+    cache_root = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    cached = (cache_root / "hub" / ("models--" + repo.replace("/", "--"))).exists()
+    if cached:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    # Progress bars are noise when these scripts run as sinain-core children
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer(name)
+
+
 # ---------------------------------------------------------------------------
 # Robust JSON extraction from LLM responses
 # ---------------------------------------------------------------------------

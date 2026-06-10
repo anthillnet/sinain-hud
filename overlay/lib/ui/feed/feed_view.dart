@@ -13,10 +13,16 @@ class FeedView extends StatefulWidget {
   final FeedChannel channel;
   final String emptyLabel;
 
+  /// When set, this view shows that region's thread (Grammarly mode) instead
+  /// of a channel feed. Give the widget a ValueKey(regionId) so switching
+  /// tabs rebuilds the state.
+  final String? regionId;
+
   const FeedView({
     super.key,
     this.channel = FeedChannel.stream,
     this.emptyLabel = 'awaiting feed…',
+    this.regionId,
   });
 
   @override
@@ -80,13 +86,22 @@ class _FeedViewState extends State<FeedView> {
     final ws = context.read<WebSocketService>();
 
     // Restore persistent items on mount (survives state transitions)
-    if (_items.isEmpty && widget.channel == FeedChannel.agent && ws.agentFeedItems.isNotEmpty) {
-      _items.addAll(ws.agentFeedItems);
+    if (_items.isEmpty) {
+      if (widget.regionId != null) {
+        _items.addAll(ws.regionThreads[widget.regionId] ?? const []);
+      } else if (widget.channel == FeedChannel.agent &&
+          ws.agentFeedItems.isNotEmpty) {
+        _items.addAll(ws.agentFeedItems);
+      }
     }
 
-    _feedSub ??= (widget.channel == FeedChannel.agent
-            ? ws.agentFeedStream
-            : ws.feedStream)
+    _feedSub ??= (widget.regionId != null
+            ? ws.regionThreadItemStream
+                .where((e) => e.$1 == widget.regionId)
+                .map((e) => e.$2)
+            : widget.channel == FeedChannel.agent
+                ? ws.agentFeedStream
+                : ws.feedStream)
         .listen(_onFeedItem);
     _scrollSub ??= ws.scrollStream.listen(_onScrollCommand);
     _copySub ??= ws.copyStream.listen(_onCopyCommand);

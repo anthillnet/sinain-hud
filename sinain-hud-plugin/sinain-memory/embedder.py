@@ -145,8 +145,8 @@ class Embedder:
     def _embed_local(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings using local sentence-transformers model."""
         if self._local_model is None:
-            from sentence_transformers import SentenceTransformer
-            self._local_model = SentenceTransformer("all-MiniLM-L6-v2")
+            from common import load_sentence_transformer
+            self._local_model = load_sentence_transformer("all-MiniLM-L6-v2")
 
         embeddings = self._local_model.encode(texts, convert_to_numpy=True)
         return [vec.tolist() for vec in embeddings]
