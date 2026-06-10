@@ -792,15 +792,15 @@ if [ -n "$INTERACTIVE_MODE" ]; then
   profile="${lane:-$AGENT}"
   bin=$(prof_get_or "$profile" bin "$profile")
   type=$(prof_get_or "$profile" type "$profile")
-  # Not every roster agent has an interactive CLI (hermes/aider run in
-  # oneshot/pipe mode). Substitute the first interactive-capable profile
-  # rather than dropping the user into a context-less plain shell.
+  # Not every roster agent has an interactive CLI (aider is pipe-only,
+  # openclaw is gateway-routed). Substitute the first interactive-capable
+  # profile rather than dropping the user into a context-less plain shell.
   case "$type" in
-    claude|openclaude|codex) ;;
+    claude|openclaude|codex|hermes) ;;
     *)
       for _alt in "${ALL_PROFILES[@]:-}"; do
         _t=$(prof_get_or "$_alt" type "$_alt")
-        case "$_t" in claude|openclaude|codex) ;; *) continue ;; esac
+        case "$_t" in claude|openclaude|codex|hermes) ;; *) continue ;; esac
         command -v "$(prof_get_or "$_alt" bin "$_alt")" >/dev/null 2>&1 || continue
         echo "⚠ lane agent '$profile' ($type) has no interactive mode — using '$_alt' for this terminal"
         profile="$_alt"
@@ -859,6 +859,15 @@ PY
       ;;
     codex)
       exec "$bin" "$task"
+      ;;
+    hermes)
+      # `hermes chat` is a full interactive TUI but takes no initial-prompt
+      # flag (-q answers once and exits). It has the sinain MCP server
+      # registered in ~/.hermes/config.yaml, so it can pull the same
+      # context itself — tell the user how to ask for it.
+      echo "ℹ hermes accepts no seed prompt — open with e.g.:"
+      echo "  'Check the current sinain context (sinain_get_digest / sinain_get_context) and give me a one-line read.'"
+      exec "$bin" chat
       ;;
     *)
       echo "⚠ agent type '$type' has no interactive terminal mode — plain shell instead"
