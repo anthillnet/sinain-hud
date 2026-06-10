@@ -1,19 +1,26 @@
 name: Release All
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Unified release: push one tag (vX.Y.Z) and every artifact ships at once —
-# overlay zip (macOS + Windows), npm package, sck-capture binary, and the
-# signed/notarized DMG. Each component workflow is reused via workflow_call
-# and creates its own prefixed release (overlay-vX.Y.Z, sck-capture-vX.Y.Z,
-# macos-vX.Y.Z), so the npm launcher's hardcoded tag-prefix lookups keep
-# working unchanged.
+# Unified release: push one tag (v<product-version>, e.g. v0.3.0 — named after
+# the DMG/product version) and every component ships at once — overlay zips
+# (macOS + Windows), npm package, sck-capture binary, and the signed/notarized
+# DMG.
 #
-# The per-component triggers (tag push / release:published) still work for
+# Versioning: each component keeps its OWN series, declared in
+# RELEASE_VERSIONS.json at the tagged commit (dmg 0.x, overlay 2.x, npm 1.x,
+# sck-capture 1.x). The v* tag is only the trigger. Components whose release
+# tag already exists are skipped — bump only what you're shipping.
+#
+# Each component workflow is reused via workflow_call and creates its own
+# prefixed release (overlay-vX, npm-vX, sck-capture-vX, macos-vX), so the npm
+# launcher's hardcoded tag-prefix lookups keep working unchanged. The
+# per-component triggers (tag push / release:published) still work for
 # one-off releases; GITHUB_TOKEN-created releases don't re-trigger them, so
 # nothing builds twice.
 #
 # Usage:
-#   git tag v3.0.0 && git push origin v3.0.0
+#   edit RELEASE_VERSIONS.json (bump shipped components) && commit
+#   git tag v0.3.0 && git push origin v0.3.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -25,43 +32,78 @@ permissions:
   contents: write
 
 jobs:
-  version:
-    name: Derive version
+  plan:
+    name: Read versions & plan
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.v.outputs.version }}
+      overlay_tag: ${{ steps.plan.outputs.overlay_tag }}
+      overlay_needed: ${{ steps.plan.outputs.overlay_needed }}
+      npm_tag: ${{ steps.plan.outputs.npm_tag }}
+      npm_needed: ${{ steps.plan.outputs.npm_needed }}
+      sck_tag: ${{ steps.plan.outputs.sck_tag }}
+      sck_needed: ${{ steps.plan.outputs.sck_needed }}
+      dmg_tag: ${{ steps.plan.outputs.dmg_tag }}
+      dmg_needed: ${{ steps.plan.outputs.dmg_needed }}
     steps:
-      - id: v
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - name: Plan component releases
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          plan() { # name prefix jq_key
+            local version tag needed
+            version="$(jq -r ".\"$3\"" RELEASE_VERSIONS.json)"
+            tag="$2$version"
+            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" >/dev/null 2>&1 \
+               || gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              needed=false
+              echo "· $1 $tag — release exists, skipping"
+            else
+              needed=true
+              echo "· $1 $tag — will release"
+            fi
+            echo "$1_tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "$1_needed=$needed" >> "$GITHUB_OUTPUT"
+          }
+          plan overlay overlay-v overlay
+          plan npm npm-v npm
+          plan sck sck-capture-v sck-capture
+          plan dmg macos-v dmg
 
   overlay:
     name: Overlay
-    needs: version
+    needs: plan
+    if: needs.plan.outputs.overlay_needed == 'true'
     uses: ./.github/workflows/release-overlay.yml
     with:
-      tag: overlay-v${{ needs.version.outputs.version }}
+      tag: ${{ needs.plan.outputs.overlay_tag }}
     secrets: inherit
 
   npm:
     name: npm
-    needs: version
+    needs: plan
+    if: needs.plan.outputs.npm_needed == 'true'
     uses: ./.github/workflows/release-npm.yml
     with:
-      tag: npm-v${{ needs.version.outputs.version }}
+      tag: ${{ needs.plan.outputs.npm_tag }}
     secrets: inherit
 
   sck-capture:
     name: sck-capture
-    needs: version
+    needs: plan
+    if: needs.plan.outputs.sck_needed == 'true'
     uses: ./.github/workflows/release-sck-capture.yml
     with:
-      tag: sck-capture-v${{ needs.version.outputs.version }}
+      tag: ${{ needs.plan.outputs.sck_tag }}
     secrets: inherit
 
   dmg:
     name: DMG
-    needs: version
+    needs: plan
+    if: needs.plan.outputs.dmg_needed == 'true'
     uses: ./.github/workflows/release-app.yml
     with:
-      tag: macos-v${{ needs.version.outputs.version }}
+      tag: ${{ needs.plan.outputs.dmg_tag }}
     secrets: inherit
