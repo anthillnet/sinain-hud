@@ -1388,11 +1388,13 @@ async function main() {
       const opts: { regionId?: string; sessionKey?: string; route?: "spawn" | "escalation" } = { regionId };
       if (regionId) {
         // Region thread: each ROI gets its own stable agent session, routed
-        // to the CURRENTLY SELECTED ESCALATION agent (not the spawn lane).
-        // First message carries the full region context; follow-ups are the
-        // user's text and continue the same session.
+        // via the SPAWN lane. Both lanes point at the same agent by default,
+        // but the overlay's per-lane selector can dedicate a separate spawn
+        // agent so region tasks never queue behind escalations on a slow
+        // sequential agent. First message carries the full region context;
+        // follow-ups are the user's text and continue the same session.
         opts.sessionKey = `agent:main:region:${regionId}`;
-        opts.route = "escalation";
+        opts.route = "spawn";
         const region = regionTracker.get(regionId);
         label = region?.issue ? region.issue.slice(0, 48) : "region";
         if (!startedRegionThreads.has(regionId)) {
