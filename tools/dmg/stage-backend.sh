@@ -154,6 +154,29 @@ else
   echo "[launch] python provisioning failed — sense_client + knowledge pages degraded"
 fi
 
+# ── Over-install refresh ──────────────────────────────────────────────────────
+# Installing a newer DMG over an existing install replaces everything inside
+# the .app (backend runs from Resources, always fresh), but provisioned state
+# in ~/.sinain was set up once by the OLD version. Compare the bundle's build
+# stamp with the recorded one and refresh version-sensitive pieces — python
+# deps may have changed between releases. User config (.env, agents.json,
+# models) is never touched.
+BUILD_ID_FILE="$RES/BUILD_ID"
+BUILD_STAMP="$HOME/.sinain/installed-build"
+if [ -f "$BUILD_ID_FILE" ]; then
+  NEW_BUILD="$(cat "$BUILD_ID_FILE")"
+  OLD_BUILD="$(cat "$BUILD_STAMP" 2>/dev/null || true)"
+  if [ "$NEW_BUILD" != "$OLD_BUILD" ]; then
+    echo "[launch] bundle updated (${OLD_BUILD:-fresh install} → $NEW_BUILD) — refreshing provisioned deps"
+    if [ -x "$PROVISIONED_PY" ] && [ -f "$RES/sense_client/requirements.txt" ]; then
+      "$PROVISIONED_PY" -m pip install -q --upgrade -r "$RES/sense_client/requirements.txt" \
+        && echo "[launch] python deps refreshed" \
+        || echo "[launch] python dep refresh failed — continuing with existing env"
+    fi
+    echo "$NEW_BUILD" > "$BUILD_STAMP"
+  fi
+fi
+
 # ── Local-mode model provisioning (tier-gated, background) ───────────────────
 # Runs in the background so core/overlay stay responsive; local features come
 # online when downloads finish. All idempotent + resumable. T1 (local STT) →
@@ -248,6 +271,12 @@ for _ps in provision-python.sh provision-whisper.sh provision-ollama.sh; do
   cp "$REPO/tools/dmg/$_ps" "$RES/scripts/$_ps"
   chmod +x "$RES/scripts/$_ps"
 done
+
+# Build stamp — launch-backend.sh compares this against ~/.sinain/installed-build
+# to detect a DMG installed over an older version and refresh provisioned deps.
+_git_sha="$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+echo "${_git_sha}-$(date -u +%Y%m%d%H%M%S)" > "$RES/BUILD_ID"
+echo "    build stamp: $(cat "$RES/BUILD_ID")"
 
 bold "✓ Staged backend → $RES"
 du -sh "$RES" 2>/dev/null | awk '{print "  size: "$1}'

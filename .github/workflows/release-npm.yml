@@ -4,6 +4,18 @@ on:
   push:
     tags:
       - 'npm-v*'
+  # Callable from release.yml (unified `v*` release) — creates the
+  # npm-v<version> release itself, so consumers' tag-prefix lookups
+  # keep working.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to create/attach to (npm-vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   publish:
@@ -23,7 +35,9 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#npm-v}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: echo "version=${TAG#npm-v}" >> "$GITHUB_OUTPUT"
 
       - name: Set package version from tag
         run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
@@ -32,3 +46,9 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release (record)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true

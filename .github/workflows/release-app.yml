@@ -34,6 +34,15 @@ on:
   release:
     types: [published]
   workflow_dispatch: {}  # manual dry run (no release → upload is skipped)
+  # Callable from release.yml (unified `v*` release) — builds the DMG and
+  # creates the macos-v<version> release itself (a GITHUB_TOKEN-created
+  # release would not re-trigger this workflow's release trigger).
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to create/attach to (macos-vX.Y.Z)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -47,6 +56,7 @@ jobs:
     # runs (dry run).
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      inputs.tag != '' ||
       startsWith(github.event.release.tag_name, 'macos-v')
 
     steps:
@@ -182,8 +192,8 @@ jobs:
       #    workflow_dispatch skips this). Uploads the asset onto the existing
       #    release without touching its name/notes (the publisher owns those).
       - name: Attach DMG to the release
-        if: steps.preflight.outputs.ready == 'true' && github.event_name == 'release'
+        if: steps.preflight.outputs.ready == 'true' && (github.event_name == 'release' || inputs.tag != '')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ inputs.tag || github.event.release.tag_name }}
           files: build/Sinain.dmg
