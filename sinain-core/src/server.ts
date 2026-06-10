@@ -1556,6 +1556,10 @@ export interface ServerDeps {
   getEscalationPending?: () => any;
   isEscalationPaused?: () => boolean;
   respondEscalation?: (id: string, response: string) => any;
+  /** Composed task text for a region (issue + OCR + digest) — used by the
+   *  thread-terminal to seed an interactive spawn-agent session with the
+   *  exact context the headless ROI Run would send. */
+  getRegionTask?: (regionId: string) => string | null;
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   listKnowledgeEntities?: (max: number) => Promise<string>;
@@ -1768,6 +1772,19 @@ export function createAppServer(deps: ServerDeps) {
         const { text, priority } = JSON.parse(body);
         deps.onFeedPost(text, priority || "normal");
         res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // ── /region/:id/task — composed context for terminal-mode ROI runs ──
+      if (req.method === "GET" && url.pathname.startsWith("/region/") && url.pathname.endsWith("/task")) {
+        const regionId = url.pathname.slice("/region/".length, -"/task".length);
+        const text = deps.getRegionTask?.(regionId) ?? null;
+        if (!text) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "unknown region" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true, text }));
         return;
       }
 

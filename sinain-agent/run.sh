@@ -3,6 +3,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Interactive thread-terminal mode: `run.sh --interactive-region <id>`
+# resolves the SPAWN-lane profile exactly like the poll loop, fetches the
+# region's composed context from sinain-core, and execs the agent CLI
+# *interactively* (the overlay's thread terminal runs this). No polling,
+# no roster registration — see the branch below the proxy block.
+INTERACTIVE_REGION=""
+if [ "${1:-}" = "--interactive-region" ]; then
+  INTERACTIVE_REGION="${2:?usage: run.sh --interactive-region <regionId>}"
+fi
+
 # Load .env as fallback — does NOT override vars already in the environment
 # (e.g. vars set by the launcher from ~/.sinain/.env)
 # Load project root .env (single config for all subsystems)
@@ -653,8 +663,10 @@ fi
 ESC_AGENT="$AGENT"
 SPAWN_AGENT="$AGENT"
 
-# Register roster with sinain-core (fire-and-forget; core may not be ready)
-if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
+# Register roster with sinain-core (fire-and-forget; core may not be ready).
+# Skipped in interactive mode: a second register would echo `current=$AGENT`
+# back to core and reset the user's per-lane selections.
+if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ] && [ -z "$INTERACTIVE_REGION" ]; then
   REGISTER_PAYLOAD=$(python3 -c "
 import json, sys
 available = sys.argv[1].split(' ') if sys.argv[1] else []
@@ -755,6 +767,44 @@ if $PROXY_NEEDED; then
       echo "  ⚠ OPENAI_BASE_URL points at :$PROXY_PORT but $PROXY_SCRIPT missing"
     fi
   fi
+fi
+
+# --- Interactive region terminal (thread-terminal) ---
+# Resolve the spawn lane's CURRENT agent from core's config piggyback
+# (read-only peek at /escalation/pending — same field the poll loop uses),
+# fetch the region context, and exec the agent CLI in its own REPL. The
+# user converses with the dedicated spawn agent directly in the terminal.
+if [ -n "$INTERACTIVE_REGION" ]; then
+  lane=$(curl -sf -m 2 "$CORE_URL/escalation/pending" \
+    | python3 -c "import sys,json; print((json.load(sys.stdin).get('config') or {}).get('spawnAgent',''))" 2>/dev/null || true)
+  profile="${lane:-$AGENT}"
+  bin=$(prof_get_or "$profile" bin "$profile")
+  type=$(prof_get_or "$profile" type "$profile")
+  task=$(curl -sf -m 5 "$CORE_URL/region/$INTERACTIVE_REGION/task" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
+  if [ -z "$task" ]; then
+    task="(The screen-region context expired before this terminal opened. Ask the user what they need help with on screen.)"
+  fi
+  apply_profile_env "$profile"
+  model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
+  # Same pre-approved whitelist as headless spawns. NOTE: no --settings —
+  # interactive sessions should use the agent's native terminal approval UX,
+  # not the overlay-routed PreToolUse hook from sinain-agent/.claude.
+  spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS} ToolSearch"
+  echo "⌨ region terminal — agent=$profile ($type), region=$INTERACTIVE_REGION"
+  case "$type" in
+    claude|openclaude)
+      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools $spawn_allowed "$task"
+      ;;
+    codex)
+      exec "$bin" "$task"
+      ;;
+    *)
+      echo "⚠ agent type '$type' has no interactive terminal mode — plain shell instead"
+      echo "  (region context lost; use the chat Run button for this agent)"
+      exec "${SHELL:-/bin/zsh}" -il
+      ;;
+  esac
 fi
 
 echo "sinain bare agent started"

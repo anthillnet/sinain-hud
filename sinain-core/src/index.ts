@@ -1265,6 +1265,12 @@ async function main() {
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
 
+    getRegionTask: (regionId: string) => {
+      const region = regionTracker.get(regionId);
+      if (!region) return null;
+      return buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+    },
+
     getHealthPayload: () => {
       const escStats = escalator.getStats();
       const warnings: string[] = [];

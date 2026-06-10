@@ -34,16 +34,39 @@ class ThreadTerminalSession {
 
   static final Map<String, ThreadTerminalSession> _sessions = {};
 
-  static ThreadTerminalSession of(String threadId) =>
-      _sessions.putIfAbsent(threadId, () => _spawn(threadId));
+  /// Get (or spawn) the session for a thread. [command]/[args] only apply
+  /// when the session doesn't exist yet — default is the user's login shell.
+  static ThreadTerminalSession of(String threadId,
+          {String? command, List<String>? args}) =>
+      _sessions.putIfAbsent(
+          threadId, () => _spawn(threadId, command: command, args: args));
 
-  static ThreadTerminalSession _spawn(String threadId) {
+  /// Locate sinain-agent/run.sh: DMG bundle Resources first, then explicit
+  /// env override, then dev-repo locations relative to the cwd flutter run
+  /// started from. Null → caller falls back to a plain shell.
+  static String? findRunSh() {
+    final exeDir = File(Platform.resolvedExecutable).parent; // Contents/MacOS
+    final candidates = [
+      '${exeDir.parent.path}/Resources/sinain-agent/run.sh',
+      Platform.environment['SINAIN_AGENT_RUNSH'] ?? '',
+      '${Directory.current.path}/sinain-agent/run.sh',
+      '${Directory.current.parent.path}/sinain-agent/run.sh',
+    ];
+    for (final c in candidates) {
+      if (c.isNotEmpty && File(c).existsSync()) return c;
+    }
+    return null;
+  }
+
+  static ThreadTerminalSession _spawn(String threadId,
+      {String? command, List<String>? args}) {
     final terminal = Terminal(maxLines: 10000);
     final controller = TerminalController();
     final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
     final pty = Pty.start(
-      shell,
-      arguments: ['-il'], // interactive login — same env the user's terminal has
+      command ?? shell,
+      // default: interactive login — same env the user's terminal has
+      arguments: args ?? ['-il'],
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,
       workingDirectory: Platform.environment['HOME'],

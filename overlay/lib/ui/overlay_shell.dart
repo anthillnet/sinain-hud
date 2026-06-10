@@ -964,6 +964,27 @@ class OverlayShellState extends State<OverlayShell> {
                 setState(() => _startedRegionThreads.add(region.id));
                 _regionEyes?.run(region);
               },
+              // SPIKE: interactive terminal variant of Run — the PTY launches
+              // run.sh --interactive-region, which resolves the spawn-lane
+              // agent and seeds it with the same composed region context the
+              // headless Run sends (GET /region/:id/task on core).
+              onTerminal: terminalSpikeEnabled
+                  ? () {
+                      final region = _activeRegion!;
+                      final runSh = ThreadTerminalSession.findRunSh();
+                      ThreadTerminalSession.of(
+                        region.id,
+                        command: runSh != null ? 'bash' : null,
+                        args: runSh != null
+                            ? [runSh, '--interactive-region', region.id]
+                            : null,
+                      );
+                      setState(() {
+                        _startedRegionThreads.add(region.id);
+                        _terminalThreads.add(region.id);
+                      });
+                    }
+                  : null,
               onDismiss: () => setState(() => _activeRegion = null),
             ),
           // Permission banner — visible above the input field whenever an
