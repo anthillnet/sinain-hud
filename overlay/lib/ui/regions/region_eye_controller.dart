@@ -108,6 +108,9 @@ class RegionEyeController {
         pos.dx.clamp(8.0, screenW - _eyeSize - 8),
         pos.dy.clamp(8.0, screenH - _eyeSize - 8),
       );
+      // De-overlap: regions anchored to the same sense event share a bbox —
+      // shift colliding eyes downward so each stays visible and tappable.
+      pos = _resolveCollision(pos, screenH);
       _eyePositions[r.id] = pos;
       eyes.add({
         'id': r.id,
@@ -117,6 +120,24 @@ class RegionEyeController {
       });
     }
     await windowService.showRegionEyes(eyes);
+  }
+
+  /// Shift [pos] down in eye-sized steps until it no longer overlaps any
+  /// already-placed eye, wrapping to the top edge at the bottom of the
+  /// screen. Bounded — gives up (accepts overlap) on a saturated screen.
+  Offset _resolveCollision(Offset pos, double screenH) {
+    const gap = _eyeSize + 8;
+    bool collides(Offset p) => _eyePositions.values.any(
+        (o) => (o.dx - p.dx).abs() < _eyeSize && (o.dy - p.dy).abs() < _eyeSize);
+    var candidate = pos;
+    for (var attempts = 0; collides(candidate) && attempts < 40; attempts++) {
+      var next = candidate.translate(0, gap);
+      if (next.dy > screenH - _eyeSize - 8) {
+        next = Offset(candidate.dx, 8.0); // wrap to the top edge
+      }
+      candidate = next;
+    }
+    return candidate;
   }
 
   void _onTap(String id) {
@@ -129,22 +150,30 @@ class RegionEyeController {
     if (now.difference(_lastTap).inMilliseconds < 500) return;
     _lastTap = now;
 
-    // Never auto-spawn — surface the issue + suggested approach in the chat
-    // and let the user launch the task explicitly (see spawn()).
+    // Never auto-run — surface the issue + suggested approach in the chat
+    // and let the user launch the thread explicitly (see run()).
     onRegionTap(region, pos);
   }
 
-  /// Launch the agent task for a region — called from the region action
-  /// banner's explicit Run button.
-  void spawn(RegionHighlight region) {
+  /// Start the region's agent thread — called from the region action
+  /// banner's explicit Run button. Core routes it to the currently selected
+  /// escalation agent under a stable per-ROI session, so follow-ups continue
+  /// the same conversation.
+  void run(RegionHighlight region) {
     final state = _eyeStates[region.id] ?? 'idle';
     if (state == 'working') return; // already running
-    _eyeStates[region.id] = 'working';
-    windowService.updateRegionEye(region.id, 'working');
-    // Text is the user-visible feed echo; core assembles the real task
-    // from the tracked region (issue + tip + source OCR + digest).
+    markWorking(region.id);
+    // Text is the user-visible feed echo; core assembles the real first
+    // message from the tracked region (issue + tip + source OCR + digest).
     ws.sendSpawnCommand('[👁 ${region.action ?? "help"}] ${region.issue}',
         regionId: region.id);
+  }
+
+  /// Flip a region's eye badge to working — used for thread follow-ups sent
+  /// from the chat input (the shell sends the message itself).
+  void markWorking(String regionId) {
+    _eyeStates[regionId] = 'working';
+    windowService.updateRegionEye(regionId, 'working');
   }
 
   void _onSpawnTask(SpawnTask task) {

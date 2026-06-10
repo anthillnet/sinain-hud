@@ -39,6 +39,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             if #available(macOS 12.0, *) {
                 window.sharingType = enabled ? .none : .readOnly
             }
+            // Demo mode applies to every capture-invisible surface, not just
+            // the main HUD — region eye panels follow the same toggle.
+            regionEyes.setPrivacyMode(enabled: enabled)
             result(nil)
 
         case "setAlwaysOnTop":

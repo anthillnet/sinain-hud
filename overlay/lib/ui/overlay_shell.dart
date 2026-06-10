@@ -63,8 +63,11 @@ class OverlayShellState extends State<OverlayShell> {
 
   // Grammarly mode: native region eyes (macOS only)
   RegionEyeController? _regionEyes;
-  // Region whose action banner is showing in the chat (set on eye tap)
+  // Region whose action banner is showing in the chat (set on eye tap).
+  // While set, the chat input routes to that region's agent thread.
   RegionHighlight? _activeRegion;
+  // Regions whose thread already started (Run pressed / follow-up sent)
+  final Set<String> _startedRegionThreads = {};
 
   @override
   void initState() {
@@ -259,6 +262,14 @@ class OverlayShellState extends State<OverlayShell> {
       case HudState.hidden:
         break;
     }
+  }
+
+  /// Send a follow-up message to a region's agent thread (stable per-ROI
+  /// session core-side) and flip its eye badge to working.
+  void _sendToRegionThread(RegionHighlight region, String text) {
+    setState(() => _startedRegionThreads.add(region.id));
+    context.read<WebSocketService>().sendSpawnCommand(text, regionId: region.id);
+    _regionEyes?.markWorking(region.id);
   }
 
   /// Move the HUD next to a region eye (top-left-origin screen point) and
@@ -742,16 +753,19 @@ class OverlayShellState extends State<OverlayShell> {
             ),
           ),
           // Region action banner — issue + suggested approach for the last
-          // tapped region eye. The agent task only launches from its explicit
-          // Run button (eye taps never auto-spawn).
+          // tapped region eye. The thread only starts from its explicit Run
+          // button (eye taps never auto-run). While the banner is visible,
+          // the input below routes to this region's thread.
           if (_activeRegion != null)
             RegionActionBanner(
               region: _activeRegion!,
               accentColor: _settingsService.settings.accentColor,
+              threadStarted:
+                  _startedRegionThreads.contains(_activeRegion!.id),
               onRun: () {
                 final region = _activeRegion!;
-                setState(() => _activeRegion = null);
-                _regionEyes?.spawn(region);
+                setState(() => _startedRegionThreads.add(region.id));
+                _regionEyes?.run(region);
               },
               onDismiss: () => setState(() => _activeRegion = null),
             ),
@@ -762,14 +776,25 @@ class OverlayShellState extends State<OverlayShell> {
           const _AgentAvailabilityBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
-          // Command input
+          // Command input — routes to the active region's thread when a
+          // region banner is showing, else to the main escalation flow.
           CommandInput(
             externalFocusNode: _commandFocusNode,
             onSubmit: (text) {
-              context.read<WebSocketService>().sendUserCommand(text);
+              final region = _activeRegion;
+              if (region != null) {
+                _sendToRegionThread(region, text);
+              } else {
+                context.read<WebSocketService>().sendUserCommand(text);
+              }
             },
             onSpawn: (text) {
-              context.read<WebSocketService>().sendSpawnCommand(text);
+              final region = _activeRegion;
+              if (region != null) {
+                _sendToRegionThread(region, text);
+              } else {
+                context.read<WebSocketService>().sendSpawnCommand(text);
+              }
             },
           ),
         ],

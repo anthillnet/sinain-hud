@@ -5,11 +5,15 @@ import '../hud_tooltip.dart';
 /// Banner above the chat input shown after tapping a region eye.
 ///
 /// Presents the detected issue and the suggested approach, and lets the user
-/// explicitly launch the agent task — tapping an eye never auto-spawns.
+/// explicitly start the region's agent thread — tapping an eye never
+/// auto-runs. Once the thread is started ([threadStarted]) the Run button
+/// becomes a thread indicator: the chat input below routes follow-ups to
+/// this region's conversation until the banner is dismissed.
 /// Mirrors [PermissionBanner]'s compact style.
 class RegionActionBanner extends StatelessWidget {
   final RegionHighlight region;
   final int accentColor;
+  final bool threadStarted;
   final VoidCallback onRun;
   final VoidCallback onDismiss;
 
@@ -17,6 +21,7 @@ class RegionActionBanner extends StatelessWidget {
     super.key,
     required this.region,
     required this.accentColor,
+    required this.threadStarted,
     required this.onRun,
     required this.onDismiss,
   });
@@ -86,33 +91,55 @@ class RegionActionBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Run button — the explicit spawn trigger
-          HudTooltip(
-            message: 'Launch an agent task for this issue',
-            child: GestureDetector(
-              onTap: onRun,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '⚡ $_runLabel',
-                    style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 9,
-                      color: accent,
-                      fontWeight: FontWeight.bold,
+          // Run button (explicit thread start) — or thread indicator once
+          // started, while the input below routes to this region's thread.
+          if (!threadStarted)
+            HudTooltip(
+              message: 'Ask the agent about this issue (starts a thread for this region)',
+              child: GestureDetector(
+                onTap: onRun,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '⚡ $_runLabel',
+                      style: TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: 9,
+                        color: accent,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
               ),
+            )
+          else
+            HudTooltip(
+              message: 'Thread active — messages below go to this region',
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: accent.withValues(alpha: 0.45)),
+                ),
+                child: Text(
+                  '👁 thread',
+                  style: TextStyle(
+                    fontFamily: 'JetBrainsMono',
+                    fontSize: 9,
+                    color: accent,
+                  ),
+                ),
+              ),
             ),
-          ),
           const SizedBox(width: 6),
           HudTooltip(
             message: 'Dismiss',
