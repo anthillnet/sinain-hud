@@ -144,14 +144,16 @@ export class WsHandler {
     });
   }
 
-  /** Broadcast a feed message to all connected overlays. */
-  broadcast(text: string, priority: Priority = "normal", channel: FeedChannel = "stream"): void {
+  /** Broadcast a feed message to all connected overlays.
+   *  regionId routes the message to a region thread tab (Grammarly mode). */
+  broadcast(text: string, priority: Priority = "normal", channel: FeedChannel = "stream", regionId?: string): void {
     const msg: FeedMessage = {
       type: "feed",
       text,
       priority,
       ts: Date.now(),
       channel,
+      ...(regionId ? { regionId } : {}),
     };
     this.replayBuffer.push(msg);
     if (this.replayBuffer.length > MAX_REPLAY) {

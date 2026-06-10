@@ -63,6 +63,26 @@ class WebSocketService extends ChangeNotifier {
   /// [regionStream].
   List<RegionHighlight> regions = const [];
 
+  // ── Region threads (Grammarly mode) ──
+  // Each ROI has its own conversation with the escalation agent. Messages
+  // tagged with regionId land here instead of the main feed; the HUD shows
+  // them as tabs.
+  final Map<String, List<FeedItem>> regionThreads = {};
+  final Map<String, String> regionThreadLabels = {};
+  final _regionThreadController =
+      StreamController<(String, FeedItem)>.broadcast();
+
+  /// (regionId, item) pairs as region thread messages arrive.
+  Stream<(String, FeedItem)> get regionThreadItemStream =>
+      _regionThreadController.stream;
+
+  /// Drop a region thread (tab closed). Server-side session is unaffected.
+  void closeRegionThread(String regionId) {
+    regionThreads.remove(regionId);
+    regionThreadLabels.remove(regionId);
+    notifyListeners();
+  }
+
   // Canonical spawn-task map. TasksView still consumes the stream for
   // incremental rendering, but the map gives the AGT/TSK tab indicator
   // a snapshot view ("does any task need attention?") without forcing
@@ -242,7 +262,16 @@ class WebSocketService extends ChangeNotifier {
           if (!_screenFeedEnabled && item.text.startsWith('[👁]')) {
             break;
           }
-          if (item.channel == FeedChannel.agent) {
+          if (item.regionId != null) {
+            // Region thread message — route to its tab, not the main feed
+            final thread = regionThreads.putIfAbsent(item.regionId!, () => []);
+            thread.add(item);
+            if (thread.length > _maxFeedItems) {
+              thread.removeRange(0, thread.length - _maxFeedItems);
+            }
+            _regionThreadController.add((item.regionId!, item));
+            notifyListeners(); // tab bar may need to appear/update
+          } else if (item.channel == FeedChannel.agent) {
             agentFeedItems.add(item);
             if (agentFeedItems.length > _maxFeedItems) {
               agentFeedItems.removeRange(
@@ -323,6 +352,13 @@ class WebSocketService extends ChangeNotifier {
           // the stream subscriber rebuilds the list view.
           final prevAttention = pendingAttentionCount;
           _spawnTasks[task.taskId] = task;
+          // Region tasks: the label is the region issue — use it as the
+          // thread tab title.
+          if (task.regionId != null &&
+              regionThreadLabels[task.regionId!] != task.label) {
+            regionThreadLabels[task.regionId!] = task.label;
+            notifyListeners();
+          }
           if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
           break;
@@ -444,6 +480,7 @@ class WebSocketService extends ChangeNotifier {
     _spawnTaskController.close();
     _copyController.close();
     _regionController.close();
+    _regionThreadController.close();
     super.dispose();
   }
 

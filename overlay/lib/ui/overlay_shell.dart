@@ -66,6 +66,9 @@ class OverlayShellState extends State<OverlayShell> {
   // Region whose action banner is showing in the chat (set on eye tap).
   // While set, the chat input routes to that region's agent thread.
   RegionHighlight? _activeRegion;
+  // Selected chat tab: null = MAIN feed, otherwise a region thread id.
+  // Each ROI is its own conversation; the input routes to the active tab.
+  String? _activeThread;
   // Regions whose thread already started (Run pressed / follow-up sent)
   final Set<String> _startedRegionThreads = {};
 
@@ -125,7 +128,10 @@ class OverlayShellState extends State<OverlayShell> {
         ws: ws,
         settingsService: _settingsService,
         onRegionTap: (region, pos) {
-          setState(() => _activeRegion = region);
+          setState(() {
+            _activeRegion = region;
+            _activeThread = region.id; // select this region's tab
+          });
           _openChatNearRegion(pos.dx, pos.dy);
         },
       )..start();
@@ -266,10 +272,148 @@ class OverlayShellState extends State<OverlayShell> {
 
   /// Send a follow-up message to a region's agent thread (stable per-ROI
   /// session core-side) and flip its eye badge to working.
-  void _sendToRegionThread(RegionHighlight region, String text) {
-    setState(() => _startedRegionThreads.add(region.id));
-    context.read<WebSocketService>().sendSpawnCommand(text, regionId: region.id);
-    _regionEyes?.markWorking(region.id);
+  void _sendToRegionThread(String regionId, String text) {
+    setState(() => _startedRegionThreads.add(regionId));
+    context.read<WebSocketService>().sendSpawnCommand(text, regionId: regionId);
+    _regionEyes?.markWorking(regionId);
+  }
+
+  /// Switch the chat to a thread tab (null = MAIN feed).
+  void _selectThread(String? id) {
+    final ws = context.read<WebSocketService>();
+    setState(() {
+      _activeThread = id;
+      if (id == null) {
+        _activeRegion = null;
+      } else if (_activeRegion?.id != id) {
+        // Re-resolve the live region for the banner (null if expired)
+        RegionHighlight? live;
+        for (final r in ws.regions) {
+          if (r.id == id) live = r;
+        }
+        _activeRegion = live;
+      }
+    });
+  }
+
+  void _closeThread(String id) {
+    context.read<WebSocketService>().closeRegionThread(id);
+    setState(() {
+      if (_activeThread == id) {
+        _activeThread = null;
+        _activeRegion = null;
+      }
+    });
+  }
+
+  /// Horizontal tab bar: MAIN + one pill per region thread. Hidden until the
+  /// first region conversation exists.
+  Widget _buildThreadTabs(WebSocketService ws) {
+    final ids = <String>{
+      ...ws.regionThreads.keys,
+      ...ws.regionThreadLabels.keys,
+      if (_activeRegion != null) _activeRegion!.id,
+    }.toList();
+    if (ids.isEmpty) return const SizedBox.shrink();
+
+    String labelFor(String id) {
+      var label = ws.regionThreadLabels[id];
+      if (label == null || label.isEmpty) {
+        for (final r in ws.regions) {
+          if (r.id == id) {
+            label = r.issue;
+            break;
+          }
+        }
+      }
+      if ((label == null || label.isEmpty) && _activeRegion?.id == id) {
+        label = _activeRegion!.issue;
+      }
+      label ??= 'region';
+      return label.length > 18 ? '${label.substring(0, 18)}…' : label;
+    }
+
+    Widget pill({
+      required String text,
+      required bool selected,
+      required VoidCallback onTap,
+      VoidCallback? onClose,
+    }) {
+      final accent = _accentColor;
+      return Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: selected
+                    ? accent.withValues(alpha: 0.15)
+                    : Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected
+                      ? accent.withValues(alpha: 0.5)
+                      : Colors.white.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    text,
+                    style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 9,
+                      color: selected
+                          ? accent
+                          : Colors.white.withValues(alpha: 0.55),
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  if (onClose != null) ...[
+                    const SizedBox(width: 5),
+                    GestureDetector(
+                      onTap: onClose,
+                      child: Icon(Icons.close,
+                          size: 9,
+                          color: Colors.white.withValues(alpha: 0.4)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            pill(
+              text: 'MAIN',
+              selected: _activeThread == null,
+              onTap: () => _selectThread(null),
+            ),
+            for (final id in ids)
+              pill(
+                text: '👁 ${labelFor(id)}',
+                selected: _activeThread == id,
+                onTap: () => _selectThread(id),
+                onClose: () => _closeThread(id),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Move the HUD next to a region eye (top-left-origin screen point) and
@@ -728,19 +872,26 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             ),
           ),
-          // Tab content (Agent feed / Tasks) with display settings overlay
+          // Thread tabs — MAIN + one per region conversation (Grammarly
+          // mode). Hidden until the first region thread exists.
+          _buildThreadTabs(ws),
+          // Tab content with display settings overlay. MAIN shows the agent
+          // feed; a region tab shows only that ROI's conversation (main
+          // escalations do not pour into region threads).
           Expanded(
             child: Stack(
               children: [
-                // Tasks tab deactivated for launch — Agent feed is the only
-                // visible surface. Permissions live on PermissionBanner above
-                // the chat input, so the Tasks tab adds no unique surface.
-                // Re-enable by restoring the Consumer<SettingsService> wrapper
-                // and switching index back to activeTab.
-                const FeedView(
-                  channel: FeedChannel.agent,
-                  emptyLabel: 'awaiting sinain…',
-                ),
+                _activeThread == null
+                    ? const FeedView(
+                        channel: FeedChannel.agent,
+                        emptyLabel: 'awaiting sinain…',
+                      )
+                    : FeedView(
+                        key: ValueKey('thread-$_activeThread'),
+                        regionId: _activeThread,
+                        channel: FeedChannel.agent,
+                        emptyLabel: 'no messages yet — press ⚡ Run',
+                      ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),
@@ -752,11 +903,12 @@ class OverlayShellState extends State<OverlayShell> {
               ],
             ),
           ),
-          // Region action banner — issue + suggested approach for the last
-          // tapped region eye. The thread only starts from its explicit Run
-          // button (eye taps never auto-run). While the banner is visible,
-          // the input below routes to this region's thread.
-          if (_activeRegion != null)
+          // Region action banner — issue + suggested approach, shown on the
+          // region's tab while the region is still detected on screen. The
+          // thread only starts from its explicit Run button.
+          if (_activeThread != null &&
+              _activeRegion != null &&
+              _activeRegion!.id == _activeThread)
             RegionActionBanner(
               region: _activeRegion!,
               accentColor: _settingsService.settings.accentColor,
@@ -776,22 +928,22 @@ class OverlayShellState extends State<OverlayShell> {
           const _AgentAvailabilityBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
-          // Command input — routes to the active region's thread when a
-          // region banner is showing, else to the main escalation flow.
+          // Command input — routes to the active thread tab: region tab →
+          // that ROI's conversation, MAIN → the regular escalation flow.
           CommandInput(
             externalFocusNode: _commandFocusNode,
             onSubmit: (text) {
-              final region = _activeRegion;
-              if (region != null) {
-                _sendToRegionThread(region, text);
+              final thread = _activeThread;
+              if (thread != null) {
+                _sendToRegionThread(thread, text);
               } else {
                 context.read<WebSocketService>().sendUserCommand(text);
               }
             },
             onSpawn: (text) {
-              final region = _activeRegion;
-              if (region != null) {
-                _sendToRegionThread(region, text);
+              final thread = _activeThread;
+              if (thread != null) {
+                _sendToRegionThread(thread, text);
               } else {
                 context.read<WebSocketService>().sendSpawnCommand(text);
               }

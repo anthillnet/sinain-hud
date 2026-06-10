@@ -73,7 +73,9 @@ export function setupCommands(deps: CommandDeps): void {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
         const regionId = typeof msg.regionId === "string" && msg.regionId ? msg.regionId : undefined;
         log(TAG, `spawn command received: "${preview}"${regionId ? ` (region=${regionId})` : ""}`);
-        // Echo spawn command to all overlay clients as a feed item (green in UI)
+        // Echo spawn command to all overlay clients as a feed item (green in
+        // UI). Region thread messages carry regionId → overlay routes the
+        // echo to that region's tab instead of the main feed.
         wsHandler.broadcastRaw({
           type: "feed",
           text: `⚡ ${msg.text}`,
@@ -81,6 +83,7 @@ export function setupCommands(deps: CommandDeps): void {
           ts: Date.now(),
           channel: "agent",
           sender: "spawn",
+          ...(regionId ? { regionId } : {}),
         } as any);
         if (deps.onSpawnCommand) {
           deps.onSpawnCommand(msg.text, regionId);

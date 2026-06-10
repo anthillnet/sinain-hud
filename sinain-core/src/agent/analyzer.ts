@@ -104,7 +104,8 @@ Each region:
 - "issue": short label of what's wrong (max 10 words, quote the specific text)
 - "tip": one actionable sentence — what an agent could do about it
 - "action": "fix" | "explain" | "research" — the kind of help
-- "sourceId": the number from the [S<id>] prefix of the screen line where you saw it
+- "sourceId": REQUIRED — copy the number from the [S<id>] prefix of the exact
+  screen line where you saw the issue ("[S12] ..." → "sourceId":12)
 Rules: do NOT invent issues — omit "regions" entirely when nothing is genuinely
 actionable (most ticks). Never emit a region for content that is merely
 interesting. Do not repeat a region for an issue that no longer appears on screen.`;

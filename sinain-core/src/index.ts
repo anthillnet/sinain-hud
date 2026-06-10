@@ -1152,6 +1152,7 @@ async function main() {
       cwd: dirname(runSh),
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     localAgentProcess = child;

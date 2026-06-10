@@ -17,6 +17,42 @@ interface TrackedRegion {
   firstSeenTs: number;
 }
 
+type ScreenEvent = ContextWindow["screen"][number];
+
+/** True when the event carries a bbox that localizes a screen area (not the
+ *  whole frame — full-frame anchors place the eye at a misleading corner). */
+function hasPartialBbox(e: ScreenEvent): boolean {
+  if (!e.imageBbox || e.imageBbox.length !== 4) return false;
+  const [, , w, h] = e.imageBbox;
+  if (!(w > 0 && h > 0)) return false;
+  if (e.frameSize && e.frameSize.length === 2) {
+    const coverage = (w * h) / (e.frameSize[0] * e.frameSize[1]);
+    return coverage < 0.85;
+  }
+  // Frame size unknown — accept; the overlay clamps to screen bounds anyway
+  return true;
+}
+
+/** Deterministic anchoring fallback: pick the newest partial-bbox event whose
+ *  OCR shares the most significant words with the issue text. */
+function anchorByText(issue: string, screen: ScreenEvent[]): ScreenEvent | undefined {
+  const tokens = issue.toLowerCase().split(/[^a-z0-9_]+/).filter(t => t.length >= 4);
+  if (tokens.length === 0) return undefined;
+  let best: ScreenEvent | undefined;
+  let bestScore = 0;
+  // ctx.screen is newest-first; >= keeps the newest among equal scores
+  for (const e of screen) {
+    if (!hasPartialBbox(e) || !e.ocr) continue;
+    const ocr = e.ocr.toLowerCase();
+    const score = tokens.reduce((n, t) => n + (ocr.includes(t) ? 1 : 0), 0);
+    if (score > bestScore) {
+      best = e;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 1 ? best : undefined;
+}
+
 export interface RegionTrackerOpts {
   /** Drop a region after this many ticks without re-detection (default 2) */
   maxMissedTicks?: number;
@@ -68,14 +104,22 @@ export class RegionTracker {
       }
       if (this.tracked.size >= this.maxRegions) continue;
 
-      const src = r.sourceId !== undefined
+      // Anchor resolution: sourceId echo from the LLM, falling back to a
+      // deterministic OCR text match (small local models often drop the id).
+      // Full-frame bboxes are demoted — an eye at the corner of the whole
+      // frame is no better than the corner stack, and misleads.
+      let src = r.sourceId !== undefined
         ? ctx.screen.find(e => e.id === r.sourceId)
         : undefined;
-      const bbox = src?.imageBbox && src.imageBbox.length === 4
-        ? src.imageBbox as [number, number, number, number]
+      if (!src || !hasPartialBbox(src)) {
+        src = anchorByText(r.issue, ctx.screen) ?? src;
+      }
+      const anchored = src && hasPartialBbox(src);
+      const bbox = anchored
+        ? src!.imageBbox as [number, number, number, number]
         : undefined;
-      const frameSize = src?.frameSize && src.frameSize.length === 2
-        ? src.frameSize as [number, number]
+      const frameSize = anchored && src!.frameSize && src!.frameSize.length === 2
+        ? src!.frameSize as [number, number]
         : undefined;
 
       this.tracked.set(id, {

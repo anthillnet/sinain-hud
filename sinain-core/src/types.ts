@@ -10,6 +10,11 @@ export interface FeedMessage {
   priority: Priority;
   ts: number;
   channel: FeedChannel;
+  /** Message origin shown in the overlay ("user" | "spawn" | agent default) */
+  sender?: string;
+  /** Region thread this message belongs to — the overlay routes it to that
+   *  region's tab instead of the main feed (Grammarly mode). */
+  regionId?: string;
 }
 
 /** sinain-core → Overlay: status update */

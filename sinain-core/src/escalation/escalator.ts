@@ -603,11 +603,14 @@ ${recentLines.join("\n")}`;
     const label = this.spawnHttpPending.label;
     const startedAt = this.spawnHttpPending.ts;
 
-    // Push result to HUD feed
+    // Push result to HUD feed (region results route to their thread tab)
+    const regionId = this.regionByTask.get(id);
     const maxLen = 3000;
-    const text = `[🔧 ${label}] ${result.trim().slice(0, maxLen)}`;
+    const text = regionId
+      ? result.trim().slice(0, maxLen)
+      : `[🔧 ${label}] ${result.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
-    this.deps.wsHandler.broadcast(text, "high", "agent");
+    this.deps.wsHandler.broadcast(text, "high", "agent", regionId);
 
     // Broadcast completion
     this.broadcastTaskEvent(id, "completed", label, startedAt, result.slice(0, 200));
@@ -767,10 +770,14 @@ ${recentLines.join("\n")}`;
       const payloads = result?.payload?.result?.payloads;
       const runId = result?.payload?.runId || taskId;
 
+      // Region thread responses skip the "label:" prefix — they render inside
+      // the region's own tab where the label is already the tab title.
+      const regionId = opts?.regionId;
+      const prefix = regionId ? "" : `${label || "Background task"}:\n`;
       if (Array.isArray(payloads) && payloads.length > 0) {
         const output = payloads.map((pl: any) => pl.text || "").join("\n").trim();
         if (output) {
-          this.pushResponse(`${label || "Background task"}:\n${output}`);
+          this.pushResponse(`${prefix}${output}`, null, regionId);
           this.broadcastTaskEvent(taskId, "completed", label, startedAt, output);
         } else {
           log(TAG, `spawn-task: ${payloads.length} payloads but empty text, trying chat.history`);
@@ -778,7 +785,7 @@ ${recentLines.join("\n")}`;
           this.broadcastTaskEvent(taskId, "completed", label, startedAt,
             historyText || "task completed (no output)");
           if (historyText) {
-            this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+            this.pushResponse(`${prefix}${historyText}`, null, regionId);
           }
         }
       } else {
@@ -786,7 +793,7 @@ ${recentLines.join("\n")}`;
         log(TAG, `spawn-task: no payloads, fetching chat.history for child=${childSessionKey}`);
         const historyText = await this.fetchChildResult(childSessionKey);
         if (historyText) {
-          this.pushResponse(`${label || "Background task"}:\n${historyText}`);
+          this.pushResponse(`${prefix}${historyText}`, null, regionId);
           this.broadcastTaskEvent(taskId, "completed", label, startedAt, historyText);
         } else {
           this.broadcastTaskEvent(taskId, "completed", label, startedAt,
@@ -1111,14 +1118,14 @@ ${recentLines.join("\n")}`;
     if (isTerminal) this.regionByTask.delete(taskId);
   }
 
-  private pushResponse(output: string, context?: ContextWindow | null): void {
+  private pushResponse(output: string, context?: ContextWindow | null, regionId?: string): void {
     // Allow longer responses for coding contexts
     const { coding } = context ? isCodingContext(context) : { coding: false };
     const maxLen = coding ? 4000 : 3000;
 
     const text = `[🤖] ${output.trim().slice(0, maxLen)}`;
     this.deps.feedBuffer.push(text, "high", "openclaw", "agent");
-    this.deps.wsHandler.broadcast(text, "high", "agent");
+    this.deps.wsHandler.broadcast(text, "high", "agent", regionId);
     this.stats.totalResponses++;
     this.deps.profiler?.gauge("escalation.totalResponses", this.stats.totalResponses);
     this.stats.lastResponseTs = Date.now();
