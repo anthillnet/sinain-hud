@@ -14,7 +14,7 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
-import { RegionTracker, buildRegionSpawnTask } from "./agent/region-tracker.js";
+import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -786,6 +786,9 @@ async function main() {
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
   // events, broadcasts the set to the overlay when it changes.
   const regionTracker = new RegionTracker();
+  // Region ids whose per-ROI agent thread already got the full region
+  // context (first message); follow-ups send just the user's text.
+  const startedRegionThreads = new Set<string>();
 
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
@@ -1367,16 +1370,26 @@ async function main() {
     onSpawnCommand: (text, regionId) => {
       let task = text;
       let label = "user-command";
+      const opts: { regionId?: string; sessionKey?: string; route?: "spawn" | "escalation" } = { regionId };
       if (regionId) {
+        // Region thread: each ROI gets its own stable agent session, routed
+        // to the CURRENTLY SELECTED ESCALATION agent (not the spawn lane).
+        // First message carries the full region context; follow-ups are the
+        // user's text and continue the same session.
+        opts.sessionKey = `agent:main:region:${regionId}`;
+        opts.route = "escalation";
         const region = regionTracker.get(regionId);
-        if (region) {
-          // Overlay text for region taps is a synthesized feed echo, not a
-          // user note — the region itself carries the task content.
-          task = buildRegionSpawnTask(region, agentLoop.getDigest()?.digest);
-          label = region.action ? `region-${region.action}` : "region";
+        label = region?.issue ? region.issue.slice(0, 48) : "region";
+        if (!startedRegionThreads.has(regionId)) {
+          startedRegionThreads.add(regionId);
+          if (region) {
+            // Overlay text on Run is a synthesized feed echo, not a user
+            // note — the region itself carries the task content.
+            task = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+          }
         }
       }
-      escalator.dispatchSpawnTask(task, label, { regionId }).catch((err) => {
+      escalator.dispatchSpawnTask(task, label, opts).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
         wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
       });

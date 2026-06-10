@@ -650,7 +650,20 @@ ${recentLines.join("\n")}`;
    * Creates a unique child session key and sends the task directly to the gateway
    * agent RPC — bypassing the main session to avoid dedup/NO_REPLY issues.
    */
-  async dispatchSpawnTask(task: string, label?: string, opts?: { regionId?: string }): Promise<void> {
+  async dispatchSpawnTask(
+    task: string,
+    label?: string,
+    opts?: {
+      regionId?: string;
+      /** Stable session override — region threads reuse one session per ROI
+       *  so follow-up messages continue the same conversation. */
+      sessionKey?: string;
+      /** Which overlay lane selection routes this task. Region threads use
+       *  "escalation" (the currently selected escalation agent); default
+       *  "spawn". */
+      route?: "spawn" | "escalation";
+    },
+  ): Promise<void> {
     // Bound sibling spawn RPCs (independent from escalation queue)
     if (this.spawnsInFlight >= Escalator.MAX_CONCURRENT_SPAWNS) {
       log(TAG, `spawn-task skipped — ${this.spawnsInFlight} spawn RPCs already in-flight`);
@@ -677,8 +690,9 @@ ${recentLines.join("\n")}`;
     const idemKey = `spawn-task-${Date.now()}`;
     if (opts?.regionId) this.regionByTask.set(taskId, opts.regionId);
 
-    // Generate a unique child session key — bypasses the main agent entirely
-    const childSessionKey = `agent:main:subagent:${randomUUID()}`;
+    // Child session key — unique per task by default; region threads pass a
+    // stable per-ROI key so the agent keeps that region's conversation.
+    const childSessionKey = opts?.sessionKey ?? `agent:main:subagent:${randomUUID()}`;
 
     this.outboundBytes += Buffer.byteLength(task);
     this.deps.profiler?.gauge("network.escalationOutBytes", this.outboundBytes);
@@ -701,28 +715,32 @@ ${recentLines.join("\n")}`;
     //   - any other non-empty agent → HTTP queue for bare agent polling
     //   - empty (Off) → drop; the spawn poll skip in run.sh should already
     //     prevent us from getting here.
-    const spawnAgent = this.deps.getSpawnAgent?.() || "";
-    const spawnIsGateway = this.deps.isGatewayAgent?.(spawnAgent) ?? false;
-    if (spawnIsGateway) {
+    const laneName = opts?.route === "escalation" ? "escalation" : "spawn";
+    const laneAgent = opts?.route === "escalation"
+      ? (this.deps.getEscalationAgent?.() || "")
+      : (this.deps.getSpawnAgent?.() || "");
+    const laneIsGateway = this.deps.isGatewayAgent?.(laneAgent) ?? false;
+    if (laneIsGateway) {
       if (!this.wsClient.isConnected) {
-        log(TAG, `spawn-task ${taskId}: dropped — gateway agent "${spawnAgent}" selected but WS disconnected`);
+        log(TAG, `spawn-task ${taskId}: dropped — gateway agent "${laneAgent}" selected but WS disconnected`);
         this.deps.wsHandler.broadcast(
-          `⚠ Gateway disconnected — spawn task dropped. Pick a local agent or check the ${spawnAgent} gateway.`,
+          `⚠ Gateway disconnected — task dropped. Pick a local agent or check the ${laneAgent} gateway.`,
           "high",
         );
         return;
       }
       // Fall through to gateway dispatch below.
-    } else if (spawnAgent) {
-      // Local bare-agent path: queue for polling.
+    } else if (laneAgent) {
+      // Local bare-agent path: queue for polling. Note: bare CLI agents are
+      // stateless per call — region threads don't keep history on this path.
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
       const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
       this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
       this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
-      log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${spawnAgent})`);
+      log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${laneName}:${laneAgent})`);
       return;
     } else {
-      log(TAG, `spawn-task ${taskId}: dropped — lane is Off (spawnAgent="")`);
+      log(TAG, `spawn-task ${taskId}: dropped — ${laneName} lane is Off`);
       return;
     }
 

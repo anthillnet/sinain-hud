@@ -135,7 +135,7 @@ export class RegionTracker {
  * assembled at spawn time (region metadata + source OCR + fresh digest),
  * not stale text embedded at detection time.
  */
-export function buildRegionSpawnTask(
+export function buildRegionTaskText(
   region: RegionHighlight,
   latestDigest?: string,
   userNote?: string,

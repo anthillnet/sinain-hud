@@ -4,8 +4,9 @@ Region eyes surface actionable screen areas (errors, typos, fixable code,
 stuck questions) as small clickable sinain eye icons positioned at the real
 screen location of the issue. Tapping an eye opens the main HUD chat next to
 the region, showing the detected issue and the suggested approach; the user
-launches the background agent task explicitly from there (taps never
-auto-spawn).
+explicitly starts a **per-region agent thread** from there (taps never
+auto-run). Each ROI gets its own conversation with the currently selected
+escalation agent.
 
 This is the v2 redesign on top of current main. It replaces the v1 prototype
 from `feat/region-multi-window` (grid-positioned placeholder eyes, text-blob
@@ -26,14 +27,19 @@ context, per-region multi-engine windows planned but never built).
 
 3. **Main HUD as viewport, eyes as tabs.** Tapping an eye opens the HUD chat
    near the region with a region action banner (issue + tip + explicit Run
-   button). Spawns run in parallel (up to 3 concurrent), each region's status
-   routes back to its eye badge (idle → working → ready/failed); results land
-   in the chat feed and the tasks pipeline. No multi-engine Flutter windows,
-   no cross-engine channels.
+   button). Region threads run in parallel (up to 3 concurrent in flight),
+   each region's status routes back to its eye badge (idle → working →
+   ready/failed); responses land in the chat feed and the tasks pipeline.
+   No multi-engine Flutter windows, no cross-engine channels.
 
-4. **Spawn context assembled at spawn time, not detection time.** On tap,
-   sinain-core builds the task from the tracked region (issue + tip + source
-   OCR + the *current* digest) — never a stale text blob baked in at
+4. **One thread per ROI, routed to the escalation agent.** Run sends the
+   region to the *currently selected escalation agent* (not the spawn lane)
+   under a stable session key `agent:main:region:<regionId>`. While the
+   region banner is active, the chat input routes follow-ups into that same
+   session — the agent keeps per-region conversation history (gateway
+   agents; bare CLI agents are stateless per call). The first message
+   carries the full region context (issue + tip + source OCR + the *current*
+   digest), assembled core-side at Run time, never a stale blob baked at
    detection.
 
 5. **Zero added LLM cost.** Regions piggyback on the existing analysis tick
@@ -51,10 +57,12 @@ RegionTracker (stable ids, bbox resolution, TTL expiry) ──▶ ws: region_hig
 overlay RegionEyeController ──▶ scale bbox frame→screen ──▶ native RegionEyePool (48×48 NSPanels, sharingType=.none)
                                                               │ tap
 chat opens near region + RegionActionBanner (issue, tip, ⚡ Run)
-                                                              │ explicit Run
-ws: spawn_command {text, regionId} ──▶ core builds task from tracker ──▶ escalator.dispatchSpawnTask(task, label, {regionId})
+                                                              │ explicit Run (and thread follow-ups from chat input)
+ws: spawn_command {text, regionId} ──▶ core: first message = region context from tracker, then user text
                                                               │
-ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/failed) + chat feed result
+escalator.dispatchSpawnTask(task, label, {regionId, sessionKey: "agent:main:region:<id>", route: "escalation"})
+                                                              │
+ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/failed) + chat feed response
 ```
 
 ## Components
@@ -113,24 +121,29 @@ ws: spawn_task {taskId, status, regionId} ──▶ eye badge (working/ready/fai
 - `macos/Runner/WindowControlPlugin.swift` — `getScreenSize`,
   `showRegionEyes`, `updateRegionEye`, `clearRegionEyes` cases.
 
-## Interaction model (eyes as tabs)
+## Interaction model (eyes as tabs, one thread per ROI)
 
 - Tap an eye → HUD chat opens next to the region with the **region action
   banner**: the detected issue, the suggested approach, and a ⚡ Run button.
-  Nothing spawns yet.
-- Press **⚡ Run** → eye turns orange (working), the spawn fires with
-  `regionId` (feed echo `⚡ [👁 fix] <issue>` appears in chat). Up to 3
-  spawns run in parallel; duplicate launches are debounced overlay-side and
-  fingerprint-deduped core-side.
+  Nothing runs yet.
+- Press **⚡ Run** → the region's thread starts: eye turns orange (working),
+  the first message (full region context) goes to the currently selected
+  escalation agent under session `agent:main:region:<id>`. The banner stays,
+  showing a "👁 thread" tag — the chat input now routes follow-ups into this
+  region's thread. Dismiss (×) to return the input to the main flow.
 - Tap another eye while the first is working → its own banner shows; running
-  tasks keep going. The HUD re-anchors to the new region.
-- A task completes → its eye badge flips to **ready** (green ✓) without
-  hijacking the current view; the result lands in the chat feed (and the
-  spawn task pipeline).
-- Tap a **working/ready** eye → HUD chat opens near it; the banner shows the
-  region again (Run is a no-op while working).
+  threads keep going independently (each has its own session). The HUD
+  re-anchors to the new region.
+- A response arrives → that region's eye badge flips to **ready** (green,
+  dilated pupil) without hijacking the current view; the response lands in
+  the chat feed (and the tasks pipeline).
+- Tap a **working/ready** eye → HUD chat opens near it; follow-ups continue
+  that thread.
 - Eyes disappear when the issue stops being detected (2 ticks) or after
-  5 min; in-flight results still land in the chat feed.
+  5 min; in-flight responses still land in the chat feed, and the thread
+  session survives server-side.
+- Duplicate launches are debounced overlay-side and fingerprint-deduped
+  core-side; at most 3 region messages in flight at once.
 
 ## Gating
 
