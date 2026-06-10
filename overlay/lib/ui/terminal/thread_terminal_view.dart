@@ -176,15 +176,19 @@ class ThreadTerminalSession {
       attempts++;
       attemptInFlight = true;
       settle?.cancel();
-      final token = seedFile.split('/').where((s) => s.isNotEmpty).toList();
-      final probe = token.length >= 2 ? token[token.length - 2] : seedFile;
+      // Probe must be unique to our TYPED text — NOT the seed path, which is
+      // also in run.sh's ⟦SINAIN-SEED:…⟧ marker line (still in the buffer),
+      // or every verify falsely "confirms". This phrase appears only in the
+      // message we type (in the input box, or echoed in the transcript once
+      // submitted), never in the marker.
+      const pointer = 'and follow its instructions.';
+      const probe = 'follow its instructions';
       if (kDebugMode) print('[seed] attempt $attempts — typing pointer');
-      pty.write(const Utf8Encoder()
-          .convert('Read $seedFile and follow its instructions.'));
+      pty.write(const Utf8Encoder().convert('Read $seedFile $pointer'));
       Timer(const Duration(milliseconds: 400), () {
         if (!session.exited) pty.write(const Utf8Encoder().convert('\r'));
       });
-      // Verify: did our unique token reach the screen? If not, the keystrokes
+      // Verify: did our typed text reach the screen? If not, the keystrokes
       // were eaten — retry (a late dialog will now be visible and waited out).
       Timer(const Duration(milliseconds: 2500), () {
         attemptInFlight = false;
