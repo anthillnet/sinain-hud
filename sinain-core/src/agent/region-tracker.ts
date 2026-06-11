@@ -126,6 +126,12 @@ export class RegionTracker {
     this.tick++;
     const before = this.stateKey();
 
+    // Expire FIRST, then admit. The other order had a starvation bug: the
+    // capacity check saw the set still full of about-to-expire regions, so
+    // every incoming replacement was rejected by the cap — then expiry
+    // emptied the set ("emitted 3 → 0 active" oscillation).
+    this.expireStale();
+
     for (const r of raw ?? []) {
       const id = regionIdFor(r.issue);
       // Exact id hit, else fuzzy re-match: identity is a hash of the issue
@@ -188,6 +194,16 @@ export class RegionTracker {
       debug(TAG, `new region ${id}: "${r.issue}" (bbox=${bbox ? bbox.join(",") : "none"})`);
     }
 
+    if (this.stateKey() === before) return null;
+    const current = this.current();
+    log(TAG, `region set changed: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
+    return current;
+  }
+
+  /** Expire regions not re-detected within the miss window (or past TTL).
+   *  Runs at the START of update() so freed capacity is available to the
+   *  same tick's incoming regions. */
+  private expireStale(): void {
     const now = Date.now();
     for (const [id, t] of this.tracked) {
       if (this.tick - t.lastSeenTick > this.maxMissedTicks ||
@@ -207,11 +223,6 @@ export class RegionTracker {
       if (oldest === undefined) break;
       this.expired.delete(oldest);
     }
-
-    if (this.stateKey() === before) return null;
-    const current = this.current();
-    log(TAG, `region set changed: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
-    return current;
   }
 
   /** Fuzzy lookup: tracked region whose issue shares ≥0.5 token-Jaccard
