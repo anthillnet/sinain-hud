@@ -805,6 +805,9 @@ async function main() {
   // Region ids whose per-ROI agent thread already got the full region
   // context (first message); follow-ups send just the user's text.
   const startedRegionThreads = new Set<string>();
+  // MAIN forks: thread id → seed (MAIN transcript + digest at fork time).
+  // Consumed by the thread's first chat message and by terminal seeding.
+  const forkSeeds = new Map<string, string>();
 
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
@@ -1273,7 +1276,13 @@ async function main() {
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
 
+    getThreadSession: (regionId: string) => escalator.threadSession(regionId),
+
     getRegionTask: async (regionId: string) => {
+      // Fork threads have no tracked region — their seed is the MAIN
+      // transcript snapshot taken at fork time (terminal path).
+      const forkSeed = forkSeeds.get(regionId);
+      if (forkSeed) return forkSeed;
       const region = regionTracker.get(regionId);
       if (!region) return null;
       // Enrich the terminal seed with knowledge-graph facts about the issue's
@@ -1421,6 +1430,9 @@ async function main() {
       await escalator.sendDirect(text);
     },
     onUserCommand: (text) => {
+      // Record the user's side of MAIN in the feed buffer so fork seeds
+      // (and session distillation) carry both halves of the conversation.
+      feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
       escalator.setUserCommand(text);
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
@@ -1433,6 +1445,24 @@ async function main() {
         regionTracker.clear();
         wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
       }
+    },
+    onForkMain: () => {
+      const id = `fork-${Date.now().toString(36)}`;
+      const items = feedBuffer.query(0).filter((i) => i.channel === "agent").slice(-30);
+      const transcript = items
+        .map((i) => i.text.startsWith("[user] ")
+          ? `User: ${i.text.slice(7)}`
+          : `sinain: ${i.text}`)
+        .join("\n\n");
+      const digest = agentLoop.getDigest()?.digest;
+      forkSeeds.set(id, [
+        "You are continuing a FORK of the user's MAIN sinain chat. Below is",
+        "the recent MAIN transcript and the situation digest at fork time.",
+        "Pick up from this context — the user's next message continues it.",
+        digest ? `\n## Situation digest\n${digest}` : "",
+        transcript ? `\n## Recent MAIN transcript\n${transcript}` : "",
+      ].filter(Boolean).join("\n"));
+      return { id, label: "⑂ fork" };
     },
     onSpawnCommand: (text, regionId) => {
       let task = text;
@@ -1448,13 +1478,19 @@ async function main() {
         opts.sessionKey = `agent:main:region:${regionId}`;
         opts.route = "spawn";
         const region = regionTracker.get(regionId);
-        label = region?.issue ? region.issue.slice(0, 48) : "region";
+        const forkSeed = forkSeeds.get(regionId);
+        label = region?.issue ? region.issue.slice(0, 48)
+          : forkSeed ? "⑂ fork" : "region";
         if (!startedRegionThreads.has(regionId)) {
           startedRegionThreads.add(regionId);
           if (region) {
             // Overlay text on Run is a synthesized feed echo, not a user
             // note — the region itself carries the task content.
             task = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+          } else if (forkSeed) {
+            // Fork thread: first message = fork seed + the user's text
+            // (unlike regions, the user's first message here is real).
+            task = `${forkSeed}\n\n## User message\n${text}`;
           }
         }
       }

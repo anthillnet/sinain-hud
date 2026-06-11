@@ -1560,6 +1560,8 @@ export interface ServerDeps {
    *  thread-terminal to seed an interactive spawn-agent session with the
    *  exact context the headless ROI Run would send. */
   getRegionTask?: (regionId: string) => Promise<string | null>;
+  /** Stable agent session for a thread (get-or-create) — terminals resume it. */
+  getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   listKnowledgeEntities?: (max: number) => Promise<string>;
@@ -1786,7 +1788,8 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "unknown region" }));
           return;
         }
-        res.end(JSON.stringify({ ok: true, text }));
+        const sess = deps.getThreadSession?.(regionId);
+        res.end(JSON.stringify({ ok: true, text, ...(sess ?? {}) }));
         return;
       }
 
@@ -2534,21 +2537,16 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
-      // ── /spawn ──
+      // ── /spawn ── REMOVED (chat-threads redesign): no autonomous spawn
+      // tasks. This was the sinain_spawn MCP tool's entry — agents were
+      // spawning background work on their own and dumping results into the
+      // feed. Agents answer inline; only the USER opens threads/terminals.
       if (req.method === "POST" && url.pathname === "/spawn") {
-        const body = await readBody(req, 65536);
-        const { text, label } = JSON.parse(body);
-        if (!text) {
-          res.writeHead(400);
-          res.end(JSON.stringify({ ok: false, error: "missing text" }));
-          return;
-        }
-        if (deps.onSpawnCommand) {
-          deps.onSpawnCommand(text);
-          res.end(JSON.stringify({ ok: true, spawned: true }));
-        } else {
-          res.end(JSON.stringify({ ok: false, error: "spawn not configured" }));
-        }
+        res.writeHead(410);
+        res.end(JSON.stringify({
+          ok: false,
+          error: "autonomous spawn tasks were removed — include your findings inline in the escalation response instead",
+        }));
         return;
       }
 

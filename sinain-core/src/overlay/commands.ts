@@ -19,6 +19,9 @@ export interface CommandDeps {
   onUserCommand: (text: string) => void;
   /** Spawn a background agent task. regionId present when a region eye initiated it. */
   onSpawnCommand?: (text: string, regionId?: string) => void;
+  /** Fork MAIN into a new thread: mints a thread id and stores a seed built
+   *  from the MAIN transcript + digest. Returns the new thread's identity. */
+  onForkMain?: () => { id: string; label: string };
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
@@ -78,16 +81,17 @@ export function setupCommands(deps: CommandDeps): void {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
         const regionId = typeof msg.regionId === "string" && msg.regionId ? msg.regionId : undefined;
         log(TAG, `spawn command received: "${preview}"${regionId ? ` (region=${regionId})` : ""}`);
-        // Echo spawn command to all overlay clients as a feed item (green in
-        // UI). Region thread messages carry regionId → overlay routes the
-        // echo to that region's tab instead of the main feed.
+        // Echo the message back to overlay clients. A thread send (regionId
+        // set) is just the user speaking in that thread's chat — echo it as
+        // the user, verbatim. Legacy non-thread spawn commands keep the ⚡
+        // prefix + spawn sender for the main feed.
         wsHandler.broadcastRaw({
           type: "feed",
-          text: `⚡ ${msg.text}`,
+          text: regionId ? msg.text : `⚡ ${msg.text}`,
           priority: "normal",
           ts: Date.now(),
           channel: "agent",
-          sender: "spawn",
+          sender: regionId ? "user" : "spawn",
           ...(regionId ? { regionId } : {}),
         } as any);
         if (deps.onSpawnCommand) {
@@ -96,6 +100,22 @@ export function setupCommands(deps: CommandDeps): void {
           log(TAG, `spawn command ignored — no handler configured`);
           wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");
         }
+        break;
+      }
+      case "fork_main": {
+        if (!deps.onForkMain) break;
+        const fork = deps.onForkMain();
+        log(TAG, `MAIN forked → ${fork.id}`);
+        // Open the thread tab on every client — rides the thread-status
+        // channel (regionId keys the tab, label titles it).
+        wsHandler.broadcastRaw({
+          type: "spawn_task",
+          taskId: fork.id,
+          label: fork.label,
+          status: "completed",
+          startedAt: Date.now(),
+          regionId: fork.id,
+        } as any);
         break;
       }
       case "spawn_reply": {

@@ -44,13 +44,16 @@ export interface PingMessage {
 }
 
 /** sinain-core → Overlay: spawn task lifecycle update */
-export type SpawnTaskStatus = "spawned" | "polling" | "completed" | "failed" | "timeout" | "awaiting_input" | "awaiting_permission";
+export type ThreadStatus = "spawned" | "polling" | "completed" | "failed" | "timeout" | "awaiting_input" | "awaiting_permission";
 
-export interface SpawnTaskMessage {
+export interface ThreadStatusMessage {
+  /** Wire literal stays "spawn_task" — deployed overlays parse it; the
+   *  overlay and core update independently, so renaming it would break
+   *  skewed pairs. Internal names say what it is: thread status. */
   type: "spawn_task";
   taskId: string;
   label: string;
-  status: SpawnTaskStatus;
+  status: ThreadStatus;
   startedAt: number;
   completedAt?: number;
   resultPreview?: string;
@@ -141,6 +144,11 @@ export interface SpawnCommandMessage {
   regionId?: string;
 }
 
+/** Overlay → sinain-core: fork MAIN into a new thread */
+export interface ForkMainMessage {
+  type: "fork_main";
+}
+
 /** Overlay → sinain-core: reply to a spawn question */
 export interface SpawnReplyMessage {
   type: "spawn_reply";
@@ -184,8 +192,8 @@ export interface CostSnapshot {
   startedAt: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | SpawnTaskMessage | CostMessage | RegionHighlightMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage;
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {

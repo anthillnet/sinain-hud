@@ -15,6 +15,7 @@ import concurrent.futures
 import copy
 import json
 import os
+import threading
 import time
 
 import numpy as np
@@ -201,7 +202,29 @@ def main():
     _logged_first_frame = False
     _last_heartbeat = time.time()
 
+    # Liveness watchdog: requests timeouts don't bound DNS resolution
+    # (getaddrinfo is an untimed libc call) — during a DNS outage the
+    # process once sat wedged in a network call for 2.5h, alive but
+    # emitting nothing. If the capture loop stops advancing, re-exec the
+    # process in place (same PID — start.sh/pkill semantics unaffected).
+    watchdog_secs = float(os.environ.get("SINAIN_SENSE_WATCHDOG_SECS", "180"))
+    _loop_beat = {"ts": time.time()}
+
+    def _watchdog():
+        while True:
+            time.sleep(15)
+            stalled = time.time() - _loop_beat["ts"]
+            if stalled > watchdog_secs:
+                log(f"WATCHDOG: capture loop stalled {stalled:.0f}s — re-executing process")
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os.execv(sys.executable, [sys.executable, "-m", "sense_client"] + sys.argv[1:])
+
+    if watchdog_secs > 0:
+        threading.Thread(target=_watchdog, daemon=True, name="watchdog").start()
+
     for frame, ts in capture.capture_loop():
+        _loop_beat["ts"] = time.time()
         # Check control file (pause/resume)
         if not is_enabled(args.control):
             time.sleep(1)

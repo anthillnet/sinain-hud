@@ -9,15 +9,14 @@ import '../core/services/settings_service.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/window_service.dart';
 import 'eye/eye_widget.dart';
-import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
-import 'input/command_input.dart';
 import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
 import 'regions/region_action_banner.dart';
 import 'regions/region_eye_controller.dart';
+import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
@@ -44,6 +43,8 @@ class OverlayShellState extends State<OverlayShell> {
   bool _hasNewContent = false;
   Timer? _contentResetTimer;
   StreamSubscription<bool>? _thinkingSub;
+  StreamSubscription? _forkSub;
+  bool _awaitingFork = false;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -112,6 +113,16 @@ class OverlayShellState extends State<OverlayShell> {
     }
 
     final ws = context.read<WebSocketService>();
+    // After tapping ⑂ the new fork tab arrives as a thread-status update —
+    // switch to it so the user lands in the thread they just created.
+    _forkSub = ws.spawnTaskStream.listen((task) {
+      if (!mounted || !_awaitingFork) return;
+      final id = task.regionId;
+      if (id != null && id.startsWith('fork-')) {
+        _awaitingFork = false;
+        _selectThread(id);
+      }
+    });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
     });
@@ -473,7 +484,9 @@ class OverlayShellState extends State<OverlayShell> {
     return Container(
       height: 26,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      child: SingleChildScrollView(
+      child: Row(children: [
+        Expanded(
+            child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
@@ -492,28 +505,42 @@ class OverlayShellState extends State<OverlayShell> {
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
               ),
-            // SPIKE: chat ⇄ terminal toggle for the active tab. Terminal
-            // mode launches the tab's lane agent seeded with the same
-            // context chat mode uses (escalation lane for MAIN, spawn lane
-            // for regions). Toggling back to chat keeps the session alive.
-            if (terminalSpikeEnabled)
-              pill(
-                text: _terminalThreads.contains(_activeTabKey)
-                    ? '💬 chat'
-                    : '⌨ term',
-                selected: _terminalThreads.contains(_activeTabKey),
-                onTap: () {
-                  if (_terminalThreads.contains(_activeTabKey)) {
-                    setState(() => _terminalThreads.remove(_activeTabKey));
-                  } else {
-                    _openTerminalForTab(_activeTabKey);
-                  }
-                  _syncBusyState();
-                },
-              ),
           ],
         ),
-      ),
+            )),
+        // Fork MAIN into a new thread (visible only on the MAIN tab): the
+        // new thread starts from the MAIN transcript + digest and runs its
+        // own agent session, chat or terminal.
+        if (_activeThread == null)
+          pill(
+            text: '⑂',
+            selected: false,
+            onTap: () {
+              _awaitingFork = true;
+              context.read<WebSocketService>().forkMain();
+            },
+          ),
+        // Chat ⇄ terminal toggle for the ACTIVE tab — pinned at the right
+        // edge, outside the scrolling tab strip, so a crowd of tabs can
+        // never squeeze it out of sight. Term→chat closes the PTY so one
+        // session never has two concurrent writers (P3 exclusivity).
+        if (terminalSpikeEnabled)
+          pill(
+            text: _terminalThreads.contains(_activeTabKey)
+                ? '💬 chat'
+                : '⌨ term',
+            selected: _terminalThreads.contains(_activeTabKey),
+            onTap: () {
+              if (_terminalThreads.contains(_activeTabKey)) {
+                ThreadTerminalSession.close(_activeTabKey);
+                setState(() => _terminalThreads.remove(_activeTabKey));
+              } else {
+                _openTerminalForTab(_activeTabKey);
+              }
+              _syncBusyState();
+            },
+          ),
+      ]),
     );
   }
 
@@ -549,6 +576,7 @@ class OverlayShellState extends State<OverlayShell> {
     _busyTimer?.cancel();
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
+    _forkSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {
@@ -988,17 +1016,21 @@ class OverlayShellState extends State<OverlayShell> {
                         key: ValueKey('term-$_activeTabKey'),
                         threadId: _activeTabKey,
                       )
-                    : _activeThread == null
-                        ? const FeedView(
-                            channel: FeedChannel.agent,
-                            emptyLabel: 'awaiting sinain…',
-                          )
-                        : FeedView(
-                            key: ValueKey('thread-$_activeThread'),
-                            regionId: _activeThread,
-                            channel: FeedChannel.agent,
-                            emptyLabel: 'no messages yet — press ⚡ Run',
-                          ),
+                    : ChatThreadView(
+                        key: ValueKey('chat-$_activeTabKey'),
+                        ws: ws,
+                        threadId: _activeThread,
+                        accentColor: _settingsService.settings.accentColor,
+                        onSend: (text) {
+                          final thread = _activeThread;
+                          if (thread != null) {
+                            _sendToRegionThread(thread, text);
+                          } else {
+                            ws.sendUserCommand(text);
+                          }
+                          _syncBusyState();
+                        },
+                      ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),
@@ -1042,27 +1074,9 @@ class OverlayShellState extends State<OverlayShell> {
           const _AgentAvailabilityBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
-          // Command input — routes to the active thread tab: region tab →
-          // that ROI's conversation, MAIN → the regular escalation flow.
-          CommandInput(
-            externalFocusNode: _commandFocusNode,
-            onSubmit: (text) {
-              final thread = _activeThread;
-              if (thread != null) {
-                _sendToRegionThread(thread, text);
-              } else {
-                context.read<WebSocketService>().sendUserCommand(text);
-              }
-            },
-            onSpawn: (text) {
-              final thread = _activeThread;
-              if (thread != null) {
-                _sendToRegionThread(thread, text);
-              } else {
-                context.read<WebSocketService>().sendSpawnCommand(text);
-              }
-            },
-          ),
+          // Input lives in the chat surface now (flyer composer) — terminal
+          // tabs type directly into the PTY. CommandInput retired with the
+          // chat-threads redesign (spawn input mode removed with it).
         ],
       ),
     );

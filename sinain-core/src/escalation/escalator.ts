@@ -1,4 +1,4 @@
-import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, SpawnTaskMessage, SpawnTaskStatus, UserCommand } from "../types.js";
+import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, ThreadStatusMessage, ThreadStatus, UserCommand } from "../types.js";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { WsHandler } from "../overlay/ws-handler.js";
 import type { Profiler } from "../profiler.js";
@@ -20,6 +20,9 @@ export interface HttpPendingEscalation {
   codingContext: boolean;
   ts: number;
   feedbackCtx: QueueFeedbackCtx | undefined;
+  /** True when this escalation carries a user message (USER_CMD) — ambient
+   *  ones are superseded when the user sends a message mid-flight. */
+  userDriven?: boolean;
 }
 
 const TAG = "escalation";
@@ -68,6 +71,9 @@ export class Escalator {
   private wsClient: OpenClawWsClient;
   private slot: EscalationSlot;
   private httpPending: HttpPendingEscalation | null = null;
+  /** Ambient escalations invalidated by a newer user message — their late
+   *  responses are dropped so the next agent message answers the USER. */
+  private readonly supersededIds = new Set<string>();
 
   // Grace window for stale escalation IDs — when analyzer rotates the pending
   // slot mid-response (agent takes 10-30s on MCP flow while ticks fire every
@@ -93,6 +99,11 @@ export class Escalator {
   // regionId per in-flight spawn task — echoed on every spawn_task broadcast
   // so the overlay can route status to the originating region eye's badge.
   private regionByTask = new Map<string, string>();
+  /** Stable agent session per thread (regionId → uuid). Core allocates the
+   *  id and tells the agent --session-id (first call) or --resume — chat and
+   *  terminal share one conversation. */
+  private readonly threadSessions = new Map<string, string>();
+  private readonly startedSessions = new Set<string>();
 
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
@@ -117,8 +128,13 @@ export class Escalator {
   /** Ambient-escalation quiet window after a user interaction. */
   private static readonly USER_BUSY_MS = 120_000;
 
-  // HTTP spawn queue — for bare agents that poll (mirrors httpPending for escalation)
-  private spawnHttpPending: { id: string; task: string; label: string; ts: number } | null = null;
+  // HTTP spawn queue — for bare agents that poll (mirrors httpPending for
+  // escalation). FIFO queue + in-flight map: with several thread chats open,
+  // tasks arrive while the agent is still working an earlier one — a single
+  // slot would be overwritten and the in-flight response rejected on id
+  // mismatch (silently lost answer).
+  private spawnHttpQueue: { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean }[] = [];
+  private spawnHttpInFlight = new Map<string, { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean }>();
 
   private stats = {
     totalEscalations: 0,
@@ -192,6 +208,19 @@ export class Escalator {
 
   setUserCommand(text: string, source: "text" | "voice" = "text"): void {
     this.pendingUserCommand = { text, ts: Date.now(), source };
+    // Conversational contract: after the user speaks, the NEXT agent message
+    // answers them. An ambient escalation already in flight is superseded —
+    // its late response is dropped in respondHttp (the agent's effort is
+    // wasted, but a stale ambient reply after a direct question reads as
+    // the system ignoring the user).
+    if (this.httpPending && !this.httpPending.userDriven) {
+      this.supersededIds.add(this.httpPending.id);
+      if (this.supersededIds.size > 20) {
+        const first = this.supersededIds.values().next().value;
+        if (first !== undefined) this.supersededIds.delete(first);
+      }
+      log(TAG, `ambient escalation ${this.httpPending.id} superseded by user message`);
+    }
     // A chat message means the user is mid-conversation: hold ambient
     // escalations so the dialogue isn't interleaved with periodic digests.
     this.noteUserBusy(Escalator.USER_BUSY_MS);
@@ -450,6 +479,7 @@ export class Escalator {
         codingContext: isCodingContext(contextWindow).coding,
         ts: entry.ts,
         feedbackCtx: slotEntry.feedbackCtx,
+        userDriven: hasUserCommand,
       };
       log(TAG, `tick #${entry.id} → httpPending id=${slotId} (lane=${escalationAgent || "<default>"})`);
     } else {
@@ -587,6 +617,14 @@ ${recentLines.join("\n")}`;
     // response was written against context that was fresh seconds ago and is
     // almost certainly still relevant — but don't clear the current pending,
     // so the agent can still address the newer escalation on its next poll.
+    if (this.supersededIds.has(id)) {
+      // Superseded by a user message — discard silently (ok:true so the
+      // agent doesn't retry or log a drop).
+      log(TAG, `respondHttp: dropping superseded ambient response id=${id} (${response.length} chars)`);
+      this.supersededIds.delete(id);
+      if (this.httpPending?.id === id) this.httpPending = null;
+      return { ok: true };
+    }
     if (!this.httpPending || this.httpPending.id !== id) {
       const recent = this.recentHttpIds.find((e) => e.id === id);
       if (recent && Date.now() - recent.ts < Escalator.STALE_ID_GRACE_MS) {
@@ -620,22 +658,53 @@ ${recentLines.join("\n")}`;
     return { ok: true };
   }
 
-  /** Return the current HTTP pending spawn task (or null). */
-  getSpawnPending(): { id: string; task: string; label: string; ts: number } | null {
-    return this.spawnHttpPending;
+  /** Get-or-create the stable agent session for a thread. isNew=true on the
+   *  very first use (caller passes --session-id); afterwards --resume.
+   *  Optimistically marked started — if the first invocation dies before the
+   *  agent persists the session, a later --resume fails visibly. */
+  threadSession(regionId: string): { sessionId: string; isNew: boolean } {
+    let sid = this.threadSessions.get(regionId);
+    if (!sid) {
+      sid = randomUUID();
+      this.threadSessions.set(regionId, sid);
+    }
+    const isNew = !this.startedSessions.has(sid);
+    this.startedSessions.add(sid);
+    return { sessionId: sid, isNew };
   }
 
-  /** Respond to a pending spawn task from a bare agent. */
-  respondSpawn(id: string, result: string): { ok: boolean; error?: string } {
-    if (!this.spawnHttpPending) {
-      return { ok: false, error: "no pending spawn task" };
-    }
-    if (this.spawnHttpPending.id !== id) {
-      return { ok: false, error: `id mismatch: expected ${this.spawnHttpPending.id}` };
-    }
+  /** Hand the next queued spawn task to the polling bare agent. Returning a
+   *  task claims it (moves to in-flight) so concurrent threads don't lose
+   *  responses to slot overwrites. */
+  getSpawnPending(): { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean } | null {
+    const next = this.spawnHttpQueue.shift();
+    if (next) this.spawnHttpInFlight.set(next.id, next);
+    return next ?? null;
+  }
 
-    const label = this.spawnHttpPending.label;
-    const startedAt = this.spawnHttpPending.ts;
+  /** Respond to a claimed spawn task from a bare agent. */
+  respondSpawn(id: string, result: string): { ok: boolean; error?: string } {
+    const pending = this.spawnHttpInFlight.get(id);
+    if (!pending) {
+      return { ok: false, error: `no in-flight spawn task with id ${id}` };
+    }
+    this.spawnHttpInFlight.delete(id);
+
+    const label = pending.label;
+    const startedAt = pending.ts;
+
+    // Agent-side failures (max turns, auth, crashes): tell the thread it
+    // failed instead of presenting the raw error as an answer, and mark the
+    // task failed so the tab badge stops spinning.
+    const looksLikeError = /^Error:|invocation failed|Reached max turns|API Error/i.test(result.trim());
+    if (looksLikeError) {
+      const failRegion = this.regionByTask.get(id);
+      const failText = `\u26a0 The agent couldn't finish this one (${result.trim().slice(0, 120)}). Send your message again, or switch the TERM lane to another agent.`;
+      this.deps.wsHandler.broadcast(failText, "high", "agent", failRegion);
+      this.broadcastTaskEvent(id, "failed", label, startedAt, result.slice(0, 200));
+      log(TAG, `spawn ${id} FAILED (${result.length} chars): ${result.trim().slice(0, 100)}`);
+      return { ok: true };
+    }
 
     // Push result to HUD feed (region results route to their thread tab)
     const regionId = this.regionByTask.get(id);
@@ -650,7 +719,6 @@ ${recentLines.join("\n")}`;
     this.broadcastTaskEvent(id, "completed", label, startedAt, result.slice(0, 200));
 
     log(TAG, `spawn ${id} responded (${result.length} chars)`);
-    this.spawnHttpPending = null;
     return { ok: true };
   }
 
@@ -770,10 +838,19 @@ ${recentLines.join("\n")}`;
     } else if (laneAgent) {
       // Local bare-agent path: queue for polling. Note: bare CLI agents are
       // stateless per call — region threads don't keep history on this path.
-      this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
-      const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
-      this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
-      this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
+      const sess = opts?.regionId ? this.threadSession(opts.regionId) : undefined;
+      this.spawnHttpQueue.push({
+        id: taskId, task, label: label || "background-task", ts: startedAt,
+        ...(sess ? { sessionId: sess.sessionId, sessionNew: sess.isNew } : {}),
+      });
+      // Queue-confirmation noise only for non-thread tasks: a region/thread
+      // chat already shows the user's own message — plumbing echoes don't
+      // belong in a conversation.
+      if (!opts?.regionId) {
+        const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
+        this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
+        this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
+      }
       log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${laneName}:${laneAgent})`);
       return;
     } else {
@@ -1129,7 +1206,7 @@ ${recentLines.join("\n")}`;
 
   private broadcastTaskEvent(
     taskId: string,
-    status: SpawnTaskStatus,
+    status: ThreadStatus,
     label?: string,
     startedAt?: number,
     resultPreview?: string,
@@ -1137,7 +1214,7 @@ ${recentLines.join("\n")}`;
     const now = Date.now();
     const isTerminal = status === "completed" || status === "failed" || status === "timeout";
     const regionId = this.regionByTask.get(taskId);
-    const msg: SpawnTaskMessage = {
+    const msg: ThreadStatusMessage = {
       type: "spawn_task",
       taskId,
       label: label || "Background task",

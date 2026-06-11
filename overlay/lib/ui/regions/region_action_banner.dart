@@ -31,19 +31,6 @@ class RegionActionBanner extends StatelessWidget {
     this.onTerminal,
   });
 
-  String get _runLabel {
-    switch (region.action) {
-      case 'fix':
-        return 'Fix it';
-      case 'explain':
-        return 'Explain';
-      case 'research':
-        return 'Research';
-      default:
-        return 'Help';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final accent = Color(accentColor);
@@ -113,7 +100,7 @@ class RegionActionBanner extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '⚡ $_runLabel',
+                      '💬 Chat',
                       style: TextStyle(
                         fontFamily: 'JetBrainsMono',
                         fontSize: 9,
