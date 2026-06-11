@@ -472,7 +472,9 @@ class OverlayShellState extends State<OverlayShell> {
     return Container(
       height: 26,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      child: SingleChildScrollView(
+      child: Row(children: [
+        Expanded(
+            child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
@@ -491,33 +493,30 @@ class OverlayShellState extends State<OverlayShell> {
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
               ),
-            // SPIKE: chat ⇄ terminal toggle for the active tab. Terminal
-            // mode launches the tab's lane agent seeded with the same
-            // context chat mode uses (escalation lane for MAIN, spawn lane
-            // for regions). Toggling back to chat closes the PTY so one
-            // session never has two concurrent writers.
-            if (terminalSpikeEnabled)
-              pill(
-                text: _terminalThreads.contains(_activeTabKey)
-                    ? '💬 chat'
-                    : '⌨ term',
-                selected: _terminalThreads.contains(_activeTabKey),
-                onTap: () {
-                  if (_terminalThreads.contains(_activeTabKey)) {
-                    // P3 exclusivity: close the PTY when switching FROM
-                    // terminal TO chat so two processes never write one
-                    // agent session.
-                    ThreadTerminalSession.close(_activeTabKey);
-                    setState(() => _terminalThreads.remove(_activeTabKey));
-                  } else {
-                    _openTerminalForTab(_activeTabKey);
-                  }
-                  _syncBusyState();
-                },
-              ),
           ],
         ),
-      ),
+            )),
+        // Chat ⇄ terminal toggle for the ACTIVE tab — pinned at the right
+        // edge, outside the scrolling tab strip, so a crowd of tabs can
+        // never squeeze it out of sight. Term→chat closes the PTY so one
+        // session never has two concurrent writers (P3 exclusivity).
+        if (terminalSpikeEnabled)
+          pill(
+            text: _terminalThreads.contains(_activeTabKey)
+                ? '💬 chat'
+                : '⌨ term',
+            selected: _terminalThreads.contains(_activeTabKey),
+            onTap: () {
+              if (_terminalThreads.contains(_activeTabKey)) {
+                ThreadTerminalSession.close(_activeTabKey);
+                setState(() => _terminalThreads.remove(_activeTabKey));
+              } else {
+                _openTerminalForTab(_activeTabKey);
+              }
+              _syncBusyState();
+            },
+          ),
+      ]),
     );
   }
 

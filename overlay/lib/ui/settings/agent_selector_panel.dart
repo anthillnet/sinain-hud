@@ -42,7 +42,10 @@ class AgentSelectorPanel extends StatelessWidget {
             _emptyState()
           else ...[
             _laneSection(
-              label: 'ESCALATION',
+              // User-facing lane names (chat-threads redesign): CHAT answers
+              // MAIN + ambient idle messages; TERM runs threads/terminals.
+              // Wire keys stay escalation/spawn.
+              label: 'CHAT',
               current: escAgent,
               available: available,
               accent: accent,
@@ -50,11 +53,35 @@ class AgentSelectorPanel extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             _laneSection(
-              label: 'SPAWN',
+              label: 'TERM',
               current: spawnAgent,
               available: available,
               accent: accent,
               onSelect: (agent) => ws.setAgent('spawn', agent),
+            ),
+            const SizedBox(height: 12),
+            // Ambient idle messages (escalations while the user is idle) —
+            // explicit on/off, independent of which agent answers them.
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'IDLE MESSAGES',
+                    style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 9,
+                      letterSpacing: 1.2,
+                      color: Colors.white.withValues(alpha: 0.45),
+                    ),
+                  ),
+                ),
+                Switch(
+                  value: ws.escalationState != 'paused' &&
+                      ws.escalationState != 'off',
+                  activeThumbColor: accent,
+                  onChanged: (_) => ws.sendCommand('toggle_escalation'),
+                ),
+              ],
             ),
           ],
         ],
