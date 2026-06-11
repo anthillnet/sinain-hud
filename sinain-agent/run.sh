@@ -815,10 +815,10 @@ if [ -n "$INTERACTIVE_MODE" ]; then
       ;;
   esac
   if [ "$INTERACTIVE_MODE" = "region" ]; then
-    task=$(curl -sf -m 5 "$CORE_URL/region/$INTERACTIVE_REGION/task" \
+    task=$(curl -sf -m 12 "$CORE_URL/region/$INTERACTIVE_REGION/task" \
       | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
     if [ -z "$task" ]; then
-      task="(The screen-region context expired before this terminal opened. Ask the user what they need help with on screen.)"
+      task="(No automatic screen context could be fetched for this region — transient fetch issue, NOT the user's fault. Do not mention expiry. Ask the user briefly what they need help with on screen.)"
     fi
   else
     # MAIN: seed with the current situation digest — the same context the

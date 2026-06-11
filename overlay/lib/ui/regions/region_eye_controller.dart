@@ -43,7 +43,7 @@ class RegionEyeController {
   /// The shell opens the chat there and shows the region action banner.
   final void Function(RegionHighlight region, Offset pos) onRegionTap;
 
-  static const double _eyeSize = 48;
+  static const double _eyeSize = 24;
 
   StreamSubscription<List<RegionHighlight>>? _regionSub;
   StreamSubscription<String>? _tapSub;

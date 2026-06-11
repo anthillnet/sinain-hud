@@ -41,6 +41,8 @@ class SenseSender:
         }
         if event.roi:
             payload["roi"] = event.roi
+        if event.ocr_lines:
+            payload["ocr_lines"] = event.ocr_lines
         if event.diff:
             payload["diff"] = event.diff
         if event.observation and event.observation.title:
