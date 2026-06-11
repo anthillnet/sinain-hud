@@ -9,15 +9,14 @@ import '../core/services/settings_service.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/window_service.dart';
 import 'eye/eye_widget.dart';
-import 'feed/feed_view.dart';
 import 'feed/idle_animation.dart';
-import 'input/command_input.dart';
 import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
 import 'regions/region_action_banner.dart';
 import 'regions/region_eye_controller.dart';
+import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
@@ -988,17 +987,21 @@ class OverlayShellState extends State<OverlayShell> {
                         key: ValueKey('term-$_activeTabKey'),
                         threadId: _activeTabKey,
                       )
-                    : _activeThread == null
-                        ? const FeedView(
-                            channel: FeedChannel.agent,
-                            emptyLabel: 'awaiting sinain…',
-                          )
-                        : FeedView(
-                            key: ValueKey('thread-$_activeThread'),
-                            regionId: _activeThread,
-                            channel: FeedChannel.agent,
-                            emptyLabel: 'no messages yet — press ⚡ Run',
-                          ),
+                    : ChatThreadView(
+                        key: ValueKey('chat-$_activeTabKey'),
+                        ws: ws,
+                        threadId: _activeThread,
+                        accentColor: _settingsService.settings.accentColor,
+                        onSend: (text) {
+                          final thread = _activeThread;
+                          if (thread != null) {
+                            _sendToRegionThread(thread, text);
+                          } else {
+                            ws.sendUserCommand(text);
+                          }
+                          _syncBusyState();
+                        },
+                      ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
                     onClose: () => setState(() => _showDisplaySettings = false),
@@ -1042,27 +1045,9 @@ class OverlayShellState extends State<OverlayShell> {
           const _AgentAvailabilityBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
-          // Command input — routes to the active thread tab: region tab →
-          // that ROI's conversation, MAIN → the regular escalation flow.
-          CommandInput(
-            externalFocusNode: _commandFocusNode,
-            onSubmit: (text) {
-              final thread = _activeThread;
-              if (thread != null) {
-                _sendToRegionThread(thread, text);
-              } else {
-                context.read<WebSocketService>().sendUserCommand(text);
-              }
-            },
-            onSpawn: (text) {
-              final thread = _activeThread;
-              if (thread != null) {
-                _sendToRegionThread(thread, text);
-              } else {
-                context.read<WebSocketService>().sendSpawnCommand(text);
-              }
-            },
-          ),
+          // Input lives in the chat surface now (flyer composer) — terminal
+          // tabs type directly into the PTY. CommandInput retired with the
+          // chat-threads redesign (spawn input mode removed with it).
         ],
       ),
     );

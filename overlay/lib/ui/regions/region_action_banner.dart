@@ -113,7 +113,7 @@ class RegionActionBanner extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '⚡ $_runLabel',
+                      '💬 Chat',
                       style: TextStyle(
                         fontFamily: 'JetBrainsMono',
                         fontSize: 9,
