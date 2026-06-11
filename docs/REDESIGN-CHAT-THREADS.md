@@ -93,9 +93,10 @@ A thread's chat and terminal must share one agent session.
   *surface of the same session* instead of chat-UI vs unrelated terminal.
 - ROI banner: **[💬 Chat] [⌨ Term]** replaces ⚡Run/⌨ Term.
 - **Fork** button on MAIN.
-- Open question (Igor to decide): where does the *stream* channel (transcripts,
-  OCR events, system lines) live once chat tabs are conversation-only?
-  Proposal: a collapsible "activity" panel/tab, off by default.
+- The raw *stream* channel (transcripts, OCR events) gets **no UI surface**
+  (decided): it remains internal pipeline context — analyzer input, digests,
+  knowledge distillation — exactly as it effectively is today. Chat tabs are
+  conversation-only.
 
 ## Phasing
 
