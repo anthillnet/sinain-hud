@@ -102,6 +102,10 @@ export class RegionTracker {
   private tick = 0;
   private readonly maxMissedTicks: number;
   private readonly maxAgeMs: number;
+  /** Recently-expired regions kept for late context fetches (see get()). */
+  private readonly expired = new Map<string, { region: RegionHighlight; expiredAt: number }>();
+  private static readonly TOMBSTONE_TTL_MS = 10 * 60_000;
+  private static readonly TOMBSTONE_MAX = 10;
   private readonly maxRegions: number;
 
   constructor(opts: RegionTrackerOpts = {}) {
@@ -157,6 +161,7 @@ export class RegionTracker {
         ? src!.frameSize as [number, number]
         : undefined;
 
+      this.expired.delete(id); // re-detected — drop any tombstone
       this.tracked.set(id, {
         region: {
           id,
@@ -179,8 +184,23 @@ export class RegionTracker {
       if (this.tick - t.lastSeenTick > this.maxMissedTicks ||
           now - t.firstSeenTs > this.maxAgeMs) {
         this.tracked.delete(id);
-        debug(TAG, `expired region ${id}`);
+        // Tombstone: opening a thread/terminal for a region CHANGES the
+        // screen (HUD in front), so the next ticks stop re-detecting it and
+        // it expires right while the user is acting on it — get() then 404s
+        // and the seed degrades to "context expired". Keep the full region
+        // for a grace window so late context fetches still resolve.
+        this.expired.set(id, { region: t.region, expiredAt: now });
+        debug(TAG, `expired region ${id} (tombstoned)`);
       }
+    }
+    // Tombstone hygiene: TTL + size cap (oldest first).
+    for (const [id, e] of this.expired) {
+      if (now - e.expiredAt > RegionTracker.TOMBSTONE_TTL_MS) this.expired.delete(id);
+    }
+    while (this.expired.size > RegionTracker.TOMBSTONE_MAX) {
+      const oldest = this.expired.keys().next().value;
+      if (oldest === undefined) break;
+      this.expired.delete(oldest);
     }
 
     if (this.stateKey() === before) return null;
@@ -194,13 +214,23 @@ export class RegionTracker {
     return [...this.tracked.values()].map(t => t.region);
   }
 
-  /** Look up a tracked region (spawn-time context assembly). */
+  /** Look up a region for spawn-time context assembly. Falls back to the
+   *  tombstones: the eye may have expired between the user's tap and the
+   *  terminal/thread fetching its context (the HUD itself changes the
+   *  screen), but the captured context is still exactly what they tapped. */
   get(id: string): RegionHighlight | undefined {
-    return this.tracked.get(id)?.region;
+    const live = this.tracked.get(id)?.region;
+    if (live) return live;
+    const dead = this.expired.get(id);
+    if (dead && Date.now() - dead.expiredAt <= RegionTracker.TOMBSTONE_TTL_MS) {
+      return dead.region;
+    }
+    return undefined;
   }
 
   clear(): void {
     this.tracked.clear();
+    this.expired.clear();
   }
 
   /** Cheap change-detection key: ids + tips (tips refresh in place). */
