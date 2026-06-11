@@ -494,7 +494,8 @@ class OverlayShellState extends State<OverlayShell> {
             // SPIKE: chat ⇄ terminal toggle for the active tab. Terminal
             // mode launches the tab's lane agent seeded with the same
             // context chat mode uses (escalation lane for MAIN, spawn lane
-            // for regions). Toggling back to chat keeps the session alive.
+            // for regions). Toggling back to chat closes the PTY so one
+            // session never has two concurrent writers.
             if (terminalSpikeEnabled)
               pill(
                 text: _terminalThreads.contains(_activeTabKey)
@@ -503,6 +504,10 @@ class OverlayShellState extends State<OverlayShell> {
                 selected: _terminalThreads.contains(_activeTabKey),
                 onTap: () {
                   if (_terminalThreads.contains(_activeTabKey)) {
+                    // P3 exclusivity: close the PTY when switching FROM
+                    // terminal TO chat so two processes never write one
+                    // agent session.
+                    ThreadTerminalSession.close(_activeTabKey);
                     setState(() => _terminalThreads.remove(_activeTabKey));
                   } else {
                     _openTerminalForTab(_activeTabKey);
