@@ -76,12 +76,18 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         : widget.ws.regionThreadItemStream.listen((rec) {
             if (rec.$1 == widget.threadId) _append(rec.$2);
           });
-    // Thinking indicator: core broadcasts {thinking:true} when the user's
-    // message is dispatched and {thinking:false} when the response lands.
-    // MAIN only — region threads show progress via the tab's ⟳ badge.
+    // Thinking indicator. MAIN: core broadcasts {thinking:true} when the
+    // user's message is dispatched and {thinking:false} when the response
+    // lands. Threads: derived from this thread's status updates — working
+    // while the task is in flight, cleared on completion/failure/question.
     if (widget.threadId == null) {
       _thinkSub = widget.ws.thinkingStream.listen((active) {
         if (mounted) setState(() => _thinking = active);
+      });
+    } else {
+      _thinkSub = widget.ws.spawnTaskStream.listen((task) {
+        if (!mounted || task.regionId != widget.threadId) return;
+        setState(() => _thinking = !task.isTerminal && !task.needsInput);
       });
     }
   }
