@@ -20,6 +20,10 @@ class OCRResult:
     text: str
     confidence: float
     word_count: int
+    # Per-line text + bounding boxes in source-image pixels, top-left origin:
+    # [{"text": str, "bbox": [x, y, w, h]}]. Vision backend only — used by
+    # sinain-core to anchor region eyes at the exact line of an issue.
+    lines: list | None = None
 
 
 class LocalOCR:
@@ -171,6 +175,8 @@ class VisionOCR:
         lines = []
         confidences = []
         word_count = 0
+        line_boxes = []
+        img_w, img_h = image.width, image.height
 
         for observation in results:
             candidate = observation.topCandidates_(1)
@@ -186,6 +192,20 @@ class VisionOCR:
                 lines.append(text.strip())
                 confidences.append(conf)
                 word_count += len(text.split())
+                # Vision boundingBox is normalized with BOTTOM-left origin;
+                # convert to top-left-origin pixel coords of the source image.
+                try:
+                    bb = observation.boundingBox()
+                    x = bb.origin.x * img_w
+                    y = (1.0 - bb.origin.y - bb.size.height) * img_h
+                    w = bb.size.width * img_w
+                    h = bb.size.height * img_h
+                    line_boxes.append({
+                        "text": text.strip(),
+                        "bbox": [round(x), round(y), round(w), round(h)],
+                    })
+                except Exception:
+                    pass  # box is best-effort; text still counts
 
         text = "\n".join(lines)
         text = self._clean(text)
@@ -195,6 +215,7 @@ class VisionOCR:
             text=text,
             confidence=avg_conf,
             word_count=word_count,
+            lines=line_boxes or None,
         )
 
     @staticmethod

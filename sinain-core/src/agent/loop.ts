@@ -397,6 +397,9 @@ export class AgentLoop extends EventEmitter {
 
       // Region tracking (Grammarly mode) — every tick, so expiry advances
       if (this.deps.agentConfig.regionsEnabled) {
+        if (result.regions?.length) {
+          log("agent", `analyzer emitted ${result.regions.length} region(s): ${result.regions.map(r => `"${r.issue.slice(0, 40)}" src=${r.sourceId ?? "-"}`).join("; ")}`);
+        }
         this.deps.onRegions?.(result.regions, contextWindow);
       }
 

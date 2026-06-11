@@ -8,7 +8,7 @@ import FlutterMacOS
 /// Panels are non-activating and privacy-protected (sharingType = .none),
 /// so they never steal focus and stay invisible to screen capture.
 class RegionEyePool {
-    static let eyeSize: CGFloat = 48
+    static let eyeSize: CGFloat = 24
 
     private var panels: [String: NSPanel] = [:]
     private weak var channel: FlutterMethodChannel?

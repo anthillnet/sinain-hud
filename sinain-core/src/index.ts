@@ -98,7 +98,9 @@ function pipeLocalAgentOutput(stream: NodeJS.ReadableStream, sink: (line: string
  * Merges results, deduplicates, returns up to maxFacts.
  */
 async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
-  const { execFileSync } = await import("node:child_process");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
   const { resolve } = await import("node:path");
   const { dirname } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
@@ -121,7 +123,13 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
     try {
       const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-      const out = execFileSync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" }).trim();
+      // Async exec — the sync variant blocked node's event loop for up to
+      // 5s PER DB (10s total): every WS broadcast, escalation, and the
+      // /region/:id/task seed fetch froze behind it (seen as the terminal's
+      // "context expired" fallback). Async keeps core responsive and lets
+      // callers' time budgets (Promise.race) actually work.
+      const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" });
+      const out = stdout.trim();
       if (out) {
         const parsed = JSON.parse(out);
         const facts = parsed.facts || parsed;
@@ -1265,10 +1273,31 @@ async function main() {
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
 
-    getRegionTask: (regionId: string) => {
+    getRegionTask: async (regionId: string) => {
       const region = regionTracker.get(regionId);
       if (!region) return null;
-      return buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+      // Enrich the terminal seed with knowledge-graph facts about the issue's
+      // topic + app — same store the escalation enrichment uses. HARD TIME
+      // BUDGET: the triplestore query has a ~5s cold start (python+sqlite),
+      // which blew run.sh's fetch timeout and turned every seed into the
+      // "context expired" fallback. The seed must never wait on enrichment —
+      // it already carries MCP instructions so the agent can query the graph
+      // itself.
+      let knowledge = "";
+      try {
+        const entities = [
+          ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
+          ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i)
+            .filter((w) => w.length > 3).slice(0, 5),
+        ];
+        if (entities.length > 0) {
+          knowledge = await Promise.race([
+            queryKnowledgeFactsMulti(entities, 8),
+            new Promise<string>((res) => setTimeout(() => res(""), 1500)),
+          ]);
+        }
+      } catch { /* enrichment is optional */ }
+      return buildRegionTaskText(region, agentLoop.getDigest()?.digest, undefined, knowledge);
     },
 
     getHealthPayload: () => {
