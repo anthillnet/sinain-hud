@@ -799,9 +799,14 @@ ${recentLines.join("\n")}`;
       // Local bare-agent path: queue for polling. Note: bare CLI agents are
       // stateless per call — region threads don't keep history on this path.
       this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
-      const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
-      this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
-      this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
+      // Queue-confirmation noise only for non-thread tasks: a region/thread
+      // chat already shows the user's own message — plumbing echoes don't
+      // belong in a conversation.
+      if (!opts?.regionId) {
+        const preview = task.length > 60 ? task.slice(0, 60) + "…" : task;
+        this.deps.feedBuffer.push(`🔧 Task queued for agent: ${preview}`, "normal", "system", "stream");
+        this.deps.wsHandler.broadcast(`🔧 Task queued for agent: ${preview}`, "normal");
+      }
       log(TAG, `spawn-task ${taskId}: queued for bare agent (lane=${laneName}:${laneAgent})`);
       return;
     } else {
