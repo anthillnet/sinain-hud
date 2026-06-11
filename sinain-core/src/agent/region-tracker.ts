@@ -132,6 +132,23 @@ export class RegionTracker {
     // emptied the set ("emitted 3 → 0 active" oscillation).
     this.expireStale();
 
+    // App-scoped eyes: a region anchored in another app's window is
+    // meaningless floating over the current one — archive it the moment the
+    // frontmost app changes (~1-2s after switch, via sense events) instead
+    // of waiting out the miss window. Switching back re-creates it on the
+    // next detection; its context survives in the archive either way.
+    const curApp = (ctx.currentApp || "").toLowerCase().trim();
+    if (curApp) {
+      for (const [id, t] of this.tracked) {
+        const regionApp = (t.region.app || "").toLowerCase().trim();
+        if (regionApp && regionApp !== curApp) {
+          this.tracked.delete(id);
+          this.expired.set(id, { region: t.region, expiredAt: Date.now() });
+          debug(TAG, `region ${id} hidden — app switch (${regionApp} → ${curApp})`);
+        }
+      }
+    }
+
     for (const r of raw ?? []) {
       const id = regionIdFor(r.issue);
       // Exact id hit, else fuzzy re-match: identity is a hash of the issue
