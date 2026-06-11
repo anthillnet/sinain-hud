@@ -1273,6 +1273,8 @@ async function main() {
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
 
+    getThreadSession: (regionId: string) => escalator.threadSession(regionId),
+
     getRegionTask: async (regionId: string) => {
       const region = regionTracker.get(regionId);
       if (!region) return null;

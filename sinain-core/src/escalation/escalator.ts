@@ -99,6 +99,11 @@ export class Escalator {
   // regionId per in-flight spawn task — echoed on every spawn_task broadcast
   // so the overlay can route status to the originating region eye's badge.
   private regionByTask = new Map<string, string>();
+  /** Stable agent session per thread (regionId → uuid). Core allocates the
+   *  id and tells the agent --session-id (first call) or --resume — chat and
+   *  terminal share one conversation. */
+  private readonly threadSessions = new Map<string, string>();
+  private readonly startedSessions = new Set<string>();
 
   // Track pending spawn tasks for result fetching (persisted to disk)
   private pendingSpawnTasks: Map<string, PendingTaskEntry>;
@@ -124,7 +129,7 @@ export class Escalator {
   private static readonly USER_BUSY_MS = 120_000;
 
   // HTTP spawn queue — for bare agents that poll (mirrors httpPending for escalation)
-  private spawnHttpPending: { id: string; task: string; label: string; ts: number } | null = null;
+  private spawnHttpPending: { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean } | null = null;
 
   private stats = {
     totalEscalations: 0,
@@ -648,8 +653,23 @@ ${recentLines.join("\n")}`;
     return { ok: true };
   }
 
+  /** Get-or-create the stable agent session for a thread. isNew=true on the
+   *  very first use (caller passes --session-id); afterwards --resume.
+   *  Optimistically marked started — if the first invocation dies before the
+   *  agent persists the session, a later --resume fails visibly. */
+  threadSession(regionId: string): { sessionId: string; isNew: boolean } {
+    let sid = this.threadSessions.get(regionId);
+    if (!sid) {
+      sid = randomUUID();
+      this.threadSessions.set(regionId, sid);
+    }
+    const isNew = !this.startedSessions.has(sid);
+    this.startedSessions.add(sid);
+    return { sessionId: sid, isNew };
+  }
+
   /** Return the current HTTP pending spawn task (or null). */
-  getSpawnPending(): { id: string; task: string; label: string; ts: number } | null {
+  getSpawnPending(): { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean } | null {
     return this.spawnHttpPending;
   }
 
@@ -798,7 +818,11 @@ ${recentLines.join("\n")}`;
     } else if (laneAgent) {
       // Local bare-agent path: queue for polling. Note: bare CLI agents are
       // stateless per call — region threads don't keep history on this path.
-      this.spawnHttpPending = { id: taskId, task, label: label || "background-task", ts: startedAt };
+      const sess = opts?.regionId ? this.threadSession(opts.regionId) : undefined;
+      this.spawnHttpPending = {
+        id: taskId, task, label: label || "background-task", ts: startedAt,
+        ...(sess ? { sessionId: sess.sessionId, sessionNew: sess.isNew } : {}),
+      };
       // Queue-confirmation noise only for non-thread tasks: a region/thread
       // chat already shows the user's own message — plumbing echoes don't
       // belong in a conversation.

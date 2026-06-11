@@ -291,10 +291,20 @@ invoke_agent() {
           # hit this on overlay-v1.24.5 (~4 prompts per 7min). Always include
           # regardless of agents.json content (defense-in-depth).
           spawn_allowed="$spawn_allowed ToolSearch"
+          # Continue the thread's agent session when core provided one.
+          local sess_args=()
+          if [ -n "${SPAWN_SESSION_ID:-}" ]; then
+            if [ "${SPAWN_SESSION_NEW:-false}" = "true" ]; then
+              sess_args=(--session-id "$SPAWN_SESSION_ID")
+            else
+              sess_args=(--resume "$SPAWN_SESSION_ID")
+            fi
+          fi
           if [ "$quiet" = "true" ]; then
             "$bin" \
               --mcp-config "$MCP_CONFIG" \
               --settings "$settings" \
+              ${sess_args[@]+"${sess_args[@]}"} \
               --allowedTools $spawn_allowed \
               --max-turns "$turns" --output-format text \
               -p "$prompt" \
@@ -303,6 +313,7 @@ invoke_agent() {
             "$bin" \
               --mcp-config "$MCP_CONFIG" \
               --settings "$settings" \
+              ${sess_args[@]+"${sess_args[@]}"} \
               --allowedTools $spawn_allowed \
               --max-turns "$turns" --output-format text \
               -p "$prompt"
@@ -815,8 +826,10 @@ if [ -n "$INTERACTIVE_MODE" ]; then
       ;;
   esac
   if [ "$INTERACTIVE_MODE" = "region" ]; then
-    task=$(curl -sf -m 12 "$CORE_URL/region/$INTERACTIVE_REGION/task" \
-      | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
+    TASK_JSON=$(curl -sf -m 12 "$CORE_URL/region/$INTERACTIVE_REGION/task" 2>/dev/null || true)
+    task=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
+    SESS_ID=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sessionId',''))" 2>/dev/null || true)
+    SESS_NEW=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print('true' if json.load(sys.stdin).get('isNew') else 'false')" 2>/dev/null || true)
     if [ -z "$task" ]; then
       task="(No automatic screen context could be fetched for this region — transient fetch issue, NOT the user's fault. Do not mention expiry. Ask the user briefly what they need help with on screen.)"
     fi
@@ -873,16 +886,31 @@ PY
   # detection on the Dart side). One mechanism instead of per-CLI prompt
   # flags, which proved unreliable (claude's trust modal eats positionals,
   # openclaude drops them entirely, hermes/codex have no usable flag).
-  case "$type" in
-    claude|openclaude|codex|hermes)
-      SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
-      printf '%s' "$task" > "$SEED_FILE"
-      echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
-      ;;
-  esac
+  # Session continuity: an existing thread session resumes with its full
+  # history — no seed needed. Only brand-new sessions get the typed seed.
+  RESUME_ARGS=()
+  if [ -n "${SESS_ID:-}" ]; then
+    if [ "${SESS_NEW:-true}" = "false" ]; then
+      RESUME_ARGS=(--resume "$SESS_ID")
+    else
+      RESUME_ARGS=(--session-id "$SESS_ID")
+    fi
+  fi
+  if [ "${SESS_NEW:-true}" != "false" ]; then
+    case "$type" in
+      claude|openclaude|codex|hermes)
+        SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
+        printf '%s' "$task" > "$SEED_FILE"
+        echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+        ;;
+    esac
+  else
+    echo "ℹ resuming thread session ${SESS_ID} — full history loads in the TUI"
+  fi
   case "$type" in
     claude|openclaude)
-      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed"
+      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed" \
+        ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
       ;;
     codex)
       exec "$bin"
@@ -1037,6 +1065,11 @@ while true; do
 
   if [ -n "$SPAWN_ID" ]; then
     SPAWN_TASK=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['task']['task'])" 2>/dev/null)
+    # Thread session continuity: core allocates a stable session per thread.
+    # First message → --session-id (create); follow-ups → --resume.
+    SPAWN_SESSION_ID=$(echo "$SPAWN" | python3 -c "import sys,json; print((json.load(sys.stdin).get('task') or {}).get('sessionId',''))" 2>/dev/null || true)
+    SPAWN_SESSION_NEW=$(echo "$SPAWN" | python3 -c "import sys,json; print('true' if (json.load(sys.stdin).get('task') or {}).get('sessionNew') else 'false')" 2>/dev/null || true)
+    export SPAWN_SESSION_ID SPAWN_SESSION_NEW
     SPAWN_LABEL=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['task'].get('label','task'))" 2>/dev/null)
 
     echo "[$(date +%H:%M:%S)] Spawn task $SPAWN_ID ($SPAWN_LABEL)"

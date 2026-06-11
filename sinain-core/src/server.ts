@@ -1560,6 +1560,8 @@ export interface ServerDeps {
    *  thread-terminal to seed an interactive spawn-agent session with the
    *  exact context the headless ROI Run would send. */
   getRegionTask?: (regionId: string) => Promise<string | null>;
+  /** Stable agent session for a thread (get-or-create) — terminals resume it. */
+  getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   listKnowledgeEntities?: (max: number) => Promise<string>;
@@ -1786,7 +1788,8 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "unknown region" }));
           return;
         }
-        res.end(JSON.stringify({ ok: true, text }));
+        const sess = deps.getThreadSession?.(regionId);
+        res.end(JSON.stringify({ ok: true, text, ...(sess ?? {}) }));
         return;
       }
 
