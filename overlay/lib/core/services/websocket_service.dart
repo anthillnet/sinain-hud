@@ -466,6 +466,13 @@ class WebSocketService extends ChangeNotifier {
         'User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
+  /// Fork MAIN into a new thread — core mints the thread id and seeds it
+  /// with the MAIN transcript; the tab opens via the thread-status message.
+  void forkMain() {
+    send({'type': 'fork_main'});
+    _log('Fork main sent');
+  }
+
   void sendSpawnCommand(String text, {String? regionId}) {
     send({
       'type': 'spawn_command',

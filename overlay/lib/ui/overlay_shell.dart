@@ -43,6 +43,8 @@ class OverlayShellState extends State<OverlayShell> {
   bool _hasNewContent = false;
   Timer? _contentResetTimer;
   StreamSubscription<bool>? _thinkingSub;
+  StreamSubscription? _forkSub;
+  bool _awaitingFork = false;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -111,6 +113,16 @@ class OverlayShellState extends State<OverlayShell> {
     }
 
     final ws = context.read<WebSocketService>();
+    // After tapping ⑂ the new fork tab arrives as a thread-status update —
+    // switch to it so the user lands in the thread they just created.
+    _forkSub = ws.spawnTaskStream.listen((task) {
+      if (!mounted || !_awaitingFork) return;
+      final id = task.regionId;
+      if (id != null && id.startsWith('fork-')) {
+        _awaitingFork = false;
+        _selectThread(id);
+      }
+    });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
     });
@@ -496,6 +508,18 @@ class OverlayShellState extends State<OverlayShell> {
           ],
         ),
             )),
+        // Fork MAIN into a new thread (visible only on the MAIN tab): the
+        // new thread starts from the MAIN transcript + digest and runs its
+        // own agent session, chat or terminal.
+        if (_activeThread == null)
+          pill(
+            text: '⑂',
+            selected: false,
+            onTap: () {
+              _awaitingFork = true;
+              context.read<WebSocketService>().forkMain();
+            },
+          ),
         // Chat ⇄ terminal toggle for the ACTIVE tab — pinned at the right
         // edge, outside the scrolling tab strip, so a crowd of tabs can
         // never squeeze it out of sight. Term→chat closes the PTY so one
@@ -552,6 +576,7 @@ class OverlayShellState extends State<OverlayShell> {
     _busyTimer?.cancel();
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
+    _forkSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {

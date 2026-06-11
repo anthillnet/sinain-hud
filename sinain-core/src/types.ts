@@ -144,6 +144,11 @@ export interface SpawnCommandMessage {
   regionId?: string;
 }
 
+/** Overlay → sinain-core: fork MAIN into a new thread */
+export interface ForkMainMessage {
+  type: "fork_main";
+}
+
 /** Overlay → sinain-core: reply to a spawn question */
 export interface SpawnReplyMessage {
   type: "spawn_reply";
@@ -188,7 +193,7 @@ export interface CostSnapshot {
 }
 
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {
