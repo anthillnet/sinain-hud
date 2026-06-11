@@ -98,7 +98,9 @@ function pipeLocalAgentOutput(stream: NodeJS.ReadableStream, sink: (line: string
  * Merges results, deduplicates, returns up to maxFacts.
  */
 async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
-  const { execFileSync } = await import("node:child_process");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
   const { resolve } = await import("node:path");
   const { dirname } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
@@ -121,7 +123,13 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
     try {
       const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-      const out = execFileSync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" }).trim();
+      // Async exec — the sync variant blocked node's event loop for up to
+      // 5s PER DB (10s total): every WS broadcast, escalation, and the
+      // /region/:id/task seed fetch froze behind it (seen as the terminal's
+      // "context expired" fallback). Async keeps core responsive and lets
+      // callers' time budgets (Promise.race) actually work.
+      const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" });
+      const out = stdout.trim();
       if (out) {
         const parsed = JSON.parse(out);
         const facts = parsed.facts || parsed;
