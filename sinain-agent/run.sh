@@ -272,6 +272,10 @@ invoke_agent() {
     apply_profile_env "$profile"
     # If the profile pinned a model, override OPENAI_MODEL for this call only.
     [ -n "$model" ] && export OPENAI_MODEL="$model"
+    # claude stores sessions per-project (cwd). Thread invocations must share
+    # a cwd with the thread TERMINAL (which starts in $HOME) or --resume
+    # fails with "No conversation found". Subshell-local cd.
+    [ -n "${SPAWN_SESSION_ID:-}" ] && cd "$HOME" 2>/dev/null
 
     case "$type" in
       claude|openclaude)
