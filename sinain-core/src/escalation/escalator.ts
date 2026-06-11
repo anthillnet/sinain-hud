@@ -128,8 +128,13 @@ export class Escalator {
   /** Ambient-escalation quiet window after a user interaction. */
   private static readonly USER_BUSY_MS = 120_000;
 
-  // HTTP spawn queue — for bare agents that poll (mirrors httpPending for escalation)
-  private spawnHttpPending: { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean } | null = null;
+  // HTTP spawn queue — for bare agents that poll (mirrors httpPending for
+  // escalation). FIFO queue + in-flight map: with several thread chats open,
+  // tasks arrive while the agent is still working an earlier one — a single
+  // slot would be overwritten and the in-flight response rejected on id
+  // mismatch (silently lost answer).
+  private spawnHttpQueue: { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean }[] = [];
+  private spawnHttpInFlight = new Map<string, { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean }>();
 
   private stats = {
     totalEscalations: 0,
@@ -668,22 +673,38 @@ ${recentLines.join("\n")}`;
     return { sessionId: sid, isNew };
   }
 
-  /** Return the current HTTP pending spawn task (or null). */
+  /** Hand the next queued spawn task to the polling bare agent. Returning a
+   *  task claims it (moves to in-flight) so concurrent threads don't lose
+   *  responses to slot overwrites. */
   getSpawnPending(): { id: string; task: string; label: string; ts: number; sessionId?: string; sessionNew?: boolean } | null {
-    return this.spawnHttpPending;
+    const next = this.spawnHttpQueue.shift();
+    if (next) this.spawnHttpInFlight.set(next.id, next);
+    return next ?? null;
   }
 
-  /** Respond to a pending spawn task from a bare agent. */
+  /** Respond to a claimed spawn task from a bare agent. */
   respondSpawn(id: string, result: string): { ok: boolean; error?: string } {
-    if (!this.spawnHttpPending) {
-      return { ok: false, error: "no pending spawn task" };
+    const pending = this.spawnHttpInFlight.get(id);
+    if (!pending) {
+      return { ok: false, error: `no in-flight spawn task with id ${id}` };
     }
-    if (this.spawnHttpPending.id !== id) {
-      return { ok: false, error: `id mismatch: expected ${this.spawnHttpPending.id}` };
-    }
+    this.spawnHttpInFlight.delete(id);
 
-    const label = this.spawnHttpPending.label;
-    const startedAt = this.spawnHttpPending.ts;
+    const label = pending.label;
+    const startedAt = pending.ts;
+
+    // Agent-side failures (max turns, auth, crashes): tell the thread it
+    // failed instead of presenting the raw error as an answer, and mark the
+    // task failed so the tab badge stops spinning.
+    const looksLikeError = /^Error:|invocation failed|Reached max turns|API Error/i.test(result.trim());
+    if (looksLikeError) {
+      const failRegion = this.regionByTask.get(id);
+      const failText = `\u26a0 The agent couldn't finish this one (${result.trim().slice(0, 120)}). Send your message again, or switch the TERM lane to another agent.`;
+      this.deps.wsHandler.broadcast(failText, "high", "agent", failRegion);
+      this.broadcastTaskEvent(id, "failed", label, startedAt, result.slice(0, 200));
+      log(TAG, `spawn ${id} FAILED (${result.length} chars): ${result.trim().slice(0, 100)}`);
+      return { ok: true };
+    }
 
     // Push result to HUD feed (region results route to their thread tab)
     const regionId = this.regionByTask.get(id);
@@ -698,7 +719,6 @@ ${recentLines.join("\n")}`;
     this.broadcastTaskEvent(id, "completed", label, startedAt, result.slice(0, 200));
 
     log(TAG, `spawn ${id} responded (${result.length} chars)`);
-    this.spawnHttpPending = null;
     return { ok: true };
   }
 
@@ -819,10 +839,10 @@ ${recentLines.join("\n")}`;
       // Local bare-agent path: queue for polling. Note: bare CLI agents are
       // stateless per call — region threads don't keep history on this path.
       const sess = opts?.regionId ? this.threadSession(opts.regionId) : undefined;
-      this.spawnHttpPending = {
+      this.spawnHttpQueue.push({
         id: taskId, task, label: label || "background-task", ts: startedAt,
         ...(sess ? { sessionId: sess.sessionId, sessionNew: sess.isNew } : {}),
-      };
+      });
       // Queue-confirmation noise only for non-thread tasks: a region/thread
       // chat already shows the user's own message — plumbing echoes don't
       // belong in a conversation.

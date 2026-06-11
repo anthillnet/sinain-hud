@@ -59,30 +59,44 @@ class AgentSelectorPanel extends StatelessWidget {
               accent: accent,
               onSelect: (agent) => ws.setAgent('spawn', agent),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             // Ambient idle messages (escalations while the user is idle) —
             // explicit on/off, independent of which agent answers them.
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'IDLE MESSAGES',
-                    style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 9,
-                      letterSpacing: 1.2,
-                      color: Colors.white.withValues(alpha: 0.45),
+            // Compact chips (a Material Switch is ~48px tall and pushed
+            // itself below the panel's visible area).
+            Builder(builder: (context) {
+              final idleOn = ws.escalationState != 'paused' &&
+                  ws.escalationState != 'off';
+              return Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'IDLE MESSAGES',
+                      style: TextStyle(
+                        fontFamily: HudConstants.monoFont,
+                        fontFamilyFallback: HudConstants.monoFontFallbacks,
+                        fontSize: 9,
+                        letterSpacing: 1.2,
+                        color: Colors.white.withValues(alpha: 0.45),
+                      ),
                     ),
                   ),
-                ),
-                Switch(
-                  value: ws.escalationState != 'paused' &&
-                      ws.escalationState != 'off',
-                  activeThumbColor: accent,
-                  onChanged: (_) => ws.sendCommand('toggle_escalation'),
-                ),
-              ],
-            ),
+                  _chip(
+                    label: 'On',
+                    selected: idleOn,
+                    accent: accent,
+                    onTap: () => ws.sendCommand('toggle_escalation'),
+                  ),
+                  const SizedBox(width: 4),
+                  _chip(
+                    label: 'Off',
+                    selected: !idleOn,
+                    accent: accent,
+                    onTap: () => ws.sendCommand('toggle_escalation'),
+                  ),
+                ],
+              );
+            }),
           ],
         ],
       ),

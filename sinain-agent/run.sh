@@ -1087,20 +1087,28 @@ while true; do
 
     if agent_has_mcp "$SPAWN_AGENT"; then
       # MCP path: agent runs task with sinain tools available
-      # Pre-fetch knowledge context so the spawn doesn't waste turns calling tools
-      SPAWN_KNOWLEDGE=$(curl -sf "$CORE_URL/knowledge" 2>/dev/null | python3 -c "
+      if [ -n "${SPAWN_SESSION_ID:-}" ]; then
+        # Thread chat message: pass it through as-is. The "background task,
+        # complete thoroughly" wrapper sent agents on multi-turn missions
+        # (25-turn tool spirals) when the user just asked a chat question —
+        # the first message already carries the full seed context.
+        SPAWN_PROMPT="$SPAWN_TASK"
+      else
+        # Pre-fetch knowledge context so the spawn doesn't waste turns calling tools
+        SPAWN_KNOWLEDGE=$(curl -sf "$CORE_URL/knowledge" 2>/dev/null | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 k = d.get('knowledge', '')
 # Trim to 2000 chars to avoid prompt bloat
 print(k[:2000])
 " 2>/dev/null || true)
-      SPAWN_PROMPT="You have a background task to complete. Task: $SPAWN_TASK
+        SPAWN_PROMPT="You have a background task to complete. Task: $SPAWN_TASK
 ${SPAWN_KNOWLEDGE:+
 ## Knowledge Context
 $SPAWN_KNOWLEDGE
 }
 Complete this task thoroughly. You also have sinain_get_knowledge and sinain_knowledge_query tools available for additional context. Summarize your findings concisely."
+      fi
       export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
       SPAWN_RESULT=$(invoke_agent "$SPAWN_AGENT" "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: $SPAWN_AGENT invocation failed")
       unset SINAIN_SPAWN SINAIN_SPAWN_TASK_ID
