@@ -6,6 +6,7 @@ import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 
 import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
+import '../feed/idle_animation.dart';
 
 /// Chat surface for a thread (chat-threads redesign).
 ///
@@ -119,6 +120,22 @@ class _ChatThreadViewState extends State<ChatThreadView> {
       },
       resolveUser: (id) async =>
           User(id: id, name: id == 'user' ? 'You' : 'sinain'),
+      builders: Builders(
+        // Empty state: the HUD's idle eye animation instead of flyer's
+        // "No messages" placeholder — same vibe as the old makeshift chat.
+        emptyChatListBuilder: (context) => const Center(child: IdleAnimation()),
+        // Desktop chat controls: Enter sends, Shift+Enter inserts a newline.
+        // Composer surfaces forced to black — the default theme drew a white
+        // frame around the input on our translucent panel.
+        composerBuilder: (context) => Composer(
+          sendOnEnter: true,
+          backgroundColor: Colors.black.withValues(alpha: 0.85),
+          inputFillColor: Colors.black.withValues(alpha: 0.6),
+          textColor: Colors.white.withValues(alpha: 0.92),
+          hintColor: Colors.white.withValues(alpha: 0.35),
+          sendIconColor: accent,
+        ),
+      ),
       theme: ChatTheme.dark().copyWith(
         colors: ChatTheme.dark().colors.copyWith(
               primary: accent.withValues(alpha: 0.25),
