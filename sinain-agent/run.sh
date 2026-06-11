@@ -303,6 +303,13 @@ invoke_agent() {
             else
               sess_args=(--resume "$SPAWN_SESSION_ID")
             fi
+            # Thread invocations cd to $HOME (sessions are per-cwd), which
+            # means sinain-agent/CLAUDE.md no longer auto-loads. Inject the
+            # thread-specific system prompt instead — NOT CLAUDE.md, whose
+            # escalation-loop instructions are wrong for a thread chat.
+            if [ -f "$SCRIPT_DIR/THREAD-SYSTEM.md" ]; then
+              sess_args+=(--append-system-prompt "$(cat "$SCRIPT_DIR/THREAD-SYSTEM.md")")
+            fi
           fi
           if [ "$quiet" = "true" ]; then
             "$bin" \
