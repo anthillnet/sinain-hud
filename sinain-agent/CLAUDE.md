@@ -105,19 +105,12 @@ Knowledge API (localhost:9500) ← merges both DBs ← queries
 
 When responding to escalations, call `sinain_knowledge_query` with relevant entities to enrich your response with long-term knowledge. Example: if the user is working on German grammar, query `sinain_knowledge_query(entities=["german", "grammar"])` to retrieve previously learned patterns.
 
-## Spawning Background Tasks
+## No Autonomous Background Tasks
 
-When an escalation suggests deeper research would help:
+Do NOT spawn background work on your own — answer inline in your escalation
+response. The user opens threads and terminals themselves; your job is to
+respond with your findings directly.
 
-1. **Respond first** — the user sees your immediate HUD response
-2. Spawn a background research task (use your native subprocess/agent capabilities)
-3. On next escalation or heartbeat, check for completed task results
-4. Integrate findings into your response or playbook
-
-Rules:
-- Max 2 spawns per hour
-- Never duplicate a recent task
-- Keep spawned tasks focused and time-bounded
 
 ## Files You Manage
 
