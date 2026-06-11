@@ -109,7 +109,10 @@ export class RegionTracker {
   private readonly maxRegions: number;
 
   constructor(opts: RegionTrackerOpts = {}) {
-    this.maxMissedTicks = opts.maxMissedTicks ?? 2;
+    // 4 (was 2): even with fuzzy re-match the model legitimately skips a
+    // region on some ticks (attention rotates among on-screen items) — two
+    // skips at a 3-6s cadence killed eyes for issues still on screen.
+    this.maxMissedTicks = opts.maxMissedTicks ?? 4;
     this.maxAgeMs = opts.maxAgeMs ?? 5 * 60_000;
     this.maxRegions = opts.maxRegions ?? 3;
   }
@@ -125,7 +128,13 @@ export class RegionTracker {
 
     for (const r of raw ?? []) {
       const id = regionIdFor(r.issue);
-      const existing = this.tracked.get(id);
+      // Exact id hit, else fuzzy re-match: identity is a hash of the issue
+      // text, but LLMs rephrase between ticks ("Missing import for X" →
+      // "X import missing") — without fuzzy matching the old region misses
+      // its ticks and expires while the issue is still on screen. A token-
+      // Jaccard ≥ 0.5 counts as the same issue; the ORIGINAL id is kept so
+      // the eye, thread, and session stay stable across rewordings.
+      const existing = this.tracked.get(id) ?? this.matchByTokens(r.issue);
       if (existing) {
         existing.lastSeenTick = this.tick;
         existing.region.tip = r.tip;
@@ -207,6 +216,25 @@ export class RegionTracker {
     const current = this.current();
     log(TAG, `region set changed: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
     return current;
+  }
+
+  /** Fuzzy lookup: tracked region whose issue shares ≥0.5 token-Jaccard
+   *  with [issue] — treats an LLM rewording as a re-detection. */
+  private matchByTokens(issue: string): TrackedRegion | undefined {
+    const tok = (s: string) =>
+      new Set(s.toLowerCase().split(/[^a-z0-9а-яё]+/i).filter(t => t.length >= 3));
+    const a = tok(issue);
+    if (a.size === 0) return undefined;
+    let best: { t: TrackedRegion; j: number } | undefined;
+    for (const t of this.tracked.values()) {
+      const b = tok(t.region.issue);
+      if (b.size === 0) continue;
+      let inter = 0;
+      for (const x of a) if (b.has(x)) inter++;
+      const j = inter / (a.size + b.size - inter);
+      if (!best || j > best.j) best = { t, j };
+    }
+    return best && best.j >= 0.5 ? best.t : undefined;
   }
 
   /** Current region set (insertion order). */
