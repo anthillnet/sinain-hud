@@ -43,7 +43,9 @@ class RegionEyeController {
   /// The shell opens the chat there and shows the region action banner.
   final void Function(RegionHighlight region, Offset pos) onRegionTap;
 
-  static const double _eyeSize = 24;
+  // Eye size follows the HUD font-size setting (default 12 → 24pt eyes,
+  // matching the original fixed size); color follows the accent setting.
+  double get _eyeSize => settingsService.settings.fontSize * 2;
 
   StreamSubscription<List<RegionHighlight>>? _regionSub;
   StreamSubscription<String>? _tapSub;
@@ -66,6 +68,8 @@ class RegionEyeController {
   bool get _enabled => settingsService.settings.autoDetectIssues;
 
   bool _lastEnabled = false;
+  int _lastAccent = 0;
+  double _lastFontSize = 0;
   bool _wasConnected = false;
   VoidCallback? _wsListener;
 
@@ -75,6 +79,14 @@ class RegionEyeController {
     _taskSub = ws.spawnTaskStream.listen(_onSpawnTask);
     _lastEnabled = _enabled;
     _settingsListener = () {
+      // Re-render eyes when their appearance settings change.
+      final accent = settingsService.settings.accentColor;
+      final size = settingsService.settings.fontSize;
+      if (accent != _lastAccent || size != _lastFontSize) {
+        _lastAccent = accent;
+        _lastFontSize = size;
+        if (_enabled && ws.regions.isNotEmpty) _onRegions(ws.regions);
+      }
       if (_enabled == _lastEnabled) return;
       _lastEnabled = _enabled;
       // The overlay toggle is the source of truth — push to core so the
@@ -165,6 +177,8 @@ class RegionEyeController {
         'x': pos.dx,
         'y': pos.dy,
         'state': _eyeStates[r.id] ?? 'idle',
+        'size': _eyeSize,
+        'accent': settingsService.settings.accentColor,
       });
     }
     await windowService.showRegionEyes(eyes);

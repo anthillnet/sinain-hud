@@ -34,7 +34,8 @@ class RegionEyePool {
 
     /// Reconcile the panel set against the desired eye list.
     /// Each entry: ["id": String, "x": Double, "y": Double, "state": String]
-    /// with x/y in top-left-origin screen points.
+    /// plus optional "size" (points) and "accent" (ARGB int) from the HUD's
+    /// display settings. x/y in top-left-origin screen points.
     func reconcile(_ eyes: [[String: Any]]) {
         var seen = Set<String>()
         for eye in eyes {
@@ -42,16 +43,19 @@ class RegionEyePool {
                   let x = eye["x"] as? Double,
                   let y = eye["y"] as? Double else { continue }
             let state = eye["state"] as? String ?? "idle"
+            let size = eye["size"] as? Double ?? Double(Self.eyeSize)
+            let accent = (eye["accent"] as? NSNumber).map { Self.argbToColor($0.int64Value) }
             seen.insert(id)
 
-            let origin = Self.toMacOrigin(x: x, y: y)
+            let origin = Self.toMacOrigin(x: x, y: y, size: size)
             if let panel = panels[id] {
-                panel.setFrameOrigin(origin)
+                panel.setFrame(NSRect(x: origin.x, y: origin.y, width: size, height: size), display: true)
                 if let view = panel.contentView as? RegionEyeView {
                     view.state = state
+                    if let accent = accent { view.accentColor = accent }
                 }
             } else {
-                panels[id] = makePanel(id: id, origin: origin, state: state)
+                panels[id] = makePanel(id: id, origin: origin, state: state, size: size, accent: accent)
             }
         }
         for (id, panel) in panels where !seen.contains(id) {
@@ -74,14 +78,23 @@ class RegionEyePool {
 
     // MARK: - Private
 
-    private static func toMacOrigin(x: Double, y: Double) -> NSPoint {
+    private static func toMacOrigin(x: Double, y: Double, size: Double) -> NSPoint {
         let screenHeight = NSScreen.main?.frame.height ?? 900
-        return NSPoint(x: x, y: screenHeight - y - eyeSize)
+        return NSPoint(x: x, y: screenHeight - y - size)
     }
 
-    private func makePanel(id: String, origin: NSPoint, state: String) -> NSPanel {
+    private static func argbToColor(_ argb: Int64) -> CGColor {
+        return CGColor(
+            red: CGFloat((argb >> 16) & 0xFF) / 255.0,
+            green: CGFloat((argb >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(argb & 0xFF) / 255.0,
+            alpha: 1
+        )
+    }
+
+    private func makePanel(id: String, origin: NSPoint, state: String, size: Double, accent: CGColor?) -> NSPanel {
         let frame = NSRect(x: origin.x, y: origin.y,
-                           width: Self.eyeSize, height: Self.eyeSize)
+                           width: size, height: size)
         let panel = NSPanel(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -101,8 +114,9 @@ class RegionEyePool {
         }
 
         let view = RegionEyeView(frame: NSRect(x: 0, y: 0,
-                                               width: Self.eyeSize, height: Self.eyeSize))
+                                               width: size, height: size))
         view.state = state
+        if let accent = accent { view.accentColor = accent }
         view.onTap = { [weak self] in
             self?.channel?.invokeMethod("onRegionTap", arguments: ["id": id])
         }
@@ -119,6 +133,11 @@ class RegionEyePool {
 /// pupil, ready = bright green full dilation, failed = red.
 class RegionEyeView: NSView {
     var onTap: (() -> Void)?
+    /// HUD accent color — drives idle/ready tint (working/failed keep their
+    /// semantic orange/red).
+    var accentColor: CGColor = CGColor(red: 0.0, green: 1.0, blue: 0.53, alpha: 1) {
+        didSet { needsDisplay = true }
+    }
     var state: String = "idle" {
         didSet { needsDisplay = true }
     }
@@ -157,9 +176,8 @@ class RegionEyeView: NSView {
     private var color: CGColor {
         switch state {
         case "working": return CGColor(red: 1.0, green: 0.67, blue: 0.0, alpha: 1)   // 0xFFAA00
-        case "ready":   return CGColor(red: 0.0, green: 1.0, blue: 0.53, alpha: 1)   // 0x00FF88
         case "failed":  return CGColor(red: 1.0, green: 0.2, blue: 0.27, alpha: 1)   // 0xFF3344
-        default:        return CGColor(red: 0.0, green: 1.0, blue: 0.53, alpha: 1)   // 0x00FF88
+        default:        return accentColor                                            // idle/ready
         }
     }
 
