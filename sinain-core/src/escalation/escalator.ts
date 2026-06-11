@@ -20,6 +20,9 @@ export interface HttpPendingEscalation {
   codingContext: boolean;
   ts: number;
   feedbackCtx: QueueFeedbackCtx | undefined;
+  /** True when this escalation carries a user message (USER_CMD) — ambient
+   *  ones are superseded when the user sends a message mid-flight. */
+  userDriven?: boolean;
 }
 
 const TAG = "escalation";
@@ -68,6 +71,9 @@ export class Escalator {
   private wsClient: OpenClawWsClient;
   private slot: EscalationSlot;
   private httpPending: HttpPendingEscalation | null = null;
+  /** Ambient escalations invalidated by a newer user message — their late
+   *  responses are dropped so the next agent message answers the USER. */
+  private readonly supersededIds = new Set<string>();
 
   // Grace window for stale escalation IDs — when analyzer rotates the pending
   // slot mid-response (agent takes 10-30s on MCP flow while ticks fire every
@@ -192,6 +198,19 @@ export class Escalator {
 
   setUserCommand(text: string, source: "text" | "voice" = "text"): void {
     this.pendingUserCommand = { text, ts: Date.now(), source };
+    // Conversational contract: after the user speaks, the NEXT agent message
+    // answers them. An ambient escalation already in flight is superseded —
+    // its late response is dropped in respondHttp (the agent's effort is
+    // wasted, but a stale ambient reply after a direct question reads as
+    // the system ignoring the user).
+    if (this.httpPending && !this.httpPending.userDriven) {
+      this.supersededIds.add(this.httpPending.id);
+      if (this.supersededIds.size > 20) {
+        const first = this.supersededIds.values().next().value;
+        if (first !== undefined) this.supersededIds.delete(first);
+      }
+      log(TAG, `ambient escalation ${this.httpPending.id} superseded by user message`);
+    }
     // A chat message means the user is mid-conversation: hold ambient
     // escalations so the dialogue isn't interleaved with periodic digests.
     this.noteUserBusy(Escalator.USER_BUSY_MS);
@@ -450,6 +469,7 @@ export class Escalator {
         codingContext: isCodingContext(contextWindow).coding,
         ts: entry.ts,
         feedbackCtx: slotEntry.feedbackCtx,
+        userDriven: hasUserCommand,
       };
       log(TAG, `tick #${entry.id} → httpPending id=${slotId} (lane=${escalationAgent || "<default>"})`);
     } else {
@@ -587,6 +607,14 @@ ${recentLines.join("\n")}`;
     // response was written against context that was fresh seconds ago and is
     // almost certainly still relevant — but don't clear the current pending,
     // so the agent can still address the newer escalation on its next poll.
+    if (this.supersededIds.has(id)) {
+      // Superseded by a user message — discard silently (ok:true so the
+      // agent doesn't retry or log a drop).
+      log(TAG, `respondHttp: dropping superseded ambient response id=${id} (${response.length} chars)`);
+      this.supersededIds.delete(id);
+      if (this.httpPending?.id === id) this.httpPending = null;
+      return { ok: true };
+    }
     if (!this.httpPending || this.httpPending.id !== id) {
       const recent = this.recentHttpIds.find((e) => e.id === id);
       if (recent && Date.now() - recent.ts < Escalator.STALE_ID_GRACE_MS) {

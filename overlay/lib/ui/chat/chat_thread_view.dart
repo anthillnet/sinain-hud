@@ -50,6 +50,8 @@ class ChatThreadView extends StatefulWidget {
 class _ChatThreadViewState extends State<ChatThreadView> {
   late final InMemoryChatController _controller;
   StreamSubscription? _sub;
+  StreamSubscription? _thinkSub;
+  bool _thinking = false;
 
   String get _key => widget.threadId ?? 'main';
   Set<String> get _seen =>
@@ -73,6 +75,14 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         : widget.ws.regionThreadItemStream.listen((rec) {
             if (rec.$1 == widget.threadId) _append(rec.$2);
           });
+    // Thinking indicator: core broadcasts {thinking:true} when the user's
+    // message is dispatched and {thinking:false} when the response lands.
+    // MAIN only — region threads show progress via the tab's ⟳ badge.
+    if (widget.threadId == null) {
+      _thinkSub = widget.ws.thinkingStream.listen((active) {
+        if (mounted) setState(() => _thinking = active);
+      });
+    }
   }
 
   void _append(FeedItem item) {
@@ -88,6 +98,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   @override
   void dispose() {
     _sub?.cancel();
+    _thinkSub?.cancel();
     // Controller intentionally NOT disposed — cached for tab switches.
     super.dispose();
   }
@@ -95,7 +106,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   @override
   Widget build(BuildContext context) {
     final accent = Color(widget.accentColor);
-    return Chat(
+    final chat = Chat(
       chatController: _controller,
       currentUserId: 'user',
       onMessageSend: (text) {
@@ -114,6 +125,36 @@ class _ChatThreadViewState extends State<ChatThreadView> {
               onSurface: Colors.white.withValues(alpha: 0.88),
             ),
       ),
+    );
+    return Column(
+      children: [
+        if (_thinking)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 10,
+                  height: 10,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: accent.withValues(alpha: 0.8),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'sinain is thinking…',
+                  style: TextStyle(
+                    fontFamily: 'JetBrainsMono',
+                    fontSize: 10,
+                    color: Colors.white.withValues(alpha: 0.55),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Expanded(child: chat),
+      ],
     );
   }
 }
