@@ -174,7 +174,9 @@ class _ChatThreadViewState extends State<ChatThreadView> {
               ],
             ),
           ),
-        Expanded(child: chat),
+        // SelectionArea: native text selection + ⌘C across all messages —
+        // copy without per-message buttons.
+        Expanded(child: SelectionArea(child: chat)),
       ],
     );
   }
