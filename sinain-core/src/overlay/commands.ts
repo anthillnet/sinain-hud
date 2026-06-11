@@ -78,16 +78,17 @@ export function setupCommands(deps: CommandDeps): void {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
         const regionId = typeof msg.regionId === "string" && msg.regionId ? msg.regionId : undefined;
         log(TAG, `spawn command received: "${preview}"${regionId ? ` (region=${regionId})` : ""}`);
-        // Echo spawn command to all overlay clients as a feed item (green in
-        // UI). Region thread messages carry regionId → overlay routes the
-        // echo to that region's tab instead of the main feed.
+        // Echo the message back to overlay clients. A thread send (regionId
+        // set) is just the user speaking in that thread's chat — echo it as
+        // the user, verbatim. Legacy non-thread spawn commands keep the ⚡
+        // prefix + spawn sender for the main feed.
         wsHandler.broadcastRaw({
           type: "feed",
-          text: `⚡ ${msg.text}`,
+          text: regionId ? msg.text : `⚡ ${msg.text}`,
           priority: "normal",
           ts: Date.now(),
           channel: "agent",
-          sender: "spawn",
+          sender: regionId ? "user" : "spawn",
           ...(regionId ? { regionId } : {}),
         } as any);
         if (deps.onSpawnCommand) {

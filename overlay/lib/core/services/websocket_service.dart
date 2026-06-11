@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/feed_item.dart';
 import '../models/region_highlight.dart';
-import '../models/spawn_task.dart';
+import '../models/thread_status.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
 class WebSocketService extends ChangeNotifier {
@@ -45,7 +45,7 @@ class WebSocketService extends ChangeNotifier {
   final _agentFeedController = StreamController<FeedItem>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
   final _scrollController = StreamController<String>.broadcast();
-  final _spawnTaskController = StreamController<SpawnTask>.broadcast();
+  final _spawnTaskController = StreamController<ThreadStatusUpdate>.broadcast();
   final _copyController = StreamController<String>.broadcast();
   final _thinkingController = StreamController<bool>.broadcast();
   final _regionController = StreamController<List<RegionHighlight>>.broadcast();
@@ -55,7 +55,7 @@ class WebSocketService extends ChangeNotifier {
   Stream<bool> get thinkingStream => _thinkingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
   Stream<String> get scrollStream => _scrollController.stream;
-  Stream<SpawnTask> get spawnTaskStream => _spawnTaskController.stream;
+  Stream<ThreadStatusUpdate> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
   Stream<List<RegionHighlight>> get regionStream => _regionController.stream;
 
@@ -96,7 +96,7 @@ class WebSocketService extends ChangeNotifier {
   // incremental rendering, but the map gives the AGT/TSK tab indicator
   // a snapshot view ("does any task need attention?") without forcing
   // every consumer to subscribe + duplicate list-management logic.
-  final Map<String, SpawnTask> _spawnTasks = {};
+  final Map<String, ThreadStatusUpdate> _spawnTasks = {};
   // Number of tasks currently waiting on user action (permission ask or
   // free-form input). Drives the badge on the inactive tab so users on
   // AGT see when TSK has something blocking.
@@ -107,7 +107,7 @@ class WebSocketService extends ChangeNotifier {
   /// TasksView reads this on mount to seed its local list with any tasks
   /// that arrived before the Chat panel (and TasksView itself) was built.
   /// The map is unmodifiable — mutations go through the stream only.
-  Map<String, SpawnTask> get spawnTasks => Map.unmodifiable(_spawnTasks);
+  Map<String, ThreadStatusUpdate> get spawnTasks => Map.unmodifiable(_spawnTasks);
 
   bool get connected => _connected;
   String get audioState => _audioState;
@@ -360,7 +360,7 @@ class WebSocketService extends ChangeNotifier {
           _statusController.add(statusData);
           break;
         case 'spawn_task':
-          final task = SpawnTask.fromJson(json);
+          final task = ThreadStatusUpdate.fromJson(json);
           _log(
               'SPAWN_TASK: taskId=${task.taskId}, status=${task.status.name}, label=${task.label}');
           // Update the canonical map first, then notify listeners so the

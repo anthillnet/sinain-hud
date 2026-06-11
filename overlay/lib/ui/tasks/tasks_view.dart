@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/models/spawn_task.dart';
+import '../../core/models/thread_status.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../hud_tooltip.dart';
@@ -15,8 +15,8 @@ class TasksView extends StatefulWidget {
 
 class _TasksViewState extends State<TasksView> {
   static const _taskTtlSeconds = 300; // 5 minutes — keep completed tasks visible
-  final List<SpawnTask> _tasks = [];
-  StreamSubscription<SpawnTask>? _taskSub;
+  final List<ThreadStatusUpdate> _tasks = [];
+  StreamSubscription<ThreadStatusUpdate>? _taskSub;
   Timer? _tickTimer;
   Timer? _fadeTimer;
   int _dotCycle = 0; // 0, 1, 2 for animated ·  ··  ···
@@ -55,7 +55,7 @@ class _TasksViewState extends State<TasksView> {
     }
   }
 
-  void _onTask(SpawnTask incoming) {
+  void _onTask(ThreadStatusUpdate incoming) {
     setState(() {
       final idx = _tasks.indexWhere((t) => t.taskId == incoming.taskId);
       if (idx >= 0) {
@@ -84,26 +84,26 @@ class _TasksViewState extends State<TasksView> {
 
   final Map<String, TextEditingController> _replyControllers = {};
 
-  String _statusIndicator(SpawnTask task) {
-    if (task.status == SpawnTaskStatus.spawned ||
-        task.status == SpawnTaskStatus.polling) {
+  String _statusIndicator(ThreadStatusUpdate task) {
+    if (task.status == ThreadStatus.spawned ||
+        task.status == ThreadStatus.polling) {
       const dots = ['·', '··', '···'];
       return dots[_dotCycle];
     }
-    if (task.status == SpawnTaskStatus.completed) return 'OK';
-    if (task.status == SpawnTaskStatus.awaitingInput) return '?';
-    if (task.status == SpawnTaskStatus.awaitingPermission) return '⚠';
+    if (task.status == ThreadStatus.completed) return 'OK';
+    if (task.status == ThreadStatus.awaitingInput) return '?';
+    if (task.status == ThreadStatus.awaitingPermission) return '⚠';
     return 'ERR'; // failed or timeout
   }
 
-  Color _statusColor(SpawnTask task) {
-    if (task.status == SpawnTaskStatus.spawned ||
-        task.status == SpawnTaskStatus.polling) {
+  Color _statusColor(ThreadStatusUpdate task) {
+    if (task.status == ThreadStatus.spawned ||
+        task.status == ThreadStatus.polling) {
       return const Color(0xFF88CCFF);
     }
-    if (task.status == SpawnTaskStatus.completed) return const Color(0xFF00FF88);
-    if (task.status == SpawnTaskStatus.awaitingInput) return const Color(0xFFFFCC00);
-    if (task.status == SpawnTaskStatus.awaitingPermission) return const Color(0xFFFF8800);
+    if (task.status == ThreadStatus.completed) return const Color(0xFF00FF88);
+    if (task.status == ThreadStatus.awaitingInput) return const Color(0xFFFFCC00);
+    if (task.status == ThreadStatus.awaitingPermission) return const Color(0xFFFF8800);
     return const Color(0xFFFF3344);
   }
 
@@ -115,7 +115,7 @@ class _TasksViewState extends State<TasksView> {
     controller.clear();
     setState(() {
       final task = _tasks.firstWhere((t) => t.taskId == taskId, orElse: () => _tasks.first);
-      task.status = SpawnTaskStatus.polling; // back to running
+      task.status = ThreadStatus.polling; // back to running
       task.question = null;
     });
   }
@@ -136,7 +136,7 @@ class _TasksViewState extends State<TasksView> {
 
   /// Gradual fade: terminal tasks start at full opacity and fade to 0.3
   /// over the last 60 seconds of their TTL.
-  double _terminalOpacity(SpawnTask task) {
+  double _terminalOpacity(ThreadStatusUpdate task) {
     if (!task.isTerminal) return 1.0;
     final age = DateTime.now()
         .difference(task.completedAt ?? DateTime.now())
@@ -167,7 +167,7 @@ class _TasksViewState extends State<TasksView> {
     // above the chat input. Filter them out here so Tasks tab stays a clean
     // history/status surface (running, completed, failed, timeout, awaitingInput).
     final visibleTasks = _tasks
-        .where((t) => t.status != SpawnTaskStatus.awaitingPermission)
+        .where((t) => t.status != ThreadStatus.awaitingPermission)
         .toList();
 
     if (visibleTasks.isEmpty) {
@@ -248,15 +248,15 @@ class _TasksViewState extends State<TasksView> {
                     padding: const EdgeInsets.only(left: 32, top: 1),
                     child: Text(
                       task.resultPreview ??
-                          (task.status == SpawnTaskStatus.failed
+                          (task.status == ThreadStatus.failed
                               ? 'task failed'
-                              : task.status == SpawnTaskStatus.timeout
+                              : task.status == ThreadStatus.timeout
                                   ? 'timed out'
                                   : 'done'),
                       style: TextStyle(
                         fontFamily: 'JetBrainsMono',
                         fontSize: (fs - 2).clamp(6.0, 20.0),
-                        color: task.status == SpawnTaskStatus.completed
+                        color: task.status == ThreadStatus.completed
                             ? Colors.white.withValues(alpha: 0.4)
                             : const Color(0xFFFF3344).withValues(alpha: 0.5),
                       ),
@@ -265,7 +265,7 @@ class _TasksViewState extends State<TasksView> {
                     ),
                   ),
                 // Question from spawn — show input field
-                if (task.status == SpawnTaskStatus.awaitingInput && task.question != null)
+                if (task.status == ThreadStatus.awaitingInput && task.question != null)
                   Padding(
                     padding: const EdgeInsets.only(left: 32, top: 4),
                     child: Column(
@@ -314,7 +314,7 @@ class _TasksViewState extends State<TasksView> {
                     ),
                   ),
                 // Permission request — show Allow/Deny buttons
-                if (task.status == SpawnTaskStatus.awaitingPermission && task.permission != null)
+                if (task.status == ThreadStatus.awaitingPermission && task.permission != null)
                   Padding(
                     padding: const EdgeInsets.only(left: 32, top: 4),
                     child: Row(

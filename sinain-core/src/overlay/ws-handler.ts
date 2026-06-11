@@ -6,7 +6,7 @@ import type {
   InboundMessage,
   FeedMessage,
   StatusMessage,
-  SpawnTaskMessage,
+  ThreadStatusMessage,
   RegionHighlightMessage,
   CostMessage,
   CostSnapshot,
@@ -44,7 +44,7 @@ export class WsHandler {
     agents: { available: [], escalationAgent: "", spawnAgent: "", registered: false },
   };
   private replayBuffer: FeedMessage[] = [];
-  private spawnTaskBuffer: Map<string, SpawnTaskMessage> = new Map();
+  private spawnTaskBuffer: Map<string, ThreadStatusMessage> = new Map();
   private latestCostMsg: CostMessage | null = null;
   private latestRegionMsg: RegionHighlightMessage | null = null;
 
@@ -181,7 +181,7 @@ export class WsHandler {
   /** Broadcast any outbound message (used by escalator for spawn_task events). */
   broadcastRaw(msg: OutboundMessage): void {
     if (msg.type === "spawn_task") {
-      const taskMsg = msg as SpawnTaskMessage;
+      const taskMsg = msg as ThreadStatusMessage;
       this.spawnTaskBuffer.set(taskMsg.taskId, taskMsg);
       this.pruneSpawnTasks();
       log(TAG, `spawn_task buffered: taskId=${taskMsg.taskId}, status=${taskMsg.status}, buffer=${this.spawnTaskBuffer.size}, clients=${this.clients.size}`);

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/models/spawn_task.dart';
+import '../../core/models/thread_status.dart';
 import '../../core/services/websocket_service.dart';
 import '../hud_tooltip.dart';
 
@@ -22,8 +22,8 @@ class PermissionBanner extends StatefulWidget {
 class _PermissionBannerState extends State<PermissionBanner> {
   // Local ordered list of permission-awaiting tasks.
   // Oldest first (insertion order) — natural queue model.
-  final List<SpawnTask> _pending = [];
-  StreamSubscription<SpawnTask>? _taskSub;
+  final List<ThreadStatusUpdate> _pending = [];
+  StreamSubscription<ThreadStatusUpdate>? _taskSub;
 
   @override
   void didChangeDependencies() {
@@ -33,7 +33,7 @@ class _PermissionBannerState extends State<PermissionBanner> {
       // Seed from snapshot so tasks that arrived before this widget was built
       // are not lost (mirrors the pattern in TasksView.didChangeDependencies).
       for (final task in ws.spawnTasks.values) {
-        if (task.status == SpawnTaskStatus.awaitingPermission &&
+        if (task.status == ThreadStatus.awaitingPermission &&
             !_pending.any((t) => t.taskId == task.taskId)) {
           _pending.add(task);
         }
@@ -45,10 +45,10 @@ class _PermissionBannerState extends State<PermissionBanner> {
     }
   }
 
-  void _onTask(SpawnTask incoming) {
+  void _onTask(ThreadStatusUpdate incoming) {
     if (!mounted) return;
     setState(() {
-      if (incoming.status == SpawnTaskStatus.awaitingPermission) {
+      if (incoming.status == ThreadStatus.awaitingPermission) {
         // Upsert: keep single entry per taskId, preserve order.
         final idx = _pending.indexWhere((t) => t.taskId == incoming.taskId);
         if (idx < 0) {

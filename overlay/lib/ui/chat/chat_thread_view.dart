@@ -90,11 +90,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
     if (!_seen.add(item.id)) return; // already rendered (seed + stream overlap)
     _controller.insertMessage(TextMessage(
       id: item.id,
-      // User-side: their own messages AND the spawn-pipeline echo of them
-      // (thread sends are tagged sender=spawn until the P2 thread registry).
-      authorId: item.sender == FeedSender.user || item.sender == FeedSender.spawn
-          ? 'user'
-          : 'agent',
+      authorId: item.sender == FeedSender.user ? 'user' : 'agent',
       createdAt: item.timestamp.toUtc(),
       text: item.text,
     ));

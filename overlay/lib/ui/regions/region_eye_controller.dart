@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import '../../core/models/region_highlight.dart';
-import '../../core/models/spawn_task.dart';
+import '../../core/models/thread_status.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/window_service.dart';
@@ -47,7 +47,7 @@ class RegionEyeController {
 
   StreamSubscription<List<RegionHighlight>>? _regionSub;
   StreamSubscription<String>? _tapSub;
-  StreamSubscription<SpawnTask>? _taskSub;
+  StreamSubscription<ThreadStatusUpdate>? _taskSub;
   VoidCallback? _settingsListener;
 
   final Map<String, RegionHighlight> _regions = {};
@@ -206,12 +206,12 @@ class RegionEyeController {
     windowService.updateRegionEye(regionId, 'working');
   }
 
-  void _onSpawnTask(SpawnTask task) {
+  void _onSpawnTask(ThreadStatusUpdate task) {
     final id = task.regionId;
     if (id == null || !_regions.containsKey(id)) return;
     final state = switch (task.status) {
-      SpawnTaskStatus.completed => 'ready',
-      SpawnTaskStatus.failed || SpawnTaskStatus.timeout => 'failed',
+      ThreadStatus.completed => 'ready',
+      ThreadStatus.failed || ThreadStatus.timeout => 'failed',
       _ => 'working',
     };
     if (_eyeStates[id] == state) return;

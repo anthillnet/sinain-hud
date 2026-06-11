@@ -1,4 +1,4 @@
-import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, SpawnTaskMessage, SpawnTaskStatus, UserCommand } from "../types.js";
+import type { AgentEntry, ContextWindow, EscalationConfig, OpenClawConfig, FeedItem, ThreadStatusMessage, ThreadStatus, UserCommand } from "../types.js";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { WsHandler } from "../overlay/ws-handler.js";
 import type { Profiler } from "../profiler.js";
@@ -1186,7 +1186,7 @@ ${recentLines.join("\n")}`;
 
   private broadcastTaskEvent(
     taskId: string,
-    status: SpawnTaskStatus,
+    status: ThreadStatus,
     label?: string,
     startedAt?: number,
     resultPreview?: string,
@@ -1194,7 +1194,7 @@ ${recentLines.join("\n")}`;
     const now = Date.now();
     const isTerminal = status === "completed" || status === "failed" || status === "timeout";
     const regionId = this.regionByTask.get(taskId);
-    const msg: SpawnTaskMessage = {
+    const msg: ThreadStatusMessage = {
       type: "spawn_task",
       taskId,
       label: label || "Background task",

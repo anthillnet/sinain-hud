@@ -1,9 +1,9 @@
-enum SpawnTaskStatus { spawned, polling, completed, failed, timeout, awaitingInput, awaitingPermission }
+enum ThreadStatus { spawned, polling, completed, failed, timeout, awaitingInput, awaitingPermission }
 
-class SpawnTask {
+class ThreadStatusUpdate {
   final String taskId;
   final String label;
-  SpawnTaskStatus status;
+  ThreadStatus status;
   final DateTime startedAt;
   DateTime? completedAt;
   String? resultPreview;
@@ -15,7 +15,7 @@ class SpawnTask {
   /// Region eye that initiated this spawn (status routes to its badge)
   final String? regionId;
 
-  SpawnTask({
+  ThreadStatusUpdate({
     required this.taskId,
     required this.label,
     required this.status,
@@ -28,8 +28,8 @@ class SpawnTask {
     this.regionId,
   });
 
-  factory SpawnTask.fromJson(Map<String, dynamic> json) {
-    return SpawnTask(
+  factory ThreadStatusUpdate.fromJson(Map<String, dynamic> json) {
+    return ThreadStatusUpdate(
       taskId: json['taskId'] as String? ?? '',
       label: json['label'] as String? ?? 'Background task',
       status: _parseStatus(json['status'] as String?),
@@ -49,35 +49,35 @@ class SpawnTask {
   }
 
   bool get isTerminal =>
-      status == SpawnTaskStatus.completed ||
-      status == SpawnTaskStatus.failed ||
-      status == SpawnTaskStatus.timeout;
+      status == ThreadStatus.completed ||
+      status == ThreadStatus.failed ||
+      status == ThreadStatus.timeout;
 
   bool get needsInput =>
-      status == SpawnTaskStatus.awaitingInput ||
-      status == SpawnTaskStatus.awaitingPermission;
+      status == ThreadStatus.awaitingInput ||
+      status == ThreadStatus.awaitingPermission;
 
   Duration get elapsed =>
       (completedAt ?? DateTime.now()).difference(startedAt);
 
-  static SpawnTaskStatus _parseStatus(String? value) {
+  static ThreadStatus _parseStatus(String? value) {
     switch (value) {
       case 'spawned':
-        return SpawnTaskStatus.spawned;
+        return ThreadStatus.spawned;
       case 'polling':
-        return SpawnTaskStatus.polling;
+        return ThreadStatus.polling;
       case 'completed':
-        return SpawnTaskStatus.completed;
+        return ThreadStatus.completed;
       case 'failed':
-        return SpawnTaskStatus.failed;
+        return ThreadStatus.failed;
       case 'timeout':
-        return SpawnTaskStatus.timeout;
+        return ThreadStatus.timeout;
       case 'awaiting_input':
-        return SpawnTaskStatus.awaitingInput;
+        return ThreadStatus.awaitingInput;
       case 'awaiting_permission':
-        return SpawnTaskStatus.awaitingPermission;
+        return ThreadStatus.awaitingPermission;
       default:
-        return SpawnTaskStatus.spawned;
+        return ThreadStatus.spawned;
     }
   }
 }
