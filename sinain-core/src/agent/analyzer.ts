@@ -1,6 +1,6 @@
 import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand, RawRegion } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
-import { log } from "../log.js";
+import { log, debug } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 
 const TAG = "agent";
@@ -108,13 +108,18 @@ Each region:
 - "issue": short label of the specific thing (max 10 words, quote the on-screen text)
 - "tip": one actionable sentence — what an agent could do about it
 - "action": "fix" | "explain" | "research" — the kind of help
-- "sourceId": REQUIRED and critical — copy the number from the [S<id>] prefix of
-  the EXACT screen line where the thing appears ("[S12] ..." → "sourceId":12).
-  The eye is placed at that line; a wrong or missing id means the region is
-  dropped, so always anchor to the most specific [S<id>] line you can see.
+- "sourceId": copy the number from the [S<id>] prefix of the screen line where
+  the thing appears ("[S12] ..." → "sourceId":12). When unsure between lines,
+  pick the closest one — a best-guess id is always better than omitting the
+  region or the id.
 Rules: the thing must be concrete and actually visible on screen — never invent
 issues or emit for an empty/idle screen. One region per distinct thing (max 3).
-Do not repeat a region for something that no longer appears on screen.`;
+When the screen has readable content, you should usually find at least one
+region worth offering help on.
+IMPORTANT — regions are a LIVE set, not a one-time report: on EVERY response,
+re-emit each region whose content is still visible on screen (same issue text,
+same sourceId). A region you stop emitting disappears from the user's screen.
+Only omit a region when its content is actually gone from view.`;
 
 const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
 
@@ -376,6 +381,7 @@ async function callOpenRouter(
     if (imageCount > 0) {
       log(TAG, `multimodal call: model=${model}, images=${imageCount}`);
     }
+    debug(TAG, `raw response (${raw.length} chars): ${raw.slice(0, 800)}`);
 
     // Parse JSON response — try direct parse, then extract embedded JSON, then fallback
     try {

@@ -159,7 +159,7 @@ export class RegionTracker {
       // match), drop the region rather than corner-stack a misplaced eye that
       // misleads and distracts. Looser emission upstream keeps the supply up.
       if (!anchored) {
-        debug(TAG, `skip unanchored region: "${r.issue}"`);
+        log(TAG, `skip unanchored region: "${r.issue}" (sourceId=${r.sourceId ?? "-"})`);
         continue;
       }
       // Snap to the exact OCR line when its text matches the issue — the
