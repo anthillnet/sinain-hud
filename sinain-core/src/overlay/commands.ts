@@ -22,6 +22,8 @@ export interface CommandDeps {
   /** Fork MAIN into a new thread: mints a thread id and stores a seed built
    *  from the MAIN transcript + digest. Returns the new thread's identity. */
   onForkMain?: () => { id: string; label: string };
+  /** User drag-selected a screen region — create a manual ROI from it. */
+  onRegionSelect?: (sel: { x: number; y: number; w: number; h: number; screenW: number; screenH: number }) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
@@ -100,6 +102,12 @@ export function setupCommands(deps: CommandDeps): void {
           log(TAG, `spawn command ignored — no handler configured`);
           wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");
         }
+        break;
+      }
+      case "region_select": {
+        const sel = msg as any;
+        log(TAG, `region select: ${sel.w}x${sel.h} at (${sel.x},${sel.y})`);
+        deps.onRegionSelect?.({ x: sel.x, y: sel.y, w: sel.w, h: sel.h, screenW: sel.screenW, screenH: sel.screenH });
         break;
       }
       case "fork_main": {

@@ -210,6 +210,19 @@ class WindowService {
   /// Each entry: {'id': String, 'x': double, 'y': double, 'state': String}
   /// with x/y in top-left-origin screen points. Panels for ids absent from
   /// the list are closed; existing ones are repositioned/restyled.
+  /// Screenshot-style drag-select. Returns {x,y,w,h,screenW,screenH} in
+  /// top-left-origin screen points, or null if the user cancelled (Esc).
+  Future<Map<String, double>?> selectRegion() async {
+    try {
+      final raw = await _channel.invokeMethod('selectRegion');
+      if (raw is! Map) return null;
+      return raw.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+    } catch (e) {
+      _log('selectRegion failed: $e');
+      return null;
+    }
+  }
+
   Future<void> showRegionEyes(List<Map<String, dynamic>> eyes) async {
     try {
       await _channel.invokeMethod('showRegionEyes', {'eyes': eyes});

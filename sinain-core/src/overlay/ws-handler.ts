@@ -253,6 +253,9 @@ export class WsHandler {
       case "spawn_reply":
         log(TAG, `\u2190 spawn reply: taskId=${(msg as any).taskId}`);
         break;
+      case "region_select":
+        log(TAG, `\u2190 region select`);
+        break;
       case "fork_main":
         log(TAG, `\u2190 fork main`);
         break;

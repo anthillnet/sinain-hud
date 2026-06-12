@@ -223,6 +223,10 @@ export class RegionTracker {
   private expireStale(): void {
     const now = Date.now();
     for (const [id, t] of this.tracked) {
+      // Manual (user-selected) regions are pinned: the analyzer never
+      // re-emits them, so miss-window expiry would kill every one after a
+      // few ticks. They leave only via the app-scope rule or archive cap.
+      if (t.region.manual) continue;
       if (this.tick - t.lastSeenTick > this.maxMissedTicks ||
           now - t.firstSeenTs > this.maxAgeMs) {
         this.tracked.delete(id);
@@ -269,6 +273,32 @@ export class RegionTracker {
   /** Look up a region for spawn-time context assembly. Live regions first,
    *  then the context archive — anything the user could see or click stays
    *  resolvable; eyes leaving the screen never invalidates their context. */
+  /** Admit a user-selected region: bypasses the analyzer's admission cap
+   *  and scoring — explicit user intent. Returns the created region. */
+  addManual(input: {
+    bbox: [number, number, number, number];
+    frameSize: [number, number];
+    app?: string;
+    ocr: string;
+    ocrLines?: { text: string; bbox: [number, number, number, number] }[];
+  }): RegionHighlight {
+    const id = `r-man-${Date.now().toString(36)}`;
+    const firstLine = input.ocr.split("\n").map((l) => l.trim()).find((l) => l.length > 2);
+    const region: RegionHighlight = {
+      id,
+      issue: firstLine ? `Selected: ${firstLine.slice(0, 56)}` : "Selected screen region",
+      tip: "The user selected this region themselves — engage with its content and ask what they need if unclear.",
+      bbox: input.bbox,
+      frameSize: input.frameSize,
+      sourceOcr: input.ocr.slice(0, 4000),
+      ...(input.app ? { app: input.app } : {}),
+      manual: true,
+    };
+    this.tracked.set(id, { region, lastSeenTick: this.tick, firstSeenTs: Date.now() });
+    log(TAG, `manual region ${id} admitted (${input.ocr.length} OCR chars, app=${input.app ?? "?"})`);
+    return region;
+  }
+
   get(id: string): RegionHighlight | undefined {
     return this.tracked.get(id)?.region ?? this.expired.get(id)?.region;
   }
@@ -299,10 +329,15 @@ export function buildRegionTaskText(
   userNote?: string,
   knowledge?: string,
 ): string {
-  const parts = [
-    `[Region — ${region.action ?? "help"}] ${region.issue}`,
-    `Suggested approach: ${region.tip}`,
-  ];
+  const parts = region.manual
+    ? [
+        `[Region — user-selected] ${region.issue}`,
+        `The user drag-selected this screen area to start a conversation about it.`,
+      ]
+    : [
+        `[Region — ${region.action ?? "help"}] ${region.issue}`,
+        `Suggested approach: ${region.tip}`,
+      ];
   if (region.sourceOcr) {
     parts.push(`\nScreen text where the issue was observed (${region.app ?? "unknown app"}):\n${region.sourceOcr}`);
   }

@@ -466,6 +466,13 @@ class WebSocketService extends ChangeNotifier {
         'User command sent: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
+  /// Manual ROI: the user drag-selected a screen rect — core builds a
+  /// region from already-computed OCR (fresh crop-OCR as fallback).
+  void sendRegionSelect(Map<String, double> sel) {
+    send({'type': 'region_select', ...sel});
+    _log('Region select sent: ${sel['w']}x${sel['h']}');
+  }
+
   /// Fork MAIN into a new thread — core mints the thread id and seeds it
   /// with the MAIN transcript; the tab opens via the thread-status message.
   void forkMain() {

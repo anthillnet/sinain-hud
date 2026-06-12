@@ -94,6 +94,9 @@ export interface RegionHighlight {
   sourceOcr?: string;
   /** App the region was detected in */
   app?: string;
+  /** User-selected region (drag-select) — pinned while its app is frontmost,
+   *  exempt from the analyzer's admission cap and re-emission expiry. */
+  manual?: boolean;
 }
 
 /** sinain-core → Overlay: current set of actionable screen regions.
@@ -149,6 +152,18 @@ export interface ForkMainMessage {
   type: "fork_main";
 }
 
+/** Overlay → sinain-core: user drag-selected a screen region (manual ROI).
+ *  Rect in screen points, top-left origin. */
+export interface RegionSelectMessage {
+  type: "region_select";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  screenW: number;
+  screenH: number;
+}
+
 /** Overlay → sinain-core: reply to a spawn question */
 export interface SpawnReplyMessage {
   type: "spawn_reply";
@@ -193,7 +208,7 @@ export interface CostSnapshot {
 }
 
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {
