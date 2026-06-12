@@ -19,6 +19,13 @@ MODEL_FAST = "google/gemini-3-flash-preview"
 MODEL_SMART = "anthropic/claude-sonnet-4.6"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Local Ollama OpenAI-compatible endpoint. Model IDs prefixed with "ollama/"
+# route here instead of OpenRouter (no API key needed). See docs/local-mode.md
+# for the paranoid-mode wiring; this is the bench-side equivalent that lets
+# SINAIN_BENCH_MODEL=ollama/phi4-mini route the distiller + QA locally.
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/v1/chat/completions"
+
 
 class LLMError(Exception):
     """Raised when the LLM API call fails (timeout, network, bad response)."""
@@ -164,7 +171,18 @@ def _load_config() -> dict:
 
 
 def _resolve_model(logical_name: str) -> str:
-    """Map a logical model name ('fast'/'smart') to an actual model ID via config."""
+    """Map a logical model name ('fast'/'smart') to an actual model ID.
+
+    Env-var overrides take precedence over koog-config.json so the bench
+    harness can route a single script-call site (e.g. session_distiller's
+    `script="session_distiller"` → model="fast") to a different model per
+    run. Used by ingest.py to thread SINAIN_BENCH_MODEL through to the
+    distiller subprocess as SINAIN_FAST_MODEL.
+    """
+    env_key = f"SINAIN_{logical_name.upper()}_MODEL"
+    env_override = os.environ.get(env_key)
+    if env_override:
+        return env_override
     cfg = _load_config()
     models = cfg.get("models", {})
     return models.get(logical_name, logical_name)
@@ -178,14 +196,28 @@ def call_llm(
     *,
     script: str | None = None,
     json_mode: bool = False,
+    json_schema: dict | None = None,
+    temperature: float | None = None,
+    seed: int | None = None,
 ) -> str:
     """Call OpenRouter chat completions API. Returns assistant message text.
 
     When *script* is provided, model and max_tokens are overridden from
     koog-config.json (external config the bot cannot modify).
 
-    When *json_mode* is True and the resolved model starts with ``openai/``,
-    ``response_format: {"type": "json_object"}`` is added to the request body.
+    When *json_schema* is provided, the request uses STRICT structured-output
+    mode (``response_format: {"type": "json_schema", ...}``) — model output is
+    forced to conform to the schema. Used to prevent local distillers
+    (phi4-mini, gemma4:e2b, qwen2.5:7b) from emitting session summaries when
+    asked for a facts[] list. Falls back gracefully if the provider rejects
+    the schema (Ollama may not support all JSON Schema features).
+
+    When *json_mode* is True (and no schema given), uses the older loose
+    ``response_format: {"type": "json_object"}`` mode for OpenAI/Google/Ollama.
+
+    *temperature*: deterministic-judging knob used by the LongMemEval paper-
+    standard judge (temperature=0.0 for reproducibility). When omitted, the
+    provider default applies (no temperature key in the request body).
     """
     timeout_s = 60
     if script:
@@ -195,28 +227,69 @@ def call_llm(
         max_tokens = script_cfg.get("maxTokens", max_tokens)
         timeout_s = script_cfg.get("timeout", cfg.get("defaults", {}).get("timeout", 60))
 
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
+    # Route based on model id. "ollama/<model>" → local Ollama; else OpenRouter.
+    is_ollama = model.startswith("ollama/")
+    if is_ollama:
+        target_url = OLLAMA_CHAT_URL
+        target_model = model[len("ollama/"):]  # strip prefix for Ollama API
+        request_headers = {"Content-Type": "application/json"}
+        # Local Ollama timeouts are longer than cloud — small models can stall.
+        if timeout_s < 120:
+            timeout_s = 120
+    else:
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
+        target_url = OPENROUTER_URL
+        target_model = model
+        request_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
 
     body: dict = {
-        "model": model,
+        "model": target_model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     }
-    if json_mode and model.startswith("openai/"):
+    if temperature is not None:
+        body["temperature"] = temperature
+    # Reproducibility: a fixed seed + temperature=0 makes greedy decoding
+    # repeatable (OpenRouter passes seed to providers that honor it; Ollama's
+    # OpenAI-compat endpoint maps it to options.seed). Without it, eval QA
+    # answers jitter run-to-run on borderline questions even at temp=0, which
+    # makes n=6 paper_label deltas indistinguishable from noise.
+    if seed is not None:
+        body["seed"] = seed
+    # Structured output. json_schema (strict) takes precedence over json_mode
+    # (loose). OpenAI / Google / Ollama OpenAI-compat all accept the
+    # response_format.json_schema shape. Strict mode bounces the response off
+    # the schema so local models can't drift into narrative output when the
+    # caller asked for a facts[] array — the empirically-observed failure
+    # mode for qwen2.5:7b and gemma4:e2b on LongMemEval-S.
+    if json_schema is not None:
+        body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": json_schema.get("title", "output"),
+                "schema": json_schema,
+                "strict": True,
+            },
+        }
+        # Ollama-native accepts the schema directly via top-level `format`;
+        # set both so whichever path the runtime takes, the constraint sticks.
+        if is_ollama:
+            body["format"] = json_schema
+    elif json_mode and (model.startswith("openai/") or model.startswith("google/") or is_ollama):
         body["response_format"] = {"type": "json_object"}
 
     try:
         resp = requests.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            target_url,
+            headers=request_headers,
             json=body,
             timeout=timeout_s,
         )
@@ -247,17 +320,30 @@ def call_llm_with_fallback(
     *,
     script: str | None = None,
     json_mode: bool = False,
+    json_schema: dict | None = None,
     retries: int = 1,
+    temperature: float | None = None,
+    seed: int | None = None,
 ) -> str:
     """call_llm with automatic retry on failure (same model).
 
     Tries the configured model. On LLMError (timeout, HTTP error, empty
     response), retries up to *retries* times with the same model.
+
+    *temperature* / *seed* forward to call_llm for reproducible greedy decoding.
+    The distiller passes temperature=0.0 + a fixed seed so re-ingesting the same
+    haystack yields the SAME facts run-to-run (was provider-default temperature →
+    the dominant source of LongMemEval run-to-run variance, mis-attributed to the
+    QA model). QA already does this in eval/benchmarks/query.py.
     """
     last_err: LLMError | None = None
     for attempt in range(1 + retries):
         try:
-            return call_llm(system_prompt, user_prompt, script=script, json_mode=json_mode)
+            return call_llm(
+                system_prompt, user_prompt,
+                script=script, json_mode=json_mode, json_schema=json_schema,
+                temperature=temperature, seed=seed,
+            )
         except LLMError as e:
             last_err = e
             if attempt < retries:

@@ -163,6 +163,53 @@ def tmp_modules_dir(tmp_path):
     return modules
 
 
+# ---------------------------------------------------------------------------
+# Wave-0 mock-LLM fixtures for paper-judge tests (Plan 01)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_llm(monkeypatch):
+    """Patch common.call_llm to return a fixed string. Call mock_llm.set('yes') to change."""
+    state = {"response": "yes"}
+
+    def _set(value: str):
+        state["response"] = value
+
+    def _fake_call_llm(*args, **kwargs):
+        return state["response"]
+
+    import common
+    monkeypatch.setattr(common, "call_llm", _fake_call_llm)
+    mock = type("MockLLM", (), {"set": staticmethod(_set), "_state": state})()
+    return mock
+
+
+@pytest.fixture
+def mock_llm_responses(monkeypatch):
+    """Patch common.call_llm to return a list of responses in order."""
+    state = {"responses": [], "idx": 0, "calls": []}
+
+    def _set(responses: list):
+        state["responses"] = responses
+        state["idx"] = 0
+
+    def _fake_call_llm(*args, **kwargs):
+        state["calls"].append({"args": args, "kwargs": kwargs})
+        if state["idx"] >= len(state["responses"]):
+            return ""
+        out = state["responses"][state["idx"]]
+        state["idx"] += 1
+        return out
+
+    import common
+    monkeypatch.setattr(common, "call_llm", _fake_call_llm)
+    return type("MockLLMResponses", (), {
+        "set": staticmethod(_set),
+        "calls": state["calls"],
+        "_state": state,
+    })()
+
+
 @pytest.fixture
 def sample_log_entry():
     """A sample playbook-log entry for testing."""
