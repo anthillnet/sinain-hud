@@ -211,7 +211,7 @@ export class TranscriptionService extends EventEmitter {
               // "en-US") keeps the strict single-language gate.
               //
               // Entity-preservation directive (added 2026-05-28 after live
-              // bench surfaced "Mustafa → Jeff Rains", "Citibank → City Bank"
+              // bench surfaced "Jibran → Jet Brain", "Citibank → City Bank"
               // — gemini-audio was substituting unfamiliar proper nouns with
               // phonetically-adjacent common names, mangling exactly the
               // facts a memory system needs to capture). Modeled after
