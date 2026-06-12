@@ -203,7 +203,11 @@ export function loadConfig(): CoreConfig {
     const localVision = env("SINAIN_LOCAL_VISION", "qwen2.5vl:7b");
     if (!process.env.ANALYSIS_PROVIDER) process.env.ANALYSIS_PROVIDER = "ollama";
     if (!process.env.ANALYSIS_MODEL) process.env.ANALYSIS_MODEL = localLlm;
-    if (!process.env.ANALYSIS_VISION_MODEL) process.env.ANALYSIS_VISION_MODEL = localLlm;
+    // ANALYSIS_VISION_MODEL must point at a VISION-capable model (qwen2.5vl,
+    // gemma4 vision variants, llava). Previously misconfigured to localLlm
+    // (text-only phi4-mini), which made the analyzer's image-tick path fail
+    // silently in local-mode.
+    if (!process.env.ANALYSIS_VISION_MODEL) process.env.ANALYSIS_VISION_MODEL = localVision;
     if (!process.env.TRANSCRIPTION_BACKEND) process.env.TRANSCRIPTION_BACKEND = "local";
     if (!process.env.LOCAL_VISION_ENABLED) process.env.LOCAL_VISION_ENABLED = "true";
     if (!process.env.LOCAL_VISION_MODEL) process.env.LOCAL_VISION_MODEL = localVision;
@@ -211,16 +215,19 @@ export function loadConfig(): CoreConfig {
     if (!process.env.SINAIN_SMART_MODEL) process.env.SINAIN_SMART_MODEL = `ollama/${localLlm}`;
   }
 
+  const transcriptionInitialPrompt = env("TRANSCRIPTION_INITIAL_PROMPT", "");
   const transcriptionConfig: TranscriptionConfig = {
     backend: env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"],
     openrouterApiKey: env("OPENROUTER_API_KEY", ""),
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
-    language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
+    language: env("TRANSCRIPTION_LANGUAGE", "auto"),
+    initialPrompt: transcriptionInitialPrompt || undefined,
     local: {
       bin: env("LOCAL_WHISPER_BIN", "whisper-cli"),
       modelPath: resolvePath(env("LOCAL_WHISPER_MODEL", "~/.sinain/models/whisper/ggml-large-v3-turbo.bin")),
-      language: env("TRANSCRIPTION_LANGUAGE", "en-US"),
+      language: env("TRANSCRIPTION_LANGUAGE", "auto"),
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
+      initialPrompt: transcriptionInitialPrompt || undefined,
     },
   };
 

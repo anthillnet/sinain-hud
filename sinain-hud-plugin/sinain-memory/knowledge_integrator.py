@@ -18,6 +18,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -62,7 +63,7 @@ FOR THE KNOWLEDGE GRAPH:
 - RETRACT facts contradicted by session evidence (list their entity_ids)
 - Each fact needs: entity (real name from content), attribute (relationship type), value (self-contained sentence), confidence (0.0-1.0), domain (for scoping)
 - Entity naming: use actual names as lowercase-hyphenated slugs
-    Good: "citibank", "al-futaim-group", "artom", "intellij-idea"
+    Good: "citibank", "acme-group", "artom", "intellij-idea"
     Bad: "ai-solutions", "client-understanding", "tool-usage"
 - The value field must be a complete, self-contained sentence that answers a question on its own
 - Assert BOTH durable facts AND time-bound decisions/action items (mark decisions with confidence 0.7)
@@ -96,11 +97,129 @@ _STOPWORDS = frozenset({
 })
 
 
-def _extract_tags(value: str) -> list[str]:
+def _to_str(v) -> str:
+    """Coerce any value to a string; dict/list go through json.dumps."""
+    if isinstance(v, str):
+        return v
+    try:
+        return json.dumps(v, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _normalize_digest(digest: dict) -> dict:
+    """Force the digest into the schema the integrator expects.
+
+    Main's distiller emits a tight `list[str]` shape for facts/decisions/
+    patterns/preferences and a list[dict] for entities. Local distillers
+    (phi4-mini, gemma4:e2b, etc.) sometimes emit dicts in place of lists,
+    bools in place of strings, or single objects instead of arrays. We
+    normalize once at the parse boundary so every downstream consumer
+    (graph ops, playbook formatting, tag extraction) sees the same shape.
+
+    Returns a NEW dict (does not mutate input).
+    """
+    if not isinstance(digest, dict):
+        return {"isEmpty": True, "error": "digest is not a dict"}
+
+    out = dict(digest)
+
+    # String-list fields: coerce each element to a string; wrap dicts in
+    # a single-element list of their JSON form; drop non-iterables.
+    #
+    # Lever 1 exception: `facts` items may legitimately be objects of shape
+    # {text, attributedTo?, subject?}. Preserve those; stringify everything
+    # else as before.
+    def _coerce_fact_item(x):
+        if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"]:
+            clean = {"text": x["text"]}
+            at = x.get("attributedTo")
+            if isinstance(at, str) and at.strip():
+                clean["attributedTo"] = at.strip()
+            subj = x.get("subject")
+            if isinstance(subj, str) and subj.strip():
+                clean["subject"] = subj.strip()
+            # Preserve provenance kind (e.g. "recon" from T1-RECON consolidation).
+            # This allow-list rebuild previously DROPPED `kind`, so consolidated
+            # current-state facts reached _facts_to_graph_ops untagged and defaulted
+            # to "distilled" — the root cause of the read-side recon guard being a
+            # no-op (zero kind=recon ever persisted).
+            kind = x.get("kind")
+            if isinstance(kind, str) and kind.strip():
+                clean["kind"] = kind.strip()
+            return clean
+        return _to_str(x)
+
+    raw_facts = out.get("facts", [])
+    if isinstance(raw_facts, list):
+        out["facts"] = [_coerce_fact_item(x) for x in raw_facts if x not in (None, "", False)]
+    elif isinstance(raw_facts, dict):
+        out["facts"] = [_coerce_fact_item(v) for v in raw_facts.values() if v not in (None, "", False)]
+    elif isinstance(raw_facts, str):
+        out["facts"] = [raw_facts] if raw_facts else []
+    else:
+        out["facts"] = []
+
+    for key in ("decisions", "patterns", "preferences"):
+        raw = out.get(key, [])
+        if isinstance(raw, list):
+            out[key] = [_to_str(x) for x in raw if x not in (None, "", False)]
+        elif isinstance(raw, dict):
+            # Dict-shaped emission — flatten values into strings.
+            out[key] = [_to_str(v) for v in raw.values() if v not in (None, "", False)]
+        elif isinstance(raw, str):
+            out[key] = [raw] if raw else []
+        else:
+            out[key] = []
+
+    # entities: list of dicts. If dict, wrap in list; if list, keep dicts only.
+    ents = out.get("entities", [])
+    if isinstance(ents, dict):
+        # Some local models emit a flat dict of name → metadata.
+        ents_list = [{"name": k, **(v if isinstance(v, dict) else {"type": _to_str(v)})}
+                     for k, v in ents.items()]
+    elif isinstance(ents, list):
+        ents_list = [e for e in ents if isinstance(e, dict)]
+    else:
+        ents_list = []
+    # Each entity's `name` and `type` MUST be strings — local distillers
+    # sometimes emit bool / None / nested dict here, and downstream callers
+    # (e.g., _extract_entity_from_fact) call .lower() on the name.
+    out["entities"] = []
+    for e in ents_list:
+        clean = dict(e)
+        for k in ("name", "type"):
+            if k in clean and not isinstance(clean[k], str):
+                clean[k] = _to_str(clean[k])
+        # Drop entities with non-string name after coercion fallback (rare).
+        if isinstance(clean.get("name"), str) and clean["name"]:
+            out["entities"].append(clean)
+
+    # Scalar fields — keep type or coerce.
+    if not isinstance(out.get("whatHappened", ""), str):
+        out["whatHappened"] = _to_str(out.get("whatHappened", ""))
+    if not isinstance(out.get("ts", ""), str):
+        out["ts"] = _to_str(out.get("ts", ""))
+    out["isEmpty"] = bool(out.get("isEmpty", False))
+
+    return out
+
+
+def _extract_tags(value) -> list[str]:
     """Extract searchable keyword tags from fact value text.
 
     Returns up to 10 deduplicated lowercase tags suitable for AVET-indexed lookup.
+
+    Defensive coercion 2026-05-27: local distillers (phi4-mini, gemma4:e2b)
+    sometimes emit `value` as a nested dict or list rather than a string.
+    JSON-stringify non-string inputs so tag extraction still produces
+    meaningful tags (keys + values both contribute) instead of crashing.
     """
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            value = str(value)
     # Lowercase words (including hyphenated compounds like "react-native")
     words = re.findall(r"[a-z][a-z0-9-]+", value.lower())
     tags = [w for w in words if len(w) > 2 and w not in _STOPWORDS]
@@ -166,7 +285,24 @@ def _find_matching_entity(
         if ratio >= best_ratio:
             best_ratio = ratio
             best_match = node_id
-    return best_match
+    if best_match is not None:
+        return best_match
+
+    # E1 — phonetic + fuzzy canonicalization. Catches variants below the 0.90
+    # difflib floor that weak distillers / ASR produce ("city-bank"↔"citibank",
+    # "mustapha"↔"mustafa") — the entity-graph fragmentation that hurts local
+    # mode most. Metaphone gate + RapidFuzz confirm + a prefix/suffix guard that
+    # generalizes _DEDUP_SKIP_PAIRS. Default ON; SINAIN_CANON=0 ablates (and is
+    # mixed into the bench cache key so on/off land in distinct store slots).
+    if os.environ.get("SINAIN_CANON", "1") != "0":
+        try:
+            from entity_canonicalizer import phonetic_fuzzy_match
+            hit = phonetic_fuzzy_match(name, existing_names, _DEDUP_SKIP_PAIRS)
+            if hit is not None:
+                return existing_names[hit]
+        except Exception:
+            pass
+    return None
 
 
 def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_facts: list[dict]) -> list[dict]:
@@ -222,6 +358,22 @@ def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_fa
         value = op.get("value", "")
         fact_id = _fact_id(entity, attribute, value)
 
+        # T1-RECON: consolidated current-state facts (kind=recon) run in a SECOND
+        # integrator pass AFTER the main graph exists, so they are almost always
+        # embedding-similar to an existing distilled fact. Letting the dedup below
+        # convert them to a `reinforce` collapses them into that distilled fact and
+        # DROPS the kind=recon provenance — which makes the read-side topical guard a
+        # no-op (root cause of RECON-on 24/36: zero recon facts ever persisted). Keep
+        # recon asserts as distinct facts (only intra-batch exact-value dedup applies)
+        # so they carry kind=recon and the guard can demote/keep them per query.
+        if op.get("kind") == "recon":
+            if value in seen_values_set or fact_id in seen_fact_ids:
+                continue
+            result.append(op)
+            seen_fact_ids.add(fact_id)
+            seen_values_set.add(value)
+            continue
+
         # Exact hash match
         if fact_id in existing_id_set or fact_id in seen_fact_ids:
             if fact_id in existing_id_set:
@@ -269,30 +421,12 @@ def _load_graph_facts(db_path: str, entities: list[str] | None = None, limit: in
                 else:
                     keywords.append(str(e).lower().replace(" ", "-"))
             keywords = [k for k in keywords if k]
-            placeholders = ",".join(["?" for _ in keywords])
-            rows = store._conn.execute(
-                f"""SELECT entity_id, COUNT(*) as matches
-                    FROM triples
-                    WHERE attribute = 'tag' AND NOT retracted
-                    AND value IN ({placeholders})
-                    GROUP BY entity_id
-                    ORDER BY matches DESC
-                    LIMIT ?""",
-                (*keywords, limit),
-            ).fetchall()
-            fact_ids = [r["entity_id"] for r in rows]
+            ranked = store.tag_ranked_search(keywords, limit=limit)
+            fact_ids = [eid for eid, _ in ranked]
         else:
             # Top-N by confidence
-            rows = store._conn.execute(
-                """SELECT entity_id, CAST(value AS REAL) as conf
-                   FROM triples
-                   WHERE attribute = 'confidence' AND NOT retracted
-                   AND entity_id LIKE 'fact:%'
-                   ORDER BY conf DESC
-                   LIMIT ?""",
-                (limit,),
-            ).fetchall()
-            fact_ids = [r["entity_id"] for r in rows]
+            top = store.top_facts_by_confidence(limit=limit)
+            fact_ids = [eid for eid, _ in top]
 
         facts = []
         for fid in fact_ids:
@@ -366,10 +500,13 @@ def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
             for tag in _extract_tags(merged_value):
                 store.assert_triple(tx, new_eid, "tag", tag)
 
-            # Retract original individual facts
+            # T1-SUPERSEDE: SOFT-retract the merged-away originals (mark valid_to +
+            # supersededBy=consolidated fact) instead of hard-deleting. The data
+            # survives for history/as-of/undo; current-state reads exclude it. The
+            # consolidated fact carries the same info, so dropping originals from
+            # current retrieval is loss-free.
             for old_eid, _ in facts:
-                for attr_name in list(store.entity(old_eid).keys()):
-                    store.retract_triple(tx, old_eid, attr_name)
+                store.soft_retract_triple(tx, old_eid, superseded_by=new_eid)
 
             consolidated += 1
             print(f"  [consolidate] {entity_name}: {len(facts)} facts → 1 ({len(merged_value)} chars)", file=sys.stderr)
@@ -378,6 +515,116 @@ def _consolidate_entity_facts(db_path: str, min_facts: int = 3) -> int:
         return consolidated
     except Exception as e:
         print(f"  [consolidate] failed: {e}", file=sys.stderr)
+        return 0
+
+
+def _manifold_canonicalize_graph(db_path: str, tau: float = 0.90) -> int:
+    """#2: graph-wide spherical-medoid canonicalization (IG_features.md).
+
+    The distiller rephrases the SAME fact differently each run and across sessions, so the
+    graph accumulates paraphrase clusters that bloat retrieval and make the stored set drift
+    run-to-run (the ~70% distillation non-determinism). Embed all current facts, cluster on
+    the unit hypersphere (connected components at cosine >= tau — deterministic, order-
+    invariant), and keep ONE canonical representative per cluster: the spherical MEDOID (the
+    member nearest the cluster's geodesic/Fréchet centre, i.e. max summed cosine to the rest).
+    Non-medoids are SOFT-retracted (valid_to + supersededBy → excluded from current-state
+    reads, preserved for history/undo; reversible, loss-free since the medoid carries the same
+    meaning). Converts run-to-run STRING variance into SEMANTIC stability (measure with
+    semantic Jaccard, not byte Jaccard).
+
+    Set-level upgrade of the pairwise Mem0 dedup; the Fréchet-mean idea (Karcher 1977) on the
+    sphere, realised as the discrete medoid since facts are text (no synthesised mean fact).
+    Local embeddings (works without sinain-core /embed). Skips kind in {recon, verbatim},
+    already-retracted, and already-consolidated facts. Deterministic, fail-open.
+    Gated by SINAIN_MANIFOLD_CANON in the caller."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        store = TripleStore(db_path)
+        facts: list[tuple[str, str, float]] = []  # (fact_id, value, confidence)
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a:
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if not (v and isinstance(v, str) and len(v) > 8):
+                continue
+            k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
+            if k in ("recon", "verbatim", "gapfill"):
+                continue  # recon=current-state, verbatim=raw, gapfill=#6 coverage facts (all kept distinct)
+            if a.get("valid_to"):
+                continue  # already superseded
+            if ";" in v and len(v) > 100:
+                continue  # already consolidated
+            c = a.get("confidence", ["0.8"]); c = c[0] if isinstance(c, list) else c
+            try:
+                conf = float(c or 0.8)
+            except (TypeError, ValueError):
+                conf = 0.8
+            facts.append((fid, v, conf))
+        if len(facts) < 2:
+            store.close()
+            return 0
+        vecs = embed([f[1] for f in facts])
+        if not vecs or len(vecs) != len(facts):
+            store.close()
+            return 0  # no embeddings → cannot cluster → no-op
+
+        n = len(facts)
+
+        def _cos(a, b) -> float:
+            return sum(x * y for x, y in zip(a, b))
+
+        # Connected components at cosine >= tau (vectors are unit-normalised → dot = cosine).
+        # Components are invariant to fact iteration order (RocksDB scan order varies), so the
+        # canonicalization result is deterministic regardless of store layout.
+        parent = list(range(n))
+
+        def _find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _cos(vecs[i], vecs[j]) >= tau:
+                    ri, rj = _find(i), _find(j)
+                    if ri != rj:
+                        parent[max(ri, rj)] = min(ri, rj)
+
+        clusters: dict[int, list[int]] = {}
+        for k in range(n):
+            clusters.setdefault(_find(k), []).append(k)
+
+        retracted = 0
+        merged_clusters = 0
+        tx = store.begin_tx("manifold-canon")
+        for members in clusters.values():
+            if len(members) < 2:
+                continue
+            merged_clusters += 1
+
+            def _centrality(m: int, _members=members) -> tuple:
+                s = round(sum(_cos(vecs[m], vecs[o]) for o in _members if o != m), 6)
+                # max centrality; tie-break: higher confidence, then value text (deterministic)
+                return (s, facts[m][2], facts[m][1])
+
+            medoid = max(members, key=_centrality)
+            for m in members:
+                if m != medoid:
+                    store.soft_retract_triple(tx, facts[m][0], superseded_by=facts[medoid][0])
+                    retracted += 1
+        store.commit_tx(tx)
+        store.close()
+        if retracted:
+            print(f"  [manifold] canonicalized {retracted} paraphrase(s) → medoid across "
+                  f"{merged_clusters} cluster(s)", file=sys.stderr)
+        return retracted
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [manifold] failed (fail-open): {e}", file=sys.stderr)
         return 0
 
 
@@ -417,17 +664,477 @@ def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
     return "general"
 
 
-def _facts_to_graph_ops(digest: dict) -> list[dict]:
+_GENERIC_PRED = re.compile(
+    # definitional / how-to / general-knowledge predicate shapes the distiller
+    # volunteers as background (NOT about the user): "Bee balm repels pests",
+    # "Turkey wraps can be refrigerated", "Atmospheric distillation is a process".
+    r"\b(?:is|are|was|were|can be|could be|should be|may be|repels?|provides?|"
+    r"offers?|involves?|includes?|consists?|requires?|contains?|refers?|"
+    r"helps?|prevents?|reduces?|improves?|means?|denotes?|typically|generally|"
+    r"usually|often|are known|is known|is a type|is the process)\b",
+    re.IGNORECASE,
+)
+_USER_REF = re.compile(r"\b(?:the user(?:'s|s')?|the user is|user's)\b", re.IGNORECASE)
+
+
+def _fact_text_of(f) -> str:
+    if isinstance(f, str):
+        return f
+    if isinstance(f, dict):
+        t = f.get("text")
+        return t if isinstance(t, str) else ""
+    return ""
+
+
+def _salience_filter(facts: list) -> list:
+    """Deterministic, model-agnostic salience gate (T3-FORGET 'salience-gated
+    writes'; eval-log STAGES rule — NOT a distiller-prompt instruction, so it
+    works regardless of which model distilled or whether it complied).
+
+    LLM distillation of long sessions is non-deterministic (~70% of facts vary
+    run-to-run); the volatile tail is INCIDENTAL world-trivia the assistant
+    volunteered ("Bee balm repels hornworm", "Frida Kahlo underwent surgeries"),
+    while the stable core is the user-centric / asked-about material. Dropping the
+    incidental tail raises precision (fewer retrieval distractors → the salient
+    facts rank more reliably → answers stabilize) AND shrinks the volatile set.
+
+    CONSERVATIVE — drops a fact only when ALL hold, so central/asked-about topics
+    and user facts always survive (raw chunks backstop anything dropped):
+      (a) it does NOT reference the user, AND
+      (b) it is "generic-leaning", AND
+      (c) its subject entity is NOT shared with any user-referencing fact in this
+          batch (i.e. it is not part of the user's own context/topic).
+
+    "Generic-leaning" (criterion b) has two implementations:
+      * DEFAULT — a regex generic-knowledge predicate shape (hand-built proxy).
+      * #1 SURPRISAL (SINAIN_SURPRISAL_SALIENCE=1) — the principled information-content
+        gate: embed the fact, score its kNN density on a FROZEN generic-knowledge manifold
+        (generic_background) and on the in-batch user facts; drop when the surprisal log-
+        ratio LR = score_user − score_generic < θ AND generic_density ≥ g_floor (two-sided
+        guard so a novel-but-salient fact far from BOTH manifolds is never dropped). θ /
+        g_floor via SINAIN_SALIENCE_LR_THETA / SINAIN_SALIENCE_GFLOOR. Fail-open to the
+        regex gate if embeddings are unavailable.
+    """
+    if not isinstance(facts, list) or len(facts) < 2:
+        return facts
+    import os as _os
+    texts = [_fact_text_of(f) for f in facts]
+    # subjects/entities that co-occur with a user-referencing fact → protected
+    def _subj(f, txt):
+        s = f.get("subject") if isinstance(f, dict) else ""
+        if isinstance(s, str) and s.strip():
+            return s.strip().lower()
+        # fallback: capitalized lead phrase
+        m = re.match(r"\s*([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})", txt)
+        return m.group(1).lower() if m else ""
+    user_subjects = set()
+    for f, txt in zip(facts, texts):
+        if _USER_REF.search(txt):
+            sj = _subj(f, txt)
+            if sj:
+                user_subjects.add(sj)
+
+    # #1 surprisal scores (per fact, aligned to `facts`): (LR, generic_density). None unless
+    # the mode is on AND embeddings + frozen background are available (else regex fallback).
+    sal = None
+    if False:  # #1 surprisal runs GRAPH-WIDE (_surprisal_prune_graph), not per-session:
+        # a single session's ~10 facts give too few user vecs for a reliable LR. Per-session
+        # stays the regex gate; the surprisal pass operates on the accumulated graph at end-of-ingest.
+        try:
+            from embed_client import embed
+            from generic_background import salience_scores
+            fact_vecs = embed(texts)
+            if fact_vecs:
+                user_vecs = [fact_vecs[i] for i, t in enumerate(texts) if _USER_REF.search(t)]
+                sal = salience_scores(fact_vecs, user_vecs)
+        except Exception:
+            sal = None
+    # θ=0.0 → drop a non-user fact only when it is closer to the GENERIC manifold than to the
+    # user's own content (surprisal log-ratio < 0). Calibrated on real stores: this catches the
+    # incidental world-trivia tail (CLI definitions, history, generic how-tos) at ~1.5% drop with
+    # ZERO user/salient facts touched. g_floor defaults to 0.0 (guard OFF): score_generic is
+    # corpus-limited (a frozen background can't cover every trivia domain), so requiring high
+    # generic-density backfires by PROTECTING corpus-missing trivia; the robust signal is the LR
+    # itself (driven by score_user). g_floor>0 is available as an extra-precision tightener.
+    lr_theta = float(_os.environ.get("SINAIN_SALIENCE_LR_THETA", "0.0"))
+    g_floor = float(_os.environ.get("SINAIN_SALIENCE_GFLOOR", "0.0"))
+
+    kept = []
+    for i, (f, txt) in enumerate(zip(facts, texts)):
+        if not txt:
+            kept.append(f)
+            continue
+        # Exempt consolidated/attribution facts (kind=recon): already curated cross-session
+        # summaries that legitimately use generic predicates ("includes"); never drop them.
+        if isinstance(f, dict) and f.get("kind") == "recon":
+            kept.append(f)
+            continue
+        # Hard protections (both modes): never drop user facts or the user's own topics.
+        if _USER_REF.search(txt):
+            kept.append(f)
+            continue
+        sj = _subj(f, txt)
+        if sj and sj in user_subjects:
+            kept.append(f)
+            continue
+        # criterion (b): generic-leaning?
+        if sal is not None:
+            lr, g_density = sal[i]
+            if (lr < lr_theta) and (g_density >= g_floor):
+                continue  # surprisal: generic-leaning AND not user-relevant → drop trivia
+        elif _GENERIC_PRED.search(txt):
+            continue  # default regex gate
+        kept.append(f)
+    return kept
+
+
+def _surprisal_prune_graph(db_path: str, lr_theta: float = 0.0, g_floor: float = 0.0) -> int:
+    """#1: graph-wide information-content (surprisal) salience prune.
+
+    The volatile ~70% distillation tail is INCIDENTAL world-trivia the assistant volunteered
+    (CLI definitions, history asides, generic how-tos) — content HIGH-probability under a generic
+    LM, i.e. near-zero pointwise mutual information with THIS user. Approximate the surprisal
+    log-ratio LR = log P(f|user) - log P(f|generic) with embedding kNN densities: score_user on
+    the accumulated USER-referencing facts, score_generic on a FROZEN generic-knowledge corpus
+    (generic_background). Soft-retract a non-user, non-recon fact when LR < lr_theta (closer to
+    the generic manifold than to the user's own content) and, if g_floor>0, score_generic>=g_floor.
+
+    Runs GRAPH-WIDE (not per-session): the LR needs the full user manifold — one session's ~10
+    facts give an unreliable estimate (the regex `_salience_filter` stays per-session). Mirrors
+    #2's structure. Hard protections: never drop user-referencing facts, kind in {recon,verbatim},
+    already-retracted, already-consolidated, or a fact whose subject co-occurs with a user fact.
+    Soft-retract = reversible; raw-chunk backstop covers anything dropped. Calibrated on real
+    stores: theta=0 drops ~1-2% (genuine trivia, zero user/salient). Deterministic, fail-open.
+    Gated by SINAIN_SURPRISAL_SALIENCE in the caller."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        from generic_background import salience_scores
+        store = TripleStore(db_path)
+        items: list[tuple[str, str]] = []  # (fact_id, value)
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a:
+                continue
+            k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
+            if k in ("recon", "verbatim", "gapfill"):
+                continue
+            if a.get("valid_to"):
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if not (v and isinstance(v, str) and len(v) > 8):
+                continue
+            if ";" in v and len(v) > 100:
+                continue  # already consolidated
+            items.append((fid, v))
+        if len(items) < 5:
+            store.close()
+            return 0
+        texts = [v for _, v in items]
+        vecs = embed(texts)
+        if not vecs or len(vecs) != len(items):
+            store.close()
+            return 0
+        user_idx = [i for i, t in enumerate(texts) if _USER_REF.search(t)]
+        user_vecs = [vecs[i] for i in user_idx]
+        if len(user_vecs) < 3:
+            store.close()
+            return 0  # too few user facts to estimate the user manifold reliably
+        user_subjects = set()
+        for i in user_idx:
+            m = re.match(r"\s*([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})", texts[i])
+            if m:
+                user_subjects.add(m.group(1).lower())
+        sal = salience_scores(vecs, user_vecs)
+        if sal is None:
+            store.close()
+            return 0
+        pruned = 0
+        tx = store.begin_tx("surprisal-prune")
+        for i, (fid, v) in enumerate(items):
+            if _USER_REF.search(v):
+                continue  # hard-protect user facts
+            m = re.match(r"\s*([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})", v)
+            if m and m.group(1).lower() in user_subjects:
+                continue  # the user's own topic
+            lr, g_density = sal[i]
+            if lr < lr_theta and (g_floor <= 0.0 or g_density >= g_floor):
+                store.soft_retract_triple(tx, fid)  # superseded=None -> just mark valid_to
+                pruned += 1
+        store.commit_tx(tx)
+        store.close()
+        if pruned:
+            print(f"  [surprisal] pruned {pruned} low-information (generic-trivia) fact(s)",
+                  file=sys.stderr)
+        return pruned
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [surprisal] failed (fail-open): {e}", file=sys.stderr)
+        return 0
+
+
+_GAPFILL_MONTHS = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|"
+    r"december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b", re.IGNORECASE)
+_GAPFILL_NUM = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\$\s?\d|\b\d{2,}\b", re.IGNORECASE)
+_GAPFILL_WORDNUM = re.compile(
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b", re.IGNORECASE)
+
+
+def _has_salience_anchor(s: str) -> bool:
+    """A source sentence is worth gap-filling only if it carries an answer-bearing ANCHOR —
+    a date, money/number, month, word-number, or a named entity (a capitalized word that is
+    NOT the sentence's first token). Generic prose without an anchor is not filled."""
+    if _GAPFILL_NUM.search(s) or _GAPFILL_MONTHS.search(s) or _GAPFILL_WORDNUM.search(s):
+        return True
+    toks = s.split()
+    return any(re.match(r"[A-Z][a-z]{2,}", t) for t in toks[1:])
+
+
+def _coverage_gapfill_graph(db_path: str, max_fill: int = 15, cover_floor: float = 0.62,
+                            user_floor: float = 0.28, min_len: int = 20, max_len: int = 300) -> int:
+    """#6: coverage-gated verbatim gap-fill (the salvageable fragment of OT coverage distillation).
+
+    The distiller DROPS salient source regions. Compute each source sentence's coverage_gap =
+    1 − max cosine to any current fact (the cheap source→summary 1-NN / Chamfer term of the
+    optimal-transport coverage objective — no Sinkhorn). Emit a sentence VERBATIM as a kind=gapfill
+    fact when it is (a) UNCOVERED (max-cosine-to-fact < cover_floor), (b) carries a salience ANCHOR
+    (date / number / named entity), AND (c) is USER-RELEVANT (top-k cosine to the user's own facts
+    ≥ user_floor). Criterion (c) is ESSENTIAL: coverage_gap alone surfaces narrative/fiction NOISE
+    the distiller correctly dropped (those are uncovered too); the user-proximity gate keeps only
+    the user's genuinely-dropped facts ("I just got back from a tour at MoMA …": user_prox≈0.37)
+    and rejects fiction ("Matt put a hand on his shoulder": ≈0.19). Deterministic, no LLM; unlike
+    the query-driven raw-chunk backstop, bakes the fact retrievable regardless of query phrasing.
+    Skipped by #1/#2 (kind=gapfill). Fail-open. Gated SINAIN_GAPFILL.
+
+    NOTE: does NOT recover facts whose answer lives in session METADATA rather than text (e.g. a
+    visit DATE carried by occurred_at, not the sentence) — that is the #8 temporal-index lever."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        from raw_store import _sidecar_path
+        sidecar = _sidecar_path(db_path)
+        if not sidecar.exists():
+            return 0
+        # source sentences carrying an anchor (chunk-id ordered), deduped
+        seen: set[str] = set()
+        src: list[tuple[int, str]] = []
+        for line in sidecar.open():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            try:
+                cid = int(rec.get("id", 0))
+            except Exception:
+                cid = 0
+            for sent in re.split(r"(?<=[.!?])\s+", rec.get("text", "")):
+                s = sent.strip()
+                if min_len < len(s) < max_len and _has_salience_anchor(s):
+                    key = s.lower()
+                    if key not in seen:
+                        seen.add(key)
+                        src.append((cid, s))
+        if not src:
+            return 0
+        store = TripleStore(db_path)
+        facts: list[str] = []
+        ufacts: list[str] = []
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a or a.get("valid_to"):
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if v and isinstance(v, str) and len(v) > 8:
+                facts.append(v)
+                if _USER_REF.search(v):
+                    ufacts.append(v)
+        if not facts or len(ufacts) < 3:
+            store.close()
+            return 0  # need a user manifold for the relevance gate
+        fvecs = embed(facts)
+        svecs = embed([s for _, s in src])
+        uvecs = embed(ufacts)
+        if not fvecs or not svecs or not uvecs or len(svecs) != len(src):
+            store.close()
+            return 0
+
+        def _cos(a, b) -> float:
+            return sum(x * y for x, y in zip(a, b))
+
+        def _topk_mean(vec, pool, k=5):
+            ss = sorted((_cos(vec, p) for p in pool), reverse=True)[:max(1, min(k, len(pool)))]
+            return sum(ss) / len(ss)
+
+        gaps = []  # (max_cosine, cid, sentence) — lower max_cosine = more uncovered
+        for i, (cid, s) in enumerate(src):
+            mc = max(_cos(svecs[i], fv) for fv in fvecs)
+            if mc >= cover_floor:
+                continue  # already covered by a fact
+            if _topk_mean(svecs[i], uvecs) < user_floor:
+                continue  # not user-relevant → narrative/fiction noise, not a salient gap
+            gaps.append((mc, cid, s))
+        if not gaps:
+            store.close()
+            return 0
+        gaps.sort(key=lambda g: (g[0], g[1]))  # most-uncovered first; cid tie-break (deterministic)
+        added = 0
+        tx = store.begin_tx("coverage-gapfill")
+        for mc, cid, s in gaps[:max_fill]:
+            ent = _extract_entity_from_fact(s, []) or "general"
+            fid = _fact_id(ent, "gapfill", s)
+            if store.entity(fid):
+                continue
+            store.assert_triple(tx, fid, "entity", ent)
+            store.assert_triple(tx, fid, "attribute", "gapfill")
+            store.assert_triple(tx, fid, "value", s)
+            store.assert_triple(tx, fid, "kind", "gapfill")
+            store.assert_triple(tx, fid, "confidence", "0.75")
+            store.assert_triple(tx, fid, "first_seen", _now_iso())
+            for tag in _extract_tags(s):
+                store.assert_triple(tx, fid, "tag", tag)
+            added += 1
+        store.commit_tx(tx)
+        store.close()
+        if added:
+            print(f"  [gapfill] added {added} coverage gap-fill fact(s)", file=sys.stderr)
+        return added
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [gapfill] failed (fail-open): {e}", file=sys.stderr)
+        return 0
+
+
+def _recurrence_importance_graph(db_path: str, tau: float = 0.55, drop_isolated: bool = False) -> int:
+    """#6b: ONLINE forward-recurrence importance (the streaming reframe of OT coverage).
+
+    Importance is not a property of a fact in isolation — it is REVEALED OVER TIME by how much
+    SUBSEQUENT content returns to a fact's semantic region. Process the source chunks in temporal
+    order (sidecar chunk_id = session order); a fact's `recurrence` = the number of DISTINCT source
+    chunks that contain a sentence with cos ≥ tau to it. A recurring theme the user revisits
+    (mortgage, the job, mom's list) accumulates returns → high recurrence → the stable, important
+    core. A one-off (a single fiction line, incidental trivia) is never revisited → recurrence≈1 →
+    the volatile tail. This is the self-exciting / Hawkes-process view (one mention raises the rate
+    of future mentions; importance = the excitation) and the SEMANTIC, forward-looking generalization
+    of the exact-match `reinforce_count` Sinain already tracks. Unlike static coverage gap-fill, it
+    needs no generic corpus and no user manifold, and it does NOT surface fiction noise (fiction
+    isn't revisited).
+
+    Writes the `recurrence` attribute on every fact (a production-usable importance signal for
+    retrieval ranking / retention). With drop_isolated=True, ALSO soft-retracts the isolated
+    volatile tail (recurrence ≤ 1) — but only for non-user, non-recon/gapfill facts WITHOUT a
+    strong value anchor, so user facts, dated/numeric anchors and curated facts are always kept.
+    Deterministic, fail-open. Gated SINAIN_RECURRENCE in the caller."""
+    try:
+        from triplestore import TripleStore
+        from embed_client import embed
+        from raw_store import _sidecar_path
+        sidecar = _sidecar_path(db_path)
+        if not sidecar.exists():
+            return 0
+        # source chunks in order; each chunk → its sentences
+        chunks: list[list[str]] = []
+        for line in sidecar.open():
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", rec.get("text", ""))
+                     if 12 < len(s.strip()) < 300]
+            if sents:
+                chunks.append(sents)
+        if len(chunks) < 2:
+            return 0
+        store = TripleStore(db_path)
+        items: list[tuple[str, str]] = []  # (fact_id, value)
+        for fid, _ in store.entities_with_attr("value"):
+            if not str(fid).startswith("fact:"):
+                continue
+            a = store.entity(fid)
+            if not a or a.get("valid_to"):
+                continue
+            v = a.get("value", [""]); v = v[0] if isinstance(v, list) else v
+            if v and isinstance(v, str) and len(v) > 8:
+                items.append((fid, v))
+        if not items:
+            store.close()
+            return 0
+        fvecs = embed([v for _, v in items])
+        # embed each chunk's sentences (flatten with chunk index)
+        flat, owner = [], []
+        for ci, sents in enumerate(chunks):
+            for s in sents:
+                flat.append(s); owner.append(ci)
+        svecs = embed(flat)
+        if not fvecs or not svecs:
+            store.close()
+            return 0
+
+        def _cos(a, b) -> float:
+            return sum(x * y for x, y in zip(a, b))
+
+        # recurrence[f] = # distinct chunks with a sentence cos≥tau to f
+        recur = [0] * len(items)
+        for fi in range(len(items)):
+            hit_chunks = set()
+            fv = fvecs[fi]
+            for si in range(len(flat)):
+                if _cos(fv, svecs[si]) >= tau:
+                    hit_chunks.add(owner[si])
+            recur[fi] = len(hit_chunks)
+
+        written = 0
+        dropped = 0
+        tx = store.begin_tx("recurrence-importance")
+        for fi, (fid, v) in enumerate(items):
+            store.assert_triple(tx, fid, "recurrence", str(recur[fi]))
+            written += 1
+            if drop_isolated and recur[fi] <= 1:
+                if _USER_REF.search(v):
+                    continue
+                if _strong_value_tokens(v):
+                    continue
+                a = store.entity(fid)
+                k = a.get("kind", [""]); k = k[0] if isinstance(k, list) else k
+                if k in ("recon", "verbatim", "gapfill"):
+                    continue
+                store.soft_retract_triple(tx, fid)  # isolated one-off, no anchor → volatile tail
+                dropped += 1
+        store.commit_tx(tx)
+        store.close()
+        print(f"  [recurrence] scored {written} fact(s); soft-retracted {dropped} isolated one-off(s)",
+              file=sys.stderr)
+        return written
+    except Exception as e:  # FAIL-OPEN — never break ingestion
+        print(f"  [recurrence] failed (fail-open): {e}", file=sys.stderr)
+        return 0
+
+
+def _facts_to_graph_ops(
+    digest: dict,
+    transcript_speakers: list[str] | None = None,
+) -> list[dict]:
     """Convert ALL distiller output + raw feed items to graph ops.
 
     DETERMINISTIC — no LLM needed. Stores distilled knowledge (facts,
     decisions, patterns, preferences, summary) AND verbatim raw captures
     (audio quotes, agent analysis) so the triplestore is the single
     source of truth for session recall.
+
+    transcript_speakers: optional list of distinct speaker labels (e.g.
+        ["SPEAKER_00", "SPEAKER_01"]) active in the batch that produced
+        this digest. When non-empty, every distilled op gets
+        op["mentioned_by"] = transcript_speakers so _execute_graph_ops
+        can write mentioned_by triples. Verbatim audio ops get per-item
+        speaker granularity from raw_items below. See
+        .planning/phases/diarization-levers/00-PLAN.md Lever 4.
     """
     ops = []
     known_entities = digest.get("entities", [])
     raw_items = digest.pop("_rawItems", None) or []
+    batch_speakers = list(transcript_speakers or [])
 
     # Session anchor from whatHappened
     session_ts = digest.get("ts", "")[:16]  # "2026-05-07T10:08"
@@ -442,25 +1149,62 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "domain": "session",
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": batch_speakers,
         })
 
     # Facts (distilled)
-    for fact_text in digest.get("facts", []):
+    #
+    # Lever 1 (2026-05-28): facts items can now be either strings (legacy) or
+    # objects {text, attributedTo?, subject?}. When an object carries
+    # attributedTo, route it into per-fact mentioned_by (single speaker,
+    # discriminative). When a string or no attributedTo, fall back to
+    # batch_speakers (Lever 4 coarse behavior preserved). When the object
+    # supplies subject, prefer it over heuristic entity extraction.
+    for fact_item in _salience_filter(digest.get("facts", [])):
+        attributed_to: str | None = None
+        explicit_subject: str | None = None
+        if isinstance(fact_item, str):
+            fact_text = fact_item
+        elif isinstance(fact_item, dict) and isinstance(fact_item.get("text"), str):
+            fact_text = fact_item["text"]
+            at = fact_item.get("attributedTo")
+            if isinstance(at, str) and at.strip():
+                attributed_to = at.strip()
+            subj = fact_item.get("subject")
+            if isinstance(subj, str) and subj.strip():
+                explicit_subject = subj.strip()
+        else:
+            # Defensive coercion (pre-2026-05-28 path): local distillers
+            # sometimes emit non-string facts (dicts for typed SPO triples,
+            # bools, ints). JSON-stringify so length checks + storage work.
+            try:
+                fact_text = json.dumps(fact_item, ensure_ascii=False)
+            except (TypeError, ValueError):
+                fact_text = str(fact_item)
+
         if not fact_text or len(fact_text) < 5:
             continue
-        entity = _extract_entity_from_fact(fact_text, known_entities)
+        entity = explicit_subject or _extract_entity_from_fact(fact_text, known_entities)
+        per_fact_speakers = [attributed_to] if attributed_to else batch_speakers
         ops.append({
             "op": "assert",
             "entity": entity,
             "attribute": "value",
             "value": fact_text,
             "confidence": 0.9,
-            "kind": "distilled",
+            "kind": (fact_item.get("kind") if isinstance(fact_item, dict)
+                     and fact_item.get("kind") else "distilled"),
             "session_ref": session_eid,
+            "mentioned_by": per_fact_speakers,
         })
 
     # Decisions (distilled, lower confidence — time-bound)
     for decision_text in digest.get("decisions", []):
+        if not isinstance(decision_text, str):
+            try:
+                decision_text = json.dumps(decision_text, ensure_ascii=False)
+            except (TypeError, ValueError):
+                decision_text = str(decision_text)
         if not decision_text or len(decision_text) < 5:
             continue
         entity = _extract_entity_from_fact(decision_text, known_entities)
@@ -472,6 +1216,7 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.7,
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": batch_speakers,
         })
 
     # Patterns + Preferences (distilled)
@@ -487,9 +1232,12 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.7,
             "kind": "distilled",
             "session_ref": session_eid,
+            "mentioned_by": batch_speakers,
         })
 
-    # Verbatim audio quotes (top 20 by length, > 30 chars)
+    # Verbatim audio quotes (top 20 by length, > 30 chars). Per-item speaker
+    # when present; falls back to batch-level when the source raw item has no
+    # speaker field (e.g. live capture before sherpa-onnx is wired in).
     audio = [i for i in raw_items
              if i.get("source") == "audio" and len(i.get("text", "")) > 30]
     for item in sorted(audio, key=lambda x: -len(x.get("text", "")))[:20]:
@@ -497,6 +1245,8 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
         if len(text) < 20:
             continue
         entity = _extract_entity_from_fact(text, known_entities)
+        item_speaker = item.get("speaker")
+        speakers_for_op = [item_speaker] if item_speaker else batch_speakers
         ops.append({
             "op": "assert",
             "entity": entity,
@@ -505,9 +1255,12 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.95,
             "kind": "verbatim",
             "session_ref": session_eid,
+            "mentioned_by": speakers_for_op,
         })
 
-    # Agent analysis responses (last 10, > 50 chars — verbatim)
+    # Agent analysis responses (last 10, > 50 chars — verbatim).
+    # Agent/openclaw sources are NOT human-spoken, so mentioned_by stays
+    # batch-level (or empty) — agents are not speakers.
     agents = [i for i in raw_items
               if i.get("source") in ("agent", "openclaw")
               and len(i.get("text", "")) > 50]
@@ -524,6 +1277,7 @@ def _facts_to_graph_ops(digest: dict) -> list[dict]:
             "confidence": 0.8,
             "kind": "verbatim",
             "session_ref": session_eid,
+            "mentioned_by": [],
         })
 
     return ops
@@ -573,6 +1327,11 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 store.assert_triple(tx, entity_id, "value", value)
                 store.assert_triple(tx, entity_id, "confidence", str(confidence))
                 store.assert_triple(tx, entity_id, "first_seen", digest_ts)
+                # T1-SUPERSEDE bi-temporal: occurred_at = EVENT time (the session's
+                # timestamp), distinct from wall-clock ingest time. Lets latest-state
+                # queries pick the most-recent value by when it HAPPENED, not when it
+                # was distilled. (digest_ts is the session ts in this pipeline.)
+                store.assert_triple(tx, entity_id, "occurred_at", digest_ts)
                 store.assert_triple(tx, entity_id, "last_reinforced", digest_ts)
                 store.assert_triple(tx, entity_id, "reinforce_count", "1")
                 if domain:
@@ -583,6 +1342,16 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 session_ref = op_data.get("session_ref")
                 if session_ref:
                     store.assert_triple(tx, entity_id, "session", session_ref, value_type="ref")
+                # Diarization Lever 4: mentioned_by triples — one per distinct
+                # speaker active in the batch that produced this fact. Pure
+                # graph metadata, never enters fact text. Queries opt in via
+                # query_facts_hybrid(..., mentioned_by_speaker=[...]). See
+                # .planning/phases/diarization-levers/00-PLAN.md
+                mentioned_by = op_data.get("mentioned_by") or []
+                if mentioned_by:
+                    for spk in mentioned_by:
+                        if spk:
+                            store.assert_triple(tx, entity_id, "mentioned_by", spk)
                 # Auto-tag for keyword-based discovery
                 for tag in _extract_tags(value):
                     store.assert_triple(tx, entity_id, "tag", tag)
@@ -638,11 +1407,10 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 tx = store.begin_tx("knowledge_integrator", metadata=json.dumps({
                     "op": "retract", "entity_id": entity_id, "reason": reason, "digest_ts": digest_ts
                 }))
-                # Retract all attributes of this entity
-                attrs = store.entity(entity_id)
-                for attr_name, values in attrs.items():
-                    for val in values:
-                        store.retract_triple(tx, entity_id, attr_name, val)
+                # T1-SUPERSEDE: SOFT-retract (mark valid_to) instead of hard-delete,
+                # so a distiller-driven retraction is reversible and visible to
+                # as-of/history queries; current-state reads exclude it.
+                store.soft_retract_triple(tx, entity_id)
                 stats["retracted"] += 1
 
         # --- Build entity graph layer (two-layer model) ---
@@ -949,6 +1717,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Knowledge Integrator")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--digest", default=None, help="SessionDigest JSON string")
+    parser.add_argument("--transcript", default=None,
+                        help="Raw transcript JSON (list of {source,text,ts} items). When provided, "
+                             "the zero-LLM typed-link extractor + user-attribute extractor "
+                             "run post-LLM to recover facts the distiller missed. gbrain "
+                             "Proposal A pattern — topic-robust, deterministic.")
     parser.add_argument("--bootstrap", action="store_true", help="One-time: seed graph from playbook")
     parser.add_argument("--retag", action="store_true", help="Re-extract tags for all existing facts")
     parser.add_argument("--dedup-entities", action="store_true", help="Merge fragmented entity nodes")
@@ -981,12 +1754,10 @@ def main() -> None:
         from triplestore import TripleStore
         store = TripleStore(db_path)
         # Get all fact entities that have a 'value' attribute
-        rows = store._conn.execute(
-            "SELECT DISTINCT entity_id FROM triples WHERE attribute = 'value' AND NOT retracted AND entity_id LIKE 'fact:%'"
-        ).fetchall()
+        fact_ids = sorted({eid for eid, _ in store.entities_with_attr("value")
+                           if eid.startswith("fact:")})
         tagged = 0
-        for row in rows:
-            fid = row["entity_id"]
+        for fid in fact_ids:
             attrs = store.entity(fid)
             value_text = attrs.get("value", [""])[0] if attrs else ""
             existing_tags = set(attrs.get("tag", [])) if attrs else set()
@@ -998,7 +1769,7 @@ def main() -> None:
                     store.assert_triple(tx, fid, "tag", tag)
                 tagged += 1
         store.close()
-        output_json({"retagged": tagged, "total_facts": len(rows)})
+        output_json({"retagged": tagged, "total_facts": len(fact_ids)})
         return
 
     # Normal mode: integrate session digest
@@ -1012,6 +1783,13 @@ def main() -> None:
     except json.JSONDecodeError as e:
         output_json({"error": f"Invalid digest JSON: {e}"})
         return
+
+    # Normalize digest at parse boundary. Local distillers (phi4-mini and
+    # similar small models) emit list fields as dicts, bools, or nested
+    # objects rather than the list[str] shape main's distiller produces.
+    # Coerce here so downstream code (graph ops, playbook rendering,
+    # tag extraction) can rely on the schema contract.
+    digest = _normalize_digest(digest)
 
     # Skip if digest indicates empty session
     if digest.get("isEmpty", False):
@@ -1038,13 +1816,108 @@ def main() -> None:
             facts_lines.append(f"- [{eid}] ({domain}, confidence={conf}) {val}")
         facts_text = f"\n\n## Existing Graph Facts (for reference — reinforce or retract as needed)\n" + "\n".join(facts_lines)
 
+    # ── Step 0.5: Pre-parse transcript once for downstream speaker + zero-LLM use ──
+    # Lever 4 (mentioned_by speaker triples) needs the distinct speaker set
+    # for this batch before _facts_to_graph_ops runs. We also reuse the parsed
+    # items in Step 1.5 below (zero-LLM extractors). Failing the parse here is
+    # non-fatal — fall back to empty list, which preserves prior behaviour.
+    transcript_items: list[dict] = []
+    transcript_speakers: list[str] = []
+    if args.transcript:
+        try:
+            transcript_items = json.loads(args.transcript)
+            if not isinstance(transcript_items, list):
+                transcript_items = []
+            transcript_speakers = sorted({
+                i.get("speaker") for i in transcript_items
+                if isinstance(i, dict) and isinstance(i.get("speaker"), str) and i.get("speaker")
+            })
+        except (json.JSONDecodeError, TypeError):
+            transcript_items = []
+            transcript_speakers = []
+
     # ── Step 1: DETERMINISTIC graph ops from distiller output (no LLM needed) ──
     # The distiller already extracted structured facts — conversion is mechanical.
-    graph_ops = _facts_to_graph_ops(digest)
+    graph_ops = _facts_to_graph_ops(digest, transcript_speakers=transcript_speakers)
     digest_ts = digest.get("ts", datetime.now(timezone.utc).isoformat())
+
+    # ── Step 1.5: Zero-LLM typed-link + user-attribute extractor ──
+    # Topic-robust safety net: weak distillers (phi4-mini, qwen2.5:7b) drop
+    # first-person attribute claims when the session is crowded with other
+    # content. Run the deterministic regex extractor over the raw transcript
+    # to recover degree/occupation/location/duration/name/age/relation facts
+    # that match high-signal patterns. Facts merge into graph_ops as ASSERT
+    # ops at confidence=0.85 (below LLM-distilled 0.9 — they don't
+    # dominate when both are present, but they cover gaps when LLM missed).
+    if transcript_items:
+        try:
+            from link_extraction import extract_user_attributes, extract_auto_edges
+            user_facts = extract_user_attributes(transcript_items)
+            for f in user_facts:
+                graph_ops.append({
+                    "op": "assert",
+                    "entity": f["entity"],
+                    "attribute": f["attribute"],
+                    "value": f["value"],
+                    "confidence": f["confidence"],
+                    "domain": "user",
+                    "kind": f.get("kind", "auto-extracted"),
+                    # Auto-extracted user attributes inherit batch-level speakers
+                    # (the regex extractor doesn't know which speaker uttered
+                    # the matched phrase — coarse but consistent).
+                    "mentioned_by": transcript_speakers,
+                })
+            if user_facts:
+                print(f"  [zero-llm] user-attribute extractor: +{len(user_facts)} fact(s)",
+                      file=sys.stderr)
+
+            # Entity-relationship extractor (gbrain Proposal A) — fires when
+            # the distiller's entities list has >=2 entries.
+            if digest_entities and len(digest_entities) >= 2:
+                edges = extract_auto_edges(transcript_items, [
+                    {"id": f"entity:{e.get('name', '').lower().replace(' ', '-')}",
+                     "name": e.get("name", ""), "type": e.get("type", "")}
+                    for e in digest_entities
+                    if isinstance(e, dict) and e.get("name")
+                ])
+                for edge in edges:
+                    graph_ops.append({
+                        "op": "assert",
+                        "entity": edge["subject_id"].replace("entity:", ""),
+                        "attribute": edge["predicate"],
+                        "value": edge.get("object_name", edge["object_id"]),
+                        "confidence": edge["confidence"],
+                        "domain": "entity-relationship",
+                        "kind": "auto-extracted",
+                        "mentioned_by": transcript_speakers,
+                    })
+                if edges:
+                    print(f"  [zero-llm] entity-relationship extractor: +{len(edges)} edge(s)",
+                          file=sys.stderr)
+        except Exception as e:
+            print(f"  [zero-llm] extractor failed (non-fatal): {e}", file=sys.stderr)
 
     # Dedup + execute
     graph_stats = _execute_graph_ops(db_path, graph_ops, digest_ts, digest_entities=digest_entities)
+
+    # Option A (PRODUCTION raw-episodic storage): append this batch's raw
+    # transcript as a chunk so retrieval can recover detail the lossy distiller
+    # dropped (the gold often survives in the transcript even when distillation
+    # omits it). Gated SINAIN_RAW_CHUNKS (default on). Skipped for bench temp
+    # dirs — bench stores chunks via ingest.py at the cache path (a temp-dir
+    # sidecar would be lost in the cache copytree).
+    if os.environ.get("SINAIN_RAW_CHUNKS", "1") != "0" and transcript_items \
+            and "sinain-bench-" not in str(db_path):
+        try:
+            from raw_store import append_chunks
+            _txt = "\n".join(
+                (it.get("text") or it.get("content") or "")
+                for it in transcript_items if isinstance(it, dict)
+            ).strip()
+            if _txt:
+                append_chunks(db_path, [_txt])
+        except Exception as e:
+            print(f"  [raw_store] append failed (non-fatal): {e}", file=sys.stderr)
 
     # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
     # at our scale (<200 facts). Individual facts are more retrievable than merged ones.
@@ -1077,12 +1950,16 @@ def main() -> None:
 
     # Add novel facts as new playbook lines (no LLM — just format as bullet points)
     for fact in digest.get("facts", [])[:5]:  # cap at 5 new lines per pass
-        fact_tags = set(_extract_tags(fact))
+        # Defensive coercion 2026-05-27: local distillers can emit dict/list
+        # facts (typed graph triples) rather than English sentences. Coerce
+        # to string so the playbook formatting and log slice don't crash.
+        fact_str = fact if isinstance(fact, str) else json.dumps(fact, ensure_ascii=False)
+        fact_tags = set(_extract_tags(fact_str))
         # Only add if no existing playbook line covers this
         if not any(set(_extract_tags(l)) & fact_tags for l in playbook_lines if len(fact_tags) > 1):
-            new_line = f"- {fact} (seen 1)"
+            new_line = f"- {fact_str} (seen 1)"
             updated_lines.append(new_line)
-            changes["added"].append(fact[:60])
+            changes["added"].append(fact_str[:60])
 
     # Keep playbook under 50 lines
     if len(updated_lines) > 50:
