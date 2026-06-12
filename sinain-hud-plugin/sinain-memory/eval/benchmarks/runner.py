@@ -73,11 +73,15 @@ def _log_distillation_summary(db_path: Path, sample_n: int = 5) -> None:
 
 def _log_retrieval_diagnostics(
     question, retrieved_facts: list[dict], retrieval: dict, db_path
-) -> None:
+) -> "str | None":
     """Log top retrieved facts for the question. When content_recall@10 < 100%,
     additionally search the graph for facts containing gold-answer keywords —
     distinguishes "missing from graph" (distillation failure) from "buried"
     (retrieval failure).
+
+    Returns the retrieval-side verdict for P0 failure-stage attribution:
+    "retrieval_miss" | "stale_current" | "ambiguous" | "write_drop", or None
+    when gold reached top-1 (no retrieval-stage failure to diagnose).
     """
     qid = getattr(question, "id", "?")
     cr1 = retrieval.get("content_recall@1", "?")
@@ -97,10 +101,45 @@ def _log_retrieval_diagnostics(
     except (ValueError, TypeError):
         cr1_val = 1.0
     if cr1_val < 1.0:
-        _grep_graph_for_keywords(question, db_path)
+        return _grep_graph_for_keywords(question, db_path)
+    return None
 
 
-def _grep_graph_for_keywords(question, db_path) -> None:
+def _classify_failure_stage(
+    retrieval: dict, retrieval_class: "str | None", sinain_answer: "dict | None"
+) -> str:
+    """P0 per-question failure-stage attribution. Combines the retrieval-side
+    verdict (from _log_retrieval_diagnostics) with answer correctness to locate
+    WHERE a multi-session question failed — the scoreboard the memory phases are
+    measured against. Returns one of:
+      ok | answer_side | retrieval_miss | stale_current | write_drop |
+      ambiguous | unknown.
+    """
+    label = (sinain_answer or {}).get("paper_label")
+    if label == 1:
+        return "ok"
+    # Answer wrong (or unscored): attribute the failing stage.
+    try:
+        cr1 = float(retrieval.get("content_recall@1", 0) or 0)
+        cr10 = float(retrieval.get("content_recall@10", 0) or 0)
+    except (TypeError, ValueError):
+        cr1 = cr10 = 0.0
+    # Gold reached top-1 yet the model still got it wrong -> answer-side
+    # (synthesis / abstention / stale-pick), unless the graph copy is superseded
+    # (then it's a stale-current problem even though it ranked).
+    if cr1 >= 1.0:
+        return "stale_current" if retrieval_class == "stale_current" else "answer_side"
+    # Gold in graph (or in top-10) but mis-ranked -> retrieval miss.
+    if retrieval_class in ("retrieval_miss", "stale_current"):
+        return retrieval_class
+    if cr10 >= 1.0:
+        return "retrieval_miss"
+    if retrieval_class in ("write_drop", "ambiguous"):
+        return retrieval_class
+    return "unknown"
+
+
+def _grep_graph_for_keywords(question, db_path) -> "str | None":
     """Search the graph for facts containing gold-answer phrases / keywords.
 
     Phrase-first matching prevents the false-positive we saw with
@@ -131,7 +170,7 @@ def _grep_graph_for_keywords(question, db_path) -> None:
         gold = (getattr(question, "gold_answer", "") or "").strip()
         if not gold:
             store.close()
-            return
+            return None
 
         # Build the phrase candidates: full gold answer, plus contiguous
         # 2-3 word windows of content words (skips short/stop words).
@@ -149,7 +188,7 @@ def _grep_graph_for_keywords(question, db_path) -> None:
         keyword_candidates = sorted(set(content_words), key=len, reverse=True)[:5]
 
         # Single-pass scan over all facts.
-        phrase_hits: list[tuple[str, str, str]] = []  # (matched_phrase, eid, value)
+        phrase_hits: list[tuple[str, str, str, bool]] = []  # (matched_phrase, eid, value, superseded)
         keyword_hits: list[tuple[int, str, str]] = []  # (match_count, eid, value)
         for eid in {e for e, _ in store.entities_with_attr("value") if e.startswith("fact:")}:
             attrs = store.entity(eid)
@@ -157,9 +196,12 @@ def _grep_graph_for_keywords(question, db_path) -> None:
             val_lc = re.sub(r"\s+", " ", val_full.lower())
             # Phrase pass — first match wins (we surface the longest phrase
             # since phrase_candidates is in length-desc order after gold).
+            # A fact carrying ``valid_to`` is superseded (P0 stale-current signal):
+            # the gold value IS in the graph but has been retracted as no-longer-current.
             for p in phrase_candidates:
                 if p in val_lc:
-                    phrase_hits.append((p, eid, val_full[:200]))
+                    superseded = bool(attrs.get("valid_to"))
+                    phrase_hits.append((p, eid, val_full[:200], superseded))
                     break
             # Keyword pass — count distinct keywords matched.
             kw_matched = [k for k in keyword_candidates if k in val_lc]
@@ -168,11 +210,18 @@ def _grep_graph_for_keywords(question, db_path) -> None:
         store.close()
 
         if phrase_hits:
-            # Real retrieval failure: the fact IS there.
-            print(f"  [diagnostic] RETRIEVAL GAP — graph contains {len(phrase_hits)} fact(s) "
-                  f"with gold-phrase match (looked for {phrase_candidates[:3]!r}); top:")
-            for matched_phrase, eid, val in phrase_hits[:3]:
-                print(f"      {eid} [matched: {matched_phrase!r}]: {val}")
+            # The gold fact IS in the graph. If every phrase-hit is superseded,
+            # the failure is stale-current (the value exists but was retracted);
+            # otherwise it's a ranking/retrieval miss.
+            all_superseded = all(h[3] for h in phrase_hits)
+            verdict = "stale_current" if all_superseded else "retrieval_miss"
+            tag = "STALE-CURRENT" if all_superseded else "RETRIEVAL GAP"
+            print(f"  [diagnostic] {tag} — graph contains {len(phrase_hits)} fact(s) "
+                  f"with gold-phrase match (looked for {phrase_candidates[:3]!r}"
+                  f"{', all superseded' if all_superseded else ''}); top:")
+            for matched_phrase, eid, val, sup in phrase_hits[:3]:
+                print(f"      {eid} [matched: {matched_phrase!r}{', superseded' if sup else ''}]: {val}")
+            return verdict
         elif keyword_hits:
             # Common case for multi-word gold: scattered vocabulary in
             # semantically-unrelated facts. Mostly a distillation gap, but
@@ -184,12 +233,15 @@ def _grep_graph_for_keywords(question, db_path) -> None:
                   "vocabulary. Top 3 keyword matches (verify by reading):")
             for _, eid, val in keyword_hits[:3]:
                 print(f"      {eid}: {val}")
+            return "ambiguous"
         else:
             print(f"  [diagnostic] DISTILLATION GAP — no facts contain gold keywords "
                   f"{keyword_candidates!r}; the answer never reached the graph. "
                   "Investigate distiller prompt / model.")
+            return "write_drop"
     except Exception as e:
         print(f"  [diagnostic] graph keyword search failed: {e}")
+        return None
 
 
 def _load_resume(resume_path: Path) -> dict[str, dict]:
@@ -208,6 +260,7 @@ def run_benchmark(
     conditions: list[str],
     *,
     subset: int | None = None,
+    qids: list | None = None,
     offset: int = 0,
     qa_model: str = QA_MODEL,
     judge_model: str = JUDGE_MODEL,
@@ -253,7 +306,12 @@ def run_benchmark(
     if offset:
         all_questions = all_questions[offset:]
 
-    if subset:
+    if qids:
+        qset = {q.strip() for q in qids if q.strip()}
+        all_questions = [(inst, q) for inst, q in all_questions if getattr(q, "id", None) in qset]
+        print(f"[runner] --qids filter -> {len(all_questions)} questions", flush=True)
+
+    if subset and not qids:  # --qids overrides subset selection entirely
         if stratified:
             # Take equal samples from each question category
             from collections import defaultdict
@@ -322,12 +380,13 @@ def run_benchmark(
         # Retrieval metrics (content-based: do retrieved facts contain the answer?)
         retrieval = {}
         retrieved_facts: list[dict] = []
+        retrieval_class: "str | None" = None
         if db_path and "sinain-memory" in conditions:
             retrieved_facts = _get_retrieved_facts(str(db_path), question.text, profile=profile)
             retrieval = compute_content_recall(
                 retrieved_facts, question.gold_answer,
             )
-            _log_retrieval_diagnostics(question, retrieved_facts, retrieval, db_path)
+            retrieval_class = _log_retrieval_diagnostics(question, retrieved_facts, retrieval, db_path)
 
         # Generate answers per condition
         answers = {}
@@ -409,6 +468,16 @@ def run_benchmark(
 
             answers[cond] = ans_entry
 
+        # P0 failure-stage attribution: WHERE did this question fail? (recorded
+        # in retrieval.stage so the dashboard can slice category × stage.)
+        if db_path and "sinain-memory" in conditions:
+            if skip_llm:
+                retrieval["stage"] = retrieval_class or None
+            else:
+                retrieval["stage"] = _classify_failure_stage(
+                    retrieval, retrieval_class, answers.get("sinain-memory")
+                )
+
         entry = {
             "id": qid,
             "question": question.text,
@@ -465,6 +534,8 @@ def main() -> None:
                              "batched full-500 eval: --offset 50 --subset 50 = slice [50:100].")
     parser.add_argument("--subset", type=int, default=None,
                         help="Run only first N questions (for dev iteration)")
+    parser.add_argument("--qids", default=None,
+                        help="Comma-separated question ids to run (targeted A/B); overrides subset selection")
     parser.add_argument("--qa-model", default=QA_MODEL, help="Model for QA generation")
     parser.add_argument("--judge-model", default=JUDGE_MODEL, help="Model for QA judging")
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
@@ -543,6 +614,7 @@ def main() -> None:
             summary, details = run_benchmark(
                 bench_name, conditions,
                 subset=args.subset,
+                qids=(args.qids.split(",") if args.qids else None),
                 offset=args.offset,
                 qa_model=args.qa_model,
                 judge_model=args.judge_model,

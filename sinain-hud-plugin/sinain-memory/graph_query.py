@@ -1736,6 +1736,37 @@ def query_facts_hybrid(
                 # they must survive the downstream excerpt cap, which keeps the first few.
                 _chunk_queries.insert(0, " ".join(_content) + " cost price paid bought purchased spent dollars expense")
         _seen_ch = set(); _ci = 0
+        # REDUCTION SELECTION (generalizes COST_QUERY from spending-sums to all "how many X"
+        # reductions): top-k similarity buries the scattered instance tail (an instrument
+        # mentioned in a pedal-shopping session ranks ~#84). A query-INDEPENDENT structural
+        # scan — user-has spans (SVO dobj ∪ possessive), ranked by the free embedder's cosine
+        # to the question's object-class noun — surfaces the complete set as SHORT spans that
+        # LEAD past the excerpt cap. Recall-oriented; the QA call does precision. No LLM here.
+        # Gated SINAIN_REDUCE_SELECT (default OFF — a CAPABLE-READER feature). Recall-oriented
+        # selection of the scattered instance tail similarity retrieval buries: user-sentences
+        # carrying a question-predicate verb (clothing "pick up"/"return") OR a question class noun
+        # (stative "…my 10-gallon tank…my betta fish"), digit-boosted, short spans that LEAD past
+        # the excerpt cap; the READER does precision. 12-domain sweep verdict: net-POSITIVE with a
+        # capable reader (gpt-4o: clothing→3, aquarium 16→17, graduations 1→3; no regression on
+        # cuisines/jewelry/instruments/devices), but MIXED with a weak reader (gemini regresses
+        # cuisines 5→7, jewelry 2→1 — it can't filter the extra candidates the strong reader does).
+        # So: enable in production (capable agent); leave OFF for the gemini bench. See
+        # project_2026-06-06_cathub_writetime_worktree memory.
+        if (_os_rk.environ.get("SINAIN_REDUCE_SELECT", "0") != "0"
+                and re.search(r"\bhow many\b|\bnumber of\b", query.lower())):
+            try:
+                from reduction_select import select_instance_spans
+                for _sp in select_instance_spans(db_path, query):
+                    if _sp in _seen_ch:
+                        continue
+                    _seen_ch.add(_sp)
+                    final.append({
+                        "entity_id": f"excerpt-{_ci}", "entity": "excerpt",
+                        "value": _sp, "source": "raw-excerpt",
+                    })
+                    _ci += 1
+            except Exception:
+                pass
         for _cq in _chunk_queries:
             for ch in retrieve_chunks(db_path, _cq, k=_rk):
                 _key = ch if isinstance(ch, str) else str(ch)

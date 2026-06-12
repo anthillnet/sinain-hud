@@ -1283,6 +1283,149 @@ def _facts_to_graph_ops(
     return ops
 
 
+# ── Tier-1 write-time slot supersession (SINAIN_SLOT_SUPERSEDE) ──────────────
+# A "slot" = (subject, masked-template, volatile-type). When a new fact fills the
+# same scalar/functional slot as an existing CURRENT fact ("pre-approved for
+# $350k" -> "$400k"; "twice a week" -> "three times a week"), the OLDER (by
+# occurred_at) is soft-retracted. Deterministic (no LLM), high-precision: requires
+# a shared distinctive tag AND a strong masked-template overlap AND the same
+# volatile unit type. Tier-1 = scalar values only (money/count/frequency/day/date)
+# — these update-in-place; cumulative slots (owned items, people) are untouched.
+_VOL_PATS = [
+    ("money", re.compile(r"\$\s?\d[\d,]*\.?\d*|\b\d[\d,]*\s*(?:dollars|usd|bucks)\b")),
+    ("freq",  re.compile(r"\b(?:once|twice|thrice|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+times)\b")),
+    ("day",   re.compile(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b")),
+    ("date",  re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b")),
+    ("num",   re.compile(r"\b\d[\d,]*\.?\d*\b")),
+]
+_SLOT_STOP = set("the a an of to in on for and or is are was were be been have has had "
+                 "i you we my our your it that this with at by from as me now then".split())
+
+
+def _volatile_type(value: str):
+    v = (value or "").lower()
+    for t, rx in _VOL_PATS:
+        if rx.search(v):
+            return t
+    return None
+
+
+def _mask_template(value: str) -> str:
+    v = (value or "").lower()
+    for t, rx in _VOL_PATS:
+        v = rx.sub(f"@{t}", v)
+    return v
+
+
+def _slot_tokens(text: str) -> set:
+    return {t for t in re.findall(r"@\w+|[a-z]{3,}", text or "") if t not in _SLOT_STOP}
+
+
+def _slot_supersede_one(store, tx, new_eid, value, occurred_at) -> int:
+    """If `value` is scalar/functional and an existing CURRENT fact fills the same
+    slot, soft-retract the older. Returns count retracted. Fail-safe: any error
+    returns 0 (no retraction)."""
+    try:
+        vtype = _volatile_type(value)
+        if not vtype:
+            return 0
+        tmpl_new = _slot_tokens(_mask_template(value))
+        if len(tmpl_new) < 2:                      # too thin a template -> skip
+            return 0
+        tags = [t for t in _extract_tags(value)]
+        if not tags:
+            return 0
+        cand = set()
+        for t in tags:
+            for eid in store.lookup("tag", t):
+                if eid != new_eid and isinstance(eid, str) and eid.startswith("fact:"):
+                    cand.add(eid)
+        retracted = 0
+        for old_eid in cand:
+            a = store.entity(old_eid)
+            if not a or a.get("valid_to"):          # current facts only
+                continue
+            old_val = (a.get("value") or [""])[0]
+            if not old_val or old_val.strip().lower() == (value or "").strip().lower():
+                continue                            # identical -> reinforcement, not supersession
+            if _volatile_type(old_val) != vtype:    # same unit type
+                continue
+            tmpl_old = _slot_tokens(_mask_template(old_val))
+            if not tmpl_old:
+                continue
+            # Jaccard (symmetric, near-identity): a true slot update is the SAME
+            # statement differing ONLY in the masked scalar. Strict threshold so
+            # cumulative facts that merely share a scalar ("bought a ROAD bike in
+            # @date" vs "...MOUNTAIN bike...") — which differ in the OBJECT — are
+            # NOT merged (they'd score ~0.6, below 0.9).
+            jac = len(tmpl_new & tmpl_old) / max(1, len(tmpl_new | tmpl_old))
+            if jac < 0.9:
+                continue
+            ots = a.get("occurred_at") or a.get("first_seen") or [""]
+            ots = ots[0] if isinstance(ots, list) else ots
+            if str(occurred_at) >= str(ots):        # newer wins by event time
+                store.soft_retract_triple(tx, old_eid, superseded_by=new_eid, valid_to=str(occurred_at))
+            else:
+                store.soft_retract_triple(tx, new_eid, superseded_by=old_eid, valid_to=str(ots))
+            retracted += 1
+        return retracted
+    except Exception as e:
+        print(f"  [slot-supersede] non-fatal: {e}", file=sys.stderr)
+        return 0
+
+
+def slot_supersede_sweep(db_path: str) -> int:
+    """Apply Tier-1 slot supersession to ALL current facts in an existing store —
+    a post-hoc, order-independent proxy for the per-assert write-time path (used
+    for same-store A/B, which isolates the supersession effect from re-distill
+    variance). For functional slots this is equivalent to the per-assert path
+    (newest-by-occurred_at wins regardless of insertion order). Returns count."""
+    from triplestore import TripleStore
+    store = TripleStore(db_path)
+    try:
+        facts = []
+        for eid, _ in store.entities_with_attr("value"):
+            if not isinstance(eid, str) or not eid.startswith("fact:"):
+                continue
+            a = store.entity(eid)
+            if not a or a.get("valid_to"):
+                continue
+            val = (a.get("value") or [""])[0]
+            if not val or not _volatile_type(val):
+                continue
+            tmpl = _slot_tokens(_mask_template(val))
+            if len(tmpl) < 2:
+                continue
+            ots = a.get("occurred_at") or a.get("first_seen") or [""]
+            ots = ots[0] if isinstance(ots, list) else ots
+            facts.append([eid, val, str(ots), set(a.get("tag") or []), tmpl, _volatile_type(val)])
+        tx = store.begin_tx("slot-sweep")
+        dead = set()
+        retracted = 0
+        for i in range(len(facts)):
+            ei, vi, ti, gi, mi, yi = facts[i]
+            if ei in dead:
+                continue
+            for j in range(i + 1, len(facts)):
+                ej, vj, tj, gj, mj, yj = facts[j]
+                if ej in dead or yj != yi or not (gi & gj):
+                    continue
+                if vi.strip().lower() == vj.strip().lower():
+                    continue
+                if len(mi & mj) / max(1, len(mi | mj)) < 0.9:   # Jaccard near-identity
+                    continue
+                retracted += 1
+                if ti >= tj:                      # i newer -> retract j
+                    store.soft_retract_triple(tx, ej, superseded_by=ei, valid_to=ti); dead.add(ej)
+                else:                             # j newer -> retract i
+                    store.soft_retract_triple(tx, ei, superseded_by=ej, valid_to=tj); dead.add(ei)
+                    break
+        store.commit_tx(tx)
+        return retracted
+    finally:
+        store.close()
+
+
 def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_entities: list | None = None) -> dict:
     """Execute graph operations + build entity graph with ref edges."""
     if not ops:
@@ -1356,6 +1499,13 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                 for tag in _extract_tags(value):
                     store.assert_triple(tx, entity_id, "tag", tag)
                 stats["asserted"] += 1
+
+                # Tier-1 write-time slot supersession: a new scalar/functional value
+                # displaces the older same-slot fact (cross-session: candidates come
+                # from the whole graph, which the session-local distiller can't see).
+                if os.environ.get("SINAIN_SLOT_SUPERSEDE") == "1":
+                    stats["slot_superseded"] = stats.get("slot_superseded", 0) + \
+                        _slot_supersede_one(store, tx, entity_id, value, op_data.get("occurred_at") or digest_ts)
 
             elif op == "reinforce":
                 entity_id = op_data.get("entityId", "")
@@ -1918,6 +2068,31 @@ def main() -> None:
                 append_chunks(db_path, [_txt])
         except Exception as e:
             print(f"  [raw_store] append failed (non-fatal): {e}", file=sys.stderr)
+
+    # ── Step 1.7: Write-time typed-edge category enrichment (SINAIN_TYPED_EDGES) ──
+    # Type user-action objects with their category AT WRITE TIME — reusing the
+    # distiller's configured model (category_enrichment.type_categories →
+    # call_llm(script="session_distiller"), so ONE model in any mode, never a 2nd
+    # resident model / 2nd local stream). Recall: broad SVO over raw ∪ distilled.
+    # Precision: the typer's taxonomic labels (bookshelf→furniture) baked in now.
+    # Read time (graph_query / reductions) then resolves "how many X" by a pure
+    # structural backrefs walk over category:* hubs — no read-time LLM. Fail-open.
+    if os.environ.get("SINAIN_TYPED_EDGES") == "1":
+        try:
+            from category_enrichment import enrich, type_categories, persist_typed_edges
+            _raw = [(it.get("text") or it.get("content") or "")
+                    for it in transcript_items if isinstance(it, dict)]
+            _dist = [(f.get("text") if isinstance(f, dict) else f)
+                     for f in (digest.get("facts") or [])]
+            _edges = enrich(_dist, _raw, gate=False)
+            if _edges:
+                _typed = type_categories(_edges)
+                n_obj, n_edge = persist_typed_edges(db_path, _typed, digest_ts)
+                _ncat = len({c for e in _typed for c in e.get("categories", [])})
+                print(f"  [typed-edges] {n_obj} action-objects, {_ncat} categories, "
+                      f"{n_edge} membership edges", file=sys.stderr)
+        except Exception as e:
+            print(f"  [typed-edges] failed (non-fatal): {e}", file=sys.stderr)
 
     # NOTE: Consolidation (merging entity facts) and summaries both HURT retrieval
     # at our scale (<200 facts). Individual facts are more retrievable than merged ones.
