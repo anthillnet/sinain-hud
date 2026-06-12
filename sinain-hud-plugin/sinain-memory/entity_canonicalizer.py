@@ -19,7 +19,7 @@ Mechanism (DETERMINISTIC, no LLM, no gazetteer):
      GENERALIZES the hand-maintained _DEDUP_SKIP_PAIRS instead of enumerating it.
 
 Intentionally NOT handled: hard ASR substitutions with no phonetic overlap
-(e.g. "Jad veins" → "JetBrains", Metaphone JTFNS≠JTBRNS, ratio 0.59). Those
+(e.g. "Jet Veins" → "JetBrains", Metaphone JTFNS≠JTBRNS, ratio 0.67). Those
 require a domain gazetteer / hotword list and are a separate concern — a generic
 canonicalizer must under-merge rather than risk false positives (which keeps
 LongMemEval neutral while still consolidating local-distiller fragmentation).

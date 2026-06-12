@@ -63,7 +63,7 @@ FOR THE KNOWLEDGE GRAPH:
 - RETRACT facts contradicted by session evidence (list their entity_ids)
 - Each fact needs: entity (real name from content), attribute (relationship type), value (self-contained sentence), confidence (0.0-1.0), domain (for scoping)
 - Entity naming: use actual names as lowercase-hyphenated slugs
-    Good: "citibank", "acme-group", "artom", "intellij-idea"
+    Good: "citibank", "acme-group", "tariq", "intellij-idea"
     Bad: "ai-solutions", "client-understanding", "tool-usage"
 - The value field must be a complete, self-contained sentence that answers a question on its own
 - Assert BOTH durable facts AND time-bound decisions/action items (mark decisions with confidence 0.7)
