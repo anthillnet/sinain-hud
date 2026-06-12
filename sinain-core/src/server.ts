@@ -1556,6 +1556,12 @@ export interface ServerDeps {
   getEscalationPending?: () => any;
   isEscalationPaused?: () => boolean;
   respondEscalation?: (id: string, response: string) => any;
+  /** Composed task text for a region (issue + OCR + digest) — used by the
+   *  thread-terminal to seed an interactive spawn-agent session with the
+   *  exact context the headless ROI Run would send. */
+  getRegionTask?: (regionId: string) => Promise<string | null>;
+  /** Stable agent session for a thread (get-or-create) — terminals resume it. */
+  getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   listKnowledgeEntities?: (max: number) => Promise<string>;
@@ -1685,6 +1691,8 @@ export function createAppServer(deps: ServerDeps) {
         // Extract image data from ROI if present
         const imageData = data.roi?.data || undefined;
         const imageBbox = data.roi?.bbox || undefined;
+        const frameSize = Array.isArray(data.roi?.frame_size) ? data.roi.frame_size : undefined;
+        const ocrLines = Array.isArray(data.ocr_lines) ? data.ocr_lines.slice(0, 40) : undefined;
 
         const event = senseBuffer.push({
           type: data.type,
@@ -1692,6 +1700,8 @@ export function createAppServer(deps: ServerDeps) {
           ocr: data.ocr || "",
           imageData,
           imageBbox,
+          frameSize,
+          ocrLines,
           meta: {
             ssim: data.meta?.ssim ?? 0,
             app: data.meta?.app || "unknown",
@@ -1766,6 +1776,20 @@ export function createAppServer(deps: ServerDeps) {
         const { text, priority } = JSON.parse(body);
         deps.onFeedPost(text, priority || "normal");
         res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // ── /region/:id/task — composed context for terminal-mode ROI runs ──
+      if (req.method === "GET" && url.pathname.startsWith("/region/") && url.pathname.endsWith("/task")) {
+        const regionId = url.pathname.slice("/region/".length, -"/task".length);
+        const text = (await deps.getRegionTask?.(regionId)) ?? null;
+        if (!text) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "unknown region" }));
+          return;
+        }
+        const sess = deps.getThreadSession?.(regionId);
+        res.end(JSON.stringify({ ok: true, text, ...(sess ?? {}) }));
         return;
       }
 
@@ -2513,21 +2537,16 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
-      // ── /spawn ──
+      // ── /spawn ── REMOVED (chat-threads redesign): no autonomous spawn
+      // tasks. This was the sinain_spawn MCP tool's entry — agents were
+      // spawning background work on their own and dumping results into the
+      // feed. Agents answer inline; only the USER opens threads/terminals.
       if (req.method === "POST" && url.pathname === "/spawn") {
-        const body = await readBody(req, 65536);
-        const { text, label } = JSON.parse(body);
-        if (!text) {
-          res.writeHead(400);
-          res.end(JSON.stringify({ ok: false, error: "missing text" }));
-          return;
-        }
-        if (deps.onSpawnCommand) {
-          deps.onSpawnCommand(text);
-          res.end(JSON.stringify({ ok: true, spawned: true }));
-        } else {
-          res.end(JSON.stringify({ ok: false, error: "spawn not configured" }));
-        }
+        res.writeHead(410);
+        res.end(JSON.stringify({
+          ok: false,
+          error: "autonomous spawn tasks were removed — include your findings inline in the escalation response instead",
+        }));
         return;
       }
 
@@ -2792,6 +2811,8 @@ export function createAppServer(deps: ServerDeps) {
             // Full event (backwards compatible)
             const imageData = msg.roi?.data || undefined;
             const imageBbox = msg.roi?.bbox || undefined;
+            const frameSize = Array.isArray(msg.roi?.frame_size) ? msg.roi.frame_size : undefined;
+            const ocrLines = Array.isArray(msg.ocr_lines) ? msg.ocr_lines.slice(0, 40) : undefined;
 
             const event = senseBuffer.push({
               type: msg.type,
@@ -2799,6 +2820,8 @@ export function createAppServer(deps: ServerDeps) {
               ocr: msg.ocr || "",
               imageData,
               imageBbox,
+              frameSize,
+              ocrLines,
               meta: {
                 ssim: msg.meta?.ssim ?? 0,
                 app: msg.meta?.app || "unknown",

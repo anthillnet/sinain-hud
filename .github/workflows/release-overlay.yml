@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'overlay-v*'
+  # Callable from release.yml (unified `v*` release) — creates the
+  # overlay-v<version> release itself, so consumers' tag-prefix lookups
+  # keep working.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to create/attach to (overlay-vX.Y.Z)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -37,6 +46,7 @@ jobs:
       - name: Upload macOS asset
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: overlay/build/macos/Build/Products/Release/sinain_hud.app.zip
           generate_release_notes: true
 
@@ -68,4 +78,5 @@ jobs:
       - name: Upload Windows asset
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: overlay/sinain_hud_windows.zip

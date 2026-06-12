@@ -1,4 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { loadAgentsConfig, isGatewayProfile, gatewayProfileNames } from "./agents-loader.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
@@ -9,6 +14,7 @@ import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
+import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -28,6 +34,16 @@ import { log, warn, error } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = resolve(MODULE_DIR, "..", "..");
+
+/**
+ * Python interpreter for the sinain-memory scripts (graph_query, page_renderer,
+ * distillers). In a packaged build the launcher sets SINAIN_PYTHON to the one
+ * interpreter that has the deps — bare "python3" can resolve to a dep-less
+ * install and make knowledge pages silently fall back to empty.
+ */
+const PYTHON_BIN = process.env.SINAIN_PYTHON || "python3";
 
 /** Resolve workspace path, expanding leading ~ to HOME. */
 function resolveWorkspace(): string {
@@ -41,13 +57,50 @@ function resolveLocalMemoryDir(): string {
   return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
 }
 
+function resolveLocalAgentScript(): string | null {
+  const candidates = [
+    resolve(PACKAGE_ROOT, "sinain-agent", "run.sh"),
+    resolve(process.cwd(), "..", "sinain-agent", "run.sh"),
+    resolve(process.cwd(), "sinain-agent", "run.sh"),
+  ];
+  return candidates.find((path) => existsSync(path)) ?? null;
+}
+
+function writeLocalAgentMcpConfig(port: number): string {
+  const tmpDir = resolve(homedir(), ".sinain", "tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const tsxBin = resolve(PACKAGE_ROOT, "sinain-core", "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+  const configPath = resolve(tmpDir, "mcp-config.json");
+  const config = {
+    mcpServers: {
+      sinain: {
+        command: tsxBin,
+        args: [resolve(PACKAGE_ROOT, "sinain-mcp-server", "index.ts")],
+        env: {
+          SINAIN_CORE_URL: process.env.SINAIN_CORE_URL || `http://localhost:${port}`,
+          SINAIN_WORKSPACE: resolveWorkspace(),
+        },
+      },
+    },
+  };
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return configPath;
+}
+
+function pipeLocalAgentOutput(stream: NodeJS.ReadableStream, sink: (line: string) => void): void {
+  const rl = createInterface({ input: stream });
+  rl.on("line", sink);
+}
+
 /**
  * Query knowledge facts from both local and workspace databases.
  * Checks local (~/.sinain/memory) first, then workspace (~/.openclaw/workspace/memory).
  * Merges results, deduplicates, returns up to maxFacts.
  */
 async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
-  const { execFileSync } = await import("node:child_process");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
   const { resolve } = await import("node:path");
   const { dirname } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
@@ -68,9 +121,18 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
+      // --no-semantic: keyword expansion would load the MiniLM model inside
+      // the one-shot python (~4s, blowing the timeout below); we re-rank
+      // with in-process embeddings in Step 2 instead.
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-      const out = execFileSync("python3", args, { timeout: 5000, encoding: "utf-8" }).trim();
+      // Async exec — the sync variant blocked node's event loop for up to
+      // 5s PER DB (10s total): every WS broadcast, escalation, and the
+      // /region/:id/task seed fetch froze behind it (seen as the terminal's
+      // "context expired" fallback). Async keeps core responsive and lets
+      // callers' time budgets (Promise.race) actually work.
+      const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" });
+      const out = stdout.trim();
       if (out) {
         const parsed = JSON.parse(out);
         const facts = parsed.facts || parsed;
@@ -141,7 +203,7 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
       ], { timeout: 5000, encoding: "utf-8" });
       const parsed = JSON.parse(out);
@@ -206,7 +268,7 @@ async function searchEntitiesMulti(query: string, limit: number): Promise<unknow
   for (const dbPath of resolveKnowledgeDbPaths()) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath,
         "--search-entities", query,
         "--search-limit", String(limit * 2), // 2x then de-dup
@@ -257,7 +319,7 @@ async function exportConceptBundle(
     if (opts.includePage) args.push("--include-page");
     try {
       // 30s budget — large 2-hop exports can take time on big graphs.
-      const { stdout } = await pExecFile("python3", args,
+      const { stdout } = await pExecFile(PYTHON_BIN, args,
         { timeout: 30_000, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
       const parsed = JSON.parse(stdout);
       // If the export found at least one entity (the root), return it.
@@ -299,7 +361,7 @@ async function importConceptBundle(
   ];
   const { spawn } = await import("node:child_process");
   return await new Promise((resolve) => {
-    const child = spawn("python3", args, { timeout: 30_000 });
+    const child = spawn(PYTHON_BIN, args, { timeout: 30_000 });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c: Buffer) => { stdout += c.toString("utf-8"); });
@@ -348,7 +410,7 @@ async function retractOrRestoreFact(
       if (opts.undoToken) args.push("--undo-token", opts.undoToken);
     }
     try {
-      const { stdout } = await pExecFile("python3", args, { timeout: 10_000, encoding: "utf-8" });
+      const { stdout } = await pExecFile(PYTHON_BIN, args, { timeout: 10_000, encoding: "utf-8" });
       const parsed = JSON.parse(stdout);
       if (parsed.ok) return parsed;
       // If error is "fact not found" try the next DB; otherwise return the error
@@ -384,7 +446,7 @@ async function renderEntityPageMulti(
     if (opts.refresh) args.push("--refresh");
     try {
       // 60s budget — LLM rendering for large entities can take 20-30s.
-      const { stdout } = await pExecFile("python3", args, { timeout: 60_000, encoding: "utf-8" });
+      const { stdout } = await pExecFile(PYTHON_BIN, args, { timeout: 60_000, encoding: "utf-8" });
       const parsed = JSON.parse(stdout);
       if (parsed.fact_count > 0) return parsed;
     } catch (e) {
@@ -411,7 +473,7 @@ async function graphChildrenMulti(entity: string): Promise<unknown> {
   for (const dbPath of resolveKnowledgeDbPaths()) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath,
         "--graph-children", entity,
         "--graph-limit", "50",
@@ -458,7 +520,7 @@ if not result:
     result = store.entity_as_of("${entity}", d)
 print(json.dumps({k: v for k, v in result.items()}, ensure_ascii=False))
 `;
-      const out = execFileSync("python3", ["-c", pyCode], {
+      const out = execFileSync(PYTHON_BIN, ["-c", pyCode], {
         timeout: 5000, encoding: "utf-8",
       }).trim();
       if (out && out !== "{}") return out;
@@ -486,7 +548,7 @@ async function exportKnowledgeMulti(domain: string | null, max: number): Promise
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const out = execFileSync("python3", [
+      const out = execFileSync(PYTHON_BIN, [
         scriptPath, "--db", dbPath, "--top", String(max), "--format", "json",
       ], { timeout: 5000, encoding: "utf-8" });
       const parsed = JSON.parse(out);
@@ -568,6 +630,7 @@ async function importKnowledgeToLocal(data: string): Promise<string> {
 import json, sys
 sys.path.insert(0, "${scriptsDir}")
 from triplestore import TripleStore
+from knowledge_integrator import _extract_tags
 import hashlib
 
 db_path = "${dbPath}"
@@ -602,13 +665,22 @@ for op in ops:
     store.assert_triple(tx, entity_id, "reinforce_count", "1")
     if op.get("domain"):
         store.assert_triple(tx, entity_id, "domain", op["domain"])
+    # Tags make the fact findable: /knowledge/facts retrieval is tag-based,
+    # so a fact without tag triples is write-only. Same extractor the
+    # integrator uses, plus the entity name and domain themselves.
+    tags = set(_extract_tags(value))
+    tags.add(entity.lower().replace(" ", "-"))
+    if op.get("domain"):
+        tags.add(str(op["domain"]).lower())
+    for tag in tags:
+        store.assert_triple(tx, entity_id, "tag", tag)
     stats["asserted"] += 1
 
 store.close()
 print(json.dumps(stats))
 `;
 
-    const result = execFileSync("python3", ["-c", script], {
+    const result = execFileSync(PYTHON_BIN, ["-c", script], {
       input: JSON.stringify(graphOps),
       timeout: 10_000,
       encoding: "utf-8",
@@ -623,6 +695,14 @@ print(json.dumps(stats))
 
 async function main() {
   log(TAG, "sinain-core starting...");
+  // Version banner: core package version + (DMG installs) bundle identifiers
+  // exported by launch-backend.sh. Source runs show "source".
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(MODULE_DIR, "..", "package.json"), "utf-8"));
+    const dmgV = process.env.SINAIN_DMG_VERSION || "source";
+    const buildId = process.env.SINAIN_BUILD_ID || "source";
+    log(TAG, `versions: core=${pkg.version} dmg=${dmgV} build=${buildId} node=${process.version}`);
+  } catch { /* version banner is best-effort */ }
 
   // ── Load config ──
   const config = loadConfig();
@@ -731,6 +811,17 @@ async function main() {
     isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
   });
 
+  // ── Region tracker (Grammarly mode) ──
+  // Ingests LLM-detected regions every tick, resolves bboxes from sense
+  // events, broadcasts the set to the overlay when it changes.
+  const regionTracker = new RegionTracker();
+  // Region ids whose per-ROI agent thread already got the full region
+  // context (first message); follow-ups send just the user's text.
+  const startedRegionThreads = new Set<string>();
+  // MAIN forks: thread id → seed (MAIN transcript + digest at fork time).
+  // Consumed by the thread's first chat message and by terminal seeding.
+  const forkSeeds = new Map<string, string>();
+
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
     feedBuffer,
@@ -749,6 +840,16 @@ async function main() {
     },
     onSituationUpdate: (content) => {
       escalator.pushSituationMd(content);
+    },
+    onRegions: (regions, contextWindow) => {
+      const changed = regionTracker.update(regions, contextWindow);
+      if (changed) {
+        wsHandler.broadcastRaw({
+          type: "region_highlight",
+          regions: changed,
+          ts: Date.now(),
+        });
+      }
     },
     // Gate SITUATION.md writes (and the subsequent push) on a gateway lane
     // being active — see escalator.shouldDriveGateway. Users with no openclaw
@@ -842,9 +943,12 @@ async function main() {
   });
 
   systemAudioPipeline.on("tcc-denied", () => {
-    // Banner already printed by pipeline.ts. Initiate graceful shutdown so
-    // sinain exits cleanly rather than continuing with audio dead.
-    shutdown("TCC-DENIED").catch(() => process.exit(1));
+    warn(TAG, "system audio permission denied; continuing with audio muted");
+    wsHandler.updateState({ audio: "muted" });
+    wsHandler.broadcast(
+      "⚠ System audio capture needs macOS Screen Recording permission. Sinain is still running; enable permission, restart Terminal if prompted, then toggle audio again.",
+      "urgent",
+    );
   });
 
   systemAudioPipeline.on("muted", () => {
@@ -968,9 +1072,13 @@ async function main() {
     available: string[];
     escalationAgent: string;
     spawnAgent: string;
-  } = { available: [], escalationAgent: "", spawnAgent: "" };
+    registered: boolean;
+  } = { available: [], escalationAgent: "", spawnAgent: "", registered: false };
+  let localAgentProcess: ReturnType<typeof spawn> | null = null;
+  let localAgentName = "";
+  let shuttingDown = false;
 
-  function registerBareAgent(availableList: string[], current: string): void {
+  function registerBareAgent(availableList: string[], current: string, registered = true): void {
     const clean = availableList.filter((a) => typeof a === "string" && AGENT_NAME_RE.test(a));
     // Inject every gateway-style profile (any agents.json profile with
     // `type: "openclaw"`) into the roster — they have no local binary, so
@@ -995,6 +1103,7 @@ async function main() {
       }
     }
     bareAgentState.available = clean;
+    bareAgentState.registered = registered;
     // If neither lane is set yet (fresh boot), adopt the bare agent's
     // reported current. If state survives from a prior register call AND
     // the agent still exists in the roster, keep it; otherwise fall back
@@ -1019,6 +1128,98 @@ async function main() {
     }
   }
 
+  function startLocalAgent(requestedAgent?: string): {
+    ok: boolean;
+    agent?: string;
+    alreadyRunning?: boolean;
+    error?: string;
+  } {
+    if (localAgentProcess && !localAgentProcess.killed && localAgentProcess.exitCode === null) {
+      return { ok: true, agent: localAgentName, alreadyRunning: true };
+    }
+
+    const agent = (requestedAgent?.trim()
+      || bareAgentState.escalationAgent
+      || escalatorAgentsCfg?.default
+      || process.env.SINAIN_AGENT
+      || "claude");
+    if (!AGENT_NAME_RE.test(agent)) {
+      return { ok: false, error: `Invalid agent name "${agent}"` };
+    }
+    if (isGatewayProfile(escalatorAgentsCfg, agent)) {
+      return { ok: false, error: `Agent "${agent}" is a gateway profile; local runner is not needed` };
+    }
+    if (bareAgentState.available.length > 0 && !bareAgentState.available.includes(agent)) {
+      return { ok: false, error: `Agent "${agent}" not available` };
+    }
+
+    const runSh = resolveLocalAgentScript();
+    if (!runSh) {
+      return { ok: false, error: "sinain-agent/run.sh not found" };
+    }
+
+    const mcpConfigPath = writeLocalAgentMcpConfig(config.port);
+    const coreUrl = process.env.SINAIN_CORE_URL || `http://localhost:${config.port}`;
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      MCP_CONFIG: mcpConfigPath,
+      SINAIN_AGENT: agent,
+      SINAIN_CORE_URL: coreUrl,
+      ESCALATION_TRANSPORT: "http",
+    };
+    // Strip Claude Code session vars that leak in when sinain-core itself was
+    // launched from inside a Claude Code / agent session. They redirect the
+    // spawned CLI agents (claude, openclaude) to the parent session's config
+    // dir, where their own credentials don't exist — surfacing as
+    // "No cookie auth credentials found" 401s on every invocation.
+    // (Profile-level CLAUDE_CODE_* overrides are unaffected: run.sh applies
+    // them per profile after this spawn.)
+    for (const key of Object.keys(childEnv)) {
+      if (key.startsWith("CLAUDE_CODE_") || key === "CLAUDE_CONFIG_DIR" ||
+          key === "CLAUDECODE" || key === "AI_AGENT") {
+        delete childEnv[key];
+      }
+    }
+    const child = spawn("bash", [runSh], {
+      cwd: dirname(runSh),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+
+    localAgentProcess = child;
+    localAgentName = agent;
+    log(TAG, `local agent start requested: agent=${agent} script=${runSh} mcp=${mcpConfigPath}`);
+    pipeLocalAgentOutput(child.stdout, (line) => log("agent", line));
+    pipeLocalAgentOutput(child.stderr, (line) => warn("agent", line));
+
+    child.once("error", (err) => {
+      if (localAgentProcess === child) {
+        localAgentProcess = null;
+        localAgentName = "";
+      }
+      warn(TAG, `local agent failed to start: ${err.message}`);
+      wsHandler.broadcast(`⚠ Local agent failed to start: ${err.message.slice(0, 120)}`, "high");
+    });
+
+    child.once("exit", (code, signal) => {
+      if (localAgentProcess !== child) return;
+      localAgentProcess = null;
+      localAgentName = "";
+      if (bareAgentState.registered) {
+        bareAgentState.registered = false;
+        wsHandler.updateState({ agents: { ...bareAgentState } });
+      }
+      const exitText = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      log(TAG, `local agent exited (${exitText})`);
+      if (!shuttingDown && code !== 0) {
+        wsHandler.broadcast(`⚠ Local agent exited (${exitText})`, "high");
+      }
+    });
+
+    return { ok: true, agent };
+  }
+
   // Pre-populate the roster from agents.json profiles so launchers that
   // don't run the bare-agent process (e.g. start.sh / start-local.sh) still
   // surface the user's configured profiles in the overlay's agent picker.
@@ -1031,7 +1232,7 @@ async function main() {
       .filter((n) => AGENT_NAME_RE.test(n));
     if (profileNames.length > 0) {
       const defaultAgent = escalatorAgentsCfg.default ?? profileNames[0];
-      registerBareAgent(profileNames, defaultAgent);
+      registerBareAgent(profileNames, defaultAgent, false);
       log(TAG, `roster pre-populated from agents.json: ${profileNames.join(",")}`);
     }
   }
@@ -1087,6 +1288,39 @@ async function main() {
     },
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),
+
+    getThreadSession: (regionId: string) => escalator.threadSession(regionId),
+
+    getRegionTask: async (regionId: string) => {
+      // Fork threads have no tracked region — their seed is the MAIN
+      // transcript snapshot taken at fork time (terminal path).
+      const forkSeed = forkSeeds.get(regionId);
+      if (forkSeed) return forkSeed;
+      const region = regionTracker.get(regionId);
+      if (!region) return null;
+      // Enrich the terminal seed with knowledge-graph facts about the issue's
+      // topic + app — same store the escalation enrichment uses. HARD TIME
+      // BUDGET: the triplestore query has a ~5s cold start (python+sqlite),
+      // which blew run.sh's fetch timeout and turned every seed into the
+      // "context expired" fallback. The seed must never wait on enrichment —
+      // it already carries MCP instructions so the agent can query the graph
+      // itself.
+      let knowledge = "";
+      try {
+        const entities = [
+          ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
+          ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i)
+            .filter((w) => w.length > 3).slice(0, 5),
+        ];
+        if (entities.length > 0) {
+          knowledge = await Promise.race([
+            queryKnowledgeFactsMulti(entities, 8),
+            new Promise<string>((res) => setTimeout(() => res(""), 1500)),
+          ]);
+        }
+      } catch { /* enrichment is optional */ }
+      return buildRegionTaskText(region, agentLoop.getDigest()?.digest, undefined, knowledge);
+    },
 
     getHealthPayload: () => {
       const escStats = escalator.getStats();
@@ -1164,11 +1398,7 @@ async function main() {
     getBareAgentConfig: () => ({
       escalationAgent: bareAgentState.escalationAgent,
       spawnAgent: bareAgentState.spawnAgent,
-      // Tells the bare agent whether core still has its roster. On core
-      // restart this flips to false until the next /bareagent/register POST
-      // — distinguishes "user picked Off/Off" (registered=true, lanes="")
-      // from "core forgot about us" (registered=false).
-      registered: bareAgentState.available.length > 0,
+      registered: bareAgentState.registered,
     }),
 
     // Knowledge graph integration (checks both local and workspace DBs)
@@ -1213,12 +1443,71 @@ async function main() {
       await escalator.sendDirect(text);
     },
     onUserCommand: (text) => {
+      // Record the user's side of MAIN in the feed buffer so fork seeds
+      // (and session distillation) carry both halves of the conversation.
+      feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
       escalator.setUserCommand(text);
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
     },
-    onSpawnCommand: (text) => {
-      escalator.dispatchSpawnTask(text, "user-command").catch((err) => {
+    onUserBusy: (ms) => escalator.noteUserBusy(ms),
+    onSetAutoDetect: (enabled) => {
+      config.agentConfig.regionsEnabled = enabled;
+      if (!enabled) {
+        // Clear tracked regions + native eyes immediately
+        regionTracker.clear();
+        wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
+      }
+    },
+    onForkMain: () => {
+      const id = `fork-${Date.now().toString(36)}`;
+      const items = feedBuffer.query(0).filter((i) => i.channel === "agent").slice(-30);
+      const transcript = items
+        .map((i) => i.text.startsWith("[user] ")
+          ? `User: ${i.text.slice(7)}`
+          : `sinain: ${i.text}`)
+        .join("\n\n");
+      const digest = agentLoop.getDigest()?.digest;
+      forkSeeds.set(id, [
+        "You are continuing a FORK of the user's MAIN sinain chat. Below is",
+        "the recent MAIN transcript and the situation digest at fork time.",
+        "Pick up from this context — the user's next message continues it.",
+        digest ? `\n## Situation digest\n${digest}` : "",
+        transcript ? `\n## Recent MAIN transcript\n${transcript}` : "",
+      ].filter(Boolean).join("\n"));
+      return { id, label: "⑂ fork" };
+    },
+    onSpawnCommand: (text, regionId) => {
+      let task = text;
+      let label = "user-command";
+      const opts: { regionId?: string; sessionKey?: string; route?: "spawn" | "escalation" } = { regionId };
+      if (regionId) {
+        // Region thread: each ROI gets its own stable agent session, routed
+        // via the SPAWN lane. Both lanes point at the same agent by default,
+        // but the overlay's per-lane selector can dedicate a separate spawn
+        // agent so region tasks never queue behind escalations on a slow
+        // sequential agent. First message carries the full region context;
+        // follow-ups are the user's text and continue the same session.
+        opts.sessionKey = `agent:main:region:${regionId}`;
+        opts.route = "spawn";
+        const region = regionTracker.get(regionId);
+        const forkSeed = forkSeeds.get(regionId);
+        label = region?.issue ? region.issue.slice(0, 48)
+          : forkSeed ? "⑂ fork" : "region";
+        if (!startedRegionThreads.has(regionId)) {
+          startedRegionThreads.add(regionId);
+          if (region) {
+            // Overlay text on Run is a synthesized feed echo, not a user
+            // note — the region itself carries the task content.
+            task = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+          } else if (forkSeed) {
+            // Fork thread: first message = fork seed + the user's text
+            // (unlike regions, the user's first message here is real).
+            task = `${forkSeed}\n\n## User message\n${text}`;
+          }
+        }
+      }
+      escalator.dispatchSpawnTask(task, label, opts).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
         wsHandler.broadcast(`\u26a0 Spawn failed: ${String(err).slice(0, 100)}`, "normal");
       });
@@ -1244,7 +1533,7 @@ async function main() {
         return false;
       }
     },
-    onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
+      onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
       // Empty-string agent = Off (lane disabled). Non-empty agent must be
       // in the current roster; stale overlay state can send something that
       // isn't available — reject with a clear error.
@@ -1295,6 +1584,7 @@ async function main() {
       log(TAG, `set_agent lane=${lane} agent=${displayAgent}`);
       return { ok: true };
     },
+    onStartLocalAgent: (agent?: string) => startLocalAgent(agent),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
@@ -1361,6 +1651,7 @@ async function main() {
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
+    shuttingDown = true;
     clearInterval(bufferGaugeTimer);
     if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
     costTracker.stop();
@@ -1371,6 +1662,9 @@ async function main() {
     if (micPipeline) micPipeline.stop();
     transcription.destroy();
     escalator.stop();
+    if (localAgentProcess && localAgentProcess.exitCode === null) {
+      localAgentProcess.kill("SIGTERM");
+    }
     signalCollector?.destroy();
     feedbackStore?.destroy();
     traceStore?.destroy();

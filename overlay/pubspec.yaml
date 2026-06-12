@@ -18,6 +18,15 @@ dependencies:
   hotkey_manager: ^0.2.0
   flutter_markdown_plus: ^1.0.7
   url_launcher: ^6.3.0
+  # Thread-terminal spike: pure-Flutter terminal emulator + native PTY.
+  # Both MIT, both terminal.studio. Pure Flutter = renders inside the private
+  # NSPanel, so capture-invisibility is inherited (no platform view needed).
+  xterm: ^4.0.0
+  flutter_pty: ^0.4.1
+  # Chat-threads redesign: flyer chat (Apache-2.0, flyer.chat) renders every
+  # thread's chat surface. Pure Flutter — same invisibility argument.
+  flutter_chat_ui: ^2.11.0
+  flutter_chat_core: ^2.9.0
 
 dev_dependencies:
   flutter_test:

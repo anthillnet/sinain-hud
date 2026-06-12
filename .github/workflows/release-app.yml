@@ -1,0 +1,203 @@
+name: Release App (DMG)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEED-001 Phase 3: signed + notarized Sinain.dmg pipeline — FUNCTIONAL.
+#
+# Builds the full product (overlay + bundled backend), signs every nested
+# Mach-O with the Developer ID cert under hardened runtime, builds the DMG,
+# notarizes it via Apple's notary service, staples, and publishes it to a
+# GitHub Release. This calls the same tools/dmg/*.sh scripts used for local
+# builds — CI just provisions the cert + notary credentials from secrets.
+#
+# Trigger: push a `macos-v*` tag (the live DMG release series — e.g.
+# macos-v0.3.0) or run manually via workflow_dispatch (dry run).
+#
+# Required GitHub Secrets (Apple set is provisioned):
+#   APPLE_CERT_P12_BASE64        Developer ID Application cert (.p12, base64)
+#   APPLE_CERT_PASSWORD          .p12 password
+#   APPLE_ID                     Apple ID email (notarytool auth)
+#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password (xxxx-xxxx-xxxx-xxxx)
+#   APPLE_TEAM_ID                Apple Developer Team ID
+#
+# Notarization uses the app-specific-password method (account.apple.com →
+# Sign-In and Security → App-Specific Passwords). See docs/dmg-distribution-spec.md §4.
+#
+# NOTE: the Sparkle appcast (EdDSA-signed auto-update feed) is intentionally
+# NOT handled here — it's a separate follow-up (Phase 4) and its key is not
+# provisioned. This workflow produces the downloadable DMG only.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  # Fires when a macOS release is published — reliable regardless of how the
+  # tag/release was created (git push, `gh release create`, or the Releases UI),
+  # unlike `push: tags` which API-created tags don't reliably emit.
+  release:
+    types: [published]
+  workflow_dispatch: {}  # manual dry run (no release → upload is skipped)
+  # Callable from release.yml (unified `v*` release) — builds the DMG and
+  # creates the macos-v<version> release itself (a GITHUB_TOKEN-created
+  # release would not re-trigger this workflow's release trigger).
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to create/attach to (macos-vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-sign-notarize:
+    name: Build, Sign & Notarize DMG
+    runs-on: macos-latest
+    # A `release: published` event also fires for overlay-v* / sck-capture-v*
+    # releases — only build the DMG for macos-v* ones. workflow_dispatch always
+    # runs (dry run).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      inputs.tag != '' ||
+      startsWith(github.event.release.tag_name, 'macos-v')
+
+    steps:
+      # ── Guard: refuse to run until the Apple signing secrets exist, so a
+      #    misconfigured repo no-ops cleanly instead of failing mid-build.
+      - name: Preflight — signing secrets present?
+        id: preflight
+        # Gate on EVERY secret the later steps consume, so a misconfigured repo
+        # no-ops cleanly instead of hard-failing mid-build under `set -euo pipefail`.
+        # APPLE_CERT_PASSWORD is intentionally excluded — a password-less .p12 is
+        # valid (security import -P "" works), so an empty value must not skip.
+        env:
+          HAVE_CERT: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
+          HAVE_NOTARY: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
+          HAVE_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+          HAVE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+        run: |
+          if [ "$HAVE_CERT" != "true" ] || [ "$HAVE_NOTARY" != "true" ] \
+             || [ "$HAVE_APPLE_ID" != "true" ] || [ "$HAVE_TEAM_ID" != "true" ]; then
+            echo "::warning::DMG signing secrets not fully provisioned (need APPLE_CERT_P12_BASE64, APPLE_APP_SPECIFIC_PASSWORD, APPLE_ID, APPLE_TEAM_ID) — skipping build."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.preflight.outputs.ready == 'true'
+
+      # ── Toolchains ──────────────────────────────────────────────────────────
+      - uses: subosito/flutter-action@v2
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+
+      # ── Build all components (mirrors the local build chain) ────────────────
+      - name: Build overlay (Flutter, release)
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: overlay
+        run: flutter pub get && flutter build macos --release
+
+      - name: Build sinain-core
+        if: steps.preflight.outputs.ready == 'true'
+        working-directory: sinain-core
+        run: npm ci && npm run build
+
+      - name: Build sck-capture (Swift, arm64)
+        if: steps.preflight.outputs.ready == 'true'
+        run: ./tools/sck-capture/build.sh
+
+      - name: Build whisper-cli (optional, local STT)
+        if: steps.preflight.outputs.ready == 'true'
+        continue-on-error: true   # stage-backend.sh tolerates a missing binary
+        run: ./tools/whisper/build-whisper.sh
+
+      # ── Stage backend + assemble the .app ───────────────────────────────────
+      - name: Stage self-contained backend
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          # Baked into Resources/DMG_VERSION — the overlay's in-app update
+          # check compares it against the latest macos-v* release.
+          SINAIN_DMG_VERSION: ${{ inputs.tag || github.event.release.tag_name || '' }}
+        run: ./tools/dmg/stage-backend.sh
+
+      - name: Assemble Sinain.app
+        if: steps.preflight.outputs.ready == 'true'
+        run: ./tools/dmg/assemble-app.sh
+
+      # ── Import the Developer ID cert into an ephemeral keychain ──────────────
+      - name: Import Developer ID Application cert
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PW="$(openssl rand -base64 24)"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"   # no auto-lock during notarize wait
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          # Add to the search list (keep existing) and make default so codesign
+          # finds the "Developer ID Application" identity non-interactively.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          security default-keychain -s "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Store notarytool credentials
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool store-credentials "sinain-notary" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --keychain "$KEYCHAIN"
+
+      # ── Sign every Mach-O, build DMG, notarize, staple ──────────────────────
+      - name: Sign + build + notarize DMG
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          NOTARY_KEYCHAIN: ${{ env.KEYCHAIN }}   # build-full-dmg.sh passes this to notarytool
+        run: ./tools/dmg/build-full-dmg.sh build/Sinain.app sinain-notary
+
+      # build-full-dmg.sh runs spctl with `|| true` (lenient for local dev). In
+      # CI we gate the release on it: a non-assessable DMG must fail the job and
+      # never be published. `stapler validate` re-confirms the stapled ticket.
+      - name: Verify Gatekeeper (strict)
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          spctl --assess --type open --context context:primary-signature -vv build/Sinain.dmg
+          xcrun stapler validate build/Sinain.dmg
+
+      # ── Attach the DMG to the triggering release (real runs only; dry-run
+      #    workflow_dispatch skips this). Uploads the asset onto the existing
+      #    release without touching its name/notes (the publisher owns those).
+      - name: Attach DMG to the release
+        if: steps.preflight.outputs.ready == 'true' && (github.event_name == 'release' || inputs.tag != '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.event.release.tag_name }}
+          files: build/Sinain.dmg

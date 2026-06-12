@@ -264,9 +264,9 @@ export class AudioPipeline extends EventEmitter {
         // Detect TCC (macOS Screen Recording / Microphone) permission denial.
         // sck-capture logs "declined TCCs" to stderr when the entitlement is
         // missing. The chicken-and-egg: clicking "Allow" on the prompt doesn't
-        // apply to a running process — the user must restart Terminal and
-        // re-run. We print a prominent banner and request graceful shutdown
-        // so users aren't left wondering why the agent never escalates.
+        // apply to a running process. We print a prominent banner, stop just the
+        // audio pipeline, and let the rest of sinain continue so the overlay can
+        // show the permission warning.
         const elapsedMs = Date.now() - spawnTime;
         const isTccDenial = stderrAccum.includes("declined TCCs");
         if (isTccDenial && elapsedMs < 5000) {
@@ -279,12 +279,13 @@ export class AudioPipeline extends EventEmitter {
             "  sck-capture cannot access screen capture and audio without",
             "  TCC (Screen Recording) permission from macOS.",
             "",
-            "  If you just clicked Allow -- that is normal! macOS does not apply",
-            "  the permission to processes that are already running. To fix:",
+            "  Sinain will keep running with system audio muted.",
             "",
-            "    1. Press Ctrl+C to stop sinain",
-            "    2. Quit and restart your Terminal app (Cmd+Q, then reopen)",
-            "    3. Run again: npx @geravant/sinain@latest start",
+            "  If you just clicked Allow -- that is normal! macOS does not apply",
+            "  the permission to processes that are already running. To enable audio:",
+            "",
+            "    1. Quit and restart your Terminal app (Cmd+Q, then reopen)",
+            "    2. Start sinain again, or toggle audio from the HUD",
             "",
             "  Already declined? Re-grant permission:",
             "    System Settings > Privacy & Security > Screen Recording",
@@ -294,7 +295,7 @@ export class AudioPipeline extends EventEmitter {
             "",
           ].join("\n"));
 
-          // Emit TCC-specific error so index.ts can initiate graceful shutdown
+          this.stop();
           this.emit("tcc-denied");
           return;
         }

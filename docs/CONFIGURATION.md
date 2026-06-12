@@ -46,6 +46,7 @@ The context analysis loop runs every 3–30 seconds inside sinain-core. It sends
 | `ANALYSIS_MAX_TOKENS` | `800` | Max output tokens |
 | `ANALYSIS_TEMPERATURE` | `0.3` | LLM temperature (0–1) |
 | `ANALYSIS_TIMEOUT` | `15000` | Request timeout in ms |
+| `AUTO_DETECT_ISSUES` | `false` | Boot default for issue auto-detection (Grammarly mode region eyes): detect actionable screen areas each tick and show clickable eye icons in the overlay. No extra LLM calls. The overlay's "AUTO-DETECT ISSUES" toggle overrides at runtime. See [GRAMMARLY-MODE.md](GRAMMARLY-MODE.md). |
 
 ### OpenRouter (default)
 
@@ -71,7 +72,7 @@ For a fully offline setup, also set:
 ```env
 TRANSCRIPTION_BACKEND=local
 LOCAL_WHISPER_BIN=whisper-cli
-LOCAL_WHISPER_MODEL=~/models/ggml-large-v3-turbo.bin
+LOCAL_WHISPER_MODEL=~/.sinain/models/whisper/ggml-large-v3-turbo.bin
 ```
 
 ---
@@ -182,7 +183,7 @@ The bare agent (`sinain-agent/run.sh`) polls sinain-core for escalations and res
 ```env
 TRANSCRIPTION_BACKEND=local
 LOCAL_WHISPER_BIN=whisper-cli
-LOCAL_WHISPER_MODEL=~/models/ggml-large-v3-turbo.bin
+LOCAL_WHISPER_MODEL=~/.sinain/models/whisper/ggml-large-v3-turbo.bin
 ```
 
 Install: `brew install whisper-cpp`. Models: [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main).

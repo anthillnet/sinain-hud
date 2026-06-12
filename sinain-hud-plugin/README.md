@@ -236,7 +236,7 @@ Sinain's knowledge graph is exposed to any MCP-aware agent via the bundled MCP s
 
 ## Connect Your Coding Agent (MCP)
 
-Sinain ships an MCP server that exposes 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, `sinain_distill_session`, `sinain_get_context`, and `sinain_respond` — to any MCP-aware agent. Register it once and the agent can read your knowledge graph and surface text on the HUD from any project.
+Sinain ships an MCP server that exposes 7 concise `sinain_*` tools — `sinain_context` (current situation), `sinain_memory_query` / `sinain_memory_store` (knowledge graph read/write), `sinain_notify` (HUD feed), `sinain_health`, and the `sinain_get_escalation` / `sinain_respond` escalation pair — to any MCP-aware agent. Register it once and the agent can use your knowledge graph as persistent memory and surface text on the HUD from any project.
 
 ```bash
 npx @geravant/sinain@latest mcp install

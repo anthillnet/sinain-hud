@@ -6,7 +6,7 @@ import type { AnalysisConfig, AgentEntry, ContextWindow, EscalationMode, Context
 import type { Profiler } from "../profiler.js";
 import type { CostTracker } from "../cost/tracker.js";
 import { buildContextWindow, RICHNESS_PRESETS } from "./context-window.js";
-import { analyzeContext } from "./analyzer.js";
+import { analyzeContext, AnalysisAuthError } from "./analyzer.js";
 import { writeSituationMd } from "./situation-writer.js";
 import { calculateEscalationScore } from "../escalation/scorer.js";
 import { log, warn, error, debug } from "../log.js";
@@ -23,6 +23,9 @@ export interface AgentLoopDeps {
   onAnalysis: (entry: AgentEntry, contextWindow: ContextWindow) => void;
   /** Called to broadcast HUD line to overlay. */
   onHudUpdate: (text: string) => void;
+  /** Called every tick with the LLM's raw regions (undefined when none) so
+   *  the region tracker can ingest new ones and expire stale ones. */
+  onRegions?: (regions: import("../types.js").RawRegion[] | undefined, contextWindow: ContextWindow) => void;
   /** Optional: tracer to record spans. */
   onTraceStart?: (tickId: number) => TraceContext | null;
   /** Optional: get current recorder status for prompt injection. */
@@ -78,6 +81,9 @@ export class AgentLoop extends EventEmitter {
   private maxIntervalTimer: ReturnType<typeof setInterval> | null = null;
   private lastRunTs = 0;
   private running = false;
+  /** True while analysis API calls are failing (network outage) — drives a
+   *  single user-visible notice + a recovery notice, not one per tick. */
+  private outage = false;
   private started = false;
   private firstTick = true;
   private urgentPending = false;
@@ -88,6 +94,7 @@ export class AgentLoop extends EventEmitter {
   private latestDigest: AgentEntry | null = null;
   private lastTickFeedVersion = 0;
   private lastTickSenseVersion = 0;
+  private authErrorNotified = false;
 
   private stats = {
     totalCalls: 0,
@@ -248,12 +255,20 @@ export class AgentLoop extends EventEmitter {
     this.urgentPending = false;
     if (!isUrgent && Date.now() - this.lastRunTs < this.deps.agentConfig.cooldownMs) return;
 
-    // Idle suppression: skip if no new events since last tick
+    // Idle suppression: skip if no new events since last tick. URGENT ticks
+    // (user commands) bypass ALL idle checks — a user message must always be
+    // analyzed and dispatched even on a completely stale screen (field bug:
+    // a chat message during a quiet period was silently idle-skipped and
+    // never answered).
     const { feedBuffer, senseBuffer } = this.deps;
-    if (feedBuffer.version === this.lastTickFeedVersion &&
-        senseBuffer.version === this.lastTickSenseVersion) {
-      this.stats.idleSkips++;
-      return;
+    const prevFeedVersion = this.lastTickFeedVersion;
+    const prevSenseVersion = this.lastTickSenseVersion;
+    if (!isUrgent) {
+      if (feedBuffer.version === this.lastTickFeedVersion &&
+          senseBuffer.version === this.lastTickSenseVersion) {
+        this.stats.idleSkips++;
+        return;
+      }
     }
     this.lastTickFeedVersion = feedBuffer.version;
     this.lastTickSenseVersion = senseBuffer.version;
@@ -262,7 +277,7 @@ export class AgentLoop extends EventEmitter {
     const cutoff = Date.now() - this.deps.agentConfig.maxAgeMs;
     const feedAudioCount = feedBuffer.queryBySource("audio", cutoff).length;
     const screenCount = senseBuffer.queryByTime(cutoff).length;
-    if (feedAudioCount === 0 && screenCount === 0) {
+    if (!isUrgent && feedAudioCount === 0 && screenCount === 0) {
       this.stats.idleSkips++;
       this.deps.profiler?.gauge("agent.idleSkips", this.stats.idleSkips);
       return;
@@ -391,6 +406,14 @@ export class AgentLoop extends EventEmitter {
         this.deps.onSituationUpdate?.(situationContent);
       }
 
+      // Region tracking (Grammarly mode) — every tick, so expiry advances
+      if (this.deps.agentConfig.regionsEnabled) {
+        if (result.regions?.length) {
+          log("agent", `analyzer emitted ${result.regions.length} region(s): ${result.regions.map(r => `"${r.issue.slice(0, 40)}" src=${r.sourceId ?? "-"}`).join("; ")}`);
+        }
+        this.deps.onRegions?.(result.regions, contextWindow);
+      }
+
       // Notify for escalation check
       traceCtx?.startSpan("escalation-check");
       this.deps.onAnalysis(entry, contextWindow);
@@ -414,8 +437,31 @@ export class AgentLoop extends EventEmitter {
         hudChanged: entry.pushed,
       });
 
+      if (this.outage) {
+        this.outage = false;
+        const note = "✓ Connectivity restored — sinain analysis is back online.";
+        this.deps.feedBuffer.push(note, "normal", "system", "stream");
+        this.deps.onHudUpdate(note);
+      }
+
     } catch (err: any) {
-      error(TAG, "tick error:", err.message || err);
+      if (err instanceof AnalysisAuthError) {
+        this.handleAuthError(err);
+      } else {
+        error(TAG, "tick error:", err.message || err);
+        // Self-healing: this tick consumed the buffer version cursors before
+        // failing — restore them so the next max-interval tick retries even
+        // if no new events arrive (a transient network error previously
+        // parked the loop in idle-skip forever).
+        this.lastTickFeedVersion = prevFeedVersion;
+        this.lastTickSenseVersion = prevSenseVersion;
+        if (!this.outage) {
+          this.outage = true;
+          const note = "⚠ Network issue: can't reach the analysis API — sinain keeps retrying in the background. Chat and escalations resume automatically when connectivity returns.";
+          this.deps.feedBuffer.push(note, "high", "system", "stream");
+          this.deps.onHudUpdate(note);
+        }
+      }
       traceCtx?.endSpan({ status: "error", error: err.message });
       traceCtx?.finish({ totalLatencyMs: Date.now() - Date.now(), llmLatencyMs: 0, llmInputTokens: 0, llmOutputTokens: 0, llmCost: 0, escalated: false, escalationScore: 0, contextScreenEvents: 0, contextAudioEntries: 0, contextRichness: richness, digestLength: 0, hudChanged: false });
     } finally {
@@ -423,6 +469,18 @@ export class AgentLoop extends EventEmitter {
       this.firstTick = false;
       this.lastRunTs = Date.now();
     }
+  }
+
+  private handleAuthError(err: AnalysisAuthError): void {
+    const msg = "Sinain paused analysis: OpenRouter rejected the API key. Update OPENROUTER_API_KEY in ~/.sinain/.env, then restart Sinain.";
+    warn(TAG, `${msg} (${err.message})`);
+    this.deps.agentConfig.enabled = false;
+    if (!this.authErrorNotified) {
+      this.authErrorNotified = true;
+      this.deps.feedBuffer.push(`⚠ ${msg}`, "urgent", "system", "stream");
+      this.deps.onHudUpdate(`⚠ ${msg}`);
+    }
+    this.stop();
   }
 
   // ── Private: startup recap tick from persistent knowledge ──
@@ -500,7 +558,11 @@ export class AgentLoop extends EventEmitter {
         log(TAG, `recap tick (${Date.now() - startTs}ms, ${result.tokensIn}in+${result.tokensOut}out tok) hud="${result.hud}"`);
       }
     } catch (err: any) {
-      debug(TAG, "recap tick error:", err.message || err);
+      if (err instanceof AnalysisAuthError) {
+        this.handleAuthError(err);
+      } else {
+        debug(TAG, "recap tick error:", err.message || err);
+      }
     } finally {
       this.running = false;
       // Do NOT update lastRunTs — normal cooldown should not be affected by recap

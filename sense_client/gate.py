@@ -44,6 +44,9 @@ class SenseEvent:
     meta: SenseMeta = field(default_factory=SenseMeta)
     observation: SenseObservation = field(default_factory=SenseObservation)
     vision_cost: dict | None = None  # {cost, tokens_in, tokens_out, model}
+    # Per-line OCR boxes in FULL-FRAME pixels (top-left origin):
+    # [{"text": str, "bbox": [x, y, w, h]}] — for precise region-eye anchoring.
+    ocr_lines: list | None = None
 
 
 class DecisionGate:

@@ -123,7 +123,7 @@ SINAIN_LOCAL_VISION=qwen2.5vl:7b
 These propagate to all subsystems:
 - `ANALYSIS_PROVIDER=ollama` (sinain-core analyzer)
 - `ANALYSIS_MODEL=phi4-mini` (sinain-core analyzer)
-- `LOCAL_VISION_ENABLED=true` + `LOCAL_VISION_MODEL=qwen2.5vl:7b` (sense_client)
+- `LOCAL_VISION_ENABLED=true` + `LOCAL_VISION_MODEL=qwen2.5vl:7b` (sense_client — legacy bridge; sense_client also reads `SINAIN_LOCAL_VISION` directly)
 - `TRANSCRIPTION_BACKEND=local` (whisper.cpp)
 - `SINAIN_FAST_MODEL=ollama/phi4-mini` + `SINAIN_SMART_MODEL=ollama/phi4-mini` (distiller)
 
@@ -139,10 +139,10 @@ Individual vars override the unified config when set explicitly:
 | `ANALYSIS_ENDPOINT` | `http://localhost:11434` | Ollama API URL |
 | `ANALYSIS_MAX_TOKENS` | `800` | Max output tokens per analysis |
 | `ANALYSIS_TEMPERATURE` | `0.3` | Temperature for analysis LLM |
-| `LOCAL_VISION_MODEL` | `qwen2.5vl:7b` | Ollama model for screen OCR |
+| `SINAIN_LOCAL_VISION` | `qwen2.5vl:7b` | Ollama model for screen OCR (primary; legacy alias `LOCAL_VISION_MODEL`) |
 | `TRANSCRIPTION_BACKEND` | `local` | `local` (whisper) or `openrouter` |
 | `LOCAL_WHISPER_BIN` | `whisper-cli` | Path to whisper.cpp binary |
-| `LOCAL_WHISPER_MODEL` | `~/models/ggml-large-v3-turbo.bin` | Whisper model file |
+| `LOCAL_WHISPER_MODEL` | `~/.sinain/models/whisper/ggml-large-v3-turbo.bin` | Whisper model file |
 | `SINAIN_FAST_MODEL` | `ollama/phi4-mini` | Distiller fast model |
 | `SINAIN_SMART_MODEL` | `ollama/phi4-mini` | Distiller smart model |
 
@@ -195,7 +195,7 @@ SINAIN_LOCAL_MODE=true ANALYSIS_PROVIDER=openrouter ANALYSIS_MODEL=google/gemini
 | Model not found warnings | Model not pulled | `ollama pull <model-name>` |
 | Very slow first analysis (~10-30s) | Ollama cold-loading model into GPU | Normal — subsequent ticks are fast. Warm up with `ollama run phi4-mini "hello"` |
 | `whisper-cli not found` | whisper.cpp not installed | `brew install whisper-cpp` |
-| Whisper model not found | Model file missing | Download from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin` to `~/models/` |
+| Whisper model not found | Model file missing | Run `./setup-local-stt.sh`, or download from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin` to `~/.sinain/models/whisper/` |
 | sense_client POST timeout | GPU contention — vision and analysis competing | Normal with retry logic. Add RAM or use smaller models |
 | sinain-core health timeout (>15s) | Startup distillation with local model is slow | `--paranoid` auto-extends timeout to 45s |
 | 401 from OpenRouter | No API key in paranoid mode | Expected — paranoid mode doesn't use OpenRouter. Set `OPENROUTER_API_KEY=` (empty) |

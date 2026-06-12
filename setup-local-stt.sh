@@ -16,7 +16,7 @@ ok()   { echo -e "${BOLD}[setup]${RESET} ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "${BOLD}[setup]${RESET} ${YELLOW}⚠${RESET} $*"; }
 fail() { echo -e "${BOLD}[setup]${RESET} ${RED}✗${RESET} $*"; exit 1; }
 
-MODEL_DIR="$HOME/models"
+MODEL_DIR="$HOME/.sinain/models/whisper"
 MODEL_NAME="ggml-large-v3-turbo.bin"
 MODEL_PATH="${LOCAL_WHISPER_MODEL:-$MODEL_DIR/$MODEL_NAME}"
 MODEL_PATH="${MODEL_PATH/#\~/$HOME}"

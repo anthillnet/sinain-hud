@@ -88,6 +88,7 @@ def query_facts_by_entities(
         # Primary: tag-based ranked search.
         ranked = store.tag_ranked_search(keywords, limit=max_facts * 3)
         fact_ids = [eid for eid, _ in ranked]
+        tag_matches = dict(ranked)
 
         # Fallback: if tag matches < max_facts, search by domain / entity_id slug.
         if len(fact_ids) < max_facts:
@@ -109,8 +110,14 @@ def query_facts_by_entities(
                 fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
 
-        # Sort by confidence descending (tag ranking already done above)
-        facts.sort(key=lambda f: float(f.get("confidence", "0")), reverse=True)
+        # Rank by tag-match count first, then confidence. A confidence-only
+        # sort let many 1-tag facts at 0.9 bury a fact matching every
+        # keyword at 0.7 — match count is the stronger relevance signal.
+        facts.sort(
+            key=lambda f: (tag_matches.get(f["entity_id"], 0),
+                           float(f.get("confidence", "0"))),
+            reverse=True,
+        )
         store.close()
         return facts[:max_facts]
     except Exception as e:
@@ -344,12 +351,12 @@ def _expand_keywords_semantic(
     """
     import time as _t
     try:
-        from sentence_transformers import SentenceTransformer
         import numpy as np
+        from common import load_sentence_transformer
         from triplestore import TripleStore
 
         if not hasattr(_expand_keywords_semantic, "_model"):
-            _expand_keywords_semantic._model = SentenceTransformer("all-MiniLM-L6-v2")
+            _expand_keywords_semantic._model = load_sentence_transformer("all-MiniLM-L6-v2")
         model = _expand_keywords_semantic._model
 
         # Cache entity names + embeddings (refresh every 5 min)
@@ -927,6 +934,7 @@ def query_facts_hybrid(
     query: str,
     max_facts: int = 10,
     *,
+    semantic: bool = True,
     precision_mode: str = "balanced",
     temporal_mode: str = "any",
     confidence_floor: float = 0.0,
@@ -1084,8 +1092,11 @@ def query_facts_hybrid(
         return False
 
     # Change 0: Semantic entity expansion — "ML" → ["ml", "machine-learning", "ai", ...]
+    # Skippable: a one-shot CLI invocation pays the full model load (~4s) for
+    # this step alone, which blows sinain-core's subprocess timeout — and core
+    # re-ranks candidates with its in-process embeddings anyway.
     expanded_keywords = keywords
-    if len(keywords) >= 1:
+    if semantic and len(keywords) >= 1:
         expanded_keywords = _expand_keywords_semantic(keywords, db_path)
 
     # Entity graph pre-filter with per-entity tracking for intersection (Change A)
@@ -1445,10 +1456,14 @@ def query_facts_hybrid(
 
     results = rrf_candidates[:max_facts]
 
-    # Bi-encoder rerank — skipped in fast mode (too slow for hot path) and
-    # if the latency budget already blew. Falls back silently when
-    # sentence-transformers is missing.
-    if precision_mode != "fast" and not budget_exceeded():
+    # Bi-encoder rerank — skipped in fast mode (too slow for hot path), when
+    # semantic=False (sinain-core subprocess: core re-ranks with its own
+    # in-process embeddings, so loading MiniLM here costs ~4s for work that
+    # gets redone), and if the latency budget already blew. Falls back
+    # silently when sentence-transformers is missing. With semantic=False,
+    # _embs_by_eid stays empty, which also keeps the embedding-dependent
+    # scaffold/DPP stages below inert.
+    if semantic and precision_mode != "fast" and not budget_exceeded():
         try:
             from sentence_transformers import SentenceTransformer
             import numpy as np
@@ -2409,6 +2424,8 @@ def main() -> None:
     parser.add_argument("--format", choices=["text", "json", "compact"], default="json", help="Output format")
     parser.add_argument("--search-entities", default=None, help="Search query for entity-prioritized lookup")
     parser.add_argument("--search-limit", type=int, default=20, help="Max entity results")
+    parser.add_argument("--no-semantic", action="store_true",
+                        help="Skip semantic keyword expansion (avoids the in-process model load — use when the caller re-ranks with its own embeddings)")
     parser.add_argument("--graph-children", default=None, help="Entity to expand for graph tree")
     parser.add_argument("--graph-limit", type=int, default=50, help="Max children per parent")
     args = parser.parse_args()
@@ -2435,7 +2452,8 @@ def main() -> None:
         entities = json.loads(args.entities)
         # Use hybrid retrieval (FTS5 + tags + entity graph + RRF) for best results
         query_text = " ".join(entities)
-        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts)
+        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts,
+                                   semantic=not args.no_semantic)
         # Fallback to tag-only if hybrid returns nothing
         if not facts:
             facts = query_facts_by_entities(args.db, entities, max_facts=args.max_facts)

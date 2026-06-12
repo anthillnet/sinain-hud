@@ -30,7 +30,7 @@ The HUD overlay is invisible to screen capture — never appears in screenshots,
 
 Sinain feeds the same screen and audio context to any MCP-compatible agent. Switch agents on the fly — no restart, no context loss.
 
-- Tested with Claude Code, OpenClaude, Codex, Goose, and Junie. Any MCP-compatible agent works.
+- Tested with Claude Code, OpenClaude, Codex, Goose, Junie, and [Hermes](https://github.com/NousResearch/Hermes-Agent) (NousResearch). Most agents connect over MCP; pipe-mode agents like aider and Hermes work without it too.
 - Pick agents in the overlay's flash-icon selector — spawn tasks can route to any profile in your roster.
 - Add custom profiles (personal Claude config, alternate models) by editing [`agents.json`](docs/AGENT-ROSTER.md). The roster is the source of truth.
 - Knowledge modules travel with you — export from one machine, import on another.
@@ -254,7 +254,7 @@ Sinain's knowledge graph is exposed to any MCP-aware agent via the bundled MCP s
 
 ## Connect Your Coding Agent (MCP)
 
-Sinain ships an MCP server that exposes 15 `sinain_*` tools — including `sinain_knowledge_query`, `sinain_get_knowledge`, `sinain_distill_session`, `sinain_get_context`, and `sinain_respond` — to any MCP-aware agent. Register it once and the agent can read your knowledge graph and surface text on the HUD from any project.
+Sinain ships an MCP server that exposes 7 concise `sinain_*` tools — `sinain_context` (current situation), `sinain_memory_query` / `sinain_memory_store` (knowledge graph read/write), `sinain_notify` (HUD feed), `sinain_health`, and the `sinain_get_escalation` / `sinain_respond` escalation pair — to any MCP-aware agent. Register it once and the agent can use your knowledge graph as persistent memory and surface text on the HUD from any project.
 
 ```bash
 npx @geravant/sinain@latest mcp install

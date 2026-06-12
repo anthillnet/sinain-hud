@@ -3,11 +3,32 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Interactive thread-terminal modes (the overlay's thread terminal runs
+# these — no polling, no roster registration; see branch below the proxy
+# block):
+#   --interactive-region <id>  spawn-lane agent + composed region context
+#   --interactive-main         escalation-lane agent + current digest
+INTERACTIVE_MODE=""
+INTERACTIVE_REGION=""
+case "${1:-}" in
+  --interactive-region)
+    INTERACTIVE_MODE="region"
+    INTERACTIVE_REGION="${2:?usage: run.sh --interactive-region <regionId>}"
+    ;;
+  --interactive-main)
+    INTERACTIVE_MODE="main"
+    ;;
+esac
+
 # Load .env as fallback — does NOT override vars already in the environment
-# (e.g. vars set by the launcher from ~/.sinain/.env)
-# Load project root .env (single config for all subsystems)
-ENV_FILE="$SCRIPT_DIR/../.env"
-if [ -f "$ENV_FILE" ]; then
+# (e.g. vars set by the launcher from ~/.sinain/.env).
+# Candidates in priority order: project root .env (dev), then ~/.sinain/.env
+# (wizard-written user config). The second matters when run.sh is invoked
+# directly — e.g. the overlay's thread terminal — without start.sh/
+# launch-backend.sh having exported the user env first (profile env like
+# OPENAI_API_KEY="${OPENROUTER_API_KEY}" expands empty otherwise → 401s).
+for ENV_FILE in "$SCRIPT_DIR/../.env" "$HOME/.sinain/.env"; do
+  [ -f "$ENV_FILE" ] || continue
   while IFS='=' read -r key val; do
     # Skip comments and blank lines
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
@@ -22,7 +43,7 @@ if [ -f "$ENV_FILE" ]; then
       export "$key=$val"
     fi
   done < "$ENV_FILE"
-fi
+done
 
 MCP_CONFIG="${MCP_CONFIG:-$SCRIPT_DIR/mcp-config.json}"
 CORE_URL="${SINAIN_CORE_URL:-http://localhost:9500}"
@@ -197,6 +218,11 @@ agent_has_mcp() {
   type=$(prof_get_or "$check" type "$check")
   case "$type" in
     claude|openclaude|codex|goose) return 0 ;;
+    # Hermes is an MCP client, but headless tool approval (calling back into
+    # sinain_respond) depends on its yolo/approval config. Default to pipe
+    # mode (self-contained text oracle); opt in to the claude-style MCP flow
+    # with HERMES_USE_MCP=true once approval is configured (see startup block).
+    hermes) [ "${HERMES_USE_MCP:-false}" = "true" ] && return 0 || return 1 ;;
     junie) $JUNIE_HAS_MCP ;;
     *) return 1 ;;
   esac
@@ -246,6 +272,10 @@ invoke_agent() {
     apply_profile_env "$profile"
     # If the profile pinned a model, override OPENAI_MODEL for this call only.
     [ -n "$model" ] && export OPENAI_MODEL="$model"
+    # claude stores sessions per-project (cwd). Thread invocations must share
+    # a cwd with the thread TERMINAL (which starts in $HOME) or --resume
+    # fails with "No conversation found". Subshell-local cd.
+    [ -n "${SPAWN_SESSION_ID:-}" ] && cd "$HOME" 2>/dev/null
 
     case "$type" in
       claude|openclaude)
@@ -265,10 +295,27 @@ invoke_agent() {
           # hit this on overlay-v1.24.5 (~4 prompts per 7min). Always include
           # regardless of agents.json content (defense-in-depth).
           spawn_allowed="$spawn_allowed ToolSearch"
+          # Continue the thread's agent session when core provided one.
+          local sess_args=()
+          if [ -n "${SPAWN_SESSION_ID:-}" ]; then
+            if [ "${SPAWN_SESSION_NEW:-false}" = "true" ]; then
+              sess_args=(--session-id "$SPAWN_SESSION_ID")
+            else
+              sess_args=(--resume "$SPAWN_SESSION_ID")
+            fi
+            # Thread invocations cd to $HOME (sessions are per-cwd), which
+            # means sinain-agent/CLAUDE.md no longer auto-loads. Inject the
+            # thread-specific system prompt instead — NOT CLAUDE.md, whose
+            # escalation-loop instructions are wrong for a thread chat.
+            if [ -f "$SCRIPT_DIR/THREAD-SYSTEM.md" ]; then
+              sess_args+=(--append-system-prompt "$(cat "$SCRIPT_DIR/THREAD-SYSTEM.md")")
+            fi
+          fi
           if [ "$quiet" = "true" ]; then
             "$bin" \
               --mcp-config "$MCP_CONFIG" \
               --settings "$settings" \
+              ${sess_args[@]+"${sess_args[@]}"} \
               --allowedTools $spawn_allowed \
               --max-turns "$turns" --output-format text \
               -p "$prompt" \
@@ -277,6 +324,7 @@ invoke_agent() {
             "$bin" \
               --mcp-config "$MCP_CONFIG" \
               --settings "$settings" \
+              ${sess_args[@]+"${sess_args[@]}"} \
               --allowedTools $spawn_allowed \
               --max-turns "$turns" --output-format text \
               -p "$prompt"
@@ -330,6 +378,16 @@ invoke_agent() {
           --no-session \
           --max-turns "$turns"
         ;;
+      hermes)
+        # MCP mode (reached only when HERMES_USE_MCP=true — see agent_has_mcp).
+        # Hermes loads the sinain MCP server from ~/.hermes/config.yaml
+        # (registered at startup) and calls sinain_respond / sinain_knowledge_query
+        # itself, mirroring the claude flow. `-z/--oneshot` prints only the final
+        # text to stdout and auto-bypasses approvals (no TTY hang). Turn budget
+        # comes from config.yaml (max_turns, default 60) — there's no top-level
+        # --max-turns flag. `--toolsets`/`-t` can narrow tools if needed.
+        "$bin" -z "$prompt"
+        ;;
       aider)
         return 1  # No MCP support — caller falls back to invoke_pipe
         ;;
@@ -375,6 +433,17 @@ invoke_pipe() {
       ;;
     aider)
       "$bin" --yes -m "$msg"
+      ;;
+    hermes)
+      # Hermes one-shot: `-z/--oneshot` sends a single prompt and prints ONLY
+      # the final response text to stdout (no banner/spinner/tool previews,
+      # no session-id line) — and auto-bypasses tool approvals, so it never
+      # hangs waiting on a TTY. Tools, memory, and skills still load. The
+      # escalation message already includes full screen/audio/digest context,
+      # so Hermes answers as a self-contained oracle using its own configured
+      # model (set via `hermes model`/`hermes setup`) — no sinain MCP needed.
+      # For the richer flow where Hermes calls sinain tools, set HERMES_USE_MCP=true.
+      "$bin" -z "$msg" 2>/dev/null
       ;;
     *)
       # Generic: pipe message to stdin to whatever binary the profile names
@@ -455,6 +524,46 @@ print('  sinain extension added to ' + config_path)
   fi
 fi
 
+# Hermes: auto-register sinain MCP server in ~/.hermes/config.yaml (opt-in).
+# Only when HERMES_USE_MCP=true and hermes is the selected agent — pipe mode
+# (the default) is a black-box text oracle and needs none of this. Hermes
+# reads MCP servers from config.yaml under the `mcp_servers` key (stdio:
+# command + args + env). ruamel.yaml (a Hermes core dep) preserves the
+# user's comments/formatting; falls back to PyYAML if unavailable.
+if [ "${HERMES_USE_MCP:-false}" = "true" ] && [ "$AGENT" = "hermes" ]; then
+  TSX_BIN="$(cd "$SCRIPT_DIR/.." && pwd)/sinain-core/node_modules/.bin/tsx"
+  MCP_ENTRY="$(cd "$SCRIPT_DIR/.." && pwd)/sinain-mcp-server/index.ts"
+  HERMES_CONFIG="${HERMES_CONFIG_DIR:-$HOME/.hermes}/config.yaml"
+  if [ -f "$HERMES_CONFIG" ] && ! grep -q "sinain:" "$HERMES_CONFIG" 2>/dev/null; then
+    echo "Registering sinain MCP server with hermes ($HERMES_CONFIG)..."
+    python3 -c "
+import sys
+try:
+    from ruamel.yaml import YAML
+    _y = YAML()
+    load = _y.load
+    def dump(cfg, f): _y.dump(cfg, f)
+except Exception:
+    import yaml as _py
+    load = _py.safe_load
+    def dump(cfg, f): _py.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+path, tsx, entry, core, ws = sys.argv[1:6]
+with open(path) as f:
+    cfg = load(f) or {}
+cfg.setdefault('mcp_servers', {})['sinain'] = {
+    'command': tsx,
+    'args': [entry],
+    'env': {'SINAIN_CORE_URL': core, 'SINAIN_WORKSPACE': ws},
+}
+with open(path, 'w') as f:
+    dump(cfg, f)
+print('  sinain mcp_server added to ' + path)
+" "$HERMES_CONFIG" "$TSX_BIN" "$MCP_ENTRY" "$CORE_URL" "$WORKSPACE"
+  elif [ ! -f "$HERMES_CONFIG" ]; then
+    echo "  ⚠ HERMES_USE_MCP=true but $HERMES_CONFIG missing — run \`hermes setup\` first"
+  fi
+fi
+
 # Ollama warmup — pin the backing model so each agent invocation hits hot weights.
 # openclaude + Ollama via the OpenAI-compat endpoint does NOT forward keep_alive,
 # so we ping Ollama's native /api/generate once with keep_alive=-1 (persistent).
@@ -498,7 +607,7 @@ fi
 # Built-in defaults are 1:1 (profile name == binary == type). Users can
 # override fields or add custom profiles by editing sinain-agent/agents.json.
 # Profiles whose binaries aren't in PATH are silently skipped.
-for default_name in claude openclaude codex goose junie aider; do
+for default_name in claude openclaude codex goose junie aider hermes; do
   prof_set "$default_name" bin "$default_name"
   prof_set "$default_name" type "$default_name"
 done
@@ -587,8 +696,10 @@ fi
 ESC_AGENT="$AGENT"
 SPAWN_AGENT="$AGENT"
 
-# Register roster with sinain-core (fire-and-forget; core may not be ready)
-if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ]; then
+# Register roster with sinain-core (fire-and-forget; core may not be ready).
+# Skipped in interactive mode: a second register would echo `current=$AGENT`
+# back to core and reset the user's per-lane selections.
+if [ ${#AVAILABLE_AGENTS[@]} -gt 0 ] && [ -z "$INTERACTIVE_MODE" ]; then
   REGISTER_PAYLOAD=$(python3 -c "
 import json, sys
 available = sys.argv[1].split(' ') if sys.argv[1] else []
@@ -691,6 +802,143 @@ if $PROXY_NEEDED; then
   fi
 fi
 
+# --- Interactive thread terminal (region or main) ---
+# Resolve the lane's CURRENT agent from core's config piggyback (read-only
+# peek at /escalation/pending — same field the poll loop uses), fetch the
+# seed context, and exec the agent CLI in its own REPL. The user converses
+# with the lane's agent directly in the terminal.
+if [ -n "$INTERACTIVE_MODE" ]; then
+  if [ "$INTERACTIVE_MODE" = "region" ]; then
+    lane_field="spawnAgent"
+  else
+    lane_field="escalationAgent"
+  fi
+  lane=$(curl -sf -m 2 "$CORE_URL/escalation/pending" \
+    | python3 -c "import sys,json; print((json.load(sys.stdin).get('config') or {}).get('$lane_field',''))" 2>/dev/null || true)
+  profile="${lane:-$AGENT}"
+  bin=$(prof_get_or "$profile" bin "$profile")
+  type=$(prof_get_or "$profile" type "$profile")
+  # Not every roster agent has an interactive CLI (aider is pipe-only,
+  # openclaw is gateway-routed). Substitute the first interactive-capable
+  # profile rather than dropping the user into a context-less plain shell.
+  case "$type" in
+    claude|openclaude|codex|hermes) ;;
+    *)
+      for _alt in "${ALL_PROFILES[@]:-}"; do
+        _t=$(prof_get_or "$_alt" type "$_alt")
+        case "$_t" in claude|openclaude|codex|hermes) ;; *) continue ;; esac
+        command -v "$(prof_get_or "$_alt" bin "$_alt")" >/dev/null 2>&1 || continue
+        echo "⚠ lane agent '$profile' ($type) has no interactive mode — using '$_alt' for this terminal"
+        profile="$_alt"
+        type="$_t"
+        bin=$(prof_get_or "$_alt" bin "$_alt")
+        break
+      done
+      ;;
+  esac
+  if [ "$INTERACTIVE_MODE" = "region" ]; then
+    TASK_JSON=$(curl -sf -m 12 "$CORE_URL/region/$INTERACTIVE_REGION/task" 2>/dev/null || true)
+    task=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
+    SESS_ID=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sessionId',''))" 2>/dev/null || true)
+    SESS_NEW=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print('true' if json.load(sys.stdin).get('isNew') else 'false')" 2>/dev/null || true)
+    if [ -z "$task" ]; then
+      task="(No automatic screen context could be fetched for this region — transient fetch issue, NOT the user's fault. Do not mention expiry. Ask the user briefly what they need help with on screen.)"
+    fi
+  else
+    # MAIN: seed with the current situation digest — the same context the
+    # ambient escalation would carry. The agent pulls more via MCP itself.
+    digest=$(curl -sf -m 3 "$CORE_URL/agent/digest" \
+      | python3 -c "import sys,json; d=json.load(sys.stdin).get('digest') or {}; print(d.get('digest') or '')" 2>/dev/null || true)
+    task="You are the sinain HUD agent in an INTERACTIVE terminal session with the user (ambient escalations hold while they're here, their messages come to you directly).
+
+Current situation digest:
+${digest:-(no digest yet — quiet session so far)}
+
+You have sinain MCP tools (sinain_context for the current situation, sinain_memory_query for long-term facts). Open with a one-line read of the situation, then ask what they need."
+  fi
+  apply_profile_env "$profile"
+  model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
+  # mcp-config.json uses repo-relative paths (../sinain-core/…) that resolve
+  # against the agent's cwd. Headless polling runs from sinain-agent/ so they
+  # work; the interactive terminal starts in $HOME — rewrite to absolute.
+  # BSD mktemp needs trailing Xs (no suffix) — use a temp dir to keep .json
+  MCP_ABS="$(mktemp -d /tmp/sinain-mcp-XXXXXX)/mcp.json"
+  python3 - "$MCP_CONFIG" "$SCRIPT_DIR" > "$MCP_ABS" <<'PY'
+import json, os, sys
+path, base = sys.argv[1], sys.argv[2]
+cfg = json.load(open(path))
+for s in (cfg.get("mcpServers") or {}).values():
+    c = s.get("command", "")
+    if c.startswith("."):
+        s["command"] = os.path.normpath(os.path.join(base, c))
+    s["args"] = [os.path.normpath(os.path.join(base, a)) if a.startswith(".") else a
+                 for a in (s.get("args") or [])]
+print(json.dumps(cfg))
+PY
+  MCP_CONFIG="$MCP_ABS"
+  # Same pre-approved whitelist as headless spawns. NOTE: no --settings —
+  # interactive sessions should use the agent's native terminal approval UX,
+  # not the overlay-routed PreToolUse hook from sinain-agent/.claude.
+  spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS} ToolSearch"
+  echo "⌨ thread terminal — agent=$profile ($type), scope=${INTERACTIVE_REGION:-main}"
+  # Debug: SINAIN_TERM_DRYRUN=1 prints the resolved invocation instead of
+  # exec'ing the agent — for diagnosing seeding/lane issues from a shell.
+  if [ -n "${SINAIN_TERM_DRYRUN:-}" ]; then
+    echo "bin=$bin"
+    echo "mcp_config=$MCP_CONFIG"
+    echo "allowed=$spawn_allowed"
+    echo "--- task (${#task} chars) ---"
+    printf '%s\n' "$task"
+    exit 0
+  fi
+  # Unified seeding for ALL agent TUIs: write the task to a file and emit
+  # the ⟦SINAIN-SEED:<path>⟧ marker — the overlay thread terminal types a
+  # pointer message into the TUI once it's ready (output quiescence + modal
+  # detection on the Dart side). One mechanism instead of per-CLI prompt
+  # flags, which proved unreliable (claude's trust modal eats positionals,
+  # openclaude drops them entirely, hermes/codex have no usable flag).
+  # Session continuity: an existing thread session resumes with its full
+  # history — no seed needed. Only brand-new sessions get the typed seed.
+  RESUME_ARGS=()
+  if [ -n "${SESS_ID:-}" ]; then
+    if [ "${SESS_NEW:-true}" = "false" ]; then
+      RESUME_ARGS=(--resume "$SESS_ID")
+    else
+      RESUME_ARGS=(--session-id "$SESS_ID")
+    fi
+  fi
+  if [ "${SESS_NEW:-true}" != "false" ]; then
+    case "$type" in
+      claude|openclaude|codex|hermes)
+        SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
+        printf '%s' "$task" > "$SEED_FILE"
+        echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+        ;;
+    esac
+  else
+    echo "ℹ resuming thread session ${SESS_ID} — full history loads in the TUI"
+  fi
+  case "$type" in
+    claude|openclaude)
+      exec "$bin" --mcp-config "$MCP_CONFIG" --allowedTools "$spawn_allowed" \
+        ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
+      ;;
+    codex)
+      exec "$bin"
+      ;;
+    hermes)
+      # Hermes already has the sinain MCP server registered in
+      # ~/.hermes/config.yaml for deeper context pulls.
+      exec "$bin" chat
+      ;;
+    *)
+      echo "⚠ agent type '$type' has no interactive terminal mode — plain shell instead"
+      echo "  (region context lost; use the chat Run button for this agent)"
+      exec "${SHELL:-/bin/zsh}" -il
+      ;;
+  esac
+fi
+
 echo "sinain bare agent started"
 echo "  Agent: $AGENT ($AGENT_MODE)"
 echo "  Core: $CORE_URL"
@@ -720,6 +968,11 @@ Call sinain_get_escalation to see the full context, then call sinain_respond wit
 Response guidelines: 5-10 sentences, address errors first, reference specific screen/audio context, never NO_REPLY. Max 4000 chars for coding context, 3000 otherwise.'
 
 # --- Main loop ---
+
+# Consecutive-drop tracking for the escalation lane (see DROP handling below).
+LAST_DROP_ID=""
+DROP_STREAK=0
+MAX_DROP_RETRIES="${SINAIN_MAX_DROP_RETRIES:-3}"
 
 while true; do
   # Poll for pending escalation
@@ -785,8 +1038,27 @@ while true; do
         echo "$RESPONSE"
         echo ""
       } >> /tmp/sinain-drops.log
+      # A dropped escalation stays httpPending in sinain-core and is re-offered
+      # every poll — without a cap, a persistently broken agent (e.g. auth that
+      # works in a terminal but not under launchd) is re-invoked into the same
+      # failure every few seconds, indefinitely. After N consecutive drops of
+      # the SAME id, ack core to clear it and tell the user what's broken.
+      if [ "$ESC_ID" = "$LAST_DROP_ID" ]; then
+        DROP_STREAK=$((DROP_STREAK + 1))
+      else
+        LAST_DROP_ID="$ESC_ID"
+        DROP_STREAK=1
+      fi
+      if [ "$DROP_STREAK" -ge "$MAX_DROP_RETRIES" ]; then
+        echo "[$(date +%H:%M:%S)] ⚠ abandoning $ESC_ID after $DROP_STREAK failed invocations of '$ESC_AGENT'"
+        post_response "$ESC_ID" "⚠ Agent '$ESC_AGENT' failed $DROP_STREAK times in a row (see /tmp/sinain-drops.log). If it works in your terminal but not here, its auth may rely on shell-profile env vars — restart Sinain, or switch the escalation lane to another agent." 2>/dev/null || true
+        LAST_DROP_ID=""
+        DROP_STREAK=0
+      fi
     else
       echo "[$(date +%H:%M:%S)] Responded ($ESCALATION_COUNT total): ${RESPONSE:0:120}..."
+      LAST_DROP_ID=""
+      DROP_STREAK=0
     fi
     echo ""
   fi
@@ -804,26 +1076,39 @@ while true; do
 
   if [ -n "$SPAWN_ID" ]; then
     SPAWN_TASK=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['task']['task'])" 2>/dev/null)
+    # Thread session continuity: core allocates a stable session per thread.
+    # First message → --session-id (create); follow-ups → --resume.
+    SPAWN_SESSION_ID=$(echo "$SPAWN" | python3 -c "import sys,json; print((json.load(sys.stdin).get('task') or {}).get('sessionId',''))" 2>/dev/null || true)
+    SPAWN_SESSION_NEW=$(echo "$SPAWN" | python3 -c "import sys,json; print('true' if (json.load(sys.stdin).get('task') or {}).get('sessionNew') else 'false')" 2>/dev/null || true)
+    export SPAWN_SESSION_ID SPAWN_SESSION_NEW
     SPAWN_LABEL=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['task'].get('label','task'))" 2>/dev/null)
 
     echo "[$(date +%H:%M:%S)] Spawn task $SPAWN_ID ($SPAWN_LABEL)"
 
     if agent_has_mcp "$SPAWN_AGENT"; then
       # MCP path: agent runs task with sinain tools available
-      # Pre-fetch knowledge context so the spawn doesn't waste turns calling tools
-      SPAWN_KNOWLEDGE=$(curl -sf "$CORE_URL/knowledge" 2>/dev/null | python3 -c "
+      if [ -n "${SPAWN_SESSION_ID:-}" ]; then
+        # Thread chat message: pass it through as-is. The "background task,
+        # complete thoroughly" wrapper sent agents on multi-turn missions
+        # (25-turn tool spirals) when the user just asked a chat question —
+        # the first message already carries the full seed context.
+        SPAWN_PROMPT="$SPAWN_TASK"
+      else
+        # Pre-fetch knowledge context so the spawn doesn't waste turns calling tools
+        SPAWN_KNOWLEDGE=$(curl -sf "$CORE_URL/knowledge" 2>/dev/null | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 k = d.get('knowledge', '')
 # Trim to 2000 chars to avoid prompt bloat
 print(k[:2000])
 " 2>/dev/null || true)
-      SPAWN_PROMPT="You have a background task to complete. Task: $SPAWN_TASK
+        SPAWN_PROMPT="You have a background task to complete. Task: $SPAWN_TASK
 ${SPAWN_KNOWLEDGE:+
 ## Knowledge Context
 $SPAWN_KNOWLEDGE
 }
-Complete this task thoroughly. You also have sinain_get_knowledge and sinain_knowledge_query tools available for additional context. Summarize your findings concisely."
+Complete this task thoroughly. You also have the sinain_memory_query tool available for additional long-term context. Summarize your findings concisely."
+      fi
       export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
       SPAWN_RESULT=$(invoke_agent "$SPAWN_AGENT" "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: $SPAWN_AGENT invocation failed")
       unset SINAIN_SPAWN SINAIN_SPAWN_TASK_ID

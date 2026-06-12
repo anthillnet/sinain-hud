@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/app_control.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/update_check_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../hud_tooltip.dart';
 
 /// Compact display-settings popover for font size and accent color.
@@ -25,6 +28,14 @@ class DisplaySettingsPanel extends StatelessWidget {
   static const _sizeLabels = ['S', 'M', 'L'];
   static const _sizeValues = ['small', 'medium', 'large'];
 
+  Future<void> _openSessionLog(BuildContext context) async {
+    final ws = context.read<WebSocketService>();
+    final error = await openCurrentSessionLog();
+    if (error != null) {
+      ws.showSystemAlert(error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
@@ -38,9 +49,7 @@ class DisplaySettingsPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: Color(accentColor).withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: Color(accentColor).withValues(alpha: 0.3)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -67,8 +76,11 @@ class DisplaySettingsPanel extends StatelessWidget {
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
                     onTap: onClose,
-                    child: Icon(Icons.close, size: 12,
-                        color: Colors.white.withValues(alpha: 0.4)),
+                    child: Icon(
+                      Icons.close,
+                      size: 12,
+                      color: Colors.white.withValues(alpha: 0.4),
+                    ),
                   ),
                 ),
               ),
@@ -151,7 +163,8 @@ class DisplaySettingsPanel extends StatelessWidget {
                       border: isSelected
                           ? Border.all(color: Colors.white, width: 2)
                           : Border.all(
-                              color: Colors.white.withValues(alpha: 0.15)),
+                              color: Colors.white.withValues(alpha: 0.15),
+                            ),
                     ),
                   ),
                 ),
@@ -202,6 +215,129 @@ class DisplaySettingsPanel extends StatelessWidget {
                 max: 2,
                 divisions: 2,
                 onChanged: (v) => ws.setResponseSize(_sizeValues[v.round()]),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Auto-detect issues (Grammarly mode region eyes) toggle
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => settings.setAutoDetectIssues(
+                  !settings.settings.autoDetectIssues),
+              child: Row(
+                children: [
+                  Text(
+                    'AUTO-DETECT ISSUES',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 9,
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    settings.settings.autoDetectIssues
+                        ? Icons.toggle_on
+                        : Icons.toggle_off,
+                    size: 22,
+                    color: settings.settings.autoDetectIssues
+                        ? Color(accentColor)
+                        : Colors.white.withValues(alpha: 0.3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
+          const SizedBox(height: 8),
+
+          // Update available (DMG installs — checked daily against the
+          // latest macos-v* release; DMGs have no auto-update)
+          if (context.watch<UpdateCheckService>().availableVersion != null) ...[
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => launchUrl(
+                  Uri.parse(UpdateCheckService.downloadUrl),
+                  mode: LaunchMode.externalApplication,
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.system_update_alt,
+                        size: 12, color: Color(accentColor)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Update available: v${context.watch<UpdateCheckService>().availableVersion} — download',
+                      style: TextStyle(
+                        fontFamily: HudConstants.monoFont,
+                        fontFamilyFallback: HudConstants.monoFontFallbacks,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(accentColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          // Current session log
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => _openSessionLog(context),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.article_outlined,
+                    size: 12,
+                    color: Colors.white.withValues(alpha: 0.55),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Open Session Log',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 10,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Quit Sinain
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: quitApp,
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.power_settings_new,
+                    size: 12,
+                    color: Color(0xFFFF6B6B),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Quit Sinain',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 10,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

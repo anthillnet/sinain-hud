@@ -47,6 +47,28 @@ ok()   { echo -e "${BOLD}[start]${RESET} ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "${BOLD}[start]${RESET} ${YELLOW}⚠${RESET} $*"; }
 fail() { echo -e "${BOLD}[start]${RESET} ${RED}✗${RESET} $*"; exit 1; }
 
+# Keep dev/local runs aligned with packaged builds: the overlay's
+# "Open Session Log" button opens this file.
+LOG_DIR="${SINAIN_LOG_DIR:-$HOME/.sinain/logs}"
+LOG_FILE="${SINAIN_SESSION_LOG:-$LOG_DIR/backend.log}"
+mkdir -p "$LOG_DIR"
+if [ -f "$LOG_FILE" ] && [ "$(wc -c <"$LOG_FILE" 2>/dev/null || echo 0)" -gt 5000000 ]; then
+  mv "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null || true
+fi
+touch "$LOG_FILE"
+export SINAIN_SESSION_LOG="$LOG_FILE"
+printf '\n# SinainHUD session started %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$LOG_FILE"
+
+pipe_log() {
+  local plain_prefix="$1"
+  local color_prefix="$2"
+  local line
+  while IFS= read -r line; do
+    printf '%s %s\n' "$plain_prefix" "$line" >> "$LOG_FILE"
+    printf '%b %s\n' "$color_prefix" "$line"
+  done
+}
+
 # ── Paranoid mode: source config + verify prerequisites ──────────────────────
 if [ "$PARANOID_MODE" = true ]; then
   if [ -f "$SCRIPT_DIR/.env.paranoid" ]; then
@@ -206,6 +228,7 @@ kill_stale
 
 # ── 1. Preflight checks ─────────────────────────────────────────────────────
 log "Preflight checks..."
+ok "session log: $LOG_FILE"
 
 command -v node >/dev/null 2>&1    || fail "node not found — install Node.js"
 ok "node $(node --version)"
@@ -262,7 +285,7 @@ mkdir -p "$HOME/.sinain/capture"
 
 # ── 2. Start sinain-core ──────────────────────────────────────────────────
 log "Starting sinain-core..."
-(cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | sed -u "s/^/$(printf "${CYAN}[core]${RESET}    ")/" &
+(cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | pipe_log "[core]" "$(printf "${CYAN}[core]${RESET}    ")" &
 CORE_PID=$!
 PIDS+=("$CORE_PID")
 
@@ -323,7 +346,7 @@ OVERLAY_PID=""
 
 if ! $SKIP_SENSE; then
   log "Starting sense_client..."
-  (cd "$SCRIPT_DIR" && python3 -m sense_client) 2>&1 | sed -u "s/^/$(printf "${YELLOW}[sense]${RESET}   ")/" &
+  (cd "$SCRIPT_DIR" && python3 -m sense_client) 2>&1 | pipe_log "[sense]" "$(printf "${YELLOW}[sense]${RESET}   ")" &
   SENSE_PID=$!
   PIDS+=("$SENSE_PID")
 else
@@ -332,7 +355,7 @@ fi
 
 if ! $SKIP_OVERLAY; then
   log "Starting overlay..."
-  (cd "$SCRIPT_DIR/overlay" && flutter run -d macos 2>&1) | sed -u "s/^/$(printf "${MAGENTA}[overlay]${RESET} ")/" &
+  (cd "$SCRIPT_DIR/overlay" && flutter run -d macos 2>&1) | pipe_log "[overlay]" "$(printf "${MAGENTA}[overlay]${RESET} ")" &
   OVERLAY_PID=$!
   PIDS+=("$OVERLAY_PID")
 else

@@ -15,6 +15,7 @@ import concurrent.futures
 import copy
 import json
 import os
+import threading
 import time
 
 import numpy as np
@@ -30,7 +31,7 @@ from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor
 from .ocr import OCRResult, create_ocr
 from .gate import DecisionGate, SenseEvent, SenseObservation, SenseMeta
-from .sender import SenseSender, package_full_frame, package_roi
+from .sender import SenseSender, package_full_frame, package_roi, frame_dims
 from .app_detector import AppDetector
 from .config import load_config
 from .privacy import apply_privacy
@@ -70,15 +71,21 @@ def _gate_reason(gate, change, ocr, app_changed, window_changed):
     return f"unknown (ocr={ocr_len}, ssim={change.ssim_score:.3f})"
 
 
-def _run_ocr(ocr, ocr_pool, rois) -> OCRResult:
-    """Run OCR on extracted ROIs (parallel if multiple). Returns best result."""
+def _run_ocr(ocr, ocr_pool, rois):
+    """Run OCR on extracted ROIs (parallel if multiple). Returns the best
+    (result, roi) pair — the roi is needed to offset per-line bboxes (which
+    are crop-relative) into full-frame coordinates."""
     if not rois:
-        return OCRResult(text="", confidence=0, word_count=0)
+        return OCRResult(text="", confidence=0, word_count=0), None
     if len(rois) == 1:
-        return ocr.extract(rois[0].image)
-    futures = [ocr_pool.submit(ocr.extract, roi.image) for roi in rois]
-    results = [f.result() for f in concurrent.futures.as_completed(futures)]
-    return max(results, key=lambda r: len(r.text))
+        return ocr.extract(rois[0].image), rois[0]
+    futures = {ocr_pool.submit(ocr.extract, roi.image): roi for roi in rois}
+    best, best_roi = OCRResult(text="", confidence=0, word_count=0), None
+    for f in concurrent.futures.as_completed(futures):
+        r = f.result()
+        if len(r.text) > len(best.text):
+            best, best_roi = r, futures[f]
+    return best, best_roi
 
 
 def is_enabled(control_path: str) -> bool:
@@ -157,6 +164,9 @@ def main():
     _privacy_images_openrouter = os.environ.get("PRIVACY_IMAGES_OPENROUTER", "full")
 
     log("sense_client started")
+    log(f"versions: dmg={os.environ.get('SINAIN_DMG_VERSION', 'source')} "
+        f"build={os.environ.get('SINAIN_BUILD_ID', 'source')} "
+        f"python={sys.version.split()[0]}")
     log(f"  relay: {config['relay']['url']}")
     log(f"  fps: {config['capture']['fps']}, scale: {config['capture']['scale']}")
     log(f"  ocr backend: {config['ocr'].get('backend', 'auto')}")
@@ -192,7 +202,29 @@ def main():
     _logged_first_frame = False
     _last_heartbeat = time.time()
 
+    # Liveness watchdog: requests timeouts don't bound DNS resolution
+    # (getaddrinfo is an untimed libc call) — during a DNS outage the
+    # process once sat wedged in a network call for 2.5h, alive but
+    # emitting nothing. If the capture loop stops advancing, re-exec the
+    # process in place (same PID — start.sh/pkill semantics unaffected).
+    watchdog_secs = float(os.environ.get("SINAIN_SENSE_WATCHDOG_SECS", "180"))
+    _loop_beat = {"ts": time.time()}
+
+    def _watchdog():
+        while True:
+            time.sleep(15)
+            stalled = time.time() - _loop_beat["ts"]
+            if stalled > watchdog_secs:
+                log(f"WATCHDOG: capture loop stalled {stalled:.0f}s — re-executing process")
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os.execv(sys.executable, [sys.executable, "-m", "sense_client"] + sys.argv[1:])
+
+    if watchdog_secs > 0:
+        threading.Thread(target=_watchdog, daemon=True, name="watchdog").start()
+
     for frame, ts in capture.capture_loop():
+        _loop_beat["ts"] = time.time()
         # Check control file (pause/resume)
         if not is_enabled(args.control):
             time.sleep(1)
@@ -273,8 +305,9 @@ def main():
         # 5. OCR on ROIs
         t0 = time.time()
         ocr_result = OCRResult(text="", confidence=0, word_count=0)
+        ocr_roi = None
         try:
-            ocr_result = _run_ocr(ocr, ocr_pool, use_rois)
+            ocr_result, ocr_roi = _run_ocr(ocr, ocr_pool, use_rois)
         except Exception as e:
             ocr_errors += 1
             log(f"OCR error: {e}")
@@ -289,13 +322,14 @@ def main():
         # Shadow validation: run baseline OCR on original frame for comparison
         if use_shadow and use_backpressure and rois:
             try:
-                baseline_result = _run_ocr(ocr, ocr_pool, rois)
+                baseline_result, baseline_roi = _run_ocr(ocr, ocr_pool, rois)
                 if baseline_result.text != ocr_result.text:
                     shadow_divergences += 1
                     log(f"SHADOW DIVERGENCE: baseline={len(baseline_result.text)}chars "
                         f"optimized={len(ocr_result.text)}chars")
                 # Use baseline for actual sending (safety)
                 ocr_result = baseline_result
+                ocr_roi = baseline_roi
             except Exception as e:
                 log(f"Shadow OCR error: {e}")
 
@@ -303,15 +337,26 @@ def main():
         if use_backpressure:
             pending_frame = pending_rois = pending_change = None
 
-        # 5b. Privacy filter — strip <private> tags and redact secrets
+        # 5b. Privacy filter — strip <private> tags and redact secrets.
+        # Per-line boxes go through the same filter; redacted-empty lines drop.
         if ocr_result.text:
+            private_lines = None
+            if ocr_result.lines:
+                private_lines = []
+                for ln in ocr_result.lines:
+                    t = apply_privacy(ln.get("text", ""))
+                    if t.strip():
+                        private_lines.append({"text": t, "bbox": ln["bbox"]})
+                private_lines = private_lines or None
             ocr_result = OCRResult(
                 text=apply_privacy(ocr_result.text),
                 confidence=ocr_result.confidence,
                 word_count=ocr_result.word_count,
+                lines=private_lines,
             )
 
-        # 5c. Privacy matrix: apply OCR gating for openrouter destination
+        # 5c. Privacy matrix: apply OCR gating for openrouter destination.
+        # Anything below "full" drops per-line text+boxes entirely.
         if ocr_result.text and _privacy_ocr_openrouter != "full":
             if _privacy_ocr_openrouter == "none":
                 ocr_result = OCRResult(text="", confidence=0, word_count=0)
@@ -394,11 +439,24 @@ def main():
         elif event.type == "context":
             event.roi = package_full_frame(use_frame)
         elif use_rois:
-            event.roi = package_roi(use_rois[0])
+            # Prefer the ROI that actually produced the OCR text — keeps the
+            # event bbox coherent with the text (and the line boxes below).
+            event.roi = package_roi(ocr_roi or use_rois[0], frame_size=frame_dims(use_frame))
         else:
             # Fallback: send full frame thumbnail for text-only events
             event.roi = package_full_frame(use_frame)
         # Diff images removed — agent doesn't use binary diff masks
+
+        # Per-line OCR boxes, offset from crop-relative to full-frame coords —
+        # sinain-core anchors region eyes at the exact line of an issue.
+        if ocr_result.lines and ocr_roi is not None:
+            ox, oy = ocr_roi.bbox[0], ocr_roi.bbox[1]
+            event.ocr_lines = [
+                {"text": ln["text"][:200],
+                 "bbox": [ln["bbox"][0] + ox, ln["bbox"][1] + oy,
+                          ln["bbox"][2], ln["bbox"][3]]}
+                for ln in ocr_result.lines[:40]
+            ]
 
         t0 = time.time()
         ok = sender.send(event)

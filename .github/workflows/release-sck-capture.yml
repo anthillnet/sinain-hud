@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'sck-capture-v*'
+  # Callable from release.yml (unified `v*` release) — creates the
+  # sck-capture-v<version> release itself, so consumers' tag-prefix lookups
+  # keep working.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to create/attach to (sck-capture-vX.Y.Z)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -29,5 +38,6 @@ jobs:
       - name: Upload asset
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: tools/sck-capture/sck-capture-macos.zip
           generate_release_notes: true

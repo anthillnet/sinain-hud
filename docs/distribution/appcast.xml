@@ -1,0 +1,38 @@
+<?xml version="1.0" standalone="yes"?>
+<!--
+  SEED-001 Phase 4 SCAFFOLD — Sparkle appcast template.
+
+  Hosted on GitHub Pages; the app's Info.plist SUFeedURL points here. Each
+  <item> describes one release; release-app.yml appends a new <item> per
+  `app-v*` tag and signs the DMG with the EdDSA key (SPARKLE_ED_PRIVATE_KEY)
+  → the `sparkle:edSignature` attribute. Sparkle refuses unsigned/tampered
+  updates. See docs/dmg-distribution-spec.md §5b.
+
+  The example item below is a PLACEHOLDER (zeroed length, fake signature) —
+  do not ship it. Open Q7: single stable channel vs. stable + beta appcasts.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Sinain</title>
+    <link>https://geravant.github.io/sinain-hud/appcast.xml</link>
+    <description>Sinain macOS updates</description>
+    <language>en</language>
+
+    <item>
+      <title>Version 2.0.0</title>
+      <description><![CDATA[
+        <h2>PLACEHOLDER release</h2>
+        <p>Replaced by release-app.yml at publish time with real notes.</p>
+      ]]></description>
+      <pubDate>Thu, 29 May 2026 00:00:00 +0000</pubDate>
+      <sparkle:version>200</sparkle:version>
+      <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/anthillnet/sinain-hud/releases/download/app-v2.0.0/Sinain.dmg"
+        sparkle:edSignature="PLACEHOLDER_edDSA_signature"
+        length="0"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

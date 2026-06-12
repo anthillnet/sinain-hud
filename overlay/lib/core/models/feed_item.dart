@@ -13,6 +13,10 @@ class FeedItem {
   final DateTime timestamp;
   double opacity;
 
+  /// Region thread this message belongs to (Grammarly mode) — routed to that
+  /// region's tab instead of the main feed.
+  final String? regionId;
+
   FeedItem({
     required this.id,
     required this.text,
@@ -21,6 +25,7 @@ class FeedItem {
     this.sender = FeedSender.agent,
     DateTime? timestamp,
     this.opacity = 1.0,
+    this.regionId,
   }) : timestamp = timestamp ?? DateTime.now();
 
   bool get isUser => sender == FeedSender.user;
@@ -39,6 +44,7 @@ class FeedItem {
           ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
           : DateTime.now(),
       opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
+      regionId: json['regionId'] as String?,
     );
   }
 

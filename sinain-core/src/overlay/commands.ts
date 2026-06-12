@@ -17,8 +17,11 @@ export interface CommandDeps {
   onUserMessage: (text: string) => Promise<void>;
   /** Queue a user command to augment the next escalation */
   onUserCommand: (text: string) => void;
-  /** Spawn a background agent task */
-  onSpawnCommand?: (text: string) => void;
+  /** Spawn a background agent task. regionId present when a region eye initiated it. */
+  onSpawnCommand?: (text: string, regionId?: string) => void;
+  /** Fork MAIN into a new thread: mints a thread id and stores a seed built
+   *  from the MAIN transcript + digest. Returns the new thread's identity. */
+  onForkMain?: () => { id: string; label: string };
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
@@ -26,6 +29,18 @@ export interface CommandDeps {
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
+  /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
+   *  The overlay's settings toggle is the source of truth. */
+  onSetAutoDetect?: (enabled: boolean) => void;
+  /** Hold ambient escalations for [ms] — user is actively interacting. */
+  onUserBusy?: (ms: number) => void;
+  /** Start the local bare-agent runner for the selected escalation agent. */
+  onStartLocalAgent?: (agent?: string) => {
+    ok: boolean;
+    agent?: string;
+    alreadyRunning?: boolean;
+    error?: string;
+  };
 }
 
 /**
@@ -64,22 +79,43 @@ export function setupCommands(deps: CommandDeps): void {
       }
       case "spawn_command": {
         const preview = msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text;
-        log(TAG, `spawn command received: "${preview}"`);
-        // Echo spawn command to all overlay clients as a feed item (green in UI)
+        const regionId = typeof msg.regionId === "string" && msg.regionId ? msg.regionId : undefined;
+        log(TAG, `spawn command received: "${preview}"${regionId ? ` (region=${regionId})` : ""}`);
+        // Echo the message back to overlay clients. A thread send (regionId
+        // set) is just the user speaking in that thread's chat — echo it as
+        // the user, verbatim. Legacy non-thread spawn commands keep the ⚡
+        // prefix + spawn sender for the main feed.
         wsHandler.broadcastRaw({
           type: "feed",
-          text: `⚡ ${msg.text}`,
+          text: regionId ? msg.text : `⚡ ${msg.text}`,
           priority: "normal",
           ts: Date.now(),
           channel: "agent",
-          sender: "spawn",
+          sender: regionId ? "user" : "spawn",
+          ...(regionId ? { regionId } : {}),
         } as any);
         if (deps.onSpawnCommand) {
-          deps.onSpawnCommand(msg.text);
+          deps.onSpawnCommand(msg.text, regionId);
         } else {
           log(TAG, `spawn command ignored — no handler configured`);
           wsHandler.broadcast(`⚠ Spawn not available (no agent gateway connected)`, "normal");
         }
+        break;
+      }
+      case "fork_main": {
+        if (!deps.onForkMain) break;
+        const fork = deps.onForkMain();
+        log(TAG, `MAIN forked → ${fork.id}`);
+        // Open the thread tab on every client — rides the thread-status
+        // channel (regionId keys the tab, label titles it).
+        wsHandler.broadcastRaw({
+          type: "spawn_task",
+          taskId: fork.id,
+          label: fork.label,
+          status: "completed",
+          startedAt: Date.now(),
+          regionId: fork.id,
+        } as any);
         break;
       }
       case "spawn_reply": {
@@ -209,6 +245,54 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         wsHandler.broadcast(`⚠ ${result.error ?? "set_agent failed"}`, "normal");
       }
       log(TAG, `set_agent lane=${lane} agent=${agent || "<off>"} (ok=${result.ok})`);
+      break;
+    }
+    case "start_local_agent": {
+      const agent = (msg as any).agent;
+      if (agent !== undefined && typeof agent !== "string") {
+        log(TAG, "start_local_agent: invalid agent field");
+        break;
+      }
+      if (!deps.onStartLocalAgent) {
+        log(TAG, "start_local_agent: no handler wired");
+        wsHandler.broadcast("⚠ Local agent launcher is not available", "high");
+        break;
+      }
+      const result = deps.onStartLocalAgent(agent);
+      if (!result.ok) {
+        wsHandler.broadcast(`⚠ ${result.error ?? "Failed to start local agent"}`, "high");
+        log(TAG, `start_local_agent failed: ${result.error ?? "unknown error"}`);
+      } else if (result.alreadyRunning) {
+        wsHandler.broadcast(`Local agent already running: ${result.agent ?? "default"}`, "normal");
+        log(TAG, `start_local_agent ignored; already running (${result.agent ?? "default"})`);
+      } else {
+        wsHandler.broadcast(`Starting local escalation agent: ${result.agent ?? "default"}`, "normal");
+        log(TAG, `start_local_agent launched (${result.agent ?? "default"})`);
+      }
+      break;
+    }
+    case "set_auto_detect": {
+      const enabled = (msg as any).enabled === true;
+      if (deps.onSetAutoDetect) {
+        deps.onSetAutoDetect(enabled);
+        log(TAG, `auto-detect issues ${enabled ? "enabled" : "disabled"}`);
+      } else {
+        log(TAG, `set_auto_detect: no handler wired`);
+      }
+      break;
+    }
+    case "user_busy": {
+      // Overlay signals active user interaction (visible thread terminal,
+      // throttled). Holds ambient escalations; user commands still pass.
+      // seconds <= 0 releases the quiet window immediately (user left the
+      // terminal view); absent defaults to 120.
+      const raw = Number((msg as any).seconds);
+      const seconds = isNaN(raw) ? 120 : Math.min(Math.max(raw, 0), 600);
+      if (deps.onUserBusy) {
+        deps.onUserBusy(seconds * 1000);
+      } else {
+        log(TAG, `user_busy: no handler wired`);
+      }
       break;
     }
     case "open_settings": {

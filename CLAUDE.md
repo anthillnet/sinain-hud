@@ -75,8 +75,13 @@ CI (`ci.yml`) — two jobs:
 1. **sinain-core-typecheck** — Node 22, `npm ci` + `npx tsc --noEmit`
 2. **overlay-analyze** — Flutter 3.27.x, `flutter pub get` + `flutter analyze` + `flutter test`
 
-Release (`release-overlay.yml`) — triggered by `overlay-v*` tags:
-- Builds Flutter macOS release on `macos-latest`, zips with `ditto`, uploads to GitHub Releases
+Release — **read [docs/RELEASING.md](docs/RELEASING.md) before releasing anything.**
+Unified flow (`release.yml`): merge a `RELEASE_VERSIONS.json` bump (per-component
+series) to main → overlay zips + npm + sck-capture + signed DMG all build in one
+run (merge-driven; no tags needed). A release is NOT done until the sinain.com download CTA
+(`docs/index.html`, pinned to `macos-v<ver>`) is bumped and merged — merging to
+main deploys the site via Firebase. Per-component tags (`overlay-v*` etc.) still
+work for one-off releases.
 
 ## Key Source Locations
 

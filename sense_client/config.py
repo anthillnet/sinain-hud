@@ -41,7 +41,7 @@ DEFAULTS = {
     "vision": {
         "enabled": False,
         "backend": "ollama",
-        "model": "llava",
+        "model": "qwen2.5vl:7b",
         "ollamaUrl": "http://localhost:11434",
         "timeout": 10.0,
         "throttleSeconds": 5,
