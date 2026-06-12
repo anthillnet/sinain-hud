@@ -261,6 +261,11 @@ apply_profile_env() {
 # use pipe mode instead".
 invoke_agent() {
   (
+    # The loop's cwd can vanish mid-session: updating sinain (DMG replace /
+    # npm reinstall) deletes the directory run.sh was launched from, and
+    # claude then refuses every invocation ("current working directory was
+    # deleted"). Re-enter a live directory before doing anything else.
+    cd "$SCRIPT_DIR" 2>/dev/null || cd "$HOME" 2>/dev/null || cd /
     local profile="$1"
     local prompt="$2"
     local turns="${3:-$AGENT_MAX_TURNS}"
@@ -417,6 +422,7 @@ post_response() {
 # Some agents take the message as an argument, others via stdin.
 invoke_pipe() {
   (
+    cd "$SCRIPT_DIR" 2>/dev/null || cd "$HOME" 2>/dev/null || cd /
     local profile="$1"
     local msg="$2"
     local bin type
