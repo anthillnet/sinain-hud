@@ -877,18 +877,13 @@ def _dpp_select_counting(results: list[dict], embs_by_eid: dict, max_k: int) -> 
     return [f for i, f in enumerate(results) if i in keep_global or embs_by_eid.get(f.get("entity_id", "")) is None]
 
 
-def _count_scaffold(results: list[dict], embs_by_eid: dict, dedup_cos: float = 0.78,
-                    max_scan: int = 64):
-    """#7-COUNT: the sufficient statistic for a "how many X" question is the cardinality of the
-    DEDUPLICATED member set. The LLM's documented counting failure is duplicate-instance
-    confusion (near-duplicate mentions of the same item double-/under-counted); dedup is exactly
-    the part code does reliably and the model does not. Greedy semantic dedup over the candidate
-    facts' embeddings (already stashed by the rerank — no re-encode): a fact opens a NEW distinct
-    member iff its cosine to every kept member is < dedup_cos. Returns a scaffold fact dict that
-    ENUMERATES the distinct members and states the deduplicated total N — a true statement about
-    the retrieved set (deterministic-fill-only: code proves dedup, the QA model still applies the
-    semantic predicate of which members match). Returns None (no scaffold) when < 2 distinct
-    members or embeddings unavailable — a wrong/empty scaffold is worse than none."""
+def _dedup_members(results: list[dict], embs_by_eid: dict, dedup_cos: float = 0.78,
+                   max_scan: int = 64):
+    """Greedy semantic dedup of candidate facts into DISTINCT members: a fact opens a NEW member
+    iff its cosine to every kept member is < dedup_cos (embeddings already stashed by the rerank —
+    no re-encode). Skips scaffolds/raw excerpts and facts without embeddings. Returns
+    [(label, unit_vec)] in relevance order. Shared by _count_scaffold (#7-COUNT) and the
+    completeness-gate shadow logger (DESIGN-completeness-gate-answer-lattice)."""
     import numpy as np
     members = []  # (label, unit_vec)
     for f in results[:max_scan]:
@@ -904,6 +899,20 @@ def _count_scaffold(results: list[dict], embs_by_eid: dict, dedup_cos: float = 0
         _val = f.get("value", "")
         _val = _val[0] if isinstance(_val, list) else _val
         members.append((str(_val)[:70], v))
+    return members
+
+
+def _count_scaffold(results: list[dict], embs_by_eid: dict, dedup_cos: float = 0.78,
+                    max_scan: int = 64):
+    """#7-COUNT: the sufficient statistic for a "how many X" question is the cardinality of the
+    DEDUPLICATED member set. The LLM's documented counting failure is duplicate-instance
+    confusion (near-duplicate mentions of the same item double-/under-counted); dedup is exactly
+    the part code does reliably and the model does not. Returns a scaffold fact dict that
+    ENUMERATES the distinct members and states the deduplicated total N — a true statement about
+    the retrieved set (deterministic-fill-only: code proves dedup, the QA model still applies the
+    semantic predicate of which members match). Returns None (no scaffold) when < 2 distinct
+    members or embeddings unavailable — a wrong/empty scaffold is worse than none."""
+    members = _dedup_members(results, embs_by_eid, dedup_cos=dedup_cos, max_scan=max_scan)
     if len(members) < 2:
         return None
     _lst = "; ".join(f"{i + 1}. {lbl}" for i, (lbl, _) in enumerate(members))
@@ -1576,6 +1585,47 @@ def query_facts_hybrid(
             _cs = _count_scaffold(results, _embs_by_eid, dedup_cos=_dc)
             if _cs is not None:
                 results = [_cs] + results
+        except Exception:
+            pass
+    # M1 SHADOW — capture–recapture completeness gate (.planning/DESIGN-completeness-gate-
+    # answer-lattice.md). Logs gate inputs + posterior for counting queries; NO behavior change.
+    # Channel A = deduped distilled members; channel B = lexical corroboration of those members in
+    # raw excerpts — a LOWER-BOUND channel (cannot add unseen members, so P(inc) is an optimistic
+    # floor; real channel-B extraction is the L3 session sweep). Gate SINAIN_COMPLETENESS_GATE,
+    # default OFF; fail-open.
+    if (question_class == "counting"
+            and os.environ.get("SINAIN_COMPLETENESS_GATE", "0") != "0"):
+        try:
+            import json as _json_cg
+            import re as _re_cg
+            import time as _time_cg
+            from pathlib import Path as _Path_cg
+            from ig.completeness import posterior_incomplete, gate_action
+            _mem = _dedup_members(results, _embs_by_eid) if _embs_by_eid else []
+            _raws = [str(f.get("value", ""))[:600] for f in results
+                     if f.get("source") == "raw-excerpt"]
+            _rtext = " ".join(_raws).lower()
+            _STOP_CG = {"that", "this", "with", "from", "have", "their", "about", "what",
+                        "when", "your", "user", "they", "will", "been", "would"}
+            _corr = 0
+            for _lbl, _ in _mem:
+                _toks = [t for t in _re_cg.findall(r"[a-z]{4,}", _lbl.lower())
+                         if t not in _STOP_CG]
+                if _toks and any(t in _rtext for t in _toks):
+                    _corr += 1
+            _n1 = len(_mem)
+            _p_inc = posterior_incomplete([_n1, _corr], _n1) if _n1 and _corr else 1.0
+            _act = gate_action([_n1, _corr], _n1)
+            _dir = _Path_cg(os.environ.get("SINAIN_SHADOW_DIR",
+                                           str(_Path_cg.home() / ".sinain" / "eval")))
+            _dir.mkdir(parents=True, exist_ok=True)
+            _rec = {"ts": int(_time_cg.time()), "query": query[:200],
+                    "n_distilled": _n1, "n_raw_corroborated": _corr,
+                    "raw_excerpts": len(_raws), "p_incomplete": round(_p_inc, 4),
+                    "action": _act, "channel_b": "lex-corroboration-lower-bound",
+                    "members": [l for l, _ in _mem][:24]}
+            with open(_dir / "completeness-shadow.jsonl", "a", encoding="utf-8") as _fh:
+                _fh.write(_json_cg.dumps(_rec, ensure_ascii=False) + "\n")
         except Exception:
             pass
     # (2026-06-04) Arithmetic reduction scaffold (sum/mean/argmax) was tried here and DROPPED as
