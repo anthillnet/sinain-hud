@@ -20,12 +20,15 @@ driven from a terminal — it is the same conversation either way.
 ## Tools
 
 You have sinain MCP tools. Most useful here:
-- `sinain_knowledge_query` — query the knowledge graph for facts about
-  entities/domains the thread touches (enrich answers with long-term
-  knowledge).
-- `sinain_get_context` — full recent context window (screen OCR, audio
-  transcripts, app history) if you need more than the thread provided.
-- `sinain_ask_user` — ask the user a clarifying question mid-task.
+- `sinain_memory_query` — query long-term memory (knowledge graph) for
+  facts about entities/domains the thread touches.
+- `sinain_memory_store` — save a durable fact the user states or confirms
+  (entity/attribute/value), so future sessions know it.
+- `sinain_context` — the current situation: digest + screen OCR, audio
+  transcripts, app history, if you need more than the thread provided.
+
+Need clarification? Just ask in your reply — this is a conversation; the
+user answers in the chat or terminal.
 
 ## Privacy
 

@@ -51,6 +51,7 @@ def query_facts_by_entities(
         ).fetchall()
 
         fact_ids = [r["entity_id"] for r in rows]
+        tag_matches = {r["entity_id"]: r["matches"] for r in rows}
 
         # Fallback: if tags found < max_facts, also search domain/entity_id (for untagged facts)
         if len(fact_ids) < max_facts:
@@ -83,8 +84,14 @@ def query_facts_by_entities(
                 fact[attr_name] = values[0] if len(values) == 1 else values
             facts.append(fact)
 
-        # Sort by confidence descending (tag ranking already done in SQL)
-        facts.sort(key=lambda f: float(f.get("confidence", "0")), reverse=True)
+        # Rank by tag-match count first, then confidence. A confidence-only
+        # sort let many 1-tag facts at 0.9 bury a fact matching every
+        # keyword at 0.7 — match count is the stronger relevance signal.
+        facts.sort(
+            key=lambda f: (tag_matches.get(f["entity_id"], 0),
+                           float(f.get("confidence", "0"))),
+            reverse=True,
+        )
         store.close()
         return facts[:max_facts]
     except Exception as e:
@@ -396,6 +403,7 @@ def query_facts_hybrid(
     db_path: str,
     query: str,
     max_facts: int = 10,
+    semantic: bool = True,
 ) -> list[dict]:
     """Hybrid retrieval with Reciprocal Rank Fusion (Graphiti pattern).
 
@@ -407,8 +415,11 @@ def query_facts_hybrid(
     keywords = [w.lower() for w in re.findall(r"[a-zA-Z][a-zA-Z0-9-]+", query) if len(w) > 2]
 
     # Change 0: Semantic entity expansion — "ML" → ["ml", "machine-learning", "ai", ...]
+    # Skippable: a one-shot CLI invocation pays the full model load (~4s) for
+    # this step alone, which blows sinain-core's subprocess timeout — and core
+    # re-ranks candidates with its in-process embeddings anyway.
     expanded_keywords = keywords
-    if len(keywords) >= 1:
+    if semantic and len(keywords) >= 1:
         expanded_keywords = _expand_keywords_semantic(keywords, db_path)
 
     # Entity graph pre-filter with per-entity tracking for intersection (Change A)
@@ -605,6 +616,11 @@ def query_facts_hybrid(
     rrf_candidates = [fact_map[eid] for eid in sorted_ids[:max_facts * 2] if eid in fact_map]
 
     results = rrf_candidates[:max_facts]
+    if not semantic:
+        # Caller re-ranks with its own embeddings (sinain-core does this
+        # in-process) — loading the model here would cost ~4s per one-shot
+        # invocation for work that gets redone anyway.
+        return _hybrid_neighbor_expand(results, fact_map, db_path, max_facts)
     try:
         import numpy as np
         from common import load_sentence_transformer
@@ -623,7 +639,16 @@ def query_facts_hybrid(
     except ImportError:
         pass  # sentence-transformers not installed — use RRF order
 
-    # Expand top results with 1-hop graph neighbors
+    return _hybrid_neighbor_expand(results, fact_map, db_path, max_facts)
+
+
+def _hybrid_neighbor_expand(
+    results: list[dict],
+    fact_map: dict[str, dict],
+    db_path: str,
+    max_facts: int,
+) -> list[dict]:
+    """Final hybrid step: pad short result sets with 1-hop graph neighbors."""
     if results and len(results) < max_facts:
         seen_ids = {f.get("entity_id", "") for f in results}
         try:
@@ -1191,6 +1216,8 @@ def main() -> None:
     parser.add_argument("--format", choices=["text", "json", "compact"], default="json", help="Output format")
     parser.add_argument("--search-entities", default=None, help="Search query for entity-prioritized lookup")
     parser.add_argument("--search-limit", type=int, default=20, help="Max entity results")
+    parser.add_argument("--no-semantic", action="store_true",
+                        help="Skip semantic keyword expansion (avoids the in-process model load — use when the caller re-ranks with its own embeddings)")
     parser.add_argument("--graph-children", default=None, help="Entity to expand for graph tree")
     parser.add_argument("--graph-limit", type=int, default=50, help="Max children per parent")
     args = parser.parse_args()
@@ -1217,7 +1244,8 @@ def main() -> None:
         entities = json.loads(args.entities)
         # Use hybrid retrieval (FTS5 + tags + entity graph + RRF) for best results
         query_text = " ".join(entities)
-        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts)
+        facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts,
+                                   semantic=not args.no_semantic)
         # Fallback to tag-only if hybrid returns nothing
         if not facts:
             facts = query_facts_by_entities(args.db, entities, max_facts=args.max_facts)

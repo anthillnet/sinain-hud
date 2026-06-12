@@ -854,7 +854,7 @@ if [ -n "$INTERACTIVE_MODE" ]; then
 Current situation digest:
 ${digest:-(no digest yet — quiet session so far)}
 
-You have sinain MCP tools (sinain_get_context for screen/audio detail, sinain_knowledge_query for long-term facts). Open with a one-line read of the situation, then ask what they need."
+You have sinain MCP tools (sinain_context for the current situation, sinain_memory_query for long-term facts). Open with a one-line read of the situation, then ask what they need."
   fi
   apply_profile_env "$profile"
   model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
@@ -1107,7 +1107,7 @@ ${SPAWN_KNOWLEDGE:+
 ## Knowledge Context
 $SPAWN_KNOWLEDGE
 }
-Complete this task thoroughly. You also have sinain_get_knowledge and sinain_knowledge_query tools available for additional context. Summarize your findings concisely."
+Complete this task thoroughly. You also have the sinain_memory_query tool available for additional long-term context. Summarize your findings concisely."
       fi
       export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
       SPAWN_RESULT=$(invoke_agent "$SPAWN_AGENT" "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: $SPAWN_AGENT invocation failed")
