@@ -20,8 +20,10 @@ import 'package:xterm/xterm.dart';
 ///
 /// Pure Flutter (xterm) + native PTY (flutter_pty) — renders inside the
 /// existing private panel, so capture-invisibility is inherited.
-bool get terminalSpikeEnabled =>
-    kDebugMode || Platform.environment['SINAIN_TERMINAL_SPIKE'] == 'true';
+/// Shipped feature since overlay 2.13.x — the spike gate (kDebugMode ||
+/// SINAIN_TERMINAL_SPIKE) made the chat⇄term toggle invisible in every
+/// release build, so production users never saw the terminal at all.
+const bool terminalSpikeEnabled = true;
 
 /// One live shell session: emulator state + PTY. Cached per thread so the
 /// process survives tab switches — only an explicit close kills it.
