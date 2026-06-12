@@ -1,6 +1,6 @@
 # Sinain <img src="media/screen-recording-2026-03-26.gif" alt="Sinain HUD" width="120" align="right">
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg)](LICENSE)
 [![CI](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml/badge.svg)](https://github.com/anthillnet/sinain-hud/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@geravant/sinain)](https://www.npmjs.com/package/@geravant/sinain)
 [![macOS 12.3+](https://img.shields.io/badge/macOS-12.3%2B-black?logo=apple)](https://support.apple.com/macos)
@@ -295,4 +295,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT
+Split licensing — open code, protected product:
+
+- **Core (this repo): [FSL-1.1-ALv2](LICENSE)** (Functional Source License).
+  Free for any use except offering a competing product or service; each
+  release automatically becomes Apache-2.0 two years after publication.
+- **MCP server (`sinain-mcp-server/`) + the knowledge export/import format:
+  [MIT](sinain-mcp-server/LICENSE)** — integrate sinain as a memory layer or
+  build on the protocol without restrictions.
+- Versions published before the switch (≤ 0.3.x MIT era) remain MIT.
