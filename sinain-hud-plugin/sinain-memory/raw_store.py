@@ -121,16 +121,17 @@ def _scan_sidecar(sidecar: Path) -> tuple[int, int]:
     count = 0
     max_sid = -1
     if sidecar.exists():
-        for ln in sidecar.read_text().splitlines():
-            if not ln.strip():
-                continue
-            count += 1
-            try:
-                sid = json.loads(ln).get("session_id")
-                if sid is not None:
-                    max_sid = max(max_sid, int(sid))
-            except Exception:
-                pass
+        with sidecar.open() as fh:
+            for ln in fh:
+                if not ln.strip():
+                    continue
+                count += 1
+                try:
+                    sid = json.loads(ln).get("session_id")
+                    if sid is not None:
+                        max_sid = max(max_sid, int(sid))
+                except Exception:
+                    pass
     return count, max_sid
 
 

@@ -70,10 +70,11 @@ def main():
     gate = "--gate" in sys.argv
     limit = None
     for i, a in enumerate(sys.argv):
-        if a == "--limit":
+        if a == "--limit" and i + 1 < len(sys.argv):
             limit = int(sys.argv[i + 1])
 
-    rows = [json.loads(l) for l in open(path) if l.strip()]
+    with open(path) as fh:
+        rows = [json.loads(l) for l in fh if l.strip()]
     if limit:
         rows = rows[:limit]
     print(f"shadow typed-edge validation: {len(rows)} questions, gate={'ON' if gate else 'OFF'}\n")

@@ -8,6 +8,7 @@ on the copy, and QA again (treatment). Compare paper_label per qid.
 Usage: python3 slot_ab.py /tmp/ku_ab_qids.txt   (run with production SINAIN_* flags set)
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -35,7 +36,8 @@ def majority_label(question, db_path, full_ctx, kdoc):
 
 
 def main():
-    qids = set(open(sys.argv[1]).read().strip().split(","))
+    with open(sys.argv[1]) as fh:
+        qids = {t for t in re.split(r"[\s,]+", fh.read().strip()) if t}
     adapter = LongMemEvalAdapter()
     instances = adapter.load_dataset(str(DATA_DIR))
     # map: instance -> the target questions in it

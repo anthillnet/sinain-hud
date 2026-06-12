@@ -24,10 +24,11 @@ def main():
     path = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "/tmp/lme_reductions.jsonl"
     limit = None
     for i, a in enumerate(sys.argv):
-        if a == "--limit":
+        if a == "--limit" and i + 1 < len(sys.argv):
             limit = int(sys.argv[i + 1])
 
-    rows = [json.loads(l) for l in open(path) if l.strip()]
+    with open(path) as fh:
+        rows = [json.loads(l) for l in fh if l.strip()]
     if limit:
         rows = rows[:limit]
     print(f"write-time typed-edge validation: {len(rows)} questions\n")

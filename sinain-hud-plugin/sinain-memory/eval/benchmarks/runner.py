@@ -311,7 +311,7 @@ def run_benchmark(
         all_questions = [(inst, q) for inst, q in all_questions if getattr(q, "id", None) in qset]
         print(f"[runner] --qids filter -> {len(all_questions)} questions", flush=True)
 
-    if subset:
+    if subset and not qids:  # --qids overrides subset selection entirely
         if stratified:
             # Take equal samples from each question category
             from collections import defaultdict
@@ -472,7 +472,7 @@ def run_benchmark(
         # in retrieval.stage so the dashboard can slice category × stage.)
         if db_path and "sinain-memory" in conditions:
             if skip_llm:
-                retrieval["stage"] = retrieval_class or ("retrieval_ok" if retrieval else None)
+                retrieval["stage"] = retrieval_class or None
             else:
                 retrieval["stage"] = _classify_failure_stage(
                     retrieval, retrieval_class, answers.get("sinain-memory")
