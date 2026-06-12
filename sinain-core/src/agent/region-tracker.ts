@@ -316,9 +316,9 @@ export function buildRegionTaskText(
     parts.push(`\nUser note: ${userNote.trim()}`);
   }
   parts.push(
-    `\nYou have sinain MCP tools for deeper context: sinain_knowledge_query ` +
-    `(long-term facts about entities/topics), sinain_get_context (current ` +
-    `screen/audio), sinain_get_digest (situation summary). Query them when ` +
+    `\nYou have sinain MCP tools for deeper context: sinain_memory_query ` +
+    `(long-term facts about entities/topics), sinain_context (current ` +
+    `screen/audio + situation summary). Query them when ` +
     `the seed above isn't enough.`,
   );
   parts.push(`\nAct on the specific issue above. Be concrete and concise.`);

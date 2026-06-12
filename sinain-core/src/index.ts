@@ -121,7 +121,10 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json"];
+      // --no-semantic: keyword expansion would load the MiniLM model inside
+      // the one-shot python (~4s, blowing the timeout below); we re-rank
+      // with in-process embeddings in Step 2 instead.
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
       // Async exec — the sync variant blocked node's event loop for up to
       // 5s PER DB (10s total): every WS broadcast, escalation, and the
@@ -627,6 +630,7 @@ async function importKnowledgeToLocal(data: string): Promise<string> {
 import json, sys
 sys.path.insert(0, "${scriptsDir}")
 from triplestore import TripleStore
+from knowledge_integrator import _extract_tags
 import hashlib
 
 db_path = "${dbPath}"
@@ -661,6 +665,15 @@ for op in ops:
     store.assert_triple(tx, entity_id, "reinforce_count", "1")
     if op.get("domain"):
         store.assert_triple(tx, entity_id, "domain", op["domain"])
+    # Tags make the fact findable: /knowledge/facts retrieval is tag-based,
+    # so a fact without tag triples is write-only. Same extractor the
+    # integrator uses, plus the entity name and domain themselves.
+    tags = set(_extract_tags(value))
+    tags.add(entity.lower().replace(" ", "-"))
+    if op.get("domain"):
+        tags.add(str(op["domain"]).lower())
+    for tag in tags:
+        store.assert_triple(tx, entity_id, "tag", tag)
     stats["asserted"] += 1
 
 store.close()

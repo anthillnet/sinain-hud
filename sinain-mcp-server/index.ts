@@ -2,8 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { execFile } from "node:child_process";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import os from "node:os";
 
@@ -14,13 +13,6 @@ import os from "node:os";
 const SINAIN_CORE_URL = process.env.SINAIN_CORE_URL || "http://localhost:9500";
 const WORKSPACE = (process.env.SINAIN_WORKSPACE || "~/.openclaw/workspace").replace(/^~/, os.homedir());
 const MEMORY_DIR = resolve(WORKSPACE, "memory");
-const MODULES_DIR = resolve(WORKSPACE, "modules");
-
-const SCRIPTS_CANDIDATES = [
-  resolve(WORKSPACE, "sinain-memory"),
-  resolve(import.meta.dirname || ".", "..", "sinain-hud-plugin", "sinain-memory"),
-];
-const SCRIPTS_DIR = SCRIPTS_CANDIDATES.find((d) => existsSync(d)) || SCRIPTS_CANDIDATES[0];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,38 +34,26 @@ async function coreRequest(method: string, path: string, body?: unknown): Promis
   return json;
 }
 
-function runScript(args: string[], timeoutMs = 30_000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "python3",
-      args,
-      {
-        timeout: timeoutMs,
-        maxBuffer: 10 * 1024 * 1024,
-        env: { ...process.env },
-      },
-      (err, stdout, stderr) => {
-        if (err) reject(new Error(`Script failed: ${err.message}\n${stderr}`));
-        else resolve(stdout);
-      },
-    );
-  });
-}
-
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
 // ---------------------------------------------------------------------------
-// Server
+// Server — 7 tools covering the two sinain scenarios:
+//   A. sinain's own agents (chat/terminal threads + the escalation loop):
+//      get_escalation/respond (loop contract), context, memory_query.
+//   B. an external agent using sinain as its memory layer
+//      (query/store): memory_query, memory_store, notify, health.
+// There is deliberately no ask-user tool — the user converses through the
+// thread's chat or terminal; the conversation IS the question channel.
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
   name: "sinain-mcp-server",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
-// 1. sinain_get_escalation
+// 1. sinain_get_escalation — escalation loop contract (run.sh prompts this)
 server.tool(
   "sinain_get_escalation",
   "Get the current pending escalation from sinain-core",
@@ -91,7 +71,7 @@ server.tool(
   },
 );
 
-// 2. sinain_respond
+// 2. sinain_respond — escalation loop contract
 server.tool(
   "sinain_respond",
   "Respond to a pending escalation",
@@ -106,57 +86,104 @@ server.tool(
   },
 );
 
-// 3. sinain_get_context
+// 3. sinain_context — the situational "whoami": current digest + context
+//    window (screen OCR, audio transcripts, app history) in one call.
 server.tool(
-  "sinain_get_context",
-  "Get the current agent context window from sinain-core (screen + audio + feed)",
+  "sinain_context",
+  "Get the user's current situation: the agent digest (one-paragraph summary) plus the full context window (screen OCR, audio transcripts, app history)",
   {},
   async () => {
     try {
-      const data = await coreRequest("GET", "/agent/context");
-      return textResult(stripPrivateTags(JSON.stringify(data, null, 2)));
+      const [digest, context] = await Promise.all([
+        coreRequest("GET", "/agent/digest").catch(() => null),
+        coreRequest("GET", "/agent/context").catch(() => null),
+      ]);
+      if (!digest && !context) {
+        return textResult("sinain-core unreachable — no context available");
+      }
+      const parts: string[] = [];
+      if (digest) parts.push(`## Digest\n${JSON.stringify(digest, null, 2)}`);
+      if (context) parts.push(`## Context window\n${JSON.stringify(context, null, 2)}`);
+      return textResult(stripPrivateTags(parts.join("\n\n")));
     } catch (err: any) {
       return textResult(`Error fetching context: ${err.message}`);
     }
   },
 );
 
-// 4. sinain_get_digest
+// 4. sinain_memory_query — hybrid retrieval over the knowledge graph
+//    (merges the local + workspace triplestores via sinain-core).
 server.tool(
-  "sinain_get_digest",
-  "Get the latest agent digest from sinain-core",
-  {},
-  async () => {
+  "sinain_memory_query",
+  "Query sinain's long-term memory (knowledge graph). Pass entities/keywords to retrieve related facts; set include_document to also get the portable knowledge document (playbook + top facts)",
+  {
+    entities: z.array(z.string()).optional().default([])
+      .describe("Entities or keywords to retrieve facts about, e.g. ['german','grammar']"),
+    max_facts: z.number().optional().default(8),
+    include_document: z.boolean().optional().default(false)
+      .describe("Also include the portable knowledge document (playbook + top facts)"),
+  },
+  async ({ entities, max_facts, include_document }) => {
+    const parts: string[] = [];
+    if (entities.length > 0) {
+      try {
+        const params = new URLSearchParams({
+          entities: entities.join(","),
+          max: String(max_facts),
+        });
+        const data = await coreRequest("GET", `/knowledge/facts?${params}`);
+        if (data.ok && data.facts) parts.push(stripPrivateTags(data.facts));
+      } catch (err: any) {
+        parts.push(`Error querying graph: ${err.message}`);
+      }
+    }
+    if (include_document || entities.length === 0) {
+      try {
+        const data = await coreRequest("GET", "/knowledge");
+        if (data.ok && data.content) {
+          parts.push(stripPrivateTags(data.content));
+        }
+      } catch {
+        // sinain-core unreachable — fall back to the workspace doc on disk
+        const docPath = resolve(MEMORY_DIR, "sinain-knowledge.md");
+        if (existsSync(docPath)) {
+          parts.push(stripPrivateTags(readFileSync(docPath, "utf-8")));
+        }
+      }
+    }
+    return textResult(parts.length > 0 ? parts.join("\n\n") : "No matching knowledge found");
+  },
+);
+
+// 5. sinain_memory_store — write facts into the knowledge graph. The
+//    deterministic integrator handles dedup, so storing is idempotent-ish.
+server.tool(
+  "sinain_memory_store",
+  "Store facts in sinain's long-term memory (knowledge graph). Each fact is an entity/attribute/value triple; duplicates are deduplicated automatically",
+  {
+    facts: z.array(z.object({
+      entity: z.string().describe("Entity the fact is about, kebab-case, e.g. 'sinain-hud' or 'igor'"),
+      attribute: z.string().describe("Attribute name, e.g. 'prefers', 'deadline', 'status'"),
+      value: z.string().describe("The fact content"),
+      confidence: z.number().optional().describe("0..1, default 0.7"),
+      domain: z.string().optional().describe("Optional domain tag, e.g. 'work', 'german'"),
+    })).min(1),
+  },
+  async ({ facts }) => {
     try {
-      const data = await coreRequest("GET", "/agent/digest");
+      const data = await coreRequest("POST", "/knowledge/import", { facts });
       return textResult(JSON.stringify(data, null, 2));
     } catch (err: any) {
-      return textResult(`Error fetching digest: ${err.message}`);
+      return textResult(`Error storing facts: ${err.message}`);
     }
   },
 );
 
-// 5. sinain_get_feedback
+// 6. sinain_notify — the one outward push channel: a message on the HUD
+//    feed. Replies in a thread happen in the conversation itself, not here.
 server.tool(
-  "sinain_get_feedback",
-  "Get recent learning feedback entries",
-  { limit: z.number().optional().default(20) },
-  async ({ limit }) => {
-    try {
-      const data = await coreRequest("GET", `/learning/feedback?limit=${limit}`);
-      return textResult(JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      return textResult(`Error fetching feedback: ${err.message}`);
-    }
-  },
-);
-
-// 6. sinain_post_feed
-// (sinain_spawn removed — chat-threads redesign: no autonomous spawn tasks.
-//  Agents answer inline; only the user opens threads/terminals.)
-server.tool(
-  "sinain_post_feed",
-  "Post a message to the sinain-core HUD feed",
+  "sinain_notify",
+  "Show a message on the user's HUD feed (the invisible overlay). Use for proactive notices; conversation replies belong in the conversation",
   {
     text: z.string(),
     priority: z.enum(["normal", "high", "urgent"]).optional().default("normal"),
@@ -182,283 +209,6 @@ server.tool(
       return textResult(JSON.stringify(data, null, 2));
     } catch (err: any) {
       return textResult(`Error checking health: ${err.message}`);
-    }
-  },
-);
-
-// 8. sinain_get_knowledge
-// Queries sinain-core's /knowledge API which merges both local and workspace DBs.
-// Falls back to reading the workspace knowledge doc directly if sinain-core is unreachable.
-server.tool(
-  "sinain_get_knowledge",
-  "Get the portable knowledge document (playbook + long-term facts from both local and workspace databases)",
-  {},
-  async () => {
-    // Try sinain-core API first (merges both DBs)
-    try {
-      const data = await coreRequest("GET", "/knowledge");
-      if (data.ok && data.content) {
-        return textResult(stripPrivateTags(data.content));
-      }
-    } catch {
-      // sinain-core unreachable — fall through to local files
-    }
-
-    // Fallback: read workspace files directly
-    try {
-      const docPath = resolve(MEMORY_DIR, "sinain-knowledge.md");
-      if (existsSync(docPath)) {
-        const content = readFileSync(docPath, "utf-8");
-        return textResult(stripPrivateTags(content));
-      }
-      const playbookPath = resolve(MEMORY_DIR, "sinain-playbook.md");
-      if (existsSync(playbookPath)) {
-        return textResult(stripPrivateTags(readFileSync(playbookPath, "utf-8")));
-      }
-      return textResult("No knowledge document available yet");
-    } catch (err: any) {
-      return textResult(`Error reading knowledge: ${err.message}`);
-    }
-  },
-);
-
-// 8b. sinain_knowledge_query (graph query — entity-based lookup)
-// Queries sinain-core's /knowledge/facts API which merges both local and workspace DBs.
-// Falls back to local graph_query.py (workspace DB only) if sinain-core is unreachable.
-server.tool(
-  "sinain_knowledge_query",
-  "Query the knowledge graph for facts about specific entities/domains (searches both local and workspace databases)",
-  {
-    entities: z.array(z.string()).optional().default([]),
-    max_facts: z.number().optional().default(5),
-  },
-  async ({ entities, max_facts }) => {
-    // Try sinain-core API first (merges both local + workspace DBs)
-    if (entities.length > 0) {
-      try {
-        const params = new URLSearchParams({
-          entities: entities.join(","),
-          max: String(max_facts),
-        });
-        const data = await coreRequest("GET", `/knowledge/facts?${params}`);
-        if (data.ok && data.facts) {
-          return textResult(stripPrivateTags(data.facts));
-        }
-      } catch {
-        // sinain-core unreachable — fall through to local script
-      }
-    }
-
-    // Fallback: query workspace DB directly via graph_query.py
-    try {
-      const dbPath = resolve(MEMORY_DIR, "knowledge-graph.db");
-      const scriptPath = resolve(SCRIPTS_DIR, "graph_query.py");
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(max_facts)];
-      if (entities.length > 0) {
-        args.push("--entities", JSON.stringify(entities));
-      }
-      const output = await runScript(args);
-      return textResult(stripPrivateTags(output));
-    } catch (err: any) {
-      return textResult(`Error querying graph: ${err.message}`);
-    }
-  },
-);
-
-// 8c. sinain_distill_session
-server.tool(
-  "sinain_distill_session",
-  "Distill the current session into knowledge (playbook updates + graph facts)",
-  {
-    session_summary: z.string().optional().default("Bare agent session distillation"),
-  },
-  async ({ session_summary }) => {
-    const results: string[] = [];
-
-    try {
-      // Fetch feed items from sinain-core
-      const coreUrl = process.env.SINAIN_CORE_URL || "http://localhost:9500";
-      const feedResp = await fetch(`${coreUrl}/feed?after=0`).then(r => r.json());
-      const historyResp = await fetch(`${coreUrl}/agent/history?limit=10`).then(r => r.json());
-
-      const feedItems = (feedResp as any).messages ?? [];
-      const agentHistory = (historyResp as any).results ?? [];
-
-      if (feedItems.length < 3) {
-        return textResult("Not enough feed items to distill (need >3)");
-      }
-
-      // Step 1: Distill
-      const transcript = JSON.stringify([...feedItems, ...agentHistory].slice(0, 100));
-      const meta = JSON.stringify({ ts: new Date().toISOString(), sessionKey: session_summary });
-
-      const distillOutput = await runScript([
-        resolve(SCRIPTS_DIR, "session_distiller.py"),
-        "--memory-dir", MEMORY_DIR,
-        "--transcript", transcript,
-        "--session-meta", meta,
-      ], 30_000);
-      results.push(`[session_distiller] ${distillOutput.trim().slice(0, 500)}`);
-
-      const digest = JSON.parse(distillOutput.trim());
-      if (digest.isEmpty || digest.error) {
-        return textResult(`Distillation skipped: ${digest.error || "empty session"}`);
-      }
-
-      // Step 2: Integrate
-      const integrateOutput = await runScript([
-        resolve(SCRIPTS_DIR, "knowledge_integrator.py"),
-        "--memory-dir", MEMORY_DIR,
-        "--digest", JSON.stringify(digest),
-      ], 60_000);
-      results.push(`[knowledge_integrator] ${integrateOutput.trim().slice(0, 500)}`);
-
-      return textResult(stripPrivateTags(results.join("\n\n")));
-    } catch (err: any) {
-      return textResult(`Distillation error: ${err.message}`);
-    }
-  },
-);
-
-// 9. sinain_heartbeat_tick
-server.tool(
-  "sinain_heartbeat_tick",
-  "Run the full heartbeat knowledge pipeline (signal analysis, insight synthesis, memory mining, playbook curation)",
-  {
-    session_summary: z.string().optional().default("Bare agent heartbeat tick"),
-  },
-  async ({ session_summary }) => {
-    const results: string[] = [];
-    const now = new Date().toISOString();
-
-    // Step 1: signal_analyzer.py
-    try {
-      const out = await runScript([
-        resolve(SCRIPTS_DIR, "signal_analyzer.py"),
-        "--memory-dir", MEMORY_DIR,
-        "--session-summary", session_summary,
-        "--current-time", now,
-      ]);
-      results.push(`[signal_analyzer] ${out.trim() || "OK"}`);
-    } catch (err: any) {
-      results.push(`[signal_analyzer] FAILED: ${err.message}`);
-    }
-
-    // Step 2: insight_synthesizer.py
-    try {
-      const out = await runScript([
-        resolve(SCRIPTS_DIR, "insight_synthesizer.py"),
-        "--memory-dir", MEMORY_DIR,
-        "--session-summary", session_summary,
-      ]);
-      results.push(`[insight_synthesizer] ${out.trim() || "OK"}`);
-    } catch (err: any) {
-      results.push(`[insight_synthesizer] FAILED: ${err.message}`);
-    }
-
-    // Step 3: memory_miner.py
-    try {
-      const out = await runScript([
-        resolve(SCRIPTS_DIR, "memory_miner.py"),
-        "--memory-dir", MEMORY_DIR,
-      ]);
-      results.push(`[memory_miner] ${out.trim() || "OK"}`);
-    } catch (err: any) {
-      results.push(`[memory_miner] FAILED: ${err.message}`);
-    }
-
-    // Step 4: playbook_curator.py
-    try {
-      const out = await runScript([
-        resolve(SCRIPTS_DIR, "playbook_curator.py"),
-        "--memory-dir", MEMORY_DIR,
-        "--session-summary", session_summary,
-      ]);
-      results.push(`[playbook_curator] ${out.trim() || "OK"}`);
-    } catch (err: any) {
-      results.push(`[playbook_curator] FAILED: ${err.message}`);
-    }
-
-    return textResult(stripPrivateTags(results.join("\n\n")));
-  },
-);
-
-// 10. sinain_user_command
-server.tool(
-  "sinain_user_command",
-  "Queue a user command to augment the next escalation context (forces escalation on next agent tick)",
-  { text: z.string().describe("The command text to inject into the next escalation") },
-  async ({ text }) => {
-    try {
-      const data = await coreRequest("POST", "/user/command", { text });
-      return textResult(JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      return textResult(`Error queuing user command: ${err.message}`);
-    }
-  },
-);
-
-// 11. sinain_module_guidance
-server.tool(
-  "sinain_module_guidance",
-  "Read guidance from all active modules in the workspace",
-  {},
-  async () => {
-    try {
-      const registryPath = resolve(MODULES_DIR, "module-registry.json");
-      if (!existsSync(registryPath)) {
-        return textResult("No modules configured");
-      }
-
-      const registry = JSON.parse(readFileSync(registryPath, "utf-8"));
-      const modules: Array<{ name: string; active?: boolean }> = Array.isArray(registry)
-        ? registry
-        : registry.modules || [];
-
-      const parts: string[] = [];
-      for (const mod of modules) {
-        if (mod.active === false) continue;
-        const guidancePath = resolve(MODULES_DIR, mod.name, "guidance.md");
-        if (existsSync(guidancePath)) {
-          const content = readFileSync(guidancePath, "utf-8");
-          parts.push(`## ${mod.name}\n\n${content}`);
-        }
-      }
-
-      if (parts.length === 0) {
-        return textResult("No module guidance files found");
-      }
-      return textResult(stripPrivateTags(parts.join("\n\n---\n\n")));
-    } catch (err: any) {
-      return textResult(`Error reading module guidance: ${err.message}`);
-    }
-  },
-);
-
-// 15. sinain_ask_user — blocking question to the user via overlay
-server.tool(
-  "sinain_ask_user",
-  "Ask the user a question and wait for their reply. Use when you need clarification, confirmation, or a decision. The question appears on the user's HUD overlay and blocks until they respond.",
-  {
-    question: z.string().describe("The question to ask the user"),
-  },
-  async ({ question }) => {
-    // Use the spawn task ID from the environment if available
-    const taskId = process.env.SINAIN_SPAWN_TASK_ID || `ask-${Date.now()}`;
-    try {
-      const resp = await fetch(`${SINAIN_CORE_URL}/spawn/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, question }),
-        signal: AbortSignal.timeout(6 * 60_000), // 6 min (server times out at 5)
-      });
-      const data = await resp.json() as { ok: boolean; answer?: string };
-      if (data.ok && data.answer) {
-        return textResult(`User replied: ${data.answer}`);
-      }
-      return textResult("User did not reply.");
-    } catch (err: any) {
-      return textResult(`Failed to ask user: ${err.message}`);
     }
   },
 );
