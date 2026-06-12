@@ -486,7 +486,7 @@ def main() -> None:
         choices=["paper", "legacy"],
         default="paper",
         help="Judge protocol: 'paper' = binary per-question-type (EVAL-04 paper-comparable); "
-             "'legacy' = 1-5 graded (al-futaim IPR backward compat).",
+             "'legacy' = 1-5 graded (acme IPR backward compat).",
     )
     parser.add_argument(
         "--ablate",

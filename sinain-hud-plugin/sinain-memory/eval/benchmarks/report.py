@@ -56,7 +56,7 @@ def generate_markdown(
 
     # ---- Paper-mode aggregation (EVAL-03/04) -----------------------------
     # Paper-mode summaries have either judge_mode="paper" or per_task populated.
-    # Legacy summaries (al-futaim IPR tracking) lack both — the existing
+    # Legacy summaries (acme IPR tracking) lack both — the existing
     # conditions/Mean Score table below remains the canonical render for them.
     is_paper = (
         _summary.get("judge_mode") == "paper"
@@ -95,8 +95,8 @@ def generate_markdown(
                 )
             lines.append("")
 
-    # ---- Legacy: Condition scores table (1-5 Mean Score, al-futaim IPR) ---
-    # Preserved unchanged — al-futaim IPR/GATE-02 regression tracking depends
+    # ---- Legacy: Condition scores table (1-5 Mean Score, acme IPR) ---
+    # Preserved unchanged — acme IPR/GATE-02 regression tracking depends
     # on this exact "Mean Score (1-5)" header.
     conditions = _summary.get("conditions", {})
     if conditions:

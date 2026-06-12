@@ -958,7 +958,7 @@ def query_facts_hybrid(
                             encoder pass over the bi-encoder's top-30; it is
                             NOT the default because bench data (2026-05-28)
                             showed the ms-marco cross-encoder demotes gold
-                            facts on the meeting bench (al-futaim 3.33→2.67)
+                            facts on the meeting bench (acme 3.33→2.67)
                             and added nothing at LongMemEval scale — revisit
                             if a larger run shows it helps. "fast" shrinks the
                             pool and skips bi-encoder entirely (latency-bound
@@ -1046,7 +1046,7 @@ def query_facts_hybrid(
 
     # Tier-3 dedicated tiny-LLM (SmolLM2:latest) — multi-query probes + HyDE
     # hypothesis. Opt-in via SINAIN_SMOLLM_PROBES=1. Targets the bench-confirmed
-    # "buried fact with generic query terms" retrieval failure (al-futaim
+    # "buried fact with generic query terms" retrieval failure (acme
     # recall@1 stuck at 16.7%; LongMemEval q3+q4 retrieval-gap = 0%).
     #
     # Probes: 3 statement-form paraphrases → tokenize → merge keywords.
@@ -1975,7 +1975,7 @@ def domain_fact_counts(db_path: str) -> dict[str, int]:
 
 
 def _slug_variants(query: str) -> set[str]:
-    """Generate slug variations to handle 'Al Futaim' / 'al-futaim' / 'alfutaim'.
+    """Generate slug variations to handle 'Acme Group' / 'acme' / 'acmegroup'.
 
     The web search bar accepts free text but the knowledge graph stores
     content-addressed slugs. We normalize aggressively: lowercase, then

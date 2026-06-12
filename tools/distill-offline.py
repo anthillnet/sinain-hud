@@ -2,7 +2,7 @@
 """Distill a labeled transcript file directly into a fresh knowledge-graph.db.
 
 Bypasses the live audio capture pipeline. Used for the diarization ablation:
-compare three graphs built from the al-futaim ground-truth transcript with
+compare three graphs built from the acme ground-truth transcript with
 different speaker-label conditions:
 
     --label-mode none       -> source="audio" on every line (baseline shape)

@@ -2,7 +2,7 @@
 
 Tier 3 of the deterministic-offload analysis (per .planning/phases/diarization-
 levers/00-PLAN.md § Unified execution order). Replaces the cloud LLM rewriter
-(`query_rewriter.py`, bench-confirmed null on al-futaim AND LongMemEval q3+q4)
+(`query_rewriter.py`, bench-confirmed null on acme AND LongMemEval q3+q4)
 with a dedicated tiny model that operates LOCALLY at zero per-query API cost.
 
 Architecture:
@@ -36,7 +36,7 @@ from typing import Any
 
 
 # SmolLM2:latest (1.7B) is the validated default — bench-tested 2026-05-28
-# evening, produces clean probes + hypothesis on both al-futaim and
+# evening, produces clean probes + hypothesis on both acme and
 # LongMemEval-S q3+q4. The 360m variant produced inconsistent output
 # (empty response on q3 with the $5 symbol). 1.7B is still tiny by LLM
 # standards (1.8GB disk, ~700ms inference) and parallelizable with phi4-mini.

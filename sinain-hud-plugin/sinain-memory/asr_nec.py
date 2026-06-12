@@ -2,7 +2,7 @@
 """ASR-C — training-free post-ASR Named-Entity Correction (prototype).
 
 Our measured #1 bottleneck is proper-noun mangling in transcription
-("Citibank"→"City Bank", "JetBrains"→"Jad veins", "Ibrahim"→"Jeff Rains"); a
+("Citibank"→"City Bank", "JetBrains"→"Jad veins", "Mustafa"→"Jeff Rains"); a
 ground-truth clean transcript lifts end-to-end QA +76%. Stock Whisper/gemini-
 audio expose no real biasing API, so we correct AFTER transcription — a model-
 agnostic post-pass that reuses assets we already have:
@@ -20,12 +20,12 @@ Two tiers (DeRAGEC ACL'25 2506.07510 / Apple RAG-NEC ICASSP'25 2409.06062):
      errors (City Bank→Citibank). Cheap, no LLM. Conservative guards mirror
      E1's (min length, prefix-variant guard, common-word stoplist).
   2. LLM denoising (opt-in) — for harder/hallucinated errors with no acoustic
-     overlap (Jeff Rains→Ibrahim), hand the transcript + phonetically-retrieved
+     overlap (Jeff Rains→Mustafa), hand the transcript + phonetically-retrieved
      candidate entities to an LLM that corrects ONLY on strong contextual
      evidence (error-prevention-priority — avoid the known LLM over-correction
      failure mode, RLLM-CF 2505.24347).
 
-Status: PROTOTYPE. Validate on the al-futaim real-capture bench (vs the +76%
+Status: PROTOTYPE. Validate on the acme real-capture bench (vs the +76%
 clean-transcript ceiling) before wiring into the live capture/distill path.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover - standalone fallback
 # a missed fix is cheap, a wrong fix poisons the graph).
 _MIN_COMPACT_LEN = 4
 _RATIO_FLOOR = 82.0          # RapidFuzz ratio on compact forms
-_MAX_NGRAM = 3               # entities up to 3 words ("city bank", "al futaim")
+_MAX_NGRAM = 3               # entities up to 3 words ("city bank", "acme group")
 _PREFIX_SUFFIX_GUARD = 3
 
 # Common words that must never be "corrected" into an entity on their own.
@@ -234,7 +234,7 @@ def phonetic_correct(
 # LLM-tier candidate retrieval floor. MEASURED CEILING (2026-05-29): text-only
 # correction can safely recover only the METAPHONE-EQUAL class. Low-acoustic-
 # overlap mangles are unrecoverable post-hoc AND string-similarity misleads —
-# "Jeff Rains"→jetbrains scores 77.8 (WRONG, should be Ibrahim) while the
+# "Jeff Rains"→jetbrains scores 77.8 (WRONG, should be Mustafa) while the
 # correct "Jad veins"→jetbrains scores only 58.8, so NO ratio threshold
 # separates them. We therefore restrict LLM candidates to metaphone-equal OR
 # very-high ratio (>=88); genuinely-destroyed names need ASR-A base-model
@@ -360,7 +360,7 @@ def nec_correct(
 
 if __name__ == "__main__":
     # Self-test: deterministic tier on real-style ASR mangles.
-    gaz = ["Citibank", "JetBrains", "IntelliJ", "TeamCity", "Ibrahim", "Al Futaim"]
+    gaz = ["Citibank", "JetBrains", "IntelliJ", "TeamCity", "Mustafa", "Acme Group"]
     cases = [
         ("We met with City Bank about the deal.", "Citibank"),       # phonetic hit
         ("He has used IntelliJ for ten years.", None),                # already correct → no change
@@ -382,7 +382,7 @@ if __name__ == "__main__":
     print(
         "\nCEILING (measured): text-only NEC reliably recovers only the "
         "metaphone-equal class (City Bank->Citibank). Low-overlap mangles "
-        "('Jad veins'->JetBrains 58.8, 'Jeff Rains'->Ibrahim) are NOT safely "
+        "('Jad veins'->JetBrains 58.8, 'Jeff Rains'->Mustafa) are NOT safely "
         "recoverable post-hoc — string similarity misleads (Jeff Rains scores "
         "77.8 to JetBrains, the WRONG entity). Those need ASR-A base-model "
         "biasing on the audio. The LLM tier is restricted to metaphone-equal "

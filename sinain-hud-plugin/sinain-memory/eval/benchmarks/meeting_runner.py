@@ -60,8 +60,8 @@ def run_meeting_benchmark(
 
     if meeting_filter:
         # Prefer an EXACT stem match (id == "meeting-<stem>") so e.g.
-        # `--meeting al-futaim-prep` selects ONLY the 25-q file and not also
-        # `al-futaim-prep-5min` (substring). Fall back to substring for partial
+        # `--meeting acme-prep` selects ONLY the 25-q file and not also
+        # `acme-prep-5min` (substring). Fall back to substring for partial
         # names. Fixes the eval-log stem-match gotcha (n=37 → n=25).
         exact = [i for i in instances if i.id == f"meeting-{meeting_filter}"]
         instances = exact if exact else [i for i in instances if meeting_filter in i.id]
@@ -216,7 +216,7 @@ def main() -> None:
     parser.add_argument("--subset", type=int, default=None,
                         help="Run only first N questions")
     parser.add_argument("--meeting", default=None,
-                        help="Filter to specific meeting by stem (e.g. al-futaim-prep-5min)")
+                        help="Filter to specific meeting by stem (e.g. acme-prep-5min)")
     parser.add_argument("--qa-model", default=QA_MODEL)
     parser.add_argument("--judge-model", default=JUDGE_MODEL)
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)

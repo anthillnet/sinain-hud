@@ -277,7 +277,7 @@ export interface TranscriptionConfig {
    * Deepgram / AssemblyAI custom-vocabulary APIs: biases the model toward
    * preserving these proper nouns rather than substituting phonetic
    * neighbors. Set via TRANSCRIPTION_INITIAL_PROMPT env var; can be a
-   * comma-separated list of names ("Ibrahim, Citibank, JetBrains, Deepak").
+   * comma-separated list of names ("Mustafa, Citibank, JetBrains, Tariq").
    */
   initialPrompt?: string;
   /** Local whisper-cpp settings (only used when backend=local) */

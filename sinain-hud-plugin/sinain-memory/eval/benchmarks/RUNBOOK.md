@@ -246,7 +246,7 @@ documents HOW we bench so the next session can reproduce and continue. All runs 
 | Surface | Measures | Driver | Short variant for iteration |
 |---|---|---|---|
 | **LongMemEval-S** | text memory QA across 30-60 prior sessions; 6 categories | `eval.benchmarks.runner` | `--subset 6 --stratified` (1/category) |
-| **al-futaim meeting** | REAL production capture (ASR errors + distillation) of a 27-min meeting; 25 Qs | `eval.benchmarks.meeting_runner` (needs a pre-built `--db`) | offline re-distill of the log-rebuilt transcript |
+| **acme meeting** | REAL production capture (ASR errors + distillation) of a 27-min meeting; 25 Qs | `eval.benchmarks.meeting_runner` (needs a pre-built `--db`) | offline re-distill of the log-rebuilt transcript |
 
 **Cloud vs local (both, always):** local is the default product mode (privacy), so the **local number is
 the one that matters most**. Toggle the distiller via `SINAIN_BENCH_MODEL=ollama/qwen2.5:7b` (threads to
@@ -278,12 +278,12 @@ cache-hit (fast: QA+judge only). Use this: iterate retrieval cheaply; budget tim
 ## The iteration loop (cheap → decisive)
 1. **Retrieval/QA change** → re-run cloud 6-q (cache-hit, ~3 min) → compare to baseline.
 2. **Distiller change** → re-ingest 6-q (cloud ~10 min; local ~1 hr — qwen is slow) → compare.
-3. **al-futaim, distiller change** → re-distill the **log-rebuilt** production transcript offline
-   (`tools/distill-offline.py` on `/tmp/al-futaim-prod-formatted.txt`) → `meeting_runner --db <graph>`.
+3. **acme, distiller change** → re-distill the **log-rebuilt** production transcript offline
+   (`tools/distill-offline.py` on `/tmp/acme-prod-formatted.txt`) → `meeting_runner --db <graph>`.
    The transcript is rebuilt from the capture's `core.log` `[transcribe]` lines — **NOT** the GT `.txt`
    (that's QA-reference only; the bench must use production-ASR text, errors and all).
 4. **Keep/drop rule:** keep a feature only if it lifts (or holds) BOTH benchmarks; **drop on any
-   regression**. When one variant is noisy (al-futaim offline-batched), weight the cleaner signal (LME).
+   regression**. When one variant is noisy (acme offline-batched), weight the cleaner signal (LME).
 
 ## Commands
 ```bash
@@ -293,13 +293,13 @@ python3 -m eval.benchmarks.runner --benchmarks longmemeval --conditions sinain-m
 # LongMemEval LOCAL 6-q (honest baseline = 1/6) — SLOW (cache-hit distill if stores exist)
 SINAIN_BENCH_MODEL=ollama/qwen2.5:7b python3 -m eval.benchmarks.runner --benchmarks longmemeval \
     --conditions sinain-memory --subset 6 --stratified --judge-mode paper --output-dir .../lme-local-6q
-# al-futaim 30-min full PRODUCTION CAPTURE (~28 min real-time, needs BlackHole + QuickTime, port 9500 free)
-python3 -m eval.local_models.bench_media_capture --video al-futaim-prep --meeting al-futaim-prep --duration 1620
-# al-futaim offline re-distill iteration (fast, no re-capture)
-python3 ../../tools/distill-offline.py --transcript /tmp/al-futaim-prod-formatted.txt \
+# acme 30-min full PRODUCTION CAPTURE (~28 min real-time, needs BlackHole + QuickTime, port 9500 free)
+python3 -m eval.local_models.bench_media_capture --video acme-prep --meeting acme-prep --duration 1620
+# acme offline re-distill iteration (fast, no re-capture)
+python3 ../../tools/distill-offline.py --transcript /tmp/acme-prod-formatted.txt \
     --out-dir /tmp/af-test --label-mode none
 python3 -m eval.benchmarks.meeting_runner --db /tmp/af-test/memory/knowledge-graph.db \
-    --conditions sinain-memory --meeting al-futaim-prep --output-dir .../af-test
+    --conditions sinain-memory --meeting acme-prep --output-dir .../af-test
 ```
 
 ## Diagnosis method (how we find WHY a question fails — use it, don't guess)
@@ -309,11 +309,11 @@ python3 -m eval.benchmarks.meeting_runner --db /tmp/af-test/memory/knowledge-gra
 2. Is the content even in the graph? Probe `graph_query.py --db <store> --entities '["term"]'`.
 3. Is it in the production transcript? Align the QA `evidence_timestamps` against the log-rebuilt
    transcript (and GT `.txt`) — distinguishes ASR-destroyed (re-capture needed) from distillation-dropped
-   (offline-fixable). This split is the al-futaim root-cause taxonomy in the discourse-reconstruction plan.
+   (offline-fixable). This split is the acme root-cause taxonomy in the discourse-reconstruction plan.
 
 ## Honest baselines (de-leaked distiller + fair-QA, 2026-05-29)
 - LongMemEval 6-q: **cloud 3/6** (single-session 3/3, cross-segment 0/3), **local qwen 1/6**.
-- al-futaim 25-q: **batched(offline) 1.60/5**, live-capture 2.56 (pre-de-leak), vs **full-context 4.00** ceiling.
+- acme 25-q: **batched(offline) 1.60/5**, live-capture 2.56 (pre-de-leak), vs **full-context 4.00** ceiling.
 
 ## Gotchas (each cost real debugging time)
 - **Long runs keep their start-time prompt** (Python module cache): editing code mid-run silently
@@ -321,8 +321,8 @@ python3 -m eval.benchmarks.meeting_runner --db /tmp/af-test/memory/knowledge-gra
 - **`| tail -N` on a launch buffers ALL output** until exit → the task file looks empty mid-run. Check
   liveness via `pgrep` + `~/.ollama/logs/server.log` (local) instead.
 - **Distillation empty-batch**: ~1/5 batches return valid JSON with empty `facts[]` (no retry) → random
-  segment dropped → adds ±0.3 noise to single-run al-futaim offline comparisons.
-- **`--meeting al-futaim-prep` matches BOTH** `al-futaim-prep_qa.json` (25) and `al-futaim-prep-5min_qa.json`
+  segment dropped → adds ±0.3 noise to single-run acme offline comparisons.
+- **`--meeting acme-prep` matches BOTH** `acme-prep_qa.json` (25) and `acme-prep-5min_qa.json`
   (12) → split by `mtg-af-*` vs `5m-*` id prefix, or move the 5-min QA aside.
 - **Bench-DB bloat**: each store is a ~126 MB Oxigraph dir but only ~1.1 MB is real data (RocksDB
   overhead); 127 stores ≈ 16 GB. Production is one shared store — not affected.

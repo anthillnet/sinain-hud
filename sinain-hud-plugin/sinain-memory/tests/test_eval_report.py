@@ -35,7 +35,7 @@ class TestPaperModeMarkdown:
 
 class TestLegacyModeMarkdown:
     def test_legacy_mode_unchanged(self):
-        """Legacy summary (no judge_mode field or judge_mode='legacy') must still render 1-5 'Mean Score' table — backward compat for al-futaim IPR runs."""
+        """Legacy summary (no judge_mode field or judge_mode='legacy') must still render 1-5 'Mean Score' table — backward compat for acme IPR runs."""
         from eval.benchmarks.report import generate_markdown
         legacy_summary = {
             "conditions": {

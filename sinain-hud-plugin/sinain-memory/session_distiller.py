@@ -269,7 +269,7 @@ def _nec_correct_items(items: list[dict], memory_dir: str) -> list[dict]:
       3. SINAIN_NEC_GAZETTEER / TRANSCRIPTION_INITIAL_PROMPT (optional bootstrap).
     Deterministic tier only (Metaphone-equal class — the safely-recoverable one;
     see asr_nec.py for the measured ceiling). Gated SINAIN_NEC (default ON);
-    no-op on any failure. Live-validated al-futaim 30-min: sinain 2.04→2.36/5,
+    no-op on any failure. Live-validated acme 30-min: sinain 2.04→2.36/5,
     IPR 50.5→57.3%, recall@10 12→20% (gazetteer self-reinforced 12→38 mid-session).
     """
     if os.environ.get("SINAIN_NEC", "1") == "0":

@@ -4,7 +4,7 @@
 Catches entity-name variants that the write-time difflib dedup (0.90 ratio in
 ``knowledge_integrator._find_matching_entity``) MISSES — especially the noisy
 spellings weak local distillers and ASR produce, e.g. "City Bank" → "Citibank"
-or "Ibraheem" → "Ibrahim". These sit at edit-ratios ~0.80–0.88, below the 0.90
+or "Mustapha" → "Mustafa". These sit at edit-ratios ~0.80–0.88, below the 0.90
 difflib floor, so they fragment the entity graph into near-duplicate nodes and
 weaken entity-backref retrieval / hop expansion — the failure mode is worst for
 local mode, which is the default privacy path.
@@ -29,7 +29,7 @@ from __future__ import annotations
 # Below this compact length, Metaphone codes collide too easily to trust.
 _MIN_LEN = 4
 # RapidFuzz fuzz.ratio floor on compact forms. city-bank/citibank=87.5,
-# ibrahim/ibraheem=80.0 are real variants we want; citibank/citi-group=47.1 and
+# mustafa/mustapha=80.0 are real variants we want; citibank/citi-group=47.1 and
 # python/postgres=28.6 are correctly excluded.
 _RATIO_FLOOR = 80.0
 # Block "X" vs "X + <=N alnum chars" (germany, gemma4) — a distinct entity, not
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     SKIP = {frozenset({"german", "germany"}), frozenset({"llama", "ollama"})}
     should = [
         ("city-bank", {"citibank": "entity:citibank"}, "citibank"),
-        ("ibraheem", {"ibrahim": "entity:ibrahim"}, "ibrahim"),
+        ("mustapha", {"mustafa": "entity:mustafa"}, "mustafa"),
         ("react-native", {"react native": "x"}, "react native"),
     ]
     shouldnt = [

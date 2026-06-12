@@ -19,7 +19,7 @@ export interface LocalTranscriptionConfig {
   /**
    * Optional hotword/entity hint passed to whisper-cli's --prompt flag.
    * Biases the model toward preserving these proper nouns rather than
-   * substituting phonetic neighbors (Ibrahim → Jeff Rains, Citibank →
+   * substituting phonetic neighbors (Mustafa → Jeff Rains, Citibank →
    * City Bank). Modeled after Whisper's documented initial-prompt
    * conditioning behavior.
    */

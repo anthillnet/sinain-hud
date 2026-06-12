@@ -14,7 +14,7 @@ Motivation — bench evidence:
 
         "What is the CTO's professional background?"
     →   {
-            "key_terms": ["CTO", "Ibrahim", "background", "career", "experience"],
+            "key_terms": ["CTO", "Mustafa", "background", "career", "experience"],
             "question_type": "entity-attribute",
             "expanded_synonyms": ["CTO", "Chief Technology Officer", "tech lead"],
             "suggested_profile": "eval"

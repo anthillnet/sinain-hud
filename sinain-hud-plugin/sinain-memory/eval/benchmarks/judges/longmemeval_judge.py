@@ -17,7 +17,7 @@ for n=500). The Plan 06 baseline-doc D-07 comparability footer is now
 emitted dynamically by variance_attribution._comparability_footer(judge).
 
 This module is ADDITIVE — it sits alongside qa_judge.py (1-5 graded judge
-that backs al-futaim IPR tracking / GATE-02). Both judges remain operational;
+that backs acme IPR tracking / GATE-02). Both judges remain operational;
 runner.py selects via --judge-mode {paper, legacy}.
 """
 from __future__ import annotations

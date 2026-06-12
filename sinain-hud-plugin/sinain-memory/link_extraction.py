@@ -67,7 +67,7 @@ WORKS_AT_RE = re.compile(
     r"(?:his|her|their|my) time at|"
     # sinain conversational additions — informal verb forms common in
     # transcribed meeting audio (e.g., "he comes from Citibank"). Tuned
-    # against al-futaim-prep-5min on 2026-05-18.
+    # against acme-prep-5min on 2026-05-18.
     r"comes from|came from|coming from|came over from|"
     r"works for|worked for|working for|"
     r"is from .{0,15} (?:team|org|side|group|department)|"
@@ -168,7 +168,7 @@ _PREDICATE_MAP = {
 #
 # 120 chars was tuned for written prose where mentions cluster tightly.
 # Conversational transcripts have mentions spread across multiple short
-# audio items (e.g., al-futaim-prep-5min: "Ibrahim" in one item, then 30-60s
+# audio items (e.g., acme-prep-5min: "Mustafa" in one item, then 30-60s
 # later "He comes from the Citibank" in another — separated by 300-500 chars
 # of intervening speech). 600 chars covers typical conversational spread
 # without inviting cross-topic noise. Tunable per call.
@@ -431,8 +431,8 @@ def extract_auto_edges(
 
 # Map sinain predicate slugs back to human-readable verb phrases for the
 # value text of the provenance fact node. FTS5 indexes the value column,
-# so storing "Ibrahim works at Citibank" makes the node retrievable by
-# natural-language queries that contain "Ibrahim", "Citibank", or "works at".
+# so storing "Mustafa works at Citibank" makes the node retrievable by
+# natural-language queries that contain "Mustafa", "Citibank", or "works at".
 PREDICATE_READABLE: dict[str, str] = {
     "auto:worksAt":    "works at",
     "auto:founded":    "founded",
@@ -444,8 +444,8 @@ PREDICATE_READABLE: dict[str, str] = {
 def edge_readable_value(edge: dict) -> str:
     """Render an auto-edge as a natural-language sentence for FTS indexing.
 
-    Example: ('entity:ibrahim', 'auto:worksAt', 'entity:citibank') →
-        "Ibrahim works at Citibank"
+    Example: ('entity:mustafa', 'auto:worksAt', 'entity:citibank') →
+        "Mustafa works at Citibank"
 
     Falls back to slug names + raw predicate when name/predicate isn't in
     the known map — the goal is FTS-matchable text, even if slightly clunky.
@@ -459,8 +459,8 @@ def edge_readable_value(edge: dict) -> str:
 # ─── User-attribute extractor (extension of gbrain Proposal A) ───────────────
 #
 # extract_auto_edges (above) catches entity×entity relationships (worksAt,
-# founded, ...) — al-futaim's failure mode where LLM distillers miss
-# "Ibrahim was at Citibank for 17 years" type claims.
+# founded, ...) — acme's failure mode where LLM distillers miss
+# "Mustafa was at Citibank for 17 years" type claims.
 #
 # This second extractor catches a different LLM-distiller failure mode:
 # first-person user-attribute claims that get summarized away because they
