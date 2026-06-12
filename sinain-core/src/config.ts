@@ -258,6 +258,10 @@ export function loadConfig(): CoreConfig {
     // Auto-detect issues (Grammarly mode region eyes). Boot default only —
     // the overlay's "AUTO-DETECT ISSUES" toggle is authoritative at runtime.
     regionsEnabled: boolEnv("AUTO_DETECT_ISSUES", false),
+    // SPIKE: when set (e.g. "deepseek/deepseek-v4-flash"), MAIN user messages
+    // are answered by this model directly from core (native tool-calling,
+    // in-process tools) instead of the agent-lane escalation pipeline.
+    directChatModel: env("DIRECT_CHAT_MODEL", ""),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.

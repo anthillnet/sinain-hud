@@ -175,7 +175,7 @@ export interface CostMessage {
 
 /** Entry recorded by CostTracker for each LLM call. */
 export interface CostEntry {
-  source: "analyzer" | "transcription" | "vision";
+  source: "analyzer" | "transcription" | "vision" | "direct-chat";
   model: string;
   cost: number;
   tokensIn: number;
@@ -349,6 +349,8 @@ export interface AnalysisConfig {
   historyLimit: number;
   /** Grammarly mode: ask the LLM for actionable screen regions each tick */
   regionsEnabled: boolean;
+  /** SPIKE: direct MAIN-chat model (empty = use the agent lane). */
+  directChatModel: string;
 }
 
 /** @deprecated Use AnalysisConfig */

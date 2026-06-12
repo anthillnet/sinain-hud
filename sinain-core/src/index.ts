@@ -15,6 +15,7 @@ import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
+import { DirectChat } from "./agent/direct-chat.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -1433,6 +1434,33 @@ async function main() {
     profiler.reportOverlay({ rssMb: msg.rssMb, uptimeS: msg.uptimeS, ts: msg.ts });
   });
 
+  // ── SPIKE: direct MAIN chat (no agent CLI) ──
+  const directChat = config.agentConfig.directChatModel
+    ? new DirectChat({
+        apiKey: config.transcriptionConfig.openrouterApiKey,
+        model: config.agentConfig.directChatModel,
+        getDigest: () => agentLoop.getDigest()?.digest,
+        getContextText: () => {
+          const ctx = agentLoop.getContext();
+          const audio = ctx.audio.map((i) => i.text).join("\n");
+          const screen = ctx.screen.map((e) => `[${e.meta.app}] ${e.ocr || ""}`).join("\n");
+          return `App: ${ctx.currentApp}\n## Screen\n${screen}\n## Audio\n${audio}`;
+        },
+        queryKnowledge: (entities, maxFacts) => queryKnowledgeFactsMulti(entities, maxFacts),
+        storeFacts: (json) => importKnowledgeToLocal(json),
+        pushAnswer: (text) => {
+          feedBuffer.push(text, "high", "openclaw", "agent");
+          wsHandler.broadcast(text, "high", "agent");
+        },
+        setThinking: (active) => wsHandler.broadcastRaw({ type: "thinking", active } as any),
+        recordCost: (cost, model) =>
+          costTracker.record({ source: "direct-chat", model, cost, tokensIn: 0, tokensOut: 0, ts: Date.now() }),
+      })
+    : null;
+  if (directChat) {
+    log("core", `direct MAIN chat enabled: ${config.agentConfig.directChatModel}`);
+  }
+
   // ── Wire overlay commands ──
   setupCommands({
     wsHandler,
@@ -1446,6 +1474,12 @@ async function main() {
       // Record the user's side of MAIN in the feed buffer so fork seeds
       // (and session distillation) carry both halves of the conversation.
       feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
+      if (directChat) {
+        // SPIKE fast path: answer from core directly; ambient escalations
+        // keep the agent lane.
+        void directChat.handle(text);
+        return;
+      }
       escalator.setUserCommand(text);
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
