@@ -70,6 +70,9 @@ sinain-wearable-hud/.venv/
 # sck-capture compiled binary
 tools/sck-capture/sck-capture
 
+# Diarization ONNX model weights (fetched on demand by tools/diarize-sidecar.py, ~35MB)
+tools/diarization-models/
+
 # Photos / media (accidental drops at repo root)
 photo_*.jpg
 photo_*.jpeg
@@ -86,6 +89,15 @@ firebase-debug.log
 
 # GSD planning workspace (commit_docs=false; baseline kept on chore/gsd-init via 4bbb543/d886792)
 .planning/
+
+# Confidential eval data — meeting recordings, transcripts, hand-authored QA pairs.
+# Per PLAN.md BLOCKING CONSTRAINT 1: client meetings and similar internal recordings
+# contain real business context and must NEVER be committed. Symlinks to
+# .planning/eval-internal/ also live here at runtime; both are blocked.
+sinain-hud-plugin/sinain-memory/eval/benchmarks/data/meeting/
+sinain-hud-plugin/sinain-memory/eval/benchmarks/results/
+sinain-hud-plugin/sinain-memory/eval/local_models/results/
+sinain-hud-plugin/sinain-memory/eval/local_models/vision_dataset/
 
 # Local DMG build artifacts (tools/dmg/local-overlay-dmg.sh)
 /build/
