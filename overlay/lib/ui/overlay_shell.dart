@@ -45,6 +45,8 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<bool>? _thinkingSub;
   StreamSubscription? _forkSub;
   bool _awaitingFork = false;
+  StreamSubscription? _manualRegionSub;
+  bool _awaitingManualRegion = false;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -121,6 +123,19 @@ class OverlayShellState extends State<OverlayShell> {
       if (id != null && id.startsWith('fork-')) {
         _awaitingFork = false;
         _selectThread(id);
+      }
+    });
+    // After a drag-select the manual region arrives in the next
+    // region_highlight — open its thread immediately: selecting a region
+    // IS the declaration of intent to talk about it.
+    _manualRegionSub = ws.regionStream.listen((regions) {
+      if (!mounted || !_awaitingManualRegion) return;
+      for (final r in regions) {
+        if (r.id.startsWith('r-man-')) {
+          _awaitingManualRegion = false;
+          _selectThread(r.id);
+          break;
+        }
       }
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
@@ -508,6 +523,19 @@ class OverlayShellState extends State<OverlayShell> {
           ],
         ),
             )),
+        // Manual ROI: drag-select a screen region to start a thread from its
+        // content — the counterpart to auto-detected eyes.
+        pill(
+          text: '⊕',
+          selected: false,
+          onTap: () async {
+            final ws = context.read<WebSocketService>();
+            final sel = await _windowService.selectRegion();
+            if (sel == null) return; // cancelled
+            _awaitingManualRegion = true;
+            ws.sendRegionSelect(sel);
+          },
+        ),
         // Fork MAIN into a new thread (visible only on the MAIN tab): the
         // new thread starts from the MAIN transcript + digest and runs its
         // own agent session, chat or terminal.
@@ -577,6 +605,7 @@ class OverlayShellState extends State<OverlayShell> {
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _forkSub?.cancel();
+    _manualRegionSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {

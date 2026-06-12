@@ -185,6 +185,20 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             regionEyes.clear()
             result(nil)
 
+        case "selectRegion":
+            // Screenshot-style drag-select. Resolves with the rect in
+            // top-left-origin screen points, or nil on Esc/cancel.
+            RegionSelector.begin { rect in
+                if let r = rect {
+                    result(["x": r.origin.x, "y": r.origin.y,
+                            "w": r.size.width, "h": r.size.height,
+                            "screenW": NSScreen.main?.frame.width ?? 0,
+                            "screenH": NSScreen.main?.frame.height ?? 0])
+                } else {
+                    result(nil)
+                }
+            }
+
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -325,5 +339,116 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         }
 
         return p
+    }
+}
+
+// MARK: - RegionSelector (manual ROI drag-select)
+
+/// Full-screen, capture-invisible selection overlay: dark tint, crosshair,
+/// drag a rectangle, Esc or click-without-drag cancels. Completion delivers
+/// the rect in TOP-LEFT-origin screen points (the coordinate space sinain's
+/// regions use), or nil on cancel.
+class RegionSelector {
+    private static var active: RegionSelector?
+
+    private var panel: NSPanel!
+    private let completion: (NSRect?) -> Void
+
+    static func begin(completion: @escaping (NSRect?) -> Void) {
+        // One selection at a time — a second request cancels into the new one.
+        active?.finish(nil)
+        active = RegionSelector(completion: completion)
+    }
+
+    private init(completion: @escaping (NSRect?) -> Void) {
+        self.completion = completion
+        let screen = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
+        let view = RegionSelectView(frame: NSRect(origin: .zero, size: screen.size))
+        view.onDone = { [weak self] rect in self?.finish(rect) }
+
+        let p = NSPanel(contentRect: screen,
+                        styleMask: [.borderless, .nonactivatingPanel],
+                        backing: .buffered, defer: false)
+        p.level = .screenSaver           // above everything, incl. the HUD
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.acceptsMouseMovedEvents = true
+        p.becomesKeyOnlyIfNeeded = false
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        if #available(macOS 12.0, *) {
+            p.sharingType = .none        // the selection act is private too
+        }
+        p.contentView = view
+        p.makeKeyAndOrderFront(nil)      // key: the view needs Esc + mouse
+        panel = p
+    }
+
+    private func finish(_ rect: NSRect?) {
+        panel?.orderOut(nil)
+        panel = nil
+        if Self.active === self { Self.active = nil }
+        completion(rect)
+    }
+}
+
+private class RegionSelectView: NSView {
+    var onDone: ((NSRect?) -> Void)?
+    private var start: NSPoint?
+    private var current: NSPoint?
+
+    override var acceptsFirstResponder: Bool { true }
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { onDone?(nil) }  // Esc
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        start = convert(event.locationInWindow, from: nil)
+        current = start
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        current = convert(event.locationInWindow, from: nil)
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let s = start, let c = current else { onDone?(nil); return }
+        let sel = rect(from: s, to: c)
+        if sel.width < 12 || sel.height < 12 {  // a stray click, not a selection
+            onDone?(nil)
+            return
+        }
+        // View coords are bottom-left origin; sinain regions use top-left.
+        let screenH = bounds.height
+        let topLeft = NSRect(x: sel.origin.x,
+                             y: screenH - sel.origin.y - sel.height,
+                             width: sel.width, height: sel.height)
+        onDone?(topLeft)
+    }
+
+    private func rect(from a: NSPoint, to b: NSPoint) -> NSRect {
+        NSRect(x: min(a.x, b.x), y: min(a.y, b.y),
+               width: abs(a.x - b.x), height: abs(a.y - b.y))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Dim everything…
+        NSColor.black.withAlphaComponent(0.25).setFill()
+        bounds.fill()
+        guard let s = start, let c = current else { return }
+        let sel = rect(from: s, to: c)
+        // …except the selection (punch a hole), then stroke its border.
+        NSColor.clear.setFill()
+        sel.fill(using: .copy)
+        NSColor(calibratedRed: 0, green: 1, blue: 0.53, alpha: 0.9).setStroke()
+        let path = NSBezierPath(rect: sel)
+        path.lineWidth = 1.5
+        path.stroke()
     }
 }

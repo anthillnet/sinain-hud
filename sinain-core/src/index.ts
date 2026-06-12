@@ -45,6 +45,15 @@ const PACKAGE_ROOT = resolve(MODULE_DIR, "..", "..");
  */
 const PYTHON_BIN = process.env.SINAIN_PYTHON || "python3";
 
+/** Directory containing the sense_client package (for `python3 -m` one-shots).
+ *  Dev/monorepo: <repo> (two up from sinain-core/src); DMG/npm layouts keep
+ *  sense_client a sibling of sinain-core the same way. */
+const SENSE_PKG_ROOT = (() => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const cands = [resolve(here, "..", ".."), resolve(here, "..")];
+  return cands.find((p) => existsSync(`${p}/sense_client`)) || cands[0];
+})();
+
 /** Resolve workspace path, expanding leading ~ to HOME. */
 function resolveWorkspace(): string {
   const raw = process.env.SINAIN_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
@@ -1458,6 +1467,83 @@ async function main() {
         regionTracker.clear();
         wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
       }
+    },
+    onRegionSelect: (sel) => {
+      void (async () => {
+        try {
+          // Tier 1 — reuse: recent sense events already carry per-line OCR
+          // with frame-pixel bboxes. Scale each event's lines into screen
+          // points and keep the ones whose center falls inside the selection.
+          const collected: { text: string; bbox: [number, number, number, number] }[] = [];
+          const recent = senseBuffer.queryByTime(Date.now() - 5 * 60_000);
+          let app: string | undefined;
+          for (const ev of recent) {
+            if (ev.meta?.app) app = ev.meta.app;
+            const fs = ev.frameSize;
+            if (!ev.ocrLines?.length || !fs || fs.length !== 2 || !fs[0] || !fs[1]) continue;
+            const sx = sel.screenW / fs[0];
+            const sy = sel.screenH / fs[1];
+            for (const ln of ev.ocrLines) {
+              const [bx, by, bw, bh] = ln.bbox;
+              const cx = (bx + bw / 2) * sx;
+              const cy = (by + bh / 2) * sy;
+              if (cx >= sel.x && cx <= sel.x + sel.w && cy >= sel.y && cy <= sel.y + sel.h) {
+                collected.push({ text: ln.text, bbox: [bx * sx, by * sy, bw * sx, bh * sy] });
+              }
+            }
+          }
+          // Newest-first dedup by text (the same line appears across events)
+          const seen = new Set<string>();
+          const lines = collected.reverse().filter((l) => {
+            const k = l.text.trim().toLowerCase();
+            if (!k || seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+          let text = lines.map((l) => l.text).join("\n");
+
+          // Tier 2 — fresh crop-OCR of the live IPC frame when reuse came up
+          // thin (area unchanged since capture start → SSIM gate never OCR'd it).
+          if (text.length < 40) {
+            try {
+              const { execFile: ef } = await import("node:child_process");
+              const { promisify: pf } = await import("node:util");
+              const { stdout } = await pf(ef)(
+                PYTHON_BIN,
+                ["-m", "sense_client.ocr_once", JSON.stringify(sel)],
+                { timeout: 10_000, encoding: "utf-8", cwd: SENSE_PKG_ROOT },
+              );
+              const fresh = JSON.parse(stdout.trim());
+              if (fresh.ok && fresh.text) {
+                text = fresh.text;
+                log("regions", `manual ROI: tier-2 fresh OCR (${text.length} chars)`);
+              } else if (!fresh.ok) {
+                log("regions", `manual ROI: tier-2 OCR unavailable: ${fresh.error}`);
+              }
+            } catch (err) {
+              log("regions", `manual ROI: tier-2 OCR failed: ${err}`);
+            }
+          } else {
+            log("regions", `manual ROI: tier-1 reuse (${lines.length} lines, ${text.length} chars)`);
+          }
+
+          const region = regionTracker.addManual({
+            bbox: [sel.x, sel.y, sel.w, sel.h],
+            frameSize: [sel.screenW, sel.screenH],
+            app,
+            ocr: text || "(no readable text in the selection)",
+          });
+          wsHandler.broadcastRaw({
+            type: "region_highlight",
+            regions: regionTracker.current(),
+            ts: Date.now(),
+          } as any);
+          log("regions", `manual region ${region.id} broadcast`);
+        } catch (err) {
+          log("regions", `manual region failed: ${err}`);
+          wsHandler.broadcast(`\u26a0 Region selection failed: ${String(err).slice(0, 100)}`, "normal");
+        }
+      })();
     },
     onForkMain: () => {
       const id = `fork-${Date.now().toString(36)}`;
