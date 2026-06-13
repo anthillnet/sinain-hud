@@ -41,10 +41,14 @@ class SettingsService extends ChangeNotifier {
 
   HudState _loadHudState() {
     final val = _prefs.getString(_keyHudState);
-    return HudState.values.firstWhere(
+    final state = HudState.values.firstWhere(
       (s) => s.name == val,
       orElse: () => HudState.eye,
     );
+    // Controls (middle) mode is disabled for now — only eye + chat remain.
+    // Coerce any persisted `controls` so an upgrading user never boots into
+    // a mode that no longer has a path back out.
+    return state == HudState.controls ? HudState.chat : state;
   }
 
   HudTab _loadActiveTab() {

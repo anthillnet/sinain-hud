@@ -225,19 +225,14 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  /// Cycle through visible states: Eye → Controls → Chat → Eye.
+  /// Two-state toggle: Eye ⇄ Chat. There's no middle controls mode — the
+  /// eye simply collapses/uncollapses the chat. (Hotkey-driven.)
   void cycleState() {
-    switch (_state) {
-      case HudState.eye:
-        _transitionTo(HudState.controls);
-      case HudState.controls:
-        _transitionTo(HudState.chat);
-      case HudState.chat:
-        _transitionTo(HudState.eye);
-      case HudState.hidden:
-        // Unhide to eye first
-        toggleVisibility(true);
+    if (_state == HudState.hidden) {
+      toggleVisibility(true); // unhide first
+      return;
     }
+    toggleChat();
   }
 
   /// Reset window position to default bottom-right corner.
@@ -673,11 +668,10 @@ class OverlayShellState extends State<OverlayShell> {
     switch (_state) {
       case HudState.eye:
         return EyeWidget(
-          // Pending permission shortcuts past Controls — one click to land
-          // on TSK-with-Allow/Deny (auto-switch already moved the tab).
-          onTap: () => _transitionTo(
-            _pendingAttention > 0 ? HudState.chat : HudState.controls,
-          ),
+          // Controls/middle mode disabled — tapping the eye opens chat
+          // directly (where any pending permission already auto-switched
+          // to its tab).
+          onTap: () => _transitionTo(HudState.chat),
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
@@ -881,12 +875,12 @@ class OverlayShellState extends State<OverlayShell> {
                 children: [
                   _quitIcon(small: true),
                   const SizedBox(width: 4),
-                  // Collapse
+                  // Collapse (controls/middle mode disabled — go to eye)
                   _plainIcon(
                     Icons.expand_more,
-                    () => _transitionTo(HudState.controls),
+                    () => _transitionTo(HudState.eye),
                     small: true,
-                    tooltip: 'Collapse to controls',
+                    tooltip: 'Collapse to eye',
                   ),
                   const SizedBox(width: 2),
                   // Capture toggles
