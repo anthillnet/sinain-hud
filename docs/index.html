@@ -220,6 +220,20 @@
   .hc-foot .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 1.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 
+  /* ─── Flow walkthrough (§01 — how it works) ─── */
+  .flow-video-wrap{
+    margin:0 0 36px;border-radius:12px;overflow:hidden;
+    border:1px solid var(--border);box-shadow:var(--shadow-lg);background:#0d0d12;
+  }
+  .flow-video-wrap video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#0d0d12}
+  .flow-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  .flow-card{
+    margin:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;
+    background:#0d0d12;box-shadow:var(--shadow);transition:border-color .15s, transform .15s;
+  }
+  .flow-card:hover{border-color:var(--border-strong);transform:translateY(-1px)}
+  .flow-card img{display:block;width:100%;height:auto}
+
   /* ─── Section header pattern ─── */
   section.s{padding:88px 0;border-top:1px solid var(--border)}
   .sec-head{
@@ -521,6 +535,7 @@
       <span class="sub mono">/ context os</span>
     </div>
     <nav class="primary" aria-label="primary">
+      <a href="#flow">How it works</a>
       <a href="#augmented">Product</a>
       <a href="#privacy">Privacy</a>
       <a href="#quickstart">Quick Start</a>
@@ -597,11 +612,40 @@
   </div>
 </section>
 
+<!-- ───────────── FLOW — how it works ───────────── -->
+<section class="s" id="flow">
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-num">§ 01 — From a glance to a working agent</div>
+      <div>
+        <h2 class="sec-title">Stop copy-pasting context into your AI.</h2>
+        <p class="sec-lede">
+          Sinain watches your screen and spots where an agent could help. One click hands the
+          task to the agent of your choice — already holding the full context. No dump, no re-paste.
+        </p>
+      </div>
+    </div>
+
+    <div class="flow-video-wrap">
+      <video src="media/sinain-flow.mp4" poster="media/sinain-flow-poster.jpg"
+             autoplay loop muted playsinline preload="metadata"
+             aria-label="Sinain flow — sees where AI can help, point at an area, pick your agent, it works with full context"></video>
+    </div>
+
+    <div class="flow-grid">
+      <figure class="flow-card"><img src="media/flow-01.png" alt="Step 1 — Sinain sees where AI can help" loading="lazy"></figure>
+      <figure class="flow-card"><img src="media/flow-02.png" alt="Step 2 — or you point it at an area on your screen" loading="lazy"></figure>
+      <figure class="flow-card"><img src="media/flow-03.png" alt="Step 3 — pick your agent" loading="lazy"></figure>
+      <figure class="flow-card"><img src="media/flow-04.png" alt="Step 4 — it works, knowing your whole context" loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
 <!-- ───────────── PILLARS ───────────── -->
 <section class="s" id="augmented">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 01 — You, Augmented</div>
+      <div class="sec-num">§ 02 — You, Augmented</div>
       <div>
         <h2 class="sec-title">Capture. Distill. Access. Share.</h2>
         <p class="sec-lede">
@@ -668,7 +712,7 @@
 <section class="s" id="agents">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 02 — Agent-Agnostic</div>
+      <div class="sec-num">§ 03 — Agent-Agnostic</div>
       <div>
         <h2 class="sec-title">One context. Any agent. No restart.</h2>
         <p class="sec-lede">
@@ -698,7 +742,7 @@
 <section class="s" id="privacy">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 03 — Privacy Controls</div>
+      <div class="sec-num">§ 04 — Privacy Controls</div>
       <div>
         <h2 class="sec-title">Four modes. From cloud-fast to fully offline.</h2>
         <p class="sec-lede">
@@ -761,7 +805,7 @@
 <section class="s" id="quickstart">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 04 — Quick Start</div>
+      <div class="sec-num">§ 05 — Quick Start</div>
       <div>
         <h2 class="sec-title">One command. A wizard. Three services up.</h2>
         <p class="sec-lede">
@@ -862,7 +906,7 @@
 <section class="s" id="mcp">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 05 — Connect Your Coding Agent</div>
+      <div class="sec-num">§ 06 — Connect Your Coding Agent</div>
       <div>
         <h2 class="sec-title">15 <code style="font-family:var(--mono);color:var(--accent);background:var(--accent-soft);padding:0 8px;border-radius:6px;font-size:30px">sinain_*</code> tools, one MCP install.</h2>
         <p class="sec-lede">
@@ -887,7 +931,7 @@
 <section class="s" id="docs">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 06 — Deep Dives</div>
+      <div class="sec-num">§ 07 — Deep Dives</div>
       <div>
         <h2 class="sec-title">Threat models, audits, full configuration.</h2>
         <p class="sec-lede">
@@ -949,6 +993,7 @@
       <div>
         <h5>Product</h5>
         <ul>
+          <li><a href="#flow">How it works</a></li>
           <li><a href="#augmented">You, Augmented</a></li>
           <li><a href="#agents">Agent-Agnostic</a></li>
           <li><a href="#privacy">Privacy</a></li>
