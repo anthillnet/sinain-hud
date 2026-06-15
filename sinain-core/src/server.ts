@@ -474,6 +474,19 @@ async function ungzipBase64(encoded) {
   return await new Response(ds).text();
 }
 
+// Encode an entity id for placement in the share-link FRAGMENT (the part after
+// #, which browsers never transmit to a server). base64url keeps the raw
+// concept name out of the redirector's access logs AND off the link's visible
+// surface, and stays within the fragment-safe alphabet so URLSearchParams can
+// round-trip it. NOT a security boundary (trivially decodable) — privacy is
+// from the fragment never being sent, not from the encoding.
+function encShareEntity(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+}
+
 let _peerjsLoading = null;
 function ensurePeerJsLoaded() {
   if (window.Peer) return Promise.resolve();
@@ -558,13 +571,18 @@ const ShareManager = (() => {
 
   // Build the public-shareable URL. Recipient pastes this anywhere; the
   // redirector at SHARE_BASE_URL does a client-side rewrite to their local
-  // sinain-core (location.href = "http://localhost:<port>/...#hash") with
-  // the fragment preserved (browsers don't send fragments to the server,
-  // so bundle bytes never touch the CDN).
-  function buildShareUrl(entity, hash) {
+  // sinain-core (location.href = "http://localhost:<port>/...#hash").
+  //
+  // EVERYTHING identifying lives in the fragment (#e=<entity>&p=<port>&bundle=…
+  // | &peer=…). Browsers never send fragments to servers, so the redirector
+  // host — and its access logs — see only "GET /share.html": not the concept
+  // name, not the port, not the bundle. The entity is base64url-encoded so it
+  // isn't readable in the link at a glance either. (Previously entity+port
+  // rode in the query string, which the host DID log.)
+  function buildShareUrl(entity, payloadFragment) {
     const port = location.port || (location.protocol === "https:" ? "443" : "80");
-    const params = new URLSearchParams({ entity, port });
-    return SHARE_BASE_URL + "?" + params.toString() + hash;
+    const payload = payloadFragment.slice(1);  // strip leading "#" → "bundle=…"/"peer=…"
+    return SHARE_BASE_URL + "#e=" + encShareEntity(entity) + "&p=" + port + "&" + payload;
   }
 
   async function createShare(entity) {

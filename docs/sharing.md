@@ -18,15 +18,20 @@ The Share button picks between two transports automatically based on bundle size
 Small entities (1–2 facts with all metadata) ride directly inside the URL itself: the entire concept bundle is gzipped, base64-encoded, and placed after the URL's `#`.
 
 ```
-https://sinain.duckdns.org/share.html?entity=fact:foo&port=9500#bundle=H4sIAAAAA…
+https://sinain.duckdns.org/share.html#e=ZmFjdDpmb28&p=9500&bundle=H4sIAAAAA…
 ```
+
+The concept name, port, and bundle all live after the `#`, so the redirector's
+host never receives any of them (see Privacy below). The `e=` value is the
+base64url-encoded entity id — so the raw concept name isn't visible in the link
+at a glance either.
 
 | Property | Value |
 |---|---|
 | Source needs to be online when recipient opens | **No** — the data is in the URL itself |
 | Time-limited | **No** — the link works forever |
 | Revocable | **No** — anyone holding the URL can still import (the bundle is the URL) |
-| Touches our redirector server | Yes — but only the entity name + port (see Privacy below) |
+| Touches our redirector server | Yes, but it learns **nothing** — all share data is in the fragment (see Privacy below) |
 | Touches any other server | No |
 
 ### Peer mode (> 6 KB)
@@ -34,7 +39,7 @@ https://sinain.duckdns.org/share.html?entity=fact:foo&port=9500#bundle=H4sIAAAAA
 Larger entities use WebRTC peer-to-peer transfer. The URL contains a peer ID (a 16-character random hex token), and the recipient's browser opens a direct connection to your browser through the **peerjs.com** public signaling cloud.
 
 ```
-https://sinain.duckdns.org/share.html?entity=entity:foo&port=9500#peer=ab12cd34ef567890
+https://sinain.duckdns.org/share.html#e=ZW50aXR5OmZvbw&p=9500&peer=ab12cd34ef567890
 ```
 
 | Property | Value |
@@ -42,7 +47,7 @@ https://sinain.duckdns.org/share.html?entity=entity:foo&port=9500#peer=ab12cd34e
 | Source needs to be online when recipient opens | **Yes** — your browser tab needs to be open |
 | Time-limited | Auto-expires after `SINAIN_SHARE_TTL_HOURS` (default 24h) |
 | Revocable | **Yes** — clicking Revoke in the Shares view tears down the peer connection |
-| Touches our redirector server | Yes — but only the entity name + port |
+| Touches our redirector server | Yes, but it learns **nothing** — entity, port, and peer token are all in the fragment |
 | Touches peerjs.com | Yes — but only the signaling handshake (SDP + ICE), not the bundle bytes |
 | Touches any other server | No |
 
@@ -50,19 +55,20 @@ https://sinain.duckdns.org/share.html?entity=entity:foo&port=9500#peer=ab12cd34e
 
 This is the part worth being precise about.
 
-### Our redirector at `sinain.duckdns.org/share.html` never sees the bundle
+### Our redirector at `sinain.duckdns.org/share.html` sees nothing about the share
 
 URL fragments — the part of a URL after `#` — are **never sent to servers by browsers**. This is part of the URI specification ([RFC 3986 §3.5](https://www.rfc-editor.org/rfc/rfc3986#section-3.5)) and is enforced consistently by every major browser.
 
-When a recipient pastes a fragment-mode link:
+Every piece of share data — the concept name, port, and bundle/peer token — lives in the fragment:
 
 ```
-https://sinain.duckdns.org/share.html?entity=fact:foo&port=9500#bundle=H4sIA…
-                                       ─────────────────────── ─────────────
-                                       sent to our server     stays in browser
+https://sinain.duckdns.org/share.html#e=ZmFjdDpmb28&p=9500&bundle=H4sIA…
+                                      ┬ ──────────────────────────────────
+                                      │ all stays in the browser
+                          sent to our server: just "GET /share.html"
 ```
 
-Our Caddy server only ever sees `?entity=fact:foo&port=9500`. The `#bundle=H4sIA…` part is read by JavaScript inside your browser, used to construct the `location.href = "http://localhost:9500/.../#bundle=H4sIA…"` redirect, and decoded only by your local sinain-core's SPA. It never crosses the network to anything except the recipient's own machine.
+Our Caddy server only ever sees `GET /share.html` with an empty query string. The `#e=…&p=…&bundle=…` part is read by JavaScript inside your browser, used to construct the `location.href = "http://localhost:9500/knowledge/ui/entity/fact:foo#bundle=H4sIA…"` redirect, and decoded only by your local sinain-core's SPA. It never crosses the network to anything except the recipient's own machine.
 
 What our redirector logs see (Caddy access logs, kept on the VPS):
 
@@ -72,11 +78,13 @@ What our redirector logs see (Caddy access logs, kept on the VPS):
 | Source IP | (recipient's public IP) |
 | User-Agent | `Mozilla/5.0 …` |
 | Method + Path | `GET /share.html` |
-| Query string | `?entity=fact:foo&port=9500` |
+| Query string | **Empty** |
 | Fragment | **Not present** (browsers never send it) |
 | Body | None (GET request) |
 
-The entity name *itself* is in the query string, so we do see "person X received a link about `entity:foo`." We don't see the facts, summary, or any bundle content.
+We see "an IP loaded the redirector page" — nothing about *which* concept, the port, the facts, or any bundle content. (The entity id is base64url-encoded in the `e=` fragment param purely so it isn't readable at a glance in the link; the privacy guarantee comes from the fragment never being transmitted, not from the encoding, which is trivially reversible.)
+
+> **Legacy links** created before this change carried `?entity=…&port=…` in the query string, which the host *did* log. The redirector still accepts that old format (so those links keep working), but new links emit the fragment-only form above.
 
 ### Peerjs.com signaling never sees the bundle
 
