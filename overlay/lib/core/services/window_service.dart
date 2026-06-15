@@ -206,6 +206,30 @@ class WindowService {
     return null;
   }
 
+  /// All displays with their global Cocoa frames + id (multi-display). Each:
+  /// {id, x, y, w, h}. Used to size/place a region's eye on the display it was
+  /// detected on.
+  Future<List<Map<String, double>>?> getScreens() async {
+    try {
+      final result = await _channel.invokeMethod('getScreens');
+      if (result is List) {
+        return result.map<Map<String, double>>((s) {
+          final m = s as Map;
+          return {
+            'id': (m['id'] as num).toDouble(),
+            'x': (m['x'] as num).toDouble(),
+            'y': (m['y'] as num).toDouble(),
+            'w': (m['w'] as num).toDouble(),
+            'h': (m['h'] as num).toDouble(),
+          };
+        }).toList();
+      }
+    } catch (e) {
+      _log('getScreens failed: $e');
+    }
+    return null;
+  }
+
   /// Reconcile the native region-eye panel set against [eyes].
   /// Each entry: {'id': String, 'x': double, 'y': double, 'state': String}
   /// with x/y in top-left-origin screen points. Panels for ids absent from

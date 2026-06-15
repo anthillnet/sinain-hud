@@ -142,13 +142,32 @@ class RegionEyeController {
     _eyeStates.removeWhere((id, _) => !_regions.containsKey(id));
     _eyePositions.clear();
 
-    final screen = await windowService.getScreenSize();
-    final screenW = screen?['w'] ?? 1440;
-    final screenH = screen?['h'] ?? 900;
+    // Multi-display: size + place each eye against the display it was detected
+    // on (region.display). Positions are top-left WITHIN that display; native
+    // applies the per-display offset + flip. Falls back to the primary screen.
+    final screens = await windowService.getScreens();
+    Map<String, double> primaryScreen() {
+      if (screens != null && screens.isNotEmpty) {
+        return screens.firstWhere((s) => s['x'] == 0 && s['y'] == 0,
+            orElse: () => screens.first);
+      }
+      return {'id': 0.0, 'w': 1440.0, 'h': 900.0};
+    }
+    Map<String, double> screenFor(int display) {
+      if (screens != null && display != 0) {
+        for (final s in screens) {
+          if (s['id'] == display.toDouble()) return s;
+        }
+      }
+      return primaryScreen();
+    }
 
     var cornerSlot = 0;
     final eyes = <Map<String, dynamic>>[];
     for (final r in regions) {
+      final scr = screenFor(r.display);
+      final screenW = scr['w']!;
+      final screenH = scr['h']!;
       Offset pos;
       if (r.bbox != null && r.frameSize != null &&
           r.frameSize![0] > 0 && r.frameSize![1] > 0) {
@@ -176,6 +195,7 @@ class RegionEyeController {
         'id': r.id,
         'x': pos.dx,
         'y': pos.dy,
+        'display': r.display,
         // A live spawn state (working/failed) wins; otherwise a pending
         // (optimistically restored) region renders dimmed until confirmed.
         'state': _eyeStates[r.id] ?? (r.pending ? 'pending' : 'idle'),

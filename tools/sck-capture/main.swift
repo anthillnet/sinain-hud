@@ -64,6 +64,12 @@ class CaptureOutputHandler: NSObject, SCStreamOutput {
     let fps: Double
     private var lastFrameTime: Double = 0
     private var audioFormatLogged = false
+    // Active-display state (multi-display prototype): which display we're
+    // currently capturing + its capture pixel dims, written into meta.json so
+    // sense/core/overlay can place ROIs on the right display.
+    var displayID: UInt32 = 0
+    var captureW: Int = 0
+    var captureH: Int = 0
 
     init(screenDir: String, audioEnabled: Bool, fps: Double) {
         self.screenDir = screenDir
@@ -165,9 +171,10 @@ class CaptureOutputHandler: NSObject, SCStreamOutput {
             try? FileManager.default.moveItem(atPath: tmpPath, toPath: framePath)
         }
 
-        // Write metadata
+        // Write metadata — `display` lets the pipeline place ROIs on the
+        // active display; width/height are the capture-frame pixel dims.
         let timestamp = Date().timeIntervalSince1970
-        let metaJson = "{\"timestamp\": \(timestamp)}"
+        let metaJson = "{\"timestamp\": \(timestamp), \"display\": \(displayID), \"width\": \(captureW), \"height\": \(captureH)}"
         do {
             try metaJson.write(toFile: metaTmpPath, atomically: false, encoding: .utf8)
             try FileManager.default.moveItem(atPath: metaTmpPath, toPath: metaPath)
@@ -178,19 +185,36 @@ class CaptureOutputHandler: NSObject, SCStreamOutput {
     }
 }
 
+// ── Active-display detection (multi-display prototype) ──
+// The "active display" is the one under the mouse cursor. Simple, robust
+// heuristic for the prototype; can later be upgraded to the display holding
+// the frontmost window. CGEvent location is in global top-left-origin coords;
+// CGGetDisplaysWithPoint maps it to a CGDirectDisplayID.
+func activeDisplayID() -> CGDirectDisplayID {
+    let loc = CGEvent(source: nil)?.location ?? .zero
+    var ids = [CGDirectDisplayID](repeating: 0, count: 8)
+    var count: UInt32 = 0
+    CGGetDisplaysWithPoint(loc, 8, &ids, &count)
+    return count > 0 ? ids[0] : CGMainDisplayID()
+}
+
 // ── Main async entry ──
 func run() async throws {
     // Get shareable content (triggers permission dialog on first run)
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
 
-    guard let display = content.displays.first else {
+    guard !content.displays.isEmpty else {
         fputs("[sck-capture] error: no displays found\n", stderr)
         exit(1)
     }
+    func scDisplay(for id: CGDirectDisplayID) -> SCDisplay {
+        content.displays.first { $0.displayID == id } ?? content.displays.first!
+    }
 
-    let filter = SCContentFilter(display: display, excludingWindows: [])
+    var activeID = activeDisplayID()
+    var display = scDisplay(for: activeID)
+
     let config = SCStreamConfiguration()
-
     // Audio configuration
     config.capturesAudio = audioEnabled
     config.excludesCurrentProcessAudio = false
@@ -198,17 +222,8 @@ func run() async throws {
         config.sampleRate = sampleRate
         config.channelCount = channels
     }
-
-    // Screen configuration
-    let screenWidth = Int(Double(display.width) * scale)
-    let screenHeight = Int(Double(display.height) * scale)
-    config.width = screenWidth
-    config.height = screenHeight
     config.showsCursor = false
     config.minimumFrameInterval = CMTime(value: Int64(1000.0 / fps), timescale: 1000)
-    fputs("[sck-capture] screen: \(screenWidth)x\(screenHeight) @ \(fps) fps → \(screenDir)\n", stderr)
-
-    let stream = SCStream(filter: filter, configuration: config, delegate: nil)
 
     let handler = CaptureOutputHandler(
         screenDir: screenDir,
@@ -216,6 +231,21 @@ func run() async throws {
         fps: fps
     )
 
+    // Configure the stream for a given display (dims scale to its resolution).
+    func applyDisplay(_ d: SCDisplay) {
+        let w = Int(Double(d.width) * scale)
+        let h = Int(Double(d.height) * scale)
+        config.width = w
+        config.height = h
+        handler.displayID = d.displayID
+        handler.captureW = w
+        handler.captureH = h
+        fputs("[sck-capture] active display \(d.displayID): \(w)x\(h) @ \(fps) fps → \(screenDir)\n", stderr)
+    }
+    applyDisplay(display)
+
+    let filter = SCContentFilter(display: display, excludingWindows: [])
+    let stream = SCStream(filter: filter, configuration: config, delegate: nil)
     try stream.addStreamOutput(handler, type: .screen, sampleHandlerQueue: .global(qos: .utility))
     try stream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
 
@@ -242,14 +272,33 @@ func run() async throws {
         src.resume()
     }
 
-    // Keep alive — exit if orphaned (parent died)
+    // Poll loop: follow the active display + exit if orphaned (parent died).
     let parentPid = getppid()
     while true {
-        try await Task.sleep(for: .seconds(5))
+        try await Task.sleep(for: .seconds(1))
         if getppid() != parentPid {
             fputs("[sck-capture] parent process died — exiting\n", stderr)
             try? await stream.stopCapture()
             exit(0)
+        }
+        // Follow the active display. updateContentFilter/Configuration (macOS
+        // 14+) switch the captured display WITHOUT restarting the stream, so
+        // audio keeps flowing. On older systems we stay on the initial display.
+        let newID = activeDisplayID()
+        if newID != activeID, content.displays.contains(where: { $0.displayID == newID }) {
+            let newDisplay = scDisplay(for: newID)
+            if #available(macOS 14.0, *) {
+                applyDisplay(newDisplay)
+                let newFilter = SCContentFilter(display: newDisplay, excludingWindows: [])
+                do {
+                    try await stream.updateConfiguration(config)
+                    try await stream.updateContentFilter(newFilter)
+                    activeID = newID
+                    display = newDisplay
+                } catch {
+                    fputs("[sck-capture] display switch failed: \(error.localizedDescription)\n", stderr)
+                }
+            }
         }
     }
 }

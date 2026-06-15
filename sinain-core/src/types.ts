@@ -94,6 +94,10 @@ export interface RegionHighlight {
   sourceOcr?: string;
   /** App the region was detected in */
   app?: string;
+  /** Display id (CGDirectDisplayID) the region was detected on — lets the
+   *  overlay place the eye on the right screen (multi-display). 0/undefined
+   *  → main display. */
+  display?: number;
   /** User-selected region (drag-select) — pinned while its app is frontmost,
    *  exempt from the analyzer's admission cap and re-emission expiry. */
   manual?: boolean;
