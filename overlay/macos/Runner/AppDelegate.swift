@@ -10,6 +10,9 @@ class AppDelegate: FlutterAppDelegate {
     // Flutter method channel for sending hotkey events to Dart
     private var hotkeyChannel: FlutterMethodChannel?
     private var backendChannel: FlutterMethodChannel?
+    // Fast frontmost-app-change signal → Dart → core (instant ROI restore).
+    private var focusChannel: FlutterMethodChannel?
+    private var lastFocusedAppName: String?
 
     // SEED-001 Stage 4 — bundled backend supervisor (packaged DMG only).
     private let backend = BackendLauncher()
@@ -19,6 +22,7 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         backend.stop()
         for ref in hotKeyRefs {
             if let ref = ref {
@@ -89,10 +93,38 @@ class AppDelegate: FlutterAppDelegate {
             }
         }
 
+        // Fast app-switch signal: NSWorkspace fires the instant the frontmost
+        // app changes — ~1.5s ahead of the sense pipeline. Forward the app's
+        // localizedName to Dart, which relays it to core for instant ROI
+        // restore. (core matches it case-insensitively against sense's app
+        // namespace; see RegionTracker.restoreForApp.)
+        focusChannel = FlutterMethodChannel(
+            name: "sinain_hud/focus",
+            binaryMessenger: controller.engine.binaryMessenger
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(appDidActivate(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+
         configureWindow()
         registerHotkeys()
 
         super.applicationDidFinishLaunching(notification)
+    }
+
+    @objc private func appDidActivate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        else { return }
+        // Ignore our own activations (e.g. clicking the HUD) — the overlay is
+        // not a real "context" app and would only churn the signal.
+        if app.bundleIdentifier == Bundle.main.bundleIdentifier { return }
+        guard let name = app.localizedName, !name.isEmpty else { return }
+        if name == lastFocusedAppName { return }
+        lastFocusedAppName = name
+        focusChannel?.invokeMethod("onAppFocus", arguments: name)
     }
 
     private func openSessionLog() -> [String: Any] {

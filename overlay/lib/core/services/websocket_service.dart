@@ -473,6 +473,13 @@ class WebSocketService extends ChangeNotifier {
     _log('Region select sent: ${sel['w']}x${sel['h']}');
   }
 
+  /// Fast frontmost-app-change signal (from native NSWorkspace observer).
+  /// Lands ahead of the sense pipeline so core can instantly restore the
+  /// new app's archived ROIs. Fire-and-forget; dropped silently if offline.
+  void sendAppFocus(String app) {
+    send({'type': 'app_focus', 'app': app});
+  }
+
   /// Fork MAIN into a new thread — core mints the thread id and seeds it
   /// with the MAIN transcript; the tab opens via the thread-status message.
   void forkMain() {

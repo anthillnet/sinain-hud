@@ -1293,6 +1293,23 @@ async function main() {
         }
       }
 
+      // Large viewport change (scroll / in-app navigation): the change region
+      // covers most of the frame, so eyes anchored to the old layout are now
+      // stale. Flip them to pending ("rechecking" \u2014 overlay dims) so they stop
+      // pointing at scrolled-away content; the urgent re-analysis below
+      // re-confirms + re-anchors survivors and the pending leash drops the rest.
+      // (App switches are handled by the archive/restore above, so skip those.)
+      const bbox = event.imageBbox, fs = event.frameSize;
+      const coverage = (bbox && bbox.length === 4 && fs && fs.length === 2 && fs[0] > 0 && fs[1] > 0)
+        ? (bbox[2] * bbox[3]) / (fs[0] * fs[1]) : 0;
+      const bigChange = coverage >= 0.5;
+      if (bigChange && !appChanged) {
+        const dimmed = regionTracker.markStaleForRecheck();
+        if (dimmed) {
+          wsHandler.broadcastRaw({ type: "region_highlight", regions: dimmed, ts: Date.now() });
+        }
+      }
+
       // Broadcast app/window changes to overlay
       if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
         const app = shortAppName(event.meta.app || "");
@@ -1302,10 +1319,11 @@ async function main() {
         wsHandler.broadcast(`[\ud83d\udc41] ${prefix}${text}`, "normal");
       }
 
-      // Trigger agent analysis. Tier 2 \u2014 fast re-confirm: an app switch goes
-      // urgent (~200ms debounce vs 3s) so real regions re-detect fast,
-      // confirming the pending eyes and surfacing any new ones.
-      agentLoop.onNewContext(appChanged);
+      // Trigger agent analysis. Tier 2 \u2014 fast re-confirm: an app switch or a
+      // large viewport change goes urgent (~200ms debounce vs the full 6s) so
+      // real regions re-detect fast, confirming/re-anchoring the pending eyes
+      // and surfacing new ones.
+      agentLoop.onNewContext(appChanged || bigChange);
     },
 
     onFeedPost: (text: string, priority: string) => {
@@ -1485,6 +1503,17 @@ async function main() {
         // Clear tracked regions + native eyes immediately
         regionTracker.clear();
         wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
+      }
+    },
+    // Fast ROI restore: the overlay's NSWorkspace observer fires on app switch
+    // ~1.5s before the sense pipeline catches up. Additively restore the new
+    // app's archived eyes instantly (dimmed/pending); the sense path still does
+    // the authoritative archive + urgent re-analysis when its event arrives.
+    onAppFocus: (app) => {
+      if (!app) return;
+      const restored = regionTracker.restoreForApp(app);
+      if (restored) {
+        wsHandler.broadcastRaw({ type: "region_highlight", regions: restored, ts: Date.now() });
       }
     },
     onRegionSelect: (sel) => {
