@@ -18,6 +18,10 @@ class RegionHighlight {
   /// [w, h] of the capture frame the bbox is expressed in.
   final List<double>? frameSize;
 
+  /// Optimistically restored from the archive on app re-entry, awaiting the
+  /// next analyzer tick to confirm it's still valid. Rendered dimmed.
+  final bool pending;
+
   const RegionHighlight({
     required this.id,
     required this.issue,
@@ -25,6 +29,7 @@ class RegionHighlight {
     this.action,
     this.bbox,
     this.frameSize,
+    this.pending = false,
   });
 
   factory RegionHighlight.fromJson(Map<String, dynamic> json) {
@@ -42,6 +47,7 @@ class RegionHighlight {
       action: json['action'] as String?,
       bbox: doubles(json['bbox'], 4),
       frameSize: doubles(json['frameSize'], 2),
+      pending: json['pending'] as bool? ?? false,
     );
   }
 }

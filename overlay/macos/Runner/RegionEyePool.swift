@@ -139,7 +139,13 @@ class RegionEyeView: NSView {
         didSet { needsDisplay = true }
     }
     var state: String = "idle" {
-        didSet { needsDisplay = true }
+        didSet {
+            // Pending = optimistically restored on app re-entry, not yet
+            // confirmed by the analyzer — render it faded so it reads as
+            // tentative until it solidifies (or quietly disappears).
+            alphaValue = state == "pending" ? 0.45 : 1.0
+            needsDisplay = true
+        }
     }
 
     private var timer: Timer?

@@ -176,7 +176,9 @@ class RegionEyeController {
         'id': r.id,
         'x': pos.dx,
         'y': pos.dy,
-        'state': _eyeStates[r.id] ?? 'idle',
+        // A live spawn state (working/failed) wins; otherwise a pending
+        // (optimistically restored) region renders dimmed until confirmed.
+        'state': _eyeStates[r.id] ?? (r.pending ? 'pending' : 'idle'),
         'size': _eyeSize,
         'accent': settingsService.settings.accentColor,
       });
