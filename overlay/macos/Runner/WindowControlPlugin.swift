@@ -188,7 +188,13 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         case "selectRegion":
             // Screenshot-style drag-select. Resolves with the rect in
             // top-left-origin screen points, or nil on Esc/cancel.
-            RegionSelector.begin { rect in
+            // Mirror the main window's demo/privacy state so the selector is
+            // visible in screen recordings when demo mode is on.
+            var selectorPrivate = true
+            if #available(macOS 12.0, *) {
+                selectorPrivate = window.sharingType == .none
+            }
+            RegionSelector.begin(privacyEnabled: selectorPrivate) { rect in
                 if let r = rect {
                     result(["x": r.origin.x, "y": r.origin.y,
                             "w": r.size.width, "h": r.size.height,
@@ -344,23 +350,27 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
 // MARK: - RegionSelector (manual ROI drag-select)
 
-/// Full-screen, capture-invisible selection overlay: dark tint, crosshair,
-/// drag a rectangle, Esc or click-without-drag cancels. Completion delivers
-/// the rect in TOP-LEFT-origin screen points (the coordinate space sinain's
-/// regions use), or nil on cancel.
+/// Full-screen selection overlay: dark tint, crosshair, drag a rectangle,
+/// Esc or click-without-drag cancels. Completion delivers the rect in
+/// TOP-LEFT-origin screen points (the coordinate space sinain's regions
+/// use), or nil on cancel.
+///
+/// Capture visibility mirrors the HUD's demo/privacy mode: private by
+/// default (sharingType = .none, invisible to screen capture), but visible
+/// (.readOnly) when demo mode is on so the selection shows up in recordings.
 class RegionSelector {
     private static var active: RegionSelector?
 
     private var panel: NSPanel!
     private let completion: (NSRect?) -> Void
 
-    static func begin(completion: @escaping (NSRect?) -> Void) {
+    static func begin(privacyEnabled: Bool, completion: @escaping (NSRect?) -> Void) {
         // One selection at a time — a second request cancels into the new one.
         active?.finish(nil)
-        active = RegionSelector(completion: completion)
+        active = RegionSelector(privacyEnabled: privacyEnabled, completion: completion)
     }
 
-    private init(completion: @escaping (NSRect?) -> Void) {
+    private init(privacyEnabled: Bool, completion: @escaping (NSRect?) -> Void) {
         self.completion = completion
         let screen = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
         let view = RegionSelectView(frame: NSRect(origin: .zero, size: screen.size))
@@ -377,7 +387,9 @@ class RegionSelector {
         p.becomesKeyOnlyIfNeeded = false
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         if #available(macOS 12.0, *) {
-            p.sharingType = .none        // the selection act is private too
+            // Demo mode (privacy off) → .readOnly so the selection overlay is
+            // captured in recordings; otherwise .none (invisible to capture).
+            p.sharingType = privacyEnabled ? .none : .readOnly
         }
         p.contentView = view
         p.makeKeyAndOrderFront(nil)      // key: the view needs Esc + mouse
