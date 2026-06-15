@@ -15,6 +15,10 @@ interface TrackedRegion {
   region: RegionHighlight;
   lastSeenTick: number;
   firstSeenTs: number;
+  /** Tick at which this region was optimistically restored (app re-entry).
+   *  A pending region not confirmed by the analyzer within
+   *  PENDING_CONFIRM_TICKS is archived again to avoid a stale eye lingering. */
+  restoredAtTick?: number;
 }
 
 type ScreenEvent = ContextWindow["screen"][number];
@@ -106,6 +110,11 @@ export class RegionTracker {
    *  late context fetches (see get()). No TTL — capped FIFO only. */
   private readonly expired = new Map<string, { region: RegionHighlight; expiredAt: number }>();
   private static readonly ARCHIVE_MAX = 50;
+  /** Optimistically restored (pending) regions must be re-confirmed by the
+   *  analyzer within this many ticks or they're archived again. Short, because
+   *  Tier 2 fires an urgent analysis right after the app switch — one real
+   *  tick is enough to confirm a still-present issue. */
+  private static readonly PENDING_CONFIRM_TICKS = 2;
   private readonly maxRegions: number;
 
   constructor(opts: RegionTrackerOpts = {}) {
@@ -137,17 +146,7 @@ export class RegionTracker {
     // frontmost app changes (~1-2s after switch, via sense events) instead
     // of waiting out the miss window. Switching back re-creates it on the
     // next detection; its context survives in the archive either way.
-    const curApp = (ctx.currentApp || "").toLowerCase().trim();
-    if (curApp) {
-      for (const [id, t] of this.tracked) {
-        const regionApp = (t.region.app || "").toLowerCase().trim();
-        if (regionApp && regionApp !== curApp) {
-          this.tracked.delete(id);
-          this.expired.set(id, { region: t.region, expiredAt: Date.now() });
-          debug(TAG, `region ${id} hidden — app switch (${regionApp} → ${curApp})`);
-        }
-      }
-    }
+    this.archiveForeign(ctx.currentApp);
 
     for (const r of raw ?? []) {
       const id = regionIdFor(r.issue);
@@ -162,36 +161,38 @@ export class RegionTracker {
         existing.lastSeenTick = this.tick;
         existing.region.tip = r.tip;
         if (r.action) existing.region.action = r.action;
+        // Tier 3 — confirm: the analyzer re-detected an optimistically
+        // restored region, so it's genuinely still on screen. Promote it
+        // from pending (dimmed) to a solid eye and drop the short leash.
+        if (existing.region.pending) {
+          existing.region.pending = false;
+          existing.restoredAtTick = undefined;
+          // Re-anchor: it was restored at its stale archived bbox; snap it to
+          // the fresh detection so the eye sits at the issue's current spot
+          // (the user may have scrolled since it was last on screen).
+          const anchor = this.resolveAnchor(r, ctx);
+          if (anchor) {
+            existing.region.bbox = anchor.bbox;
+            existing.region.frameSize = anchor.frameSize;
+            if (anchor.src.ocr) existing.region.sourceOcr = anchor.src.ocr.slice(0, 2000);
+          }
+          debug(TAG, `region ${existing.region.id} confirmed (was pending)`);
+        }
         continue;
       }
       if (this.tracked.size >= this.maxRegions) continue;
 
-      // Anchor resolution: sourceId echo from the LLM, falling back to a
-      // deterministic OCR text match (small local models often drop the id).
-      // Full-frame bboxes are demoted — an eye at the corner of the whole
-      // frame is no better than the corner stack, and misleads.
-      let src = r.sourceId !== undefined
-        ? ctx.screen.find(e => e.id === r.sourceId)
-        : undefined;
-      if (!src || !hasPartialBbox(src)) {
-        src = anchorByText(r.issue, ctx.screen) ?? src;
-      }
-      const anchored = src && hasPartialBbox(src);
+      // Anchor resolution (sourceId echo → OCR text match → OCR line refine).
       // Precise-or-nothing: an eye is only useful next to the thing it points
-      // at. If we can't resolve a localized bbox (sourceId echo or OCR text
-      // match), drop the region rather than corner-stack a misplaced eye that
-      // misleads and distracts. Looser emission upstream keeps the supply up.
-      if (!anchored) {
+      // at. If we can't resolve a localized bbox, drop the region rather than
+      // corner-stack a misplaced eye that misleads. Looser emission upstream
+      // keeps the supply up. Full-frame bboxes are demoted inside resolveAnchor.
+      const anchor = this.resolveAnchor(r, ctx);
+      if (!anchor) {
         log(TAG, `skip unanchored region: "${r.issue}" (sourceId=${r.sourceId ?? "-"})`);
         continue;
       }
-      // Snap to the exact OCR line when its text matches the issue — the
-      // change-region bbox is only the fallback granularity.
-      const lineBbox = refineToLine(r.issue, src!);
-      const bbox = lineBbox ?? (src!.imageBbox as [number, number, number, number]);
-      const frameSize = src!.frameSize && src!.frameSize.length === 2
-        ? src!.frameSize as [number, number]
-        : undefined;
+      const { src, bbox, frameSize } = anchor;
 
       this.expired.delete(id); // re-detected — drop any tombstone
       this.tracked.set(id, {
@@ -202,8 +203,8 @@ export class RegionTracker {
           action: r.action,
           bbox,
           frameSize,
-          sourceOcr: src?.ocr ? src.ocr.slice(0, 2000) : undefined,
-          app: src?.meta.app ?? ctx.currentApp,
+          sourceOcr: src.ocr ? src.ocr.slice(0, 2000) : undefined,
+          app: src.meta.app ?? ctx.currentApp,
         },
         lastSeenTick: this.tick,
         firstSeenTs: Date.now(),
@@ -217,12 +218,48 @@ export class RegionTracker {
     return current;
   }
 
+  /** Resolve a localized screen anchor for a raw region: sourceId echo from
+   *  the LLM, else a deterministic OCR text match; refined to the matching
+   *  OCR line when possible. Returns null when no partial-bbox anchor exists
+   *  (an eye there would point nowhere useful). */
+  private resolveAnchor(
+    r: RawRegion,
+    ctx: ContextWindow,
+  ): { src: ScreenEvent; bbox: [number, number, number, number]; frameSize?: [number, number] } | null {
+    let src = r.sourceId !== undefined
+      ? ctx.screen.find(e => e.id === r.sourceId)
+      : undefined;
+    if (!src || !hasPartialBbox(src)) {
+      src = anchorByText(r.issue, ctx.screen) ?? src;
+    }
+    if (!src || !hasPartialBbox(src)) return null;
+    const lineBbox = refineToLine(r.issue, src);
+    const bbox = lineBbox ?? (src.imageBbox as [number, number, number, number]);
+    const frameSize = src.frameSize && src.frameSize.length === 2
+      ? src.frameSize as [number, number]
+      : undefined;
+    return { src, bbox, frameSize };
+  }
+
   /** Expire regions not re-detected within the miss window (or past TTL).
    *  Runs at the START of update() so freed capacity is available to the
    *  same tick's incoming regions. */
   private expireStale(): void {
     const now = Date.now();
     for (const [id, t] of this.tracked) {
+      // Tier 3 — pending leash: an optimistically restored region the
+      // analyzer hasn't re-confirmed within PENDING_CONFIRM_TICKS is archived
+      // again. Keeps a stale eye from lingering when the user returned to a
+      // screen whose content has since changed (scrolled, different file).
+      if (t.region.pending && t.restoredAtTick !== undefined &&
+          this.tick - t.restoredAtTick >= RegionTracker.PENDING_CONFIRM_TICKS) {
+        this.tracked.delete(id);
+        t.region.pending = false;
+        t.restoredAtTick = undefined;
+        this.expired.set(id, { region: t.region, expiredAt: now });
+        debug(TAG, `pending region ${id} unconfirmed — re-archived`);
+        continue;
+      }
       // Manual (user-selected) regions are pinned: the analyzer never
       // re-emits them, so miss-window expiry would kill every one after a
       // few ticks. They leave only via the app-scope rule or archive cap.
@@ -263,6 +300,67 @@ export class RegionTracker {
       if (!best || j > best.j) best = { t, j };
     }
     return best && best.j >= 0.5 ? best.t : undefined;
+  }
+
+  /** Archive eyes anchored in another app — a region floating over a window
+   *  it doesn't belong to is meaningless. Runs both on every analyzer tick
+   *  (via update) and on app focus change (via onAppFocus). */
+  private archiveForeign(curAppRaw: string | null | undefined): void {
+    const curApp = (curAppRaw || "").toLowerCase().trim();
+    if (!curApp) return;
+    for (const [id, t] of this.tracked) {
+      const regionApp = (t.region.app || "").toLowerCase().trim();
+      if (regionApp && regionApp !== curApp) {
+        this.tracked.delete(id);
+        this.expired.set(id, { region: t.region, expiredAt: Date.now() });
+        debug(TAG, `region ${id} hidden — app switch (${regionApp} → ${curApp})`);
+      }
+    }
+  }
+
+  /** Tier 1 — optimistic restore: re-admit archived eyes for the app the user
+   *  just switched TO, marked pending (overlay dims them), so they reappear
+   *  instantly instead of after a full sense→OCR→LLM cycle. Newest-archived
+   *  first, up to the region cap. The analyzer confirms (or the pending leash
+   *  expires) them on the next tick. */
+  private restorePending(curAppRaw: string | null | undefined): void {
+    const curApp = (curAppRaw || "").toLowerCase().trim();
+    if (!curApp) return;
+    for (const [id, e] of [...this.expired.entries()].reverse()) {
+      if (this.tracked.size >= this.maxRegions) break;
+      const regionApp = (e.region.app || "").toLowerCase().trim();
+      if (regionApp !== curApp) continue;
+      const region = e.region;
+      // Manual regions are user-pinned and never analyzer-re-emitted, so they
+      // can't be "confirmed" — restore them solid (the pending leash would
+      // otherwise kill them in PENDING_CONFIRM_TICKS).
+      region.pending = !region.manual;
+      this.tracked.set(id, {
+        region,
+        lastSeenTick: this.tick,
+        firstSeenTs: Date.now(),
+        restoredAtTick: region.pending ? this.tick : undefined,
+      });
+      this.expired.delete(id);
+      debug(TAG, `restored region ${id} on app re-entry (${curApp})${region.pending ? " [pending]" : ""}`);
+    }
+  }
+
+  /**
+   * Tier 1 entry point: the frontmost app changed. Archive eyes that belong
+   * elsewhere and optimistically restore this app's archived eyes (pending).
+   * Returns the new full set if it changed (caller broadcasts it), else null.
+   * Call only on an actual focus change — restoring every tick would resurrect
+   * just-expired eyes.
+   */
+  onAppFocus(appRaw: string | null | undefined): RegionHighlight[] | null {
+    const before = this.stateKey();
+    this.archiveForeign(appRaw);
+    this.restorePending(appRaw);
+    if (this.stateKey() === before) return null;
+    const current = this.current();
+    log(TAG, `app focus → ${appRaw}: region set changed: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
+    return current;
   }
 
   /** Current region set (insertion order). */
@@ -312,9 +410,13 @@ export class RegionTracker {
     this.tracked.clear();
   }
 
-  /** Cheap change-detection key: ids + tips (tips refresh in place). */
+  /** Cheap change-detection key: ids + tips + pending flag (tips refresh in
+   *  place; the pending→confirmed flip must re-broadcast so the overlay
+   *  un-dims a restored eye). */
   private stateKey(): string {
-    return [...this.tracked.entries()].map(([id, t]) => `${id}:${t.region.tip}`).join("|");
+    return [...this.tracked.entries()]
+      .map(([id, t]) => `${id}:${t.region.tip}:${t.region.pending ? "p" : ""}`)
+      .join("|");
   }
 }
 

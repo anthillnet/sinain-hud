@@ -824,6 +824,9 @@ async function main() {
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
   // events, broadcasts the set to the overlay when it changes.
   const regionTracker = new RegionTracker();
+  // Frontmost app last seen on the sense path — drives instant ROI restore +
+  // urgent re-analysis the moment the user switches apps (region snappiness).
+  let lastFocusedApp = "";
   // Region ids whose per-ROI agent thread already got the full region
   // context (first message); follow-ups send just the user's text.
   const startedRegionThreads = new Set<string>();
@@ -1276,6 +1279,20 @@ async function main() {
       // Track app context for recorder
       recorder.onSenseEvent(event);
 
+      // Tier 1 \u2014 instant ROI restore on app switch: the sense path carries the
+      // earliest app signal, well before the analyzer tick. The moment the
+      // frontmost app changes, re-show the eyes we had archived for it (dimmed/
+      // pending) straight from the archive \u2014 no LLM/OCR wait.
+      const rawApp = event.meta.app || "";
+      const appChanged = rawApp !== "" && rawApp !== lastFocusedApp;
+      if (appChanged) {
+        lastFocusedApp = rawApp;
+        const restored = regionTracker.onAppFocus(rawApp);
+        if (restored) {
+          wsHandler.broadcastRaw({ type: "region_highlight", regions: restored, ts: Date.now() });
+        }
+      }
+
       // Broadcast app/window changes to overlay
       if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
         const app = shortAppName(event.meta.app || "");
@@ -1285,8 +1302,10 @@ async function main() {
         wsHandler.broadcast(`[\ud83d\udc41] ${prefix}${text}`, "normal");
       }
 
-      // Trigger debounced agent analysis
-      agentLoop.onNewContext();
+      // Trigger agent analysis. Tier 2 \u2014 fast re-confirm: an app switch goes
+      // urgent (~200ms debounce vs 3s) so real regions re-detect fast,
+      // confirming the pending eyes and surfacing any new ones.
+      agentLoop.onNewContext(appChanged);
     },
 
     onFeedPost: (text: string, priority: string) => {

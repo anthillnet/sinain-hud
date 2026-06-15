@@ -97,6 +97,9 @@ export interface RegionHighlight {
   /** User-selected region (drag-select) — pinned while its app is frontmost,
    *  exempt from the analyzer's admission cap and re-emission expiry. */
   manual?: boolean;
+  /** Optimistically restored from the archive on app re-entry, awaiting the
+   *  next analyzer tick to confirm it's still valid. Overlay dims it. */
+  pending?: boolean;
 }
 
 /** sinain-core → Overlay: current set of actionable screen regions.
