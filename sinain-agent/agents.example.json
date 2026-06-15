@@ -70,6 +70,13 @@
   },
 
   "profiles": {
+    "sinain": {
+      "_comment": "Sinain's OWN bundled chat agent — a RESIDENT OpenHands sidecar (sinain-chat-agent/) on ws://127.0.0.1:9610, NOT a run.sh subprocess. Fast non-reasoning model (qwen3.5-flash, reasoning off) + lean sinain tools + token streaming → sub-4s responsive chat. type 'sinain' routes the chat path to the sidecar via sinain-core's ChatService (not yet shipped). Chat mode only; terminal mode falls back to an interactive agent. Becomes the `default` once ChatService lands.",
+      "type": "sinain",
+      "model": "qwen/qwen3.5-flash-02-23",
+      "ws": "ws://127.0.0.1:9610",
+      "reasoning": "off"
+    },
     "claude":     { "type": "claude" },
     "openclaude": {
       "_comment": "Routes through the local OpenRouter proxy (auto-launched on :11435 by run.sh) → DeepSeek V4 Flash. Proxy preserves reasoning_content across multi-turn MCP flows. To use Anthropic API directly, drop the env block (or just pick the `claude` profile).",

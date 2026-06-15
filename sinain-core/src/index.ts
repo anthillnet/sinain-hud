@@ -5,7 +5,8 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
-import { loadAgentsConfig, isGatewayProfile, gatewayProfileNames } from "./agents-loader.js";
+import { loadAgentsConfig, isGatewayProfile, isSinainProfile, gatewayProfileNames } from "./agents-loader.js";
+import { ChatService } from "./chat/chat-service.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -820,6 +821,13 @@ async function main() {
     isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
   });
 
+  // ── Chat sidecar (type "sinain" roster profile) ──
+  // Resident OpenHands chat agent on a local WS. When the selected escalation-lane
+  // agent is type "sinain", chat turns route here instead of the run.sh/gateway path.
+  const chatService = new ChatService(
+    process.env.SINAIN_CHAT_WS_URL || "ws://127.0.0.1:9610",
+  );
+
   // ── Region tracker (Grammarly mode) ──
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
   // events, broadcasts the set to the overlay when it changes.
@@ -1492,6 +1500,25 @@ async function main() {
       // Record the user's side of MAIN in the feed buffer so fork seeds
       // (and session distillation) carry both halves of the conversation.
       feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
+
+      // type "sinain" → route the chat turn to the resident OpenHands sidecar
+      // instead of the escalation/run.sh path. Streams the reply to the overlay.
+      if (isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+        wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
+        chatService
+          .handle(text, { kind: "main" })
+          .then((reply) => {
+            wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
+            wsHandler.broadcast(reply, "normal", "stream");
+            feedBuffer.push(`[agent] ${reply}`, "normal", "system", "agent");
+          })
+          .catch((e: Error) => {
+            wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
+            wsHandler.broadcast(`⚠ chat sidecar error: ${e.message}`, "normal", "stream");
+          });
+        return;
+      }
+
       escalator.setUserCommand(text);
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);

@@ -244,6 +244,15 @@ export function isGatewayProfile(
   return cfg?.profiles?.[name]?.type === "openclaw";
 }
 
+/** True iff `name` is sinain's bundled resident chat sidecar (type "sinain").
+ *  Routed to the local OpenHands sidecar over WS instead of run.sh/gateway. */
+export function isSinainProfile(
+  cfg: AgentsConfig | null,
+  name: string,
+): boolean {
+  return cfg?.profiles?.[name]?.type === "sinain";
+}
+
 /** All openclaw-typed profile names in the config. */
 export function gatewayProfileNames(cfg: AgentsConfig | null): string[] {
   const profiles = cfg?.profiles;
