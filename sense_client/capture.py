@@ -115,6 +115,8 @@ class ScreenKitCapture:
         self._last_frame_ts = 0.0
         self._last_stats_time = time.time()
         self._stats_interval = 60
+        # Active display id from sck-capture meta (multi-display prototype).
+        self.last_display = 0
 
     @classmethod
     def is_available(cls) -> bool:
@@ -143,6 +145,7 @@ class ScreenKitCapture:
                     with open(self.META_PATH) as f:
                         meta = json.load(f)
                     ts = meta.get("timestamp", ts)
+                    self.last_display = int(meta.get("display", 0))
                 except (json.JSONDecodeError, OSError):
                     pass
 

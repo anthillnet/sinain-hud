@@ -45,9 +45,10 @@ class RegionEyePool {
             let state = eye["state"] as? String ?? "idle"
             let size = eye["size"] as? Double ?? Double(Self.eyeSize)
             let accent = (eye["accent"] as? NSNumber).map { Self.argbToColor($0.int64Value) }
+            let display = (eye["display"] as? NSNumber)?.uint32Value ?? 0
             seen.insert(id)
 
-            let origin = Self.toMacOrigin(x: x, y: y, size: size)
+            let origin = Self.toMacOrigin(x: x, y: y, size: size, display: display)
             if let panel = panels[id] {
                 panel.setFrame(NSRect(x: origin.x, y: origin.y, width: size, height: size), display: true)
                 if let view = panel.contentView as? RegionEyeView {
@@ -78,9 +79,27 @@ class RegionEyePool {
 
     // MARK: - Private
 
-    private static func toMacOrigin(x: Double, y: Double, size: Double) -> NSPoint {
-        let screenHeight = NSScreen.main?.frame.height ?? 900
-        return NSPoint(x: x, y: screenHeight - y - size)
+    /// Map a top-left-origin point WITHIN a display to a global Cocoa
+    /// (bottom-left-origin) origin on that display. x/y are relative to the
+    /// display's own top-left; the display's global frame supplies the offset
+    /// and the flip — so an eye lands on the correct screen in a multi-display
+    /// layout. display==0 (or unknown) falls back to the main display, which
+    /// preserves the original single-display behavior exactly.
+    private static func toMacOrigin(x: Double, y: Double, size: Double, display: UInt32) -> NSPoint {
+        let f = screenFor(display).frame
+        return NSPoint(x: f.minX + x, y: f.minY + (f.height - y - size))
+    }
+
+    private static func screenFor(_ display: UInt32) -> NSScreen {
+        if display != 0 {
+            for s in NSScreen.screens {
+                if let n = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                   n.uint32Value == display {
+                    return s
+                }
+            }
+        }
+        return NSScreen.main ?? NSScreen.screens.first ?? NSScreen()
     }
 
     private static func argbToColor(_ argb: Int64) -> CGColor {

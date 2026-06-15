@@ -170,6 +170,18 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             let frame = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
             result(["w": frame.size.width, "h": frame.size.height])
 
+        case "getScreens":
+            // All displays with their global Cocoa frames + id (multi-display).
+            // Lets the overlay size a region's eye against the display it was
+            // detected on, then place it there.
+            let screens = NSScreen.screens.map { s -> [String: Any] in
+                let id = (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+                return ["id": Double(id),
+                        "x": s.frame.origin.x, "y": s.frame.origin.y,
+                        "w": s.frame.size.width, "h": s.frame.size.height]
+            }
+            result(screens)
+
         case "showRegionEyes":
             let eyes = args?["eyes"] as? [[String: Any]] ?? []
             regionEyes.reconcile(eyes)

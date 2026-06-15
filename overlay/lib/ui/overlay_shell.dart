@@ -176,7 +176,7 @@ class OverlayShellState extends State<OverlayShell> {
             _activeRegion = region;
             _activeThread = region.id; // select this region's tab
           });
-          _openChatNearRegion(pos.dx, pos.dy);
+          _openChatNearRegion(pos.dx, pos.dy, region.display);
         },
       )..start();
     }
@@ -569,20 +569,38 @@ class OverlayShellState extends State<OverlayShell> {
   /// Move the HUD next to a region eye (top-left-origin screen point) and
   /// open the chat there. Used by region eye taps — the chat becomes the
   /// viewport for that region's conversation.
-  Future<void> _openChatNearRegion(double x, double y) async {
+  Future<void> _openChatNearRegion(double x, double y, [int display = 0]) async {
     if (_state == HudState.hidden) toggleVisibility(true);
 
-    final screen = await _windowService.getScreenSize();
     final chatW = _settingsService.settings.chatWidth;
     final chatH = _settingsService.settings.chatHeight;
-    if (screen != null) {
-      final screenW = screen['w']!;
-      final screenH = screen['h']!;
-      // Chat below the eye, right edge roughly aligned with it
-      final left = (x + 48 - chatW).clamp(8.0, screenW - chatW - 8);
-      final top = (y + 56).clamp(8.0, screenH - chatH - 8);
-      final macY = screenH - top - chatH; // top-left → macOS bottom-left origin
-      await _windowService.setWindowFrame(left, macY, chatW, chatH);
+
+    // Resolve the eye's display (multi-display): x/y are top-left WITHIN that
+    // display, so the chat must be clamped to that display and converted to its
+    // global Cocoa origin — otherwise it opens on the main display.
+    final screens = await _windowService.getScreens();
+    Map<String, double>? scr;
+    if (screens != null && screens.isNotEmpty) {
+      if (display != 0) {
+        for (final s in screens) {
+          if (s['id'] == display.toDouble()) { scr = s; break; }
+        }
+      }
+      scr ??= screens.firstWhere((s) => s['x'] == 0 && s['y'] == 0,
+          orElse: () => screens.first);
+    } else {
+      final size = await _windowService.getScreenSize();
+      if (size != null) scr = {'id': 0.0, 'x': 0.0, 'y': 0.0, 'w': size['w']!, 'h': size['h']!};
+    }
+    if (scr != null) {
+      final sw = scr['w']!, sh = scr['h']!, ox = scr['x']!, oy = scr['y']!;
+      // Chat below the eye, right edge roughly aligned with it (within-display).
+      final left = (x + 48 - chatW).clamp(8.0, sw - chatW - 8);
+      final top = (y + 56).clamp(8.0, sh - chatH - 8);
+      // top-left within display → global macOS bottom-left origin.
+      final globalX = ox + left;
+      final globalY = oy + (sh - top - chatH);
+      await _windowService.setWindowFrame(globalX, globalY, chatW, chatH);
     }
 
     if (_state != HudState.chat) {

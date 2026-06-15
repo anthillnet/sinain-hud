@@ -222,6 +222,9 @@ export class RegionTracker {
           // archiveForeign skips it (falsy), leaving a foreign eye that never
           // clears on app switch. currentApp is "unknown" at worst, never "".
           app: src.meta.app || ctx.currentApp,
+          // Display the region was detected on (multi-display) — overlay places
+          // the eye on the matching screen.
+          display: src.meta.screen,
         },
         lastSeenTick: this.tick,
         firstSeenTs: Date.now(),

@@ -395,7 +395,9 @@ def main():
         # 7. Package and send
         event.meta.app = app_name
         event.meta.window_title = window_title
-        event.meta.screen = config["capture"]["target"]
+        # Active display id from sck-capture (multi-display prototype); falls
+        # back to the configured target when not provided by the capture source.
+        event.meta.screen = getattr(capture, "last_display", 0) or config["capture"]["target"]
 
         # 7b. Auto-populate structured observation from available context
         facts = []
