@@ -172,6 +172,16 @@ Future<void> _startApp() async {
     }
   });
 
+  // Fast frontmost-app-change signal from native (NSWorkspace) → core, for
+  // instant ROI restore on app switch (ahead of the sense pipeline).
+  const focusChannel = MethodChannel('sinain_hud/focus');
+  focusChannel.setMethodCallHandler((call) async {
+    if (call.method == 'onAppFocus') {
+      final app = call.arguments as String?;
+      if (app != null && app.isNotEmpty) wsService.sendAppFocus(app);
+    }
+  });
+
   // Connect WebSocket
   wsService.connect();
 

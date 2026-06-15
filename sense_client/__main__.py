@@ -28,7 +28,7 @@ if sys.platform != "win32":
 
 from .capture import ScreenCapture, create_capture
 from .change_detector import ChangeDetector
-from .roi_extractor import ROIExtractor
+from .roi_extractor import ROIExtractor, ROI
 from .ocr import OCRResult, create_ocr
 from .gate import DecisionGate, SenseEvent, SenseObservation, SenseMeta
 from .sender import SenseSender, package_full_frame, package_roi, frame_dims
@@ -301,6 +301,17 @@ def main():
             use_frame = frame
             use_rois = rois
             use_change = change
+
+        # On app change, OCR the FULL frame regardless of change contours. A
+        # static new app (a quiet web page, an inbox) yields poor/empty change
+        # ROIs, so the new app's text never reaches sinain-core and the analyzer
+        # stays blind to it (currentApp keeps the previous app's OCR → no eyes
+        # for the app you just switched to). Full-frame OCR guarantees the new
+        # app's text + per-line boxes land, so it can detect and anchor regions
+        # right away. One extra OCR per app switch (human-paced, bounded cost).
+        if app_changed:
+            use_rois = [ROI(image=use_frame, bbox=(0, 0, use_frame.size[0], use_frame.size[1]))]
+            log(f"app change → full-frame OCR ({use_frame.size[0]}x{use_frame.size[1]})")
 
         # 5. OCR on ROIs
         t0 = time.time()

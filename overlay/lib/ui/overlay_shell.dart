@@ -281,28 +281,27 @@ class OverlayShellState extends State<OverlayShell> {
     final frame = await _windowService.getWindowFrame();
     if (frame == null) return;
 
-    final eyeRight = frame['x']! + frame['w']!;
-    final eyeBottom = frame['y']!;
+    // Anchor every transition to the TOP-RIGHT corner. macOS frames are
+    // bottom-left origin, so the previous code kept frame.y (the BOTTOM edge)
+    // fixed — collapsing a tall chat to a 48px eye then left the eye at the
+    // chat's bottom-right. Pinning the top-right instead puts the eye where the
+    // chat's top-right corner was (matching how region-eye chats open downward
+    // from the eye), and makes collapse⇄expand return to the exact same rect.
+    // top = y + h; new origin.y = top - newHeight keeps the top edge fixed.
+    final right = frame['x']! + frame['w']!;
+    final top = frame['y']! + frame['h']!;
+    void place(double w, double h) =>
+        _windowService.setWindowFrame(right - w, top - h, w, h);
 
     switch (state) {
       case HudState.eye:
-        _windowService.setWindowFrame(eyeRight - 48, eyeBottom, 48, 48);
+        place(48, 48);
       case HudState.controls:
-        const controlsW = 360.0;
-        _windowService.setWindowFrame(
-          eyeRight - controlsW,
-          eyeBottom,
-          controlsW,
-          48,
-        );
+        place(360, 48);
       case HudState.chat:
-        final chatW = _settingsService.settings.chatWidth;
-        final chatH = _settingsService.settings.chatHeight;
-        _windowService.setWindowFrame(
-          eyeRight - chatW,
-          eyeBottom,
-          chatW,
-          chatH,
+        place(
+          _settingsService.settings.chatWidth,
+          _settingsService.settings.chatHeight,
         );
       case HudState.hidden:
         break;

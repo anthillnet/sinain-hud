@@ -194,6 +194,19 @@ export class RegionTracker {
       }
       const { src, bbox, frameSize } = anchor;
 
+      // App-scoped admission: never anchor a NEW eye to a window that isn't
+      // frontmost. The sense buffer keeps the previous app's OCR for up to
+      // ~2 min after a switch (context-window maxAgeMs), and the analyzer
+      // happily re-detects issues in it — which would otherwise spawn eyes for
+      // the old app over the current screen every tick. This is the birth-side
+      // mirror of archiveForeign (which only removes already-live foreign eyes).
+      const srcApp = (src.meta.app || "").toLowerCase().trim();
+      const curApp = (ctx.currentApp || "").toLowerCase().trim();
+      if (srcApp && curApp && curApp !== "unknown" && srcApp !== curApp) {
+        debug(TAG, `skip foreign-app region: "${r.issue}" (src=${srcApp} ≠ current=${curApp})`);
+        continue;
+      }
+
       this.expired.delete(id); // re-detected — drop any tombstone
       this.tracked.set(id, {
         region: {
@@ -204,7 +217,11 @@ export class RegionTracker {
           bbox,
           frameSize,
           sourceOcr: src.ocr ? src.ocr.slice(0, 2000) : undefined,
-          app: src.meta.app ?? ctx.currentApp,
+          // || not ?? — an empty-string app (app-detector timed out that
+          // frame) must fall back to currentApp, else region.app="" and
+          // archiveForeign skips it (falsy), leaving a foreign eye that never
+          // clears on app switch. currentApp is "unknown" at worst, never "".
+          app: src.meta.app || ctx.currentApp,
         },
         lastSeenTick: this.tick,
         firstSeenTs: Date.now(),
@@ -219,26 +236,35 @@ export class RegionTracker {
   }
 
   /** Resolve a localized screen anchor for a raw region: sourceId echo from
-   *  the LLM, else a deterministic OCR text match; refined to the matching
-   *  OCR line when possible. Returns null when no partial-bbox anchor exists
-   *  (an eye there would point nowhere useful). */
+   *  the LLM, else a deterministic OCR text match. Anchors to the precise OCR
+   *  LINE when the issue text matches one — which works even when the change
+   *  region is the whole frame (switching INTO an editor repaints everything,
+   *  so its change-bbox is full-frame, but its per-line OCR boxes are still
+   *  localized). Only falls back to the raw change-region bbox when it's
+   *  partial; returns null when nothing localized can be found (a full-frame
+   *  corner eye points nowhere useful). */
   private resolveAnchor(
     r: RawRegion,
     ctx: ContextWindow,
   ): { src: ScreenEvent; bbox: [number, number, number, number]; frameSize?: [number, number] } | null {
+    // Keep the sourceId event as a candidate even if its change-region is
+    // full-frame — we may still anchor to a precise OCR line within it.
     let src = r.sourceId !== undefined
       ? ctx.screen.find(e => e.id === r.sourceId)
       : undefined;
     if (!src || !hasPartialBbox(src)) {
       src = anchorByText(r.issue, ctx.screen) ?? src;
     }
-    if (!src || !hasPartialBbox(src)) return null;
-    const lineBbox = refineToLine(r.issue, src);
-    const bbox = lineBbox ?? (src.imageBbox as [number, number, number, number]);
+    if (!src) return null;
     const frameSize = src.frameSize && src.frameSize.length === 2
       ? src.frameSize as [number, number]
       : undefined;
-    return { src, bbox, frameSize };
+    // Precise OCR-line box first — localized regardless of change-region size.
+    const lineBbox = refineToLine(r.issue, src);
+    if (lineBbox) return { src, bbox: lineBbox, frameSize };
+    // No line match — only anchor to the change-region if it's localized.
+    if (!hasPartialBbox(src)) return null;
+    return { src, bbox: src.imageBbox as [number, number, number, number], frameSize };
   }
 
   /** Expire regions not re-detected within the miss window (or past TTL).
@@ -359,7 +385,49 @@ export class RegionTracker {
     this.restorePending(appRaw);
     if (this.stateKey() === before) return null;
     const current = this.current();
+    // Suppress broadcast when focus switches to an app with no regions
+    // (was viewing another app's eyes). Prevents the overlay flashing a
+    // "0 regions" highlight when the HUD should just describe the new app.
+    if (current.length === 0) return null;
     log(TAG, `app focus → ${appRaw}: region set changed: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
+    return current;
+  }
+
+  /** Fast-path restore (additive only): re-show this app's archived eyes the
+   *  instant a frontmost-app-change signal arrives from the overlay
+   *  (NSWorkspace), ahead of the ~1.5s sense pipeline. Deliberately does NOT
+   *  archiveForeign — the overlay's app name (localizedName) and sense's app
+   *  name (process name) share a namespace only up to case, so a destructive
+   *  archive on a mismatched name could wrongly clear live eyes. Archiving of
+   *  the previous app's eyes stays on the sense path / per-tick archiveForeign,
+   *  which use the consistent sense namespace. Returns the new set if changed. */
+  restoreForApp(appRaw: string | null | undefined): RegionHighlight[] | null {
+    const before = this.stateKey();
+    this.restorePending(appRaw);
+    if (this.stateKey() === before) return null;
+    const current = this.current();
+    log(TAG, `fast restore for ${appRaw}: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
+    return current;
+  }
+
+  /** Flip all live auto-detected eyes to pending ("rechecking" — the overlay
+   *  dims them) after a large viewport change (scroll / in-app navigation), so
+   *  eyes anchored to the old layout stop pointing at content that scrolled
+   *  away. The urgent re-analysis that follows re-confirms + re-anchors the
+   *  still-present ones (the pending-confirm path updates their bbox to the new
+   *  position) and the pending leash drops the rest within PENDING_CONFIRM_TICKS.
+   *  Manual (user-pinned) and already-pending eyes are left untouched. Returns
+   *  the changed set to broadcast, or null if nothing flipped. */
+  markStaleForRecheck(): RegionHighlight[] | null {
+    const before = this.stateKey();
+    for (const t of this.tracked.values()) {
+      if (t.region.manual || t.region.pending) continue;
+      t.region.pending = true;
+      t.restoredAtTick = this.tick;
+    }
+    if (this.stateKey() === before) return null;
+    const current = this.current();
+    log(TAG, `recheck after viewport change: ${current.length} eyes pending re-confirm`);
     return current;
   }
 

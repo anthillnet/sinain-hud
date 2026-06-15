@@ -24,6 +24,8 @@ export interface CommandDeps {
   onForkMain?: () => { id: string; label: string };
   /** User drag-selected a screen region — create a manual ROI from it. */
   onRegionSelect?: (sel: { x: number; y: number; w: number; h: number; screenW: number; screenH: number }) => void;
+  /** Frontmost app changed (fast NSWorkspace signal) — instant ROI restore. */
+  onAppFocus?: (app: string) => void;
   /** Toggle screen capture — returns new state */
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
@@ -108,6 +110,10 @@ export function setupCommands(deps: CommandDeps): void {
         const sel = msg as any;
         log(TAG, `region select: ${sel.w}x${sel.h} at (${sel.x},${sel.y})`);
         deps.onRegionSelect?.({ x: sel.x, y: sel.y, w: sel.w, h: sel.h, screenW: sel.screenW, screenH: sel.screenH });
+        break;
+      }
+      case "app_focus": {
+        deps.onAppFocus?.((msg as any).app ?? "");
         break;
       }
       case "fork_main": {
