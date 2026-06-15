@@ -66,18 +66,27 @@
       <a href="https://github.com/anthillnet/sinain-hud" target="_blank">Install it from GitHub</a>
       and start it before clicking the button.
       <br><br>
-      <strong>Privacy:</strong> the bundle data lives in the URL fragment (after <code>#</code>),
-      which browsers never send to servers. This page only sees the entity name and port.
+      <strong>Privacy:</strong> everything — the concept name, port, and bundle —
+      lives in the URL fragment (after <code>#</code>), which browsers never send
+      to servers. This page receives nothing about your share; it only rewrites
+      the link to your local sinain-core.
     </p>
   </div>
 <script>
-// Tiny URL rewriter. Inputs:
-//   query string ?entity=<id>&port=<n>
-//   fragment    #bundle=<encoded>  OR  #peer=<token>
-// On user click, navigates to http://localhost:<port>/knowledge/ui/entity/<id><fragment>
+// Tiny URL rewriter.
 //
-// IMPORTANT: browsers do NOT send URL fragments to servers. The bundle/peer
-// data in the hash never touches this redirector or its host.
+// Current link format — EVERYTHING in the fragment (never sent to a server):
+//   #e=<base64url entity>&p=<port>&bundle=<encoded>   (self-contained)
+//   #e=<base64url entity>&p=<port>&peer=<token>       (live peer-to-peer)
+// Legacy link format (still honored) — entity/port in the query string:
+//   ?entity=<id>&port=<n>   with   #bundle=<encoded> | #peer=<token>
+//
+// On user click, navigates to
+//   http://localhost:<port>/knowledge/ui/entity/<id>#bundle=… | #peer=…
+//
+// IMPORTANT: browsers do NOT send URL fragments to servers. In the current
+// format the concept name, port, and bundle ALL live in the fragment, so this
+// redirector's host receives only "GET /share.html" — no share metadata at all.
 //
 // We DELIBERATELY require a user click rather than auto-redirecting:
 // - HTTPS→HTTP localhost top-level navigation is increasingly throttled by
@@ -88,18 +97,45 @@
 //   out of. The button gives them that beat to confirm.
 
 (function() {
-  const params = new URLSearchParams(location.search);
-  const entity = params.get("entity") || "";
-  const portStr = params.get("port") || "9500";
-  const initialPort = parseInt(portStr) || 9500;
-  const hash = location.hash || "";  // includes leading #
+  // base64url → string (UTF-8 safe). Inverse of encShareEntity in server.ts.
+  function decEntity(e) {
+    try {
+      const padded = e.replace(/-/g, "+").replace(/_/g, "/")
+        + "===".slice((e.length + 3) % 4);
+      const bin = atob(padded);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    } catch (_) { return ""; }
+  }
+
+  const query = new URLSearchParams(location.search);
+  const rawHash = location.hash ? location.hash.slice(1) : "";  // no leading #
+  const frag = new URLSearchParams(rawHash);
+
+  let entity = "";
+  let payload = "";       // "bundle=…" or "peer=…" — re-attached as the localhost fragment
+  let initialPort = 9500;
+
+  if (frag.has("e")) {
+    // Current format: all data in the fragment.
+    entity = decEntity(frag.get("e"));
+    initialPort = parseInt(frag.get("p")) || 9500;
+    if (frag.has("bundle")) payload = "bundle=" + frag.get("bundle");
+    else if (frag.has("peer")) payload = "peer=" + frag.get("peer");
+  } else {
+    // Legacy format: entity/port in query, raw "bundle=…"/"peer=…" in fragment.
+    entity = query.get("entity") || "";
+    initialPort = parseInt(query.get("port")) || 9500;
+    payload = rawHash;
+  }
 
   const statusEl = document.getElementById("status");
   const openBtn = document.getElementById("openBtn");
   const portInput = document.getElementById("port");
   const updateBtn = document.getElementById("updatePort");
 
-  if (!entity || !hash) {
+  if (!entity || !payload) {
     statusEl.innerHTML =
       '<span class="err">Missing share data.</span> ' +
       'This link must be opened directly. Some chat apps strip the part after ' +
@@ -111,7 +147,8 @@
   }
 
   function targetUrl(p) {
-    return "http://localhost:" + p + "/knowledge/ui/entity/" + entity + hash;
+    return "http://localhost:" + p + "/knowledge/ui/entity/"
+      + encodeURIComponent(entity) + "#" + payload;
   }
 
   function bindButton(p) {
@@ -128,11 +165,11 @@
   });
 
   // Update the lede to match share mode for clarity
-  if (hash.indexOf("#peer=") === 0) {
+  if (payload.indexOf("peer=") === 0) {
     statusEl.textContent =
       "A friend is sharing a concept with you live (peer-to-peer). " +
       "Click below to connect — make sure they keep their sinain tab open.";
-  } else if (hash.indexOf("#bundle=") === 0) {
+  } else if (payload.indexOf("bundle=") === 0) {
     statusEl.textContent =
       "A friend has sent you a self-contained concept. Click below to load " +
       "it in your local sinain-core.";
