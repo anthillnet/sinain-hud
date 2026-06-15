@@ -181,6 +181,15 @@ export interface SpawnPermissionReplyMessage {
   decision: "allow" | "deny";
 }
 
+/** Overlay → sinain-core: frontmost application changed. A fast OS-level
+ *  signal (NSWorkspace) that lands ahead of the sense pipeline — drives the
+ *  instant ROI restore on app switch. `app` is the localizedName (matched
+ *  case-insensitively against sense's process-name namespace). */
+export interface AppFocusMessage {
+  type: "app_focus";
+  app: string;
+}
+
 /** Cost update broadcast to overlay. */
 export interface CostMessage {
   type: "cost";
@@ -211,7 +220,7 @@ export interface CostSnapshot {
 }
 
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {
