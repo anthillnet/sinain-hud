@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // sinain launcher — process orchestrator for `sinain start`
-// Ports the logic from start.sh + sinain-agent/run.sh into a single Node.js process manager.
+// Ports the logic from start.sh + sinain-agent-runner/run.sh into a single Node.js process manager.
 
 import { spawn, execSync } from "child_process";
 import fs from "fs";
@@ -233,6 +233,67 @@ async function main() {
     }
   }
 
+  // Start sinain chat sidecar (the built-in "sinain" chat lane — a resident
+  // OpenHands agent on :9610). Bundled with the package; launched here like
+  // sense_client. Degrades gracefully: if python3 / the key / deps are
+  // missing it's skipped, and the user can pick a CLI chat agent instead.
+  let chatStatus = "skipped";
+  {
+    const chatDir = path.join(PKG_DIR, "sinain-chat-agent");
+    const sidecar = path.join(chatDir, "sidecar.py");
+    // Local mode (ollama) needs no OpenRouter key — only the cloud path does.
+    const chatLocal = process.env.SINAIN_LOCAL_MODE === "true"
+      || ["ollama", "local"].includes((process.env.SINAIN_CHAT_PROVIDER || "").toLowerCase());
+    if (!commandExists("python3")) {
+      warn("python3 not found — sinain chat sidecar skipped (pick a CLI chat agent)");
+    } else if (!fs.existsSync(sidecar)) {
+      // Not bundled (older package) — skip silently.
+    } else if (!chatLocal && !process.env.OPENROUTER_API_KEY) {
+      warn("OPENROUTER_API_KEY not set — sinain chat sidecar skipped (set the key, enable local mode, or pick a CLI chat agent)");
+    } else {
+      // Prefer the sidecar's own .venv (dev); else system python3 (prod —
+      // deps are pip-installed into the system interpreter below).
+      const venvPy = path.join(chatDir, ".venv", "bin", "python");
+      const chatPy = fs.existsSync(venvPy) ? venvPy : "python3";
+      const reqFile = path.join(chatDir, "requirements.txt");
+      if (fs.existsSync(reqFile)) {
+        try {
+          execSync(`"${chatPy}" -c "import openhands.sdk; import websockets"`, { stdio: "pipe" });
+        } catch {
+          log("Installing sinain chat sidecar Python dependencies (first run may take a minute)...");
+          try {
+            if (chatPy === "python3") {
+              execSync(`pip3 install -r "${reqFile}" --quiet --break-system-packages`, { stdio: "inherit" });
+            } else {
+              execSync(`"${chatPy}" -m pip install -r "${reqFile}" --quiet`, { stdio: "inherit" });
+            }
+          } catch {
+            try {
+              execSync(`pip3 install -r "${reqFile}" --quiet`, { stdio: "inherit" });
+            } catch {
+              warn("pip3 install failed — sinain chat sidecar may not work");
+            }
+          }
+        }
+      }
+      log("Starting sinain chat sidecar...");
+      startProcess("chat", chatPy, ["sidecar.py"], {
+        cwd: chatDir,
+        color: MAGENTA,
+      });
+      // OpenHands warm-up takes a moment; give it time to fail fast if misconfigured.
+      await sleep(1500);
+      const chatChild = children.find(c => c.name === "chat");
+      if (chatChild && !chatChild.proc.killed && chatChild.proc.exitCode === null) {
+        ok(`sinain chat sidecar running (pid:${chatChild.pid})`);
+        chatStatus = "running";
+      } else {
+        warn("sinain chat sidecar exited early — check logs above");
+        chatStatus = "failed";
+      }
+    }
+  }
+
   // Start overlay
   let overlayStatus = "skipped";
   if (!skipOverlay) {
@@ -338,7 +399,7 @@ async function main() {
   // Start agent
   let agentStatus = "skipped";
   if (!skipAgent) {
-    const runSh = path.join(PKG_DIR, "sinain-agent/run.sh");
+    const runSh = path.join(PKG_DIR, "sinain-agent-runner/run.sh");
     if (fs.existsSync(runSh)) {
       // Generate MCP config with absolute paths
       const mcpConfigPath = generateMcpConfig();
@@ -348,7 +409,7 @@ async function main() {
 
       log(`Starting agent (${agent})...`);
       startProcess("agent", "bash", [runSh], {
-        cwd: path.join(PKG_DIR, "sinain-agent"),
+        cwd: path.join(PKG_DIR, "sinain-agent-runner"),
         color: GREEN,
         extraEnv: {
           MCP_CONFIG: mcpConfigPath,
@@ -365,7 +426,7 @@ async function main() {
         agentStatus = "failed";
       }
     } else {
-      warn("sinain-agent/run.sh not found — agent skipped");
+      warn("sinain-agent-runner/run.sh not found — agent skipped");
     }
   }
 
@@ -373,7 +434,7 @@ async function main() {
   writePidFile();
 
   // Banner
-  printBanner({ senseStatus, overlayStatus, agentStatus });
+  printBanner({ senseStatus, chatStatus, overlayStatus, agentStatus });
 
   // Wait forever (children keep us alive)
   await new Promise(() => {});
@@ -585,9 +646,12 @@ function killStale() {
       "flutter run -d macos",
       "python3 -m sense_client",
       "Python -m sense_client",
+      "sinain-chat-agent/sidecar.py",
+      "python3 sidecar.py",
+      "Python sidecar.py",
       "tsx.*src/index.ts",
       "tsx watch src/index.ts",
-      "sinain-agent/run.sh",
+      "sinain-agent-runner/run.sh",
     ];
 
     for (const pat of patterns) {
@@ -735,7 +799,7 @@ async function healthCheck(url, retries) {
 
 // ── Banner ──────────────────────────────────────────────────────────────────
 
-function printBanner({ senseStatus, overlayStatus, agentStatus }) {
+function printBanner({ senseStatus, chatStatus, overlayStatus, agentStatus }) {
   console.log();
   console.log(`${BOLD}── SinainHUD ──────────────────────────${RESET}`);
 
@@ -744,6 +808,9 @@ function printBanner({ senseStatus, overlayStatus, agentStatus }) {
 
   // Sense
   printServiceLine("sense", YELLOW, senseStatus);
+
+  // Chat sidecar (built-in sinain chat lane on :9610)
+  printServiceLine("chat", MAGENTA, chatStatus);
 
   // Overlay
   printServiceLine("overlay", MAGENTA, overlayStatus);

@@ -5,7 +5,7 @@
 import fs from "fs";
 import path from "path";
 
-const LINKS = ["sinain-core", "sinain-mcp-server", "sinain-agent", "sense_client", ".env.example"];
+const LINKS = ["sinain-core", "sinain-mcp-server", "sinain-agent-runner", "sense_client", "sinain-chat-agent", ".env.example"];
 const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 
 const action = process.argv[2]; // "pre" or "post"
@@ -41,7 +41,7 @@ if (action === "pre") {
 function copyDir(src, dst) {
   fs.mkdirSync(dst, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    if (["node_modules", "__pycache__", ".pytest_cache", "dist", ".env"].includes(entry.name)) continue;
+    if (["node_modules", "__pycache__", ".pytest_cache", "dist", ".env", ".venv"].includes(entry.name)) continue;
     const s = path.join(src, entry.name);
     const d = path.join(dst, entry.name);
     if (entry.isDirectory()) {

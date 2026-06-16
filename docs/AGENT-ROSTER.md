@@ -36,7 +36,7 @@ takes effect on the next escalation/spawn cycle.
 ```
 ~/.sinain/agents.json                   ← your local working copy (gitignored,
                                           wizard's write target)
-sinain-agent/agents.example.json        ← committed template (in the repo /
+sinain-agent-runner/agents.example.json        ← committed template (in the repo /
                                           npm package)
 ```
 
@@ -46,14 +46,14 @@ sinain-agent/agents.example.json        ← committed template (in the repo /
    custom layouts.
 2. `~/.sinain/agents.json` — wizard's write target. Highest non-explicit
    priority; works on npm installs where the package directory is read-only.
-3. `<repo-root>/sinain-agent/agents.json` — legacy / dev-repo location.
-4. `<repo-root>/sinain-agent/agents.example.json` — bootstrap fallback.
+3. `<repo-root>/sinain-agent-runner/agents.json` — legacy / dev-repo location.
+4. `<repo-root>/sinain-agent-runner/agents.example.json` — bootstrap fallback.
 
 ### First-run bootstrap
 
 If neither (2) nor (3) exists, `run.sh` copies `agents.example.json` into the
 first writable target — typically `~/.sinain/agents.json` for npm-installed
-users, `sinain-agent/agents.json` for repo dev installs. After bootstrap,
+users, `sinain-agent-runner/agents.json` for repo dev installs. After bootstrap,
 edit your working copy freely; the example template stays untouched.
 
 ## Schema
@@ -124,7 +124,7 @@ is optional.
 |---|---|---|
 | `type` | yes | Determines dispatch path AND CLI flag layout. See [Profile types](#profile-types) below. |
 | `bin` | no | Path or name of a real binary on PATH (default: profile name). **Shell aliases are invisible** — see [aliases](#shell-aliases-arent-binaries). |
-| `settings` | no | Path to a Claude-Code-style `settings.json` (default: `sinain-agent/.claude/settings.json` — the hook-bearing one). |
+| `settings` | no | Path to a Claude-Code-style `settings.json` (default: `sinain-agent-runner/.claude/settings.json` — the hook-bearing one). |
 | `model` | no | `OPENAI_MODEL` override; only meaningful for `CLAUDE_CODE_USE_OPENAI=1` paths (e.g. openclaude). |
 | `env` | no | Per-profile env overrides applied only for this profile's invocation. Values may use `${VAR}` indirection (anywhere in the string). |
 
@@ -354,7 +354,7 @@ Pick `openclaude` for rapid escalations (DeepSeek's reasoning), pick
 "openclaude-spawn": {
   "type":     "openclaude",
   "bin":      "openclaude",
-  "settings": "/Users/me/IdeaProjects/sinain-hud/sinain-agent/.claude/spawn-settings.json"
+  "settings": "/Users/me/IdeaProjects/sinain-hud/sinain-agent-runner/.claude/spawn-settings.json"
 }
 ```
 
@@ -408,8 +408,8 @@ WS-routed`.**
 **Wizard wrote my prod gateway URL into `agents.example.json`.**
 - That shouldn't happen — the wizard targets `~/.sinain/agents.json`, not
   the example file. If you see prod values in
-  `sinain-agent/agents.example.json`, you may have manually edited the
-  template; revert it from git: `git checkout sinain-agent/agents.example.json`.
+  `sinain-agent-runner/agents.example.json`, you may have manually edited the
+  template; revert it from git: `git checkout sinain-agent-runner/agents.example.json`.
 
 ## Reference: contracts that key off `type`
 
@@ -422,9 +422,9 @@ behaves a certain way:
 | Roster injection | `sinain-core/src/index.ts:registerBareAgent` | Adds every gateway-typed profile name to the broadcast roster |
 | Dispatch routing | `sinain-core/src/escalation/escalator.ts:dispatchEscalation/dispatchSpawnTask` | Calls `isGatewayAgent(name)` → WS vs HTTP |
 | WS connection params | `sinain-core/src/config.ts` (uses `findGatewayProfile`) | First openclaw-typed profile's URLs become `openclawConfig` |
-| Roster (bare agent side) | `sinain-agent/run.sh` | Skips PATH-existence filter for openclaw-typed profiles |
-| Defensive skip guard | `sinain-agent/run.sh` | Bare agent refuses to invoke when `prof_get_or "$ESC_AGENT" type` is `openclaw` |
-| MCP detection | `sinain-agent/run.sh:agent_has_mcp` | Routes claude/openclaude/codex/goose via MCP path; junie conditional; hermes via pipe by default (MCP when `HERMES_USE_MCP=true`); aider/openclaw via pipe path |
+| Roster (bare agent side) | `sinain-agent-runner/run.sh` | Skips PATH-existence filter for openclaw-typed profiles |
+| Defensive skip guard | `sinain-agent-runner/run.sh` | Bare agent refuses to invoke when `prof_get_or "$ESC_AGENT" type` is `openclaw` |
+| MCP detection | `sinain-agent-runner/run.sh:agent_has_mcp` | Routes claude/openclaude/codex/goose via MCP path; junie conditional; hermes via pipe by default (MCP when `HERMES_USE_MCP=true`); aider/openclaw via pipe path |
 
 All five layers consult `agents.json` (or its loaded view) — a single
 source of truth.

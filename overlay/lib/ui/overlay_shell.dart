@@ -384,8 +384,8 @@ class OverlayShellState extends State<OverlayShell> {
             ]
           : null,
       banner: runSh == null
-          ? '⚠ sinain-agent/run.sh not found — plain shell. '
-              'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent/run.sh'
+          ? '⚠ sinain-agent-runner/run.sh not found — plain shell. '
+              'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent-runner/run.sh'
           : null,
     );
     context.read<WebSocketService>().sendUserBusy();
@@ -1350,20 +1350,30 @@ class _AgentAvailabilityBanner extends StatelessWidget {
 
   Widget _startButton(WebSocketService ws, Color color) {
     final agent = ws.escalationAgent;
-    final label = agent.isEmpty ? 'Start local agent' : 'Start $agent';
+    // Resident chat lane → Run restarts the sidecar; CLI lane → Run launches it.
+    final resident = ws.escalationResident;
+    final label = resident
+        ? 'Start chat sidecar'
+        : (agent.isEmpty ? 'Start local agent' : 'Start $agent');
     return HudTooltip(
       message: label,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           onTap: () {
-            ws.startLocalAgent(agent);
-            ws.showSystemAlert(
-              agent.isEmpty
-                  ? 'Starting local escalation agent...'
-                  : 'Starting local escalation agent: $agent',
-              priority: FeedPriority.high,
-            );
+            if (resident) {
+              ws.restartChatSidecar();
+              ws.showSystemAlert('Starting chat sidecar…',
+                  priority: FeedPriority.high);
+            } else {
+              ws.startLocalAgent(agent);
+              ws.showSystemAlert(
+                agent.isEmpty
+                    ? 'Starting local escalation agent...'
+                    : 'Starting local escalation agent: $agent',
+                priority: FeedPriority.high,
+              );
+            }
           },
           behavior: HitTestBehavior.opaque,
           child: Container(
@@ -1389,19 +1399,25 @@ class _AgentAvailabilityBanner extends StatelessWidget {
   String? _warningText(WebSocketService ws) {
     if (!ws.connected) return null;
     if (ws.escalationState != 'active') return 'Escalation is paused';
-    if (ws.availableAgents.isEmpty) return 'No escalation agent connected';
-    if (ws.escalationAgent.isEmpty) return 'No escalation agent selected';
+    if (ws.escalationAgent.isEmpty) return 'No chat agent selected';
+    // Built-in sinain sidecar: connected only if it's actually reachable.
+    if (ws.escalationResident) {
+      return ws.chatSidecarUp ? null : 'Chat sidecar not running';
+    }
+    // A CLI chat agent needs bare-agent registration before it can answer.
     if (!ws.agentRegistered) {
-      return 'Escalation agent not connected: ${ws.escalationAgent}';
+      return 'Chat agent not connected: ${ws.escalationAgent}';
     }
     return null;
   }
 
   bool _showStartButton(WebSocketService ws) {
-    if (!ws.connected || ws.escalationState != 'active' || ws.agentRegistered) {
-      return false;
-    }
-    return ws.escalationAgent.isNotEmpty || ws.availableAgents.isEmpty;
+    if (!ws.connected || ws.escalationState != 'active') return false;
+    // Resident lane: show Run only when the sidecar is down (Run restarts it).
+    if (ws.escalationResident) return !ws.chatSidecarUp;
+    // CLI lane: show Run only for an unstarted agent (Run launches it).
+    if (ws.agentRegistered) return false;
+    return ws.escalationAgent.isNotEmpty;
   }
 }
 

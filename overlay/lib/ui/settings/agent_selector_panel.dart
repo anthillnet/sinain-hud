@@ -22,8 +22,9 @@ class AgentSelectorPanel extends StatelessWidget {
     final ws = context.watch<WebSocketService>();
     final accent = Color(settings.settings.accentColor);
     final available = ws.availableAgents;
+    final terminalAvailable = ws.terminalAvailable;
     final escAgent = ws.escalationAgent;
-    final spawnAgent = ws.spawnAgent;
+    final terminalAgent = ws.terminalAgent;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -42,9 +43,10 @@ class AgentSelectorPanel extends StatelessWidget {
             _emptyState()
           else ...[
             _laneSection(
-              // User-facing lane names (chat-threads redesign): CHAT answers
-              // MAIN + ambient idle messages; TERM runs threads/terminals.
-              // Wire keys stay escalation/spawn.
+              // User-facing lane names: CHAT answers MAIN + region chat +
+              // ambient idle messages (chat selector, includes the sinain
+              // sidecar); TERM runs interactive thread terminals (terminal
+              // selector, excludes sinain — no TUI). Two decoupled lanes.
               label: 'CHAT',
               current: escAgent,
               available: available,
@@ -54,10 +56,10 @@ class AgentSelectorPanel extends StatelessWidget {
             const SizedBox(height: 10),
             _laneSection(
               label: 'TERM',
-              current: spawnAgent,
-              available: available,
+              current: terminalAgent,
+              available: terminalAvailable,
               accent: accent,
-              onSelect: (agent) => ws.setAgent('spawn', agent),
+              onSelect: (agent) => ws.setAgent('terminal', agent),
             ),
             const SizedBox(height: 10),
             // Ambient idle messages (escalations while the user is idle) —

@@ -76,7 +76,7 @@ fi
 AGENT="${SINAIN_AGENT:-}"
 TRANSPORT="${ESCALATION_TRANSPORT:-auto}"
 if [ -n "$AGENT" ]; then
-  log "  agent:    $AGENT (transport=$TRANSPORT) — start with: sinain-agent/run.sh"
+  log "  agent:    $AGENT (transport=$TRANSPORT) — start with: sinain-agent-runner/run.sh"
 else
   log "  agent:    not configured (set SINAIN_AGENT in .env)"
 fi

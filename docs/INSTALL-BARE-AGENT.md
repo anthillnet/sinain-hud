@@ -67,7 +67,7 @@ This routes all escalations to the HTTP pending slot instead of the WebSocket ga
 If you have a knowledge snapshot from a previous OpenClaw deployment:
 
 ```bash
-python3 sinain-agent/restore-snapshot.py
+python3 sinain-agent-runner/restore-snapshot.py
 ```
 
 This populates `~/.openclaw/workspace/` with:
@@ -87,7 +87,7 @@ cd sinain-core && npm run dev
 
 Terminal 2 — bare agent (default: Claude Code):
 ```bash
-cd sinain-agent && ./run.sh
+cd sinain-agent-runner && ./run.sh
 ```
 
 Or with a different agent:
@@ -154,9 +154,9 @@ MCP agents need access to the sinain MCP server (`sinain-mcp-server/index.ts`). 
 
 | Agent | MCP setup | Config location |
 |-------|-----------|-----------------|
-| Claude | Automatic — `--mcp-config` flag per invocation | `sinain-agent/mcp-config.json` |
+| Claude | Automatic — `--mcp-config` flag per invocation | `sinain-agent-runner/mcp-config.json` |
 | Codex | Auto-registered on first `run.sh` via `codex mcp add` | `~/.codex/config.toml` |
-| Junie | Automatic — copies `mcp-config.json` to `--mcp-location` dir | `sinain-agent/.junie-mcp/mcp.json` |
+| Junie | Automatic — copies `mcp-config.json` to `--mcp-location` dir | `sinain-agent-runner/.junie-mcp/mcp.json` |
 | Goose | Manual one-time `goose configure` | `~/.config/goose/` |
 | Aider | N/A — no MCP support (uses pipe mode) | — |
 

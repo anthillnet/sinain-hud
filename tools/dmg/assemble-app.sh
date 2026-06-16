@@ -30,7 +30,7 @@ cp -R "$SRC_APP" "$OUT_APP"
 
 bold "Embedding bundled backend into Contents/Resources/"
 # Copy EVERY staged top-level item (node, sinain-core, sck-capture, scripts,
-# sinain-agent, sinain-mcp-server, sense_client, sinain-memory, …). Iterating
+# sinain-agent-runner, sinain-mcp-server, sense_client, sinain-memory, …). Iterating
 # the stage dir rather than a hardcoded list so new staged components can't be
 # silently dropped from the bundle.
 staged_any=false

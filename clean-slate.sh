@@ -48,7 +48,7 @@ rmrf() { # rmrf <path...> — guard against empty args
 
 echo -e "${B}1. Stop running Sinain processes${X}"
 for pat in "Sinain.app" "@geravant/sinain" "sinain-core/dist/index.js" "tsx.*src/index.ts" \
-           "sense_client" "sck-capture" "sinain-agent/run.sh" "bash run.sh" \
+           "sense_client" "sck-capture" "sinain-agent-runner/run.sh" "bash run.sh" \
            "openrouter-proxy" ".sinain/python/bin/python3" "whisper-cli" "launch-backend.sh"; do
   run "pkill -f '${pat}'" pkill -f "$pat"
 done

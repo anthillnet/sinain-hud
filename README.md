@@ -123,7 +123,7 @@ npx @geravant/sinain@latest start --no-overlay  # headless mode
 | **overlay** | Dart / Swift | Private HUD (macOS), display modes, hotkeys | [Hotkeys](docs/HOTKEYS.md) |
 | **sense_client** | Python | Screen capture, SSIM diff, OCR, privacy filter | [sense_client/](sense_client/) |
 | **sck-capture** | Swift | ScreenCaptureKit: system audio + screen frames | [tools/sck-capture/](tools/sck-capture/) |
-| **sinain-agent** | Bash | Shell harness that connects any agent to sinain-core | [sinain-agent/](sinain-agent/) |
+| **sinain-agent-runner** | Bash | Shell harness that connects any agent to sinain-core | [sinain-agent-runner/](sinain-agent-runner/) |
 | **sinain-knowledge** | TypeScript | Curation, playbook, eval, portable knowledge modules | [Knowledge System](docs/knowledge-system.md) |
 | **sinain-mcp-server** | TypeScript | MCP server exposing sinain tools to agents | [sinain-mcp-server/](sinain-mcp-server/) |
 

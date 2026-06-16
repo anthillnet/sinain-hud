@@ -1,6 +1,6 @@
 // agents-loader.ts
 //
-// sinain-core's view of sinain-agent/agents.json. Loaded once at startup,
+// sinain-core's view of sinain-agent-runner/agents.json. Loaded once at startup,
 // gives config.ts a typed snapshot of the bare-agent + OpenClaw config that
 // used to live in .env.
 //
@@ -12,8 +12,8 @@
 //
 // Path resolution:
 //   1. AGENTS_CONFIG_PATH env var (explicit override)
-//   2. <repo-root>/sinain-agent/agents.json (default)
-//   3. <repo-root>/sinain-agent/agents.example.json (fresh-checkout fallback)
+//   2. <repo-root>/sinain-agent-runner/agents.json (default)
+//   3. <repo-root>/sinain-agent-runner/agents.example.json (fresh-checkout fallback)
 //
 // Returns null if no candidate exists. config.ts treats null as "use env
 // defaults" so the migration is non-breaking.
@@ -78,7 +78,13 @@ export interface EscalationBlock {
 }
 
 export interface AgentsConfig {
+  /** Chat/escalation lane default (sinain-eligible). */
   default?: string;
+  /** Terminal (interactive TUI) lane default. Decoupled from `default` so the
+   *  chat lane can default to the resident sinain sidecar while the terminal —
+   *  which needs a real TUI — defaults to a different, sinain-INELIGIBLE agent.
+   *  Falls back to the first terminal-eligible profile when unset/invalid. */
+  terminalDefault?: string;
   pollIntervalSec?: number;
   agentMaxTurns?: number;
   spawnMaxTurns?: number;
@@ -149,12 +155,12 @@ function candidatePaths(): string[] {
   // template.
   const userHome = resolve(homedir(), ".sinain", "agents.json");
   // sinain-core compiled output sits at sinain-core/dist/, source at
-  // sinain-core/src/. From either, sinain-agent is two levels up.
+  // sinain-core/src/. From either, sinain-agent-runner is two levels up.
   const repoRoot = resolve(__dirname, "..", "..");
   return [
     userHome,
-    resolve(repoRoot, "sinain-agent", "agents.json"),
-    resolve(repoRoot, "sinain-agent", "agents.example.json"),
+    resolve(repoRoot, "sinain-agent-runner", "agents.json"),
+    resolve(repoRoot, "sinain-agent-runner", "agents.example.json"),
   ];
 }
 
@@ -244,11 +250,31 @@ export function isGatewayProfile(
   return cfg?.profiles?.[name]?.type === "openclaw";
 }
 
+/** True iff `name` is sinain's bundled resident chat sidecar (type "sinain").
+ *  Routed to the local OpenHands sidecar over WS instead of run.sh/gateway. */
+export function isSinainProfile(
+  cfg: AgentsConfig | null,
+  name: string,
+): boolean {
+  return cfg?.profiles?.[name]?.type === "sinain";
+}
+
 /** All openclaw-typed profile names in the config. */
 export function gatewayProfileNames(cfg: AgentsConfig | null): string[] {
   const profiles = cfg?.profiles;
   if (!profiles) return [];
   return Object.entries(profiles)
     .filter(([_, p]) => p?.type === "openclaw")
+    .map(([name]) => name);
+}
+
+/** All sinain-typed (resident chat sidecar) profile names in the config.
+ *  Like gateway profiles, these have no PATH binary, so run.sh's roster POST
+ *  drops them — sinain-core must inject them into the chat roster itself. */
+export function sinainProfileNames(cfg: AgentsConfig | null): string[] {
+  const profiles = cfg?.profiles;
+  if (!profiles) return [];
+  return Object.entries(profiles)
+    .filter(([_, p]) => p?.type === "sinain")
     .map(([name]) => name);
 }

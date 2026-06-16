@@ -41,13 +41,13 @@ bold "3 · Staging sck-capture (arm64)"
 cp "$REPO/tools/sck-capture/sck-capture" "$RES/sck-capture/sck-capture"
 chmod +x "$RES/sck-capture/sck-capture"
 
-bold "3b · Staging agent runtime (sinain-agent + sinain-mcp-server)"
+bold "3b · Staging agent runtime (sinain-agent-runner + sinain-mcp-server)"
 # Bare-agent runtime: run.sh dispatches escalations/spawns to a local coding
 # CLI (claude/codex/…) using MCP tools from sinain-mcp-server. Tiny source;
 # the MCP server needs its own prod deps (@modelcontextprotocol/sdk). tsx (to
 # run the .ts MCP entry) already ships in sinain-core/node_modules/.bin.
-cp -R "$REPO/sinain-agent" "$RES/sinain-agent"
-rm -rf "$RES/sinain-agent/agents.json"  # never bundle a user's agents.json
+cp -R "$REPO/sinain-agent-runner" "$RES/sinain-agent-runner"
+rm -rf "$RES/sinain-agent-runner/agents.json"  # never bundle a user's agents.json
 cp -R "$REPO/sinain-mcp-server" "$RES/sinain-mcp-server"
 rm -rf "$RES/sinain-mcp-server/node_modules"
 ( cd "$RES/sinain-mcp-server" && "$RES/node/bin/node" "$(command -v npm)" install --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
@@ -83,7 +83,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"          # …/Resources/scripts
 RES="$(cd "$HERE/.." && pwd)"                   # …/Resources
 NODE="$RES/node/bin/node"
 CORE="$RES/sinain-core"
-AGENT_DIR="$RES/sinain-agent"
+AGENT_DIR="$RES/sinain-agent-runner"
 
 # Capture all backend output (core + agent + sense_client) to a rotating log so
 # failures are diagnosable — the overlay spawns this script with no stdout sink.
@@ -282,7 +282,7 @@ for _i in $(seq 1 40); do
   sleep 1
 done
 
-# Start the bare agent. CWD = bundled sinain-agent so settings.json's relative
+# Start the bare agent. CWD = bundled sinain-agent-runner so settings.json's relative
 # ./hooks/approve-tool.sh resolves.
 if [ -f "$AGENT_DIR/run.sh" ]; then
   ( cd "$AGENT_DIR" && exec bash run.sh ) &

@@ -127,9 +127,12 @@ async function stopServices() {
       "tsx watch src/index.ts",
       "python3 -m sense_client",
       "Python -m sense_client",
+      "sinain-chat-agent/sidecar.py",
+      "python3 sidecar.py",
+      "Python sidecar.py",
       "flutter run -d macos",
       "sinain_hud.app/Contents/MacOS/sinain_hud",
-      "sinain-agent/run.sh",
+      "sinain-agent-runner/run.sh",
     ];
 
     for (const pat of patterns) {
@@ -201,6 +204,14 @@ async function showStatus() {
     console.log(`  ${YELLOW}sense${RESET}            ${DIM}—  stopped${RESET}`);
   }
 
+  // Chat sidecar: built-in sinain chat lane on :9610
+  const chatUp = await isPortOpen(9610);
+  if (chatUp) {
+    console.log(`  ${MAGENTA}chat${RESET}     :9610   ${GREEN}✓${RESET}  running`);
+  } else {
+    console.log(`  ${MAGENTA}chat${RESET}     :9610   ${DIM}—  stopped${RESET}`);
+  }
+
   // Overlay
   const overlayUp = isProcessRunning("sinain_hud");
   if (overlayUp) {
@@ -210,7 +221,7 @@ async function showStatus() {
   }
 
   // Agent
-  const agentUp = isProcessRunning("sinain-agent");
+  const agentUp = isProcessRunning("sinain-agent-runner");
   if (agentUp) {
     console.log(`  ${GREEN}agent${RESET}            ${GREEN}✓${RESET}  running`);
   } else {

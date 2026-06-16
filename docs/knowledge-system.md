@@ -379,20 +379,20 @@ python3 sinain-memory/module_manager.py --modules-dir modules/ import react-nati
 
 2. If you have a snapshot from another instance:
    ```bash
-   python3 sinain-agent/restore-snapshot.py
+   python3 sinain-agent-runner/restore-snapshot.py
    ```
 
 3. Or bootstrap from scratch:
    ```bash
    cd ~/.openclaw/workspace
-   cp sinain-agent/seed-playbook.md memory/sinain-playbook.md
+   cp sinain-agent-runner/seed-playbook.md memory/sinain-playbook.md
    python3 sinain-memory/knowledge_integrator.py --memory-dir memory/ --bootstrap
    python3 sinain-memory/knowledge_integrator.py --memory-dir memory/ --retag
    ```
 
 4. Start the bare agent:
    ```bash
-   cd sinain-agent && ./run.sh
+   cd sinain-agent-runner && ./run.sh
    ```
 
 5. The agent's heartbeat will distill sessions and grow the knowledge graph over time.

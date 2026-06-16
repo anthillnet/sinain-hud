@@ -32,7 +32,7 @@ export interface CommandDeps {
   onToggleEscalation: () => boolean;
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
-  onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
+  onSetAgent?: (lane: "escalation" | "terminal", agent: string) => { ok: boolean; error?: string };
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
@@ -45,6 +45,9 @@ export interface CommandDeps {
     alreadyRunning?: boolean;
     error?: string;
   };
+  /** (Re)start the resident chat sidecar — overlay Run button when the
+   *  built-in sinain chat lane is selected but unreachable. */
+  onRestartChatSidecar?: () => { ok: boolean; error?: string };
 }
 
 /**
@@ -240,9 +243,9 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       break;
     }
     case "set_agent": {
-      const lane = (msg as any).lane as "escalation" | "spawn" | undefined;
+      const lane = (msg as any).lane as "escalation" | "terminal" | undefined;
       const agent = (msg as any).agent;
-      if (lane !== "escalation" && lane !== "spawn") {
+      if (lane !== "escalation" && lane !== "terminal") {
         log(TAG, `set_agent: invalid lane "${lane}"`);
         break;
       }
@@ -282,6 +285,22 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       } else {
         wsHandler.broadcast(`Starting local escalation agent: ${result.agent ?? "default"}`, "normal");
         log(TAG, `start_local_agent launched (${result.agent ?? "default"})`);
+      }
+      break;
+    }
+    case "restart_chat_sidecar": {
+      if (!deps.onRestartChatSidecar) {
+        log(TAG, "restart_chat_sidecar: no handler wired");
+        wsHandler.broadcast("⚠ Chat sidecar launcher is not available", "high");
+        break;
+      }
+      const result = deps.onRestartChatSidecar();
+      if (!result.ok) {
+        wsHandler.broadcast(`⚠ ${result.error ?? "Failed to start chat sidecar"}`, "high");
+        log(TAG, `restart_chat_sidecar failed: ${result.error ?? "unknown error"}`);
+      } else {
+        wsHandler.broadcast("Starting chat sidecar…", "normal");
+        log(TAG, "restart_chat_sidecar launched");
       }
       break;
     }

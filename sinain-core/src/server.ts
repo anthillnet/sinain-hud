@@ -1616,7 +1616,7 @@ export interface ServerDeps {
    *  debug via GET /bareagent/config. `registered` distinguishes "user
    *  chose Off" (registered=true, lanes="") from "core forgot our
    *  registration" (registered=false) so run.sh heals only on the latter. */
-  getBareAgentConfig?: () => { escalationAgent: string; spawnAgent: string; registered: boolean };
+  getBareAgentConfig?: () => { escalationAgent: string; terminalAgent: string; registered: boolean };
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -2530,7 +2530,7 @@ export function createAppServer(deps: ServerDeps) {
       // Response piggybacks the per-lane agent config so run.sh learns
       // about overlay-side agent switches without a separate poll.
       if (req.method === "GET" && url.pathname === "/escalation/pending") {
-        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "", registered: false };
+        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", terminalAgent: "", registered: false };
         const paused = deps.isEscalationPaused?.() ?? false;
         if (paused) {
           res.end(JSON.stringify({ ok: true, escalation: null, paused: true, config }));
@@ -2571,7 +2571,7 @@ export function createAppServer(deps: ServerDeps) {
       // ── /spawn/pending (bare agent polls for queued tasks) ──
       // Response piggybacks the per-lane agent config (see /escalation/pending).
       if (req.method === "GET" && url.pathname === "/spawn/pending") {
-        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "", registered: false };
+        const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", terminalAgent: "", registered: false };
         const task = deps.getSpawnPending?.() ?? null;
         res.end(JSON.stringify({ ok: true, task, config }));
         return;
@@ -2742,7 +2742,7 @@ export function createAppServer(deps: ServerDeps) {
       // ── /bareagent/config (debug; the hot path uses the config field
       // piggybacked on /escalation/pending and /spawn/pending responses) ──
       if (req.method === "GET" && url.pathname === "/bareagent/config") {
-        const cfg = deps.getBareAgentConfig?.() ?? { escalationAgent: "", spawnAgent: "", registered: false };
+        const cfg = deps.getBareAgentConfig?.() ?? { escalationAgent: "", terminalAgent: "", registered: false };
         res.end(JSON.stringify({ ok: true, ...cfg }));
         return;
       }
