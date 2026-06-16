@@ -53,11 +53,41 @@ class ChatAgent:
     async def setup(self) -> None:
         tools.register_all()
         model = os.environ.get("SINAIN_CHAT_MODEL", "qwen/qwen3.5-flash-02-23")
-        llm_kwargs = dict(model="openrouter/" + model,
-                          api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
-                          service_id="sinain-chat", stream=True)
-        if os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on":
-            llm_kwargs["litellm_extra_body"] = {"reasoning": {"enabled": False}}
+        # Provider: openrouter (cloud, default) or ollama (local). Auto-detect
+        # local from SINAIN_LOCAL_MODE if SINAIN_CHAT_PROVIDER is unset.
+        provider = os.environ.get("SINAIN_CHAT_PROVIDER", "").lower()
+        if not provider:
+            provider = "ollama" if os.environ.get("SINAIN_LOCAL_MODE") == "true" else "openrouter"
+        if provider in ("ollama", "local"):
+            base = (os.environ.get("SINAIN_CHAT_BASE_URL")
+                    or os.environ.get("OLLAMA_BASE_URL")
+                    or "http://localhost:11434")
+            # litellm: use the ollama_chat/ provider (Ollama /api/chat) — it
+            # supports function/tool-calling; the bare ollama/ provider hits
+            # /api/generate and rejects the tool list (OllamaException).
+            lm = os.environ.get("SINAIN_CHAT_MODEL", "")
+            if lm.startswith("ollama_chat/"):
+                model_id = lm
+            elif lm.startswith("ollama/"):
+                model_id = "ollama_chat/" + lm[len("ollama/"):]
+            elif lm and "/" not in lm:
+                model_id = f"ollama_chat/{lm}"     # bare ollama tag, e.g. qwen2.5:7b
+            else:
+                model_id = "ollama_chat/qwen2.5:7b"  # unset / openrouter slug → local default
+            # ollama is keyless; litellm wants a non-empty key + api_base.
+            # think:false — non-reasoning local models (qwen2.5, phi4-mini)
+            # reject Ollama's `think` flag ("does not support thinking").
+            llm_kwargs = dict(model=model_id, base_url=base,
+                              api_key=SecretStr("ollama"),
+                              litellm_extra_body={"think": False},
+                              service_id="sinain-chat", stream=True)
+        else:
+            llm_kwargs = dict(model="openrouter/" + model,
+                              api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
+                              service_id="sinain-chat", stream=True)
+            # reasoning:{enabled:false} is an OpenRouter-only param — cloud only.
+            if os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on":
+                llm_kwargs["litellm_extra_body"] = {"reasoning": {"enabled": False}}
         llm = LLM(**llm_kwargs)
         agent = Agent(llm=llm, tools=[Tool(name=n) for n, _, _ in tools.SPECS],
                       system_prompt_kwargs={}, system_prompt=SYSTEM)

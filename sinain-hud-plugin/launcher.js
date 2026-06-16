@@ -241,12 +241,15 @@ async function main() {
   {
     const chatDir = path.join(PKG_DIR, "sinain-chat-agent");
     const sidecar = path.join(chatDir, "sidecar.py");
+    // Local mode (ollama) needs no OpenRouter key — only the cloud path does.
+    const chatLocal = process.env.SINAIN_LOCAL_MODE === "true"
+      || ["ollama", "local"].includes((process.env.SINAIN_CHAT_PROVIDER || "").toLowerCase());
     if (!commandExists("python3")) {
       warn("python3 not found — sinain chat sidecar skipped (pick a CLI chat agent)");
     } else if (!fs.existsSync(sidecar)) {
       // Not bundled (older package) — skip silently.
-    } else if (!process.env.OPENROUTER_API_KEY) {
-      warn("OPENROUTER_API_KEY not set — sinain chat sidecar skipped (set the key or pick a CLI chat agent)");
+    } else if (!chatLocal && !process.env.OPENROUTER_API_KEY) {
+      warn("OPENROUTER_API_KEY not set — sinain chat sidecar skipped (set the key, enable local mode, or pick a CLI chat agent)");
     } else {
       // Prefer the sidecar's own .venv (dev); else system python3 (prod —
       // deps are pip-installed into the system interpreter below).
