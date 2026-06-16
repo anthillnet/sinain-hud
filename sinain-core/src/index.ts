@@ -1509,12 +1509,20 @@ async function main() {
           .handle(text, { kind: "main" })
           .then((reply) => {
             wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
-            wsHandler.broadcast(reply, "normal", "stream");
+            // Reply must land in the chat thread (channel "agent", sender "agent"),
+            // mirroring how commands.ts echoes the user message — NOT the "stream" feed.
+            wsHandler.broadcastRaw({
+              type: "feed", text: reply, priority: "normal",
+              ts: Date.now(), channel: "agent", sender: "agent",
+            } as any);
             feedBuffer.push(`[agent] ${reply}`, "normal", "system", "agent");
           })
           .catch((e: Error) => {
             wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
-            wsHandler.broadcast(`⚠ chat sidecar error: ${e.message}`, "normal", "stream");
+            wsHandler.broadcastRaw({
+              type: "feed", text: `⚠ chat sidecar error: ${e.message}`, priority: "normal",
+              ts: Date.now(), channel: "agent", sender: "agent",
+            } as any);
           });
         return;
       }
