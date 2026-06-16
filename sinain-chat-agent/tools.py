@@ -60,7 +60,11 @@ def _bash(cmd: str) -> str:
 
 def dispatch(name: str, args: dict) -> str:
     if name == "sinain_memory_query":
-        return _get(f"/knowledge/facts?q={urllib.parse.quote(args.get('query', ''))}&limit={args.get('limit', 8)}")
+        # /knowledge/query (NOT /knowledge/facts): the facts endpoint only reads
+        # an `entities` param and ignores `q`, so the query term never reached
+        # the graph. /knowledge/query splits `q` into keywords and runs the
+        # multi-store (local + workspace) lookup.
+        return _get(f"/knowledge/query?q={urllib.parse.quote(args.get('query', ''))}&max={args.get('limit', 8)}")
     if name == "sinain_context":
         return (_get("/agent/digest") + "\n---\n" + _get("/agent/context"))[:_MAX]
     if name == "sinain_memory_store":

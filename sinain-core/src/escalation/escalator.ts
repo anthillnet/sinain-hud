@@ -208,6 +208,24 @@ export class Escalator {
     this.suppressAmbientUntil = Math.max(this.suppressAmbientUntil, Date.now() + ms);
   }
 
+  /** The user is actively conversing via the resident chat (sinain) lane.
+   *  Drop/supersede any in-flight ambient escalation and hold further ambient
+   *  escalations for the busy window — WITHOUT queuing a bare-agent command
+   *  (the sidecar handles the turn). The sinain chat path bypasses
+   *  setUserCommand, so without this, escalations keep flooding the single
+   *  resident sidecar and starve the user's own chat/ROI turns. */
+  noteUserChatting(): void {
+    if (this.httpPending && !this.httpPending.userDriven) {
+      this.supersededIds.add(this.httpPending.id);
+      if (this.supersededIds.size > 20) {
+        const first = this.supersededIds.values().next().value;
+        if (first !== undefined) this.supersededIds.delete(first);
+      }
+      log(TAG, `ambient escalation ${this.httpPending.id} superseded by user chat`);
+    }
+    this.noteUserBusy(Escalator.USER_BUSY_MS);
+  }
+
   setUserCommand(text: string, source: "text" | "voice" = "text"): void {
     this.pendingUserCommand = { text, ts: Date.now(), source };
     // Conversational contract: after the user speaks, the NEXT agent message

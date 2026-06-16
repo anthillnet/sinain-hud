@@ -49,6 +49,12 @@ class ChatAgent:
         self._acc = ""
         self._q: asyncio.Queue | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # One resident Conversation serves BOTH user chat and ambient
+        # escalations. Serialize turns (a single Conversation can't run two at
+        # once) and let a USER turn preempt an in-flight ESCALATION so the user
+        # is never starved. _lock = one turn at a time; _active = its source.
+        self._lock = asyncio.Lock()
+        self._active_source: str | None = None
 
     async def setup(self) -> None:
         tools.register_all()
@@ -114,29 +120,47 @@ class ChatAgent:
             self._loop.call_soon_threadsafe(self._q.put_nowait, ev)
 
     async def run(self, message: str, context: dict):
-        self._acc = ""
-        self._q = asyncio.Queue()
+        source = (context or {}).get("source") or "user"
         seed = (context or {}).get("seed") or ""
         kind = (context or {}).get("kind") or "main"
-        msg = message if not seed else f"[{kind} context]\n{seed}\n\n{message}"
 
-        def _work():
+        # Escalations are ephemeral. If a turn is already running, DROP this one
+        # rather than queue — a backlog of ambient escalations would pile up on
+        # the single Conversation and starve user turns.
+        if source != "user" and self._lock.locked():
+            yield {"type": "done", "text": ""}
+            return
+
+        # A user turn PREEMPTS an in-flight escalation so the user is never
+        # starved: signal the running turn to stop (run() resets PAUSED→RUNNING
+        # for our turn), then wait for the lock as it unwinds.
+        if source == "user" and self._lock.locked() and self._active_source != "user":
+            self.cancel()
+
+        async with self._lock:
+            self._active_source = source
+            self._acc = ""
+            self._q = asyncio.Queue()
+            msg = message if not seed else f"[{kind} context]\n{seed}\n\n{message}"
+
+            def _work():
+                try:
+                    self._conv.send_message(msg)
+                    self._conv.run()
+                    self._emit({"type": "done", "text": self._acc})
+                except Exception as e:  # noqa: BLE001
+                    self._emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
+
+            worker = asyncio.create_task(asyncio.to_thread(_work))
             try:
-                self._conv.send_message(msg)
-                self._conv.run()
-                self._emit({"type": "done", "text": self._acc})
-            except Exception as e:  # noqa: BLE001
-                self._emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
-
-        worker = asyncio.create_task(asyncio.to_thread(_work))
-        try:
-            while True:
-                ev = await self._q.get()
-                yield ev
-                if ev["type"] in ("done", "error"):
-                    break
-        finally:
-            await worker
+                while True:
+                    ev = await self._q.get()
+                    yield ev
+                    if ev["type"] in ("done", "error"):
+                        break
+            finally:
+                await worker
+                self._active_source = None
 
     def cancel(self) -> None:
         if self._conv is not None:
