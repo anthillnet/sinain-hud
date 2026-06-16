@@ -137,29 +137,29 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
 
   // Step 1: Get candidates from Python (RRF-ranked, no embedding — avoids deadlock)
   // Request 2x candidates in JSON for re-ranking in Node.js
-  const candidateFacts: Array<Record<string, string>> = [];
-  for (const dbPath of dbPaths) {
-    if (!existsSync(dbPath)) continue;
+  // Query the stores CONCURRENTLY. They're separate Oxigraph paths (local +
+  // workspace) so there's no lock contention, and total latency becomes the
+  // slowest single store (~5.5s for the ~285k-triple workspace) instead of the
+  // SUM (~10s). The old sequential loop summed to ~10s, which (a) brushed the
+  // caller's HTTP timeout and (b) with the prior 5s per-db cap silently dropped
+  // the workspace store entirely → chat memory missed workspace-only facts
+  // (e.g. "Y Combinator"). 10s per-db cap covers the slow store with headroom.
+  // --no-semantic: keyword expansion would load the MiniLM model inside the
+  // one-shot python (~4s); we re-rank with in-process embeddings in Step 2.
+  const perDb = await Promise.all(dbPaths.map(async (dbPath) => {
+    if (!existsSync(dbPath)) return [] as Array<Record<string, string>>;
     try {
-      // --no-semantic: keyword expansion would load the MiniLM model inside
-      // the one-shot python (~4s, blowing the timeout below); we re-rank
-      // with in-process embeddings in Step 2 instead.
       const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-      // Async exec — the sync variant blocked node's event loop for up to
-      // 5s PER DB (10s total): every WS broadcast, escalation, and the
-      // /region/:id/task seed fetch froze behind it (seen as the terminal's
-      // "context expired" fallback). Async keeps core responsive and lets
-      // callers' time budgets (Promise.race) actually work.
-      const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 5000, encoding: "utf-8" });
+      const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 10000, encoding: "utf-8" });
       const out = stdout.trim();
-      if (out) {
-        const parsed = JSON.parse(out);
-        const facts = parsed.facts || parsed;
-        if (Array.isArray(facts)) candidateFacts.push(...facts);
-      }
-    } catch { /* skip failed db */ }
-  }
+      if (!out) return [] as Array<Record<string, string>>;
+      const parsed = JSON.parse(out);
+      const facts = parsed.facts || parsed;
+      return Array.isArray(facts) ? facts as Array<Record<string, string>> : [];
+    } catch { return [] as Array<Record<string, string>>; }
+  }));
+  const candidateFacts: Array<Record<string, string>> = perDb.flat();
 
   if (candidateFacts.length === 0) return "";
 
