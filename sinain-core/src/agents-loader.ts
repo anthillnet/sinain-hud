@@ -1,6 +1,6 @@
 // agents-loader.ts
 //
-// sinain-core's view of sinain-agent/agents.json. Loaded once at startup,
+// sinain-core's view of sinain-agent-runner/agents.json. Loaded once at startup,
 // gives config.ts a typed snapshot of the bare-agent + OpenClaw config that
 // used to live in .env.
 //
@@ -12,8 +12,8 @@
 //
 // Path resolution:
 //   1. AGENTS_CONFIG_PATH env var (explicit override)
-//   2. <repo-root>/sinain-agent/agents.json (default)
-//   3. <repo-root>/sinain-agent/agents.example.json (fresh-checkout fallback)
+//   2. <repo-root>/sinain-agent-runner/agents.json (default)
+//   3. <repo-root>/sinain-agent-runner/agents.example.json (fresh-checkout fallback)
 //
 // Returns null if no candidate exists. config.ts treats null as "use env
 // defaults" so the migration is non-breaking.
@@ -155,12 +155,12 @@ function candidatePaths(): string[] {
   // template.
   const userHome = resolve(homedir(), ".sinain", "agents.json");
   // sinain-core compiled output sits at sinain-core/dist/, source at
-  // sinain-core/src/. From either, sinain-agent is two levels up.
+  // sinain-core/src/. From either, sinain-agent-runner is two levels up.
   const repoRoot = resolve(__dirname, "..", "..");
   return [
     userHome,
-    resolve(repoRoot, "sinain-agent", "agents.json"),
-    resolve(repoRoot, "sinain-agent", "agents.example.json"),
+    resolve(repoRoot, "sinain-agent-runner", "agents.json"),
+    resolve(repoRoot, "sinain-agent-runner", "agents.example.json"),
   ];
 }
 

@@ -147,7 +147,7 @@ function loadPrivacyConfig(): PrivacyConfig {
 }
 
 export function loadConfig(): CoreConfig {
-  // sinain-agent/agents.json is the new single source of truth for the
+  // sinain-agent-runner/agents.json is the new single source of truth for the
   // bare-agent + OpenClaw config that used to live in .env. Loading
   // happens once at startup; null means the file isn't there (fresh
   // checkout, custom layout, etc.) and we fall back to env defaults.

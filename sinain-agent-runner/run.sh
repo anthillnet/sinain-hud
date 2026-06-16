@@ -309,7 +309,7 @@ invoke_agent() {
               sess_args=(--resume "$SPAWN_SESSION_ID")
             fi
             # Thread invocations cd to $HOME (sessions are per-cwd), which
-            # means sinain-agent/CLAUDE.md no longer auto-loads. Inject the
+            # means sinain-agent-runner/CLAUDE.md no longer auto-loads. Inject the
             # thread-specific system prompt instead — NOT CLAUDE.md, whose
             # escalation-loop instructions are wrong for a thread chat.
             if [ -f "$SCRIPT_DIR/THREAD-SYSTEM.md" ]; then
@@ -611,7 +611,7 @@ fi
 
 # --- Load agent profiles from agents.json ---
 # Built-in defaults are 1:1 (profile name == binary == type). Users can
-# override fields or add custom profiles by editing sinain-agent/agents.json.
+# override fields or add custom profiles by editing sinain-agent-runner/agents.json.
 # Profiles whose binaries aren't in PATH are silently skipped.
 for default_name in claude openclaude codex goose junie aider hermes; do
   prof_set "$default_name" bin "$default_name"
@@ -694,11 +694,20 @@ for p in "${ALL_PROFILES[@]:-}"; do
   fi
 done
 
-# Sanity check the configured default agent
+# Sanity check the configured default agent — but skip profiles with no local
+# binary by design: the resident sinain chat sidecar (handled in-process by
+# sinain-core) and gateway/openclaw profiles (dispatched via WS). For the
+# interactive terminal the actual agent comes from the terminal lane anyway.
+AGENT_TYPE=$(prof_get_or "$AGENT" type "$AGENT")
 AGENT_BIN=$(prof_get_or "$AGENT" bin "$AGENT")
-if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
-  echo "  ⚠ configured agent '$AGENT' (bin=$AGENT_BIN) not installed — waiting for overlay override"
-fi
+case "$AGENT_TYPE" in
+  sinain|openclaw) ;;
+  *)
+    if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+      echo "  ⚠ configured agent '$AGENT' (bin=$AGENT_BIN) not installed — waiting for overlay override"
+    fi
+    ;;
+esac
 
 ESC_AGENT="$AGENT"
 
@@ -754,7 +763,7 @@ print(json.dumps({'available': sys.argv[1].split(' '), 'current': sys.argv[2]}))
 }
 
 # --- OpenRouter reasoning-preserving proxy autolaunch ---
-# Starts sinain-agent/openrouter-proxy.mjs when any code path will need it.
+# Starts sinain-agent-runner/openrouter-proxy.mjs when any code path will need it.
 # The proxy preserves reasoning_content across multi-turn MCP flows so
 # DeepSeek V4 Flash (and other thinking models) don't 400 on turn-2.
 #
@@ -862,7 +871,7 @@ You have sinain MCP tools (sinain_context for the current situation, sinain_memo
   apply_profile_env "$profile"
   model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
   # mcp-config.json uses repo-relative paths (../sinain-core/…) that resolve
-  # against the agent's cwd. Headless polling runs from sinain-agent/ so they
+  # against the agent's cwd. Headless polling runs from sinain-agent-runner/ so they
   # work; the interactive terminal starts in $HOME — rewrite to absolute.
   # BSD mktemp needs trailing Xs (no suffix) — use a temp dir to keep .json
   MCP_ABS="$(mktemp -d /tmp/sinain-mcp-XXXXXX)/mcp.json"
@@ -881,7 +890,7 @@ PY
   MCP_CONFIG="$MCP_ABS"
   # Same pre-approved whitelist as headless spawns. NOTE: no --settings —
   # interactive sessions should use the agent's native terminal approval UX,
-  # not the overlay-routed PreToolUse hook from sinain-agent/.claude.
+  # not the overlay-routed PreToolUse hook from sinain-agent-runner/.claude.
   spawn_allowed="${SINAIN_SPAWN_ALLOWED_TOOLS:-${ALLOWED_TOOLS} Bash(git:*) Edit Write Read Glob Grep LS} ToolSearch"
   echo "⌨ thread terminal — agent=$profile ($type), scope=${INTERACTIVE_REGION:-main}"
   # Debug: SINAIN_TERM_DRYRUN=1 prints the resolved invocation instead of

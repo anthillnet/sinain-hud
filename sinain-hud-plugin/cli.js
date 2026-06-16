@@ -132,7 +132,7 @@ async function stopServices() {
       "Python sidecar.py",
       "flutter run -d macos",
       "sinain_hud.app/Contents/MacOS/sinain_hud",
-      "sinain-agent/run.sh",
+      "sinain-agent-runner/run.sh",
     ];
 
     for (const pat of patterns) {
@@ -221,7 +221,7 @@ async function showStatus() {
   }
 
   // Agent
-  const agentUp = isProcessRunning("sinain-agent");
+  const agentUp = isProcessRunning("sinain-agent-runner");
   if (agentUp) {
     console.log(`  ${GREEN}agent${RESET}            ${GREEN}✓${RESET}  running`);
   } else {

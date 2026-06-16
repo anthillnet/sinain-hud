@@ -70,9 +70,9 @@ function resolveLocalMemoryDir(): string {
 
 function resolveLocalAgentScript(): string | null {
   const candidates = [
-    resolve(PACKAGE_ROOT, "sinain-agent", "run.sh"),
-    resolve(process.cwd(), "..", "sinain-agent", "run.sh"),
-    resolve(process.cwd(), "sinain-agent", "run.sh"),
+    resolve(PACKAGE_ROOT, "sinain-agent-runner", "run.sh"),
+    resolve(process.cwd(), "..", "sinain-agent-runner", "run.sh"),
+    resolve(process.cwd(), "sinain-agent-runner", "run.sh"),
   ];
   return candidates.find((path) => existsSync(path)) ?? null;
 }
@@ -1292,7 +1292,7 @@ async function main() {
 
     const runSh = resolveLocalAgentScript();
     if (!runSh) {
-      return { ok: false, error: "sinain-agent/run.sh not found" };
+      return { ok: false, error: "sinain-agent-runner/run.sh not found" };
     }
 
     const mcpConfigPath = writeLocalAgentMcpConfig(config.port);

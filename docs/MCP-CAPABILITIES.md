@@ -124,7 +124,7 @@ These read sinain-core's live ring buffers. They tell you what is happening *rig
 
 ## Escalation flow
 
-These two tools let any MCP agent become a sinain escalation responder, replacing or complementing the `sinain-agent/run.sh` poll loop.
+These two tools let any MCP agent become a sinain escalation responder, replacing or complementing the `sinain-agent-runner/run.sh` poll loop.
 
 ### `sinain_get_escalation`
 
@@ -225,7 +225,7 @@ Push text or a blocking question to the user without going through escalation.
 
 ### 1. Respond to escalations from any MCP agent
 
-The `sinain-agent/run.sh` bare-agent loop is just a polling driver around `sinain_get_escalation` + `sinain_respond`. Any MCP-connected agent can do the same — useful when you want Cursor or Goose handling escalations instead of Claude Code.
+The `sinain-agent-runner/run.sh` bare-agent loop is just a polling driver around `sinain_get_escalation` + `sinain_respond`. Any MCP-connected agent can do the same — useful when you want Cursor or Goose handling escalations instead of Claude Code.
 
 ```
 loop:

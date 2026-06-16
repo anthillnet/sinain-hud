@@ -19,7 +19,7 @@ All other configuration is via environment variables. Sinain reads `~/.sinain/.e
 cp .env.example ~/.sinain/.env    # then edit with your secrets
 ```
 
-sinain-core, sinain-agent, and sense_client all read from this file.
+sinain-core, sinain-agent-runner, and sense_client all read from this file.
 Tokens (`OPENROUTER_API_KEY`, `OPENCLAW_WS_TOKEN`, `OPENCLAW_HTTP_TOKEN`)
 are referenced from `agents.json` via `${VAR}` indirection — keep secrets
 in `.env`, not in the JSON.
@@ -132,7 +132,7 @@ Controls when and how context analysis results are forwarded to an external agen
 
 ## Bare Agent
 
-The bare agent (`sinain-agent/run.sh`) polls sinain-core for escalations and responds using a local AI agent (Claude, Codex, etc.).
+The bare agent (`sinain-agent-runner/run.sh`) polls sinain-core for escalations and responds using a local AI agent (Claude, Codex, etc.).
 
 | Variable | Default | Description |
 |---|---|---|

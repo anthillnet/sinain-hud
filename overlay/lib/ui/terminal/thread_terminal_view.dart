@@ -59,28 +59,28 @@ class ThreadTerminalSession {
     return session;
   }
 
-  /// Locate sinain-agent/run.sh: DMG bundle Resources first, then explicit
+  /// Locate sinain-agent-runner/run.sh: DMG bundle Resources first, then explicit
   /// env override, then dev-repo locations. Null → caller falls back to a
   /// plain shell.
   static String? findRunSh() {
     final exeDir = File(Platform.resolvedExecutable).parent; // Contents/MacOS
     final candidates = [
-      '${exeDir.parent.path}/Resources/sinain-agent/run.sh',
+      '${exeDir.parent.path}/Resources/sinain-agent-runner/run.sh',
       Platform.environment['SINAIN_AGENT_RUNSH'] ?? '',
-      '${Directory.current.path}/sinain-agent/run.sh',
-      '${Directory.current.parent.path}/sinain-agent/run.sh',
+      '${Directory.current.path}/sinain-agent-runner/run.sh',
+      '${Directory.current.parent.path}/sinain-agent-runner/run.sh',
     ];
     for (final c in candidates) {
       if (c.isNotEmpty && File(c).existsSync()) return c;
     }
     // Dev builds: the debug .app lives deep under <repo>/overlay/build/...,
     // and `open`-launched apps have cwd=/ — so walk up from the executable
-    // (and the cwd) looking for sinain-agent/run.sh. Self-correcting at any
+    // (and the cwd) looking for sinain-agent-runner/run.sh. Self-correcting at any
     // build depth, so no manual SINAIN_AGENT_RUNSH is needed in dev.
     for (final start in [exeDir, Directory.current]) {
       Directory dir = start;
       for (var i = 0; i < 12; i++) {
-        final candidate = '${dir.path}/sinain-agent/run.sh';
+        final candidate = '${dir.path}/sinain-agent-runner/run.sh';
         if (File(candidate).existsSync()) return candidate;
         final parent = dir.parent;
         if (parent.path == dir.path) break; // filesystem root

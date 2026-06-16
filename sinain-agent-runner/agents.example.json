@@ -9,13 +9,13 @@
     "                        (claude, openclaude, codex, ..., openclaw)",
     "",
     "This is the COMMITTED example. The actual file run.sh and sinain-core",
-    "read is sinain-agent/agents.json (gitignored). On first run, run.sh",
+    "read is sinain-agent-runner/agents.json (gitignored). On first run, run.sh",
     "copies this example into agents.json so a fresh checkout works without",
     "manual setup. sinain-core falls back to this file too if agents.json",
     "doesn't exist yet.",
     "",
     "Path resolution in sinain-core: AGENTS_CONFIG_PATH env override, or",
-    "default: <repo-root>/sinain-agent/agents.json (resolved relative to",
+    "default: <repo-root>/sinain-agent-runner/agents.json (resolved relative to",
     "the sinain-core/dist directory).",
     "",
     "Profile fields (all optional except `type`):",
@@ -32,7 +32,7 @@
     "            as bin (the underlying binary) + env (the vars the alias",
     "            was setting). See the pclaude example.",
     "  settings  Path to a Claude-Code-style settings.json (default:",
-    "            sinain-agent/.claude/settings.json — the hook-bearing one).",
+    "            sinain-agent-runner/.claude/settings.json — the hook-bearing one).",
     "  model     OPENAI_MODEL override (only meaningful for openclaude /",
     "            CLAUDE_CODE_USE_OPENAI=1 paths).",
     "  env       Per-profile env overrides applied only for this binary's",
@@ -130,7 +130,7 @@
       "_comment": "Different settings.json for the spawn lane vs the escalation lane.",
       "type": "openclaude",
       "bin": "openclaude",
-      "settings": "/Users/your.name/IdeaProjects/sinain-hud/sinain-agent/.claude/spawn-settings.json"
+      "settings": "/Users/your.name/IdeaProjects/sinain-hud/sinain-agent-runner/.claude/spawn-settings.json"
     },
     "openclaude-gpt5": {
       "_comment": "Same binary, different model + key for a different OpenRouter route.",

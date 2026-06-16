@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // sinain launcher — process orchestrator for `sinain start`
-// Ports the logic from start.sh + sinain-agent/run.sh into a single Node.js process manager.
+// Ports the logic from start.sh + sinain-agent-runner/run.sh into a single Node.js process manager.
 
 import { spawn, execSync } from "child_process";
 import fs from "fs";
@@ -396,7 +396,7 @@ async function main() {
   // Start agent
   let agentStatus = "skipped";
   if (!skipAgent) {
-    const runSh = path.join(PKG_DIR, "sinain-agent/run.sh");
+    const runSh = path.join(PKG_DIR, "sinain-agent-runner/run.sh");
     if (fs.existsSync(runSh)) {
       // Generate MCP config with absolute paths
       const mcpConfigPath = generateMcpConfig();
@@ -406,7 +406,7 @@ async function main() {
 
       log(`Starting agent (${agent})...`);
       startProcess("agent", "bash", [runSh], {
-        cwd: path.join(PKG_DIR, "sinain-agent"),
+        cwd: path.join(PKG_DIR, "sinain-agent-runner"),
         color: GREEN,
         extraEnv: {
           MCP_CONFIG: mcpConfigPath,
@@ -423,7 +423,7 @@ async function main() {
         agentStatus = "failed";
       }
     } else {
-      warn("sinain-agent/run.sh not found — agent skipped");
+      warn("sinain-agent-runner/run.sh not found — agent skipped");
     }
   }
 
@@ -648,7 +648,7 @@ function killStale() {
       "Python sidecar.py",
       "tsx.*src/index.ts",
       "tsx watch src/index.ts",
-      "sinain-agent/run.sh",
+      "sinain-agent-runner/run.sh",
     ];
 
     for (const pat of patterns) {

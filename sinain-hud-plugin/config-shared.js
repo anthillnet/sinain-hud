@@ -18,13 +18,13 @@ export const IS_MAC = os.platform() === "darwin";
 
 // Wizard write target for agents.json. Lives in user home so npm-installed
 // users (whose package dir is often read-only) get a writable path.
-// sinain-agent/run.sh and sinain-core/agents-loader.ts both check this
+// sinain-agent-runner/run.sh and sinain-core/agents-loader.ts both check this
 // path with the highest priority after AGENTS_CONFIG_PATH env override.
 export const AGENTS_JSON_PATH = path.join(SINAIN_DIR, "agents.json");
 // agents.example.json ships inside the package as the bootstrap template
 // for first-run wizard writes (and as the fallback when no agents.json
 // exists yet on this host).
-export const AGENTS_EXAMPLE_PATH = path.join(PKG_DIR, "sinain-agent", "agents.example.json");
+export const AGENTS_EXAMPLE_PATH = path.join(PKG_DIR, "sinain-agent-runner", "agents.example.json");
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ export function writeEnv(vars) {
  *
  * Resolution order mirrors agents-loader.ts and run.sh:
  *   1. ~/.sinain/agents.json (the wizard write target)
- *   2. <pkg>/sinain-agent/agents.example.json (bootstrap template fallback)
+ *   2. <pkg>/sinain-agent-runner/agents.example.json (bootstrap template fallback)
  *
  * Returns an empty object if neither file exists or parsing fails — callers
  * treat null/missing fields as "use schema defaults".

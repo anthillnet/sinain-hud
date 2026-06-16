@@ -384,8 +384,8 @@ class OverlayShellState extends State<OverlayShell> {
             ]
           : null,
       banner: runSh == null
-          ? '⚠ sinain-agent/run.sh not found — plain shell. '
-              'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent/run.sh'
+          ? '⚠ sinain-agent-runner/run.sh not found — plain shell. '
+              'Dev builds need SINAIN_AGENT_RUNSH=<repo>/sinain-agent-runner/run.sh'
           : null,
     );
     context.read<WebSocketService>().sendUserBusy();

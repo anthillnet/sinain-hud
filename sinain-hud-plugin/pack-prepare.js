@@ -5,7 +5,7 @@
 import fs from "fs";
 import path from "path";
 
-const LINKS = ["sinain-core", "sinain-mcp-server", "sinain-agent", "sense_client", "sinain-chat-agent", ".env.example"];
+const LINKS = ["sinain-core", "sinain-mcp-server", "sinain-agent-runner", "sense_client", "sinain-chat-agent", ".env.example"];
 const PKG_DIR = path.dirname(new URL(import.meta.url).pathname);
 
 const action = process.argv[2]; // "pre" or "post"
