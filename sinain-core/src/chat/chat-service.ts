@@ -17,6 +17,9 @@ import { WebSocket } from "ws";
 export interface ChatContext {
   kind?: "main" | "roi";
   seed?: string;
+  /** "user" (default) turns preempt an in-flight escalation in the sidecar;
+   *  "escalation" turns drop if a turn is already running. */
+  source?: "user" | "escalation";
 }
 
 export interface ChatHandlers {

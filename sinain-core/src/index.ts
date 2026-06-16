@@ -832,7 +832,7 @@ async function main() {
     // escalator delivers idle/ambient escalations in-process via ChatService.
     // (chatService is constructed just below; referenced lazily at call time.)
     isResidentAgent: (name: string) => isSinainProfile(escalatorAgentsCfg, name),
-    runResidentChat: (message: string) => chatService.handle(message, { kind: "main" }),
+    runResidentChat: (message: string) => chatService.handle(message, { kind: "main", source: "escalation" }),
   });
 
   // ── Chat sidecar (type "sinain" roster profile) ──
