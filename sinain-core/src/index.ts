@@ -1619,6 +1619,10 @@ async function main() {
   // Conversation continuity within a thread is a later (resident-session)
   // optimization — same limitation main chat already has.
   const routeSinainChat = (text: string, regionId?: string): void => {
+    // A user chat/ROI turn must immediately drop ambient escalations: they
+    // share this one resident sidecar, and an escalation storm (e.g. while a
+    // doc is open) otherwise starves the user's turn → ChatService timeout.
+    escalator.noteUserChatting();
     let seed: string | undefined;
     const kind: "main" | "roi" = regionId ? "roi" : "main";
     if (regionId) {
