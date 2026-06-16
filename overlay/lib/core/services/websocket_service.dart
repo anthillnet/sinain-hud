@@ -39,6 +39,9 @@ class WebSocketService extends ChangeNotifier {
   // sidecar WS, not bare-agent registration, so the HUD must not show a
   // "not connected" warning or a Run/start button for it.
   bool _escalationResident = false;
+  // Resident chat sidecar (:9610) reachable? With a resident lane, down → the
+  // HUD shows "Chat sidecar not running" + a Run-to-restart.
+  bool _chatSidecarUp = false;
   bool _agentRegistered = false;
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
@@ -133,6 +136,8 @@ class WebSocketService extends ChangeNotifier {
   /// Chat lane is the built-in sinain sidecar — connected by definition, no
   /// bare-agent registration / terminal / start applies.
   bool get escalationResident => _escalationResident;
+  /// Resident chat sidecar (:9610) reachable.
+  bool get chatSidecarUp => _chatSidecarUp;
   bool get agentRegistered => _agentRegistered;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
@@ -171,6 +176,11 @@ class WebSocketService extends ChangeNotifier {
       params['agent'] = agent;
     }
     sendCommand('start_local_agent', params.isEmpty ? null : params);
+  }
+
+  /// Ask core to (re)start the built-in sinain chat sidecar (:9610).
+  void restartChatSidecar() {
+    sendCommand('restart_chat_sidecar');
   }
 
   void toggleAudioFeed() {
@@ -353,12 +363,14 @@ class WebSocketService extends ChangeNotifier {
             final newEsc = agents['escalationAgent'] as String? ?? '';
             final newTerm = agents['terminalAgent'] as String? ?? '';
             final newResident = agents['escalationResident'] as bool? ?? false;
+            final newChatUp = agents['chatSidecarUp'] as bool? ?? false;
             final newRegistered = agents['registered'] as bool? ?? false;
             if (newAvail.join(',') != _availableAgents.join(',') ||
                 newTermAvail.join(',') != _terminalAvailable.join(',') ||
                 newEsc != _escalationAgent ||
                 newTerm != _terminalAgent ||
                 newResident != _escalationResident ||
+                newChatUp != _chatSidecarUp ||
                 newRegistered != _agentRegistered) {
               final wasRegistered = _agentRegistered;
               _availableAgents = newAvail;
@@ -366,6 +378,7 @@ class WebSocketService extends ChangeNotifier {
               _escalationAgent = newEsc;
               _terminalAgent = newTerm;
               _escalationResident = newResident;
+              _chatSidecarUp = newChatUp;
               _agentRegistered = newRegistered;
               if (newRegistered &&
                   !wasRegistered &&

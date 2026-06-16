@@ -45,6 +45,9 @@ export interface CommandDeps {
     alreadyRunning?: boolean;
     error?: string;
   };
+  /** (Re)start the resident chat sidecar — overlay Run button when the
+   *  built-in sinain chat lane is selected but unreachable. */
+  onRestartChatSidecar?: () => { ok: boolean; error?: string };
 }
 
 /**
@@ -282,6 +285,22 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       } else {
         wsHandler.broadcast(`Starting local escalation agent: ${result.agent ?? "default"}`, "normal");
         log(TAG, `start_local_agent launched (${result.agent ?? "default"})`);
+      }
+      break;
+    }
+    case "restart_chat_sidecar": {
+      if (!deps.onRestartChatSidecar) {
+        log(TAG, "restart_chat_sidecar: no handler wired");
+        wsHandler.broadcast("⚠ Chat sidecar launcher is not available", "high");
+        break;
+      }
+      const result = deps.onRestartChatSidecar();
+      if (!result.ok) {
+        wsHandler.broadcast(`⚠ ${result.error ?? "Failed to start chat sidecar"}`, "high");
+        log(TAG, `restart_chat_sidecar failed: ${result.error ?? "unknown error"}`);
+      } else {
+        wsHandler.broadcast("Starting chat sidecar…", "normal");
+        log(TAG, "restart_chat_sidecar launched");
       }
       break;
     }

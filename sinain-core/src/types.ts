@@ -40,6 +40,9 @@ export interface StatusMessage {
      *  liveness is the sidecar WS, NOT bare-agent registration, so the overlay
      *  must not demand a terminal/start for it. */
     escalationResident?: boolean;
+    /** True when the resident chat sidecar (:9610) is reachable. With a resident
+     *  lane, "down" → overlay shows "Chat sidecar not running" + Run-to-restart. */
+    chatSidecarUp?: boolean;
     registered: boolean;
   };
 }
@@ -533,6 +536,8 @@ export interface BridgeState {
     terminalAgent?: string;
     /** True when the chat lane is a resident sidecar (type "sinain"). */
     escalationResident?: boolean;
+    /** True when the resident chat sidecar (:9610) is reachable. */
+    chatSidecarUp?: boolean;
     registered: boolean;
   };
 }

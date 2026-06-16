@@ -1350,20 +1350,30 @@ class _AgentAvailabilityBanner extends StatelessWidget {
 
   Widget _startButton(WebSocketService ws, Color color) {
     final agent = ws.escalationAgent;
-    final label = agent.isEmpty ? 'Start local agent' : 'Start $agent';
+    // Resident chat lane → Run restarts the sidecar; CLI lane → Run launches it.
+    final resident = ws.escalationResident;
+    final label = resident
+        ? 'Start chat sidecar'
+        : (agent.isEmpty ? 'Start local agent' : 'Start $agent');
     return HudTooltip(
       message: label,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           onTap: () {
-            ws.startLocalAgent(agent);
-            ws.showSystemAlert(
-              agent.isEmpty
-                  ? 'Starting local escalation agent...'
-                  : 'Starting local escalation agent: $agent',
-              priority: FeedPriority.high,
-            );
+            if (resident) {
+              ws.restartChatSidecar();
+              ws.showSystemAlert('Starting chat sidecar…',
+                  priority: FeedPriority.high);
+            } else {
+              ws.startLocalAgent(agent);
+              ws.showSystemAlert(
+                agent.isEmpty
+                    ? 'Starting local escalation agent...'
+                    : 'Starting local escalation agent: $agent',
+                priority: FeedPriority.high,
+              );
+            }
           },
           behavior: HitTestBehavior.opaque,
           child: Container(
@@ -1390,23 +1400,23 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     if (!ws.connected) return null;
     if (ws.escalationState != 'active') return 'Escalation is paused';
     if (ws.escalationAgent.isEmpty) return 'No chat agent selected';
-    // The built-in sinain sidecar is connected by definition. Only a CLI chat
-    // agent needs bare-agent registration before it can answer.
-    if (!ws.escalationResident && !ws.agentRegistered) {
+    // Built-in sinain sidecar: connected only if it's actually reachable.
+    if (ws.escalationResident) {
+      return ws.chatSidecarUp ? null : 'Chat sidecar not running';
+    }
+    // A CLI chat agent needs bare-agent registration before it can answer.
+    if (!ws.agentRegistered) {
       return 'Chat agent not connected: ${ws.escalationAgent}';
     }
     return null;
   }
 
   bool _showStartButton(WebSocketService ws) {
-    // Only an unstarted CLI chat agent needs a manual start. The built-in
-    // sinain sidecar (resident) never does — it has no terminal to launch.
-    if (!ws.connected ||
-        ws.escalationState != 'active' ||
-        ws.escalationResident ||
-        ws.agentRegistered) {
-      return false;
-    }
+    if (!ws.connected || ws.escalationState != 'active') return false;
+    // Resident lane: show Run only when the sidecar is down (Run restarts it).
+    if (ws.escalationResident) return !ws.chatSidecarUp;
+    // CLI lane: show Run only for an unstarted agent (Run launches it).
+    if (ws.agentRegistered) return false;
     return ws.escalationAgent.isNotEmpty;
   }
 }

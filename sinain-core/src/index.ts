@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -72,6 +73,15 @@ function resolveLocalAgentScript(): string | null {
     resolve(PACKAGE_ROOT, "sinain-agent", "run.sh"),
     resolve(process.cwd(), "..", "sinain-agent", "run.sh"),
     resolve(process.cwd(), "sinain-agent", "run.sh"),
+  ];
+  return candidates.find((path) => existsSync(path)) ?? null;
+}
+
+function resolveChatSidecar(): string | null {
+  const candidates = [
+    resolve(PACKAGE_ROOT, "sinain-chat-agent", "sidecar.py"),
+    resolve(process.cwd(), "..", "sinain-chat-agent", "sidecar.py"),
+    resolve(process.cwd(), "sinain-chat-agent", "sidecar.py"),
   ];
   return candidates.find((path) => existsSync(path)) ?? null;
 }
@@ -828,9 +838,73 @@ async function main() {
   // ── Chat sidecar (type "sinain" roster profile) ──
   // Resident OpenHands chat agent on a local WS. When the selected escalation-lane
   // agent is type "sinain", chat turns route here instead of the run.sh/gateway path.
-  const chatService = new ChatService(
-    process.env.SINAIN_CHAT_WS_URL || "ws://127.0.0.1:9610",
-  );
+  const chatSidecarUrl = process.env.SINAIN_CHAT_WS_URL || "ws://127.0.0.1:9610";
+  const chatService = new ChatService(chatSidecarUrl);
+
+  // Chat sidecar liveness. The HUD talks only to core, so core polls :9610 and
+  // broadcasts whether the resident chat lane is actually reachable — the
+  // overlay uses this to show "Chat sidecar not running" + a Run-to-restart
+  // instead of silently assuming a selected sinain lane is up.
+  const chatSidecarPort = (() => {
+    try { return Number(new URL(chatSidecarUrl).port) || 9610; } catch { return 9610; }
+  })();
+  let chatSidecarProc: ReturnType<typeof spawn> | null = null;
+
+  function probeChatSidecar(): Promise<boolean> {
+    return new Promise((res) => {
+      const sock = netConnect({ host: "127.0.0.1", port: chatSidecarPort });
+      let settled = false;
+      const done = (up: boolean) => {
+        if (settled) return; settled = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        res(up);
+      };
+      sock.once("connect", () => done(true));
+      sock.once("error", () => done(false));
+      sock.setTimeout(1500, () => done(false));
+    });
+  }
+
+  // (Re)start the sidecar on demand — only when it's actually down, so we never
+  // double-bind against the launcher's instance. Used by the overlay Run button
+  // when the resident chat lane is selected but unreachable.
+  function restartChatSidecar(): { ok: boolean; error?: string } {
+    if (chatSidecarProc && !chatSidecarProc.killed && chatSidecarProc.exitCode === null) {
+      return { ok: true };
+    }
+    const sidecar = resolveChatSidecar();
+    if (!sidecar) return { ok: false, error: "chat sidecar not found" };
+    const sidecarDir = dirname(sidecar);
+    // Prefer the sidecar's own .venv (dev); fall back to system python3 (prod,
+    // where the launcher pip-installs deps into the system interpreter).
+    const venvPy = resolve(sidecarDir, ".venv", "bin", "python");
+    const py = existsSync(venvPy) ? venvPy : "python3";
+    log(TAG, `restarting chat sidecar: ${py} ${sidecar}`);
+    const child = spawn(py, ["sidecar.py"], {
+      cwd: sidecarDir,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    chatSidecarProc = child;
+    pipeLocalAgentOutput(child.stdout, (line) => log("chat", line));
+    pipeLocalAgentOutput(child.stderr, (line) => warn("chat", line));
+    child.once("error", (err) => {
+      warn(TAG, `chat sidecar failed to start: ${err.message}`);
+      wsHandler.broadcast(`⚠ Chat sidecar failed to start: ${err.message.slice(0, 120)}`, "high");
+    });
+    return { ok: true };
+  }
+
+  // Poll liveness; broadcast on change. Cheap TCP probe every 5s. NOTE: the
+  // timer is started later (after bareAgentState is declared) — see below.
+  const probeChatLoop = async (): Promise<void> => {
+    const up = await probeChatSidecar();
+    if (up !== bareAgentState.chatSidecarUp) {
+      bareAgentState.chatSidecarUp = up;
+      wsHandler.updateState({ agents: { ...bareAgentState } });
+    }
+  };
 
   // ── Region tracker (Grammarly mode) ──
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
@@ -1105,8 +1179,12 @@ async function main() {
      *  sidecar WS, not bare-agent registration). Kept in sync wherever
      *  escalationAgent changes so the overlay never demands a terminal for it. */
     escalationResident: boolean;
+    /** True when the resident chat sidecar (:9610) is actually reachable.
+     *  Polled by core; lets the overlay distinguish "built-in chat connected"
+     *  from "selected sinain but the sidecar is down" (→ warning + Run). */
+    chatSidecarUp: boolean;
     registered: boolean;
-  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, registered: false };
+  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, chatSidecarUp: false, registered: false };
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
   let shuttingDown = false;
@@ -1295,6 +1373,10 @@ async function main() {
       log(TAG, `roster pre-populated from agents.json: ${profileNames.join(",")}`);
     }
   }
+
+  // Start chat-sidecar liveness polling now that bareAgentState exists.
+  const chatProbeTimer = setInterval(() => { void probeChatLoop(); }, 5000);
+  void probeChatLoop();
 
   // ── Create HTTP + WS server ──
   const server = createAppServer({
@@ -1841,6 +1923,7 @@ async function main() {
       return { ok: true };
     },
     onStartLocalAgent: (agent?: string) => startLocalAgent(agent),
+    onRestartChatSidecar: () => restartChatSidecar(),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect

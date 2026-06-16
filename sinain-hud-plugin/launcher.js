@@ -248,14 +248,22 @@ async function main() {
     } else if (!process.env.OPENROUTER_API_KEY) {
       warn("OPENROUTER_API_KEY not set — sinain chat sidecar skipped (set the key or pick a CLI chat agent)");
     } else {
+      // Prefer the sidecar's own .venv (dev); else system python3 (prod —
+      // deps are pip-installed into the system interpreter below).
+      const venvPy = path.join(chatDir, ".venv", "bin", "python");
+      const chatPy = fs.existsSync(venvPy) ? venvPy : "python3";
       const reqFile = path.join(chatDir, "requirements.txt");
       if (fs.existsSync(reqFile)) {
         try {
-          execSync('python3 -c "import openhands.sdk; import websockets"', { stdio: "pipe" });
+          execSync(`"${chatPy}" -c "import openhands.sdk; import websockets"`, { stdio: "pipe" });
         } catch {
           log("Installing sinain chat sidecar Python dependencies (first run may take a minute)...");
           try {
-            execSync(`pip3 install -r "${reqFile}" --quiet --break-system-packages`, { stdio: "inherit" });
+            if (chatPy === "python3") {
+              execSync(`pip3 install -r "${reqFile}" --quiet --break-system-packages`, { stdio: "inherit" });
+            } else {
+              execSync(`"${chatPy}" -m pip install -r "${reqFile}" --quiet`, { stdio: "inherit" });
+            }
           } catch {
             try {
               execSync(`pip3 install -r "${reqFile}" --quiet`, { stdio: "inherit" });
@@ -266,7 +274,7 @@ async function main() {
         }
       }
       log("Starting sinain chat sidecar...");
-      startProcess("chat", "python3", ["sidecar.py"], {
+      startProcess("chat", chatPy, ["sidecar.py"], {
         cwd: chatDir,
         color: MAGENTA,
       });

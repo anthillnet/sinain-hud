@@ -367,8 +367,11 @@ fi
 # Built-in sinain chat lane — resident sidecar on :9610 (reads its own
 # sinain-chat-agent/.env). Skipped if python3 is unavailable.
 if command -v python3 >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/sinain-chat-agent/sidecar.py" ]; then
+  # Prefer the sidecar's own .venv (dev); fall back to system python3.
+  CHAT_PY="python3"
+  [ -x "$SCRIPT_DIR/sinain-chat-agent/.venv/bin/python" ] && CHAT_PY="$SCRIPT_DIR/sinain-chat-agent/.venv/bin/python"
   log "Starting sinain chat sidecar..."
-  (cd "$SCRIPT_DIR/sinain-chat-agent" && python3 sidecar.py) 2>&1 | pipe_log "[chat]" "$(printf "${MAGENTA}[chat]${RESET}    ")" &
+  (cd "$SCRIPT_DIR/sinain-chat-agent" && "$CHAT_PY" sidecar.py) 2>&1 | pipe_log "[chat]" "$(printf "${MAGENTA}[chat]${RESET}    ")" &
   CHAT_PID=$!
   PIDS+=("$CHAT_PID")
 else
