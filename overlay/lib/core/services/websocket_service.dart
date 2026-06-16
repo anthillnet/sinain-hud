@@ -30,8 +30,15 @@ class WebSocketService extends ChangeNotifier {
   // for a lane means "Off" (lane disabled). Empty availableAgents means
   // the bare agent hasn't registered yet (or no agents are installed).
   List<String> _availableAgents = const [];
+  // Terminal-lane roster — `available` minus the sinain sidecar (no TUI). Falls
+  // back to the full roster if core hasn't sent it (older core).
+  List<String> _terminalAvailable = const [];
   String _escalationAgent = '';
-  String _spawnAgent = '';
+  String _terminalAgent = '';
+  // Chat lane is a resident sidecar (type "sinain") — its liveness is the
+  // sidecar WS, not bare-agent registration, so the HUD must not show a
+  // "not connected" warning or a Run/start button for it.
+  bool _escalationResident = false;
   bool _agentRegistered = false;
   bool _audioFeedEnabled = true;
   bool _screenFeedEnabled = true;
@@ -117,8 +124,15 @@ class WebSocketService extends ChangeNotifier {
   String get responseSize => _responseSize;
   String get envPath => _envPath;
   List<String> get availableAgents => _availableAgents;
+  /// Terminal-lane roster (sinain-excluded). Falls back to the full roster
+  /// when core hasn't populated it.
+  List<String> get terminalAvailable =>
+      _terminalAvailable.isNotEmpty ? _terminalAvailable : _availableAgents;
   String get escalationAgent => _escalationAgent;
-  String get spawnAgent => _spawnAgent;
+  String get terminalAgent => _terminalAgent;
+  /// Chat lane is the built-in sinain sidecar — connected by definition, no
+  /// bare-agent registration / terminal / start applies.
+  bool get escalationResident => _escalationResident;
   bool get agentRegistered => _agentRegistered;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
@@ -333,17 +347,25 @@ class WebSocketService extends ChangeNotifier {
           if (agents != null) {
             final newAvail = (agents['available'] as List?)?.cast<String>() ??
                 const <String>[];
+            final newTermAvail =
+                (agents['terminalAvailable'] as List?)?.cast<String>() ??
+                    const <String>[];
             final newEsc = agents['escalationAgent'] as String? ?? '';
-            final newSpawn = agents['spawnAgent'] as String? ?? '';
+            final newTerm = agents['terminalAgent'] as String? ?? '';
+            final newResident = agents['escalationResident'] as bool? ?? false;
             final newRegistered = agents['registered'] as bool? ?? false;
             if (newAvail.join(',') != _availableAgents.join(',') ||
+                newTermAvail.join(',') != _terminalAvailable.join(',') ||
                 newEsc != _escalationAgent ||
-                newSpawn != _spawnAgent ||
+                newTerm != _terminalAgent ||
+                newResident != _escalationResident ||
                 newRegistered != _agentRegistered) {
               final wasRegistered = _agentRegistered;
               _availableAgents = newAvail;
+              _terminalAvailable = newTermAvail;
               _escalationAgent = newEsc;
-              _spawnAgent = newSpawn;
+              _terminalAgent = newTerm;
+              _escalationResident = newResident;
               _agentRegistered = newRegistered;
               if (newRegistered &&
                   !wasRegistered &&

@@ -31,8 +31,15 @@ export interface StatusMessage {
    *  values mean "Off" (lane disabled). */
   agents?: {
     available: string[];
+    /** Terminal-lane roster — `available` minus sinain-typed (no-TUI) profiles. */
+    terminalAvailable?: string[];
     escalationAgent: string;
-    spawnAgent: string;
+    /** Interactive terminal lane; decoupled from escalation, excludes sinain. */
+    terminalAgent?: string;
+    /** True when the chat lane is a resident sidecar (type "sinain"): its
+     *  liveness is the sidecar WS, NOT bare-agent registration, so the overlay
+     *  must not demand a terminal/start for it. */
+    escalationResident?: boolean;
     registered: boolean;
   };
 }
@@ -519,8 +526,13 @@ export interface BridgeState {
    *  bare agent's POST /bareagent/register. "" lane value = lane disabled. */
   agents: {
     available: string[];
+    /** Terminal-lane roster — `available` minus sinain-typed (no-TUI) profiles. */
+    terminalAvailable?: string[];
     escalationAgent: string;
-    spawnAgent: string;
+    /** Interactive terminal lane; decoupled from escalation, excludes sinain. */
+    terminalAgent?: string;
+    /** True when the chat lane is a resident sidecar (type "sinain"). */
+    escalationResident?: boolean;
     registered: boolean;
   };
 }

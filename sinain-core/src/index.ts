@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
-import { loadAgentsConfig, isGatewayProfile, isSinainProfile, gatewayProfileNames } from "./agents-loader.js";
+import { loadAgentsConfig, isGatewayProfile, isSinainProfile, gatewayProfileNames, sinainProfileNames } from "./agents-loader.js";
 import { ChatService } from "./chat/chat-service.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
@@ -797,8 +797,8 @@ async function main() {
   });
 
   // ── Initialize escalation ──
-  // getSpawnAgent reads bareAgentState (declared later in this function) via
-  // closure at call-time, NOT at construction time. Safe because
+  // getEscalationAgent reads bareAgentState (declared later in this function)
+  // via closure at call-time, NOT at construction time. Safe because
   // dispatchSpawnTask only fires after an overlay message, which can't
   // happen before server setup completes.
   // Load agents.json once for lookup helpers passed to escalator. Same file
@@ -813,12 +813,16 @@ async function main() {
     profiler,
     feedbackStore: feedbackStore ?? undefined,
     queryKnowledgeFacts: queryKnowledgeFactsMulti,
-    getSpawnAgent: () => bareAgentState.spawnAgent,
     getEscalationAgent: () => bareAgentState.escalationAgent,
     // Type-based gateway lookup. Routing key is agents.json `profiles[name].type`,
     // so any custom profile with `type: "openclaw"` (e.g. "nemoclaw",
     // "nanoclaw-prod") gets WS dispatch automatically — no name-matching.
     isGatewayAgent: (name: string) => isGatewayProfile(escalatorAgentsCfg, name),
+    // Resident chat lane (built-in sinain sidecar): no bare agent polls, so the
+    // escalator delivers idle/ambient escalations in-process via ChatService.
+    // (chatService is constructed just below; referenced lazily at call time.)
+    isResidentAgent: (name: string) => isSinainProfile(escalatorAgentsCfg, name),
+    runResidentChat: (message: string) => chatService.handle(message, { kind: "main" }),
   });
 
   // ── Chat sidecar (type "sinain" roster profile) ──
@@ -1088,12 +1092,21 @@ async function main() {
   // "openclaw" is reserved-injected below when gatewayWsUrl is set —
   // it's not a local CLI, it's a routing choice that sends tasks to the
   // remote OpenClaw gateway via WS RPC instead of the local bare agent.
+  // Two selectors only: chat (escalation) + terminal. The spawn lane was
+  // removed — region/thread tasks run on the chat lane, never a spawn lane.
   const bareAgentState: {
     available: string[];
+    /** Terminal-lane roster: `available` minus sinain-typed (no-TUI) profiles. */
+    terminalAvailable: string[];
     escalationAgent: string;
-    spawnAgent: string;
+    /** Interactive terminal lane — decoupled from escalation, excludes sinain. */
+    terminalAgent: string;
+    /** True when the chat lane is the resident sinain sidecar (liveness = the
+     *  sidecar WS, not bare-agent registration). Kept in sync wherever
+     *  escalationAgent changes so the overlay never demands a terminal for it. */
+    escalationResident: boolean;
     registered: boolean;
-  } = { available: [], escalationAgent: "", spawnAgent: "", registered: false };
+  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, registered: false };
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
   let shuttingDown = false;
@@ -1122,20 +1135,40 @@ async function main() {
         clean.push("openclaw");
       }
     }
+    // Inject sinain-typed (resident chat sidecar) profiles into the CHAT roster.
+    // Like gateway profiles they have no PATH binary, so run.sh's roster POST
+    // drops them — but the chat lane routes them in-process via ChatService, so
+    // sinain-core must surface them itself. (They stay OUT of terminalRoster
+    // below: the sidecar has no interactive TUI.)
+    for (const snName of sinainProfileNames(escalatorAgentsCfg)) {
+      if (!clean.includes(snName)) clean.push(snName);
+    }
     bareAgentState.available = clean;
     bareAgentState.registered = registered;
-    // If neither lane is set yet (fresh boot), adopt the bare agent's
-    // reported current. If state survives from a prior register call AND
-    // the agent still exists in the roster, keep it; otherwise fall back
-    // to the new current.
+    // Terminal lane is sinain-INELIGIBLE: the sidecar can't host a REPL. The
+    // interactive terminal draws from this filtered roster.
+    const terminalRoster = clean.filter((a) => !isSinainProfile(escalatorAgentsCfg, a));
+    bareAgentState.terminalAvailable = terminalRoster;
+    // Decoupled defaults: chat lane prefers `default` (sinain-eligible);
+    // terminal lane prefers `terminalDefault`, then the reported `current`,
+    // then the first terminal-eligible profile.
+    const terminalDefault = escalatorAgentsCfg?.terminalDefault;
+    const pickTerminal = (): string =>
+      (terminalDefault && terminalRoster.includes(terminalDefault)) ? terminalDefault
+      : terminalRoster.includes(current) ? current
+      : (terminalRoster[0] ?? "");
+    // If neither lane is set yet (fresh boot), adopt the relevant default. If
+    // state survives from a prior register call AND the agent still exists in
+    // the lane's roster, keep it; otherwise fall back.
     if (!bareAgentState.escalationAgent || !clean.includes(bareAgentState.escalationAgent)) {
       bareAgentState.escalationAgent = clean.includes(current) ? current : (clean[0] ?? "");
     }
-    if (!bareAgentState.spawnAgent || !clean.includes(bareAgentState.spawnAgent)) {
-      bareAgentState.spawnAgent = clean.includes(current) ? current : (clean[0] ?? "");
+    if (!bareAgentState.terminalAgent || !terminalRoster.includes(bareAgentState.terminalAgent)) {
+      bareAgentState.terminalAgent = pickTerminal();
     }
+    bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
     wsHandler.updateState({ agents: { ...bareAgentState } });
-    log(TAG, `bareagent register: available=[${clean.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} spawn=${bareAgentState.spawnAgent}`);
+    log(TAG, `bareagent register: available=[${clean.join(",")}] terminal=[${terminalRoster.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} term=${bareAgentState.terminalAgent}`);
 
     // Lane is the source of truth for "is escalation active?". If a lane is
     // set but mode is still "off" (e.g. an old wizard run wrote mode=off and
@@ -1158,9 +1191,12 @@ async function main() {
       return { ok: true, agent: localAgentName, alreadyRunning: true };
     }
 
+    // The local runner drives the interactive TERMINAL lane — decoupled from
+    // the chat/escalation lane (which may be the sinain sidecar). Default to
+    // the terminal selection, then terminalDefault, then env/claude.
     const agent = (requestedAgent?.trim()
-      || bareAgentState.escalationAgent
-      || escalatorAgentsCfg?.default
+      || bareAgentState.terminalAgent
+      || escalatorAgentsCfg?.terminalDefault
       || process.env.SINAIN_AGENT
       || "claude");
     if (!AGENT_NAME_RE.test(agent)) {
@@ -1169,8 +1205,11 @@ async function main() {
     if (isGatewayProfile(escalatorAgentsCfg, agent)) {
       return { ok: false, error: `Agent "${agent}" is a gateway profile; local runner is not needed` };
     }
-    if (bareAgentState.available.length > 0 && !bareAgentState.available.includes(agent)) {
-      return { ok: false, error: `Agent "${agent}" not available` };
+    if (isSinainProfile(escalatorAgentsCfg, agent)) {
+      return { ok: false, error: `Agent "${agent}" is the resident chat sidecar; it has no interactive terminal` };
+    }
+    if (bareAgentState.terminalAvailable.length > 0 && !bareAgentState.terminalAvailable.includes(agent)) {
+      return { ok: false, error: `Agent "${agent}" not available in the terminal roster` };
     }
 
     const runSh = resolveLocalAgentScript();
@@ -1451,7 +1490,7 @@ async function main() {
     registerBareAgent,
     getBareAgentConfig: () => ({
       escalationAgent: bareAgentState.escalationAgent,
-      spawnAgent: bareAgentState.spawnAgent,
+      terminalAgent: bareAgentState.terminalAgent,
       registered: bareAgentState.registered,
     }),
 
@@ -1487,6 +1526,59 @@ async function main() {
     profiler.reportOverlay({ rssMb: msg.rssMb, uptimeS: msg.uptimeS, ts: msg.ts });
   });
 
+  // Route a chat turn to the resident sinain sidecar (the CHAT lane). Used by
+  // BOTH the main thread and region/ROI threads so the chat selector serves
+  // chat regardless of thread (per the decoupled lane model). `regionId`
+  // scopes the reply to that thread; undefined = main thread.
+  //
+  // The sidecar is stateless per turn, so we always pass the thread's context
+  // as `seed`: region task text for an ROI thread, the fork seed for a fork
+  // thread, none for main (the main digest is a separate follow-up concern).
+  // Conversation continuity within a thread is a later (resident-session)
+  // optimization — same limitation main chat already has.
+  const routeSinainChat = (text: string, regionId?: string): void => {
+    let seed: string | undefined;
+    const kind: "main" | "roi" = regionId ? "roi" : "main";
+    if (regionId) {
+      const region = regionTracker.get(regionId);
+      const forkSeed = forkSeeds.get(regionId);
+      if (region) seed = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
+      else if (forkSeed) seed = forkSeed;
+    }
+    wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
+    chatService
+      .handle(text, { kind, seed })
+      .then((reply) => {
+        wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
+        if (regionId) {
+          // Region threads render "agent"-channel feed messages scoped by
+          // regionId — same shape as the spawn reply path (escalator.pushResponse).
+          wsHandler.broadcast(reply, "normal", "agent", regionId);
+        } else {
+          // Main chat thread expects sender:"agent" (mirrors commands.ts user
+          // echo) — NOT the "stream" feed. Also feed the MAIN transcript for
+          // session distillation; region threads are separate sessions and
+          // must not pollute the main feed buffer.
+          wsHandler.broadcastRaw({
+            type: "feed", text: reply, priority: "normal",
+            ts: Date.now(), channel: "agent", sender: "agent",
+          } as any);
+          feedBuffer.push(`[agent] ${reply}`, "normal", "system", "agent");
+        }
+      })
+      .catch((e: Error) => {
+        wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
+        if (regionId) {
+          wsHandler.broadcast(`⚠ chat sidecar error: ${e.message}`, "normal", "agent", regionId);
+        } else {
+          wsHandler.broadcastRaw({
+            type: "feed", text: `⚠ chat sidecar error: ${e.message}`, priority: "normal",
+            ts: Date.now(), channel: "agent", sender: "agent",
+          } as any);
+        }
+      });
+  };
+
   // ── Wire overlay commands ──
   setupCommands({
     wsHandler,
@@ -1501,29 +1593,10 @@ async function main() {
       // (and session distillation) carry both halves of the conversation.
       feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
 
-      // type "sinain" → route the chat turn to the resident OpenHands sidecar
-      // instead of the escalation/run.sh path. Streams the reply to the overlay.
+      // Chat lane = sinain → route this turn to the resident sidecar instead
+      // of the escalation/run.sh path. (Same selector serves region chat below.)
       if (isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
-        wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
-        chatService
-          .handle(text, { kind: "main" })
-          .then((reply) => {
-            wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
-            // Reply must land in the chat thread (channel "agent", sender "agent"),
-            // mirroring how commands.ts echoes the user message — NOT the "stream" feed.
-            wsHandler.broadcastRaw({
-              type: "feed", text: reply, priority: "normal",
-              ts: Date.now(), channel: "agent", sender: "agent",
-            } as any);
-            feedBuffer.push(`[agent] ${reply}`, "normal", "system", "agent");
-          })
-          .catch((e: Error) => {
-            wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
-            wsHandler.broadcastRaw({
-              type: "feed", text: `⚠ chat sidecar error: ${e.message}`, priority: "normal",
-              ts: Date.now(), channel: "agent", sender: "agent",
-            } as any);
-          });
+        routeSinainChat(text);
         return;
       }
 
@@ -1647,18 +1720,24 @@ async function main() {
       return { id, label: "⑂ fork" };
     },
     onSpawnCommand: (text, regionId) => {
+      // Region/ROI chat uses the CHAT selector — there is no spawn lane. The
+      // chat selector serves chat regardless of thread (chat + terminal are the
+      // only lanes). When the chat agent is the sinain sidecar (the default),
+      // route in-process; otherwise the task runs on the chat (escalation) lane
+      // via dispatchSpawnTask (the region-task execution mechanism, no longer a
+      // separate spawn selection).
+      if (regionId && isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+        routeSinainChat(text, regionId);
+        return;
+      }
       let task = text;
       let label = "user-command";
-      const opts: { regionId?: string; sessionKey?: string; route?: "spawn" | "escalation" } = { regionId };
+      const opts: { regionId?: string; sessionKey?: string } = { regionId };
       if (regionId) {
-        // Region thread: each ROI gets its own stable agent session, routed
-        // via the SPAWN lane. Both lanes point at the same agent by default,
-        // but the overlay's per-lane selector can dedicate a separate spawn
-        // agent so region tasks never queue behind escalations on a slow
-        // sequential agent. First message carries the full region context;
-        // follow-ups are the user's text and continue the same session.
+        // Region thread: each ROI gets its own stable agent session on the chat
+        // lane. First message carries the full region context; follow-ups are
+        // the user's text and continue the same session.
         opts.sessionKey = `agent:main:region:${regionId}`;
-        opts.route = "spawn";
         const region = regionTracker.get(regionId);
         const forkSeed = forkSeeds.get(regionId);
         label = region?.issue ? region.issue.slice(0, 48)
@@ -1702,16 +1781,24 @@ async function main() {
         return false;
       }
     },
-      onSetAgent: (lane: "escalation" | "spawn", agent: string): { ok: boolean; error?: string } => {
-      // Empty-string agent = Off (lane disabled). Non-empty agent must be
-      // in the current roster; stale overlay state can send something that
-      // isn't available — reject with a clear error.
-      if (agent !== "" && !bareAgentState.available.includes(agent)) {
-        return { ok: false, error: `Agent "${agent}" not available` };
+      onSetAgent: (lane: "escalation" | "terminal", agent: string): { ok: boolean; error?: string } => {
+      // Empty-string agent = Off (lane disabled). Non-empty agent must be in
+      // the lane's roster: the chat/escalation lane draws from the full roster
+      // (sinain-eligible); the terminal lane draws from the sinain-excluded
+      // terminal roster. Stale overlay state can send something out of range —
+      // reject with a clear error.
+      if (agent !== "") {
+        const roster = lane === "escalation"
+          ? bareAgentState.available
+          : bareAgentState.terminalAvailable;
+        if (!roster.includes(agent)) {
+          return { ok: false, error: `Agent "${agent}" not available in the ${lane} roster` };
+        }
       }
       if (lane === "escalation") {
         const prevAgent = bareAgentState.escalationAgent;
         bareAgentState.escalationAgent = agent;
+        bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, agent);
         if (agent === "") {
           pauseEscalationInternal();
         } else {
@@ -1730,9 +1817,9 @@ async function main() {
           if (did) log(TAG, `lane switch ${prevAgent || "<empty>"} → ${agent}: stale httpPending redispatched`);
         }
       } else {
-        bareAgentState.spawnAgent = agent;
-        // Spawn "off" just means run.sh won't poll /spawn/pending; no
-        // server-side state to flip. Queued spawn tasks TTL out naturally.
+        // terminal lane — which agent the interactive thread terminal launches
+        // (run.sh --interactive-main). Pure selection; no escalator/WS effect.
+        bareAgentState.terminalAgent = agent;
       }
       // Re-evaluate WS lifecycle: connect when a gateway lane just got
       // selected (zero attempts before this point), disconnect when the user

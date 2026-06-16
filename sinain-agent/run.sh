@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Interactive thread-terminal modes (the overlay's thread terminal runs
 # these — no polling, no roster registration; see branch below the proxy
 # block):
-#   --interactive-region <id>  spawn-lane agent + composed region context
-#   --interactive-main         escalation-lane agent + current digest
+#   --interactive-region <id>  terminal-lane agent + composed region context
+#   --interactive-main         terminal-lane agent + current digest
 INTERACTIVE_MODE=""
 INTERACTIVE_REGION=""
 case "${1:-}" in
@@ -675,9 +675,10 @@ done
 
 # AVAILABLE_AGENTS = profile names whose configured bin is on PATH.
 # This is what gets POSTed to /bareagent/register and shown in the
-# overlay selector. Lane-specific choices (ESC_AGENT, SPAWN_AGENT)
-# default to $AGENT and are refreshed per-iteration from the config
-# piggyback field on /escalation/pending and /spawn/pending responses.
+# overlay selector. The chat-lane choice (ESC_AGENT) defaults to $AGENT
+# and is refreshed per-iteration from the config piggyback field on
+# /escalation/pending and /spawn/pending responses. Queued region/thread
+# tasks run on the CHAT lane (ESC_AGENT) — there is no spawn lane.
 AVAILABLE_AGENTS=()
 for p in "${ALL_PROFILES[@]:-}"; do
   # Gateway-style profiles (type=openclaw) have no local binary — they're
@@ -700,7 +701,6 @@ if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
 fi
 
 ESC_AGENT="$AGENT"
-SPAWN_AGENT="$AGENT"
 
 # Register roster with sinain-core (fire-and-forget; core may not be ready).
 # Skipped in interactive mode: a second register would echo `current=$AGENT`
@@ -716,7 +716,7 @@ print(json.dumps({'available': available, 'current': sys.argv[2]}))
     -d "$REGISTER_PAYLOAD" >/dev/null 2>&1 || true
 fi
 echo "  Agents available: ${AVAILABLE_AGENTS[*]:-<none>}"
-echo "  Lanes:  escalation=$ESC_AGENT  spawn=$SPAWN_AGENT"
+echo "  Lanes:  chat=$ESC_AGENT  (region/thread tasks run on the chat lane)"
 
 # --- Apply config piggybacked on escalation/spawn poll responses ---
 # No separate polling — parses the `config` field from /escalation/pending
@@ -727,9 +727,8 @@ apply_config_from_response() {
   local json="$1"
   # Short-circuit: only process if the response actually includes a config.
   echo "$json" | grep -q '"config"' || return 0
-  local new_esc new_spawn registered
+  local new_esc registered
   new_esc=$(echo "$json"     | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('escalationAgent',''))" 2>/dev/null)
-  new_spawn=$(echo "$json"   | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print(c.get('spawnAgent',''))" 2>/dev/null)
   registered=$(echo "$json"  | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('config') or {}; print('true' if c.get('registered') else 'false')" 2>/dev/null)
 
   # Healing: core says it doesn't have our roster. Re-register (fire-and-
@@ -749,12 +748,8 @@ print(json.dumps({'available': sys.argv[1].split(' '), 'current': sys.argv[2]}))
   fi
 
   if [ "$new_esc" != "$ESC_AGENT" ]; then
-    echo "[$(date +%H:%M:%S)] escalation agent: ${ESC_AGENT:-<off>} → ${new_esc:-<off>}"
+    echo "[$(date +%H:%M:%S)] chat agent: ${ESC_AGENT:-<off>} → ${new_esc:-<off>}"
     ESC_AGENT="$new_esc"
-  fi
-  if [ "$new_spawn" != "$SPAWN_AGENT" ]; then
-    echo "[$(date +%H:%M:%S)] spawn agent: ${SPAWN_AGENT:-<off>} → ${new_spawn:-<off>}"
-    SPAWN_AGENT="$new_spawn"
   fi
 }
 
@@ -814,11 +809,13 @@ fi
 # seed context, and exec the agent CLI in its own REPL. The user converses
 # with the lane's agent directly in the terminal.
 if [ -n "$INTERACTIVE_MODE" ]; then
-  if [ "$INTERACTIVE_MODE" = "region" ]; then
-    lane_field="spawnAgent"
-  else
-    lane_field="escalationAgent"
-  fi
+  # Selector is per-CAPABILITY, not per-thread: every interactive terminal —
+  # main thread OR region/ROI thread — launches the TERMINAL-lane agent. The
+  # thread scope only changes the context seed (region task vs main digest),
+  # fetched below. (The TERMINAL lane is decoupled from the chat/escalation
+  # lane, which may be the resident sinain sidecar that has no TUI; and from
+  # the headless spawnAgent lane, which drives background spawns, not REPLs.)
+  lane_field="terminalAgent"
   lane=$(curl -sf -m 2 "$CORE_URL/escalation/pending" \
     | python3 -c "import sys,json; print((json.load(sys.stdin).get('config') or {}).get('$lane_field',''))" 2>/dev/null || true)
   profile="${lane:-$AGENT}"
@@ -1069,10 +1066,12 @@ while true; do
     echo ""
   fi
 
-  # Poll for pending spawn task (queued via HUD Shift+Enter or POST /spawn).
-  # Skip entirely when the spawn lane is Off — queued tasks will TTL on
-  # the server side. This prevents fetching + throwing away task bodies.
-  if [ -n "$SPAWN_AGENT" ]; then
+  # Poll for pending region/thread tasks (queued when the chat lane is a local
+  # CLI agent — the sinain sidecar handles its own chat in-process and never
+  # queues here). These run on the CHAT lane (ESC_AGENT); there is no spawn
+  # lane. Skip entirely when the chat lane is Off — queued tasks TTL on the
+  # server side. This prevents fetching + throwing away task bodies.
+  if [ -n "$ESC_AGENT" ]; then
     SPAWN=$(curl -sf "$CORE_URL/spawn/pending" 2>/dev/null || echo '{"ok":false}')
     apply_config_from_response "$SPAWN"
     SPAWN_ID=$(echo "$SPAWN" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('task'); print(t['id'] if t else '')" 2>/dev/null || true)
@@ -1091,7 +1090,7 @@ while true; do
 
     echo "[$(date +%H:%M:%S)] Spawn task $SPAWN_ID ($SPAWN_LABEL)"
 
-    if agent_has_mcp "$SPAWN_AGENT"; then
+    if agent_has_mcp "$ESC_AGENT"; then
       # MCP path: agent runs task with sinain tools available
       if [ -n "${SPAWN_SESSION_ID:-}" ]; then
         # Thread chat message: pass it through as-is. The "background task,
@@ -1116,11 +1115,11 @@ $SPAWN_KNOWLEDGE
 Complete this task thoroughly. You also have the sinain_memory_query tool available for additional long-term context. Summarize your findings concisely."
       fi
       export SINAIN_SPAWN=1 SINAIN_SPAWN_TASK_ID="$SPAWN_ID"
-      SPAWN_RESULT=$(invoke_agent "$SPAWN_AGENT" "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: $SPAWN_AGENT invocation failed")
+      SPAWN_RESULT=$(invoke_agent "$ESC_AGENT" "$SPAWN_PROMPT" "$SPAWN_MAX_TURNS" || echo "ERROR: $ESC_AGENT invocation failed")
       unset SINAIN_SPAWN SINAIN_SPAWN_TASK_ID
     else
       # Pipe path: agent gets task text directly
-      SPAWN_RESULT=$(invoke_pipe "$SPAWN_AGENT" "Background task: $SPAWN_TASK" || echo "No output")
+      SPAWN_RESULT=$(invoke_pipe "$ESC_AGENT" "Background task: $SPAWN_TASK" || echo "No output")
     fi
 
     # Post result back
@@ -1136,7 +1135,7 @@ Complete this task thoroughly. You also have the sinain_memory_query tool availa
         echo "$SPAWN_RESULT"
         echo "─────────────────────────────────────────────────────────────"
         {
-          echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) SPAWN DROP ($SPAWN_ID, agent=$SPAWN_AGENT) ====="
+          echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) SPAWN DROP ($SPAWN_ID, agent=$ESC_AGENT) ====="
           echo "$SPAWN_RESULT"
           echo ""
         } >> /tmp/sinain-drops.log

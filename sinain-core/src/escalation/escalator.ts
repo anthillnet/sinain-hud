@@ -36,12 +36,6 @@ export interface EscalatorDeps {
   feedbackStore?: FeedbackStore;
   signalCollector?: SignalCollector;
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
-  /** Returns the currently-selected spawn-lane agent from the bare-agent
-   *  roster ("" = Off). When a local agent is selected, dispatchSpawnTask
-   *  prefers the HTTP bare-agent path over the OpenClaw gateway WS path,
-   *  so the overlay's agent-selector choice is respected even when the
-   *  gateway is connected. */
-  getSpawnAgent?: () => string;
   /** Returns the currently-selected escalation-lane agent. Gateway-typed
    *  profiles (any agent whose `type` is "openclaw" — see isGatewayAgent)
    *  route via WS; any other non-empty value routes to the local bare
@@ -53,6 +47,14 @@ export interface EscalatorDeps {
    *  like "nemoclaw" or "nanoclaw-prod" with that type get WS dispatch
    *  automatically — the routing key is type, not name. */
   isGatewayAgent?: (name: string) => boolean;
+  /** Returns true if the named profile is a resident sidecar (type "sinain").
+   *  Resident chat lanes have no bare agent polling /escalation/pending, so
+   *  idle/ambient escalations must be delivered in-process (see runResidentChat). */
+  isResidentAgent?: (name: string) => boolean;
+  /** Run one turn against the resident chat sidecar and resolve with its full
+   *  reply. Used to deliver idle/ambient escalations when the chat lane is the
+   *  built-in sidecar — the reply is fed back through respondHttp. */
+  runResidentChat?: (message: string) => Promise<string>;
 }
 
 /**
@@ -237,9 +239,10 @@ export class Escalator {
   private isGatewayLaneSelected(): boolean {
     const isGw = this.deps.isGatewayAgent;
     if (!isGw) return false;
+    // Only the chat (escalation) lane can select a gateway profile now —
+    // the spawn lane was removed (only chat + terminal selectors remain).
     const esc = this.deps.getEscalationAgent?.() ?? "";
-    const spawn = this.deps.getSpawnAgent?.() ?? "";
-    return isGw(esc) || isGw(spawn);
+    return isGw(esc);
   }
 
   /** Public predicate so the agent loop / index.ts can ask "should I do
@@ -482,6 +485,16 @@ export class Escalator {
         userDriven: hasUserCommand,
       };
       log(TAG, `tick #${entry.id} → httpPending id=${slotId} (lane=${escalationAgent || "<default>"})`);
+      // Resident chat lane (built-in sinain sidecar): no bare agent polls
+      // /escalation/pending, so deliver this idle/ambient escalation in-process.
+      // Feed the sidecar's reply back through respondHttp so it gets the same
+      // supersession, HUD push, and feedback handling as a bare-agent reply —
+      // and so a user message arriving mid-flight still supersedes it.
+      if (this.deps.isResidentAgent?.(escalationAgent)) {
+        this.deps.runResidentChat?.(message)
+          .then((reply) => { if (reply) void this.respondHttp(slotId, reply); })
+          .catch((e) => log(TAG, `resident escalation ${slotId} failed: ${(e as Error).message}`));
+      }
     } else {
       log(TAG, `tick #${entry.id} → slot.insert id=${slotId} depth=${this.slot.depth}`);
       this.slot.insert(slotEntry);
@@ -763,10 +776,6 @@ ${recentLines.join("\n")}`;
       /** Stable session override — region threads reuse one session per ROI
        *  so follow-up messages continue the same conversation. */
       sessionKey?: string;
-      /** Which overlay lane selection routes this task. Region threads use
-       *  "escalation" (the currently selected escalation agent); default
-       *  "spawn". */
-      route?: "spawn" | "escalation";
     },
   ): Promise<void> {
     // Bound sibling spawn RPCs (independent from escalation queue)
@@ -820,10 +829,10 @@ ${recentLines.join("\n")}`;
     //   - any other non-empty agent → HTTP queue for bare agent polling
     //   - empty (Off) → drop; the spawn poll skip in run.sh should already
     //     prevent us from getting here.
-    const laneName = opts?.route === "escalation" ? "escalation" : "spawn";
-    const laneAgent = opts?.route === "escalation"
-      ? (this.deps.getEscalationAgent?.() || "")
-      : (this.deps.getSpawnAgent?.() || "");
+    // Region/thread tasks run on the CHAT (escalation) lane — there is no
+    // separate spawn lane any more (only chat + terminal selectors exist).
+    const laneName = "escalation";
+    const laneAgent = this.deps.getEscalationAgent?.() || "";
     const laneIsGateway = this.deps.isGatewayAgent?.(laneAgent) ?? false;
     if (laneIsGateway) {
       if (!this.wsClient.isConnected) {

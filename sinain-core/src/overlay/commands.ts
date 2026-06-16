@@ -32,7 +32,7 @@ export interface CommandDeps {
   onToggleEscalation: () => boolean;
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
-  onSetAgent?: (lane: "escalation" | "spawn", agent: string) => { ok: boolean; error?: string };
+  onSetAgent?: (lane: "escalation" | "terminal", agent: string) => { ok: boolean; error?: string };
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
@@ -240,9 +240,9 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       break;
     }
     case "set_agent": {
-      const lane = (msg as any).lane as "escalation" | "spawn" | undefined;
+      const lane = (msg as any).lane as "escalation" | "terminal" | undefined;
       const agent = (msg as any).agent;
-      if (lane !== "escalation" && lane !== "spawn") {
+      if (lane !== "escalation" && lane !== "terminal") {
         log(TAG, `set_agent: invalid lane "${lane}"`);
         break;
       }

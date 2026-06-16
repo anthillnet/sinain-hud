@@ -78,7 +78,13 @@ export interface EscalationBlock {
 }
 
 export interface AgentsConfig {
+  /** Chat/escalation lane default (sinain-eligible). */
   default?: string;
+  /** Terminal (interactive TUI) lane default. Decoupled from `default` so the
+   *  chat lane can default to the resident sinain sidecar while the terminal —
+   *  which needs a real TUI — defaults to a different, sinain-INELIGIBLE agent.
+   *  Falls back to the first terminal-eligible profile when unset/invalid. */
+  terminalDefault?: string;
   pollIntervalSec?: number;
   agentMaxTurns?: number;
   spawnMaxTurns?: number;
@@ -259,5 +265,16 @@ export function gatewayProfileNames(cfg: AgentsConfig | null): string[] {
   if (!profiles) return [];
   return Object.entries(profiles)
     .filter(([_, p]) => p?.type === "openclaw")
+    .map(([name]) => name);
+}
+
+/** All sinain-typed (resident chat sidecar) profile names in the config.
+ *  Like gateway profiles, these have no PATH binary, so run.sh's roster POST
+ *  drops them — sinain-core must inject them into the chat roster itself. */
+export function sinainProfileNames(cfg: AgentsConfig | null): string[] {
+  const profiles = cfg?.profiles;
+  if (!profiles) return [];
+  return Object.entries(profiles)
+    .filter(([_, p]) => p?.type === "sinain")
     .map(([name]) => name);
 }

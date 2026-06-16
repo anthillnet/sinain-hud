@@ -48,7 +48,8 @@
     "into `profiles` to activate; the runtime ignores keys it doesn't know."
   ],
 
-  "default": "openclaude",
+  "default": "sinain",
+  "terminalDefault": "openclaude",
   "pollIntervalSec": 5,
   "agentMaxTurns": 8,
   "spawnMaxTurns": 25,
@@ -71,7 +72,7 @@
 
   "profiles": {
     "sinain": {
-      "_comment": "Sinain's OWN bundled chat agent — a RESIDENT OpenHands sidecar (sinain-chat-agent/) on ws://127.0.0.1:9610, NOT a run.sh subprocess. Fast non-reasoning model (qwen3.5-flash, reasoning off) + lean sinain tools + token streaming → sub-4s responsive chat. type 'sinain' routes the chat path to the sidecar via sinain-core's ChatService (not yet shipped). Chat mode only; terminal mode falls back to an interactive agent. Becomes the `default` once ChatService lands.",
+      "_comment": "Sinain's OWN bundled chat agent — a RESIDENT OpenHands sidecar (sinain-chat-agent/) on ws://127.0.0.1:9610, NOT a run.sh subprocess. Fast non-reasoning model (qwen3.5-flash, reasoning off) + lean sinain tools + token streaming → sub-4s responsive chat. type 'sinain' routes the chat/escalation lane to the sidecar via sinain-core's ChatService. The CHAT and TERMINAL lanes are DECOUPLED: sinain is the chat `default` and appears only in the chat roster; it is EXCLUDED from the terminal roster (no interactive TUI). The terminal lane has its own `terminalDefault` (openclaude) and its own selection.",
       "type": "sinain",
       "model": "qwen/qwen3.5-flash-02-23",
       "ws": "ws://127.0.0.1:9610",

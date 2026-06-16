@@ -1389,19 +1389,25 @@ class _AgentAvailabilityBanner extends StatelessWidget {
   String? _warningText(WebSocketService ws) {
     if (!ws.connected) return null;
     if (ws.escalationState != 'active') return 'Escalation is paused';
-    if (ws.availableAgents.isEmpty) return 'No escalation agent connected';
-    if (ws.escalationAgent.isEmpty) return 'No escalation agent selected';
-    if (!ws.agentRegistered) {
-      return 'Escalation agent not connected: ${ws.escalationAgent}';
+    if (ws.escalationAgent.isEmpty) return 'No chat agent selected';
+    // The built-in sinain sidecar is connected by definition. Only a CLI chat
+    // agent needs bare-agent registration before it can answer.
+    if (!ws.escalationResident && !ws.agentRegistered) {
+      return 'Chat agent not connected: ${ws.escalationAgent}';
     }
     return null;
   }
 
   bool _showStartButton(WebSocketService ws) {
-    if (!ws.connected || ws.escalationState != 'active' || ws.agentRegistered) {
+    // Only an unstarted CLI chat agent needs a manual start. The built-in
+    // sinain sidecar (resident) never does — it has no terminal to launch.
+    if (!ws.connected ||
+        ws.escalationState != 'active' ||
+        ws.escalationResident ||
+        ws.agentRegistered) {
       return false;
     }
-    return ws.escalationAgent.isNotEmpty || ws.availableAgents.isEmpty;
+    return ws.escalationAgent.isNotEmpty;
   }
 }
 
