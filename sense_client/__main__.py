@@ -26,7 +26,7 @@ from skimage.metrics import structural_similarity
 if sys.platform != "win32":
     import resource
 
-from .capture import ScreenCapture, create_capture
+from .capture import ScreenCapture, ScreenKitCapture, create_capture
 from .change_detector import ChangeDetector
 from .roi_extractor import ROIExtractor, ROI
 from .ocr import OCRResult, create_ocr
@@ -223,7 +223,27 @@ def main():
     if watchdog_secs > 0:
         threading.Thread(target=_watchdog, daemon=True, name="watchdog").start()
 
-    for frame, ts in capture.capture_loop():
+    def capture_frames():
+        """Drive the active backend, auto-upgrading CoreGraphics → IPC if
+        sck-capture appears mid-run. The legacy backend reports no display id
+        (multi-display ROIs degrade to the primary screen), so we switch to the
+        camera-safe, display-aware IPC path as soon as its frames show up. The
+        `nonlocal` swap also redirects the loop body's `capture.last_display`
+        read to the new backend."""
+        nonlocal capture
+        while True:
+            upgraded = False
+            for fr in capture.capture_loop():
+                if isinstance(capture, ScreenCapture) and ScreenKitCapture.is_available():
+                    log("upgrading capture backend: CoreGraphics → ScreenCaptureKit IPC")
+                    capture = ScreenKitCapture(fps=config["capture"]["fps"], scale=1.0)
+                    upgraded = True
+                    break
+                yield fr
+            if not upgraded:
+                return
+
+    for frame, ts in capture_frames():
         _loop_beat["ts"] = time.time()
         # Check control file (pause/resume)
         if not is_enabled(args.control):
