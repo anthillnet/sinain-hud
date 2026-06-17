@@ -483,10 +483,22 @@ if [ "$AGENT" = "junie" ]; then
   fi
 fi
 
-# Verify MCP server dependencies (only needed for MCP agents)
-if agent_has_mcp && [ ! -d "$SCRIPT_DIR/../sinain-mcp-server/node_modules" ]; then
+# Ensure the sinain MCP server's deps are installed (node_modules isn't tracked
+# by git, so every fresh worktree starts empty → the server crashes on launch
+# with ERR_MODULE_NOT_FOUND and the agent silently gets zero sinain_* tools).
+#
+# Do NOT gate this on `agent_has_mcp` (which checks the global default $AGENT):
+# lane selection is per-capability, so the default profile is often the built-in
+# "sinain" chat type (reports no MCP need) while the terminal/escalation lane
+# launches an MCP-capable CLI (claude/openclaude/codex/goose) that does need it.
+# Asking the default agent skips the install the launched agent requires. Just
+# install whenever the server source is present but unbuilt.
+if [ -f "$SCRIPT_DIR/../sinain-mcp-server/package.json" ] && \
+   [ ! -d "$SCRIPT_DIR/../sinain-mcp-server/node_modules" ]; then
   echo "Installing sinain-mcp-server dependencies..."
-  (cd "$SCRIPT_DIR/../sinain-mcp-server" && npm install)
+  if ! (cd "$SCRIPT_DIR/../sinain-mcp-server" && npm install); then
+    echo "⚠ sinain-mcp-server npm install failed — sinain_* MCP tools will be unavailable" >&2
+  fi
 fi
 
 # Codex: auto-register sinain MCP server if not already configured
