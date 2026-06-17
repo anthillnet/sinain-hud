@@ -195,11 +195,19 @@ class ScreenKitCapture:
 
 
 def create_capture(mode: str = "screen", target: int = 0,
-                   fps: float = 1, scale: float = 0.5):
+                   fps: float = 1, scale: float = 0.5,
+                   ipc_wait_s: float = 8.0):
     """Factory: platform-dispatched screen capture backend.
 
     macOS: ScreenKitCapture (IPC from sck-capture) → ScreenCapture (CoreGraphics).
     Windows: WinScreenCapture (mss / DXGI Desktop Duplication).
+
+    sinain-core spawns sck-capture in parallel with sense_client, so at startup
+    the IPC frames may not exist yet. We briefly wait (up to `ipc_wait_s`) for
+    them before falling back to CoreGraphics — otherwise a startup race silently
+    pins us to the legacy backend, which (a) risks camera conflicts and (b) emits
+    no active-display id, breaking multi-display ROI placement. The capture loop
+    also auto-upgrades CoreGraphics → IPC later if sck-capture appears.
     """
     if sys.platform == "win32":
         from .capture_win import WinScreenCapture
@@ -207,12 +215,23 @@ def create_capture(mode: str = "screen", target: int = 0,
         return WinScreenCapture(mode=mode, target=target, fps=fps, scale=scale)
 
     # macOS path
-    # 1. IPC from sck-capture (primary — Swift binary writes JPEG frames)
-    if ScreenKitCapture.is_available():
-        print("[capture] Using ScreenCaptureKit (sck-capture IPC)")
-        return ScreenKitCapture(fps=fps, scale=1.0)  # scale handled by sck-capture
+    # 1. IPC from sck-capture (primary — Swift binary writes JPEG frames).
+    #    Wait briefly for the first frame to dodge the parallel-startup race.
+    deadline = time.time() + max(0.0, ipc_wait_s)
+    waited = False
+    while True:
+        if ScreenKitCapture.is_available():
+            print("[capture] Using ScreenCaptureKit (sck-capture IPC)"
+                  + (" (after wait)" if waited else ""))
+            return ScreenKitCapture(fps=fps, scale=1.0)  # scale handled by sck-capture
+        if time.time() >= deadline:
+            break
+        waited = True
+        time.sleep(0.5)
 
-    # 2. CGDisplayCreateImage (legacy fallback for macOS < 13)
+    # 2. CGDisplayCreateImage (legacy fallback — macOS < 13, or sck-capture off)
     print("[capture] Using CoreGraphics (CGDisplayCreateImage)")
     print("[capture] WARNING: CGDisplayCreateImage may cause camera conflicts on macOS 14+")
+    print("[capture] NOTE: legacy backend reports no display id — multi-display "
+          "ROI placement falls back to the primary screen until sck-capture appears")
     return ScreenCapture(mode=mode, target=target, fps=fps, scale=scale)
