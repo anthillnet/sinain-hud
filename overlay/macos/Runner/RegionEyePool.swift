@@ -99,7 +99,15 @@ class RegionEyePool {
                 }
             }
         }
-        return NSScreen.main ?? NSScreen.screens.first ?? NSScreen()
+        // display == 0 (or unmatched) means the capture source didn't report a
+        // display id — the CoreGraphics fallback backend, which always captures
+        // the PRIMARY display (CGMainDisplayID). Fall back to the primary (the
+        // screen at global origin), NOT NSScreen.main: NSScreen.main is the
+        // *focused* screen, which flips to a second monitor when its window has
+        // key focus and would put primary-display ROIs on the wrong screen.
+        // This also matches the Dart side, which scales against the primary.
+        return NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main ?? NSScreen.screens.first ?? NSScreen()
     }
 
     private static func argbToColor(_ argb: Int64) -> CGColor {
