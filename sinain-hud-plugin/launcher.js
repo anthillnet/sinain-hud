@@ -189,32 +189,43 @@ async function main() {
   if (!skipSense) {
     const hasPython = commandExists("python3");
     if (hasPython) {
+      const scDir = path.join(PKG_DIR, "sense_client");
+      // Prefer a dedicated venv if present (mirrors the chat sidecar); else
+      // system python3. The dep-check, pip-install, and run below all use this
+      // SAME interpreter — previously the check/run used `python3` but install
+      // used bare `pip3`, which can resolve to a different interpreter, leaving
+      // sense_client running on a python without its deps (silent "exited early").
+      const venvPy = path.join(scDir, ".venv", "bin", "python");
+      const sensePy = fs.existsSync(venvPy) ? venvPy : "python3";
       // Install sense deps if needed
-      const reqFile = path.join(PKG_DIR, "sense_client/requirements.txt");
+      const reqFile = path.join(scDir, "requirements.txt");
       if (fs.existsSync(reqFile)) {
-        const scDir = path.join(PKG_DIR, "sense_client");
-        // Check if key package is importable to skip pip
+        // Check if key packages are importable to skip pip
         try {
-          const depCheck = IS_WINDOWS
-            ? 'python3 -c "import PIL; import skimage"'
-            : 'python3 -c "import PIL; import skimage; import Quartz; import Vision"';
-          execSync(depCheck, { stdio: "pipe" });
+          const depMods = IS_WINDOWS
+            ? "import PIL; import skimage"
+            : "import PIL; import skimage; import Quartz; import Vision";
+          execSync(`"${sensePy}" -c "${depMods}"`, { stdio: "pipe" });
         } catch {
           log("Installing sense_client Python dependencies...");
           try {
-            execSync(`pip3 install -r "${reqFile}" --quiet --break-system-packages`, { stdio: "inherit" });
+            if (sensePy === "python3") {
+              execSync(`python3 -m pip install -r "${reqFile}" --quiet --break-system-packages`, { stdio: "inherit" });
+            } else {
+              execSync(`"${sensePy}" -m pip install -r "${reqFile}" --quiet`, { stdio: "inherit" });
+            }
           } catch {
             try {
-              execSync(`pip3 install -r "${reqFile}" --quiet`, { stdio: "inherit" });
+              execSync(`python3 -m pip install -r "${reqFile}" --quiet`, { stdio: "inherit" });
             } catch {
-              warn("pip3 install failed — sense_client may not work");
+              warn("pip install failed — sense_client may not work");
             }
           }
         }
       }
 
       log("Starting sense_client...");
-      startProcess("sense", "python3", ["-m", "sense_client"], {
+      startProcess("sense", sensePy, ["-m", "sense_client"], {
         cwd: PKG_DIR,
         color: YELLOW,
       });
