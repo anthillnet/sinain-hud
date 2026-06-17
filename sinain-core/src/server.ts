@@ -2889,8 +2889,14 @@ export function createAppServer(deps: ServerDeps) {
     start(): Promise<void> {
       return new Promise((resolve, reject) => {
         httpServer.on("error", reject);
-        httpServer.listen(config.port, "0.0.0.0", () => {
-          log(TAG, `listening on http://0.0.0.0:${config.port} (HTTP + WS, epoch=${serverEpoch})`);
+        // SECURITY: bind loopback-only by default (config.host = 127.0.0.1).
+        // The HTTP/WS API has no authentication, so LAN exposure (0.0.0.0)
+        // must be a deliberate opt-in via SINAIN_BIND_HOST.
+        httpServer.listen(config.port, config.host, () => {
+          log(TAG, `listening on http://${config.host}:${config.port} (HTTP + WS, epoch=${serverEpoch})`);
+          if (config.host === "0.0.0.0") {
+            log(TAG, "WARNING: bound on 0.0.0.0 — API is reachable from the LAN with no auth (SINAIN_BIND_HOST override)");
+          }
           resolve();
         });
       });
