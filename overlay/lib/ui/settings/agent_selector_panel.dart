@@ -87,14 +87,19 @@ class AgentSelectorPanel extends StatelessWidget {
                     label: 'On',
                     selected: idleOn,
                     accent: accent,
-                    onTap: () => ws.sendCommand('toggle_escalation'),
+                    // Explicit set (not a flip): tapping On always resumes,
+                    // even if the displayed state momentarily lags core.
+                    onTap: () => ws.sendCommand(
+                        'set_escalation_enabled', {'enabled': true}),
                   ),
                   const SizedBox(width: 4),
                   _chip(
                     label: 'Off',
                     selected: !idleOn,
                     accent: accent,
-                    onTap: () => ws.sendCommand('toggle_escalation'),
+                    // Explicit set (not a flip): tapping Off always pauses.
+                    onTap: () => ws.sendCommand(
+                        'set_escalation_enabled', {'enabled': false}),
                   ),
                 ],
               );

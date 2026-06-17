@@ -1270,7 +1270,19 @@ async function main() {
     // booted from agents.json with that combination), reconcile by promoting
     // mode to match. Mirrors the existing set_agent → resumeEscalation flow,
     // applied at register time so the boot-from-disk case isn't an exception.
-    if (bareAgentState.escalationAgent && config.escalationConfig.mode === "off") {
+    //
+    // BUT `{ escalationAgent set, mode === "off" }` is ambiguous — it also
+    // describes a *deliberate user pause* (idle messages → Off, or
+    // set_agent("escalation","")) where an agent stays selected. Auto-resuming
+    // there clobbers the user's intent, and because the bare agent
+    // re-registers every few minutes the pause reverts within seconds — the
+    // reported "idle messages off doesn't stick" bug. `savedEscalationMode` is
+    // the discriminator: it is non-null ONLY while a user-initiated pause is
+    // active (pause sets it, resume clears it); a stale/boot mode=off leaves it
+    // null. So only reconcile the stale case — never override a live pause.
+    if (bareAgentState.escalationAgent
+        && config.escalationConfig.mode === "off"
+        && savedEscalationMode === null) {
       resumeEscalationInternal();
     }
   }
@@ -1882,6 +1894,18 @@ async function main() {
         pauseEscalationInternal();
         return false;
       }
+    },
+    onSetEscalationEnabled: (enabled: boolean): boolean => {
+      // Idempotent setter behind the overlay's On/Off chips (vs the legacy
+      // flip-toggle). Shares savedEscalationMode bookkeeping via the same
+      // helpers, so a user pause established here is protected by the
+      // registerBareAgent reconcile guard exactly like the toggle path.
+      if (enabled) {
+        resumeEscalationInternal();
+        return true;
+      }
+      pauseEscalationInternal();
+      return false;
     },
       onSetAgent: (lane: "escalation" | "terminal", agent: string): { ok: boolean; error?: string } => {
       // Empty-string agent = Off (lane disabled). Non-empty agent must be in

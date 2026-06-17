@@ -30,6 +30,10 @@ export interface CommandDeps {
   onToggleScreen: () => boolean;
   /** Toggle escalation pause/resume — returns true if now active */
   onToggleEscalation: () => boolean;
+  /** Idempotent set of escalation enabled/paused — returns true if now active.
+   *  Unlike onToggleEscalation (a flip), an explicit set can't desync into
+   *  flipping the wrong way when the overlay's displayed state lags core. */
+  onSetEscalationEnabled?: (enabled: boolean) => boolean;
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "terminal", agent: string) => { ok: boolean; error?: string };
@@ -230,6 +234,25 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         "normal"
       );
       log(TAG, `escalation toggled ${nowActive ? "ON" : "OFF"}`);
+      break;
+    }
+    case "set_escalation_enabled": {
+      const enabled = (msg as any).enabled;
+      if (typeof enabled !== "boolean") {
+        log(TAG, `set_escalation_enabled: missing or non-boolean enabled field`);
+        break;
+      }
+      if (!deps.onSetEscalationEnabled) {
+        log(TAG, `set_escalation_enabled: no handler wired`);
+        break;
+      }
+      const nowActive = deps.onSetEscalationEnabled(enabled);
+      wsHandler.updateState({ escalation: nowActive ? "active" : "paused" });
+      wsHandler.broadcast(
+        nowActive ? "Escalations resumed" : "Escalations paused — context still accumulating",
+        "normal"
+      );
+      log(TAG, `escalation set ${nowActive ? "ON" : "OFF"}`);
       break;
     }
     case "set_response_size": {
