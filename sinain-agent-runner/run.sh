@@ -880,6 +880,18 @@ ${digest:-(no digest yet — quiet session so far)}
 
 You have sinain MCP tools (sinain_context for the current situation, sinain_memory_query for long-term facts). Open with a one-line read of the situation, then ask what they need."
   fi
+  # Mirror sinain-core's spawn env hygiene (index.ts ~1314): when the stack is
+  # launched from inside a Claude Code / agent session, the inherited
+  # CLAUDE_CONFIG_DIR / CLAUDE_CODE_* redirect the spawned CLI at the PARENT
+  # session's config dir — wrong credentials and a different MCP-server set than
+  # the user's own default config. Core strips these before its headless spawn,
+  # but the interactive terminal is launched straight from the overlay (PTY →
+  # run.sh), bypassing that — so strip them here too. A per-profile env block
+  # (e.g. the pclaude/gclaude pattern: CLAUDE_CONFIG_DIR=$HOME/.claude-personal)
+  # re-applies immediately below in apply_profile_env, so explicit config-dir
+  # selection still works.
+  unset CLAUDE_CONFIG_DIR CLAUDECODE AI_AGENT
+  for _ccvar in ${!CLAUDE_CODE_*}; do unset "$_ccvar"; done
   apply_profile_env "$profile"
   model=$(prof_get "$profile" model); [ -n "$model" ] && export OPENAI_MODEL="$model"
   # mcp-config.json uses repo-relative paths (../sinain-core/…) that resolve
