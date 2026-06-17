@@ -17,7 +17,7 @@ import subprocess
 import urllib.parse
 import urllib.request
 
-from pydantic import SecretStr  # noqa: F401 (kept for parity; used by sidecar)
+from pydantic import BaseModel, Field, SecretStr  # noqa: F401 (SecretStr kept for parity; used by sidecar)
 
 from openhands.sdk.llm.message import TextContent
 from openhands.sdk.tool import Action, Observation, ToolAnnotations, ToolDefinition, ToolExecutor
@@ -68,7 +68,18 @@ def dispatch(name: str, args: dict) -> str:
     if name == "sinain_context":
         return (_get("/agent/digest") + "\n---\n" + _get("/agent/context"))[:_MAX]
     if name == "sinain_memory_store":
-        return _post("/knowledge/import", {"content": args.get("text", "")})
+        # /knowledge/import expects entity/attribute/value triples: {"facts":[...]}
+        # (the shape the MCP server's sinain_memory_store also uses). Sending
+        # {"content": text} was rejected with "No 'facts' array found". Drop
+        # empty/None fields and skip facts missing a required key.
+        facts = []
+        for f in args.get("facts", []):
+            fact = {k: v for k, v in f.items() if v not in (None, "")}
+            if fact.get("entity") and fact.get("attribute") and fact.get("value"):
+                facts.append(fact)
+        if not facts:
+            return "[sinain_memory_store: each fact needs non-empty entity, attribute, and value]"
+        return _post("/knowledge/import", {"facts": facts})
     if name == "read_file":
         try:
             with open(args["path"], encoding="utf-8") as fh:
@@ -91,8 +102,16 @@ class MemoryQueryAction(Action):
     limit: int = 8
 
 
+class StoreFact(BaseModel):
+    entity: str = Field(description="Entity the fact is about, kebab-case, e.g. 'sinain-hud' or 'igor'")
+    attribute: str = Field(description="Attribute name, e.g. 'prefers', 'deadline', 'status'")
+    value: str = Field(description="The fact content")
+    confidence: float = Field(default=0.7, description="0..1 confidence, default 0.7")
+    domain: str | None = Field(default=None, description="Optional domain tag, e.g. 'work', 'german'")
+
+
 class MemoryStoreAction(Action):
-    text: str
+    facts: list[StoreFact] = Field(description="One or more entity/attribute/value facts to store")
 
 
 class BashAction(Action):
@@ -152,7 +171,7 @@ def _make(name: str, action_cls: type, desc: str) -> type:
 SPECS = [
     ("sinain_memory_query", MemoryQueryAction, "Query the user's knowledge graph (facts/entities)."),
     ("sinain_context", EmptyAction, "Get the user's current situation: digest + screen OCR/vision, audio, app history."),
-    ("sinain_memory_store", MemoryStoreAction, "Save a fact/note to the user's long-term memory."),
+    ("sinain_memory_store", MemoryStoreAction, "Store facts in the user's long-term memory (knowledge graph). Each fact is an entity/attribute/value triple; duplicates are deduped automatically."),
     ("read_file", ReadFileAction, "Read a UTF-8 text file by absolute path."),
     ("bash", BashAction, "Run a read-only shell command to orient on the machine."),
     ("grep", GrepAction, "Search file contents for a pattern under a path."),
