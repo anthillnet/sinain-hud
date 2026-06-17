@@ -150,13 +150,14 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
       })
       .join("\n");
   } catch {
-    // Privacy not yet initialized — use full text
+    // SECURITY: privacy not yet initialized (startup race) — fail CLOSED.
+    // This text would otherwise go to the OpenRouter cloud LLM. Suppress the
+    // OCR content; keep only low-sensitivity app/timing metadata.
     screenLines = ctx.screen
       .map(e => {
         const app = normalizeAppName(e.meta.app);
         const ago = Math.round((now - (e.ts || now)) / 1000);
-        const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, ctx.preset.maxOcrChars) : "(no text)";
-        return `${srcTag(e)}[${ago}s ago] [${app}] ${ocr}`;
+        return `${srcTag(e)}[${ago}s ago] [${app}] (suppressed: privacy uninitialized)`;
       })
       .join("\n");
   }
@@ -172,10 +173,11 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
       })
       .join("\n");
   } catch {
+    // SECURITY: privacy not yet initialized — fail CLOSED (cloud-bound text).
     audioLines = ctx.audio
       .map(e => {
         const ago = Math.round((now - (e.ts || now)) / 1000);
-        return `[${ago}s ago] ${e.text.slice(0, ctx.preset.maxTranscriptChars)}`;
+        return `[${ago}s ago] (suppressed: privacy uninitialized)`;
       })
       .join("\n");
   }
@@ -193,7 +195,7 @@ function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | nu
     if (imgLevel === "none") {
       imagesForPrompt = [];
     }
-  } catch { /* privacy not initialized, keep images */ }
+  } catch { imagesForPrompt = []; /* SECURITY: fail CLOSED — drop cloud-bound images when privacy uninitialized */ }
 
   const hasImages = imagesForPrompt && imagesForPrompt.length > 0;
   const imageNote = hasImages ? `\n\nScreen screenshots (${imagesForPrompt!.length}) are attached below.` : "";
@@ -285,7 +287,7 @@ export async function analyzeContext(
   const privacyDest = config.provider === "ollama" ? "local_llm" : "openrouter";
   try {
     if (levelFor("screen_images", privacyDest) === "none") images = [];
-  } catch { /* privacy not initialized, keep images */ }
+  } catch { images = []; /* SECURITY: fail CLOSED — drop images when privacy uninitialized */ }
 
   if (config.provider === "ollama") {
     return await callOllama(systemPrompt, userPrompt, images, config);

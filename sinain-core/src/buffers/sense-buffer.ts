@@ -109,14 +109,19 @@ export class SenseBuffer {
       receivedAt: Date.now(),
     };
 
-    // Privacy: strip imageData if screen_images local_buffer level is "none"
+    // Privacy: strip imageData if screen_images local_buffer level is "none".
+    // SECURITY: fail CLOSED — if privacy isn't initialized yet (startup race),
+    // drop the image data rather than retaining sensitive screen captures.
     try {
       const imgLevel = levelFor("screen_images", "local_buffer");
       if (imgLevel === "none") {
         delete event.imageData;
         delete event.imageBbox;
       }
-    } catch { /* privacy not yet initialized — keep image data */ }
+    } catch {
+      delete event.imageData;
+      delete event.imageBbox;
+    }
 
     // Track activity type
     if (event.semantic?.context?.activity) {
