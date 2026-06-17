@@ -278,3 +278,29 @@ export function sinainProfileNames(cfg: AgentsConfig | null): string[] {
     .filter(([_, p]) => p?.type === "sinain")
     .map(([name]) => name);
 }
+
+/** Desktop chat-app profiles (Claude / ChatGPT). Like sinain profiles they have
+ *  no PATH binary and are chat-lane-only (no TUI) — core injects them into the
+ *  chat roster, gated on the app actually being installed. The deep-link launch
+ *  hands the ROI seed to the app; the app pulls it via the sinain_roi MCP tool. */
+export function isDesktopProfile(cfg: AgentsConfig | null, name: string): boolean {
+  const t = cfg?.profiles?.[name]?.type;
+  return t === "claude_desktop" || t === "chatgpt_desktop";
+}
+
+export function desktopProfileNames(cfg: AgentsConfig | null): string[] {
+  const profiles = cfg?.profiles;
+  if (!profiles) return [];
+  return Object.entries(profiles)
+    .filter(([_, p]) => p?.type === "claude_desktop" || p?.type === "chatgpt_desktop")
+    .map(([name]) => name);
+}
+
+/** The desktop app type for a profile name, or null. */
+export function desktopProfileType(
+  cfg: AgentsConfig | null,
+  name: string,
+): "claude_desktop" | "chatgpt_desktop" | null {
+  const t = cfg?.profiles?.[name]?.type;
+  return t === "claude_desktop" || t === "chatgpt_desktop" ? t : null;
+}

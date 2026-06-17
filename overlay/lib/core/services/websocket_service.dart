@@ -163,6 +163,12 @@ class WebSocketService extends ChangeNotifier {
     sendCommand('set_agent', {'lane': lane, 'agent': agent});
   }
 
+  /// Toggle the ChatGPT network harness (exposes the local MCP server over a
+  /// public tunnel so ChatGPT can reach it). Off by default — security-sensitive.
+  void setChatgptHarness(bool enabled) {
+    sendCommand('set_chatgpt_harness', {'enabled': enabled});
+  }
+
   /// Hold ambient escalations for [seconds] — the user is actively
   /// interacting (visible thread terminal). Chat messages set this
   /// server-side; this covers terminal sessions. Throttled by callers.

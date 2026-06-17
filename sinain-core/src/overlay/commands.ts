@@ -37,6 +37,8 @@ export interface CommandDeps {
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "terminal", agent: string) => { ok: boolean; error?: string };
+  /** Toggle the ChatGPT network harness (public-tunnel exposure) at runtime. */
+  onSetChatgptHarness?: (enabled: boolean) => void;
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
@@ -285,6 +287,13 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         wsHandler.broadcast(`⚠ ${result.error ?? "set_agent failed"}`, "normal");
       }
       log(TAG, `set_agent lane=${lane} agent=${agent || "<off>"} (ok=${result.ok})`);
+      break;
+    }
+
+    case "set_chatgpt_harness": {
+      const enabled = (msg as any).enabled === true;
+      deps.onSetChatgptHarness?.(enabled);
+      log(TAG, `set_chatgpt_harness enabled=${enabled}`);
       break;
     }
     case "start_local_agent": {

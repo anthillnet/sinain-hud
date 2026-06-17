@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { createServer, IncomingMessage } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import os from "node:os";
@@ -13,6 +15,14 @@ import os from "node:os";
 const SINAIN_CORE_URL = process.env.SINAIN_CORE_URL || "http://localhost:9500";
 const WORKSPACE = (process.env.SINAIN_WORKSPACE || "~/.openclaw/workspace").replace(/^~/, os.homedir());
 const MEMORY_DIR = resolve(WORKSPACE, "memory");
+
+// Transport selection:
+//   stdio (default) — for local MCP clients like Claude Desktop.
+//   http            — Streamable HTTP, for remote clients like ChatGPT, which
+//                     only accept remote MCP connectors over HTTPS (tunnel a
+//                     local http port with ngrok / Cloudflare / OpenAI tunnel).
+const MCP_TRANSPORT = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
+const MCP_HTTP_PORT = Number(process.env.MCP_HTTP_PORT || 9510);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +58,10 @@ function textResult(text: string) {
 // thread's chat or terminal; the conversation IS the question channel.
 // ---------------------------------------------------------------------------
 
+// A single McpServer can only bind to ONE transport, so we build a fresh
+// instance per connection. stdio uses one; the HTTP transport mints one per
+// session (remote clients run initialize/list/call across separate requests).
+function buildServer() {
 const server = new McpServer({
   name: "sinain-mcp-server",
   version: "0.2.0",
@@ -107,6 +121,48 @@ server.tool(
       return textResult(stripPrivateTags(parts.join("\n\n")));
     } catch (err: any) {
       return textResult(`Error fetching context: ${err.message}`);
+    }
+  },
+);
+
+// 3b. sinain_roi — fetch the seed the user just queued by selecting a screen
+//     region in the HUD ("Ask Claude" on a ROI). The deep-link that opens this
+//     chat only carries a pointer ("call sinain_roi and follow it"); the real
+//     payload (composed context + optional cropped screenshot) rides this tool,
+//     so it never hits the URL length cap or the file-attach modal.
+server.tool(
+  "sinain_roi",
+  "Fetch the pending region-of-interest (ROI) seed the user queued from the sinain HUD: the composed screen context for the region they selected, plus a cropped screenshot when available. Call this first when asked to 'follow the ROI / seed instructions', passing the seed id from that request, then do what the seed says.",
+  {
+    id: z.string().optional()
+      .describe("The ROI seed id from the request that opened this chat. Omit to get the most recent pending seed."),
+  },
+  async ({ id }) => {
+    try {
+      const qs = id ? `?id=${encodeURIComponent(id)}` : "";
+      const data = await coreRequest("GET", `/roi/pending${qs}`);
+      if (!data || data.ok === false || !data.seed) {
+        return textResult(
+          id
+            ? `No ROI seed found for id "${id}" — it may have expired or already been consumed.`
+            : "No pending ROI seed — the user hasn't queued a region from the HUD (or it expired).",
+        );
+      }
+      const content: any[] = [];
+      const header = data.id || data.regionId ? `[ROI seed id=${data.id ?? "?"} region=${data.regionId ?? "?"}]\n\n` : "";
+      const text = stripPrivateTags(String(data.seed.text || ""));
+      content.push({ type: "text" as const, text: header + (text || "(empty seed)") });
+      // Cropped ROI screenshot, if the capture pipeline attached one.
+      if (data.seed.image) {
+        content.push({
+          type: "image" as const,
+          data: data.seed.image, // base64, no data: prefix
+          mimeType: data.seed.imageMimeType || "image/jpeg",
+        });
+      }
+      return { content };
+    } catch (err: any) {
+      return textResult(`Error fetching ROI seed: ${err.message}`);
     }
   },
 );
@@ -213,14 +269,88 @@ server.tool(
   },
 );
 
+  return server;
+}
+
 // ---------------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------------
 
+// Read and JSON-parse a Node request body (Streamable HTTP needs the parsed
+// body passed alongside req/res).
+function readBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolveBody, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c as Buffer));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf-8");
+      if (!raw) return resolveBody(undefined);
+      try {
+        resolveBody(JSON.parse(raw));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+async function startHttp() {
+  // Stateful mode: remote clients (ChatGPT) run the full initialize → tools/list
+  // → tools/call lifecycle across SEPARATE HTTP requests, so the server must
+  // correlate them by session id. We mint a session on initialize, return it in
+  // the mcp-session-id header, and route subsequent requests to that transport.
+  const { randomUUID } = await import("node:crypto");
+  const transports: Record<string, InstanceType<typeof StreamableHTTPServerTransport>> = {};
+
+  const httpServer = createServer(async (req, res) => {
+    const pathname = req.url ? new URL(req.url, "http://localhost").pathname.replace(/\/$/, "") : "";
+    if (pathname !== "/mcp") {
+      res.writeHead(404).end("Not found — POST MCP requests to /mcp");
+      return;
+    }
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    console.error(`[http] ${req.method} /mcp session=${sessionId ?? "-"} host=${req.headers.host}`);
+    try {
+      const body = req.method === "POST" ? await readBody(req) : undefined;
+      let transport = sessionId ? transports[sessionId] : undefined;
+      if (!transport) {
+        // No session yet — must be the initialize request. Mint a transport.
+        const isInit = body && typeof body === "object" && (body as any).method === "initialize";
+        if (sessionId || !isInit) {
+          res.writeHead(400).end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "No valid session; send initialize first" }, id: null }));
+          return;
+        }
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (sid) => { transports[sid] = transport!; },
+        });
+        transport.onclose = () => { if (transport!.sessionId) delete transports[transport!.sessionId]; };
+        await buildServer().connect(transport); // fresh server per session
+      }
+      await transport.handleRequest(req, res, body);
+    } catch (err: any) {
+      console.error("[http] handleRequest threw:", err?.stack || err);
+      if (!res.headersSent) res.writeHead(400).end(`Bad request: ${err.message}`);
+    }
+  });
+
+  httpServer.listen(MCP_HTTP_PORT, () => {
+    console.error(
+      `sinain-mcp-server (http) listening on http://localhost:${MCP_HTTP_PORT}/mcp ` +
+        `(core=${SINAIN_CORE_URL}) — tunnel this port over HTTPS for ChatGPT`,
+    );
+  });
+}
+
 async function main() {
+  if (MCP_TRANSPORT === "http") {
+    await startHttp();
+    return;
+  }
   const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error(`sinain-mcp-server started (core=${SINAIN_CORE_URL}, workspace=${WORKSPACE})`);
+  await buildServer().connect(transport);
+  console.error(`sinain-mcp-server (stdio) started (core=${SINAIN_CORE_URL}, workspace=${WORKSPACE})`);
 }
 
 main().catch(console.error);

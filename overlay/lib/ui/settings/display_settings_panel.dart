@@ -252,6 +252,58 @@ class DisplaySettingsPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+
+          // ChatGPT network harness — exposes the local MCP server over a public
+          // tunnel so ChatGPT can reach it. Security-sensitive → off by default.
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () {
+                final next = !settings.settings.chatgptHarness;
+                settings.setChatgptHarness(next);
+                ws.setChatgptHarness(next);
+              },
+              child: Row(
+                children: [
+                  Text(
+                    'CHATGPT NETWORK HARNESS',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 9,
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    settings.settings.chatgptHarness
+                        ? Icons.toggle_on
+                        : Icons.toggle_off,
+                    size: 22,
+                    color: settings.settings.chatgptHarness
+                        ? const Color(0xFFFF6644)
+                        : Colors.white.withValues(alpha: 0.3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 3, right: 24),
+            child: Text(
+              '⚠ Opens a public tunnel to your local context (screen/audio). '
+              'Anyone with the URL could reach it. Enable only while using '
+              'ChatGPT, and turn it off when done.',
+              style: TextStyle(
+                fontFamily: HudConstants.monoFont,
+                fontFamilyFallback: HudConstants.monoFontFallbacks,
+                fontSize: 8,
+                height: 1.3,
+                color: const Color(0xFFFF6644).withValues(alpha: 0.85),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
           const SizedBox(height: 8),
 

@@ -6,7 +6,9 @@ import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
-import { loadAgentsConfig, isGatewayProfile, isSinainProfile, gatewayProfileNames, sinainProfileNames } from "./agents-loader.js";
+import { loadAgentsConfig, isGatewayProfile, isSinainProfile, gatewayProfileNames, sinainProfileNames, isDesktopProfile, desktopProfileNames, desktopProfileType } from "./agents-loader.js";
+import { roiSeeds } from "./chat/roi-seeds.js";
+import { launchDesktop, desktopAppInstalled } from "./chat/desktop-launch.js";
 import { ChatService } from "./chat/chat-service.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
@@ -1204,6 +1206,10 @@ async function main() {
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
   let shuttingDown = false;
+  // ChatGPT "network harness" gate — exposes the local MCP server over a public
+  // tunnel, so it's a security-sensitive opt-in. Runtime-toggled from the
+  // overlay settings (set_chatgpt_harness); seeded from the env for headless.
+  let chatgptHarnessEnabled = process.env.SINAIN_ENABLE_CHATGPT_DESKTOP === "true";
 
   function registerBareAgent(availableList: string[], current: string, registered = true): void {
     const clean = availableList.filter((a) => typeof a === "string" && AGENT_NAME_RE.test(a));
@@ -1237,11 +1243,33 @@ async function main() {
     for (const snName of sinainProfileNames(escalatorAgentsCfg)) {
       if (!clean.includes(snName)) clean.push(snName);
     }
+    // Gate desktop chat-app profiles (Claude/ChatGPT) for the CHAT roster:
+    // offer one ONLY if the app is installed — never an app the user lacks.
+    // ChatGPT additionally needs the remote-MCP connector (tunnel), so it's
+    // behind a feature flag, OFF by default. Applied as a FILTER (not just an
+    // inject-guard) because desktop names can arrive via the agents.json
+    // pre-populate too — we must drop failing ones, not only skip adding them.
+    // Like sinain profiles they're chat-only (no TUI; excluded from terminal).
+    const chatgptEnabled = chatgptHarnessEnabled;
+    const desktopOk = (name: string): boolean => {
+      const t = desktopProfileType(escalatorAgentsCfg, name);
+      if (!t) return true; // not a desktop profile — unaffected
+      if (t === "chatgpt_desktop" && !chatgptEnabled) return false;
+      return desktopAppInstalled(t);
+    };
+    for (let k = clean.length - 1; k >= 0; k--) {
+      if (isDesktopProfile(escalatorAgentsCfg, clean[k]) && !desktopOk(clean[k])) clean.splice(k, 1);
+    }
+    for (const dName of desktopProfileNames(escalatorAgentsCfg)) {
+      if (desktopOk(dName) && !clean.includes(dName)) clean.push(dName);
+    }
     bareAgentState.available = clean;
     bareAgentState.registered = registered;
-    // Terminal lane is sinain-INELIGIBLE: the sidecar can't host a REPL. The
+    // Terminal lane is sinain/desktop-INELIGIBLE: neither can host a REPL. The
     // interactive terminal draws from this filtered roster.
-    const terminalRoster = clean.filter((a) => !isSinainProfile(escalatorAgentsCfg, a));
+    const terminalRoster = clean.filter(
+      (a) => !isSinainProfile(escalatorAgentsCfg, a) && !isDesktopProfile(escalatorAgentsCfg, a),
+    );
     bareAgentState.terminalAvailable = terminalRoster;
     // Decoupled defaults: chat lane prefers `default` (sinain-eligible);
     // terminal lane prefers `terminalDefault`, then the reported `current`,
@@ -1494,36 +1522,10 @@ async function main() {
 
     getThreadSession: (regionId: string) => escalator.threadSession(regionId),
 
-    getRegionTask: async (regionId: string) => {
-      // Fork threads have no tracked region — their seed is the MAIN
-      // transcript snapshot taken at fork time (terminal path).
-      const forkSeed = forkSeeds.get(regionId);
-      if (forkSeed) return forkSeed;
-      const region = regionTracker.get(regionId);
-      if (!region) return null;
-      // Enrich the terminal seed with knowledge-graph facts about the issue's
-      // topic + app — same store the escalation enrichment uses. HARD TIME
-      // BUDGET: the triplestore query has a ~5s cold start (python+sqlite),
-      // which blew run.sh's fetch timeout and turned every seed into the
-      // "context expired" fallback. The seed must never wait on enrichment —
-      // it already carries MCP instructions so the agent can query the graph
-      // itself.
-      let knowledge = "";
-      try {
-        const entities = [
-          ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
-          ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i)
-            .filter((w) => w.length > 3).slice(0, 5),
-        ];
-        if (entities.length > 0) {
-          knowledge = await Promise.race([
-            queryKnowledgeFactsMulti(entities, 8),
-            new Promise<string>((res) => setTimeout(() => res(""), 1500)),
-          ]);
-        }
-      } catch { /* enrichment is optional */ }
-      return buildRegionTaskText(region, agentLoop.getDigest()?.digest, undefined, knowledge);
-    },
+    // Returns the rich ROI seed text AND stores it under an id for the unified
+    // sinain_roi pull. The terminal, Claude Desktop and ChatGPT all consume the
+    // SAME seed via the SAME mechanic (sinain_roi id=…); this is the one builder.
+    getRegionTask: async (regionId: string) => composeAndStoreRoiSeed(regionId),
 
     getHealthPayload: () => {
       const escStats = escalator.getStats();
@@ -1646,6 +1648,48 @@ async function main() {
   // thread, none for main (the main digest is a separate follow-up concern).
   // Conversation continuity within a thread is a later (resident-session)
   // optimization — same limitation main chat already has.
+  // THE single ROI seed builder. Composes the rich seed (region issue/tip +
+  // source OCR + current digest + long-term knowledge-graph facts), stores it
+  // under a minted id, and returns {id, text}. Every agent surface — the
+  // interactive terminal, Claude Desktop, ChatGPT — pulls this exact seed by id
+  // through the sinain_roi MCP tool. One builder, one store, one pull mechanic.
+  // Knowledge enrichment has a hard 1.5s budget (triplestore cold start); the
+  // seed also carries MCP instructions so the agent can query more itself.
+  async function composeAndStoreRoiSeed(regionId: string): Promise<{ id: string; text: string } | null> {
+    const forkSeed = forkSeeds.get(regionId);
+    if (forkSeed) {
+      const id = roiSeeds.put(forkSeed, regionId);
+      return { id, text: forkSeed };
+    }
+    const region = regionTracker.get(regionId);
+    if (!region) return null;
+    const digest = agentLoop.getDigest()?.digest;
+    // FAST seed: region + OCR + digest, NO knowledge wait — store + return now
+    // so the app (or terminal) launches instantly.
+    const fastText = buildRegionTaskText(region, digest);
+    const id = roiSeeds.put(fastText, regionId);
+    // ASYNC enrich: run the full knowledge-graph query (no 1.5s race — it has a
+    // ~5s cold start) and upgrade the stored seed in place. The agent pulls via
+    // sinain_roi several seconds after launch, by which time this has usually
+    // landed. Best-effort: if the pull beats it, the agent still has the fast
+    // seed + can call sinain_memory_query itself.
+    void (async () => {
+      try {
+        const entities = [
+          ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
+          ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i)
+            .filter((w) => w.length > 3).slice(0, 5),
+        ];
+        if (entities.length === 0) return;
+        const knowledge = await queryKnowledgeFactsMulti(entities, 8);
+        if (knowledge?.trim()) {
+          roiSeeds.update(id, buildRegionTaskText(region, digest, undefined, knowledge));
+        }
+      } catch { /* enrichment is optional */ }
+    })();
+    return { id, text: fastText };
+  }
+
   const routeSinainChat = (text: string, regionId?: string): void => {
     // A user chat/ROI turn must immediately drop ambient escalations: they
     // share this one resident sidecar, and an escalation storm (e.g. while a
@@ -1693,6 +1737,32 @@ async function main() {
       });
   };
 
+  // Desktop chat-app lane: compose the same ROI seed the sidecar would get,
+  // stash it for the sinain_roi MCP pull, then open the app (Claude/ChatGPT) on
+  // a pointer to that seed. No in-process reply stream — the conversation lives
+  // in the desktop app; we just echo a one-line confirmation to the thread feed.
+  const routeDesktopChat = async (text: string, regionId: string | undefined, agentName: string): Promise<void> => {
+    const dType = desktopProfileType(escalatorAgentsCfg, agentName);
+    if (!dType) return;
+    escalator.noteUserChatting();
+    // Same rich seed + same store + same id the terminal pulls — one mechanic.
+    // Main-chat (no region) has no ROI seed: stash the user's text so the app
+    // still has something to pull.
+    const composed = regionId ? await composeAndStoreRoiSeed(regionId) : null;
+    const id = composed ? composed.id : roiSeeds.put(text, "");
+    launchDesktop(dType, id);
+    const appLabel = dType === "claude_desktop" ? "Claude Desktop" : "ChatGPT";
+    const note = `↗ Opened this in ${appLabel} — it pulls the context via sinain_roi.`;
+    if (regionId) {
+      wsHandler.broadcast(note, "normal", "agent", regionId);
+    } else {
+      wsHandler.broadcastRaw({
+        type: "feed", text: note, priority: "normal",
+        ts: Date.now(), channel: "agent", sender: "agent",
+      } as any);
+    }
+  };
+
   // ── Wire overlay commands ──
   setupCommands({
     wsHandler,
@@ -1711,6 +1781,10 @@ async function main() {
       // of the escalation/run.sh path. (Same selector serves region chat below.)
       if (isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
         routeSinainChat(text);
+        return;
+      }
+      if (isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+        void routeDesktopChat(text, undefined, bareAgentState.escalationAgent);
         return;
       }
 
@@ -1844,6 +1918,10 @@ async function main() {
         routeSinainChat(text, regionId);
         return;
       }
+      if (regionId && isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+        void routeDesktopChat(text, regionId, bareAgentState.escalationAgent);
+        return;
+      }
       let task = text;
       let label = "user-command";
       const opts: { regionId?: string; sessionKey?: string } = { regionId };
@@ -1907,6 +1985,13 @@ async function main() {
       pauseEscalationInternal();
       return false;
     },
+      onSetChatgptHarness: (enabled: boolean): void => {
+        chatgptHarnessEnabled = enabled;
+        log(TAG, `chatgpt network harness ${enabled ? "ENABLED (public tunnel exposure)" : "disabled"}`);
+        // Re-evaluate the roster with the new flag — the desktop add/filter in
+        // registerBareAgent surfaces or drops chatgpt-desktop accordingly.
+        registerBareAgent(bareAgentState.available, bareAgentState.escalationAgent, bareAgentState.registered);
+      },
       onSetAgent: (lane: "escalation" | "terminal", agent: string): { ok: boolean; error?: string } => {
       // Empty-string agent = Off (lane disabled). Non-empty agent must be in
       // the lane's roster: the chat/escalation lane draws from the full roster

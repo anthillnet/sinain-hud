@@ -47,6 +47,10 @@ class OverlayShellState extends State<OverlayShell> {
   bool _awaitingFork = false;
   StreamSubscription? _manualRegionSub;
   bool _awaitingManualRegion = false;
+  // Manual ROI ids present BEFORE the current drag-select, so the broadcast
+  // handler can pick the NEWLY-created region instead of re-grabbing an earlier
+  // one (which would keep the user stuck on the first ROI's thread).
+  Set<String> _manualIdsBefore = {};
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -130,13 +134,21 @@ class OverlayShellState extends State<OverlayShell> {
     // IS the declaration of intent to talk about it.
     _manualRegionSub = ws.regionStream.listen((regions) {
       if (!mounted || !_awaitingManualRegion) return;
+      // Pick the region that's NEW since the drag-select started — the
+      // broadcast still includes earlier manual ROIs, and grabbing the first
+      // r-man-* would re-select an old one (reusing its thread). Fall back to
+      // the newest-by-id (base36 timestamp) if the snapshot missed it.
+      RegionHighlight? fresh;
       for (final r in regions) {
-        if (r.id.startsWith('r-man-')) {
-          _awaitingManualRegion = false;
-          _selectThread(r.id);
-          break;
-        }
+        if (!r.id.startsWith('r-man-') || _manualIdsBefore.contains(r.id)) continue;
+        if (fresh == null || r.id.compareTo(fresh.id) > 0) fresh = r;
       }
+      if (fresh == null) return; // new region not in this batch yet — wait
+      _awaitingManualRegion = false;
+      // Register its tab (eye-tap path does this; manual path must too) so the
+      // ROI gets a distinct, switchable tab instead of silently replacing.
+      ws.registerRegionThread(fresh.id, fresh.issue);
+      _selectThread(fresh.id);
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
@@ -526,6 +538,12 @@ class OverlayShellState extends State<OverlayShell> {
             final ws = context.read<WebSocketService>();
             final sel = await _windowService.selectRegion();
             if (sel == null) return; // cancelled
+            // Snapshot existing manual ROIs so the broadcast handler can tell
+            // the new one apart from earlier ones still in the region list.
+            _manualIdsBefore = ws.regions
+                .where((r) => r.id.startsWith('r-man-'))
+                .map((r) => r.id)
+                .toSet();
             _awaitingManualRegion = true;
             ws.sendRegionSelect(sel);
           },

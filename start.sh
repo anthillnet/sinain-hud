@@ -301,8 +301,8 @@ PIDS+=("$CORE_PID")
 
 # ── 3. Health-check sinain-core ────────────────────────────────────────────
 # Paranoid mode needs longer — local model distillation at startup is slower
-HEALTH_TIMEOUT=15
-if [ "$PARANOID_MODE" = true ]; then HEALTH_TIMEOUT=45; fi
+HEALTH_TIMEOUT="${SINAIN_HEALTH_TIMEOUT:-15}"
+if [ "$PARANOID_MODE" = true ]; then HEALTH_TIMEOUT="${SINAIN_HEALTH_TIMEOUT:-45}"; fi
 CORE_OK=false
 for i in $(seq 1 $HEALTH_TIMEOUT); do
   if curl -sf http://localhost:9500/health >/dev/null 2>&1; then

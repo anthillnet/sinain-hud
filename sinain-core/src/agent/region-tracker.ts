@@ -505,7 +505,7 @@ export function buildRegionTaskText(
   const parts = region.manual
     ? [
         `[Region — user-selected] ${region.issue}`,
-        `The user drag-selected this screen area to start a conversation about it.`,
+        `The user pointed at this screen area to get your help with whatever they're doing here — treat it as context, not as something to describe back.`,
       ]
     : [
         `[Region — ${region.action ?? "help"}] ${region.issue}`,
@@ -529,6 +529,12 @@ export function buildRegionTaskText(
     `screen/audio + situation summary). Query them when ` +
     `the seed above isn't enough.`,
   );
-  parts.push(`\nAct on the specific issue above. Be concrete and concise.`);
+  parts.push(
+    `\nYou're a hands-on assistant, not a screen-reader. Use the above as context ` +
+    `and HELP with what the user is actually doing — answer their question, ` +
+    `diagnose the problem, write the fix, suggest the next step. If their goal ` +
+    `isn't clear from the context, ask one short question. Don't narrate or ` +
+    `summarize the screen — they can already see it.`,
+  );
   return parts.join("\n");
 }
