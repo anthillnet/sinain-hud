@@ -342,6 +342,8 @@ export function loadConfig(): CoreConfig {
 
   return {
     port: intEnv("PORT", 9500),
+    // Loopback-only by default; SINAIN_BIND_HOST=0.0.0.0 opts into LAN exposure.
+    host: env("SINAIN_BIND_HOST", "127.0.0.1"),
     audioConfig,
     micConfig,
     micEnabled,

@@ -617,6 +617,9 @@ export interface PermissionsConfig {
 
 export interface CoreConfig {
   port: number;
+  /** Network interface to bind. Defaults to 127.0.0.1 (loopback only).
+   *  Set SINAIN_BIND_HOST=0.0.0.0 to expose on the LAN (opt-in). */
+  host: string;
   audioConfig: AudioPipelineConfig;
   micConfig: AudioPipelineConfig;
   micEnabled: boolean;

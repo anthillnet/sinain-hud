@@ -529,20 +529,28 @@ async function queryKnowledgeAsOfMulti(entity: string, date: string): Promise<st
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
+      // SECURITY: entity/date are caller-supplied. The program text is a fixed
+      // constant; all dynamic values are passed as argv (sys.argv[1..4]) so they
+      // enter Python as runtime string data and can never be parsed as code.
       const pyCode = `
-import sys, json; sys.path.insert(0, "${scriptsDir}")
-from datetime import datetime; from triplestore import TripleStore
-store = TripleStore("${dbPath}")
-d = datetime.fromisoformat("${date}")
+import sys, json
+sys.path.insert(0, sys.argv[1])
+from datetime import datetime
+from triplestore import TripleStore
+store = TripleStore(sys.argv[2])
+d = datetime.fromisoformat(sys.argv[3])
+entity = sys.argv[4]
 # Query both entity:X and fact:X-* patterns
-result = store.entity_as_of("entity:${entity}", d)
+result = store.entity_as_of("entity:" + entity, d)
 if not result:
-    result = store.entity_as_of("${entity}", d)
+    result = store.entity_as_of(entity, d)
 print(json.dumps({k: v for k, v in result.items()}, ensure_ascii=False))
 `;
-      const out = execFileSync(PYTHON_BIN, ["-c", pyCode], {
-        timeout: 5000, encoding: "utf-8",
-      }).trim();
+      const out = execFileSync(
+        PYTHON_BIN,
+        ["-c", pyCode, scriptsDir, dbPath, date, entity],
+        { timeout: 5000, encoding: "utf-8" },
+      ).trim();
       if (out && out !== "{}") return out;
     } catch { /* skip */ }
   }
@@ -645,15 +653,19 @@ async function importKnowledgeToLocal(data: string): Promise<string> {
   }));
 
   try {
-    // Use triplestore directly via Python
+    // SECURITY: the fact payload arrives via stdin (untrusted, parsed as JSON
+    // data). The program text is a fixed constant; scriptsDir/dbPath/timestamp
+    // are passed as argv (sys.argv[1..3]) so nothing dynamic is parsed as code.
+    const nowIso = new Date().toISOString();
     const script = `
 import json, sys
-sys.path.insert(0, "${scriptsDir}")
+sys.path.insert(0, sys.argv[1])
 from triplestore import TripleStore
 from knowledge_integrator import _extract_tags
 import hashlib
 
-db_path = "${dbPath}"
+db_path = sys.argv[2]
+now_iso = sys.argv[3]
 store = TripleStore(db_path)
 ops = json.loads(sys.stdin.read())
 stats = {"asserted": 0, "skipped": 0}
@@ -680,8 +692,8 @@ for op in ops:
     store.assert_triple(tx, entity_id, "attribute", op.get("attribute", "value"))
     store.assert_triple(tx, entity_id, "value", value)
     store.assert_triple(tx, entity_id, "confidence", str(op.get("confidence", 0.7)))
-    store.assert_triple(tx, entity_id, "first_seen", "${new Date().toISOString()}")
-    store.assert_triple(tx, entity_id, "last_reinforced", "${new Date().toISOString()}")
+    store.assert_triple(tx, entity_id, "first_seen", now_iso)
+    store.assert_triple(tx, entity_id, "last_reinforced", now_iso)
     store.assert_triple(tx, entity_id, "reinforce_count", "1")
     if op.get("domain"):
         store.assert_triple(tx, entity_id, "domain", op["domain"])
@@ -700,11 +712,15 @@ store.close()
 print(json.dumps(stats))
 `;
 
-    const result = execFileSync(PYTHON_BIN, ["-c", script], {
-      input: JSON.stringify(graphOps),
-      timeout: 10_000,
-      encoding: "utf-8",
-    });
+    const result = execFileSync(
+      PYTHON_BIN,
+      ["-c", script, scriptsDir, dbPath, nowIso],
+      {
+        input: JSON.stringify(graphOps),
+        timeout: 10_000,
+        encoding: "utf-8",
+      },
+    );
 
     const stats = JSON.parse(result.trim());
     return JSON.stringify({ ok: true, stats, imported: stats.asserted, skipped: stats.skipped });

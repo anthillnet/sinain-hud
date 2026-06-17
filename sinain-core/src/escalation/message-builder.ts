@@ -157,15 +157,18 @@ export function buildEscalationMessage(
   const errors = context.screen.filter(e => hasErrorPattern(e.ocr));
   const hasErrors = errors.length > 0;
 
-  // Privacy levels for agent_gateway destination
-  let ocrLevel: import("../types.js").PrivacyLevel = "full";
-  let audioLevel: import("../types.js").PrivacyLevel = "full";
-  let titlesLevel: import("../types.js").PrivacyLevel = "full";
+  // Privacy levels for agent_gateway destination.
+  // SECURITY: default to "none" (fail CLOSED) — if privacy isn't initialized
+  // yet, suppress rather than ship full OCR/audio to the (possibly remote)
+  // OpenClaw gateway. levelFor() overwrites these once privacy is ready.
+  let ocrLevel: import("../types.js").PrivacyLevel = "none";
+  let audioLevel: import("../types.js").PrivacyLevel = "none";
+  let titlesLevel: import("../types.js").PrivacyLevel = "none";
   try {
     ocrLevel = levelFor("screen_ocr", "agent_gateway");
     audioLevel = levelFor("audio_transcript", "agent_gateway");
     titlesLevel = levelFor("window_titles", "agent_gateway");
-  } catch { /* privacy not initialized */ }
+  } catch { /* privacy not initialized — levels stay "none" (fail closed) */ }
 
   const applyOcr = (text: string) => applyLevel(text.slice(0, context.preset.maxOcrChars), ocrLevel, "ocr");
   const applyAudio = (text: string) => applyLevel(text.slice(0, context.preset.maxTranscriptChars), audioLevel, "audio");
