@@ -70,11 +70,14 @@ export class EntityCache {
       const names = new Set<string>();
       for (const dbPath of dbPaths) {
         try {
+          // SECURITY: scriptsDir/dbPath pass as argv (sys.argv[1..2]) — fixed
+          // program text, no path interpolated into the source string.
           const out = execFileSync("python3", [
             "-c",
-            `import sys; sys.path.insert(0, "${dirname(scriptPath)}"); ` +
-            `from triplestore import TripleStore; store = TripleStore("${dbPath}"); ` +
+            `import sys; sys.path.insert(0, sys.argv[1]); ` +
+            `from triplestore import TripleStore; store = TripleStore(sys.argv[2]); ` +
             `[print(n) for _, n in store.entities_with_attr("name") if _.startswith("entity:")]`,
+            dirname(scriptPath), dbPath,
           ], { timeout: 5000, encoding: "utf-8" });
           for (const line of out.split("\n")) {
             const name = line.trim();
