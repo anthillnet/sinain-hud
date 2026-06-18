@@ -256,8 +256,13 @@ def main():
             log(f"first frame: {frame.size[0]}x{frame.size[1]} (scale={config['capture']['scale']})")
             _logged_first_frame = True
 
-        # 1. Check app/window change (first frame always treated as app change)
-        app_changed, window_changed, app_name, window_title = app_detector.detect_change()
+        # 1. Check app/window change (first frame always treated as app change).
+        # Pass the captured display so app detection reports the frontmost window
+        # ON THAT display — not the global frontmost, which may be an app on
+        # another screen (mismatching the OCR'd content and breaking ROI scoping).
+        app_changed, window_changed, app_name, window_title = app_detector.detect_change(
+            getattr(capture, "last_display", 0)
+        )
         if _is_first_frame:
             app_changed = True  # force context event on startup
 
