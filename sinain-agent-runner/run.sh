@@ -863,6 +863,9 @@ if [ -n "$INTERACTIVE_MODE" ]; then
   if [ "$INTERACTIVE_MODE" = "region" ]; then
     TASK_JSON=$(curl -sf -m 12 "$CORE_URL/region/$INTERACTIVE_REGION/task" 2>/dev/null || true)
     task=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null || true)
+    # Unified pull handle: the agent fetches this exact seed via sinain_roi(id) —
+    # same mechanic as Claude Desktop / ChatGPT (one seed, one store, one tool).
+    ROI_SEED_ID=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('roiSeedId',''))" 2>/dev/null || true)
     SESS_ID=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sessionId',''))" 2>/dev/null || true)
     SESS_NEW=$(printf '%s' "$TASK_JSON" | python3 -c "import sys,json; print('true' if json.load(sys.stdin).get('isNew') else 'false')" 2>/dev/null || true)
     if [ -z "$task" ]; then
@@ -927,12 +930,14 @@ PY
     printf '%s\n' "$task"
     exit 0
   fi
-  # Unified seeding for ALL agent TUIs: write the task to a file and emit
-  # the ⟦SINAIN-SEED:<path>⟧ marker — the overlay thread terminal types a
-  # pointer message into the TUI once it's ready (output quiescence + modal
-  # detection on the Dart side). One mechanism instead of per-CLI prompt
-  # flags, which proved unreliable (claude's trust modal eats positionals,
-  # openclaude drops them entirely, hermes/codex have no usable flag).
+  # Unified seeding for ALL agent TUIs. Two markers, both consumed by the
+  # overlay thread terminal (output quiescence + modal detection on the Dart
+  # side), which types a pointer into the TUI once it's ready:
+  #   ⟦SINAIN-ROI:<id>⟧   → "Use the sinain_roi tool with id <id> …"  (region
+  #                          mode: the agent PULLS the rich seed via MCP — the
+  #                          same one Claude Desktop / ChatGPT pull. One mechanic.)
+  #   ⟦SINAIN-SEED:<path>⟧ → "Read <path> …"  (fallback: MAIN mode / no region id,
+  #                          where there's no ROI seed to pull — embed the digest.)
   # Session continuity: an existing thread session resumes with its full
   # history — no seed needed. Only brand-new sessions get the typed seed.
   RESUME_ARGS=()
@@ -946,9 +951,13 @@ PY
   if [ "${SESS_NEW:-true}" != "false" ]; then
     case "$type" in
       claude|openclaude|codex|hermes)
-        SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
-        printf '%s' "$task" > "$SEED_FILE"
-        echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+        if [ -n "${ROI_SEED_ID:-}" ]; then
+          echo "⟦SINAIN-ROI:${ROI_SEED_ID}⟧"
+        else
+          SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
+          printf '%s' "$task" > "$SEED_FILE"
+          echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+        fi
         ;;
     esac
   else

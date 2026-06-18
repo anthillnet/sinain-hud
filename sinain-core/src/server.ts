@@ -8,6 +8,7 @@ import type { WebDb, BookmarkStatus } from "./web-db/store.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer, type SemanticSenseEvent, type TextDelta } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
+import { roiSeeds } from "./chat/roi-seeds.js";
 import { log, error } from "./log.js";
 
 const TAG = "server";
@@ -1574,10 +1575,11 @@ export interface ServerDeps {
   getEscalationPending?: () => any;
   isEscalationPaused?: () => boolean;
   respondEscalation?: (id: string, response: string) => any;
-  /** Composed task text for a region (issue + OCR + digest) — used by the
-   *  thread-terminal to seed an interactive spawn-agent session with the
-   *  exact context the headless ROI Run would send. */
-  getRegionTask?: (regionId: string) => Promise<string | null>;
+  /** Composed rich ROI seed (issue + OCR + digest + knowledge), stored under an
+   *  id for the unified sinain_roi pull. Returns {id, text}: `text` for legacy
+   *  embedding, `id` so the terminal can instead pull via sinain_roi — the same
+   *  mechanic Claude Desktop / ChatGPT use. */
+  getRegionTask?: (regionId: string) => Promise<{ id: string; text: string } | null>;
   /** Stable agent session for a thread (get-or-create) — terminals resume it. */
   getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
@@ -1800,14 +1802,16 @@ export function createAppServer(deps: ServerDeps) {
       // ── /region/:id/task — composed context for terminal-mode ROI runs ──
       if (req.method === "GET" && url.pathname.startsWith("/region/") && url.pathname.endsWith("/task")) {
         const regionId = url.pathname.slice("/region/".length, -"/task".length);
-        const text = (await deps.getRegionTask?.(regionId)) ?? null;
-        if (!text) {
+        const seed = (await deps.getRegionTask?.(regionId)) ?? null;
+        if (!seed) {
           res.statusCode = 404;
           res.end(JSON.stringify({ ok: false, error: "unknown region" }));
           return;
         }
         const sess = deps.getThreadSession?.(regionId);
-        res.end(JSON.stringify({ ok: true, text, ...(sess ?? {}) }));
+        // `text` kept for back-compat; `roiSeedId` is the unified pull handle —
+        // the terminal can `sinain_roi(id)` instead of embedding the text.
+        res.end(JSON.stringify({ ok: true, text: seed.text, roiSeedId: seed.id, ...(sess ?? {}) }));
         return;
       }
 
@@ -2574,6 +2578,16 @@ export function createAppServer(deps: ServerDeps) {
         const config = deps.getBareAgentConfig?.() ?? { escalationAgent: "", terminalAgent: "", registered: false };
         const task = deps.getSpawnPending?.() ?? null;
         res.end(JSON.stringify({ ok: true, task, config }));
+        return;
+      }
+
+      // ── /roi/pending — desktop chat apps pull the ROI seed by id via the
+      //    sinain_roi MCP tool. Core stashed it when routing the chat turn to a
+      //    desktop agent (routeDesktopChat). No id → most recent seed. ──
+      if (req.method === "GET" && url.pathname === "/roi/pending") {
+        const s = roiSeeds.get(url.searchParams.get("id"));
+        if (!s) { res.end(JSON.stringify({ ok: false, error: "no matching seed" })); return; }
+        res.end(JSON.stringify({ ok: true, id: s.id, regionId: s.regionId, seed: s.seed }));
         return;
       }
 

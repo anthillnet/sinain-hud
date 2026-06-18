@@ -15,6 +15,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyFontSize = 'font_size';
   static const _keyAccentColor = 'accent_color';
   static const _keyAutoDetectIssues = 'auto_detect_issues';
+  static const _keyChatgptHarness = 'chatgpt_harness';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -35,6 +36,7 @@ class SettingsService extends ChangeNotifier {
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
       accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
       autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
+      chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
     );
     notifyListeners();
   }
@@ -122,6 +124,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setAutoDetectIssues(bool value) async {
     _settings.autoDetectIssues = value;
     await _prefs.setBool(_keyAutoDetectIssues, value);
+    notifyListeners();
+  }
+
+  Future<void> setChatgptHarness(bool value) async {
+    _settings.chatgptHarness = value;
+    await _prefs.setBool(_keyChatgptHarness, value);
     notifyListeners();
   }
 }

@@ -131,11 +131,13 @@ class ThreadTerminalSession {
     // initial render — typing earlier risks the raw-mode init flushing the
     // TTY input queue), with a 6s hard cap for TUIs that keep animating.
     var seedFile = '';
+    var seedRoiId = ''; // ⟦SINAIN-ROI:<id>⟧ — pull the seed via sinain_roi(id)
     var seedTyped = false;
     var carry = '';
     Timer? settle;
     Timer? cap;
     final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
+    final roiMarker = RegExp('⟦SINAIN-ROI:([^⟧]+)⟧');
     // Startup modals (claude's folder-trust check, theme pickers) own the
     // keyboard — typing into them answers the dialog and the seed is lost.
     // We read the ACTUAL rendered screen from xterm's buffer (not raw bytes:
@@ -192,15 +194,23 @@ class ThreadTerminalSession {
       attempts++;
       attemptInFlight = true;
       settle?.cancel();
-      // Probe must be unique to our TYPED text — NOT the seed path, which is
-      // also in run.sh's ⟦SINAIN-SEED:…⟧ marker line (still in the buffer),
-      // or every verify falsely "confirms". This phrase appears only in the
-      // message we type (in the input box, or echoed in the transcript once
-      // submitted), never in the marker.
-      const pointer = 'and follow its instructions.';
-      const probe = 'follow its instructions';
+      // Probe must be unique to our TYPED text — NOT the marker line (still in
+      // the buffer), or every verify falsely "confirms". These phrases appear
+      // only in the message we type, never in the ⟦SINAIN-…⟧ marker.
+      //   ROI mode  → pull the rich seed via the sinain_roi MCP tool (same
+      //               mechanic as Claude Desktop / ChatGPT).
+      //   SEED mode → read the embedded seed file (MAIN / no-region fallback).
+      final String typed;
+      final String probe;
+      if (seedRoiId.isNotEmpty) {
+        typed = 'Call the sinain_roi tool (id "$seedRoiId") to load context on what I\'m working on, then help me with it.';
+        probe = 'sinain_roi tool';
+      } else {
+        typed = 'Read $seedFile and follow its instructions.';
+        probe = 'follow its instructions';
+      }
       if (kDebugMode) print('[seed] attempt $attempts — typing pointer');
-      pty.write(const Utf8Encoder().convert('Read $seedFile $pointer'));
+      pty.write(const Utf8Encoder().convert(typed));
       Timer(const Duration(milliseconds: 400), () {
         if (!session.exited) pty.write(const Utf8Encoder().convert('\r'));
       });
@@ -228,15 +238,23 @@ class ThreadTerminalSession {
       terminal.write(data);
       if (seedTyped) return;
       lastOutputAt = DateTime.now();
-      if (seedFile.isNotEmpty) {
+      if (seedFile.isNotEmpty || seedRoiId.isNotEmpty) {
         if (seedDone || seedTyped) return;
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 800), attemptSeed);
         return;
       }
       carry += data;
+      final roi = roiMarker.firstMatch(carry);
       final m = seedMarker.firstMatch(carry);
-      if (m != null) {
+      if (roi != null) {
+        seedRoiId = roi.group(1)!;
+        if (kDebugMode) print('[seed] ROI marker seen → sinain_roi($seedRoiId)');
+        carry = '';
+        // See the SEED branch below: don't arm settle here (agent hasn't drawn
+        // yet); its first output arms it. cap is the long safety net.
+        cap = Timer(const Duration(seconds: 12), attemptSeed);
+      } else if (m != null) {
         seedFile = m.group(1)!;
         if (kDebugMode) print('[seed] marker seen → $seedFile');
         carry = '';

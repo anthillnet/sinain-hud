@@ -24,6 +24,10 @@ class HudSettings {
   /// Grammarly mode: show clickable region eyes at actionable screen areas.
   bool autoDetectIssues;
 
+  /// ChatGPT network harness: expose the local MCP server over a public tunnel
+  /// so ChatGPT can pull ROI context. Off by default — security-sensitive.
+  bool chatgptHarness;
+
   HudSettings({
     this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
@@ -36,6 +40,7 @@ class HudSettings {
     this.fontSize = 12.0,
     this.accentColor = 0xFF00FF88,
     this.autoDetectIssues = false,
+    this.chatgptHarness = false,
   });
 
   HudTab get nextTab {
@@ -56,6 +61,7 @@ class HudSettings {
     double? fontSize,
     int? accentColor,
     bool? autoDetectIssues,
+    bool? chatgptHarness,
   }) {
     return HudSettings(
       overlayState: overlayState ?? this.overlayState,
@@ -69,6 +75,7 @@ class HudSettings {
       fontSize: fontSize ?? this.fontSize,
       accentColor: accentColor ?? this.accentColor,
       autoDetectIssues: autoDetectIssues ?? this.autoDetectIssues,
+      chatgptHarness: chatgptHarness ?? this.chatgptHarness,
     );
   }
 }
