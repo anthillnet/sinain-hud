@@ -1481,6 +1481,13 @@ async function main() {
     importConcept: (envelope, conflict) => importConceptBundle(envelope, conflict),
     isScreenActive: () => screenActive,
 
+    onMotion: (dx, dy, changedBoxes, app, display) => {
+      if (!config.agentConfig.regionsEnabled) return;
+      const moved = regionTracker.applyMotion(dx, dy, changedBoxes, app, display);
+      if (moved) {
+        wsHandler.broadcastRaw({ type: "region_highlight", regions: moved, ts: Date.now() });
+      }
+    },
     onSenseEvent: (event: SenseEvent) => {
       // Respect toggle_screen — if user disabled screen, ignore sense events
       if (!screenActive) return;

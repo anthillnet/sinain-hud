@@ -120,6 +120,8 @@ def main():
     extractor = ROIExtractor(
         padding=config["detection"]["roiPadding"],
     )
+    from .motion import MotionEstimator
+    motion = MotionEstimator()
     log("initializing OCR...")
     ocr = create_ocr(config)
     gate = DecisionGate(
@@ -265,6 +267,23 @@ def main():
         )
         if _is_first_frame:
             app_changed = True  # force context event on startup
+
+        # 1b. Frame-rate visual motion → glide/retire ROI eyes (ungated, cheap).
+        # Reuses this frame's grayscale; sends scroll (dx,dy) + replaced-content
+        # boxes to core so eyes track content between OCR ticks. Reset on app/
+        # window change (content is discontinuous → no meaningful translation).
+        try:
+            _gray = np.array(frame.convert("L"))
+            if app_changed or window_changed:
+                motion.reset()
+            else:
+                m = motion.estimate(_gray)
+                if m is not None:
+                    _dx, _dy, _boxes = m
+                    sender.send_motion(_dx, _dy, _boxes, app_name,
+                                       getattr(capture, "last_display", 0))
+        except Exception as _e:
+            pass
 
         # Adaptive SSIM threshold
         now_sec = time.time()

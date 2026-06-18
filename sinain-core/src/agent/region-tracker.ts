@@ -25,6 +25,15 @@ interface TrackedRegion {
   localMisses?: number;
 }
 
+/** True if two [x,y,w,h] rects overlap (touching edges don't count). */
+function rectsOverlap(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): boolean {
+  return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] &&
+         a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
 /** Largest single-axis shift between two bboxes, in full-frame pixels. */
 function bboxShift(
   a: [number, number, number, number],
@@ -585,6 +594,59 @@ export class RegionTracker {
     const current = this.current();
     debug(TAG, `local re-anchor (app=${frameApp}): ${current.length} active`);
     return current;
+  }
+
+  /**
+   * Sense-driven eye geometry (frame-rate, no LLM/OCR). Reuses sense_client's
+   * change computation:
+   *  - (dx,dy): scroll translation — eyes GLIDE with content (precise movement,
+   *    independent of the slower OCR re-match which only corrects on gated ticks).
+   *  - changedBoxes: regions that changed BEYOND the scroll (content replaced).
+   *    An eye whose (glided) box overlaps one is DIMMED — its content is gone,
+   *    detected the instant it happens instead of waiting out the miss window.
+   * Scoped to app+display. Eyes scrolled fully off-frame are dimmed too. Manual
+   * eyes glide (content scrolls) but are never dimmed (user-pinned). Returns the
+   * changed set or null.
+   */
+  applyMotion(
+    dx: number, dy: number,
+    changedBoxes: [number, number, number, number][],
+    appRaw: string, display: number,
+  ): RegionHighlight[] | null {
+    const app = (appRaw || "").toLowerCase().trim();
+    let changed = false;
+    for (const t of this.tracked.values()) {
+      const regionApp = (t.region.app || "").toLowerCase().trim();
+      if (app && regionApp && regionApp !== app) continue;
+      if (t.region.display !== undefined && display && t.region.display !== display) continue;
+      const b = t.region.bbox;
+      const fs = t.region.frameSize;
+      if (!b || !fs) continue;
+
+      // Glide by the scroll translation.
+      let [x, y, w, h] = b;
+      if (dx !== 0 || dy !== 0) {
+        const nx = x + dx, ny = y + dy;
+        if (ny + h < 0 || ny > fs[1] || nx + w < 0 || nx > fs[0]) {
+          // Scrolled fully out of view.
+          if (!t.region.manual && !t.region.pending) {
+            t.region.pending = true; t.restoredAtTick = this.tick; changed = true;
+          }
+          continue;
+        }
+        x = Math.max(0, Math.min(nx, fs[0] - 1));
+        y = Math.max(0, Math.min(ny, fs[1] - 1));
+        t.region.bbox = [x, y, w, h];
+        changed = true;
+      }
+
+      // Content replaced under the eye → gone. Dim (not for manual eyes).
+      if (!t.region.manual && !t.region.pending &&
+          changedBoxes.some(cb => rectsOverlap([x, y, w, h], cb))) {
+        t.region.pending = true; t.restoredAtTick = this.tick; changed = true;
+      }
+    }
+    return changed ? this.current() : null;
   }
 
   /** Current region set (insertion order). */

@@ -1558,6 +1558,16 @@ export interface ServerDeps {
   profiler?: Profiler;
   costTracker?: CostTracker;
   onSenseEvent: (event: SenseEvent) => void;
+  /** Frame-rate visual change from sense_client (cheap, ungated by OCR
+   *  cooldown): (dx,dy) is the scroll translation — eyes glide with content;
+   *  changedBoxes are frame-px regions that changed BEYOND the scroll (content
+   *  replaced) — eyes there are dimmed (gone). Together they move eyes
+   *  precisely and retire them the instant their content leaves. */
+  onMotion?: (
+    dx: number, dy: number,
+    changedBoxes: [number, number, number, number][],
+    app: string, display: number,
+  ) => void;
   onSenseDelta?: (data: { app: string; activity: string; changes: TextDelta[]; priority?: string; ts: number }) => void;
   onFeedPost: (text: string, priority: string) => void;
   isScreenActive: () => boolean;
@@ -1675,6 +1685,23 @@ export function createAppServer(deps: ServerDeps) {
     const url = new URL(req.url || "/", `http://localhost:${config.port}`);
 
     try {
+      // ── /motion ── frame-rate scroll displacement (cheap; ungated). Shifts
+      // live eyes by (dx,dy) so they glide with content between OCR ticks.
+      if (req.method === "POST" && url.pathname === "/motion") {
+        if (!deps.isScreenActive()) { res.end(JSON.stringify({ ok: true, gated: true })); return; }
+        const body = await readBody(req, 8192);
+        const d = JSON.parse(body);
+        const dx = Number(d.dx), dy = Number(d.dy);
+        const boxes: [number, number, number, number][] = Array.isArray(d.changed)
+          ? d.changed.filter((b: any) => Array.isArray(b) && b.length === 4).slice(0, 16)
+          : [];
+        if (Number.isFinite(dx) && Number.isFinite(dy)) {
+          deps.onMotion?.(dx, dy, boxes, String(d.app || ""), Number(d.display) || 0);
+        }
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
       // ── /sense ──
       if (req.method === "POST" && url.pathname === "/sense") {
         if (!deps.isScreenActive()) {

@@ -26,6 +26,19 @@ class SenseSender:
         self._last_stats_ts: float = time.time()
         self._consecutive_failures: int = 0
 
+    def send_motion(self, dx: float, dy: float, changed: list, app: str, display: int) -> None:
+        """POST /motion — cheap, ungated, fire-and-forget (no retry): frame-rate
+        scroll (dx,dy) + changed-region boxes so core can glide/retire eyes."""
+        try:
+            requests.post(
+                f"{self.url}/motion",
+                json={"dx": round(dx, 1), "dy": round(dy, 1), "changed": changed,
+                      "app": app, "display": display},
+                timeout=1,
+            )
+        except Exception:
+            pass  # best-effort; the next frame supersedes it
+
     def send(self, event: SenseEvent) -> bool:
         """POST /sense with JSON payload. Returns True on success."""
         payload = {
