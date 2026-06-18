@@ -19,6 +19,7 @@ import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
+import { RegionDetector } from "./agent/region-detector.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -32,7 +33,7 @@ import { createAppServer } from "./server.js";
 import { WebDb } from "./web-db/store.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
-import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
+import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { log, warn, error } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
@@ -943,6 +944,30 @@ async function main() {
   // Consumed by the thread's first chat message and by terminal seeding.
   const forkSeeds = new Map<string, string>();
 
+  // Shared region sink — RegionTracker.update + broadcast on change. Fed by
+  // BOTH the cloud analyzer (loop.onRegions) and the Tier-0 SLM detector.
+  const pushRegions = (regions: RawRegion[] | undefined, ctx: ContextWindow): void => {
+    const changed = regionTracker.update(regions, ctx);
+    if (changed) {
+      wsHandler.broadcastRaw({ type: "region_highlight", regions: changed, ts: Date.now() });
+    }
+  };
+
+  // Tier-0 local-SLM region lane (experiment). Owns ROI detection when enabled,
+  // running on its own fast, screen-change-driven cadence; the cloud loop then
+  // yields regions to it (see onRegions below) and keeps only hud/digest.
+  const regionDetector = new RegionDetector({
+    feedBuffer,
+    senseBuffer,
+    config: config.regionSlmConfig,
+    maxAgeMs: config.agentConfig.maxAgeMs,
+    isEnabled: () => config.agentConfig.regionsEnabled && config.regionSlmConfig.enabled,
+    onRegions: pushRegions,
+  });
+  if (config.regionSlmConfig.enabled) {
+    log(TAG, `region-slm lane ON: model=${config.regionSlmConfig.model} debounce=${config.regionSlmConfig.debounceMs}ms endpoint=${config.regionSlmConfig.endpoint}`);
+  }
+
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
     feedBuffer,
@@ -963,14 +988,10 @@ async function main() {
       escalator.pushSituationMd(content);
     },
     onRegions: (regions, contextWindow) => {
-      const changed = regionTracker.update(regions, contextWindow);
-      if (changed) {
-        wsHandler.broadcastRaw({
-          type: "region_highlight",
-          regions: changed,
-          ts: Date.now(),
-        });
-      }
+      // When the Tier-0 SLM lane owns detection, the cloud loop yields regions
+      // to it (keeps only hud/digest) — a clean A/B and no two detectors fighting.
+      if (config.regionSlmConfig.enabled) return;
+      pushRegions(regions, contextWindow);
     },
     // Gate SITUATION.md writes (and the subsequent push) on a gateway lane
     // being active — see escalator.shouldDriveGateway. Users with no openclaw
@@ -1514,6 +1535,10 @@ async function main() {
       // real regions re-detect fast, confirming/re-anchoring the pending eyes
       // and surfacing new ones.
       agentLoop.onNewContext(appChanged || bigChange);
+
+      // Tier-0 SLM region lane runs on the raw screen-change cadence (no-op
+      // unless REGION_SLM_ENABLED) \u2014 decoupled from the cloud loop's debounce.
+      regionDetector.onContextChange();
     },
 
     onFeedPost: (text: string, priority: string) => {

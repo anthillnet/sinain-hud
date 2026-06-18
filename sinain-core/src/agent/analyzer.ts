@@ -127,7 +127,7 @@ const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
  * Build the dynamic user prompt (changes every tick).
  * Contains the current context data: screen OCR, audio transcripts, app state.
  */
-function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
+export function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
   const now = Date.now();
 
   // [S<id>] prefix lets the LLM anchor regions to a sense event (Grammarly mode)
@@ -254,7 +254,7 @@ const MAX_REGIONS = 3;
 /**
  * Parse regions from LLM response (Grammarly mode).
  */
-function parseRegions(parsed: any): RawRegion[] | undefined {
+export function parseRegions(parsed: any): RawRegion[] | undefined {
   if (!Array.isArray(parsed.regions) || parsed.regions.length === 0) return undefined;
   const regions = parsed.regions
     .filter((r: any) => typeof r?.issue === "string" && r.issue.trim() &&

@@ -395,6 +395,28 @@ export interface AnalysisConfig {
 /** @deprecated Use AnalysisConfig */
 export type AgentConfig = AnalysisConfig;
 
+/**
+ * Tier-0 local-SLM region lane (experiment). When enabled, a small local model
+ * (Ollama) detects actionable screen regions on its own fast cadence — decoupled
+ * from the cloud analyzer's hud/digest call and its debounce — so eyes appear at
+ * near-frame rate with no network. The cloud loop keeps writing hud/digest but
+ * yields region detection to this lane while it's on (clean A/B).
+ */
+export interface RegionSlmConfig {
+  /** Master switch for the local-SLM region detector (default false). */
+  enabled: boolean;
+  /** Ollama model tag, e.g. "phi4-mini", "qwen2.5:7b", "gemma4:e2b". */
+  model: string;
+  /** Ollama base URL (default http://localhost:11434). */
+  endpoint: string;
+  /** Coalescing window after a screen change before detecting (default 500ms). */
+  debounceMs: number;
+  /** Cap on generated tokens — regions JSON is small (default 256). */
+  maxTokens: number;
+  /** Per-call timeout; aborts a slow/superseded generation (default 6000ms). */
+  timeoutMs: number;
+}
+
 export interface AgentResult {
   hud: string;
   digest: string;
@@ -625,6 +647,7 @@ export interface CoreConfig {
   micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AnalysisConfig;
+  regionSlmConfig: RegionSlmConfig;
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
   situationMdPath: string;
