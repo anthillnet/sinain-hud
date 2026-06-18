@@ -40,9 +40,15 @@ export class MacOSCaptureSpawner implements CaptureSpawner {
         args.push("--mic-device", config.device);
       }
     } else {
+      // Screen-capture rate caps the whole region pipeline: the IPC frame
+      // refreshes at this fps, so OCR → /sense → eye re-anchoring can't run
+      // faster. 1 fps made eyes appear late and barely follow scrolling; 4 fps
+      // (downscaled 0.5) keeps eyes tracking content with modest CPU. Tunable
+      // via CAPTURE_FPS for low-power setups.
+      const fps = Number(process.env.CAPTURE_FPS) || 4;
       args.push(
         "--screen-dir", resolve(os.homedir(), ".sinain", "capture"),
-        "--fps", "1",
+        "--fps", String(fps),
         "--scale", "0.5",
       );
     }

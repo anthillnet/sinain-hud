@@ -9,7 +9,9 @@ DEFAULTS = {
     "capture": {
         "mode": "screen",
         "target": 0,
-        "fps": 2.0,
+        # Must keep up with sck-capture's IPC frame rate (CAPTURE_FPS, default 4)
+        # so OCR and downstream eye re-anchoring run at full cadence. Env: SENSE_FPS.
+        "fps": 4.0,
         "scale": 0.5,
     },
     "detection": {
@@ -70,4 +72,10 @@ def load_config(path: str | None = None) -> dict:
                     config[section] = values
         except (json.JSONDecodeError, ValueError):
             pass  # use defaults
+    # Env override for capture fps (kept in sync with sck-capture CAPTURE_FPS).
+    if os.environ.get("SENSE_FPS"):
+        try:
+            config["capture"]["fps"] = float(os.environ["SENSE_FPS"])
+        except ValueError:
+            pass
     return config

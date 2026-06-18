@@ -79,23 +79,43 @@ function anchorByText(issue: string, screen: ScreenEvent[]): ScreenEvent | undef
 function refineToLine(
   issue: string,
   src: ScreenEvent,
-): [number, number, number, number] | undefined {
+): { bbox: [number, number, number, number]; text: string } | undefined {
   const lines = src.ocrLines;
   if (!lines?.length) return undefined;
   const tokens = issue.toLowerCase().split(/[^a-z0-9_а-яё]+/i).filter(t => t.length >= 3);
   if (tokens.length === 0) return undefined;
-  let best: { score: number; bbox: [number, number, number, number] } | undefined;
+  let best: { score: number; bbox: [number, number, number, number]; text: string } | undefined;
   for (const l of lines) {
     if (!Array.isArray(l.bbox) || l.bbox.length !== 4 || !l.text) continue;
     const lt = l.text.toLowerCase();
     const score = tokens.reduce((n, t) => n + (lt.includes(t) ? 1 : 0), 0);
     if (score > 0 && (!best || score > best.score)) {
-      best = { score, bbox: l.bbox };
+      best = { score, bbox: l.bbox, text: l.text };
     }
   }
   // Require a solid match: at least 2 tokens, or all of them for short issues.
   const need = Math.min(2, tokens.length);
-  return best && best.score >= need ? best.bbox : undefined;
+  return best && best.score >= need ? { bbox: best.bbox, text: best.text } : undefined;
+}
+
+/** Find a previously-anchored OCR line verbatim on a fresh frame, returning its
+ *  new bbox. Normalized exact-or-containment match — robust to the line being a
+ *  substring of a longer re-OCR'd line (and vice versa) and to whitespace/case
+ *  drift. This is how an eye follows its content across frames regardless of how
+ *  the LLM phrased the issue. */
+function findLineByText(
+  anchorText: string,
+  frame: ScreenEvent,
+): [number, number, number, number] | undefined {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const target = norm(anchorText);
+  if (target.length < 4) return undefined; // too short to match safely
+  for (const l of frame.ocrLines ?? []) {
+    if (!Array.isArray(l.bbox) || l.bbox.length !== 4 || !l.text) continue;
+    const lt = norm(l.text);
+    if (lt === target || lt.includes(target) || target.includes(lt)) return l.bbox;
+  }
+  return undefined;
 }
 
 export interface RegionTrackerOpts {
@@ -203,6 +223,7 @@ export class RegionTracker {
           if (anchor) {
             existing.region.bbox = anchor.bbox;
             existing.region.frameSize = anchor.frameSize;
+            existing.region.anchorText = anchor.anchorText;
             if (anchor.src.ocr) existing.region.sourceOcr = anchor.src.ocr.slice(0, 2000);
           }
           debug(TAG, `region ${existing.region.id} confirmed (was pending)`);
@@ -221,7 +242,7 @@ export class RegionTracker {
         log(TAG, `skip unanchored region: "${r.issue}" (sourceId=${r.sourceId ?? "-"})`);
         continue;
       }
-      const { src, bbox, frameSize } = anchor;
+      const { src, bbox, frameSize, anchorText } = anchor;
 
       // App-scoped admission: never anchor a NEW eye to a window that isn't
       // frontmost. The sense buffer keeps the previous app's OCR for up to
@@ -245,6 +266,7 @@ export class RegionTracker {
           action: r.action,
           bbox,
           frameSize,
+          anchorText,
           sourceOcr: src.ocr ? src.ocr.slice(0, 2000) : undefined,
           // || not ?? — an empty-string app (app-detector timed out that
           // frame) must fall back to currentApp, else region.app="" and
@@ -278,7 +300,7 @@ export class RegionTracker {
   private resolveAnchor(
     r: RawRegion,
     ctx: ContextWindow,
-  ): { src: ScreenEvent; bbox: [number, number, number, number]; frameSize?: [number, number] } | null {
+  ): { src: ScreenEvent; bbox: [number, number, number, number]; frameSize?: [number, number]; anchorText?: string } | null {
     // Keep the sourceId event as a candidate even if its change-region is
     // full-frame — we may still anchor to a precise OCR line within it.
     let src = r.sourceId !== undefined
@@ -292,8 +314,9 @@ export class RegionTracker {
       ? src.frameSize as [number, number]
       : undefined;
     // Precise OCR-line box first — localized regardless of change-region size.
-    const lineBbox = refineToLine(r.issue, src);
-    if (lineBbox) return { src, bbox: lineBbox, frameSize };
+    // Capture the matched line verbatim so re-anchoring can track it directly.
+    const line = refineToLine(r.issue, src);
+    if (line) return { src, bbox: line.bbox, frameSize, anchorText: line.text };
     // No line match — only anchor to the change-region if it's localized.
     if (!hasPartialBbox(src)) return null;
     return { src, bbox: src.imageBbox as [number, number, number, number], frameSize };
@@ -506,7 +529,16 @@ export class RegionTracker {
       const regionApp = (t.region.app || "").toLowerCase().trim();
       if (regionApp && regionApp !== frameApp) continue; // foreign — archiveForeign owns it
 
-      const newBbox = refineToLine(t.region.issue, frame);
+      // Track the verbatim anchored line first (robust to the issue being a
+      // paraphrase that no longer token-matches); fall back to issue tokens,
+      // refreshing anchorText when that path finds the line.
+      let newBbox = t.region.anchorText
+        ? findLineByText(t.region.anchorText, frame)
+        : undefined;
+      if (!newBbox) {
+        const line = refineToLine(t.region.issue, frame);
+        if (line) { newBbox = line.bbox; t.region.anchorText = line.text; }
+      }
       if (newBbox) {
         t.localMisses = 0;
         // A1: slide to the content's current position (above jitter threshold).

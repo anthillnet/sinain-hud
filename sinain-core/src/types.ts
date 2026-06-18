@@ -102,6 +102,10 @@ export interface RegionHighlight {
   frameSize?: [number, number];
   /** OCR text of the source sense event (context for spawn) */
   sourceOcr?: string;
+  /** Verbatim OCR line the eye is anchored to (the line refineToLine matched).
+   *  Re-anchoring tracks THIS across frames, not the (often paraphrased) issue
+   *  text — so the eye follows its content on scroll/typing. */
+  anchorText?: string;
   /** App the region was detected in */
   app?: string;
   /** Display id (CGDirectDisplayID) the region was detected on — lets the
