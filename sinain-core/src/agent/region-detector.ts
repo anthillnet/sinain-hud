@@ -93,7 +93,19 @@ export class RegionDetector {
     // placeholder lines, and a small model latches onto those as if they were
     // content (emitting bogus issue="(no text)" eyes). The cloud model ignores
     // them; the SLM needs them gone. Skip entirely if nothing has real text.
-    const screen = ctx.screen.filter(e => e.ocr && e.ocr.trim().length > 0);
+    let screen = ctx.screen.filter(e => e.ocr && e.ocr.trim().length > 0);
+    // Focus on the CURRENT app's frames. Right after an app switch the buffer
+    // is still full of the previous app's OCR; feeding all of it makes the SLM
+    // spend its budget on (and emit regions for) the old app — which the tracker
+    // then rejects as foreign — so the new app gets few/no eyes for several
+    // ticks ("super long wait" after a switch). Scoping to currentApp makes the
+    // model detect the screen you're actually on immediately. Fall back to the
+    // unfiltered set if the current app has no OCR frame yet.
+    const cur = (ctx.currentApp || "").toLowerCase().trim();
+    if (cur) {
+      const curOnly = screen.filter(e => (e.meta.app || "").toLowerCase().trim() === cur);
+      if (curOnly.length > 0) screen = curOnly;
+    }
     if (screen.length === 0) return;
     const leanCtx: ContextWindow = { ...ctx, screen };
 

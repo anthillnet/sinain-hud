@@ -32,11 +32,12 @@ DEFAULTS = {
         "minOcrChars": 20,
         "majorChangeThreshold": 0.85,
         # Min gap between emitted sense events. This caps how fast eyes update /
-        # re-anchor (the 4fps capture can't help past this gate). Lowered for
-        # snappier tracking; OCR is local (Apple Vision) so the extra cost is
-        # modest. adaptive applies for ~10s after an app switch.
-        "cooldownMs": 1500,
-        "adaptiveCooldownMs": 800,
+        # re-anchor (the 4fps capture can't help past this gate). Low so eyes
+        # track scroll within ~0.5s instead of in 1.5s steps; OCR is local
+        # (Apple Vision) so the extra cost is modest. adaptive applies for ~10s
+        # after an app switch.
+        "cooldownMs": 700,
+        "adaptiveCooldownMs": 400,
         "contextCooldownMs": 10000,
     },
     "relay": {
