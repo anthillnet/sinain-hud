@@ -31,8 +31,12 @@ DEFAULTS = {
     "gate": {
         "minOcrChars": 20,
         "majorChangeThreshold": 0.85,
-        "cooldownMs": 5000,
-        "adaptiveCooldownMs": 2000,
+        # Min gap between emitted sense events. This caps how fast eyes update /
+        # re-anchor (the 4fps capture can't help past this gate). Lowered for
+        # snappier tracking; OCR is local (Apple Vision) so the extra cost is
+        # modest. adaptive applies for ~10s after an app switch.
+        "cooldownMs": 1500,
+        "adaptiveCooldownMs": 800,
         "contextCooldownMs": 10000,
     },
     "relay": {
