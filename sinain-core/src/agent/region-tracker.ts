@@ -512,8 +512,8 @@ export class RegionTracker {
    *    waiting out the analyzer miss window. Dim-only: the analyzer re-confirms
    *    (clearing pending) if it's still relevant, else the pending leash archives
    *    it. So a false miss self-corrects within a tick.
-   * Manual (user-pinned) and foreign-app eyes are left untouched. Returns the
-   * changed set to broadcast, or null.
+   * Manual (user-pinned), foreign-app, and other-display eyes are left
+   * untouched. Returns the changed set to broadcast, or null.
    */
   reanchorLive(frame: ScreenEvent): RegionHighlight[] | null {
     if (!frame.ocrLines?.length) return null; // need line boxes to re-anchor
@@ -522,6 +522,7 @@ export class RegionTracker {
     const frameSize = frame.frameSize && frame.frameSize.length === 2
       ? frame.frameSize as [number, number]
       : undefined;
+    const frameDisplay = frame.meta.screen;
 
     let changed = false;
     for (const t of this.tracked.values()) {
@@ -547,6 +548,17 @@ export class RegionTracker {
           if (frameSize) t.region.frameSize = frameSize;
           changed = true;
         }
+        // Multi-display: bbox is in THIS frame's display coordinate space, so the
+        // eye's display must travel with it. Capture follows the active display,
+        // so when the user moves a window (or the same text now shows) on another
+        // screen, the eye migrates there — display, bbox and frameSize stay a
+        // consistent triple (the overlay places by display, then scales bbox in
+        // its frameSize). Leaving display stale was the "eye on the secondary
+        // citing primary content" bug.
+        if (frameDisplay !== undefined && t.region.display !== frameDisplay) {
+          t.region.display = frameDisplay;
+          changed = true;
+        }
         // Local presence = re-confirmation: keep alive + un-dim.
         t.lastSeenTick = this.tick;
         if (t.region.pending) {
@@ -554,8 +566,13 @@ export class RegionTracker {
           t.restoredAtTick = undefined;
           changed = true;
         }
-      } else {
-        // A2: content not on this frame — dim after a short miss streak.
+      } else if (frameDisplay === undefined || t.region.display === undefined ||
+                 t.region.display === frameDisplay) {
+        // A2: content absent — but only conclude "gone" when this frame is the
+        // eye's OWN display. A frame from another screen tells us nothing about
+        // the eye's content (we're not capturing its display right now), so
+        // don't dim or count a miss against it — that froze eyes / false-dimmed
+        // across displays. Same-display absence dims after a short miss streak.
         t.localMisses = (t.localMisses ?? 0) + 1;
         if (t.localMisses >= RegionTracker.LOCAL_MISS_LIMIT && !t.region.pending) {
           t.region.pending = true;
