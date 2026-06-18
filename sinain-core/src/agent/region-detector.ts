@@ -89,9 +89,15 @@ export class RegionDetector {
     const ctx = buildContextWindow(
       this.deps.feedBuffer, this.deps.senseBuffer, "lean", this.deps.maxAgeMs,
     );
-    if (ctx.screen.length === 0) return; // nothing on screen to detect against
+    // Drop frames with no real OCR: buildUserPrompt renders them as "(no text)"
+    // placeholder lines, and a small model latches onto those as if they were
+    // content (emitting bogus issue="(no text)" eyes). The cloud model ignores
+    // them; the SLM needs them gone. Skip entirely if nothing has real text.
+    const screen = ctx.screen.filter(e => e.ocr && e.ocr.trim().length > 0);
+    if (screen.length === 0) return;
+    const leanCtx: ContextWindow = { ...ctx, screen };
 
-    const userPrompt = buildUserPrompt(ctx, null, /* withSourceIds */ true);
+    const userPrompt = buildUserPrompt(leanCtx, null, /* withSourceIds */ true);
     const controller = new AbortController();
     this.inflight = controller;
     const timeout = setTimeout(() => controller.abort(), this.deps.config.timeoutMs);
