@@ -927,7 +927,12 @@ async function main() {
   // ── Region tracker (Grammarly mode) ──
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
   // events, broadcasts the set to the overlay when it changes.
-  const regionTracker = new RegionTracker();
+  const regionTracker = new RegionTracker({
+    // Off-screen eyes older than this aren't optimistically flashed back on
+    // app re-entry (their anchored content is stale) — the analyzer re-detects
+    // live ones fresh. Tunable for fast app-bouncers who want a longer window.
+    restoreMaxAgeMs: Number(process.env.REGION_RESTORE_MAX_AGE_MS) || 45_000,
+  });
   // Frontmost app last seen on the sense path — drives instant ROI restore +
   // urgent re-analysis the moment the user switches apps (region snappiness).
   let lastFocusedApp = "";

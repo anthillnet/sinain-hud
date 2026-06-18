@@ -90,6 +90,12 @@ export interface RegionTrackerOpts {
   maxAgeMs?: number;
   /** Max simultaneously tracked regions (default 3) */
   maxRegions?: number;
+  /** Max time an archived eye may sit off-screen and still be eligible for
+   *  optimistic restore on app re-entry (default 45s). Beyond this the eye's
+   *  anchored content is assumed stale — it's left in the archive for context
+   *  fetches but no longer flashed back; the analyzer re-detects it fresh if
+   *  it's genuinely still on screen. */
+  restoreMaxAgeMs?: number;
 }
 
 /**
@@ -116,6 +122,7 @@ export class RegionTracker {
    *  tick is enough to confirm a still-present issue. */
   private static readonly PENDING_CONFIRM_TICKS = 2;
   private readonly maxRegions: number;
+  private readonly restoreMaxAgeMs: number;
 
   constructor(opts: RegionTrackerOpts = {}) {
     // 4 (was 2): even with fuzzy re-match the model legitimately skips a
@@ -124,6 +131,7 @@ export class RegionTracker {
     this.maxMissedTicks = opts.maxMissedTicks ?? 4;
     this.maxAgeMs = opts.maxAgeMs ?? 5 * 60_000;
     this.maxRegions = opts.maxRegions ?? 3;
+    this.restoreMaxAgeMs = opts.restoreMaxAgeMs ?? 45_000;
   }
 
   /**
@@ -355,10 +363,23 @@ export class RegionTracker {
   private restorePending(curAppRaw: string | null | undefined): void {
     const curApp = (curAppRaw || "").toLowerCase().trim();
     if (!curApp) return;
+    const now = Date.now();
     for (const [id, e] of [...this.expired.entries()].reverse()) {
       if (this.tracked.size >= this.maxRegions) break;
       const regionApp = (e.region.app || "").toLowerCase().trim();
       if (regionApp !== curApp) continue;
+      // Freshness gate: only optimistically restore eyes that left the screen
+      // recently. An eye archived minutes ago is anchored to content that has
+      // since scrolled/changed away — flashing it back produces a stale eye
+      // that re-confirms against nothing and dies on the pending leash, only to
+      // reappear on the next focus switch (the resurrection loop). Stale eyes
+      // stay in the archive for context fetches; the analyzer re-detects them
+      // fresh (with a current anchor) if the issue is genuinely still present.
+      // Manual eyes are user-pinned — they outlive any freshness window.
+      if (!e.region.manual && now - e.expiredAt > this.restoreMaxAgeMs) {
+        debug(TAG, `skip stale restore ${id} (off-screen ${Math.round((now - e.expiredAt) / 1000)}s > ${Math.round(this.restoreMaxAgeMs / 1000)}s)`);
+        continue;
+      }
       const region = e.region;
       // Manual regions are user-pinned and never analyzer-re-emitted, so they
       // can't be "confirmed" — restore them solid (the pending leash would
