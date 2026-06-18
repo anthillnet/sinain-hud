@@ -51,6 +51,11 @@ export class MacOSCaptureSpawner implements CaptureSpawner {
         "--fps", String(fps),
         "--scale", "0.5",
       );
+      // Pin to the primary display by default — multi-display "follow active"
+      // mis-places ROIs (wrong screen). Opt back in with CAPTURE_FOLLOW_DISPLAY=true.
+      if (process.env.CAPTURE_FOLLOW_DISPLAY !== "true") {
+        args.push("--pin-display");
+      }
     }
 
     log(TAG, `spawning: ${binaryPath} ${args.join(" ")}`);

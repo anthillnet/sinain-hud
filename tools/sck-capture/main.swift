@@ -12,6 +12,10 @@ var screenDir: String = NSString("~/.sinain/capture").expandingTildeInPath
 var fps: Double = 1.0
 var scale: Double = 0.5
 var audioEnabled: Bool = true
+// Pin capture to the main display and never follow the active one. Multi-display
+// follow is the source of wrong-display ROI placement; pinning keeps every frame
+// (and every eye) on one known screen until that's solid.
+var pinDisplay: Bool = false
 
 var args = CommandLine.arguments.dropFirst()
 while let arg = args.first {
@@ -29,10 +33,12 @@ while let arg = args.first {
         if let next = args.first { scale = Double(next) ?? 0.5; args = args.dropFirst() }
     case "--no-audio":
         audioEnabled = false
+    case "--pin-display":
+        pinDisplay = true
     case "--help", "-h":
         fputs("Usage: sck-capture [--sample-rate 16000] [--channels 1]\n", stderr)
         fputs("                 [--screen-dir ~/.sinain/capture] [--fps 1] [--scale 0.5]\n", stderr)
-        fputs("                 [--no-audio]\n", stderr)
+        fputs("                 [--no-audio] [--pin-display]\n", stderr)
         fputs("Captures system audio + screen via ScreenCaptureKit.\n", stderr)
         fputs("Audio: raw s16le PCM to stdout.\n", stderr)
         fputs("Screen: JPEG frames to --screen-dir (atomic write).\n", stderr)
@@ -211,7 +217,9 @@ func run() async throws {
         content.displays.first { $0.displayID == id } ?? content.displays.first!
     }
 
-    var activeID = activeDisplayID()
+    // Pinned: lock to the main (primary) display. Otherwise follow the display
+    // under the cursor.
+    var activeID = pinDisplay ? CGMainDisplayID() : activeDisplayID()
     var display = scDisplay(for: activeID)
 
     let config = SCStreamConfiguration()
@@ -281,6 +289,8 @@ func run() async throws {
             try? await stream.stopCapture()
             exit(0)
         }
+        // Pinned to the main display — never switch.
+        if pinDisplay { continue }
         // Follow the active display. updateContentFilter/Configuration (macOS
         // 14+) switch the captured display WITHOUT restarting the stream, so
         // audio keeps flowing. On older systems we stay on the initial display.
