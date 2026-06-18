@@ -93,82 +93,53 @@ def load_entity_facts(db_path: str, entity_id: str, max_facts: int) -> tuple[lis
     if entity_id.startswith("fact:"):
         fact_ids = [entity_id]
     elif entity_id.startswith("entity:"):
-        # Find ANY incoming ref (any attribute), matching the same broad
-        # predicate that graph_children uses. Filtering to attribute='entity'
-        # was too narrow — real data references entities via many attribute
-        # names (related_to, parent_org, employed_by, etc.).
-        rows = store._conn.execute(
-            """SELECT DISTINCT entity_id FROM triples
-               WHERE value = ? AND value_type = 'ref' AND retracted = 0
-               LIMIT ?""",
-            (entity_id, max_facts),
-        ).fetchall()
-        fact_ids = [r["entity_id"] for r in rows]
-        # Some installs store the entity-pointer as value_type='string' (the
-        # slug, not a typed ref). Match those too via the slugified entity name
-        # against the 'entity' attribute (the most common holder for that
-        # legacy shape).
+        # Incoming refs (ANY attribute) point facts at this entity — the same
+        # broad backref that graph_children uses. RdfStore.backrefs() is the
+        # Oxigraph equivalent of the old SQLite VAET scan
+        # (value = ? AND value_type='ref'); de-dup since an entity can be
+        # referenced by one fact via several edges (about + mentions).
+        seen: set[str] = set()
+        fact_ids = []
+        for src, _attr in store.backrefs(entity_id):
+            if src not in seen:
+                seen.add(src)
+                fact_ids.append(src)
+            if len(fact_ids) >= max_facts:
+                break
+        # Legacy string-typed pointer: facts with attribute='entity', value=<slug>
+        # (the slug, not a typed ref). lookup() matches string-valued triples.
         slug_part = entity_id.split(":", 1)[1] if ":" in entity_id else entity_id
-        legacy_rows = store._conn.execute(
-            """SELECT DISTINCT entity_id FROM triples
-               WHERE attribute = 'entity' AND value = ?
-                 AND value_type = 'string' AND retracted = 0
-               LIMIT ?""",
-            (slug_part, max_facts),
-        ).fetchall()
-        for r in legacy_rows:
-            if r["entity_id"] not in fact_ids:
-                fact_ids.append(r["entity_id"])
+        for src in store.lookup("entity", slug_part):
+            if src not in seen:
+                seen.add(src)
+                fact_ids.append(src)
         # Always include the entity itself's own attributes as a "self" fact.
-        self_attrs_count = store._conn.execute(
-            "SELECT COUNT(*) AS n FROM triples WHERE entity_id = ? AND retracted = 0",
-            (entity_id,),
-        ).fetchone()["n"]
-        if self_attrs_count > 0:
+        if store.entity(entity_id):
             fact_ids.insert(0, entity_id)
         fact_ids = fact_ids[:max_facts]
     else:
-        # Bare slug — try entity: first, then fact: prefix scan, then
-        # broader substring match across both prefixes (handles cases where
-        # the slug is a fragment of the actual entity_id).
+        # Bare slug — try entity:<slug>, then fact:<slug>, then BM25 over value
+        # text (Oxigraph has no LIKE; fts_search replaces the substring scan).
         eid = f"entity:{entity_id}"
-        exists = store._conn.execute(
-            "SELECT 1 FROM triples WHERE entity_id = ? AND retracted = 0 LIMIT 1",
-            (eid,),
-        ).fetchone()
-        if exists:
+        if store.entity(eid):
             return load_entity_facts(db_path, eid, max_facts)
-        # Try fact:<slug>* (prefix), then *<slug>* (substring) across both prefixes.
-        rows = store._conn.execute(
-            """SELECT DISTINCT entity_id FROM triples
-               WHERE entity_id LIKE ? AND retracted = 0
-               LIMIT ?""",
-            (f"fact:{entity_id}%", max_facts),
-        ).fetchall()
-        fact_ids = [r["entity_id"] for r in rows]
-        if not fact_ids:
-            rows = store._conn.execute(
-                """SELECT DISTINCT entity_id FROM triples
-                   WHERE (entity_id LIKE ? OR entity_id LIKE ?) AND retracted = 0
-                   LIMIT ?""",
-                (f"fact:%{entity_id}%", f"entity:%{entity_id}%", max_facts),
-            ).fetchall()
-            fact_ids = [r["entity_id"] for r in rows]
+        if store.entity(f"fact:{entity_id}"):
+            fact_ids = [f"fact:{entity_id}"]
+        else:
+            try:
+                fact_ids = store.fts_search(entity_id.replace("-", " "), max_facts)
+            except Exception:
+                fact_ids = []
 
-    # Load full attribute sets for each fact
+    # Load full attribute sets for each fact. tx_watermark is retired with the
+    # SQLite store — Oxigraph keeps no tx history (latest_tx()==0), so the page
+    # cache relies on refresh + content rather than a per-entity tx max.
     facts: list[dict] = []
     tx_watermark = 0
     for fid in fact_ids:
         attrs = store.entity(fid)
         if not attrs:
             continue
-        # Compute tx_watermark across all triples for this fact
-        max_tx_row = store._conn.execute(
-            "SELECT MAX(tx_id) AS m FROM triples WHERE entity_id = ? AND retracted = 0",
-            (fid,),
-        ).fetchone()
-        if max_tx_row and max_tx_row["m"] is not None:
-            tx_watermark = max(tx_watermark, max_tx_row["m"])
 
         fact = {"fact_id": fid}
         for attr, values in attrs.items():

@@ -305,7 +305,14 @@ async function searchEntitiesMulti(query: string, limit: number): Promise<unknow
           existing.fact_count += r.fact_count; // sum across DBs when same entity present
         }
       }
-    } catch { /* skip failed DB */ }
+    } catch (err) {
+      // Skip a failed DB, but LOG it. This catch fires on PROCESS-level failures
+      // (timeout, interpreter/import crash) — distinct from graph_query.py's own
+      // internal try/except, which swallowed the post-migration '_conn' crash to
+      // stderr + exit 0 and made the web UI show empty memories with no trace. A
+      // crash and a genuinely-empty store must never look the same to the caller.
+      warn(TAG, `searchEntities: DB query failed (${dbPath}): ${(err as Error).message}`);
+    }
   }
 
   const results = Array.from(merged.values())

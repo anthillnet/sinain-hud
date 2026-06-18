@@ -9,9 +9,11 @@ does automatically. The new ingredients are:
   2. Pre-retraction snapshot saved to web.db.retraction_undo, single-use,
      10-minute TTL — gives the UI a real "undo" button.
 
-Soft delete: rows stay; retracted=1 + retracted_tx + valid_to are set.
-Bi-temporal queries (entity_as_of) still see the fact at past tx_ids.
-Physical removal only happens via gc_retracted_triples (off by default).
+On Oxigraph, retract_triple hard-removes the fact's quads (the old SQLite
+soft-delete flag is gone), so the pre-retraction snapshot in web.db IS the undo
+mechanism: restore re-asserts every snapshotted triple. Supersession that must
+preserve history (entity_as_of) uses store.soft_retract_triple (valid_to marker)
+instead, which is what knowledge_integrator does automatically.
 
 Usage:
     python3 retract.py --retract --db <db> --web-db <web.db> \
@@ -34,24 +36,23 @@ UNDO_TTL_MS = 10 * 60 * 1000  # 10 minutes
 
 
 def snapshot_triples(store, fact_id: str) -> list[dict]:
-    """Capture every active triple for a fact entity for restore. Includes
-    value_type so re-asserts preserve string-vs-ref semantics."""
-    rows = store._conn.execute(
-        """SELECT attribute, value, value_type, tx_id, created_at
-           FROM triples
-           WHERE entity_id = ? AND retracted = 0""",
-        (fact_id,),
-    ).fetchall()
-    return [
-        {
-            "attribute": r["attribute"],
-            "value": r["value"],
-            "value_type": r["value_type"],
-            "original_tx_id": r["tx_id"],
-            "original_created_at": r["created_at"],
-        }
-        for r in rows
-    ]
+    """Capture every current triple for a fact entity for restore. Oxigraph
+    collapses the old ``value_type`` column into the stored term, so we re-infer
+    it from the value shape via ``_is_ref_like`` (the same heuristic
+    retract/lookup use) — that keeps string-vs-ref semantics intact when restore
+    re-asserts. The retired SQLite-only columns (tx_id, created_at) are dropped;
+    the source timeline rides along as a ``first_seen`` triple if present."""
+    from rdf_store import _is_ref_like
+
+    snap: list[dict] = []
+    for attribute, values in store.entity(fact_id).items():
+        for value in values:
+            snap.append({
+                "attribute": attribute,
+                "value": value,
+                "value_type": "ref" if _is_ref_like(value) else "string",
+            })
+    return snap
 
 
 def retract_fact(db_path: str, web_db_path: str, fact_id: str,
@@ -150,29 +151,28 @@ def restore_fact(db_path: str, web_db_path: str, fact_id: str,
         return {"ok": False, "error": "undo token expired"}
 
     original_retracted_tx = row["retracted_tx"]
+    snapshot = json.loads(row["snapshot_json"])
 
     store = TripleStore(db_path)
     tx_id = store.begin_tx(source="web-ui-restore",
                            metadata={"undo_token": undo_token,
                                      "reverses_tx": original_retracted_tx})
 
-    # Un-retract: flip retracted=0 on triples that were closed by the original
-    # retraction tx. Avoids creating duplicate triples — the originals come back
-    # with their original tx_ids and created_at intact, preserving bi-temporal
-    # history.
-    cur = store._conn.execute(
-        """UPDATE triples SET retracted = 0, retracted_tx = NULL, valid_to = NULL
-           WHERE entity_id = ? AND retracted_tx = ?""",
-        (fact_id, original_retracted_tx),
-    )
-    triples_restored = cur.rowcount
+    # Oxigraph's retract_triple HARD-removes quads (no retracted flag to flip
+    # back, unlike the old SQLite store), so restore RE-ASSERTS each snapshotted
+    # triple from the pre-retraction undo record. assert_triple is idempotent at
+    # the quad level, so a double-restore is harmless.
+    triples_restored = 0
+    for t in snapshot:
+        store.assert_triple(tx_id, fact_id, t["attribute"], t["value"],
+                            t.get("value_type", "string"))
+        triples_restored += 1
 
     # Also retract the audit triples we wrote during retraction so they don't
     # linger as active facts on the restored entity.
     store.retract_triple(tx_id, fact_id, "retracted_reason")
     store.retract_triple(tx_id, fact_id, "retracted_by")
 
-    store._conn.commit()
     store.close()
 
     # Mark consumed + log undo

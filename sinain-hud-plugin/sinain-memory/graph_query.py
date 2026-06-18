@@ -2059,31 +2059,26 @@ def _significant_tokens(query: str) -> list[str]:
 
 
 def search_entities(db_path: str, query: str, limit: int = 20) -> list[dict]:
-    """High-recall entity search for the web UI search bar.
+    """High-recall entity search for the web UI search bar (Oxigraph-native).
 
-    The triplestore has **5× more FTS signal** than my first version exploited:
-    FTS5 indexes the ``value`` column of *every* triple (not just facts'
-    ``value`` attribute), so tags, refs (their stringified target), and
-    everything else are searchable. The original predicate
-    ``AND t.attribute = 'value'`` was a recall killer — most facts have ~10
-    tag triples and 1 value triple, so we were dropping the bulk of the index.
+    Rebuilt on the RdfStore API after the SQLite→Oxigraph migration. The prior
+    version drove every pass through the retired ``store._conn`` SQLite cursor,
+    so on the live Oxigraph store it raised ``'RdfStore' object has no attribute
+    '_conn'`` and returned ``[]`` — the silent cause of "no memories in the web
+    UI". Signal sources union into a ranked entity list:
 
-    Six passes union into a ranked list:
-      1. Exact entity_id slug match (variants: hyphen / underscore / no-sep)
-         → score 2.0. Top of the list.
-      2. entity_id LIKE substring for each variant → score 1.0. Catches
-         ``fact:al-futtaim-cto-...`` when user types ``al futtaim``.
-      3. FTS5 over the FULL index (no attribute filter) for the raw query.
-         Per-hit score weighted by attribute: tag=0.3, value=0.2, other=0.1.
-         Tags are the strongest single signal because they're auto-extracted
-         keywords — a tag match is essentially "the fact is *about* this term."
-      4. FTS5 prefix wildcard (``term*``) for each long token. Catches partial
-         words: typing ``intel`` should reach ``intellij``.
-      5. Direct tag-exact match: ``attribute='tag' AND LOWER(value) = ?``.
-         Cheap, high-precision boost (+0.4) for entities deeply tagged.
-      6. Snippet backfill for top-K results that landed via slug-only paths.
+      1. Exact slug match (hyphen / underscore / no-sep variants) for
+         ``entity:<slug>`` / ``fact:<slug>`` → score 2.0 (top of the list).
+      2. BM25 full-text over fact ``value`` text (``RdfStore.fts_search``). Each
+         hit contributes 0.2 to its TARGET entity (the fact's ``about`` /
+         ``mentions`` ref, else its ``entity:`` slug, else the fact itself) and
+         +1 to fact_count. Falls back to an OR over significant tokens when the
+         default AND match is dry (partial / multi-word input).
+      3. Exact tag match (``lookup('tag', token)``) → +0.4. High precision:
+         a tag is an auto-extracted keyword, i.e. "this fact is *about* X".
 
-    Score is uncapped during accumulation but final score is rounded to 3 dp.
+    Exact-match scores (>=1.0) take the max; sub-1.0 evidence accumulates so
+    entities with several independent hit types out-rank one-trick hits.
     Returns: [{entity, type, fact_count, snippet, score, last_seen}].
     """
     if not Path(db_path).exists() or not query.strip():
@@ -2094,21 +2089,34 @@ def search_entities(db_path: str, query: str, limit: int = 20) -> list[dict]:
         store = TripleStore(db_path)
 
         candidates: dict[str, dict] = {}
-        # Cache outgoing-ref lookups — many FTS hits hit the same fact_eid.
-        ref_cache: dict[str, str | None] = {}
+        # Cache fact→target-entity resolution — many FTS/tag hits share a fact.
+        ent_cache: dict[str, str] = {}
 
-        def lookup_outbound_ref(fact_eid: str) -> str | None:
-            if fact_eid in ref_cache:
-                return ref_cache[fact_eid]
-            ref_row = store._conn.execute(
-                """SELECT value FROM triples
-                   WHERE entity_id = ? AND value_type = 'ref' AND retracted = 0
-                   LIMIT 1""",
-                (fact_eid,),
-            ).fetchone()
-            v = ref_row["value"] if ref_row else None
-            ref_cache[fact_eid] = v if v and str(v).startswith("entity:") else None
-            return ref_cache[fact_eid]
+        def target_entity(fact_eid: str) -> str:
+            """The entity a fact is ABOUT: typed ref (about/mentions) → entity:
+            slug → the fact itself. Replaces the SQLite outbound-ref lookup."""
+            if fact_eid in ent_cache:
+                return ent_cache[fact_eid]
+            if fact_eid.startswith("entity:"):
+                ent_cache[fact_eid] = fact_eid
+                return fact_eid
+            attrs = store.entity(fact_eid)
+            tgt: str | None = None
+            for a in ("about", "mentions"):
+                for v in attrs.get(a, []):
+                    if str(v).startswith("entity:"):
+                        tgt = str(v)
+                        break
+                if tgt:
+                    break
+            if not tgt:
+                for slug in attrs.get("entity", []):
+                    cand = f"entity:{slug}"
+                    if store.entity(cand):
+                        tgt = cand
+                        break
+            ent_cache[fact_eid] = tgt or fact_eid
+            return ent_cache[fact_eid]
 
         def upsert(eid: str, *, score: float = 0.0, snippet: str = "",
                    ts: str | None = None) -> dict:
@@ -2118,8 +2126,7 @@ def search_entities(db_path: str, query: str, limit: int = 20) -> list[dict]:
                 "score": 0.0, "fact_count": 0,
                 "snippet": "", "last_seen": None,
             })
-            # For exact-match scores (>=1.0) take the max; for evidence
-            # contributions (<1.0) accumulate so multiple weak hits stack.
+            # Exact-match scores (>=1.0) take the max; evidence (<1.0) accumulates.
             if score >= 1.0:
                 entry["score"] = max(entry["score"], score)
             else:
@@ -2131,194 +2138,72 @@ def search_entities(db_path: str, query: str, limit: int = 20) -> list[dict]:
             return entry
 
         # ── Pass 1: exact slug match for each variant ────────────────────
-        variants = _slug_variants(query)
-        for variant in variants:
+        for variant in _slug_variants(query):
             for prefix in ("entity:", "fact:"):
                 eid = f"{prefix}{variant}"
-                row = store._conn.execute(
-                    "SELECT 1 FROM triples WHERE entity_id = ? AND retracted = 0 LIMIT 1",
-                    (eid,),
-                ).fetchone()
-                if row:
+                if store.entity(eid):
                     upsert(eid, score=2.0)
 
-        # ── Pass 2: entity_id substring LIKE ─────────────────────────────
-        for variant in variants:
-            if len(variant) < 2:
-                continue
-            rows = store._conn.execute(
-                """SELECT DISTINCT entity_id FROM triples
-                   WHERE retracted = 0
-                     AND (entity_id LIKE ? OR entity_id LIKE ?)
-                   LIMIT 200""",
-                (f"entity:%{variant}%", f"fact:%{variant}%"),
-            ).fetchall()
-            for r in rows:
-                upsert(r["entity_id"], score=1.0)
-
-        # ── Pass 3: FTS5 over the FULL index (the big recall fix) ────────
-        # Per-hit score weighted by attribute: tags carry the strongest
-        # topical signal because they're auto-extracted keywords.
-        attr_weight = {"tag": 0.3, "value": 0.2}
+        # ── Pass 2: BM25 over fact value text ────────────────────────────
         try:
-            fts_rows = store._conn.execute(
-                """SELECT t.entity_id, t.attribute, t.value, t.created_at
-                   FROM triples_fts fts
-                   JOIN triples t ON fts.rowid = t.id
-                   WHERE triples_fts MATCH ? AND t.retracted = 0
-                   LIMIT 500""",
-                (query,),
-            ).fetchall()
+            scored = store.fts_search(query, limit * 4, with_scores=True)
         except Exception:
-            # Defang the query and retry with cleaned tokens; fall back to
-            # LIKE if FTS5 itself is unavailable.
-            tokens = _fts5_safe_tokens(query)
-            if tokens:
+            scored = []
+        if not scored:
+            # Partial / multi-word miss under the default AND gate — retry OR'd
+            # over significant tokens for recall.
+            toks = _significant_tokens(query)
+            if toks:
                 try:
-                    fts_rows = store._conn.execute(
-                        """SELECT t.entity_id, t.attribute, t.value, t.created_at
-                           FROM triples_fts fts JOIN triples t ON fts.rowid = t.id
-                           WHERE triples_fts MATCH ? AND t.retracted = 0
-                           LIMIT 500""",
-                        (" ".join(tokens),),
-                    ).fetchall()
+                    scored = store.fts_search(" or ".join(toks), limit * 4,
+                                              with_scores=True)
                 except Exception:
-                    conds = " OR ".join(["LOWER(value) LIKE ?"] * len(tokens))
-                    params = [f"%{t}%" for t in tokens]
-                    fts_rows = store._conn.execute(
-                        f"""SELECT entity_id, attribute, value, created_at FROM triples
-                            WHERE retracted = 0 AND ({conds}) LIMIT 500""",
-                        params,
-                    ).fetchall()
-            else:
-                fts_rows = []
+                    scored = []
+        for feid, _bm in scored:
+            attrs = store.entity(feid)
+            val = (attrs.get("value") or [""])[0]
+            ts = (attrs.get("occurred_at") or attrs.get("first_seen") or [None])[0]
+            entry = upsert(target_entity(feid), score=0.2, snippet=val, ts=ts)
+            entry["fact_count"] += 1
 
-        for r in fts_rows:
-            fact_eid = r["entity_id"]
-            attr = r["attribute"]
-            value = r["value"] or ""
-            ts = r["created_at"]
-            # Don't double-count: refs themselves match FTS as their target
-            # entity name, but we'll surface them via the ref-following step.
-            target_eid = lookup_outbound_ref(fact_eid) or fact_eid
-            weight = attr_weight.get(attr, 0.1)
-            # Only feed snippets from real value text — tags are noisy as
-            # snippets ("citibank", "cto", ...).
-            snippet_text = value if attr == "value" else ""
-            entry = upsert(target_eid, score=weight,
-                          snippet=snippet_text, ts=ts)
-            if attr == "value":
-                entry["fact_count"] += 1
+        # ── Pass 3: exact tag match (high-precision boost) ───────────────
+        for token in _significant_tokens(query):
+            for feid in store.lookup("tag", token):
+                upsert(target_entity(feid), score=0.4)
 
-        # ── Pass 4: prefix wildcards — only when Pass 3 was dry ─────────
-        # "intel" → "intellij", "intelligence", etc. FTS5 prefix is
-        # forward-only, so this is for partial input (still typing). For
-        # multi-word queries we trust FTS5's implicit AND in Pass 3 for
-        # precision; running OR'd per-token prefix here would give common
-        # nouns like "real" enough hits (88+ rows) to drown signal.
-        sig_tokens = _significant_tokens(query)
-        if len(fts_rows) < 5 and sig_tokens:
-            for token in sig_tokens:
-                if len(token) < 4:
-                    continue  # 3-char prefixes match too broadly
-                try:
-                    # Use FTS5 rank ordering so the top 300 are the most
-                    # relevant by bm25, not arbitrary insertion order. This
-                    # matters when a prefix like 'intel*' has thousands of
-                    # matches but only ~200 are about IntelliJ/Intelligence.
-                    prefix_rows = store._conn.execute(
-                        """SELECT t.entity_id, t.attribute, t.value, t.created_at
-                           FROM triples_fts fts JOIN triples t ON fts.rowid = t.id
-                           WHERE triples_fts MATCH ? AND t.retracted = 0
-                           ORDER BY rank
-                           LIMIT 300""",
-                        (token + "*",),
-                    ).fetchall()
-                except Exception:
-                    prefix_rows = []
-                for r in prefix_rows:
-                    fact_eid = r["entity_id"]
-                    target_eid = lookup_outbound_ref(fact_eid) or fact_eid
-                    upsert(target_eid, score=0.05,
-                          snippet=(r["value"] if r["attribute"] == "value" else ""),
-                          ts=r["created_at"])
-
-        # ── Pass 5: direct tag exact-match (high-precision boost) ────────
-        # Stopword guard prevents "not"/"are"/"with" from blanket-boosting
-        # entities tagged with those (which they shouldn't be, but real
-        # auto-tag pipelines occasionally produce them).
-        for token in sig_tokens:
-            rows = store._conn.execute(
-                """SELECT DISTINCT entity_id FROM triples
-                   WHERE attribute = 'tag' AND LOWER(value) = ? AND retracted = 0
-                   LIMIT 200""",
-                (token,),
-            ).fetchall()
-            for r in rows:
-                fact_eid = r["entity_id"]
-                target_eid = lookup_outbound_ref(fact_eid) or fact_eid
-                upsert(target_eid, score=0.4)
-
-        # Compute fact_count for slug-match candidates that weren't seen via FTS.
+        # fact_count for slug-only candidates (no FTS/tag hit): entities count
+        # their incoming refs; a bare fact counts as 1.
         for eid, entry in candidates.items():
             if entry["fact_count"] == 0:
-                # Count facts that reference this entity via any ref attribute.
-                cnt_row = store._conn.execute(
-                    """SELECT COUNT(DISTINCT entity_id) AS n FROM triples
-                       WHERE value = ? AND value_type = 'ref' AND retracted = 0""",
-                    (eid,),
-                ).fetchone()
-                entry["fact_count"] = int(cnt_row["n"]) if cnt_row else 0
-                # If no incoming refs but the entity itself has triples, count
-                # that as 1 for display (it's at least a real entity).
-                if entry["fact_count"] == 0:
-                    self_row = store._conn.execute(
-                        "SELECT 1 FROM triples WHERE entity_id = ? AND retracted = 0 LIMIT 1",
-                        (eid,),
-                    ).fetchone()
-                    if self_row:
-                        entry["fact_count"] = 1
+                if eid.startswith("entity:"):
+                    entry["fact_count"] = len(store.backrefs(eid)) or 1
+                elif store.entity(eid):
+                    entry["fact_count"] = 1
 
-        # Round for display; no hard cap — exact matches start at 2.0 and
-        # evidence accumulation below 1.0 should be allowed to sum freely so
-        # entities with many independent hit types out-rank one-trick hits.
         for c in candidates.values():
             c["score"] = round(c["score"], 3)
 
         results = sorted(candidates.values(),
                         key=lambda x: (-x["score"], -x["fact_count"]))[:limit]
 
-        # Backfill snippets for top results that came from slug-only matches
-        # (no FTS hit on value text). Bounded to `limit` queries — cheap.
+        # Snippet backfill for slug-only entity hits: pull one backref fact's value.
         for c in results:
             if c["snippet"]:
                 continue
             if c["entity"].startswith("entity:"):
-                row = store._conn.execute(
-                    """SELECT t.value, t.created_at FROM triples t
-                       WHERE t.attribute = 'value' AND t.retracted = 0
-                         AND t.entity_id IN (
-                           SELECT entity_id FROM triples
-                           WHERE value = ? AND value_type = 'ref' AND retracted = 0
-                           LIMIT 5
-                         ) LIMIT 1""",
-                    (c["entity"],),
-                ).fetchone()
-                if row:
-                    c["snippet"] = (row["value"] or "")[:140]
-                    if row["created_at"] and not c["last_seen"]:
-                        c["last_seen"] = row["created_at"]
-            elif c["entity"].startswith("fact:"):
-                row = store._conn.execute(
-                    """SELECT value, created_at FROM triples
-                       WHERE entity_id = ? AND attribute = 'value' AND retracted = 0
-                       LIMIT 1""",
-                    (c["entity"],),
-                ).fetchone()
-                if row:
-                    c["snippet"] = (row["value"] or "")[:140]
-                    if row["created_at"] and not c["last_seen"]:
-                        c["last_seen"] = row["created_at"]
+                for src_eid, _attr in store.backrefs(c["entity"])[:5]:
+                    fv = store.entity(src_eid)
+                    val = (fv.get("value") or [""])[0]
+                    if val:
+                        c["snippet"] = val[:140]
+                        if not c["last_seen"]:
+                            c["last_seen"] = (fv.get("occurred_at")
+                                              or fv.get("first_seen") or [None])[0]
+                        break
+            else:
+                val = (store.entity(c["entity"]).get("value") or [""])[0]
+                if val:
+                    c["snippet"] = val[:140]
 
         store.close()
         return results
@@ -2351,60 +2236,31 @@ def graph_children(db_path: str, entity: str, limit: int = 200) -> dict:
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Find all triples where value=entity (backref via VAET)
-        rows = store._conn.execute(
-            """SELECT entity_id, attribute FROM triples
-               WHERE value = ? AND value_type = 'ref' AND retracted = 0
-               LIMIT ?""",
-            (entity, limit),
-        ).fetchall()
+        # Backrefs: facts whose ref edge points at this entity, grouped by the
+        # edge attribute. RdfStore.backrefs() replaces the SQLite VAET scan
+        # (value = ? AND value_type='ref').
         children_by_attr: dict[str, set[str]] = {}
-        for r in rows:
-            children_by_attr.setdefault(r["attribute"] or "related", set()) \
-                .add(r["entity_id"])
+        for src_eid, attr in store.backrefs(entity)[:limit]:
+            children_by_attr.setdefault(attr or "related", set()).add(src_eid)
 
         # Legacy string-typed refs: facts with attribute='entity', value=<slug>.
         slug_part = entity.split(":", 1)[1] if ":" in entity else entity
-        legacy_rows = store._conn.execute(
-            """SELECT DISTINCT entity_id FROM triples
-               WHERE attribute = 'entity' AND value = ?
-                 AND value_type = 'string' AND retracted = 0
-               LIMIT ?""",
-            (slug_part, limit),
-        ).fetchall()
-        for r in legacy_rows:
-            children_by_attr.setdefault("entity", set()).add(r["entity_id"])
+        for src_eid in store.lookup("entity", slug_part)[:limit]:
+            children_by_attr.setdefault("entity", set()).add(src_eid)
 
         # Pre-fetch per-child metadata (fact_count, domain, value snippet,
-        # has-its-own-backrefs) in a tight loop — this is hot for big graphs.
+        # has-its-own-backrefs). fact_count = total triples for the child =
+        # sum of per-attribute value counts.
         all_children = {c for cs in children_by_attr.values() for c in cs}
         meta: dict[str, dict] = {}
         for child_eid in all_children:
-            cnt = store._conn.execute(
-                "SELECT COUNT(*) AS n FROM triples WHERE entity_id = ? AND retracted = 0",
-                (child_eid,),
-            ).fetchone()["n"]
-            domain_row = store._conn.execute(
-                """SELECT value FROM triples WHERE entity_id = ?
-                   AND attribute = 'domain' AND retracted = 0 LIMIT 1""",
-                (child_eid,),
-            ).fetchone()
-            value_row = store._conn.execute(
-                """SELECT value FROM triples WHERE entity_id = ?
-                   AND attribute = 'value' AND retracted = 0 LIMIT 1""",
-                (child_eid,),
-            ).fetchone()
-            backref_row = store._conn.execute(
-                """SELECT 1 FROM triples WHERE value = ? AND value_type = 'ref'
-                   AND retracted = 0 LIMIT 1""",
-                (child_eid,),
-            ).fetchone()
+            attrs = store.entity(child_eid)
             meta[child_eid] = {
                 "entity": child_eid,
-                "fact_count": cnt,
-                "domain": (domain_row["value"] if domain_row else None),
-                "snippet": ((value_row["value"] or "")[:80] if value_row else ""),
-                "expandable": bool(backref_row),
+                "fact_count": sum(len(v) for v in attrs.values()),
+                "domain": (attrs.get("domain") or [None])[0],
+                "snippet": ((attrs.get("value") or [""])[0] or "")[:80],
+                "expandable": bool(store.backrefs(child_eid)),
             }
 
         out_groups: list[dict] = []
