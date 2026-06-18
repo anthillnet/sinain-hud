@@ -19,6 +19,21 @@ interface TrackedRegion {
    *  A pending region not confirmed by the analyzer within
    *  PENDING_CONFIRM_TICKS is archived again to avoid a stale eye lingering. */
   restoredAtTick?: number;
+  /** Consecutive local re-anchor frames on which this region's content was NOT
+   *  found (reanchorLive). After LOCAL_MISS_LIMIT, the eye dims — its anchored
+   *  text has scrolled off, without waiting for an analyzer tick to miss it. */
+  localMisses?: number;
+}
+
+/** Largest single-axis shift between two bboxes, in full-frame pixels. */
+function bboxShift(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): number {
+  return Math.max(
+    Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]),
+    Math.abs(a[2] - b[2]), Math.abs(a[3] - b[3]),
+  );
 }
 
 type ScreenEvent = ContextWindow["screen"][number];
@@ -121,6 +136,12 @@ export class RegionTracker {
    *  Tier 2 fires an urgent analysis right after the app switch — one real
    *  tick is enough to confirm a still-present issue. */
   private static readonly PENDING_CONFIRM_TICKS = 2;
+  /** Local re-anchor frames a region's content may be absent before its eye
+   *  dims. >1 so a single noisy OCR frame can't flicker a still-present eye. */
+  private static readonly LOCAL_MISS_LIMIT = 2;
+  /** Min single-axis bbox shift (px) before a local re-anchor re-broadcasts —
+   *  suppresses sub-pixel OCR jitter while still following real scroll/typing. */
+  private static readonly BBOX_MOVE_EPSILON = 4;
   private readonly maxRegions: number;
   private readonly restoreMaxAgeMs: number;
 
@@ -452,6 +473,68 @@ export class RegionTracker {
     if (this.stateKey() === before) return null;
     const current = this.current();
     log(TAG, `recheck after viewport change: ${current.length} eyes pending re-confirm`);
+    return current;
+  }
+
+  /**
+   * A1 + A2 — local re-anchoring (no LLM). Runs per sense frame, between
+   * analyzer ticks, so eyes track their content at capture rate:
+   *  - A1: re-locate each live eye's issue text on the fresh frame and slide
+   *    the eye to its new position (scroll / typing / window resize). A local
+   *    match also counts as a re-confirmation — keeps the eye alive and un-dims
+   *    it — so an eye whose content is visibly still present never expires just
+   *    because the LLM's attention rotated away.
+   *  - A2: when an eye's text is absent for LOCAL_MISS_LIMIT consecutive frames,
+   *    dim it ("rechecking") immediately — its content scrolled off — instead of
+   *    waiting out the analyzer miss window. Dim-only: the analyzer re-confirms
+   *    (clearing pending) if it's still relevant, else the pending leash archives
+   *    it. So a false miss self-corrects within a tick.
+   * Manual (user-pinned) and foreign-app eyes are left untouched. Returns the
+   * changed set to broadcast, or null.
+   */
+  reanchorLive(frame: ScreenEvent): RegionHighlight[] | null {
+    if (!frame.ocrLines?.length) return null; // need line boxes to re-anchor
+    const frameApp = (frame.meta.app || "").toLowerCase().trim();
+    if (!frameApp) return null;
+    const frameSize = frame.frameSize && frame.frameSize.length === 2
+      ? frame.frameSize as [number, number]
+      : undefined;
+
+    let changed = false;
+    for (const t of this.tracked.values()) {
+      if (t.region.manual) continue; // user-pinned — never moved automatically
+      const regionApp = (t.region.app || "").toLowerCase().trim();
+      if (regionApp && regionApp !== frameApp) continue; // foreign — archiveForeign owns it
+
+      const newBbox = refineToLine(t.region.issue, frame);
+      if (newBbox) {
+        t.localMisses = 0;
+        // A1: slide to the content's current position (above jitter threshold).
+        if (!t.region.bbox || bboxShift(t.region.bbox, newBbox) > RegionTracker.BBOX_MOVE_EPSILON) {
+          t.region.bbox = newBbox;
+          if (frameSize) t.region.frameSize = frameSize;
+          changed = true;
+        }
+        // Local presence = re-confirmation: keep alive + un-dim.
+        t.lastSeenTick = this.tick;
+        if (t.region.pending) {
+          t.region.pending = false;
+          t.restoredAtTick = undefined;
+          changed = true;
+        }
+      } else {
+        // A2: content not on this frame — dim after a short miss streak.
+        t.localMisses = (t.localMisses ?? 0) + 1;
+        if (t.localMisses >= RegionTracker.LOCAL_MISS_LIMIT && !t.region.pending) {
+          t.region.pending = true;
+          t.restoredAtTick = this.tick; // hand off to the pending leash
+          changed = true;
+        }
+      }
+    }
+    if (!changed) return null;
+    const current = this.current();
+    debug(TAG, `local re-anchor (app=${frameApp}): ${current.length} active`);
     return current;
   }
 

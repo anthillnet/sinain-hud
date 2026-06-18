@@ -1521,6 +1521,18 @@ async function main() {
         }
       }
 
+      // A1+A2 — local re-anchoring (no LLM): slide live eyes to follow their
+      // content on this fresh frame and dim ones whose text scrolled off, at
+      // capture rate — so eyes track scroll/typing without waiting for the next
+      // analyzer tick. Runs after the big-change dim so it un-dims + re-anchors
+      // the eyes still present and lets the absent ones stay dimmed.
+      if (config.agentConfig.regionsEnabled && event.ocrLines?.length) {
+        const moved = regionTracker.reanchorLive(event);
+        if (moved) {
+          wsHandler.broadcastRaw({ type: "region_highlight", regions: moved, ts: Date.now() });
+        }
+      }
+
       // Broadcast app/window changes to overlay
       if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
         const app = shortAppName(event.meta.app || "");
