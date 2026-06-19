@@ -94,22 +94,26 @@ Rules:
  */
 const REGIONS_SECTION = `
 
-Optional "regions" field — high-value spots an assistant could actually help with.
-Pick from the numbered "Actionable lines" in the user message:
+"regions" field — the user is almost always working on SOMETHING; identify that
+task and offer concrete help to MOVE IT FORWARD. Pick from the numbered
+"Actionable lines" in the user message:
 {"hud":"...","digest":"...","regions":[{"line":5,"issue":"...","tip":"...","action":"fix"}]}
 
-Be selective — most screens need none; passive reading/browsing/feeds → omit.
-Flag clear, high-value things: an error/failure, a problem the user is solving, a
-form/task/command in progress, code or config with a real bug or TODO. Skip
-quality nitpicks (grammar, formatting, timestamps).
+Look at what they're doing and offer to advance it:
+- writing a slide/presentation/doc/email → sharpen the message, draft the next
+  part, tighten the argument, suggest content
+- code → fix a bug, explain it, refactor
+- reading an article/topic → summarize, explain, find related info
+- a form/command/error → fill it, run it, diagnose and fix
 Each region:
-- "line": the integer id from an "[L<id>]" actionable line
-- "issue": a SHORT CLEAN description in your own words (≤10 words) — do NOT quote
-  the raw text (OCR may be imperfect); say what it is.
-- "tip": one actionable sentence — what an assistant could do about it
+- "line": the integer id from an "[L<id>]" actionable line (the thing in focus)
+- "issue": SHORT, CLEAN, in your own words (≤10 words) — what the user is doing /
+  what you'd help with. Don't quote raw OCR.
+- "tip": the concrete thing you'd do to help advance their work
 - "action": "fix" | "explain" | "research"
-Rules: max 3, one per distinct thing, only what's genuinely useful. Omit the
-"regions" field entirely (or []) when nothing qualifies.`;
+Be genuinely USEFUL, never a nitpicker: don't flag surface trivia (others'
+grammar/formatting/timestamps) or just restate the screen — offer real help.
+Usually emit 1-2 (the main thing in focus); [] only for a blank/idle screen.`;
 
 const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
 

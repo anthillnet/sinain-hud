@@ -14,31 +14,25 @@ const MAX_REGIONS = 2;  // quality over quantity — better to surface fewer, re
  * main analyzer lane supplies the real description later, so the model's own
  * prose is intentionally ignored. Tight schema; `format: json` constrains it.
  */
-const SLM_SYSTEM_PROMPT = `You flag ONLY high-value lines on a user's screen where an assistant could do real, concrete work the user would want. Return JSON only.
+const SLM_SYSTEM_PROMPT = `You pick the on-screen line(s) at the CENTER of what the user is doing, so an assistant can offer to help. Return JSON only.
 
 Input: numbered screen lines, "[L<id>] text".
 
-Most screens need NOTHING — passive reading, browsing, social feeds, chat
-scrollback, menus. {"regions":[]} is the correct, common answer. When unsure, none.
+The user is almost always working on something — a slide/doc/email being written,
+code, an article or topic being read, a form, a chat, an error. Pick the line
+that best represents that focus. Picking something is expected on most screens.
 
-FLAG only clear, high-value things:
-- an error / failure / stack trace / warning
-- a question or problem the user is visibly trying to solve
-- a form / task / command they are actively working through
-- code or config with a concrete bug or TODO
-
-Do NOT flag passive content (feeds, articles, posts) or quality nitpicks
-(grammar, wording, timestamp/format). Those are noise.
+Skip only pure chrome (menu bars, toolbars, tab strips, status bars) and blank
+screens. Don't pick navigation or decoration.
 
 For each: {"line": <integer id>, "action": "fix"|"explain"|"research"}.
-Max 2. Output JSON only — no prose.
+Max 2 — the main thing(s) in focus. Output JSON only — no prose.
 
 Example input:
-[L4] def parse(self, x):  # TODO handle None
-[L5] Traceback (most recent call last): KeyError 'user_id'
-[L6] Top 10 movies of 2026 - you won't believe #3
-Example output (L6 is passive → ignored):
-{"regions":[{"line":5,"action":"fix"},{"line":4,"action":"fix"}]}`;
+[L2] Slide 3: Why Sinain — the ambient intelligence layer
+[L7] File  Edit  View  Insert  Format
+Example output (L7 is chrome → skip):
+{"regions":[{"line":2,"action":"explain"}]}`;
 
 export interface RegionDetectorDeps {
   feedBuffer: FeedBuffer;
