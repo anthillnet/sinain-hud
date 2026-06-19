@@ -26,6 +26,9 @@ export interface CommandDeps {
    *  destination agent's next seed picks it up so it continues the thread.
    *  key = regionId for a region thread, "main" for the main thread. */
   onSetHandoffContext?: (key: string, transcript: string) => void;
+  /** Set a per-thread chat-agent override (handoff). key = regionId or "main";
+   *  agent="" clears it (thread falls back to the global lane). */
+  onSetThreadAgent?: (key: string, agent: string) => void;
   /** User drag-selected a screen region — create a manual ROI from it. */
   onRegionSelect?: (sel: { x: number; y: number; w: number; h: number; screenW: number; screenH: number }) => void;
   /** Frontmost app changed (fast NSWorkspace signal) — instant ROI restore. */
@@ -376,6 +379,20 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         log(TAG, `set_handoff_context: ${key} (${transcript.length} chars)`);
       } else {
         log(TAG, `set_handoff_context: no handler wired`);
+      }
+      break;
+    }
+    case "set_thread_agent": {
+      const key = String((msg as any).key ?? "").trim();
+      const agent = String((msg as any).agent ?? "");
+      if (!key) {
+        log(TAG, `set_thread_agent: missing key`);
+        break;
+      }
+      if (deps.onSetThreadAgent) {
+        deps.onSetThreadAgent(key, agent);
+      } else {
+        log(TAG, `set_thread_agent: no handler wired`);
       }
       break;
     }

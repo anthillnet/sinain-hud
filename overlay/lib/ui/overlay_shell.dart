@@ -501,10 +501,11 @@ class OverlayShellState extends State<OverlayShell> {
   /// Hand the ACTIVE thread off to another agent — the composer's ⑂ control.
   /// Terminal target: switch the terminal lane and open (or surface) the PTY
   /// for this tab, which run.sh seeds with the thread's context. Chat target:
-  /// switch the chat lane so this thread's follow-ups route to the new agent,
-  /// closing any open terminal so one session never has two writers.
-  /// [includeTranscript] is captured for the Phase 2 reseed; today's seeds
-  /// already carry the region/main context.
+  /// set a PER-THREAD chat-agent override (not the global lane) so this thread's
+  /// follow-ups route to the new agent while other threads + ambient escalations
+  /// keep the default; then close any open terminal so one session never has two
+  /// writers. The transcript (when included) is carried so the destination
+  /// continues the conversation.
   void _handoffThread({
     required String agent,
     required bool isTerminal,
@@ -533,19 +534,19 @@ class OverlayShellState extends State<OverlayShell> {
       _syncBusyState();
       return;
     }
-    // Chat handoff: switch the chat lane, then fire one kickoff turn so the new
-    // agent actually picks up this thread. set_agent is applied synchronously
-    // by core (same socket, in order) before the kickoff, so routing reflects
-    // the new agent — crucially, a desktop lane (Claude Desktop / ChatGPT) only
-    // launches its app when a turn is sent (routeDesktopChat). Without this the
-    // handoff just re-pointed the lane and nothing opened.
+    // Chat handoff: set a per-thread override (NOT the global lane), then fire
+    // one kickoff turn so the new agent actually picks up this thread. Both are
+    // applied by core in order on the same socket before routing — crucially, a
+    // desktop agent (Claude Desktop / ChatGPT) only launches its app when a turn
+    // is sent (routeDesktopChat). Without the kickoff the handoff would just set
+    // the override and nothing would open.
     if (_terminalThreads.contains(tabKey)) {
       ThreadTerminalSession.close(tabKey);
       setState(() => _terminalThreads.remove(tabKey));
     }
-    ws.setAgent('escalation', agent);
-    // Phase 1 kickoff: core seeds the real context (region ROI / main digest);
-    // the transcript carry lands in Phase 2.
+    ws.sendCommand('set_thread_agent', {'key': thread ?? 'main', 'agent': agent});
+    // Kickoff turn — core seeds the real context (region ROI / main digest) plus
+    // the carried transcript so the destination continues the conversation.
     const kickoff = '[handoff] continue this thread';
     if (thread != null) {
       _sendToRegionThread(thread, kickoff);

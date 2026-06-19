@@ -1006,6 +1006,14 @@ async function main() {
   // by the next seed build for that thread so the destination agent picks up
   // where the chat left off, then it doesn't leak into later turns.
   const handoffContexts = new Map<string, string>();
+  // Per-thread chat-agent override: thread key (regionId, or "main") → agent
+  // name. A thread handoff sets this so THAT thread's chat turns route to the
+  // chosen agent (resident sinain / Claude Desktop / ChatGPT / bare) WITHOUT
+  // changing the global chat lane — other threads and ambient escalations keep
+  // the default. Absent/"" → fall back to the global lane.
+  const threadChatAgents = new Map<string, string>();
+  const chatAgentFor = (key: string): string =>
+    threadChatAgents.get(key) || bareAgentState.escalationAgent;
   function takeHandoffBlock(key: string): string {
     const transcript = handoffContexts.get(key);
     if (!transcript) return "";
@@ -1926,14 +1934,17 @@ async function main() {
       // (and session distillation) carry both halves of the conversation.
       feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
 
-      // Chat lane = sinain → route this turn to the resident sidecar instead
-      // of the escalation/run.sh path. (Same selector serves region chat below.)
-      if (isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+      // Resolve the chat agent for MAIN — a per-thread handoff override wins
+      // over the global lane (so handing MAIN to another agent doesn't move the
+      // ambient/default lane). Chat agent = sinain → resident sidecar; desktop
+      // → external app; otherwise the escalation/run.sh path.
+      const mainAgent = chatAgentFor("main");
+      if (isSinainProfile(escalatorAgentsCfg, mainAgent)) {
         routeSinainChat(text);
         return;
       }
-      if (isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
-        void routeDesktopChat(text, undefined, bareAgentState.escalationAgent);
+      if (isDesktopProfile(escalatorAgentsCfg, mainAgent)) {
+        void routeDesktopChat(text, undefined, mainAgent);
         return;
       }
 
@@ -2059,6 +2070,14 @@ async function main() {
     onSetHandoffContext: (key, transcript) => {
       handoffContexts.set(key, transcript);
     },
+    onSetThreadAgent: (key, agent) => {
+      // Per-thread chat-agent override (handoff). "" clears it → the thread
+      // falls back to the global lane. Does NOT touch bareAgentState, so the
+      // default lane and ambient escalations are unaffected.
+      if (agent) threadChatAgents.set(key, agent);
+      else threadChatAgents.delete(key);
+      log(TAG, `set_thread_agent ${key} → ${agent || "<default>"}`);
+    },
     onSpawnCommand: (text, regionId) => {
       // Region/ROI chat uses the CHAT selector — there is no spawn lane. The
       // chat selector serves chat regardless of thread (chat + terminal are the
@@ -2066,12 +2085,14 @@ async function main() {
       // route in-process; otherwise the task runs on the chat (escalation) lane
       // via dispatchSpawnTask (the region-task execution mechanism, no longer a
       // separate spawn selection).
-      if (regionId && isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+      // A per-thread handoff override wins over the global lane for THIS region.
+      const regionAgent = regionId ? chatAgentFor(regionId) : bareAgentState.escalationAgent;
+      if (regionId && isSinainProfile(escalatorAgentsCfg, regionAgent)) {
         routeSinainChat(text, regionId);
         return;
       }
-      if (regionId && isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
-        void routeDesktopChat(text, regionId, bareAgentState.escalationAgent);
+      if (regionId && isDesktopProfile(escalatorAgentsCfg, regionAgent)) {
+        void routeDesktopChat(text, regionId, regionAgent);
         return;
       }
       let task = text;
