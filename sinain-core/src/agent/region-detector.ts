@@ -7,7 +7,7 @@ import { log, debug, error } from "../log.js";
 const TAG = "region-slm";
 const REGION_ACTIONS = new Set(["fix", "explain", "research"]);
 const MAX_LINES = 40;   // OCR lines offered to the model per tick
-const MAX_REGIONS = 3;
+const MAX_REGIONS = 2;  // quality over quantity — better to surface fewer, real ones
 
 /**
  * Region prompt for a small local model. The model picks the LINE-ID of an
@@ -16,28 +16,38 @@ const MAX_REGIONS = 3;
  * readable rather than parroting (often-imperfect) OCR. Tight schema; SLMs obey
  * a short explicit contract far better than prose. `format: json` constrains it.
  */
-const SLM_SYSTEM_PROMPT = `You spot things on a user's screen an assistant could help with, and return JSON only.
+const SLM_SYSTEM_PROMPT = `You flag ONLY high-value spots on a user's screen where an assistant could do real, concrete work the user would actually want. Return JSON only.
 
 Input: numbered screen lines, "[L<id>] text".
 
-Pick lines worth offering help on — an error, a bug, a typo, a question, a form,
-code being edited, a term being read, a draft being written, a command the user
-seems unsure of. Be generous but concrete; only real, on-screen things.
+Most screens need NOTHING — passive reading, browsing, social feeds, chat
+scrollback, menus. Returning {"regions":[]} is the correct, common answer. Be
+strict: when unsure, emit nothing.
 
-For each, output:
-- "line": the integer id of the line it refers to
-- "issue": a SHORT, CLEAN description in YOUR OWN WORDS (≤10 words). Do NOT copy
-  the raw text; summarize what it is (OCR may be imperfect — describe the intent).
-- "tip": one sentence — what an assistant could actually do about it
+FLAG only clear, high-value things:
+- an error / failure / stack trace / warning
+- a question or problem the user is visibly trying to solve
+- a form / task / command they are actively working through
+- code or config with a concrete bug or TODO
+
+Do NOT flag: passive content (feeds, articles, posts, videos), or "quality"
+nitpicks (grammar, wording, timestamp/format, "incomplete sentence",
+"misleading offer"). Those are noise — skip them.
+
+For each flagged line:
+- "line": the integer id
+- "issue": a SHORT, CLEAN description in YOUR OWN WORDS (≤10 words). Don't copy
+  the raw text; say what it is (OCR may be imperfect — describe the intent).
+- "tip": one sentence — the concrete thing an assistant would do
 - "action": "fix" | "explain" | "research"
 
-Rules: max 3, one per distinct thing. Empty/idle screen → {"regions":[]}.
-Output JSON only — no prose.
+Rules: max 2, only genuinely useful ones. Output JSON only — no prose.
 
 Example input:
 [L4] def parse(self, x):  # TODO handle None
 [L5] Traceback (most recent call last): KeyError 'user_id'
-Example output:
+[L6] Top 10 movies of 2026 - you won't believe #3
+Example output (L6 is passive content → ignored):
 {"regions":[{"line":5,"issue":"KeyError on 'user_id' in a traceback","tip":"Trace where user_id is read and guard the missing key.","action":"fix"},{"line":4,"issue":"Unhandled None case marked TODO","tip":"Add the None handling the TODO calls for.","action":"fix"}]}`;
 
 /** One OCR line offered to the model, with the geometry to anchor it. */

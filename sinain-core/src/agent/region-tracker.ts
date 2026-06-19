@@ -469,10 +469,11 @@ export class RegionTracker {
     this.restorePending(appRaw);
     if (this.stateKey() === before) return null;
     const current = this.current();
-    // Suppress broadcast when focus switches to an app with no regions
-    // (was viewing another app's eyes). Prevents the overlay flashing a
-    // "0 regions" highlight when the HUD should just describe the new app.
-    if (current.length === 0) return null;
+    // Broadcast even when empty: switching to an app with no eyes archived the
+    // PREVIOUS app's eyes, and the overlay must be told so it clears them — else
+    // they linger over the new app until the next detection ("ROIs don't
+    // dissolve on app switch"). (Previously suppressed length===0, which caused
+    // exactly that lingering.)
     log(TAG, `app focus → ${appRaw}: region set changed: ${current.length} active [${current.map(r => r.id).join(", ")}]`);
     return current;
   }
