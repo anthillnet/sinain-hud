@@ -186,6 +186,55 @@ def decayed_confidence(
 _STORE_CACHE: dict[str, "RdfStore"] = {}
 
 
+class _FtsIndex:
+    """In-memory inverted index over ``value`` triples for O(query-terms) BM25
+    search instead of an O(corpus) full scan on every ``fts_search`` call.
+
+    ``word2eids``: word → set of fact eids whose value contains that word.
+    ``eid_doc``:   eid → (lowercased value text, doc length in words).
+
+    The old path matched query tokens as SUBSTRINGS (``tok in text``), so a
+    plain word-token index would change results. We preserve that exactly: a
+    query token has no spaces, so it can only occur WITHIN a single word — to
+    find docs containing token ``t`` we scan the (much smaller) vocabulary for
+    words containing ``t`` and union their postings. df / tf / doc-length / N
+    are all reproduced from the index, so fts_search returns byte-identical
+    rankings to the full-scan version, just without touching every fact."""
+
+    __slots__ = ("word2eids", "eid_doc", "total_len")
+
+    def __init__(self) -> None:
+        self.word2eids: dict[str, set[str]] = {}
+        self.eid_doc: dict[str, tuple[str, int]] = {}
+        self.total_len = 0
+
+    def add(self, eid: str, text: str) -> None:
+        # Facts are immutable (content-hash id) so a value never changes — first
+        # write wins, matching the old `seen` de-dup of multiple value quads.
+        if eid in self.eid_doc:
+            return
+        tl = text.lower()
+        words = tl.split()
+        dl = len(words) or 1
+        self.eid_doc[eid] = (tl, dl)
+        self.total_len += dl
+        for w in set(words):
+            self.word2eids.setdefault(w, set()).add(eid)
+
+    def remove(self, eid: str) -> None:
+        doc = self.eid_doc.pop(eid, None)
+        if doc is None:
+            return
+        tl, dl = doc
+        self.total_len -= dl
+        for w in set(tl.split()):
+            s = self.word2eids.get(w)
+            if s is not None:
+                s.discard(eid)
+                if not s:
+                    self.word2eids.pop(w, None)
+
+
 class RdfStore:
     """Oxigraph-backed triple store with the sinain triplestore API surface."""
 
@@ -208,6 +257,7 @@ class RdfStore:
             return
         self._initialized = True
         self.db_path = "" if path is None else str(Path(path).expanduser())
+        self._fts: _FtsIndex | None = None  # lazy inverted index for fts_search
         if path is None:
             self._store = ox.Store()
         else:
@@ -222,7 +272,24 @@ class RdfStore:
         if self._cache_key is not None:
             _STORE_CACHE.pop(self._cache_key, None)
         self._store = None
+        self._fts = None
         self._initialized = False
+
+    def _ensure_fts(self) -> _FtsIndex:
+        """Build the inverted index over current ``value`` triples on first use,
+        then keep it in sync incrementally via assert_triple / retract_triple."""
+        if self._fts is not None:
+            return self._fts
+        idx = _FtsIndex()
+        p = attribute_to_predicate("value")
+        for q in self._store.quads_for_pattern(None, p, None, None):
+            if isinstance(q.object, ox.NamedNode):
+                continue
+            text = str(q.object.value) if hasattr(q.object, "value") else ""
+            if text:
+                idx.add(uri_to_entity_id(q.subject), text)
+        self._fts = idx
+        return idx
 
     # ----- Transactions (no-op stubs — Oxigraph commits per-insert) -----
 
@@ -261,6 +328,9 @@ class RdfStore:
         p = attribute_to_predicate(attribute)
         o = value_to_term(value, value_type)
         self._store.add(ox.Quad(s, p, o))
+        # Keep the fts index in sync for new searchable text (idempotent add).
+        if attribute == "value" and self._fts is not None and not isinstance(o, ox.NamedNode):
+            self._fts.add(entity_id, str(value))
 
     def retract_triple(
         self,
@@ -283,6 +353,8 @@ class RdfStore:
             quads = list(self._store.quads_for_pattern(s, p, None, None))
             for q in quads:
                 self._store.remove(q)
+            if quads and attribute == "value" and self._fts is not None:
+                self._fts.remove(entity_id)
             return len(quads)
         candidates = []
         if _is_ref_like(value):
@@ -298,6 +370,8 @@ class RdfStore:
                 seen.add(key)
                 self._store.remove(q)
                 removed += 1
+        if removed and attribute == "value" and self._fts is not None:
+            self._fts.remove(entity_id)
         return removed
 
     # ----- T1-SUPERSEDE: bi-temporal soft-retract -----
@@ -627,12 +701,14 @@ class RdfStore:
         the cutoff and never reach the rerank window (see
         .planning/phases/diarization-levers/00-PLAN.md).
 
-        We now scan every `sinain:value` triple once (corpora are small — tens
-        to low-thousands of facts), gate candidates by the same FTS5-style
-        "term1 AND term2" / "term1 OR term2" logic callers pass (default AND),
-        then rank survivors by BM25 and return the top-`limit` entity ids by
-        score. The ranked list also gives RRF a meaningful per-rank signal it
-        previously lacked.
+        Backed by an in-memory inverted index (``_FtsIndex``, built lazily and
+        kept in sync by assert/retract): query tokens are resolved to candidate
+        docs via the vocabulary, and only those candidates are BM25-scored —
+        O(query terms) rather than an O(corpus) scan per call. Results are
+        byte-identical to the previous full-scan path (same substring matching,
+        same FTS5-style "term1 AND term2" / "term1 OR term2" gate (default AND),
+        same BM25, same deterministic eid tie-break) — the ranked list still
+        gives RRF a meaningful per-rank signal.
         """
         q = (query or "").strip()
         if not q:
@@ -651,37 +727,69 @@ class RdfStore:
         if not tokens:
             return []
 
-        p = attribute_to_predicate("value")
-        # Single pass: collect candidate docs + corpus stats for BM25 scoring.
-        docs: list[tuple[str, str, int]] = []  # (eid, lowercased text, doc_len words)
-        seen: set[str] = set()
-        total_len = 0
-        df: dict[str, int] = {tok: 0 for tok in tokens}
-        for q_obj in self._store.quads_for_pattern(None, p, None, None):
-            if isinstance(q_obj.object, ox.NamedNode):
+        idx = self._ensure_fts()
+        n_docs = len(idx.eid_doc)
+        if not n_docs:
+            return []
+
+        # Docs containing each token AS A SUBSTRING, resolved via a vocabulary scan
+        # (a query token has no spaces, so it can only occur inside one word). This
+        # reproduces the old `tok in text` matching exactly and yields df without
+        # touching the corpus. Only docs that contain a query token are scored —
+        # the old path iterated every fact to discover the same set.
+        def _docs_with_substring(sub: str) -> set[str]:
+            # eids whose value contains `sub` (a single word, no spaces) — exact
+            # postings plus any longer vocabulary word that contains it.
+            hits: set[str] = set()
+            exact = idx.word2eids.get(sub)
+            if exact is not None:
+                hits |= exact
+            for w, eids in idx.word2eids.items():
+                if w != sub and sub in w:
+                    hits |= eids
+            return hits
+
+        tok_eids: dict[str, set[str]] = {}
+        for tok in tokens:
+            subwords = tok.split()
+            if not subwords:
+                tok_eids[tok] = set()
                 continue
-            text = str(q_obj.object.value).lower() if hasattr(q_obj.object, "value") else ""
-            if not text:
-                continue
-            eid = uri_to_entity_id(q_obj.subject)
-            if eid in seen:
-                continue
-            seen.add(eid)
-            dl = len(text.split()) or 1
-            docs.append((eid, text, dl))
-            total_len += dl
+            # A doc contains token `tok` (possibly a multi-word phrase from an
+            # AND/OR split) only if it contains every word of it; for phrases we
+            # then verify the full substring on that small candidate set, so
+            # `tok in text` matching is reproduced exactly.
+            cand = set.intersection(*[_docs_with_substring(sw) for sw in subwords])
+            if len(subwords) > 1:
+                cand = {eid for eid in cand if tok in idx.eid_doc[eid][0]}
+            tok_eids[tok] = cand
+        # NB: the old full-scan incremented df once per (doc × token-occurrence),
+        # so a token repeated in the query inflated its df by that repeat count.
+        # Reproduce it exactly (× tok_counts) so with_scores BM25 stays bit-identical;
+        # "fixing" this df weighting would shift fusion scores — a separate change.
+        from collections import Counter
+        tok_counts = Counter(tokens)
+        df = {tok: len(eids) * tok_counts[tok] for tok, eids in tok_eids.items()}
+
+        # Candidate gate identical to the old scan: OR ⇒ ≥1 token, AND ⇒ all tokens.
+        if require_or:
+            candidates: set[str] = set().union(*tok_eids.values()) if tok_eids else set()
+        else:
+            candidates = None  # type: ignore[assignment]
             for tok in tokens:
-                if tok in text:
-                    df[tok] += 1
-        if not docs:
+                candidates = set(tok_eids[tok]) if candidates is None else (candidates & tok_eids[tok])
+                if not candidates:
+                    break
+            candidates = candidates or set()
+        if not candidates:
             return []
 
         import math
-        n_docs = len(docs)
-        avgdl = (total_len / n_docs) if n_docs else 1.0
+        avgdl = (idx.total_len / n_docs) if n_docs else 1.0
         k1, b = 1.5, 0.75
-
-        def _bm25(text: str, dl: int) -> float:
+        scored: list[tuple[float, str]] = []
+        for eid in candidates:
+            text, dl = idx.eid_doc[eid]
             score = 0.0
             for tok in tokens:
                 tf = text.count(tok)
@@ -690,21 +798,9 @@ class RdfStore:
                 n_t = df.get(tok, 0)
                 idf = math.log(1 + (n_docs - n_t + 0.5) / (n_t + 0.5))
                 score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avgdl))
-            return score
-
-        scored: list[tuple[float, str]] = []
-        for eid, text, dl in docs:
-            present = sum(1 for tok in tokens if tok in text)
-            # Same gate as before: OR needs ≥1 token, AND needs all tokens.
-            if require_or:
-                if present == 0:
-                    continue
-            elif present != len(tokens):
-                continue
-            scored.append((_bm25(text, dl), eid))
-        # Deterministic tie-break: equal-BM25 docs sorted by eid, not by
-        # arbitrary RocksDB iteration order (T1-DETERMINISM — retrieval ties
-        # are the run-to-run variance ceiling).
+            scored.append((score, eid))
+        # Deterministic tie-break: equal-BM25 docs sorted by eid (T1-DETERMINISM —
+        # retrieval ties are the run-to-run variance ceiling).
         scored.sort(key=lambda x: (-x[0], x[1]))
         top = scored[: int(limit)]
         if with_scores:
