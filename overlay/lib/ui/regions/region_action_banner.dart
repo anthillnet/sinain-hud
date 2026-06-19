@@ -83,8 +83,8 @@ class RegionActionBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Run button (explicit thread start) — or thread indicator once
-          // started, while the input below routes to this region's thread.
+          // Run button (explicit thread start). Once started, no indicator is
+          // shown — the input below simply routes to this region's thread.
           if (!threadStarted)
             HudTooltip(
               message: 'Ask the agent about this issue (starts a thread for this region)',
@@ -108,26 +108,6 @@ class RegionActionBanner extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                ),
-              ),
-            )
-          else
-            HudTooltip(
-              message: 'Thread active — messages below go to this region',
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: accent.withValues(alpha: 0.45)),
-                ),
-                child: Text(
-                  '👁 thread',
-                  style: TextStyle(
-                    fontFamily: 'JetBrainsMono',
-                    fontSize: 9,
-                    color: accent,
                   ),
                 ),
               ),

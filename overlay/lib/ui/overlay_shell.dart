@@ -365,6 +365,9 @@ class OverlayShellState extends State<OverlayShell> {
     ThreadTerminalSession.close(id); // kill the thread's PTY, if any
     setState(() {
       _terminalThreads.remove(id);
+      // Drop the "started" mark too — otherwise the gate in _buildThreadTabs
+      // (which keys off _startedRegionThreads) would resurrect the closed tab.
+      _startedRegionThreads.remove(id);
       if (_activeThread == id) {
         _activeThread = null;
         _activeRegion = null;
@@ -428,13 +431,16 @@ class OverlayShellState extends State<OverlayShell> {
     return false;
   }
 
-  /// Horizontal tab bar: MAIN + one pill per region thread. Hidden until the
-  /// first region conversation exists.
+  /// Horizontal tab bar: MAIN + one pill per STARTED region thread. A tab
+  /// appears only once a region's thread is actually started — chat Run / a
+  /// sent message / an opened terminal (`_startedRegionThreads`), or live
+  /// thread messages (`regionThreads`). Merely tapping an eye registers a
+  /// label but must NOT spawn a tab, or the strip fills with not-started
+  /// threads the user never opened.
   Widget _buildThreadTabs(WebSocketService ws) {
     final ids = <String>{
       ...ws.regionThreads.keys,
-      ...ws.regionThreadLabels.keys,
-      if (_activeRegion != null) _activeRegion!.id,
+      ..._startedRegionThreads,
     }.toList();
     // SPIKE: with the terminal enabled the row is always shown so the ⌨
     // toggle is reachable from MAIN even before any region thread exists.
@@ -532,9 +538,10 @@ class OverlayShellState extends State<OverlayShell> {
             for (final id in ids)
               pill(
                 // ⟳ while this region's task is in flight — visible feedback
-                // that the agent is working even if the eye expired meanwhile
+                // that the agent is working. No eye glyph otherwise: the label
+                // alone names the tab.
                 text:
-                    '${_regionWorking(ws, id) ? "⟳" : "👁"} ${labelFor(id)}',
+                    '${_regionWorking(ws, id) ? "⟳ " : ""}${labelFor(id)}',
                 selected: _activeThread == id,
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
