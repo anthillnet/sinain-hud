@@ -273,17 +273,21 @@ def main():
         # boxes to core so eyes track content between OCR ticks. Reset on app/
         # window change (content is discontinuous → no meaningful translation).
         try:
-            _gray = np.array(frame.convert("L"))
+            _gray = frame.convert("L") if hasattr(frame, "convert") else frame
+            _gray = np.asarray(_gray)
+            if _gray.ndim == 3:
+                _gray = _gray.mean(axis=2).astype(np.uint8)
             if app_changed or window_changed:
                 motion.reset()
             else:
                 m = motion.estimate(_gray)
                 if m is not None:
                     _dx, _dy, _boxes = m
+                    log(f"motion: dx={_dx:.1f} dy={_dy:.1f} changed={len(_boxes)} app={app_name}")
                     sender.send_motion(_dx, _dy, _boxes, app_name,
                                        getattr(capture, "last_display", 0))
         except Exception as _e:
-            pass
+            log(f"motion error: {_e}")
 
         # Adaptive SSIM threshold
         now_sec = time.time()

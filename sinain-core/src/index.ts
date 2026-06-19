@@ -35,7 +35,7 @@ import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
 import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
-import { log, warn, error } from "./log.js";
+import { log, warn, error, debug } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
@@ -1484,6 +1484,7 @@ async function main() {
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;
       const moved = regionTracker.applyMotion(dx, dy, changedBoxes, app, display);
+      debug("regions", `motion dx=${dx} dy=${dy} changed=${changedBoxes.length} app=${app} disp=${display} → ${moved ? moved.length + " moved" : "no eyes matched"}`);
       if (moved) {
         wsHandler.broadcastRaw({ type: "region_highlight", regions: moved, ts: Date.now() });
       }
