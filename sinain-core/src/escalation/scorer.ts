@@ -155,11 +155,13 @@ export function shouldEscalate(
   // Don't escalate idle
   if (hud === "Idle" || hud === "\u2014") return { escalate: false, score, stale: false };
 
-  // Focus mode: always escalate (even if digest unchanged)
-  if (mode === "focus" || mode === "rich") return { escalate: true, score, stale: false };
-
-  // Selective mode: dedup identical digests
+  // Dedup an unchanged digest: a static screen re-ticking is idle, not new
+  // activity \u2014 don't re-escalate it. Applies to rich/focus too, so they no
+  // longer fire idly; reactive escalation (changed digest) still fires.
   if (digest === lastEscalatedDigest) return { escalate: false, score, stale: false };
+
+  // Focus/rich: escalate on changed content
+  if (mode === "focus" || mode === "rich") return { escalate: true, score, stale: false };
 
   // Selective mode: score-based
   return { escalate: score.total >= ESCALATION_THRESHOLD, score, stale: false };
