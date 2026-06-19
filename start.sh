@@ -391,7 +391,9 @@ else
 fi
 
 # Built-in sinain chat lane — resident sidecar on :9610 (reads its own
-# sinain-chat-agent/.env). Skipped if python3 is unavailable.
+# sinain-chat-agent/.env). Skipped if python3 is unavailable. Idle/proactive
+# messages are opt-in inside the sidecar (SINAIN_CHAT_IDLE_ENABLED) — they're
+# the dominant token cost; normal thread chat stays on.
 if command -v python3 >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/sinain-chat-agent/sidecar.py" ]; then
   # Prefer the sidecar's own .venv (dev); fall back to system python3.
   CHAT_PY="python3"
