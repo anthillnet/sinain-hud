@@ -87,6 +87,17 @@ export interface RawRegion {
   action?: RegionAction;
   /** SenseEvent.id the issue was observed in (from numbered prompt lines) */
   sourceId?: number;
+  /** Line-id path (region-detector): the detector picked a specific OCR LINE,
+   *  so the anchor is already resolved — `issue` is a clean description (not a
+   *  quote) and these carry the exact geometry. When present, the tracker uses
+   *  them directly and derives the stable id from `anchorText` (the verbatim
+   *  line) so re-phrased descriptions don't spawn duplicate eyes. */
+  bbox?: [number, number, number, number];
+  frameSize?: [number, number];
+  anchorText?: string;
+  sourceOcr?: string;
+  app?: string;
+  display?: number;
 }
 
 /** Tracked region with stable identity and resolved coordinates. */

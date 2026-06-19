@@ -265,14 +265,12 @@ export function loadConfig(): CoreConfig {
   // on a fast cadence instead of the cloud analyzer.
   const regionSlmConfig: import("./types.js").RegionSlmConfig = {
     enabled: boolEnv("REGION_SLM_ENABLED", false),
-    // MUST be a small, DEDICATED model — never the local-mode main model
-    // (qwen2.5:7b): Ollama serializes requests per-model, so sharing it would
-    // queue region detection behind the analyzer/distiller lanes. A separate
-    // small model loads alongside (≈1GB) and runs concurrently. Bake-off (warm,
-    // one-shot prompt): qwen2.5:1.5b ≈500ms with correct sourceId anchoring and
-    // generous detection — best small option. phi4-mini (~1.4s) mis-anchored
-    // (sourceId undefined); smollm2:360m fast (~150ms) but hallucinated/no anchor.
-    model: env("REGION_SLM_MODEL", "qwen2.5:1.5b"),
+    // Small, DEDICATED model — never the local-mode main model (qwen2.5:7b),
+    // which Ollama serializes, queueing detection behind the analyzer/distiller.
+    // 3b (≈2GB, ~0.5-1s) writes clean descriptions; the line-id prompt means it
+    // only has to pick a line + describe (not quote), so it doesn't need to be
+    // large. 1.5b is a faster/lower-quality fallback.
+    model: env("REGION_SLM_MODEL", "qwen2.5:3b"),
     endpoint: env("REGION_SLM_ENDPOINT", "http://localhost:11434"),
     debounceMs: intEnv("REGION_SLM_DEBOUNCE_MS", 500),
     maxTokens: intEnv("REGION_SLM_MAX_TOKENS", 256),

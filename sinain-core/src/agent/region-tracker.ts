@@ -207,33 +207,37 @@ export class RegionTracker {
     this.archiveForeign(ctx.currentApp);
 
     for (const r of raw ?? []) {
-      const id = regionIdFor(r.issue);
-      // Exact id hit, else fuzzy re-match: identity is a hash of the issue
-      // text, but LLMs rephrase between ticks ("Missing import for X" →
-      // "X import missing") — without fuzzy matching the old region misses
-      // its ticks and expires while the issue is still on screen. A token-
-      // Jaccard ≥ 0.5 counts as the same issue; the ORIGINAL id is kept so
-      // the eye, thread, and session stay stable across rewordings.
+      // Line-id path (region-detector) carries a pre-resolved anchor and a clean
+      // (non-quote) description, so its id hashes the VERBATIM anchored line —
+      // re-phrased descriptions map to the same eye. Legacy path hashes the
+      // issue (itself a quote, stable enough).
+      const preResolved = !!(r.bbox && r.frameSize);
+      const id = r.anchorText ? regionIdFor(r.anchorText) : regionIdFor(r.issue);
+      // Exact id hit, else fuzzy re-match (token-Jaccard ≥ 0.5) so an LLM
+      // rewording doesn't expire a still-present eye; the ORIGINAL id is kept.
       const existing = this.tracked.get(id) ?? this.matchByTokens(r.issue);
       if (existing) {
         existing.lastSeenTick = this.tick;
         existing.region.tip = r.tip;
+        existing.region.issue = r.issue; // keep the label fresh as wording improves
         if (r.action) existing.region.action = r.action;
-        // Tier 3 — confirm: the analyzer re-detected an optimistically
-        // restored region, so it's genuinely still on screen. Promote it
-        // from pending (dimmed) to a solid eye and drop the short leash.
+        // Tier 3 — confirm a restored (pending) eye + re-anchor to the fresh spot.
         if (existing.region.pending) {
           existing.region.pending = false;
           existing.restoredAtTick = undefined;
-          // Re-anchor: it was restored at its stale archived bbox; snap it to
-          // the fresh detection so the eye sits at the issue's current spot
-          // (the user may have scrolled since it was last on screen).
-          const anchor = this.resolveAnchor(r, ctx);
-          if (anchor) {
-            existing.region.bbox = anchor.bbox;
-            existing.region.frameSize = anchor.frameSize;
-            existing.region.anchorText = anchor.anchorText;
-            if (anchor.src.ocr) existing.region.sourceOcr = anchor.src.ocr.slice(0, 2000);
+          if (preResolved) {
+            existing.region.bbox = r.bbox;
+            existing.region.frameSize = r.frameSize;
+            existing.region.anchorText = r.anchorText;
+            if (r.sourceOcr) existing.region.sourceOcr = r.sourceOcr.slice(0, 2000);
+          } else {
+            const anchor = this.resolveAnchor(r, ctx);
+            if (anchor) {
+              existing.region.bbox = anchor.bbox;
+              existing.region.frameSize = anchor.frameSize;
+              existing.region.anchorText = anchor.anchorText;
+              if (anchor.src.ocr) existing.region.sourceOcr = anchor.src.ocr.slice(0, 2000);
+            }
           }
           debug(TAG, `region ${existing.region.id} confirmed (was pending)`);
         }
@@ -241,25 +245,34 @@ export class RegionTracker {
       }
       if (this.tracked.size >= this.maxRegions) continue;
 
-      // Anchor resolution (sourceId echo → OCR text match → OCR line refine).
-      // Precise-or-nothing: an eye is only useful next to the thing it points
-      // at. If we can't resolve a localized bbox, drop the region rather than
-      // corner-stack a misplaced eye that misleads. Looser emission upstream
-      // keeps the supply up. Full-frame bboxes are demoted inside resolveAnchor.
-      const anchor = this.resolveAnchor(r, ctx);
-      if (!anchor) {
-        log(TAG, `skip unanchored region: "${r.issue}" (sourceId=${r.sourceId ?? "-"})`);
-        continue;
+      // Resolve the anchor + app/display for a NEW eye, from either path.
+      let bbox: [number, number, number, number] | undefined;
+      let frameSize: [number, number] | undefined;
+      let anchorText: string | undefined;
+      let sourceOcr: string | undefined;
+      let regionApp: string | undefined;
+      let regionDisplay: number | undefined;
+      if (preResolved) {
+        bbox = r.bbox; frameSize = r.frameSize; anchorText = r.anchorText;
+        sourceOcr = r.sourceOcr; regionApp = r.app || ctx.currentApp; regionDisplay = r.display;
+      } else {
+        // sourceId echo → OCR text match → line refine. Precise-or-nothing:
+        // drop rather than corner-stack a misplaced eye.
+        const anchor = this.resolveAnchor(r, ctx);
+        if (!anchor) {
+          log(TAG, `skip unanchored region: "${r.issue}" (sourceId=${r.sourceId ?? "-"})`);
+          continue;
+        }
+        bbox = anchor.bbox; frameSize = anchor.frameSize; anchorText = anchor.anchorText;
+        sourceOcr = anchor.src.ocr;
+        regionApp = anchor.src.meta.app || ctx.currentApp; // || not ??: empty app → currentApp
+        regionDisplay = anchor.src.meta.screen;
       }
-      const { src, bbox, frameSize, anchorText } = anchor;
 
       // App-scoped admission: never anchor a NEW eye to a window that isn't
-      // frontmost. The sense buffer keeps the previous app's OCR for up to
-      // ~2 min after a switch (context-window maxAgeMs), and the analyzer
-      // happily re-detects issues in it — which would otherwise spawn eyes for
-      // the old app over the current screen every tick. This is the birth-side
-      // mirror of archiveForeign (which only removes already-live foreign eyes).
-      const srcApp = (src.meta.app || "").toLowerCase().trim();
+      // frontmost (stale buffer OCR for the previous app would otherwise spawn
+      // eyes over the current screen). Birth-side mirror of archiveForeign.
+      const srcApp = (regionApp || "").toLowerCase().trim();
       const curApp = (ctx.currentApp || "").toLowerCase().trim();
       if (srcApp && curApp && curApp !== "unknown" && srcApp !== curApp) {
         debug(TAG, `skip foreign-app region: "${r.issue}" (src=${srcApp} ≠ current=${curApp})`);
@@ -276,15 +289,9 @@ export class RegionTracker {
           bbox,
           frameSize,
           anchorText,
-          sourceOcr: src.ocr ? src.ocr.slice(0, 2000) : undefined,
-          // || not ?? — an empty-string app (app-detector timed out that
-          // frame) must fall back to currentApp, else region.app="" and
-          // archiveForeign skips it (falsy), leaving a foreign eye that never
-          // clears on app switch. currentApp is "unknown" at worst, never "".
-          app: src.meta.app || ctx.currentApp,
-          // Display the region was detected on (multi-display) — overlay places
-          // the eye on the matching screen.
-          display: src.meta.screen,
+          sourceOcr: sourceOcr ? sourceOcr.slice(0, 2000) : undefined,
+          app: regionApp,
+          display: regionDisplay,
         },
         lastSeenTick: this.tick,
         firstSeenTs: Date.now(),

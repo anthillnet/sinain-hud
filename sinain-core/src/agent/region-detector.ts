@@ -2,37 +2,53 @@ import type { ContextWindow, RawRegion, RegionSlmConfig } from "../types.js";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import { buildContextWindow } from "./context-window.js";
-import { buildUserPrompt, parseRegions } from "./analyzer.js";
 import { log, debug, error } from "../log.js";
 
 const TAG = "region-slm";
+const REGION_ACTIONS = new Set(["fix", "explain", "research"]);
+const MAX_LINES = 40;   // OCR lines offered to the model per tick
+const MAX_REGIONS = 3;
 
 /**
- * Regions-only system prompt for a small local model. Deliberately short and
- * explicit — SLMs follow a tight schema far better than a long discursive one.
- * No hud/digest/record: this lane does ONE job, so the model spends its budget
- * on regions and returns fast. `format: json` (Ollama) constrains the output.
+ * Region prompt for a small local model. The model picks the LINE-ID of an
+ * actionable on-screen line and writes a clean DESCRIPTION (not a quote) — the
+ * tracker anchors to the line's exact box, so the description is free to be
+ * readable rather than parroting (often-imperfect) OCR. Tight schema; SLMs obey
+ * a short explicit contract far better than prose. `format: json` constrains it.
  */
-const SLM_SYSTEM_PROMPT = `You find actionable things on a user's screen and return JSON only.
+const SLM_SYSTEM_PROMPT = `You spot things on a user's screen an assistant could help with, and return JSON only.
 
-Input: screen OCR lines, each tagged "[S<id>] [app] text".
+Input: numbered screen lines, "[L<id>] text".
 
-A region is anything an agent could genuinely help with — an error, a typo, a
-bug, a question, a form, code being edited, a term being read, a draft being
-written, a command the user seems unsure of. Be generous but concrete.
+Pick lines worth offering help on — an error, a bug, a typo, a question, a form,
+code being edited, a term being read, a draft being written, a command the user
+seems unsure of. Be generous but concrete; only real, on-screen things.
 
-Each region object has:
-- "issue": ≤10 words quoting the on-screen text it refers to
-- "tip": one sentence — what an agent could do about it
-- "action": one of "fix" | "explain" | "research"
-- "sourceId": the integer from the [S<id>] prefix of the line where it appears
+For each, output:
+- "line": the integer id of the line it refers to
+- "issue": a SHORT, CLEAN description in YOUR OWN WORDS (≤10 words). Do NOT copy
+  the raw text; summarize what it is (OCR may be imperfect — describe the intent).
+- "tip": one sentence — what an assistant could actually do about it
+- "action": "fix" | "explain" | "research"
 
-Rules: max 3 regions, one per distinct thing, only things actually visible.
-If the screen is empty or idle, return {"regions":[]}. Output JSON only — no prose.
+Rules: max 3, one per distinct thing. Empty/idle screen → {"regions":[]}.
+Output JSON only — no prose.
 
-Example input line: [S7] [Terminal] error TS2339: Property 'foo' does not exist
+Example input:
+[L4] def parse(self, x):  # TODO handle None
+[L5] Traceback (most recent call last): KeyError 'user_id'
 Example output:
-{"regions":[{"issue":"error TS2339: Property 'foo' does not exist","tip":"Add the missing 'foo' property to the type or fix the reference.","action":"fix","sourceId":7}]}`;
+{"regions":[{"line":5,"issue":"KeyError on 'user_id' in a traceback","tip":"Trace where user_id is read and guard the missing key.","action":"fix"},{"line":4,"issue":"Unhandled None case marked TODO","tip":"Add the None handling the TODO calls for.","action":"fix"}]}`;
+
+/** One OCR line offered to the model, with the geometry to anchor it. */
+interface PromptLine {
+  bbox: [number, number, number, number];
+  text: string;
+  frameSize: [number, number];
+  app: string;
+  display: number;
+  ocr: string; // the source event's full OCR (spawn context)
+}
 
 export interface RegionDetectorDeps {
   feedBuffer: FeedBuffer;
@@ -89,27 +105,38 @@ export class RegionDetector {
     const ctx = buildContextWindow(
       this.deps.feedBuffer, this.deps.senseBuffer, "lean", this.deps.maxAgeMs,
     );
-    // Drop frames with no real OCR: buildUserPrompt renders them as "(no text)"
-    // placeholder lines, and a small model latches onto those as if they were
-    // content (emitting bogus issue="(no text)" eyes). The cloud model ignores
-    // them; the SLM needs them gone. Skip entirely if nothing has real text.
-    let screen = ctx.screen.filter(e => e.ocr && e.ocr.trim().length > 0);
-    // Focus on the CURRENT app's frames. Right after an app switch the buffer
-    // is still full of the previous app's OCR; feeding all of it makes the SLM
-    // spend its budget on (and emit regions for) the old app — which the tracker
-    // then rejects as foreign — so the new app gets few/no eyes for several
-    // ticks ("super long wait" after a switch). Scoping to currentApp makes the
-    // model detect the screen you're actually on immediately. Fall back to the
-    // unfiltered set if the current app has no OCR frame yet.
+    // Build the line list the model chooses from: per-line OCR boxes of the
+    // CURRENT app's frames (newest first), deduped. Scoping to currentApp avoids
+    // detecting the previous app's leftover buffer OCR right after a switch.
     const cur = (ctx.currentApp || "").toLowerCase().trim();
-    if (cur) {
-      const curOnly = screen.filter(e => (e.meta.app || "").toLowerCase().trim() === cur);
-      if (curOnly.length > 0) screen = curOnly;
+    const lines: PromptLine[] = [];
+    const seen = new Set<string>();
+    for (const e of ctx.screen) { // newest-first
+      const eApp = (e.meta.app || "").toLowerCase().trim();
+      if (cur && eApp && eApp !== cur) continue;
+      const fs = (e.frameSize && e.frameSize.length === 2) ? e.frameSize as [number, number] : undefined;
+      if (!fs || !e.ocrLines?.length) continue;
+      for (const l of e.ocrLines) {
+        const text = (l.text || "").trim();
+        if (text.length < 3 || !Array.isArray(l.bbox) || l.bbox.length !== 4) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lines.push({
+          bbox: l.bbox as [number, number, number, number],
+          text, frameSize: fs,
+          app: e.meta.app || ctx.currentApp,
+          display: e.meta.screen,
+          ocr: e.ocr || "",
+        });
+        if (lines.length >= MAX_LINES) break;
+      }
+      if (lines.length >= MAX_LINES) break;
     }
-    if (screen.length === 0) return;
-    const leanCtx: ContextWindow = { ...ctx, screen };
+    if (lines.length === 0) return;
 
-    const userPrompt = buildUserPrompt(leanCtx, null, /* withSourceIds */ true);
+    const userPrompt = `Active app: ${ctx.currentApp || "?"}\nScreen lines:\n`
+      + lines.map((l, i) => `[L${i}] ${l.text}`).join("\n");
     const controller = new AbortController();
     this.inflight = controller;
     const timeout = setTimeout(() => controller.abort(), this.deps.config.timeoutMs);
@@ -140,23 +167,48 @@ export class RegionDetector {
       this.lastLatencyMs = latencyMs;
       this.runs++;
 
+      let parsed: any;
+      try { parsed = JSON.parse(content); }
+      catch { const m = content.match(/\{[\s\S]*\}/); if (m) { try { parsed = JSON.parse(m[0]); } catch { /* */ } } }
+
+      // Map each {line, issue, tip, action} to a pre-resolved RawRegion: the
+      // line-id gives the exact anchor box + verbatim text; the issue is the
+      // model's clean description.
       let regions: RawRegion[] | undefined;
-      try {
-        regions = parseRegions(JSON.parse(content));
-      } catch {
-        const m = content.match(/\{[\s\S]*\}/);
-        if (m) { try { regions = parseRegions(JSON.parse(m[0])); } catch { /* unparseable */ } }
+      if (parsed && Array.isArray(parsed.regions)) {
+        regions = parsed.regions
+          .map((r: any): RawRegion | null => {
+            // Models return the id as 2, "2", or "L2" — extract the digits.
+            const li = parseInt(String(r?.line ?? r?.lineId ?? "").replace(/[^0-9]/g, ""), 10);
+            const issue = typeof r?.issue === "string" ? r.issue.trim() : "";
+            const tip = typeof r?.tip === "string" ? r.tip.trim() : "";
+            if (!Number.isInteger(li) || li < 0 || li >= lines.length || !issue) return null;
+            const ln = lines[li];
+            return {
+              issue: issue.slice(0, 200),
+              tip: (tip || "Engage with this on screen.").slice(0, 300),
+              action: REGION_ACTIONS.has(r?.action) ? r.action : undefined,
+              bbox: ln.bbox,
+              frameSize: ln.frameSize,
+              anchorText: ln.text,
+              sourceOcr: ln.ocr,
+              app: ln.app,
+              display: ln.display,
+            };
+          })
+          .filter((r: RawRegion | null): r is RawRegion => r !== null)
+          .slice(0, MAX_REGIONS);
+        if (regions && regions.length === 0) regions = undefined;
       }
 
-      // A newer run aborted us mid-flight (controller swapped) — discard, the
-      // newer run owns the screen now.
+      // A newer run aborted us mid-flight (controller swapped) — discard.
       if (this.inflight !== controller) {
         debug(TAG, `superseded run discarded (${latencyMs}ms)`);
         return;
       }
       if (!this.deps.isEnabled()) return;
 
-      log(TAG, `detect #${this.runs} ${latencyMs}ms model=${this.deps.config.model} → ${regions?.length ?? 0} region(s)${regions?.length ? ": " + regions.map(r => `"${r.issue.slice(0, 32)}" src=${r.sourceId ?? "-"}`).join("; ") : ""}`);
+      log(TAG, `detect #${this.runs} ${latencyMs}ms model=${this.deps.config.model} ${lines.length} lines → ${regions?.length ?? 0} region(s)${regions?.length ? ": " + regions.map(r => `"${r.issue.slice(0, 36)}"`).join("; ") : ""}`);
       // Always call (even with undefined) so RegionTracker expiry advances.
       this.deps.onRegions(regions, ctx);
     } catch (err: any) {
