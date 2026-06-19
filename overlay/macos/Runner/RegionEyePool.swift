@@ -91,7 +91,7 @@ class RegionEyePool {
         guard let eye = panels[id] else { hidePreview(); return }
         hidePreview()
 
-        let w: CGFloat = 320
+        let w: CGFloat = 360
         let card = RegionCardView(width: w, issue: issue, tip: tip, hasTerminal: hasTerminal)
         let h = card.frame.height
         card.onChat = { [weak self] in
@@ -362,10 +362,10 @@ class RegionCardView: NSView {
         let contentW = width - pad * 2
         let issueLabel = RegionCardView.makeLabel(issue.isEmpty ? "Region" : issue,
                                                   size: 13, weight: .semibold,
-                                                  color: .white, maxW: contentW)
+                                                  color: .white, maxW: contentW, maxLines: 5)
         let hasTip = !tip.isEmpty
         let tipLabel = RegionCardView.makeLabel(tip, size: 12, weight: .regular,
-                                                color: RegionCardView.muted, maxW: contentW)
+                                                color: RegionCardView.muted, maxW: contentW, maxLines: 8)
         let issueH = issueLabel.fittingSize.height
         let tipH = hasTip ? tipLabel.fittingSize.height : 0
         let gap: CGFloat = hasTip ? 4 : 0
@@ -411,7 +411,7 @@ class RegionCardView: NSView {
     @objc private func closeTapped() { onClose?() }
 
     private static func makeLabel(_ text: String, size: CGFloat, weight: NSFont.Weight,
-                                  color: NSColor, maxW: CGFloat) -> NSTextField {
+                                  color: NSColor, maxW: CGFloat, maxLines: Int = 3) -> NSTextField {
         let l = NSTextField(wrappingLabelWithString: text)
         l.font = NSFont.systemFont(ofSize: size, weight: weight)
         l.textColor = color
@@ -420,8 +420,12 @@ class RegionCardView: NSView {
         l.isEditable = false
         l.isSelectable = false
         l.drawsBackground = false
-        l.maximumNumberOfLines = 3
-        l.lineBreakMode = .byTruncatingTail
+        l.maximumNumberOfLines = maxLines
+        // Word-wrap up to maxLines, then ellipsize the last line if it still
+        // overflows. .byTruncatingTail here would force a SINGLE truncated line
+        // (no wrapping) — the cause of long tips being cut off on one line.
+        l.lineBreakMode = .byWordWrapping
+        l.cell?.truncatesLastVisibleLine = true
         l.preferredMaxLayoutWidth = maxW
         return l
     }
