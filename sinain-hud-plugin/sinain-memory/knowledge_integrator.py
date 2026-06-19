@@ -305,50 +305,72 @@ def _find_matching_entity(
     return None
 
 
-def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_facts: list[dict]) -> list[dict]:
-    """Deduplicate graph ops via embedding similarity (Mem0 pattern).
+def _canonicalize_ops(ops: list[dict], store, k: int = 20) -> list[dict]:
+    """Deduplicate graph ops via embedding similarity (Mem0 pattern), CANDIDATE-BOUNDED.
 
-    For each new assertion, check if a semantically equivalent fact already exists
-    using cosine similarity (threshold 0.78). If so, reinforce instead of asserting.
-    Falls back to exact hash matching if embedding service is unavailable.
+    For each new assertion, retrieve only the top-K lexically-similar existing facts
+    (BM25 via ``store.fts_search``) and run cosine over THOSE — instead of loading and
+    re-embedding every fact in the store. Per-integration dedup is therefore O(new·K),
+    not O(store size), so it scales to large stores and to batch backfills (where the
+    old full-scan was effectively O(N²)). Exact (content-hash) dedup is an O(1) point
+    lookup. Falls back to exact-only if the embed service is unavailable. BM25 is the
+    candidate-recall stage: near-duplicate facts almost always share vocabulary, so
+    recall stays high while cost no longer depends on total store size.
     """
-    existing_id_set = set(existing_entities)
+    from embed_client import embed, cosine, SIMILARITY_THRESHOLD
 
-    # Build text→entity_id map for existing facts (for embedding-based dedup)
-    existing_texts: list[str] = []
-    existing_ids: list[str] = []
-    for f in existing_facts:
-        val = f.get("value", "")
-        eid = f.get("entityId", f.get("entity_id", ""))
-        if val and eid:
-            existing_texts.append(val)
-            existing_ids.append(eid)
-
-    # Separate assert ops for batch dedup
-    assert_ops = [(i, op) for i, op in enumerate(ops) if op.get("op") == "assert"]
-    non_assert_ops = [(i, op) for i, op in enumerate(ops) if op.get("op") != "assert"]
-
-    # Batch embedding dedup: single HTTP call for all new facts
-    dedup_map: dict[int, int] = {}  # assert_index → existing_index
-    if assert_ops and existing_texts:
+    # Stage 1 — per new fact, pull top-K BM25 candidates (bounded), then run ONE
+    # embedding batch over (all new values + the union of candidate values).
+    assert_cands: dict[int, list[tuple[str, str]]] = {}  # orig_idx → [(cand_id, cand_value)]
+    for orig_idx, op in enumerate(ops):
+        if op.get("op") != "assert" or op.get("kind") == "recon":
+            continue
+        value = op.get("value", "")
+        if not value:
+            continue
+        cands: list[tuple[str, str]] = []
         try:
-            from embed_client import find_duplicates_batch
-            new_values = [op.get("value", "") for _, op in assert_ops]
-            dedup_map = find_duplicates_batch(new_values, existing_texts)
-            if dedup_map:
-                print(f"  [dedup] found {len(dedup_map)} semantic duplicates in batch", file=sys.stderr)
+            for cid in store.fts_search(value, k):
+                vals = store.entity(cid).get("value") or []
+                cval = vals[0] if vals else ""
+                if cval:
+                    cands.append((cid, cval))
         except Exception:
-            pass  # embedding unavailable, fall through to exact matching
+            pass
+        assert_cands[orig_idx] = cands
+
+    sem_dup: dict[int, str] = {}  # orig_idx → existing fact id it duplicates
+    cand_vals = sorted({cv for cs in assert_cands.values() for _, cv in cs})
+    new_vals = [ops[i].get("value", "") for i in assert_cands]
+    if cand_vals:
+        try:
+            all_texts = list(dict.fromkeys([v for v in new_vals if v] + cand_vals))
+            vecs = embed(all_texts)
+            if vecs is not None:
+                vmap = {t: vecs[i] for i, t in enumerate(all_texts)}
+                for orig_idx, cands in assert_cands.items():
+                    vv = vmap.get(ops[orig_idx].get("value", ""))
+                    if vv is None or not cands:
+                        continue
+                    best_id, best_sim = None, SIMILARITY_THRESHOLD
+                    for cid, cval in cands:
+                        cvec = vmap.get(cval)
+                        if cvec is not None:
+                            s = cosine(vv, cvec)
+                            if s > best_sim:
+                                best_sim, best_id = s, cid
+                    if best_id is not None:
+                        sem_dup[orig_idx] = best_id
+                if sem_dup:
+                    print(f"  [dedup] {len(sem_dup)} semantic duplicates (candidate-bounded)", file=sys.stderr)
+        except Exception:
+            pass  # embedding unavailable → exact-only below
 
     result = []
     seen_fact_ids: set[str] = set()
     seen_values_set: set[str] = set()
 
-    # Re-merge in original order
-    all_indexed = non_assert_ops + assert_ops
-    all_indexed.sort(key=lambda x: x[0])
-
-    for orig_idx, op in all_indexed:
+    for orig_idx, op in enumerate(ops):
         if op.get("op") != "assert":
             result.append(op)
             continue
@@ -374,19 +396,18 @@ def _canonicalize_ops(ops: list[dict], existing_entities: list[str], existing_fa
             seen_values_set.add(value)
             continue
 
-        # Exact hash match
-        if fact_id in existing_id_set or fact_id in seen_fact_ids:
-            if fact_id in existing_id_set:
-                result.append({"op": "reinforce", "entityId": fact_id})
-                print(f"  [dedup] exact → reinforce '{fact_id}'", file=sys.stderr)
+        # Exact content-hash match — O(1) point lookup (was a whole-store set).
+        if fact_id in seen_fact_ids:
+            continue
+        if store.entity(fact_id):
+            result.append({"op": "reinforce", "entityId": fact_id})
+            print(f"  [dedup] exact → reinforce '{fact_id}'", file=sys.stderr)
             continue
 
-        # Check batch embedding dedup results
-        assert_idx = [i for i, (oi, _) in enumerate(assert_ops) if oi == orig_idx]
-        if assert_idx and assert_idx[0] in dedup_map:
-            dup_existing_idx = dedup_map[assert_idx[0]]
-            result.append({"op": "reinforce", "entityId": existing_ids[dup_existing_idx]})
-            print(f"  [dedup] semantic → reinforce '{existing_ids[dup_existing_idx]}'", file=sys.stderr)
+        # Semantic match against this fact's K BM25 candidates.
+        if orig_idx in sem_dup:
+            result.append({"op": "reinforce", "entityId": sem_dup[orig_idx]})
+            print(f"  [dedup] semantic → reinforce '{sem_dup[orig_idx]}'", file=sys.stderr)
             continue
 
         # Intra-batch dedup (by value text)
@@ -1435,18 +1456,11 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
         from triplestore import TripleStore
         store = TripleStore(db_path)
 
-        # Deduplicate via embedding similarity (Mem0 pattern)
-        existing_ids = [r[0] for r in store.entities_with_attr("entity")]
-        # Load existing fact values for semantic comparison
-        existing_facts_for_dedup = []
-        for eid in existing_ids:
-            attrs = store.entity(eid)
-            if attrs and "value" in attrs:
-                vals = attrs["value"]
-                val = vals[0] if isinstance(vals, list) and vals else str(vals) if vals else ""
-                if val:
-                    existing_facts_for_dedup.append({"entity_id": eid, "value": val})
-        ops = _canonicalize_ops(ops, existing_ids, existing_facts_for_dedup)
+        # Deduplicate via embedding similarity (Mem0 pattern), candidate-bounded:
+        # _canonicalize_ops pulls per-fact BM25 candidates from the store itself, so we
+        # no longer load + re-embed the entire store on every integration (was O(store
+        # size) per digest — the cost that made batch backfills effectively O(N²)).
+        ops = _canonicalize_ops(ops, store)
 
         stats = {"asserted": 0, "reinforced": 0, "retracted": 0}
 
@@ -1616,15 +1630,17 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                         tx = store.begin_tx("entity_graph")
                         store.assert_triple(tx, fact_eid, "about", entity_node_id, value_type="ref")
 
-                ref_count = 0
-                for fact_eid_row in store.entities_with_attr("value"):
-                    fact_eid = fact_eid_row[0]
-                    if not fact_eid.startswith("fact:"):
-                        continue
-                    attrs = store.entity(fact_eid)
+                # Mentions inference — CANDIDATE-BOUNDED. The old version re-scanned
+                # every fact × every entity on EVERY digest (O(N·M)). The only edges
+                # that can be NEW are (1) this digest's new facts mentioning any known
+                # entity, and (2) older facts mentioning one of this digest's entity
+                # nodes (reached via BM25, not a full scan). Existing fact×entity pairs
+                # were already linked in earlier digests, so the rescan was pure waste.
+                # Cost is now O(new_facts·M + digest_entities·K).
+                def _link(fact_eid: str, attrs: dict) -> int:
+                    n = 0
                     source_entity = (attrs.get("entity", [""])[0] if attrs.get("entity") else "").lower()
                     value_lower = (attrs["value"][0] if attrs.get("value") else "").lower()
-
                     for ename, enode_id in all_entity_nodes.items():
                         if ename == source_entity or len(ename) < 4:
                             continue
@@ -1633,7 +1649,35 @@ def _execute_graph_ops(db_path: str, ops: list[dict], digest_ts: str, digest_ent
                             if not any(r[0] == fact_eid for r in existing_refs):
                                 tx = store.begin_tx("ref_inference")
                                 store.assert_triple(tx, fact_eid, "mentions", enode_id, value_type="ref")
-                                ref_count += 1
+                                n += 1
+                    return n
+
+                ref_count = 0
+                # (1) new facts (this digest) × all known entities
+                new_fact_eids = {
+                    _fact_id(o.get("entity", ""), o.get("attribute", ""), o.get("value", ""))
+                    for o in ops if o.get("op") == "assert"
+                }
+                for fact_eid in new_fact_eids:
+                    attrs = store.entity(fact_eid)
+                    if attrs:
+                        ref_count += _link(fact_eid, attrs)
+
+                # (2) older facts mentioning one of THIS digest's entity nodes,
+                # reached via BM25 candidates rather than a full-store scan.
+                for ename in entity_resolve:
+                    if len(ename) < 4:
+                        continue
+                    try:
+                        cand_ids = store.fts_search(ename, 50)
+                    except Exception:
+                        cand_ids = []
+                    for fact_eid in cand_ids:
+                        if not fact_eid.startswith("fact:") or fact_eid in new_fact_eids:
+                            continue
+                        attrs = store.entity(fact_eid)
+                        if attrs:
+                            ref_count += _link(fact_eid, attrs)
 
                 if ref_count:
                     stats["refs_created"] = ref_count
