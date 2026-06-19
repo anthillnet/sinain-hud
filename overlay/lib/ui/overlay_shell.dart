@@ -538,9 +538,10 @@ class OverlayShellState extends State<OverlayShell> {
             for (final id in ids)
               pill(
                 // ⟳ while this region's task is in flight — visible feedback
-                // that the agent is working even if the eye expired meanwhile
+                // that the agent is working. No eye glyph otherwise: the label
+                // alone names the tab.
                 text:
-                    '${_regionWorking(ws, id) ? "⟳" : "👁"} ${labelFor(id)}',
+                    '${_regionWorking(ws, id) ? "⟳ " : ""}${labelFor(id)}',
                 selected: _activeThread == id,
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
