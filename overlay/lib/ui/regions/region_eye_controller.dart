@@ -221,6 +221,7 @@ class RegionEyeController {
     if (_pendingTapId == id && _pendingTapTimer?.isActive == true) {
       _pendingTapTimer?.cancel();
       _pendingTapId = null;
+      windowService.hideRegionPreview(); // clear preview, then teleport
       onRegionTap(region, pos, true); // double → teleport
       return;
     }
@@ -228,7 +229,10 @@ class RegionEyeController {
     _pendingTapId = id;
     _pendingTapTimer = Timer(const Duration(milliseconds: 280), () {
       _pendingTapId = null;
-      onRegionTap(region, pos, false); // single → preview (toggle)
+      // single → toggle a native preview AT the ROI (issue + tip), no HUD needed
+      final tip = region.tip.trim();
+      windowService.toggleRegionPreview(
+          region.id, tip.isEmpty ? region.issue : '${region.issue}\n$tip');
     });
   }
 
