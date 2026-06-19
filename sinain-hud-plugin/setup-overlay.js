@@ -35,7 +35,15 @@ const RESET = "\x1b[0m";
 function log(msg)  { console.log(`${BOLD}[setup-overlay]${RESET} ${msg}`); }
 function ok(msg)   { console.log(`${BOLD}[setup-overlay]${RESET} ${GREEN}✓${RESET} ${msg}`); }
 function warn(msg) { console.log(`${BOLD}[setup-overlay]${RESET} ${YELLOW}⚠${RESET} ${msg}`); }
-function fail(msg) { console.error(`${BOLD}[setup-overlay]${RESET} ${RED}✗${RESET} ${msg}`); process.exit(1); }
+function fail(msg) {
+  console.error(`${BOLD}[setup-overlay]${RESET} ${RED}✗${RESET} ${msg}`);
+  // As a CLI, exit non-zero. When IMPORTED (e.g. launcher.js's overlay
+  // update-check), THROW instead so the caller can fall back to the bundled /
+  // local overlay — a GitHub API 403 (rate limit, no token, offline) must never
+  // abort app launch, especially for DMG users who already ship the overlay.
+  if (isMain) process.exit(1);
+  throw new Error(String(msg).split("\n")[0]);
+}
 
 // ── Entry point (only when run directly, not when imported) ──────────────────
 

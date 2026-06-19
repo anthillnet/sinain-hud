@@ -27,7 +27,13 @@ const RESET = "\x1b[0m";
 function log(msg)  { console.log(`${BOLD}[setup-sck-capture]${RESET} ${msg}`); }
 function ok(msg)   { console.log(`${BOLD}[setup-sck-capture]${RESET} ${GREEN}✓${RESET} ${msg}`); }
 function warn(msg) { console.log(`${BOLD}[setup-sck-capture]${RESET} ${YELLOW}⚠${RESET} ${msg}`); }
-function fail(msg) { console.error(`${BOLD}[setup-sck-capture]${RESET} ${RED}✗${RESET} ${msg}`); process.exit(1); }
+function fail(msg) {
+  console.error(`${BOLD}[setup-sck-capture]${RESET} ${RED}✗${RESET} ${msg}`);
+  // CLI → exit; imported (launcher) → throw so a GitHub 403 / network failure
+  // can't abort launch — the caller falls back to the bundled/local binary.
+  if (isMain) process.exit(1);
+  throw new Error(String(msg).split("\n")[0]);
+}
 
 // ── Entry point (only when run directly, not when imported) ──────────────────
 
