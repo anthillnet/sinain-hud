@@ -44,12 +44,17 @@ class RegionEyeController {
   /// true for a double tap (move the HUD/chat to the region).
   final void Function(RegionHighlight region, Offset pos, bool teleport) onRegionTap;
 
+  /// "Term" chosen on the native ROI card — open the region as a terminal
+  /// thread (vs onRegionTap which opens a chat thread).
+  final void Function(RegionHighlight region, Offset pos) onRegionTerminal;
+
   // Eye size follows the HUD font-size setting (default 12 → 24pt eyes,
   // matching the original fixed size); color follows the accent setting.
   double get _eyeSize => settingsService.settings.fontSize * 2;
 
   StreamSubscription<List<RegionHighlight>>? _regionSub;
   StreamSubscription<String>? _tapSub;
+  StreamSubscription<(String, String)>? _cardActionSub;
   StreamSubscription<ThreadStatusUpdate>? _taskSub;
   VoidCallback? _settingsListener;
 
@@ -66,6 +71,7 @@ class RegionEyeController {
     required this.ws,
     required this.settingsService,
     required this.onRegionTap,
+    required this.onRegionTerminal,
   });
 
   bool get _enabled => settingsService.settings.autoDetectIssues;
@@ -79,6 +85,8 @@ class RegionEyeController {
   void start() {
     _regionSub = ws.regionStream.listen(_onRegions);
     _tapSub = windowService.regionTapStream.listen(_onTap);
+    _cardActionSub =
+        windowService.regionCardActionStream.listen(_onCardAction);
     _taskSub = ws.spawnTaskStream.listen(_onSpawnTask);
     _lastEnabled = _enabled;
     _settingsListener = () {
@@ -125,6 +133,7 @@ class RegionEyeController {
   void dispose() {
     _regionSub?.cancel();
     _tapSub?.cancel();
+    _cardActionSub?.cancel();
     _pendingTapTimer?.cancel();
     _taskSub?.cancel();
     if (_settingsListener != null) {
@@ -229,11 +238,28 @@ class RegionEyeController {
     _pendingTapId = id;
     _pendingTapTimer = Timer(const Duration(milliseconds: 280), () {
       _pendingTapId = null;
-      // single → toggle a native preview AT the ROI (issue + tip), no HUD needed
-      final tip = region.tip.trim();
-      windowService.toggleRegionPreview(
-          region.id, tip.isEmpty ? region.issue : '${region.issue}\n$tip');
+      // single → toggle the native suggestion card AT the ROI (issue + tip +
+      // Chat/Term choice). No HUD needed until the user picks an action.
+      windowService.toggleRegionPreview(region.id, region.issue, region.tip);
     });
+  }
+
+  /// A Chat/Term button on the native ROI card was tapped — open the matching
+  /// thread for the region. The native card has already dismissed itself.
+  void _onCardAction((String, String) ev) {
+    final region = _regions[ev.$1];
+    final pos = _eyePositions[ev.$1];
+    if (region == null || pos == null) return;
+    if (ev.$2 == 'term') {
+      onRegionTerminal(region, pos);
+    } else {
+      run(region); // start the agent (desktop lane → core launches the app)
+      // A desktop chat (Claude Desktop / ChatGPT) opens the external app, so
+      // don't also open the in-HUD chat surface for it.
+      if (!ws.escalationDesktop) {
+        onRegionTap(region, pos, true); // open the chat thread at the ROI
+      }
+    }
   }
 
   /// Start the region's agent thread — called from the region action

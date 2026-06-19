@@ -930,14 +930,14 @@ PY
     printf '%s\n' "$task"
     exit 0
   fi
-  # Unified seeding for ALL agent TUIs. Two markers, both consumed by the
-  # overlay thread terminal (output quiescence + modal detection on the Dart
-  # side), which types a pointer into the TUI once it's ready:
-  #   ⟦SINAIN-ROI:<id>⟧   → "Use the sinain_roi tool with id <id> …"  (region
-  #                          mode: the agent PULLS the rich seed via MCP — the
-  #                          same one Claude Desktop / ChatGPT pull. One mechanic.)
-  #   ⟦SINAIN-SEED:<path>⟧ → "Read <path> …"  (fallback: MAIN mode / no region id,
-  #                          where there's no ROI seed to pull — embed the digest.)
+  # Unified seeding for ALL agent TUIs — ONE marker, ONE mechanic, NO files:
+  #   ⟦SINAIN-ROI:<id>⟧ → the overlay thread terminal (output quiescence + modal
+  #                        detection on the Dart side) types "Use the sinain_roi
+  #                        tool with id <id> …" once the TUI is ready, and the
+  #                        agent PULLS the seed via MCP — the same seed/store/
+  #                        tool Claude Desktop / ChatGPT use.
+  # Every context (region, MAIN digest, handoff transcript, fallbacks) is minted
+  # into an roiSeed above and pulled this way; nothing is ever written to disk.
   # Session continuity: an existing thread session resumes with its full
   # history — no seed needed. Only brand-new sessions get the typed seed.
   RESUME_ARGS=()
@@ -948,15 +948,29 @@ PY
       RESUME_ARGS=(--session-id "$SESS_ID")
     fi
   fi
+  # Unified MCP seeding — NO seed files. Region mode already has ROI_SEED_ID
+  # (region/desktop seeds fold in any handoff transcript). For MAIN, fallbacks,
+  # or a transient region-fetch miss, fold in the one-shot handoff transcript
+  # (if any) and mint an roiSeed from $task so the agent ALWAYS pulls context
+  # via sinain_roi(id) — the same mechanic Claude Desktop / ChatGPT use.
+  if [ -z "${ROI_SEED_ID:-}" ] && [ -n "$task" ]; then
+    HKEY="${INTERACTIVE_REGION:-main}"
+    HANDOFF_BLOCK=$(curl -sf -m 3 "$CORE_URL/handoff/$HKEY" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('block') or '')" 2>/dev/null || true)
+    [ -n "$HANDOFF_BLOCK" ] && task="${HANDOFF_BLOCK}
+${task}"
+    ROI_SEED_ID=$(curl -sf -m 5 -X POST "$CORE_URL/roi-seed" \
+      -H 'Content-Type: application/json' \
+      --data-binary "$(printf '%s' "$task" | python3 -c 'import sys,json; print(json.dumps({"text": sys.stdin.read()}))')" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+  fi
   if [ "${SESS_NEW:-true}" != "false" ]; then
     case "$type" in
       claude|openclaude|codex|hermes)
         if [ -n "${ROI_SEED_ID:-}" ]; then
           echo "⟦SINAIN-ROI:${ROI_SEED_ID}⟧"
         else
-          SEED_FILE="$(dirname "$MCP_ABS")/seed.md"
-          printf '%s' "$task" > "$SEED_FILE"
-          echo "⟦SINAIN-SEED:${SEED_FILE}⟧"
+          echo "ℹ no seed available — starting without injected context (use sinain_context to read the situation)"
         fi
         ;;
     esac

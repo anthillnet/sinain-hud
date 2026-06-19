@@ -81,26 +81,28 @@ class RegionEyePool {
         hidePreview()
     }
 
-    /// Toggle a small text preview next to the eye [id] — single-tap shows what
-    /// the ROI is about right at the ROI (no need to open the HUD). Tapping the
-    /// same eye again (or its eye disappearing) hides it.
-    func togglePreview(id: String, text: String) {
+    /// Toggle the suggestion card next to the eye [id] — single-tap surfaces
+    /// the detected issue + tip AND the Chat / Term choice right at the ROI (no
+    /// HUD needed). Button taps fire back to Flutter via "onRegionCardAction"
+    /// ({id, action: "chat"|"term"}); ✕ just dismisses. Tapping the same eye
+    /// again (or its eye disappearing) hides it.
+    func togglePreview(id: String, issue: String, tip: String, hasTerminal: Bool) {
         if previewId == id { hidePreview(); return }
         guard let eye = panels[id] else { hidePreview(); return }
         hidePreview()
 
-        let maxW: CGFloat = 320, pad: CGFloat = 10
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 12)
-        label.textColor = .white
-        label.backgroundColor = .clear
-        label.isBezeled = false
-        label.isEditable = false
-        label.drawsBackground = false
-        label.preferredMaxLayoutWidth = maxW - pad * 2
-        var sz = label.fittingSize
-        sz.width = min(sz.width, maxW - pad * 2)
-        let w = sz.width + pad * 2, h = sz.height + pad * 2
+        let w: CGFloat = 360
+        let card = RegionCardView(width: w, issue: issue, tip: tip, hasTerminal: hasTerminal)
+        let h = card.frame.height
+        card.onChat = { [weak self] in
+            self?.channel?.invokeMethod("onRegionCardAction", arguments: ["id": id, "action": "chat"])
+            self?.hidePreview()
+        }
+        card.onTerm = { [weak self] in
+            self?.channel?.invokeMethod("onRegionCardAction", arguments: ["id": id, "action": "term"])
+            self?.hidePreview()
+        }
+        card.onClose = { [weak self] in self?.hidePreview() }
 
         // Below the eye, left-aligned with it, clamped to the eye's screen.
         let ef = eye.frame
@@ -114,24 +116,17 @@ class RegionEyePool {
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = false   // the card's buttons are interactive
         if #available(macOS 12.0, *) {
             panel.sharingType = privacyEnabled ? .none : .readOnly
         }
-        let bg = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
-        bg.wantsLayer = true
-        bg.layer?.backgroundColor = CGColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.96)
-        bg.layer?.cornerRadius = 8
-        bg.layer?.borderWidth = 1
-        bg.layer?.borderColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.12)
-        label.frame = NSRect(x: pad, y: pad, width: sz.width, height: sz.height)
-        bg.addSubview(label)
-        panel.contentView = bg
+        panel.contentView = card
         panel.orderFront(nil)
         previewPanel = panel
         previewId = id
@@ -346,5 +341,142 @@ class RegionEyeView: NSView {
             ctx.addLine(to: end)
             ctx.strokePath()
         }
+    }
+}
+
+/// The detected-ROI suggestion card (Overlay UX Drafts · D2), rendered natively
+/// in the floating preview panel next to the eye: issue + tip, then a blue
+/// Chat / outline Term / ✕ row. Button taps invoke the closures, which the
+/// pool forwards to Flutter.
+class RegionCardView: NSView {
+    var onChat: (() -> Void)?
+    var onTerm: (() -> Void)?
+    var onClose: (() -> Void)?
+
+    static let cardBg = NSColor(srgbRed: 0x2B / 255.0, green: 0x2D / 255.0, blue: 0x30 / 255.0, alpha: 1)
+    static let blue = NSColor(srgbRed: 0x33 / 255.0, green: 0x69 / 255.0, blue: 0xD6 / 255.0, alpha: 1)
+    static let muted = NSColor(srgbRed: 0xA8 / 255.0, green: 0xAD / 255.0, blue: 0xBD / 255.0, alpha: 1)
+
+    init(width: CGFloat, issue: String, tip: String, hasTerminal: Bool) {
+        let pad: CGFloat = 12
+        let contentW = width - pad * 2
+        let issueLabel = RegionCardView.makeLabel(issue.isEmpty ? "Region" : issue,
+                                                  size: 13, weight: .semibold,
+                                                  color: .white, maxW: contentW, maxLines: 5)
+        let hasTip = !tip.isEmpty
+        let tipLabel = RegionCardView.makeLabel(tip, size: 12, weight: .regular,
+                                                color: RegionCardView.muted, maxW: contentW, maxLines: 8)
+        let issueH = issueLabel.fittingSize.height
+        let tipH = hasTip ? tipLabel.fittingSize.height : 0
+        let gap: CGFloat = hasTip ? 4 : 0
+        let btnRowH: CGFloat = 28
+        let totalH = pad + issueH + gap + tipH + 12 + btnRowH + pad
+
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: totalH))
+        wantsLayer = true
+        layer?.backgroundColor = RegionCardView.cardBg.cgColor
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor(srgbRed: 0x1F / 255.0, green: 0x80 / 255.0,
+                                     blue: 0x39 / 255.0, alpha: 0.45).cgColor
+
+        // Bottom-left origin: buttons at the bottom, text stacked above.
+        let btnY = pad
+        let tipY = btnY + btnRowH + 12
+        let issueY = tipY + tipH + gap
+        issueLabel.frame = NSRect(x: pad, y: issueY, width: contentW, height: issueH)
+        addSubview(issueLabel)
+        if hasTip {
+            tipLabel.frame = NSRect(x: pad, y: tipY, width: contentW, height: tipH)
+            addSubview(tipLabel)
+        }
+
+        let chat = makeTextButton(title: "Chat", symbol: "message", filled: true, action: #selector(chatTapped))
+        chat.setFrameOrigin(NSPoint(x: pad, y: btnY))
+        addSubview(chat)
+        if hasTerminal {
+            let term = makeTextButton(title: "Term", symbol: "terminal", filled: false, action: #selector(termTapped))
+            term.setFrameOrigin(NSPoint(x: chat.frame.maxX + 4, y: btnY))
+            addSubview(term)
+        }
+        let close = makeIconButton(symbol: "xmark", action: #selector(closeTapped))
+        close.setFrameOrigin(NSPoint(x: width - pad - 28, y: btnY))
+        addSubview(close)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    @objc private func chatTapped() { onChat?() }
+    @objc private func termTapped() { onTerm?() }
+    @objc private func closeTapped() { onClose?() }
+
+    private static func makeLabel(_ text: String, size: CGFloat, weight: NSFont.Weight,
+                                  color: NSColor, maxW: CGFloat, maxLines: Int = 3) -> NSTextField {
+        let l = NSTextField(wrappingLabelWithString: text)
+        l.font = NSFont.systemFont(ofSize: size, weight: weight)
+        l.textColor = color
+        l.backgroundColor = .clear
+        l.isBezeled = false
+        l.isEditable = false
+        l.isSelectable = false
+        l.drawsBackground = false
+        l.maximumNumberOfLines = maxLines
+        // Word-wrap up to maxLines, then ellipsize the last line if it still
+        // overflows. .byTruncatingTail here would force a SINGLE truncated line
+        // (no wrapping) — the cause of long tips being cut off on one line.
+        l.lineBreakMode = .byWordWrapping
+        l.cell?.truncatesLastVisibleLine = true
+        l.preferredMaxLayoutWidth = maxW
+        return l
+    }
+
+    private func makeTextButton(title: String, symbol: String, filled: Bool, action: Selector) -> NSButton {
+        let b = NSButton(title: title, target: self, action: action)
+        b.isBordered = false
+        b.wantsLayer = true
+        b.bezelStyle = .regularSquare
+        b.layer?.cornerRadius = 4
+        b.layer?.masksToBounds = true
+        if filled {
+            b.layer?.backgroundColor = RegionCardView.blue.cgColor
+        } else {
+            b.layer?.backgroundColor = NSColor.clear.cgColor
+            b.layer?.borderWidth = 1
+            b.layer?.borderColor = NSColor(white: 1, alpha: 0.18).cgColor
+        }
+        b.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: 13, weight: filled ? .medium : .regular),
+        ])
+        if #available(macOS 11.0, *),
+           let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+            b.image = img
+            b.imagePosition = .imageLeading
+            b.imageHugsTitle = true
+            b.alignment = .center
+            b.contentTintColor = .white
+        }
+        // Hug the content, then add symmetric horizontal padding — a fixed
+        // width left the icon+label group visibly off-centre.
+        b.sizeToFit()
+        b.setFrameSize(NSSize(width: ceil(b.frame.width) + 16, height: 28))
+        return b
+    }
+
+    private func makeIconButton(symbol: String, action: Selector) -> NSButton {
+        let b = NSButton(title: "", target: self, action: action)
+        b.isBordered = false
+        b.wantsLayer = true
+        b.contentTintColor = RegionCardView.muted
+        if #available(macOS 11.0, *),
+           let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Dismiss") {
+            b.image = img
+        } else {
+            b.attributedTitle = NSAttributedString(string: "✕", attributes: [
+                .foregroundColor: NSColor(white: 1, alpha: 0.66),
+            ])
+        }
+        b.setFrameSize(NSSize(width: 28, height: 28))
+        return b
     }
 }

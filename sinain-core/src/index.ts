@@ -1000,6 +1000,34 @@ async function main() {
   // MAIN forks: thread id → seed (MAIN transcript + digest at fork time).
   // Consumed by the thread's first chat message and by terminal seeding.
   const forkSeeds = new Map<string, string>();
+  // Thread handoff transcripts: thread key (regionId, or "main") → the prior
+  // conversation, sent by the overlay when the user continues a thread in
+  // another agent ("Include full transcript"). One-shot: taken (and cleared)
+  // by the next seed build for that thread so the destination agent picks up
+  // where the chat left off, then it doesn't leak into later turns.
+  const handoffContexts = new Map<string, string>();
+  // Per-thread chat-agent override: thread key (regionId, or "main") → agent
+  // name. A thread handoff sets this so THAT thread's chat turns route to the
+  // chosen agent (resident sinain / Claude Desktop / ChatGPT / bare) WITHOUT
+  // changing the global chat lane — other threads and ambient escalations keep
+  // the default. Absent/"" → fall back to the global lane.
+  const threadChatAgents = new Map<string, string>();
+  const chatAgentFor = (key: string): string =>
+    threadChatAgents.get(key) || bareAgentState.escalationAgent;
+  function takeHandoffBlock(key: string): string {
+    const transcript = handoffContexts.get(key);
+    if (!transcript) return "";
+    handoffContexts.delete(key);
+    return (
+      "## Continued from Sinain chat\n" +
+      "The user is continuing an existing Sinain conversation here. " +
+      "Briefly acknowledge that you've loaded the prior context, then pick up " +
+      "where it left off.\n\n" +
+      "### Conversation so far\n" +
+      transcript.trim() +
+      "\n\n---\n\n"
+    );
+  }
 
   // Shared region sink — RegionTracker.update + broadcast on change. Fed by
   // BOTH the cloud analyzer (loop.onRegions) and the Tier-0 SLM detector.
@@ -1280,12 +1308,16 @@ async function main() {
      *  sidecar WS, not bare-agent registration). Kept in sync wherever
      *  escalationAgent changes so the overlay never demands a terminal for it. */
     escalationResident: boolean;
+    /** True when the chat lane is a desktop app (Claude Desktop / ChatGPT) —
+     *  chat opens the external app, so the overlay must not open its own HUD
+     *  chat surface for region/manual-ROI chats. */
+    escalationDesktop: boolean;
     /** True when the resident chat sidecar (:9610) is actually reachable.
      *  Polled by core; lets the overlay distinguish "built-in chat connected"
      *  from "selected sinain but the sidecar is down" (→ warning + Run). */
     chatSidecarUp: boolean;
     registered: boolean;
-  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, chatSidecarUp: false, registered: false };
+  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, escalationDesktop: false, chatSidecarUp: false, registered: false };
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
   let shuttingDown = false;
@@ -1372,6 +1404,7 @@ async function main() {
       bareAgentState.terminalAgent = pickTerminal();
     }
     bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
+    bareAgentState.escalationDesktop = isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
     wsHandler.updateState({ agents: { ...bareAgentState } });
     log(TAG, `bareagent register: available=[${clean.join(",")}] terminal=[${terminalRoster.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} term=${bareAgentState.terminalAgent}`);
 
@@ -1634,6 +1667,13 @@ async function main() {
     // SAME seed via the SAME mechanic (sinain_roi id=…); this is the one builder.
     getRegionTask: async (regionId: string) => composeAndStoreRoiSeed(regionId),
 
+    // One-shot pending handoff transcript (MAIN terminal pulls + prepends it).
+    getHandoffBlock: (key: string) => takeHandoffBlock(key),
+
+    // Mint a seed from arbitrary text → id for the unified sinain_roi MCP pull.
+    // Interactive terminals seed ALL context this way — no seed files on disk.
+    mintRoiSeed: (text: string) => roiSeeds.put(text, ""),
+
     getHealthPayload: () => {
       const escStats = escalator.getStats();
       const warnings: string[] = [];
@@ -1771,9 +1811,13 @@ async function main() {
     const region = regionTracker.get(regionId);
     if (!region) return null;
     const digest = agentLoop.getDigest()?.digest;
+    // Handoff transcript (if the user continued a chat thread here). Captured
+    // once so both the fast seed and the async-enriched update carry it — a
+    // one-shot take inside the enrichment closure would come up empty.
+    const handoff = takeHandoffBlock(regionId);
     // FAST seed: region + OCR + digest, NO knowledge wait — store + return now
     // so the app (or terminal) launches instantly.
-    const fastText = buildRegionTaskText(region, digest);
+    const fastText = handoff + buildRegionTaskText(region, digest);
     const id = roiSeeds.put(fastText, regionId);
     // ASYNC enrich: run the full knowledge-graph query (no 1.5s race — it has a
     // ~5s cold start) and upgrade the stored seed in place. The agent pulls via
@@ -1790,7 +1834,7 @@ async function main() {
         if (entities.length === 0) return;
         const knowledge = await queryKnowledgeFactsMulti(entities, 8);
         if (knowledge?.trim()) {
-          roiSeeds.update(id, buildRegionTaskText(region, digest, undefined, knowledge));
+          roiSeeds.update(id, handoff + buildRegionTaskText(region, digest, undefined, knowledge));
         }
       } catch { /* enrichment is optional */ }
     })();
@@ -1810,6 +1854,10 @@ async function main() {
       if (region) seed = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
       else if (forkSeed) seed = forkSeed;
     }
+    // Thread handoff into the resident sidecar: prepend the carried transcript
+    // so the sidecar continues the prior conversation rather than cold-starting.
+    const handoff = takeHandoffBlock(regionId ?? "main");
+    if (handoff) seed = handoff + (seed ?? "");
     wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
     chatService
       .handle(text, { kind, seed })
@@ -1855,8 +1903,10 @@ async function main() {
     // Same rich seed + same store + same id the terminal pulls — one mechanic.
     // Main-chat (no region) has no ROI seed: stash the user's text so the app
     // still has something to pull.
+    // Region seed already absorbed any handoff transcript in composeAndStoreRoiSeed;
+    // main-chat has no ROI seed, so fold the transcript (if any) into the stash.
     const composed = regionId ? await composeAndStoreRoiSeed(regionId) : null;
-    const id = composed ? composed.id : roiSeeds.put(text, "");
+    const id = composed ? composed.id : roiSeeds.put(takeHandoffBlock("main") + text, "");
     launchDesktop(dType, id);
     const appLabel = dType === "claude_desktop" ? "Claude Desktop" : "ChatGPT";
     const note = `↗ Opened this in ${appLabel} — it pulls the context via sinain_roi.`;
@@ -1884,14 +1934,17 @@ async function main() {
       // (and session distillation) carry both halves of the conversation.
       feedBuffer.push(`[user] ${text}`, "normal", "system", "agent");
 
-      // Chat lane = sinain → route this turn to the resident sidecar instead
-      // of the escalation/run.sh path. (Same selector serves region chat below.)
-      if (isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+      // Resolve the chat agent for MAIN — a per-thread handoff override wins
+      // over the global lane (so handing MAIN to another agent doesn't move the
+      // ambient/default lane). Chat agent = sinain → resident sidecar; desktop
+      // → external app; otherwise the escalation/run.sh path.
+      const mainAgent = chatAgentFor("main");
+      if (isSinainProfile(escalatorAgentsCfg, mainAgent)) {
         routeSinainChat(text);
         return;
       }
-      if (isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
-        void routeDesktopChat(text, undefined, bareAgentState.escalationAgent);
+      if (isDesktopProfile(escalatorAgentsCfg, mainAgent)) {
+        void routeDesktopChat(text, undefined, mainAgent);
         return;
       }
 
@@ -2014,6 +2067,17 @@ async function main() {
       ].filter(Boolean).join("\n"));
       return { id, label: "⑂ fork" };
     },
+    onSetHandoffContext: (key, transcript) => {
+      handoffContexts.set(key, transcript);
+    },
+    onSetThreadAgent: (key, agent) => {
+      // Per-thread chat-agent override (handoff). "" clears it → the thread
+      // falls back to the global lane. Does NOT touch bareAgentState, so the
+      // default lane and ambient escalations are unaffected.
+      if (agent) threadChatAgents.set(key, agent);
+      else threadChatAgents.delete(key);
+      log(TAG, `set_thread_agent ${key} → ${agent || "<default>"}`);
+    },
     onSpawnCommand: (text, regionId) => {
       // Region/ROI chat uses the CHAT selector — there is no spawn lane. The
       // chat selector serves chat regardless of thread (chat + terminal are the
@@ -2021,12 +2085,14 @@ async function main() {
       // route in-process; otherwise the task runs on the chat (escalation) lane
       // via dispatchSpawnTask (the region-task execution mechanism, no longer a
       // separate spawn selection).
-      if (regionId && isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
+      // A per-thread handoff override wins over the global lane for THIS region.
+      const regionAgent = regionId ? chatAgentFor(regionId) : bareAgentState.escalationAgent;
+      if (regionId && isSinainProfile(escalatorAgentsCfg, regionAgent)) {
         routeSinainChat(text, regionId);
         return;
       }
-      if (regionId && isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent)) {
-        void routeDesktopChat(text, regionId, bareAgentState.escalationAgent);
+      if (regionId && isDesktopProfile(escalatorAgentsCfg, regionAgent)) {
+        void routeDesktopChat(text, regionId, regionAgent);
         return;
       }
       let task = text;
@@ -2053,6 +2119,11 @@ async function main() {
             task = `${forkSeed}\n\n## User message\n${text}`;
           }
         }
+        // Thread handoff onto a bare chat-lane agent: prepend the carried
+        // transcript regardless of started state (handoff usually happens
+        // mid-conversation, after the thread is already started).
+        const handoff = takeHandoffBlock(regionId);
+        if (handoff) task = handoff + task;
       }
       escalator.dispatchSpawnTask(task, label, opts).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
@@ -2126,6 +2197,7 @@ async function main() {
         const prevAgent = bareAgentState.escalationAgent;
         bareAgentState.escalationAgent = agent;
         bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, agent);
+        bareAgentState.escalationDesktop = isDesktopProfile(escalatorAgentsCfg, agent);
         if (agent === "") {
           pauseEscalationInternal();
         } else {

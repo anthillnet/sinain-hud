@@ -14,7 +14,6 @@ import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
-import 'regions/region_action_banner.dart';
 import 'regions/region_eye_controller.dart';
 import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
@@ -51,6 +50,12 @@ class OverlayShellState extends State<OverlayShell> {
   // handler can pick the NEWLY-created region instead of re-grabbing an earlier
   // one (which would keep the user stuck on the first ROI's thread).
   Set<String> _manualIdsBefore = {};
+  // Destination chosen in the drag-select toolbar ('chat' | 'term') — applied
+  // when the freshly-created manual ROI arrives back over regionStream.
+  String _pendingManualMode = 'chat';
+  // Top-left-origin screen point to teleport the HUD to for a manual ROI (the
+  // selection's bottom-left, so the chat opens just below the grabbed region).
+  Offset? _pendingManualPos;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -144,11 +149,40 @@ class OverlayShellState extends State<OverlayShell> {
         if (fresh == null || r.id.compareTo(fresh.id) > 0) fresh = r;
       }
       if (fresh == null) return; // new region not in this batch yet — wait
+      final picked = fresh; // final → survives promotion into the setState closure
       _awaitingManualRegion = false;
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
-      ws.registerRegionThread(fresh.id, fresh.issue);
-      _selectThread(fresh.id);
+      ws.registerRegionThread(picked.id, picked.issue);
+      // A chat on a desktop lane (Claude Desktop / ChatGPT) opens the external
+      // app, not the in-HUD chat — so route it through run() (which seeds the
+      // ROI + launches the app via core) and leave the HUD collapsed.
+      final desktopChat = _pendingManualMode == 'chat' && ws.escalationDesktop;
+      if (_pendingManualMode == 'term') {
+        _openTerminalForTab(picked.id); // marks started + opens the PTY
+      } else {
+        setState(() => _startedRegionThreads.add(picked.id));
+        // Start the agent turn on the selected ROI so the user gets an initial
+        // response about what they selected — selecting a region IS the intent
+        // to talk about it. Mirrors the auto-ROI card's Chat action (which
+        // always calls run()). For a desktop lane run() launches the external
+        // app; for the in-HUD native chat it fires the spawn command (→ an
+        // agent reply scoped to this thread) and we also open the thread.
+        _regionEyes?.run(picked);
+        if (!desktopChat) {
+          _selectThread(picked.id);
+        }
+      }
+      // Teleport the HUD to the grabbed region and uncollapse it — matches the
+      // auto-ROI path. Skipped for a desktop chat (its surface is the app).
+      if (!desktopChat) {
+        final p = _pendingManualPos;
+        if (p != null) {
+          _openChatNearRegion(p.dx, p.dy, 0);
+        } else {
+          _transitionTo(HudState.chat);
+        }
+      }
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
@@ -201,6 +235,17 @@ class OverlayShellState extends State<OverlayShell> {
             _activeRegion = region;
             _activeThread = region.id;
           });
+          _openChatNearRegion(pos.dx, pos.dy, region.display);
+        },
+        // "Term" on the native ROI card → open the region as a terminal thread
+        // and bring the HUD to it (mirrors the chat-teleport path).
+        onRegionTerminal: (region, pos) {
+          ws.registerRegionThread(region.id, region.issue);
+          setState(() {
+            _activeRegion = region;
+            _activeThread = region.id;
+          });
+          _openTerminalForTab(region.id);
           _openChatNearRegion(pos.dx, pos.dy, region.display);
         },
       )..start();
@@ -376,6 +421,36 @@ class OverlayShellState extends State<OverlayShell> {
     _syncBusyState();
   }
 
+  /// Manual ROI capture — drag-select a screen region, then the toolbar under
+  /// the box picks Chat/Term. Triggered by the ⊕ tab pill and by double-tapping
+  /// the main eye. The freshly-created r-man-* region is picked up in the
+  /// regionStream listener, which opens it in the chosen mode.
+  Future<void> _startManualRoi() async {
+    final ws = context.read<WebSocketService>();
+    final res = await _windowService.selectRegion();
+    if (res == null) return; // cancelled (Esc / ✕)
+    // The toolbar under the box returns the destination: 'chat' | 'term'.
+    _pendingManualMode = res['mode'] == 'term' ? 'term' : 'chat';
+    // Remember where to teleport the HUD: the selection's bottom-left corner
+    // (selector reports main-display, top-left-origin points → display 0).
+    final rx = (res['x'] as num?)?.toDouble() ?? 0;
+    final ry = (res['y'] as num?)?.toDouble() ?? 0;
+    final rh = (res['h'] as num?)?.toDouble() ?? 0;
+    _pendingManualPos = Offset(rx, ry + rh);
+    // Snapshot existing manual ROIs so the broadcast handler can tell the new
+    // one apart from earlier ones still in the region list.
+    _manualIdsBefore = ws.regions
+        .where((r) => r.id.startsWith('r-man-'))
+        .map((r) => r.id)
+        .toSet();
+    _awaitingManualRegion = true;
+    // Forward only the numeric rect fields; 'mode' is overlay-local.
+    ws.sendRegionSelect(<String, double>{
+      for (final e in res.entries)
+        if (e.value is double) e.key: e.value as double,
+    });
+  }
+
   /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
   /// spike can be exercised without waiting for a region thread.
   String get _activeTabKey => _activeThread ?? 'main';
@@ -421,6 +496,85 @@ class OverlayShellState extends State<OverlayShell> {
       if (!isMain) _startedRegionThreads.add(tabKey);
       _terminalThreads.add(tabKey);
     });
+  }
+
+  /// Hand the ACTIVE thread off to another agent — the composer's ⑂ control.
+  /// Terminal target: switch the terminal lane and open (or surface) the PTY
+  /// for this tab, which run.sh seeds with the thread's context. Chat target:
+  /// set a PER-THREAD chat-agent override (not the global lane) so this thread's
+  /// follow-ups route to the new agent while other threads + ambient escalations
+  /// keep the default; then close any open terminal so one session never has two
+  /// writers. The transcript (when included) is carried so the destination
+  /// continues the conversation.
+  void _handoffThread({
+    required String agent,
+    required bool isTerminal,
+    required bool includeTranscript,
+  }) {
+    final ws = context.read<WebSocketService>();
+    final tabKey = _activeTabKey;
+    final thread = _activeThread;
+    // Carry the conversation so the destination agent continues the thread
+    // rather than cold-starting. Sent FIRST so core has it stashed before the
+    // destination's seed is built — the terminal pull, desktop seed, and chat
+    // kickoff that follow all run after this command on the same socket.
+    if (includeTranscript) {
+      final items = thread != null
+          ? (ws.regionThreads[thread] ?? const <FeedItem>[])
+          : ws.agentFeedItems;
+      final transcript = _composeTranscript(items);
+      if (transcript.isNotEmpty) {
+        ws.sendCommand('set_handoff_context',
+            {'key': thread ?? 'main', 'transcript': transcript});
+      }
+    }
+    if (isTerminal) {
+      ws.setAgent('terminal', agent);
+      _openTerminalForTab(tabKey); // seeds this thread's context into the PTY
+      _syncBusyState();
+      return;
+    }
+    // Chat handoff: set a per-thread override (NOT the global lane), then fire
+    // one kickoff turn so the new agent actually picks up this thread. Both are
+    // applied by core in order on the same socket before routing — crucially, a
+    // desktop agent (Claude Desktop / ChatGPT) only launches its app when a turn
+    // is sent (routeDesktopChat). Without the kickoff the handoff would just set
+    // the override and nothing would open.
+    if (_terminalThreads.contains(tabKey)) {
+      ThreadTerminalSession.close(tabKey);
+      setState(() => _terminalThreads.remove(tabKey));
+    }
+    ws.sendCommand('set_thread_agent', {'key': thread ?? 'main', 'agent': agent});
+    // Kickoff turn — core seeds the real context (region ROI / main digest) plus
+    // the carried transcript so the destination continues the conversation.
+    const kickoff = '[handoff] continue this thread';
+    if (thread != null) {
+      _sendToRegionThread(thread, kickoff);
+    } else {
+      ws.sendUserCommand(kickoff);
+    }
+    _syncBusyState();
+  }
+
+  /// Format a thread's feed items into a compact dialogue transcript for a
+  /// handoff. Caps to the recent turns + a char budget so the WS payload and
+  /// the destination seed stay reasonable.
+  String _composeTranscript(List<FeedItem> items) {
+    final recent =
+        items.length > 40 ? items.sublist(items.length - 40) : items;
+    final buf = StringBuffer();
+    for (final it in recent) {
+      final text = it.text.trim();
+      if (text.isEmpty) continue;
+      buf.writeln('${it.isUserOriginated ? 'User' : 'sinain'}: $text');
+      buf.writeln();
+    }
+    var out = buf.toString().trim();
+    const maxChars = 6000;
+    if (out.length > maxChars) {
+      out = '…(earlier turns trimmed)…\n\n${out.substring(out.length - maxChars)}';
+    }
+    return out;
   }
 
   /// True while any spawn task for this region is still in flight.
@@ -554,32 +708,11 @@ class OverlayShellState extends State<OverlayShell> {
         pill(
           text: '⊕',
           selected: false,
-          onTap: () async {
-            final ws = context.read<WebSocketService>();
-            final sel = await _windowService.selectRegion();
-            if (sel == null) return; // cancelled
-            // Snapshot existing manual ROIs so the broadcast handler can tell
-            // the new one apart from earlier ones still in the region list.
-            _manualIdsBefore = ws.regions
-                .where((r) => r.id.startsWith('r-man-'))
-                .map((r) => r.id)
-                .toSet();
-            _awaitingManualRegion = true;
-            ws.sendRegionSelect(sel);
-          },
+          onTap: _startManualRoi,
         ),
-        // Fork MAIN into a new thread (visible only on the MAIN tab): the
-        // new thread starts from the MAIN transcript + digest and runs its
-        // own agent session, chat or terminal.
-        if (_activeThread == null)
-          pill(
-            text: '⑂',
-            selected: false,
-            onTap: () {
-              _awaitingFork = true;
-              context.read<WebSocketService>().forkMain();
-            },
-          ),
+        // (The ⑂ fork pill moved into the chat composer as the inline-left
+        // "continue this thread elsewhere" handoff control — see
+        // ChatThreadView.onHandoff / _handoffThread.)
         // Chat ⇄ terminal toggle for the ACTIVE tab — pinned at the right
         // edge, outside the scrolling tab strip, so a crowd of tabs can
         // never squeeze it out of sight. Term→chat closes the PTY so one
@@ -727,6 +860,9 @@ class OverlayShellState extends State<OverlayShell> {
           // directly (where any pending permission already auto-switched
           // to its tab).
           onTap: () => _transitionTo(HudState.chat),
+          // Double-tap the eye → instantly grab a screen region (same flow as
+          // the ⊕ tab pill). macOS only — the drag selector is native.
+          onDoubleTap: _isMacOS ? _startManualRoi : null,
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
@@ -822,14 +958,12 @@ class OverlayShellState extends State<OverlayShell> {
                         cursor: SystemMouseCursors.click,
                         child: Padding(
                           padding: const EdgeInsets.only(right: 4),
-                          child: Text(
-                            'DEMO',
-                            style: TextStyle(
-                              fontFamily: 'JetBrainsMono',
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: _redEye.withValues(alpha: 0.8),
-                            ),
+                          // Demo mode (scene 8): a visible red screen — Sinain
+                          // is exposed to capture and sees itself.
+                          child: Icon(
+                            Icons.desktop_windows,
+                            size: 13,
+                            color: _redEye.withValues(alpha: 0.9),
                           ),
                         ),
                       ),
@@ -991,20 +1125,19 @@ class OverlayShellState extends State<OverlayShell> {
                         cursor: SystemMouseCursors.click,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
+                          // Scene 8 metaphor: hidden-from-capture = a struck
+                          // screen (vision stays clean); demo mode = a visible
+                          // screen, turned RED — Sinain sees itself.
                           child: _settingsService.settings.privacyMode
                               ? Icon(
-                                  Icons.videocam_off,
-                                  size: 12,
+                                  Icons.desktop_access_disabled,
+                                  size: 13,
                                   color: Colors.white.withValues(alpha: 0.3),
                                 )
-                              : Text(
-                                  'DEMO',
-                                  style: TextStyle(
-                                    fontFamily: 'JetBrainsMono',
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.bold,
-                                    color: _redEye.withValues(alpha: 0.8),
-                                  ),
+                              : Icon(
+                                  Icons.desktop_windows,
+                                  size: 13,
+                                  color: _redEye.withValues(alpha: 0.9),
                                 ),
                         ),
                       ),
@@ -1108,6 +1241,7 @@ class OverlayShellState extends State<OverlayShell> {
                           }
                           _syncBusyState();
                         },
+                        onHandoff: _handoffThread,
                       ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
@@ -1120,31 +1254,9 @@ class OverlayShellState extends State<OverlayShell> {
               ],
             ),
           ),
-          // Region action banner — issue + suggested approach, shown on the
-          // region's tab while the region is still detected on screen. The
-          // thread only starts from its explicit Run button.
-          if (_activeThread != null &&
-              _activeRegion != null &&
-              _activeRegion!.id == _activeThread)
-            RegionActionBanner(
-              region: _activeRegion!,
-              accentColor: _settingsService.settings.accentColor,
-              threadStarted:
-                  _startedRegionThreads.contains(_activeRegion!.id),
-              onRun: () {
-                final region = _activeRegion!;
-                setState(() => _startedRegionThreads.add(region.id));
-                _regionEyes?.run(region);
-              },
-              // SPIKE: interactive terminal variant of Run — the PTY launches
-              // run.sh --interactive-region, which resolves the spawn-lane
-              // agent and seeds it with the same composed region context the
-              // headless Run sends (GET /region/:id/task on core).
-              onTerminal: terminalSpikeEnabled
-                  ? () => _openTerminalForTab(_activeRegion!.id)
-                  : null,
-              onDismiss: () => setState(() => _activeRegion = null),
-            ),
+          // (The detected-ROI issue/tip + Chat/Term choice now lives in the
+          // native suggestion card at the ROI — see RegionEyePool.togglePreview
+          // — not in the HUD.)
           // Permission banner — visible above the input field whenever an
           // agent task is blocked waiting for user approval. Hidden (zero
           // height) when no tasks are pending. Mirrors Tasks tab — does not

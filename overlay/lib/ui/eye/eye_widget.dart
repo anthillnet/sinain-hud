@@ -9,6 +9,7 @@ import '../hud_tooltip.dart';
 /// Click → expand to controls. Drag → reposition window. Long-press → hide.
 class EyeWidget extends StatefulWidget {
   final VoidCallback onTap;
+  final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onDragEnd;
   final double pupilDilation;
@@ -17,6 +18,7 @@ class EyeWidget extends StatefulWidget {
   const EyeWidget({
     super.key,
     required this.onTap,
+    this.onDoubleTap,
     this.onLongPress,
     this.onDragEnd,
     this.pupilDilation = 0.0,
@@ -41,9 +43,12 @@ class _EyeWidgetState extends State<EyeWidget> {
   @override
   Widget build(BuildContext context) {
     return HudTooltip(
-      message: 'Tap to expand, long-press to hide',
+      message: widget.onDoubleTap != null
+          ? 'Tap to expand · double-tap to grab a region · long-press to hide'
+          : 'Tap to expand, long-press to hide',
       child: GestureDetector(
         onTap: _isDragging ? null : widget.onTap,
+        onDoubleTap: _isDragging ? null : widget.onDoubleTap,
         onLongPress: widget.onLongPress,
         onPanStart: _onDragStart,
         onPanUpdate: _onDragUpdate,

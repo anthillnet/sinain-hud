@@ -1593,6 +1593,14 @@ export interface ServerDeps {
    *  embedding, `id` so the terminal can instead pull via sinain_roi — the same
    *  mechanic Claude Desktop / ChatGPT use. */
   getRegionTask?: (regionId: string) => Promise<{ id: string; text: string } | null>;
+  /** One-shot pending handoff transcript block for a thread key ("main" or a
+   *  regionId) — consumed by the MAIN interactive terminal (region/desktop
+   *  seeds fold it in directly). Returns "" when none pending. */
+  getHandoffBlock?: (key: string) => string;
+  /** Mint an roiSeed from arbitrary text → returns its id for the unified
+   *  sinain_roi MCP pull. Lets interactive terminals seed ANY context (main
+   *  digest, fallbacks) through the MCP mechanic — never a seed file on disk. */
+  mintRoiSeed?: (text: string) => string;
   /** Stable agent session for a thread (get-or-create) — terminals resume it. */
   getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
@@ -1842,6 +1850,32 @@ export function createAppServer(deps: ServerDeps) {
         // `text` kept for back-compat; `roiSeedId` is the unified pull handle —
         // the terminal can `sinain_roi(id)` instead of embedding the text.
         res.end(JSON.stringify({ ok: true, text: seed.text, roiSeedId: seed.id, ...(sess ?? {}) }));
+        return;
+      }
+
+      // ── /handoff/:key — one-shot pending handoff transcript block ──
+      // MAIN interactive terminals have no ROI seed to fold the transcript
+      // into, so they pull it here and prepend it to the digest task.
+      if (req.method === "GET" && url.pathname.startsWith("/handoff/")) {
+        const key = decodeURIComponent(url.pathname.slice("/handoff/".length));
+        const block = deps.getHandoffBlock?.(key) ?? "";
+        res.end(JSON.stringify({ ok: true, block }));
+        return;
+      }
+
+      // ── POST /roi-seed — mint a seed from arbitrary text, return its id ──
+      // The unified MCP-pull mechanic for any non-region context (MAIN digest,
+      // fallbacks): the terminal seeds via sinain_roi(id), never a file.
+      if (req.method === "POST" && url.pathname === "/roi-seed") {
+        const body = await readBody(req, 64 * 1024);
+        let text = "";
+        try { text = String(JSON.parse(body).text ?? ""); } catch { /* empty */ }
+        if (!text.trim() || !deps.mintRoiSeed) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: "missing text or handler" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true, id: deps.mintRoiSeed(text) }));
         return;
       }
 
