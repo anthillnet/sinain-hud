@@ -1059,7 +1059,6 @@ async function renderEntityPage(entity) {
         <button id="bmFavorite" class="icon" title="Favorite">★</button>
         <button id="bmArchive" class="icon" title="Archive">🗄</button>
         <button id="actRefresh" class="icon" title="Re-render">↻</button>
-        <button id="actCopyLink" class="icon" title="Copy entity URL (recipient needs same data)">🔗</button>
         <button id="actShare" class="icon" title="Share concept (auto-imports for recipient)">📤</button>
         <button id="actExport" class="icon" title="Download bundle file (manual transfer)">⬇</button>
       </div>
@@ -1093,7 +1092,6 @@ async function renderEntityPage(entity) {
   $("#bmFavorite").onclick = () => bookmarkAction(entity, "favorite");
   $("#bmArchive").onclick = () => bookmarkAction(entity, "archive");
   $("#actRefresh").onclick = () => refreshPage(entity);
-  $("#actCopyLink").onclick = () => copyLink(entity);
   $("#actShare").onclick = () => shareEntity(entity);
   $("#actExport").onclick = () => exportConcept(entity);
 
@@ -1196,14 +1194,6 @@ async function refreshPage(entity) {
   showToast(\`<span class="spinner"></span> Re-rendering…\`);
   await api("/knowledge/page?refresh=1&entity=" + encodeURIComponent(entity));
   render();
-}
-
-function copyLink(entity) {
-  const url = location.origin + "/knowledge/ui/entity/" + encodeURIComponent(entity);
-  navigator.clipboard.writeText(url).then(
-    () => showToast("✓ Link copied. Recipient needs the concept imported."),
-    () => showToast("Copy failed — your browser may block clipboard access"),
-  );
 }
 
 async function exportConcept(entity) {
@@ -1413,7 +1403,6 @@ async function renderTopicPage(q) {
         <span class="badge">\${Object.keys(grouped).length} entit\${Object.keys(grouped).length === 1 ? "y" : "ies"}</span>
       </div>
       <div class="page-actions">
-        <button id="topicCopyLink" class="icon" title="Copy topic URL">🔗</button>
         <button id="topicShare" class="icon" title="Share topic (auto-imports for recipient)">📤</button>
       </div>
     </div>
@@ -1451,11 +1440,6 @@ async function renderTopicPage(q) {
       </div>\` : ""}\`;
 
   // Wire actions
-  $("#topicCopyLink").onclick = () => {
-    const url = location.origin + "/knowledge/ui/topic/" + encodeURIComponent(q);
-    navigator.clipboard.writeText(url);
-    showToast("✓ Link copied");
-  };
   $("#topicShare").onclick = async () => {
     // Share all entities mentioned in the query
     const ents = (qr.entities || q.split(/[\\s,+]+/)).filter(Boolean);
