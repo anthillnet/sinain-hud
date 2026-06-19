@@ -627,15 +627,17 @@ export class RegionTracker {
       let [x, y, w, h] = b;
       if (dx !== 0 || dy !== 0) {
         const nx = x + dx, ny = y + dy;
-        if (ny + h < 0 || ny > fs[1] || nx + w < 0 || nx > fs[0]) {
-          // Scrolled fully out of view.
+        // Dim once the eye's CENTER leaves the viewport — its content has
+        // scrolled off-screen. Do NOT clamp to the edge: a clamped eye pins to
+        // the border over whatever scrolled into its place and lingers stale.
+        const cx = nx + w / 2, cy = ny + h / 2;
+        if (cx < 0 || cx > fs[0] || cy < 0 || cy > fs[1]) {
           if (!t.region.manual && !t.region.pending) {
             t.region.pending = true; t.restoredAtTick = this.tick; changed = true;
           }
           continue;
         }
-        x = Math.max(0, Math.min(nx, fs[0] - 1));
-        y = Math.max(0, Math.min(ny, fs[1] - 1));
+        x = nx; y = ny;
         t.region.bbox = [x, y, w, h];
         changed = true;
       }
