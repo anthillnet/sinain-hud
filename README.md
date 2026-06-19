@@ -177,16 +177,13 @@ See [Privacy Threat Model](docs/privacy-protection-design.md) for the full desig
 
 ## Hotkeys
 
-Global hotkeys use **Cmd+Shift**:
+SinainHUD is mouse-driven — there's a single global hotkey:
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+Shift+Space` | Toggle overlay visibility |
-| `Cmd+Shift+M` | Cycle display mode |
-| `Cmd+Shift+/` | Open command input |
-| `Cmd+Shift+H` | Quit overlay |
+| `Cmd+Shift+P` | Reset window position (recover an off-screen overlay) |
 
-See [docs/HOTKEYS.md](docs/HOTKEYS.md) for all 15 shortcuts.
+Everything else (cycle view, switch tabs, capture toggles, quit) is a click in the overlay. See [docs/HOTKEYS.md](docs/HOTKEYS.md).
 
 ## Running Fully Local
 

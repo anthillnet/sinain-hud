@@ -43,7 +43,7 @@ class StepOrientation extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'HOTKEYS',
+                  'HOTKEY',
                   style: TextStyle(
                     fontSize: 9,
                     color: Colors.white.withValues(alpha: 0.3),
@@ -51,13 +51,15 @@ class StepOrientation extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                _hotkey(mod, 'Space', 'Show / hide overlay'),
-                const SizedBox(height: 4),
-                _hotkey(mod, 'E', 'Cycle tabs'),
-                const SizedBox(height: 4),
-                _hotkey(mod, 'C', 'Toggle click-through'),
-                const SizedBox(height: 4),
-                _hotkey(mod, 'M', 'Cycle display mode'),
+                _hotkey(mod, 'P', 'Reset window position'),
+                const SizedBox(height: 8),
+                Text(
+                  'Everything else is a click away in the overlay.',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white.withValues(alpha: 0.45),
+                  ),
+                ),
               ],
             ),
           ),
