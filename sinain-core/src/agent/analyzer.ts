@@ -1,5 +1,6 @@
 import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand, RawRegion } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
+import { buildLineList, resolveLineRegions } from "./region-lines.js";
 import { log, debug } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 
@@ -87,39 +88,32 @@ Rules:
 
 /**
  * Regions section appended to the system prompt when Grammarly mode is on.
- * Screen OCR lines are prefixed with [S<id>] so the model can anchor each
- * region to the sense event it was observed in — the model never invents
- * coordinates; sinain-core resolves the bbox from the referenced event.
+ * The "Actionable lines" block in the user prompt numbers OCR lines "[L<id>]";
+ * the model picks a line id and writes a clean DESCRIPTION (not a quote) — core
+ * anchors the eye to that line's exact box, so the label is free to be readable.
  */
 const REGIONS_SECTION = `
 
-Optional "regions" field — actionable issues visible on screen:
-{"hud":"...","digest":"...","regions":[{"issue":"...","tip":"...","action":"fix","sourceId":12}]}
+"regions" field — the user is almost always working on SOMETHING; identify that
+task and offer concrete help to MOVE IT FORWARD. Pick from the numbered
+"Actionable lines" in the user message:
+{"hud":"...","digest":"...","regions":[{"line":5,"issue":"...","tip":"...","action":"fix"}]}
 
-Emit a region whenever a specific thing on screen is one where an agent could
-genuinely help — be generous, not just for hard errors:
-- An error or warning (terminal error, build failure, red underline, stack trace)
-- A fixable problem (typo, bug, inefficient code, missing import, broken config)
-- A question, form, or step the user appears to be working through
-- Anything you could research, draft, explain, summarize, or improve: a topic or
-  term they are reading, an email/message/doc they are writing, code they are
-  editing, a setting or command they seem unsure about, a decision they face
+Look at what they're doing and offer to advance it:
+- writing a slide/presentation/doc/email → sharpen the message, draft the next
+  part, tighten the argument, suggest content
+- code → fix a bug, explain it, refactor
+- reading an article/topic → summarize, explain, find related info
+- a form/command/error → fill it, run it, diagnose and fix
 Each region:
-- "issue": short label of the specific thing (max 10 words, quote the on-screen text)
-- "tip": one actionable sentence — what an agent could do about it
-- "action": "fix" | "explain" | "research" — the kind of help
-- "sourceId": copy the number from the [S<id>] prefix of the screen line where
-  the thing appears ("[S12] ..." → "sourceId":12). When unsure between lines,
-  pick the closest one — a best-guess id is always better than omitting the
-  region or the id.
-Rules: the thing must be concrete and actually visible on screen — never invent
-issues or emit for an empty/idle screen. One region per distinct thing (max 3).
-When the screen has readable content, you should usually find at least one
-region worth offering help on.
-IMPORTANT — regions are a LIVE set, not a one-time report: on EVERY response,
-re-emit each region whose content is still visible on screen (same issue text,
-same sourceId). A region you stop emitting disappears from the user's screen.
-Only omit a region when its content is actually gone from view.`;
+- "line": the integer id from an "[L<id>]" actionable line (the thing in focus)
+- "issue": SHORT, CLEAN, in your own words (≤10 words) — what the user is doing /
+  what you'd help with. Don't quote raw OCR.
+- "tip": the concrete thing you'd do to help advance their work
+- "action": "fix" | "explain" | "research"
+Be genuinely USEFUL, never a nitpicker: don't flag surface trivia (others'
+grammar/formatting/timestamps) or just restate the screen — offer real help.
+Usually emit 1-2 (the main thing in focus); [] only for a blank/idle screen.`;
 
 const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
 
@@ -127,7 +121,7 @@ const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
  * Build the dynamic user prompt (changes every tick).
  * Contains the current context data: screen OCR, audio transcripts, app state.
  */
-function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
+export function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
   const now = Date.now();
 
   // [S<id>] prefix lets the LLM anchor regions to a sense event (Grammarly mode)
@@ -254,7 +248,7 @@ const MAX_REGIONS = 3;
 /**
  * Parse regions from LLM response (Grammarly mode).
  */
-function parseRegions(parsed: any): RawRegion[] | undefined {
+export function parseRegions(parsed: any): RawRegion[] | undefined {
   if (!Array.isArray(parsed.regions) || parsed.regions.length === 0) return undefined;
   const regions = parsed.regions
     .filter((r: any) => typeof r?.issue === "string" && r.issue.trim() &&
@@ -279,8 +273,22 @@ export async function analyzeContext(
   config: AnalysisConfig,
   recorderStatus: RecorderStatus | null = null,
 ): Promise<AgentResult> {
-  const userPrompt = buildUserPrompt(contextWindow, recorderStatus, config.regionsEnabled);
+  let userPrompt = buildUserPrompt(contextWindow, recorderStatus, config.regionsEnabled);
   const systemPrompt = config.regionsEnabled ? SYSTEM_PROMPT_WITH_REGIONS : SYSTEM_PROMPT;
+
+  // Region anchoring: offer numbered OCR lines; the model picks line ids and we
+  // resolve them to exact boxes after the call (same path as the SLM lane, so a
+  // region maps to the same eye regardless of which lane found it).
+  const lineList = config.regionsEnabled ? buildLineList(contextWindow) : null;
+  if (lineList && lineList.lines.length) {
+    userPrompt += `\n\nActionable lines (use the [L<id>] number for region "line"):\n${lineList.prompt}`;
+  }
+  const resolveRegions = (result: AgentResult): AgentResult => {
+    result.regions = lineList
+      ? resolveLineRegions(result.regions as any, lineList.lines, { maxRegions: 3 })
+      : undefined;
+    return result;
+  };
 
   // Apply privacy gating for images based on provider
   let images = contextWindow.images || [];
@@ -290,7 +298,7 @@ export async function analyzeContext(
   } catch { images = []; /* SECURITY: fail CLOSED — drop images when privacy uninitialized */ }
 
   if (config.provider === "ollama") {
-    return await callOllama(systemPrompt, userPrompt, images, config);
+    return resolveRegions(await callOllama(systemPrompt, userPrompt, images, config));
   }
 
   // OpenRouter path: model chain with fallbacks
@@ -307,7 +315,7 @@ export async function analyzeContext(
   let lastError: Error | null = null;
   for (const model of models) {
     try {
-      return await callOpenRouter(systemPrompt, userPrompt, images, model, config);
+      return resolveRegions(await callOpenRouter(systemPrompt, userPrompt, images, model, config));
     } catch (err: any) {
       if (err instanceof AnalysisAuthError) throw err;
       lastError = err;
@@ -395,7 +403,8 @@ async function callOpenRouter(
         digest: asText(parsed.digest, "\u2014"),
         record: parseRecord(parsed),
         task: parseTask(parsed),
-        regions: parseRegions(parsed),
+        // Raw {line,...} array; analyzeContext resolves it against the line list.
+        regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
         latencyMs,
         tokensIn: data.usage?.prompt_tokens || 0,
         tokensOut: data.usage?.completion_tokens || 0,
@@ -416,7 +425,8 @@ async function callOpenRouter(
               digest: asText(parsed.digest, "\u2014"),
               record: parseRecord(parsed),
               task: parseTask(parsed),
-              regions: parseRegions(parsed),
+              // Raw {line,...} array; analyzeContext resolves it against the line list.
+        regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
               latencyMs,
               tokensIn: data.usage?.prompt_tokens || 0,
               tokensOut: data.usage?.completion_tokens || 0,
@@ -506,7 +516,8 @@ async function callOllama(
         digest: asText(parsed.digest, "\u2014"),
         record: parseRecord(parsed),
         task: parseTask(parsed),
-        regions: parseRegions(parsed),
+        // Raw {line,...} array; analyzeContext resolves it against the line list.
+        regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
         latencyMs,
         tokensIn, tokensOut,
         model: config.model,
@@ -523,7 +534,8 @@ async function callOllama(
               digest: asText(parsed.digest, "\u2014"),
               record: parseRecord(parsed),
               task: parseTask(parsed),
-              regions: parseRegions(parsed),
+              // Raw {line,...} array; analyzeContext resolves it against the line list.
+        regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
               latencyMs,
               tokensIn, tokensOut,
               model: config.model,

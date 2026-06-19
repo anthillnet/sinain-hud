@@ -197,6 +197,16 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             regionEyes.clear()
             result(nil)
 
+        case "toggleRegionPreview":
+            let id = args?["id"] as? String ?? ""
+            let text = args?["text"] as? String ?? ""
+            regionEyes.togglePreview(id: id, text: text)
+            result(nil)
+
+        case "hideRegionPreview":
+            regionEyes.hidePreview()
+            result(nil)
+
         case "selectRegion":
             // Screenshot-style drag-select. Resolves with the rect in
             // top-left-origin screen points, or nil on Esc/cancel.

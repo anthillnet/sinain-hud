@@ -1,18 +1,61 @@
 """Detect the frontmost application and window title (cross-platform)."""
-
 import subprocess
 import sys
 
 
 class MacAppDetector:
-    """Detects the frontmost application and window title on macOS via AppleScript."""
+    """Frontmost application + window title on macOS.
+
+    Display-aware: given a display_id, reports the frontmost window ON THAT
+    display (via CGWindowList), not the global frontmost. This matters when
+    capture is pinned to one display while keyboard focus is on an app on
+    ANOTHER screen — the captured content's app must drive ROI app-scoping, or
+    eyes on the captured display get wrongly archived (treated as an app switch)
+    and new regions get rejected as "foreign". Falls back to AppleScript (global
+    frontmost) when Quartz is unavailable or no display_id is supplied.
+    """
 
     def __init__(self):
         self._last_app: str = ""
         self._last_window: str = ""
+        try:
+            import Quartz  # type: ignore
+            self._quartz = Quartz
+        except Exception:
+            self._quartz = None
 
-    def get_active_app(self) -> tuple[str, str]:
-        """Returns (app_name, window_title) of the frontmost application."""
+    def _frontmost_on_display(self, display_id: int):
+        """(app, title) of the frontmost normal window whose center is on the
+        given display, or None if it can't be determined."""
+        Q = self._quartz
+        if Q is None or not display_id:
+            return None
+        try:
+            bounds = Q.CGDisplayBounds(display_id)
+            ox, oy = bounds.origin.x, bounds.origin.y
+            ow, oh = bounds.size.width, bounds.size.height
+            windows = Q.CGWindowListCopyWindowInfo(
+                Q.kCGWindowListOptionOnScreenOnly | Q.kCGWindowListExcludeDesktopElements,
+                Q.kCGNullWindowID,
+            )
+            for w in windows:  # returned front-to-back
+                if w.get("kCGWindowLayer", 0) != 0:
+                    continue  # skip menubar/dock/overlays; 0 == normal app windows
+                wb = w.get("kCGWindowBounds")
+                if not wb:
+                    continue
+                cx = wb["X"] + wb["Width"] / 2.0
+                cy = wb["Y"] + wb["Height"] / 2.0
+                if ox <= cx < ox + ow and oy <= cy < oy + oh:
+                    owner = w.get("kCGWindowOwnerName", "") or ""
+                    title = w.get("kCGWindowName", "") or ""
+                    return owner, title
+        except Exception:
+            return None
+        return None
+
+    def _global_frontmost(self) -> tuple[str, str]:
+        """AppleScript fallback — global frontmost app (display-agnostic)."""
         try:
             result = subprocess.run(
                 [
@@ -36,9 +79,17 @@ class MacAppDetector:
         except Exception:
             return "", ""
 
-    def detect_change(self) -> tuple[bool, bool, str, str]:
+    def get_active_app(self, display_id: int = 0) -> tuple[str, str]:
+        """Returns (app_name, window_title). Prefers the frontmost window on the
+        captured display; falls back to the global frontmost."""
+        on_display = self._frontmost_on_display(display_id)
+        if on_display is not None and on_display[0]:
+            return on_display
+        return self._global_frontmost()
+
+    def detect_change(self, display_id: int = 0) -> tuple[bool, bool, str, str]:
         """Returns (app_changed, window_changed, app_name, window_title)."""
-        app, window = self.get_active_app()
+        app, window = self.get_active_app(display_id)
         app_changed = app != self._last_app and self._last_app != ""
         window_changed = window != self._last_window and self._last_window != ""
         self._last_app = app

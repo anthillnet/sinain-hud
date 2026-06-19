@@ -9,7 +9,9 @@ DEFAULTS = {
     "capture": {
         "mode": "screen",
         "target": 0,
-        "fps": 2.0,
+        # Must keep up with sck-capture's IPC frame rate (CAPTURE_FPS, default 4)
+        # so OCR and downstream eye re-anchoring run at full cadence. Env: SENSE_FPS.
+        "fps": 4.0,
         "scale": 0.5,
     },
     "detection": {
@@ -29,8 +31,13 @@ DEFAULTS = {
     "gate": {
         "minOcrChars": 20,
         "majorChangeThreshold": 0.85,
-        "cooldownMs": 5000,
-        "adaptiveCooldownMs": 2000,
+        # Min gap between emitted sense events. This caps how fast eyes update /
+        # re-anchor (the 4fps capture can't help past this gate). Low so eyes
+        # track scroll within ~0.5s instead of in 1.5s steps; OCR is local
+        # (Apple Vision) so the extra cost is modest. adaptive applies for ~10s
+        # after an app switch.
+        "cooldownMs": 700,
+        "adaptiveCooldownMs": 400,
         "contextCooldownMs": 10000,
     },
     "relay": {
@@ -70,4 +77,10 @@ def load_config(path: str | None = None) -> dict:
                     config[section] = values
         except (json.JSONDecodeError, ValueError):
             pass  # use defaults
+    # Env override for capture fps (kept in sync with sck-capture CAPTURE_FPS).
+    if os.environ.get("SENSE_FPS"):
+        try:
+            config["capture"]["fps"] = float(os.environ["SENSE_FPS"])
+        except ValueError:
+            pass
     return config

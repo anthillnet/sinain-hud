@@ -112,10 +112,14 @@ class DecisionGate:
         """Returns SenseEvent to send, or None to drop."""
         now = time.time() * 1000
 
-        # Context events (app/window change) bypass normal cooldown
+        # A real app switch is the highest-priority moment to refresh eyes —
+        # emit the context event IMMEDIATELY, bypassing the cooldown (otherwise
+        # an app switch within context_cooldown_ms of the last one was dropped,
+        # so eyes lingered on the old app for up to ~10s). Only same-app
+        # window-title churn is still throttled by the context cooldown.
         if app_changed or window_changed:
             self.last_app_change_ts = now
-            if now - self.last_context_ts >= self.context_cooldown_ms:
+            if app_changed or (now - self.last_context_ts >= self.context_cooldown_ms):
                 self.last_context_ts = now
                 self.last_send_ts = now
                 return SenseEvent(type="context", ts=now)

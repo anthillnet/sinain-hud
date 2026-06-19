@@ -290,6 +290,32 @@ if [ -f "$SCRIPT_DIR/tools/sck-capture/main.swift" ]; then
   fi
 fi
 
+# ── 1c. Region-SLM model (provisional ROI eyes) — every mode ────────────────
+# The two-tier ROI lane uses a small local model for instant "thinking about
+# this…" placeholders. It's on by default and needs Ollama + the model present;
+# auto-pull it once if missing. Degrades gracefully (eyes still come from the
+# main analyzer lane) if Ollama is unavailable.
+if [ "${REGION_SLM_ENABLED:-true}" != "false" ]; then
+  _slm_model="${REGION_SLM_MODEL:-qwen2.5:3b}"
+  _ollama_url="${REGION_SLM_ENDPOINT:-http://localhost:11434}"
+  if curl -sf "$_ollama_url/api/tags" >/dev/null 2>&1; then
+    if curl -sf "$_ollama_url/api/tags" | grep -q "\"name\":\"${_slm_model}\""; then
+      ok "region-SLM model present: $_slm_model"
+    elif command -v ollama >/dev/null 2>&1; then
+      log "Pulling region-SLM model ${BOLD}$_slm_model${RESET} (one-time, for instant ROI previews)..."
+      if ollama pull "$_slm_model" >/dev/null 2>&1; then
+        ok "region-SLM model pulled: $_slm_model"
+      else
+        warn "could not pull $_slm_model — provisional ROI eyes off (main analyzer lane still labels them)"
+      fi
+    else
+      warn "region-SLM model $_slm_model missing and 'ollama' CLI not found — provisional ROI eyes off"
+    fi
+  else
+    warn "Ollama not reachable at $_ollama_url — provisional ROI eyes off (eyes still come from the analyzer lane)"
+  fi
+fi
+
 # Ensure IPC directory for screen frames
 mkdir -p "$HOME/.sinain/capture"
 

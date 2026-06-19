@@ -120,6 +120,8 @@ def main():
     extractor = ROIExtractor(
         padding=config["detection"]["roiPadding"],
     )
+    from .motion import MotionEstimator
+    motion = MotionEstimator()
     log("initializing OCR...")
     ocr = create_ocr(config)
     gate = DecisionGate(
@@ -256,10 +258,36 @@ def main():
             log(f"first frame: {frame.size[0]}x{frame.size[1]} (scale={config['capture']['scale']})")
             _logged_first_frame = True
 
-        # 1. Check app/window change (first frame always treated as app change)
-        app_changed, window_changed, app_name, window_title = app_detector.detect_change()
+        # 1. Check app/window change (first frame always treated as app change).
+        # Pass the captured display so app detection reports the frontmost window
+        # ON THAT display — not the global frontmost, which may be an app on
+        # another screen (mismatching the OCR'd content and breaking ROI scoping).
+        app_changed, window_changed, app_name, window_title = app_detector.detect_change(
+            getattr(capture, "last_display", 0)
+        )
         if _is_first_frame:
             app_changed = True  # force context event on startup
+
+        # 1b. Frame-rate visual motion → glide/retire ROI eyes (ungated, cheap).
+        # Reuses this frame's grayscale; sends scroll (dx,dy) + replaced-content
+        # boxes to core so eyes track content between OCR ticks. Reset on app/
+        # window change (content is discontinuous → no meaningful translation).
+        try:
+            _gray = frame.convert("L") if hasattr(frame, "convert") else frame
+            _gray = np.asarray(_gray)
+            if _gray.ndim == 3:
+                _gray = _gray.mean(axis=2).astype(np.uint8)
+            if app_changed or window_changed:
+                motion.reset()
+            else:
+                m = motion.estimate(_gray)
+                if m is not None:
+                    _dx, _dy, _boxes = m
+                    log(f"motion: dx={_dx:.1f} dy={_dy:.1f} changed={len(_boxes)} app={app_name}")
+                    sender.send_motion(_dx, _dy, _boxes, app_name,
+                                       getattr(capture, "last_display", 0))
+        except Exception as _e:
+            log(f"motion error: {_e}")
 
         # Adaptive SSIM threshold
         now_sec = time.time()

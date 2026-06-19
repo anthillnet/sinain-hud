@@ -19,6 +19,7 @@ import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
+import { RegionDetector } from "./agent/region-detector.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -32,9 +33,9 @@ import { createAppServer } from "./server.js";
 import { WebDb } from "./web-db/store.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
-import type { SenseEvent, EscalationMode, FeedItem } from "./types.js";
+import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
-import { log, warn, error } from "./log.js";
+import { log, warn, error, debug } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 const TAG = "core";
@@ -934,7 +935,12 @@ async function main() {
   // ── Region tracker (Grammarly mode) ──
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
   // events, broadcasts the set to the overlay when it changes.
-  const regionTracker = new RegionTracker();
+  const regionTracker = new RegionTracker({
+    // Off-screen eyes older than this aren't optimistically flashed back on
+    // app re-entry (their anchored content is stale) — the analyzer re-detects
+    // live ones fresh. Tunable for fast app-bouncers who want a longer window.
+    restoreMaxAgeMs: Number(process.env.REGION_RESTORE_MAX_AGE_MS) || 45_000,
+  });
   // Frontmost app last seen on the sense path — drives instant ROI restore +
   // urgent re-analysis the moment the user switches apps (region snappiness).
   let lastFocusedApp = "";
@@ -944,6 +950,30 @@ async function main() {
   // MAIN forks: thread id → seed (MAIN transcript + digest at fork time).
   // Consumed by the thread's first chat message and by terminal seeding.
   const forkSeeds = new Map<string, string>();
+
+  // Shared region sink — RegionTracker.update + broadcast on change. Fed by
+  // BOTH the cloud analyzer (loop.onRegions) and the Tier-0 SLM detector.
+  const pushRegions = (regions: RawRegion[] | undefined, ctx: ContextWindow): void => {
+    const changed = regionTracker.update(regions, ctx);
+    if (changed) {
+      wsHandler.broadcastRaw({ type: "region_highlight", regions: changed, ts: Date.now() });
+    }
+  };
+
+  // Tier-0 local-SLM region lane (experiment). Owns ROI detection when enabled,
+  // running on its own fast, screen-change-driven cadence; the cloud loop then
+  // yields regions to it (see onRegions below) and keeps only hud/digest.
+  const regionDetector = new RegionDetector({
+    feedBuffer,
+    senseBuffer,
+    config: config.regionSlmConfig,
+    maxAgeMs: config.agentConfig.maxAgeMs,
+    isEnabled: () => config.agentConfig.regionsEnabled && config.regionSlmConfig.enabled,
+    onRegions: pushRegions,
+  });
+  if (config.regionSlmConfig.enabled) {
+    log(TAG, `region-slm lane ON: model=${config.regionSlmConfig.model} debounce=${config.regionSlmConfig.debounceMs}ms endpoint=${config.regionSlmConfig.endpoint}`);
+  }
 
   // ── Initialize agent loop (event-driven) ──
   const agentLoop = new AgentLoop({
@@ -965,14 +995,10 @@ async function main() {
       escalator.pushSituationMd(content);
     },
     onRegions: (regions, contextWindow) => {
-      const changed = regionTracker.update(regions, contextWindow);
-      if (changed) {
-        wsHandler.broadcastRaw({
-          type: "region_highlight",
-          regions: changed,
-          ts: Date.now(),
-        });
-      }
+      // Two-tier: the main analyzer emits QUALITY regions that upgrade the SLM
+      // lane's provisional placeholders in place (same eye id via anchorText).
+      // When the SLM lane is off, this is the sole (quality) region source.
+      pushRegions(regions, contextWindow);
     },
     // Gate SITUATION.md writes (and the subsequent push) on a gateway lane
     // being active — see escalator.shouldDriveGateway. Users with no openclaw
@@ -1462,6 +1488,14 @@ async function main() {
     importConcept: (envelope, conflict) => importConceptBundle(envelope, conflict),
     isScreenActive: () => screenActive,
 
+    onMotion: (dx, dy, changedBoxes, app, display) => {
+      if (!config.agentConfig.regionsEnabled) return;
+      const moved = regionTracker.applyMotion(dx, dy, changedBoxes, app, display);
+      debug("regions", `motion dx=${dx} dy=${dy} changed=${changedBoxes.length} app=${app} disp=${display} → ${moved ? moved.length + " moved" : "no eyes matched"}`);
+      if (moved) {
+        wsHandler.broadcastRaw({ type: "region_highlight", regions: moved, ts: Date.now() });
+      }
+    },
     onSenseEvent: (event: SenseEvent) => {
       // Respect toggle_screen — if user disabled screen, ignore sense events
       if (!screenActive) return;
@@ -1502,6 +1536,18 @@ async function main() {
         }
       }
 
+      // A1+A2 — local re-anchoring (no LLM): slide live eyes to follow their
+      // content on this fresh frame and dim ones whose text scrolled off, at
+      // capture rate — so eyes track scroll/typing without waiting for the next
+      // analyzer tick. Runs after the big-change dim so it un-dims + re-anchors
+      // the eyes still present and lets the absent ones stay dimmed.
+      if (config.agentConfig.regionsEnabled && event.ocrLines?.length) {
+        const moved = regionTracker.reanchorLive(event);
+        if (moved) {
+          wsHandler.broadcastRaw({ type: "region_highlight", regions: moved, ts: Date.now() });
+        }
+      }
+
       // Broadcast app/window changes to overlay
       if (event.type === "text" && event.ocr && event.ocr.trim().length > 10) {
         const app = shortAppName(event.meta.app || "");
@@ -1516,6 +1562,10 @@ async function main() {
       // real regions re-detect fast, confirming/re-anchoring the pending eyes
       // and surfacing new ones.
       agentLoop.onNewContext(appChanged || bigChange);
+
+      // Tier-0 SLM region lane runs on the raw screen-change cadence (no-op
+      // unless REGION_SLM_ENABLED) \u2014 decoupled from the cloud loop's debounce.
+      regionDetector.onContextChange();
     },
 
     onFeedPost: (text: string, priority: string) => {

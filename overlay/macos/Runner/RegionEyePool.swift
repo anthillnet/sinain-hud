@@ -11,6 +11,8 @@ class RegionEyePool {
     static let eyeSize: CGFloat = 24
 
     private var panels: [String: NSPanel] = [:]
+    private var previewPanel: NSPanel?
+    private var previewId: String?
     private weak var channel: FlutterMethodChannel?
 
     /// Mirrors the main HUD's privacy mode: true → invisible to screen
@@ -62,6 +64,7 @@ class RegionEyePool {
         for (id, panel) in panels where !seen.contains(id) {
             panel.orderOut(nil)
             panels.removeValue(forKey: id)
+            if id == previewId { hidePreview() }
         }
     }
 
@@ -75,6 +78,69 @@ class RegionEyePool {
             panel.orderOut(nil)
         }
         panels.removeAll()
+        hidePreview()
+    }
+
+    /// Toggle a small text preview next to the eye [id] — single-tap shows what
+    /// the ROI is about right at the ROI (no need to open the HUD). Tapping the
+    /// same eye again (or its eye disappearing) hides it.
+    func togglePreview(id: String, text: String) {
+        if previewId == id { hidePreview(); return }
+        guard let eye = panels[id] else { hidePreview(); return }
+        hidePreview()
+
+        let maxW: CGFloat = 320, pad: CGFloat = 10
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 12)
+        label.textColor = .white
+        label.backgroundColor = .clear
+        label.isBezeled = false
+        label.isEditable = false
+        label.drawsBackground = false
+        label.preferredMaxLayoutWidth = maxW - pad * 2
+        var sz = label.fittingSize
+        sz.width = min(sz.width, maxW - pad * 2)
+        let w = sz.width + pad * 2, h = sz.height + pad * 2
+
+        // Below the eye, left-aligned with it, clamped to the eye's screen.
+        let ef = eye.frame
+        let scr = eye.screen?.frame ?? NSScreen.main?.frame ?? .zero
+        var x = ef.minX
+        var y = ef.minY - h - 4
+        if y < scr.minY + 4 { y = ef.maxY + 4 } // flip above if no room below
+        x = max(scr.minX + 4, min(x, scr.maxX - w - 4))
+
+        let panel = NSPanel(contentRect: NSRect(x: x, y: y, width: w, height: h),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = true
+        if #available(macOS 12.0, *) {
+            panel.sharingType = privacyEnabled ? .none : .readOnly
+        }
+        let bg = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+        bg.wantsLayer = true
+        bg.layer?.backgroundColor = CGColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.96)
+        bg.layer?.cornerRadius = 8
+        bg.layer?.borderWidth = 1
+        bg.layer?.borderColor = CGColor(red: 1, green: 1, blue: 1, alpha: 0.12)
+        label.frame = NSRect(x: pad, y: pad, width: sz.width, height: sz.height)
+        bg.addSubview(label)
+        panel.contentView = bg
+        panel.orderFront(nil)
+        previewPanel = panel
+        previewId = id
+    }
+
+    func hidePreview() {
+        previewPanel?.orderOut(nil)
+        previewPanel = nil
+        previewId = nil
     }
 
     // MARK: - Private

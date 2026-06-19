@@ -87,6 +87,21 @@ export interface RawRegion {
   action?: RegionAction;
   /** SenseEvent.id the issue was observed in (from numbered prompt lines) */
   sourceId?: number;
+  /** Line-id path (region-detector): the detector picked a specific OCR LINE,
+   *  so the anchor is already resolved — `issue` is a clean description (not a
+   *  quote) and these carry the exact geometry. When present, the tracker uses
+   *  them directly and derives the stable id from `anchorText` (the verbatim
+   *  line) so re-phrased descriptions don't spawn duplicate eyes. */
+  bbox?: [number, number, number, number];
+  frameSize?: [number, number];
+  anchorText?: string;
+  sourceOcr?: string;
+  app?: string;
+  display?: number;
+  /** Two-tier cascade: the SLM lane emits provisional eyes (instant, templated
+   *  placeholder label); the main analyzer lane emits quality (non-provisional)
+   *  regions that UPGRADE them in place. Unratified provisionals expire. */
+  provisional?: boolean;
 }
 
 /** Tracked region with stable identity and resolved coordinates. */
@@ -102,6 +117,10 @@ export interface RegionHighlight {
   frameSize?: [number, number];
   /** OCR text of the source sense event (context for spawn) */
   sourceOcr?: string;
+  /** Verbatim OCR line the eye is anchored to (the line refineToLine matched).
+   *  Re-anchoring tracks THIS across frames, not the (often paraphrased) issue
+   *  text — so the eye follows its content on scroll/typing. */
+  anchorText?: string;
   /** App the region was detected in */
   app?: string;
   /** Display id (CGDirectDisplayID) the region was detected on — lets the
@@ -114,6 +133,10 @@ export interface RegionHighlight {
   /** Optimistically restored from the archive on app re-entry, awaiting the
    *  next analyzer tick to confirm it's still valid. Overlay dims it. */
   pending?: boolean;
+  /** SLM-prepopulated, awaiting a quality description from the main lane. The
+   *  label is a templated placeholder ("Thinking about this email…"); the
+   *  overlay dims it. Cleared when the analyzer upgrades it. */
+  provisional?: boolean;
 }
 
 /** sinain-core → Overlay: current set of actionable screen regions.
@@ -395,6 +418,28 @@ export interface AnalysisConfig {
 /** @deprecated Use AnalysisConfig */
 export type AgentConfig = AnalysisConfig;
 
+/**
+ * Tier-0 local-SLM region lane (experiment). When enabled, a small local model
+ * (Ollama) detects actionable screen regions on its own fast cadence — decoupled
+ * from the cloud analyzer's hud/digest call and its debounce — so eyes appear at
+ * near-frame rate with no network. The cloud loop keeps writing hud/digest but
+ * yields region detection to this lane while it's on (clean A/B).
+ */
+export interface RegionSlmConfig {
+  /** Master switch for the local-SLM region detector (default false). */
+  enabled: boolean;
+  /** Ollama model tag, e.g. "phi4-mini", "qwen2.5:7b", "gemma4:e2b". */
+  model: string;
+  /** Ollama base URL (default http://localhost:11434). */
+  endpoint: string;
+  /** Coalescing window after a screen change before detecting (default 500ms). */
+  debounceMs: number;
+  /** Cap on generated tokens — regions JSON is small (default 256). */
+  maxTokens: number;
+  /** Per-call timeout; aborts a slow/superseded generation (default 6000ms). */
+  timeoutMs: number;
+}
+
 export interface AgentResult {
   hud: string;
   digest: string;
@@ -625,6 +670,7 @@ export interface CoreConfig {
   micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AnalysisConfig;
+  regionSlmConfig: RegionSlmConfig;
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
   situationMdPath: string;

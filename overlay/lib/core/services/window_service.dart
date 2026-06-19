@@ -255,6 +255,23 @@ class WindowService {
     }
   }
 
+  /// Toggle a native text preview next to the eye [id], shown at the ROI.
+  Future<void> toggleRegionPreview(String id, String text) async {
+    try {
+      await _channel.invokeMethod('toggleRegionPreview', {'id': id, 'text': text});
+    } catch (e) {
+      _log('toggleRegionPreview failed: $e');
+    }
+  }
+
+  Future<void> hideRegionPreview() async {
+    try {
+      await _channel.invokeMethod('hideRegionPreview');
+    } catch (e) {
+      _log('hideRegionPreview failed: $e');
+    }
+  }
+
   /// Update one eye's badge state: 'idle' | 'working' | 'ready' | 'failed'.
   Future<void> updateRegionEye(String id, String state) async {
     try {
