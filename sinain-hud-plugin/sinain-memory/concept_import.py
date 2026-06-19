@@ -95,28 +95,20 @@ def import_bundle(db_path: str, envelope: dict, conflict: str = "merge",
             # Imported retracted triples → preserve retracted state. (They're
             # part of the bundle's audit trail.)
             if retracted:
-                # Insert as retracted; valid_to stays as-is.
-                # We use a direct INSERT to preserve the retracted flag — assert_triple
-                # always sets retracted=0.
-                store._conn.execute(
-                    """INSERT INTO triples
-                       (tx_id, entity_id, attribute, value, value_type, retracted, retracted_tx, valid_to, created_at)
-                       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)""",
-                    (new_tx, eid, attr, value, value_type, new_tx, valid_to, created_at or _iso_now()),
-                )
-                store._conn.execute(
-                    "INSERT OR IGNORE INTO entity_types (entity_id, entity_type) VALUES (?, ?)",
-                    (eid, eid.split(":", 1)[0] if ":" in eid else "unknown"),
-                )
+                # Legacy SQLite-era bundles carried a per-triple retracted flag.
+                # Oxigraph has no such column, so we assert the quad and mark the
+                # fact non-current with a valid_to (bi-temporal supersession
+                # marker): current-state reads skip it, history/as-of still see
+                # it. New bundles never set `retracted` — superseded facts ride
+                # in as an ordinary valid_to triple — so this is back-compat only.
+                store.assert_triple(new_tx, eid, attr, value, value_type=value_type)
+                store.soft_retract_triple(new_tx, eid, valid_to=valid_to or _iso_now())
                 inserted += 1
                 continue
 
-            # Active triple — apply conflict mode for (entity, attribute, value)
-            existing = store._conn.execute(
-                """SELECT id FROM triples WHERE entity_id = ? AND attribute = ?
-                       AND value = ? AND retracted = 0 LIMIT 1""",
-                (eid, attr, value),
-            ).fetchone()
+            # Active triple — apply conflict mode for (entity, attribute, value).
+            # Membership over entity() replaces the old SQLite SELECT.
+            existing = value in store.entity(eid).get(attr, [])
 
             if existing:
                 # Exact triple already present
@@ -128,19 +120,13 @@ def import_bundle(db_path: str, envelope: dict, conflict: str = "merge",
                     store.retract_triple(new_tx, eid, attr, value)
                     overwritten += 1
 
-            # Insert
+            # Insert. The source timeline rides along as the bundle's own
+            # `first_seen` triple, so the old created_at column-patch is retired
+            # (Oxigraph stores no per-quad created_at).
             store.assert_triple(new_tx, eid, attr, value, value_type=value_type)
-            # Patch created_at to preserve source timeline (assert_triple uses now()).
-            if created_at:
-                store._conn.execute(
-                    """UPDATE triples SET created_at = ?
-                       WHERE tx_id = ? AND entity_id = ? AND attribute = ? AND value = ?
-                       AND id = (SELECT MAX(id) FROM triples WHERE tx_id = ? AND entity_id = ? AND attribute = ? AND value = ?)""",
-                    (created_at, new_tx, eid, attr, value, new_tx, eid, attr, value),
-                )
             inserted += 1
 
-        store._conn.commit()
+        # Oxigraph auto-commits each add/remove — no explicit commit needed.
 
     store.close()
 

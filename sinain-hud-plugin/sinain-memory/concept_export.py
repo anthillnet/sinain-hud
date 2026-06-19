@@ -87,38 +87,34 @@ def collect_neighborhood(store, root_entity: str, depth: int,
 
     Returns deterministically-ordered list of entity_ids reachable within depth.
     """
+    from rdf_store import _is_ref_like
+
     visited: dict[str, int] = {root_entity: 0}
     queue: list[tuple[str, int]] = [(root_entity, 0)]
-    retracted_filter = "" if include_retracted else "AND retracted = 0"
+    # include_retracted is a no-op on Oxigraph: retracted facts are hard-removed
+    # (their quads are simply gone), and superseded facts carry a valid_to marker
+    # but their ref edges still traverse — there's no retracted column to filter.
 
     while queue:
         eid, d = queue.pop(0)
         if d >= depth:
             continue
 
-        # Outgoing refs
-        rows_out = store._conn.execute(
-            f"""SELECT DISTINCT value FROM triples
-                WHERE entity_id = ? AND value_type = 'ref' {retracted_filter}""",
-            (eid,),
-        ).fetchall()
-        for r in rows_out:
-            ref = r["value"]
-            if ref and ref not in visited:
-                visited[ref] = d + 1
-                queue.append((ref, d + 1))
+        # Outgoing refs — ref-valued attributes of eid. entity() returns refs as
+        # entity_ids, so _is_ref_like distinguishes them from literal values
+        # (replaces the old value_type='ref' filter).
+        for values in store.entity(eid).values():
+            for ref in values:
+                if _is_ref_like(ref) and ref not in visited:
+                    visited[ref] = d + 1
+                    queue.append((ref, d + 1))
 
-        # Incoming refs
-        rows_in = store._conn.execute(
-            f"""SELECT DISTINCT entity_id FROM triples
-                WHERE value = ? AND value_type = 'ref' {retracted_filter}""",
-            (eid,),
-        ).fetchall()
-        for r in rows_in:
-            ref = r["entity_id"]
-            if ref and ref not in visited:
-                visited[ref] = d + 1
-                queue.append((ref, d + 1))
+        # Incoming refs — facts pointing at eid via any ref edge. backrefs()
+        # already filters to URI (ref) objects, the Oxigraph VAET equivalent.
+        for src, _attr in store.backrefs(eid):
+            if src and src not in visited:
+                visited[src] = d + 1
+                queue.append((src, d + 1))
 
     return sorted(visited.keys())  # deterministic ordering for stable checksum
 
@@ -129,34 +125,34 @@ def serialize_entity(store, entity_id: str, include_retracted: bool,
 
     Returns ({id, type, triples: [...]}, applied_rules, redacted_count).
     """
-    where = "" if include_retracted else "AND retracted = 0"
-    rows = store._conn.execute(
-        f"""SELECT attribute, value, value_type, tx_id, created_at, retracted, valid_to
-            FROM triples WHERE entity_id = ? {where}
-            ORDER BY tx_id, attribute, value""",
-        (entity_id,),
-    ).fetchall()
+    from rdf_store import _is_ref_like
+
+    # Oxigraph stores no retracted/tx_id/created_at columns: retraction hard-
+    # removes quads (so entity() yields only current ones), and the source
+    # timeline rides along as a `first_seen` triple. value_type is re-inferred
+    # from the value shape; include_retracted is a no-op here. Sorted by
+    # (attribute, value) for a stable bundle checksum now that tx_id is gone.
+    attrs = store.entity(entity_id)
+    valid_to = (attrs.get("valid_to") or [None])[0]
 
     triples = []
     all_applied: list[str] = []
     redacted_count = 0
-    for r in rows:
-        value = r["value"]
-        if r["value_type"] == "string" and redact_rules and value:
-            new_value, applied = apply_redactions(value, redact_rules)
-            if applied:
-                all_applied.extend(applied)
-                redacted_count += 1
-                value = new_value
-        triples.append({
-            "attribute": r["attribute"],
-            "value": value,
-            "value_type": r["value_type"],
-            "tx_id": r["tx_id"],
-            "created_at": r["created_at"],
-            "retracted": int(r["retracted"]),
-            "valid_to": r["valid_to"],
-        })
+    for attribute in sorted(attrs):
+        for value in sorted(attrs[attribute], key=str):
+            value_type = "ref" if _is_ref_like(value) else "string"
+            if value_type == "string" and redact_rules and value:
+                new_value, applied = apply_redactions(value, redact_rules)
+                if applied:
+                    all_applied.extend(applied)
+                    redacted_count += 1
+                    value = new_value
+            triples.append({
+                "attribute": attribute,
+                "value": value,
+                "value_type": value_type,
+                "valid_to": valid_to,
+            })
 
     type_prefix = entity_id.split(":", 1)[0] if ":" in entity_id else "unknown"
     return ({"id": entity_id, "type": type_prefix, "triples": triples},
