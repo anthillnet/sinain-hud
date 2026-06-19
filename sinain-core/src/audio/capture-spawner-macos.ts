@@ -46,10 +46,15 @@ export class MacOSCaptureSpawner implements CaptureSpawner {
       // (downscaled 0.5) keeps eyes tracking content with modest CPU. Tunable
       // via CAPTURE_FPS for low-power setups.
       const fps = Number(process.env.CAPTURE_FPS) || 4;
+      // OCR resolution. 0.5 of a Retina panel's logical size is ~1/4 physical
+      // res — Vision merges strokes (m→n, dropped letters) and ROI text comes
+      // out garbled. 1.0 (logical resolution = what the user sees) is the sweet
+      // spot for OCR accuracy at acceptable cost. Tunable via CAPTURE_SCALE.
+      const scale = Number(process.env.CAPTURE_SCALE) || 1.0;
       args.push(
         "--screen-dir", resolve(os.homedir(), ".sinain", "capture"),
         "--fps", String(fps),
-        "--scale", "0.5",
+        "--scale", String(scale),
       );
       // Pin to the primary display by default — multi-display "follow active"
       // mis-places ROIs (wrong screen). Opt back in with CAPTURE_FOLLOW_DISPLAY=true.
