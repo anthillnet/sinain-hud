@@ -958,14 +958,12 @@ class OverlayShellState extends State<OverlayShell> {
                         cursor: SystemMouseCursors.click,
                         child: Padding(
                           padding: const EdgeInsets.only(right: 4),
-                          child: Text(
-                            'DEMO',
-                            style: TextStyle(
-                              fontFamily: 'JetBrainsMono',
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: _redEye.withValues(alpha: 0.8),
-                            ),
+                          // Demo mode (scene 8): a visible red screen — Sinain
+                          // is exposed to capture and sees itself.
+                          child: Icon(
+                            Icons.desktop_windows,
+                            size: 13,
+                            color: _redEye.withValues(alpha: 0.9),
                           ),
                         ),
                       ),
@@ -1127,20 +1125,19 @@ class OverlayShellState extends State<OverlayShell> {
                         cursor: SystemMouseCursors.click,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
+                          // Scene 8 metaphor: hidden-from-capture = a struck
+                          // screen (vision stays clean); demo mode = a visible
+                          // screen, turned RED — Sinain sees itself.
                           child: _settingsService.settings.privacyMode
                               ? Icon(
-                                  Icons.videocam_off,
-                                  size: 12,
+                                  Icons.desktop_access_disabled,
+                                  size: 13,
                                   color: Colors.white.withValues(alpha: 0.3),
                                 )
-                              : Text(
-                                  'DEMO',
-                                  style: TextStyle(
-                                    fontFamily: 'JetBrainsMono',
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.bold,
-                                    color: _redEye.withValues(alpha: 0.8),
-                                  ),
+                              : Icon(
+                                  Icons.desktop_windows,
+                                  size: 13,
+                                  color: _redEye.withValues(alpha: 0.9),
                                 ),
                         ),
                       ),
