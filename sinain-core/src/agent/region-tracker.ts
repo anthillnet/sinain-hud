@@ -23,6 +23,10 @@ interface TrackedRegion {
    *  found (reanchorLive). After LOCAL_MISS_LIMIT, the eye dims — its anchored
    *  text has scrolled off, without waiting for an analyzer tick to miss it. */
   localMisses?: number;
+  /** When this eye was created provisional (SLM placeholder). If the main lane
+   *  doesn't upgrade it to a quality description within PROVISIONAL_TTL_MS, it
+   *  was SLM noise the analyzer declined to ratify → expire it. */
+  provisionalSinceTs?: number;
 }
 
 /** True if two [x,y,w,h] rects overlap (touching edges don't count). */
@@ -171,6 +175,10 @@ export class RegionTracker {
   /** Min single-axis bbox shift (px) before a local re-anchor re-broadcasts —
    *  suppresses sub-pixel OCR jitter while still following real scroll/typing. */
   private static readonly BBOX_MOVE_EPSILON = 4;
+  /** A provisional (SLM placeholder) eye the main lane hasn't upgraded within
+   *  this long is dropped — ~2-3 analyzer ticks, generous enough to ratify a
+   *  real region, short enough that SLM over-flags don't linger. */
+  private static readonly PROVISIONAL_TTL_MS = 8_000;
   private readonly maxRegions: number;
   private readonly restoreMaxAgeMs: number;
 
@@ -218,9 +226,23 @@ export class RegionTracker {
       const existing = this.tracked.get(id) ?? this.matchByTokens(r.issue);
       if (existing) {
         existing.lastSeenTick = this.tick;
-        existing.region.tip = r.tip;
-        existing.region.issue = r.issue; // keep the label fresh as wording improves
         if (r.action) existing.region.action = r.action;
+        // Two-tier reconcile. QUALITY (main lane, !provisional) upgrades the
+        // label and clears the provisional flag — but does NOT touch bbox, so a
+        // provisional eye that's been gliding (motion) keeps its live position
+        // instead of snapping back to the analyzer's older frame. A PROVISIONAL
+        // (SLM placeholder) incoming never overwrites an already-quality label.
+        if (!r.provisional) {
+          existing.region.issue = r.issue;
+          existing.region.tip = r.tip;
+          if (existing.region.provisional) {
+            existing.region.provisional = false;
+            existing.provisionalSinceTs = undefined;
+            debug(TAG, `region ${existing.region.id} upgraded (provisional → quality): "${r.issue.slice(0, 40)}"`);
+          }
+        } else if (existing.region.provisional) {
+          existing.region.tip = r.tip; // still provisional — keep placeholder label
+        }
         // Tier 3 — confirm a restored (pending) eye + re-anchor to the fresh spot.
         if (existing.region.pending) {
           existing.region.pending = false;
@@ -292,11 +314,13 @@ export class RegionTracker {
           sourceOcr: sourceOcr ? sourceOcr.slice(0, 2000) : undefined,
           app: regionApp,
           display: regionDisplay,
+          provisional: r.provisional || undefined,
         },
         lastSeenTick: this.tick,
         firstSeenTs: Date.now(),
+        provisionalSinceTs: r.provisional ? Date.now() : undefined,
       });
-      debug(TAG, `new region ${id}: "${r.issue}" (bbox=${bbox ? bbox.join(",") : "none"})`);
+      debug(TAG, `new region ${id}: "${r.issue}"${r.provisional ? " [provisional]" : ""} (bbox=${bbox ? bbox.join(",") : "none"})`);
     }
 
     if (this.stateKey() === before) return null;
@@ -355,6 +379,17 @@ export class RegionTracker {
         t.restoredAtTick = undefined;
         this.expired.set(id, { region: t.region, expiredAt: now });
         debug(TAG, `pending region ${id} unconfirmed — re-archived`);
+        continue;
+      }
+      // Provisional leash: an SLM placeholder the main lane never upgraded to a
+      // quality description within PROVISIONAL_TTL_MS was an over-flag the
+      // analyzer declined to ratify — drop it so it doesn't linger as a
+      // placeholder. (Upgrade clears provisional, exempting genuine eyes.)
+      if (t.region.provisional && t.provisionalSinceTs !== undefined &&
+          now - t.provisionalSinceTs > RegionTracker.PROVISIONAL_TTL_MS) {
+        this.tracked.delete(id);
+        this.expired.set(id, { region: t.region, expiredAt: now });
+        debug(TAG, `provisional region ${id} unratified — dropped`);
         continue;
       }
       // Manual (user-selected) regions are pinned: the analyzer never
@@ -711,7 +746,7 @@ export class RegionTracker {
    *  un-dims a restored eye). */
   private stateKey(): string {
     return [...this.tracked.entries()]
-      .map(([id, t]) => `${id}:${t.region.tip}:${t.region.pending ? "p" : ""}`)
+      .map(([id, t]) => `${id}:${t.region.issue}:${t.region.pending ? "p" : ""}:${t.region.provisional ? "v" : ""}`)
       .join("|");
   }
 }

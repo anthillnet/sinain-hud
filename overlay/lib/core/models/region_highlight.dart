@@ -26,6 +26,10 @@ class RegionHighlight {
   /// next analyzer tick to confirm it's still valid. Rendered dimmed.
   final bool pending;
 
+  /// SLM-prepopulated placeholder ("Thinking about this email…"), awaiting a
+  /// quality description from the main lane. Rendered dimmed like pending.
+  final bool provisional;
+
   const RegionHighlight({
     required this.id,
     required this.issue,
@@ -35,6 +39,7 @@ class RegionHighlight {
     this.frameSize,
     this.display = 0,
     this.pending = false,
+    this.provisional = false,
   });
 
   factory RegionHighlight.fromJson(Map<String, dynamic> json) {
@@ -54,6 +59,7 @@ class RegionHighlight {
       frameSize: doubles(json['frameSize'], 2),
       display: (json['display'] as num?)?.toInt() ?? 0,
       pending: json['pending'] as bool? ?? false,
+      provisional: json['provisional'] as bool? ?? false,
     );
   }
 }

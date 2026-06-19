@@ -98,6 +98,10 @@ export interface RawRegion {
   sourceOcr?: string;
   app?: string;
   display?: number;
+  /** Two-tier cascade: the SLM lane emits provisional eyes (instant, templated
+   *  placeholder label); the main analyzer lane emits quality (non-provisional)
+   *  regions that UPGRADE them in place. Unratified provisionals expire. */
+  provisional?: boolean;
 }
 
 /** Tracked region with stable identity and resolved coordinates. */
@@ -129,6 +133,10 @@ export interface RegionHighlight {
   /** Optimistically restored from the archive on app re-entry, awaiting the
    *  next analyzer tick to confirm it's still valid. Overlay dims it. */
   pending?: boolean;
+  /** SLM-prepopulated, awaiting a quality description from the main lane. The
+   *  label is a templated placeholder ("Thinking about this email…"); the
+   *  overlay dims it. Cleared when the analyzer upgrades it. */
+  provisional?: boolean;
 }
 
 /** sinain-core → Overlay: current set of actionable screen regions.

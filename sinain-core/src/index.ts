@@ -988,9 +988,9 @@ async function main() {
       escalator.pushSituationMd(content);
     },
     onRegions: (regions, contextWindow) => {
-      // When the Tier-0 SLM lane owns detection, the cloud loop yields regions
-      // to it (keeps only hud/digest) — a clean A/B and no two detectors fighting.
-      if (config.regionSlmConfig.enabled) return;
+      // Two-tier: the main analyzer emits QUALITY regions that upgrade the SLM
+      // lane's provisional placeholders in place (same eye id via anchorText).
+      // When the SLM lane is off, this is the sole (quality) region source.
       pushRegions(regions, contextWindow);
     },
     // Gate SITUATION.md writes (and the subsequent push) on a gateway lane

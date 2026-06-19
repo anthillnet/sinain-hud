@@ -197,8 +197,9 @@ class RegionEyeController {
         'y': pos.dy,
         'display': r.display,
         // A live spawn state (working/failed) wins; otherwise a pending
-        // (optimistically restored) region renders dimmed until confirmed.
-        'state': _eyeStates[r.id] ?? (r.pending ? 'pending' : 'idle'),
+        // (restored) or provisional (SLM placeholder, awaiting the main lane's
+        // quality label) region renders dimmed until confirmed/upgraded.
+        'state': _eyeStates[r.id] ?? ((r.pending || r.provisional) ? 'pending' : 'idle'),
         'size': _eyeSize,
         'accent': settingsService.settings.accentColor,
       });
