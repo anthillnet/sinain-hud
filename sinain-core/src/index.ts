@@ -1280,12 +1280,16 @@ async function main() {
      *  sidecar WS, not bare-agent registration). Kept in sync wherever
      *  escalationAgent changes so the overlay never demands a terminal for it. */
     escalationResident: boolean;
+    /** True when the chat lane is a desktop app (Claude Desktop / ChatGPT) —
+     *  chat opens the external app, so the overlay must not open its own HUD
+     *  chat surface for region/manual-ROI chats. */
+    escalationDesktop: boolean;
     /** True when the resident chat sidecar (:9610) is actually reachable.
      *  Polled by core; lets the overlay distinguish "built-in chat connected"
      *  from "selected sinain but the sidecar is down" (→ warning + Run). */
     chatSidecarUp: boolean;
     registered: boolean;
-  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, chatSidecarUp: false, registered: false };
+  } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, escalationDesktop: false, chatSidecarUp: false, registered: false };
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
   let shuttingDown = false;
@@ -1372,6 +1376,7 @@ async function main() {
       bareAgentState.terminalAgent = pickTerminal();
     }
     bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
+    bareAgentState.escalationDesktop = isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
     wsHandler.updateState({ agents: { ...bareAgentState } });
     log(TAG, `bareagent register: available=[${clean.join(",")}] terminal=[${terminalRoster.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} term=${bareAgentState.terminalAgent}`);
 
@@ -2126,6 +2131,7 @@ async function main() {
         const prevAgent = bareAgentState.escalationAgent;
         bareAgentState.escalationAgent = agent;
         bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, agent);
+        bareAgentState.escalationDesktop = isDesktopProfile(escalatorAgentsCfg, agent);
         if (agent === "") {
           pauseEscalationInternal();
         } else {

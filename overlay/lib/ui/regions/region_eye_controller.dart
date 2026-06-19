@@ -253,8 +253,12 @@ class RegionEyeController {
     if (ev.$2 == 'term') {
       onRegionTerminal(region, pos);
     } else {
-      onRegionTap(region, pos, true); // open the chat thread at the ROI
-      run(region); // and start the agent on this region
+      run(region); // start the agent (desktop lane → core launches the app)
+      // A desktop chat (Claude Desktop / ChatGPT) opens the external app, so
+      // don't also open the in-HUD chat surface for it.
+      if (!ws.escalationDesktop) {
+        onRegionTap(region, pos, true); // open the chat thread at the ROI
+      }
     }
   }
 

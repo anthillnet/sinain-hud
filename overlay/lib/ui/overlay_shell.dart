@@ -53,6 +53,9 @@ class OverlayShellState extends State<OverlayShell> {
   // Destination chosen in the drag-select toolbar ('chat' | 'term') — applied
   // when the freshly-created manual ROI arrives back over regionStream.
   String _pendingManualMode = 'chat';
+  // Top-left-origin screen point to teleport the HUD to for a manual ROI (the
+  // selection's bottom-left, so the chat opens just below the grabbed region).
+  Offset? _pendingManualPos;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -151,12 +154,29 @@ class OverlayShellState extends State<OverlayShell> {
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
-      // Open the destination the user picked in the drag-select toolbar.
+      // A chat on a desktop lane (Claude Desktop / ChatGPT) opens the external
+      // app, not the in-HUD chat — so route it through run() (which seeds the
+      // ROI + launches the app via core) and leave the HUD collapsed.
+      final desktopChat = _pendingManualMode == 'chat' && ws.escalationDesktop;
       if (_pendingManualMode == 'term') {
         _openTerminalForTab(picked.id); // marks started + opens the PTY
       } else {
         setState(() => _startedRegionThreads.add(picked.id));
-        _selectThread(picked.id);
+        if (desktopChat) {
+          _regionEyes?.run(picked); // launch the desktop app with this region
+        } else {
+          _selectThread(picked.id);
+        }
+      }
+      // Teleport the HUD to the grabbed region and uncollapse it — matches the
+      // auto-ROI path. Skipped for a desktop chat (its surface is the app).
+      if (!desktopChat) {
+        final p = _pendingManualPos;
+        if (p != null) {
+          _openChatNearRegion(p.dx, p.dy, 0);
+        } else {
+          _transitionTo(HudState.chat);
+        }
       }
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
@@ -396,6 +416,36 @@ class OverlayShellState extends State<OverlayShell> {
     _syncBusyState();
   }
 
+  /// Manual ROI capture — drag-select a screen region, then the toolbar under
+  /// the box picks Chat/Term. Triggered by the ⊕ tab pill and by double-tapping
+  /// the main eye. The freshly-created r-man-* region is picked up in the
+  /// regionStream listener, which opens it in the chosen mode.
+  Future<void> _startManualRoi() async {
+    final ws = context.read<WebSocketService>();
+    final res = await _windowService.selectRegion();
+    if (res == null) return; // cancelled (Esc / ✕)
+    // The toolbar under the box returns the destination: 'chat' | 'term'.
+    _pendingManualMode = res['mode'] == 'term' ? 'term' : 'chat';
+    // Remember where to teleport the HUD: the selection's bottom-left corner
+    // (selector reports main-display, top-left-origin points → display 0).
+    final rx = (res['x'] as num?)?.toDouble() ?? 0;
+    final ry = (res['y'] as num?)?.toDouble() ?? 0;
+    final rh = (res['h'] as num?)?.toDouble() ?? 0;
+    _pendingManualPos = Offset(rx, ry + rh);
+    // Snapshot existing manual ROIs so the broadcast handler can tell the new
+    // one apart from earlier ones still in the region list.
+    _manualIdsBefore = ws.regions
+        .where((r) => r.id.startsWith('r-man-'))
+        .map((r) => r.id)
+        .toSet();
+    _awaitingManualRegion = true;
+    // Forward only the numeric rect fields; 'mode' is overlay-local.
+    ws.sendRegionSelect(<String, double>{
+      for (final e in res.entries)
+        if (e.value is double) e.key: e.value as double,
+    });
+  }
+
   /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
   /// spike can be exercised without waiting for a region thread.
   String get _activeTabKey => _activeThread ?? 'main';
@@ -574,25 +624,7 @@ class OverlayShellState extends State<OverlayShell> {
         pill(
           text: '⊕',
           selected: false,
-          onTap: () async {
-            final ws = context.read<WebSocketService>();
-            final res = await _windowService.selectRegion();
-            if (res == null) return; // cancelled (Esc / ✕)
-            // The toolbar under the box returns the destination: 'chat' | 'term'.
-            _pendingManualMode = res['mode'] == 'term' ? 'term' : 'chat';
-            // Snapshot existing manual ROIs so the broadcast handler can tell
-            // the new one apart from earlier ones still in the region list.
-            _manualIdsBefore = ws.regions
-                .where((r) => r.id.startsWith('r-man-'))
-                .map((r) => r.id)
-                .toSet();
-            _awaitingManualRegion = true;
-            // Forward only the numeric rect fields; 'mode' is overlay-local.
-            ws.sendRegionSelect(<String, double>{
-              for (final e in res.entries)
-                if (e.value is double) e.key: e.value as double,
-            });
-          },
+          onTap: _startManualRoi,
         ),
         // Fork MAIN into a new thread (visible only on the MAIN tab): the
         // new thread starts from the MAIN transcript + digest and runs its
@@ -753,6 +785,9 @@ class OverlayShellState extends State<OverlayShell> {
           // directly (where any pending permission already auto-switched
           // to its tab).
           onTap: () => _transitionTo(HudState.chat),
+          // Double-tap the eye → instantly grab a screen region (same flow as
+          // the ⊕ tab pill). macOS only — the drag selector is native.
+          onDoubleTap: _isMacOS ? _startManualRoi : null,
           onLongPress: () => toggleVisibility(false),
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,

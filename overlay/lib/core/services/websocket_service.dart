@@ -42,6 +42,9 @@ class WebSocketService extends ChangeNotifier {
   // sidecar WS, not bare-agent registration, so the HUD must not show a
   // "not connected" warning or a Run/start button for it.
   bool _escalationResident = false;
+  // Chat lane is a desktop app (Claude Desktop / ChatGPT) — chat opens the
+  // external app, so the overlay must not open its own HUD chat surface.
+  bool _escalationDesktop = false;
   // Resident chat sidecar (:9610) reachable? With a resident lane, down → the
   // HUD shows "Chat sidecar not running" + a Run-to-restart.
   bool _chatSidecarUp = false;
@@ -140,6 +143,9 @@ class WebSocketService extends ChangeNotifier {
   /// Chat lane is the built-in sinain sidecar — connected by definition, no
   /// bare-agent registration / terminal / start applies.
   bool get escalationResident => _escalationResident;
+  /// Chat lane is a desktop app (Claude Desktop / ChatGPT) — chat opens the
+  /// external app rather than the in-HUD chat surface.
+  bool get escalationDesktop => _escalationDesktop;
   /// Resident chat sidecar (:9610) reachable.
   bool get chatSidecarUp => _chatSidecarUp;
   bool get agentRegistered => _agentRegistered;
@@ -381,6 +387,7 @@ class WebSocketService extends ChangeNotifier {
             final newEsc = agents['escalationAgent'] as String? ?? '';
             final newTerm = agents['terminalAgent'] as String? ?? '';
             final newResident = agents['escalationResident'] as bool? ?? false;
+            final newDesktop = agents['escalationDesktop'] as bool? ?? false;
             final newChatUp = agents['chatSidecarUp'] as bool? ?? false;
             final newRegistered = agents['registered'] as bool? ?? false;
             if (newAvail.join(',') != _availableAgents.join(',') ||
@@ -388,6 +395,7 @@ class WebSocketService extends ChangeNotifier {
                 newEsc != _escalationAgent ||
                 newTerm != _terminalAgent ||
                 newResident != _escalationResident ||
+                newDesktop != _escalationDesktop ||
                 newChatUp != _chatSidecarUp ||
                 newRegistered != _agentRegistered) {
               final wasRegistered = _agentRegistered;
@@ -396,6 +404,7 @@ class WebSocketService extends ChangeNotifier {
               _escalationAgent = newEsc;
               _terminalAgent = newTerm;
               _escalationResident = newResident;
+              _escalationDesktop = newDesktop;
               _chatSidecarUp = newChatUp;
               _agentRegistered = newRegistered;
               if (newRegistered &&
