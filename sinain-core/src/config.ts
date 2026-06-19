@@ -264,7 +264,10 @@ export function loadConfig(): CoreConfig {
   // REGION_SLM_ENABLED=true to let a small local Ollama model own ROI detection
   // on a fast cadence instead of the cloud analyzer.
   const regionSlmConfig: import("./types.js").RegionSlmConfig = {
-    enabled: boolEnv("REGION_SLM_ENABLED", false),
+    // On by default in EVERY mode — it only actually runs when region-eyes are
+    // enabled (AUTO_DETECT_ISSUES), and degrades gracefully if Ollama/model is
+    // absent (eyes still come from the main analyzer lane). Set false to disable.
+    enabled: boolEnv("REGION_SLM_ENABLED", true),
     // Small, DEDICATED model — never the local-mode main model (qwen2.5:7b),
     // which Ollama serializes, queueing detection behind the analyzer/distiller.
     // 3b (≈2GB, ~0.5-1s) writes clean descriptions; the line-id prompt means it
