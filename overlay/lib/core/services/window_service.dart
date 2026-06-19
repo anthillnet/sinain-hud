@@ -10,6 +10,14 @@ class WindowService {
   /// Region eye taps from native panels (Grammarly mode). Emits region ids.
   Stream<String> get regionTapStream => _regionTapController.stream;
 
+  final _regionCardActionController =
+      StreamController<(String, String)>.broadcast();
+
+  /// Chat/Term button taps from the native ROI suggestion card. Emits
+  /// (regionId, action) where action is 'chat' | 'term'.
+  Stream<(String, String)> get regionCardActionStream =>
+      _regionCardActionController.stream;
+
   Future<void> setTransparent() async {
     try {
       await _channel.invokeMethod('setTransparent');
@@ -184,6 +192,13 @@ class WindowService {
           final args = call.arguments as Map;
           final id = args['id'] as String?;
           if (id != null && id.isNotEmpty) _regionTapController.add(id);
+        case 'onRegionCardAction':
+          final args = call.arguments as Map;
+          final id = args['id'] as String?;
+          final action = args['action'] as String?;
+          if (id != null && id.isNotEmpty && action != null) {
+            _regionCardActionController.add((id, action));
+          }
       }
     });
   }
@@ -234,13 +249,20 @@ class WindowService {
   /// Each entry: {'id': String, 'x': double, 'y': double, 'state': String}
   /// with x/y in top-left-origin screen points. Panels for ids absent from
   /// the list are closed; existing ones are repositioned/restyled.
-  /// Screenshot-style drag-select. Returns {x,y,w,h,screenW,screenH} in
-  /// top-left-origin screen points, or null if the user cancelled (Esc).
-  Future<Map<String, double>?> selectRegion() async {
+  /// Screenshot-style drag-select. On release the user picks Chat or Term from
+  /// a toolbar under the box. Returns the numeric rect ({x,y,w,h,screenW,
+  /// screenH}, top-left-origin) plus a `mode` of 'chat' | 'term', or null if
+  /// the user cancelled (Esc / ✕). `mode` is the only non-numeric entry.
+  Future<Map<String, Object>?> selectRegion() async {
     try {
       final raw = await _channel.invokeMethod('selectRegion');
       if (raw is! Map) return null;
-      return raw.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+      final out = <String, Object>{};
+      raw.forEach((k, v) {
+        final key = k.toString();
+        out[key] = v is num ? v.toDouble() : v.toString();
+      });
+      return out;
     } catch (e) {
       _log('selectRegion failed: $e');
       return null;
@@ -255,10 +277,14 @@ class WindowService {
     }
   }
 
-  /// Toggle a native text preview next to the eye [id], shown at the ROI.
-  Future<void> toggleRegionPreview(String id, String text) async {
+  /// Toggle the native suggestion card next to the eye [id], shown at the ROI:
+  /// the issue + tip and a Chat / Term choice. Button taps come back over
+  /// [regionCardActionStream].
+  Future<void> toggleRegionPreview(String id, String issue, String tip,
+      {bool hasTerminal = true}) async {
     try {
-      await _channel.invokeMethod('toggleRegionPreview', {'id': id, 'text': text});
+      await _channel.invokeMethod('toggleRegionPreview',
+          {'id': id, 'issue': issue, 'tip': tip, 'hasTerminal': hasTerminal});
     } catch (e) {
       _log('toggleRegionPreview failed: $e');
     }

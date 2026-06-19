@@ -14,7 +14,6 @@ import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
-import 'regions/region_action_banner.dart';
 import 'regions/region_eye_controller.dart';
 import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
@@ -51,6 +50,9 @@ class OverlayShellState extends State<OverlayShell> {
   // handler can pick the NEWLY-created region instead of re-grabbing an earlier
   // one (which would keep the user stuck on the first ROI's thread).
   Set<String> _manualIdsBefore = {};
+  // Destination chosen in the drag-select toolbar ('chat' | 'term') — applied
+  // when the freshly-created manual ROI arrives back over regionStream.
+  String _pendingManualMode = 'chat';
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -144,11 +146,18 @@ class OverlayShellState extends State<OverlayShell> {
         if (fresh == null || r.id.compareTo(fresh.id) > 0) fresh = r;
       }
       if (fresh == null) return; // new region not in this batch yet — wait
+      final picked = fresh; // final → survives promotion into the setState closure
       _awaitingManualRegion = false;
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
-      ws.registerRegionThread(fresh.id, fresh.issue);
-      _selectThread(fresh.id);
+      ws.registerRegionThread(picked.id, picked.issue);
+      // Open the destination the user picked in the drag-select toolbar.
+      if (_pendingManualMode == 'term') {
+        _openTerminalForTab(picked.id); // marks started + opens the PTY
+      } else {
+        setState(() => _startedRegionThreads.add(picked.id));
+        _selectThread(picked.id);
+      }
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
@@ -201,6 +210,17 @@ class OverlayShellState extends State<OverlayShell> {
             _activeRegion = region;
             _activeThread = region.id;
           });
+          _openChatNearRegion(pos.dx, pos.dy, region.display);
+        },
+        // "Term" on the native ROI card → open the region as a terminal thread
+        // and bring the HUD to it (mirrors the chat-teleport path).
+        onRegionTerminal: (region, pos) {
+          ws.registerRegionThread(region.id, region.issue);
+          setState(() {
+            _activeRegion = region;
+            _activeThread = region.id;
+          });
+          _openTerminalForTab(region.id);
           _openChatNearRegion(pos.dx, pos.dy, region.display);
         },
       )..start();
@@ -556,8 +576,10 @@ class OverlayShellState extends State<OverlayShell> {
           selected: false,
           onTap: () async {
             final ws = context.read<WebSocketService>();
-            final sel = await _windowService.selectRegion();
-            if (sel == null) return; // cancelled
+            final res = await _windowService.selectRegion();
+            if (res == null) return; // cancelled (Esc / ✕)
+            // The toolbar under the box returns the destination: 'chat' | 'term'.
+            _pendingManualMode = res['mode'] == 'term' ? 'term' : 'chat';
             // Snapshot existing manual ROIs so the broadcast handler can tell
             // the new one apart from earlier ones still in the region list.
             _manualIdsBefore = ws.regions
@@ -565,7 +587,11 @@ class OverlayShellState extends State<OverlayShell> {
                 .map((r) => r.id)
                 .toSet();
             _awaitingManualRegion = true;
-            ws.sendRegionSelect(sel);
+            // Forward only the numeric rect fields; 'mode' is overlay-local.
+            ws.sendRegionSelect(<String, double>{
+              for (final e in res.entries)
+                if (e.value is double) e.key: e.value as double,
+            });
           },
         ),
         // Fork MAIN into a new thread (visible only on the MAIN tab): the
@@ -1120,31 +1146,9 @@ class OverlayShellState extends State<OverlayShell> {
               ],
             ),
           ),
-          // Region action banner — issue + suggested approach, shown on the
-          // region's tab while the region is still detected on screen. The
-          // thread only starts from its explicit Run button.
-          if (_activeThread != null &&
-              _activeRegion != null &&
-              _activeRegion!.id == _activeThread)
-            RegionActionBanner(
-              region: _activeRegion!,
-              accentColor: _settingsService.settings.accentColor,
-              threadStarted:
-                  _startedRegionThreads.contains(_activeRegion!.id),
-              onRun: () {
-                final region = _activeRegion!;
-                setState(() => _startedRegionThreads.add(region.id));
-                _regionEyes?.run(region);
-              },
-              // SPIKE: interactive terminal variant of Run — the PTY launches
-              // run.sh --interactive-region, which resolves the spawn-lane
-              // agent and seeds it with the same composed region context the
-              // headless Run sends (GET /region/:id/task on core).
-              onTerminal: terminalSpikeEnabled
-                  ? () => _openTerminalForTab(_activeRegion!.id)
-                  : null,
-              onDismiss: () => setState(() => _activeRegion = null),
-            ),
+          // (The detected-ROI issue/tip + Chat/Term choice now lives in the
+          // native suggestion card at the ROI — see RegionEyePool.togglePreview
+          // — not in the HUD.)
           // Permission banner — visible above the input field whenever an
           // agent task is blocked waiting for user approval. Hidden (zero
           // height) when no tasks are pending. Mirrors Tasks tab — does not

@@ -199,8 +199,10 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         case "toggleRegionPreview":
             let id = args?["id"] as? String ?? ""
-            let text = args?["text"] as? String ?? ""
-            regionEyes.togglePreview(id: id, text: text)
+            let issue = args?["issue"] as? String ?? ""
+            let tip = args?["tip"] as? String ?? ""
+            let hasTerminal = args?["hasTerminal"] as? Bool ?? true
+            regionEyes.togglePreview(id: id, issue: issue, tip: tip, hasTerminal: hasTerminal)
             result(nil)
 
         case "hideRegionPreview":
@@ -216,12 +218,25 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             if #available(macOS 12.0, *) {
                 selectorPrivate = window.sharingType == .none
             }
-            RegionSelector.begin(privacyEnabled: selectorPrivate) { rect in
-                if let r = rect {
+            // Fade the HUD out for the duration of the drag so it never
+            // obscures the area being selected; restore it when the selection
+            // finishes or cancels.
+            let prevAlpha = window.alphaValue
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                window.animator().alphaValue = 0
+            }
+            RegionSelector.begin(privacyEnabled: selectorPrivate) { rect, mode in
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.15
+                    window.animator().alphaValue = prevAlpha
+                }
+                if let r = rect, let m = mode {
                     result(["x": r.origin.x, "y": r.origin.y,
                             "w": r.size.width, "h": r.size.height,
                             "screenW": NSScreen.main?.frame.width ?? 0,
-                            "screenH": NSScreen.main?.frame.height ?? 0])
+                            "screenH": NSScreen.main?.frame.height ?? 0,
+                            "mode": m])
                 } else {
                     result(nil)
                 }
@@ -384,19 +399,19 @@ class RegionSelector {
     private static var active: RegionSelector?
 
     private var panel: NSPanel!
-    private let completion: (NSRect?) -> Void
+    private let completion: (NSRect?, String?) -> Void
 
-    static func begin(privacyEnabled: Bool, completion: @escaping (NSRect?) -> Void) {
+    static func begin(privacyEnabled: Bool, completion: @escaping (NSRect?, String?) -> Void) {
         // One selection at a time — a second request cancels into the new one.
-        active?.finish(nil)
+        active?.finish(nil, nil)
         active = RegionSelector(privacyEnabled: privacyEnabled, completion: completion)
     }
 
-    private init(privacyEnabled: Bool, completion: @escaping (NSRect?) -> Void) {
+    private init(privacyEnabled: Bool, completion: @escaping (NSRect?, String?) -> Void) {
         self.completion = completion
         let screen = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
         let view = RegionSelectView(frame: NSRect(origin: .zero, size: screen.size))
-        view.onDone = { [weak self] rect in self?.finish(rect) }
+        view.onDone = { [weak self] rect, mode in self?.finish(rect, mode) }
 
         let p = NSPanel(contentRect: screen,
                         styleMask: [.borderless, .nonactivatingPanel],
@@ -418,52 +433,79 @@ class RegionSelector {
         panel = p
     }
 
-    private func finish(_ rect: NSRect?) {
+    private func finish(_ rect: NSRect?, _ mode: String?) {
         panel?.orderOut(nil)
         panel = nil
         if Self.active === self { Self.active = nil }
-        completion(rect)
+        completion(rect, mode)
     }
 }
 
 private class RegionSelectView: NSView {
-    var onDone: ((NSRect?) -> Void)?
+    // (rect, mode) on confirm — mode is "chat" | "term"; (nil, nil) on cancel.
+    var onDone: ((NSRect?, String?) -> Void)?
+
+    static let blue = NSColor(srgbRed: 0x33 / 255.0, green: 0x69 / 255.0, blue: 0xD6 / 255.0, alpha: 1)
+    static let toolbarBg = NSColor(srgbRed: 0x2B / 255.0, green: 0x2D / 255.0, blue: 0x30 / 255.0, alpha: 1)
+    static let badgeBg = NSColor(srgbRed: 0x27 / 255.0, green: 0x28 / 255.0, blue: 0x2E / 255.0, alpha: 1)
+
     private var start: NSPoint?
     private var current: NSPoint?
+    private var frozen: NSRect?       // selection locked in on mouseUp
+    private var placed = false        // true once the toolbar is shown
+    private var finished = false
+    private var toolbar: NSView?
+    private var antTimer: Timer?
+    private var antPhase: CGFloat = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // Marching-ant animation: advance the dash phase while a selection exists.
+        antTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self = self, self.start != nil else { return }
+            self.antPhase -= 2
+            self.needsDisplay = true
+        }
+    }
+    required init?(coder: NSCoder) { super.init(coder: coder) }
 
     override var acceptsFirstResponder: Bool { true }
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
+        if !placed { addCursorRect(bounds, cursor: .crosshair) }
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { onDone?(nil) }  // Esc
+        if event.keyCode == 53 { finish(nil) }  // Esc
     }
 
     override func mouseDown(with event: NSEvent) {
+        if placed { return }
         start = convert(event.locationInWindow, from: nil)
         current = start
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if placed { return }
         current = convert(event.locationInWindow, from: nil)
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard let s = start, let c = current else { onDone?(nil); return }
+        if placed { return }
+        guard let s = start, let c = current else { finish(nil); return }
         let sel = rect(from: s, to: c)
         if sel.width < 12 || sel.height < 12 {  // a stray click, not a selection
-            onDone?(nil)
+            finish(nil)
             return
         }
-        // View coords are bottom-left origin; sinain regions use top-left.
-        let screenH = bounds.height
-        let topLeft = NSRect(x: sel.origin.x,
-                             y: screenH - sel.origin.y - sel.height,
-                             width: sel.width, height: sel.height)
-        onDone?(topLeft)
+        // Lock the selection and surface the Chat / Term toolbar under the box
+        // instead of resolving immediately — the user picks the destination.
+        frozen = sel
+        placed = true
+        addToolbar(under: sel)
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true
     }
 
     private func rect(from a: NSPoint, to b: NSPoint) -> NSRect {
@@ -471,18 +513,192 @@ private class RegionSelectView: NSView {
                width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 
+    /// Resolve once. mode "chat"/"term" confirms with the frozen rect (converted
+    /// to top-left origin); nil cancels.
+    private func finish(_ mode: String?) {
+        if finished { return }
+        finished = true
+        antTimer?.invalidate(); antTimer = nil
+        if let m = mode, let sel = frozen {
+            let screenH = bounds.height
+            let topLeft = NSRect(x: sel.origin.x,
+                                 y: screenH - sel.origin.y - sel.height,
+                                 width: sel.width, height: sel.height)
+            onDone?(topLeft, m)
+        } else {
+            onDone?(nil, nil)
+        }
+    }
+
+    @objc private func chatTapped() { finish("chat") }
+    @objc private func termTapped() { finish("term") }
+    @objc private func closeTapped() { finish(nil) }
+
+    // MARK: drawing
+
     override func draw(_ dirtyRect: NSRect) {
-        // Dim everything…
-        NSColor.black.withAlphaComponent(0.25).setFill()
+        NSColor.black.withAlphaComponent(0.32).setFill()
         bounds.fill()
-        guard let s = start, let c = current else { return }
-        let sel = rect(from: s, to: c)
-        // …except the selection (punch a hole), then stroke its border.
+
+        let sel: NSRect?
+        if let f = frozen { sel = f }
+        else if let s = start, let c = current { sel = rect(from: s, to: c) }
+        else { sel = nil }
+
+        guard let box = sel else {
+            drawHint()
+            return
+        }
+
+        // Punch a clear hole over the selection so the screen shows through.
         NSColor.clear.setFill()
-        sel.fill(using: .copy)
-        NSColor(calibratedRed: 0, green: 1, blue: 0.53, alpha: 0.9).setStroke()
-        let path = NSBezierPath(rect: sel)
+        box.fill(using: .copy)
+        // Faint Ring-blue tint inside, then the marching-ant border.
+        RegionSelectView.blue.withAlphaComponent(0.06).setFill()
+        box.fill()
+        RegionSelectView.blue.setStroke()
+        let path = NSBezierPath(rect: box)
         path.lineWidth = 1.5
+        let dash: [CGFloat] = [6, 4]
+        path.setLineDash(dash, count: dash.count, phase: antPhase)
         path.stroke()
+
+        // Corner handles.
+        drawHandle(NSPoint(x: box.minX, y: box.minY))
+        drawHandle(NSPoint(x: box.maxX, y: box.minY))
+        drawHandle(NSPoint(x: box.minX, y: box.maxY))
+        drawHandle(NSPoint(x: box.maxX, y: box.maxY))
+
+        drawBadge(box)
+        if !placed { drawHint() }
+    }
+
+    private func drawHandle(_ p: NSPoint) {
+        let r = NSRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)
+        NSColor.white.setFill()
+        r.fill()
+        RegionSelectView.blue.setStroke()
+        let bp = NSBezierPath(rect: r)
+        bp.lineWidth = 1
+        bp.stroke()
+    }
+
+    private func drawBadge(_ box: NSRect) {
+        let text = "\(Int(box.width)) × \(Int(box.height))"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor.white,
+        ]
+        let str = NSAttributedString(string: text, attributes: attrs)
+        let ts = str.size()
+        let padX: CGFloat = 6, h: CGFloat = 18
+        let r = NSRect(x: box.minX, y: box.maxY + 4, width: ts.width + padX * 2, height: h)
+        RegionSelectView.badgeBg.setFill()
+        NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
+        str.draw(at: NSPoint(x: r.minX + padX, y: r.minY + (h - ts.height) / 2))
+    }
+
+    private func drawHint() {
+        let text = "Esc to cancel · release to open a thread"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.white,
+        ]
+        let str = NSAttributedString(string: text, attributes: attrs)
+        let ts = str.size()
+        let padX: CGFloat = 12, h: CGFloat = 26
+        let r = NSRect(x: 16, y: 16, width: ts.width + padX * 2, height: h)
+        RegionSelectView.toolbarBg.withAlphaComponent(0.92).setFill()
+        NSBezierPath(roundedRect: r, xRadius: 13, yRadius: 13).fill()
+        str.draw(at: NSPoint(x: r.minX + padX, y: r.minY + (h - ts.height) / 2))
+    }
+
+    // MARK: toolbar
+
+    private func addToolbar(under box: NSRect) {
+        let pad: CGFloat = 4, h: CGFloat = 28, gap: CGFloat = 4
+
+        // Buttons self-size to their content (icon + label + symmetric padding).
+        let chat = makeTextButton(title: "Chat", symbol: "message", filled: true, action: #selector(chatTapped))
+        let term = makeTextButton(title: "Term", symbol: "terminal", filled: false, action: #selector(termTapped))
+        let close = makeIconButton(symbol: "xmark", action: #selector(closeTapped))
+
+        chat.setFrameOrigin(NSPoint(x: pad, y: pad))
+        term.setFrameOrigin(NSPoint(x: chat.frame.maxX + gap, y: pad))
+        let divX = term.frame.maxX + gap
+        let divider = NSView(frame: NSRect(x: divX, y: pad + (h - 18) / 2, width: 1, height: 18))
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor(white: 1, alpha: 0.14).cgColor
+        close.setFrameOrigin(NSPoint(x: divX + 1 + gap, y: pad))
+
+        let barW = close.frame.maxX + pad
+        let barH = h + pad * 2
+        var bx = box.midX - barW / 2
+        bx = max(8, min(bx, bounds.width - barW - 8))
+        var by = box.minY - 10 - barH          // below the box…
+        if by < 8 { by = box.maxY + 10 }        // …or above if there's no room.
+
+        let bar = NSView(frame: NSRect(x: bx, y: by, width: barW, height: barH))
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = RegionSelectView.toolbarBg.cgColor
+        bar.layer?.cornerRadius = 8
+        bar.layer?.borderWidth = 1
+        bar.layer?.borderColor = NSColor(white: 1, alpha: 0.14).cgColor
+        bar.addSubview(chat)
+        bar.addSubview(term)
+        bar.addSubview(divider)
+        bar.addSubview(close)
+        addSubview(bar)
+        toolbar = bar
+    }
+
+    private func makeTextButton(title: String, symbol: String, filled: Bool, action: Selector) -> NSButton {
+        let b = NSButton(title: title, target: self, action: action)
+        b.isBordered = false
+        b.wantsLayer = true
+        b.bezelStyle = .regularSquare
+        b.layer?.cornerRadius = 4
+        b.layer?.masksToBounds = true
+        if filled {
+            b.layer?.backgroundColor = RegionSelectView.blue.cgColor
+        } else {
+            b.layer?.backgroundColor = NSColor.clear.cgColor
+            b.layer?.borderWidth = 1
+            b.layer?.borderColor = NSColor(white: 1, alpha: 0.18).cgColor
+        }
+        b.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: 13, weight: filled ? .medium : .regular),
+        ])
+        if #available(macOS 11.0, *),
+           let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+            b.image = img
+            b.imagePosition = .imageLeading
+            b.imageHugsTitle = true
+            b.alignment = .center
+            b.contentTintColor = .white
+        }
+        // Hug the content, then add symmetric horizontal padding — a fixed
+        // width left the icon+label group visibly off-centre.
+        b.sizeToFit()
+        b.setFrameSize(NSSize(width: ceil(b.frame.width) + 16, height: 28))
+        return b
+    }
+
+    private func makeIconButton(symbol: String, action: Selector) -> NSButton {
+        let b = NSButton(title: "", target: self, action: action)
+        b.isBordered = false
+        b.wantsLayer = true
+        b.contentTintColor = NSColor(srgbRed: 0xA8 / 255.0, green: 0xAD / 255.0, blue: 0xBD / 255.0, alpha: 1)
+        if #available(macOS 11.0, *),
+           let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Cancel") {
+            b.image = img
+        } else {
+            b.attributedTitle = NSAttributedString(string: "✕", attributes: [
+                .foregroundColor: NSColor(white: 1, alpha: 0.66),
+            ])
+        }
+        b.setFrameSize(NSSize(width: 28, height: 28))
+        return b
     }
 }
