@@ -751,6 +751,9 @@ async function main() {
   log(TAG, `transcription: model=${config.transcriptionConfig.geminiModel}`);
   log(TAG, `agent: model=${config.agentConfig.model} debounce=${config.agentConfig.debounceMs}ms max=${config.agentConfig.maxIntervalMs}ms`);
   log(TAG, `escalation: mode=${config.escalationConfig.mode} cooldown=${config.escalationConfig.cooldownMs}ms stale=${config.escalationConfig.staleMs}ms`);
+  if (config.escalationConfig.staleMs > 0) {
+    warn(TAG, `idle messages ON (ESCALATION_STALE_MS=${config.escalationConfig.staleMs}) — proactive chat turns on silence CONSUME API TOKENS each tick; set ESCALATION_STALE_MS=0 to disable`);
+  }
   log(TAG, `openclaw: ws=${config.openclawConfig.gatewayWsUrl} http=${config.openclawConfig.hookUrl}`);
   log(TAG, `situation: ${config.situationMdPath}`);
   log(TAG, `tracing: enabled=${config.traceEnabled} dir=${config.traceDir}`);

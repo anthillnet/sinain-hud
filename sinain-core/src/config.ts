@@ -288,7 +288,12 @@ export function loadConfig(): CoreConfig {
   const escalationConfig: EscalationConfig = {
     mode: escalationMode,
     cooldownMs: fromCfgInt(agentsCfg?.escalation?.cooldownMs, "ESCALATION_COOLDOWN_MS", 30000),
-    staleMs: fromCfgInt(agentsCfg?.escalation?.staleMs, "ESCALATION_STALE_MS", 90000),
+    // Idle messages OFF by default (0): the stale override force-escalates a
+    // proactive chat turn after prolonged silence — each re-sends a large
+    // uncached context and is the dominant token cost. Reactive escalation
+    // (the normal proactive thread chat) is unaffected. Opt in by setting
+    // ESCALATION_STALE_MS > 0 (e.g. 90000); see the startup token-cost warning.
+    staleMs: fromCfgInt(agentsCfg?.escalation?.staleMs, "ESCALATION_STALE_MS", 0),
   };
 
   // OpenClaw gateway config: pick the first openclaw-TYPED profile
