@@ -62,13 +62,14 @@ class AgentSelectorPanel extends StatelessWidget {
               onSelect: (agent) => ws.setAgent('terminal', agent),
             ),
             const SizedBox(height: 10),
-            // Ambient idle messages (escalations while the user is idle) —
-            // explicit on/off, independent of which agent answers them.
-            // Compact chips (a Material Switch is ~48px tall and pushed
-            // itself below the panel's visible area).
+            // Ambient idle messages (unsolicited proactive messages while the
+            // user is idle) — explicit on/off, OFF by default, and fully
+            // decoupled from escalation mode + agent selection so picking a
+            // chat agent can never silently turn it on. Compact chips (a
+            // Material Switch is ~48px tall and pushed itself below the
+            // panel's visible area).
             Builder(builder: (context) {
-              final idleOn = ws.escalationState != 'paused' &&
-                  ws.escalationState != 'off';
+              final idleOn = ws.idleMessagesEnabled;
               return Row(
                 children: [
                   Expanded(
@@ -87,19 +88,19 @@ class AgentSelectorPanel extends StatelessWidget {
                     label: 'On',
                     selected: idleOn,
                     accent: accent,
-                    // Explicit set (not a flip): tapping On always resumes,
+                    // Explicit set (not a flip): tapping On always enables,
                     // even if the displayed state momentarily lags core.
                     onTap: () => ws.sendCommand(
-                        'set_escalation_enabled', {'enabled': true}),
+                        'set_idle_messages_enabled', {'enabled': true}),
                   ),
                   const SizedBox(width: 4),
                   _chip(
                     label: 'Off',
                     selected: !idleOn,
                     accent: accent,
-                    // Explicit set (not a flip): tapping Off always pauses.
+                    // Explicit set (not a flip): tapping Off always disables.
                     onTap: () => ws.sendCommand(
-                        'set_escalation_enabled', {'enabled': false}),
+                        'set_idle_messages_enabled', {'enabled': false}),
                   ),
                 ],
               );

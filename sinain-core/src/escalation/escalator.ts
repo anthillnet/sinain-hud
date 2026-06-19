@@ -55,6 +55,13 @@ export interface EscalatorDeps {
    *  reply. Used to deliver idle/ambient escalations when the chat lane is the
    *  built-in sidecar — the reply is fed back through respondHttp. */
   runResidentChat?: (message: string) => Promise<string>;
+  /** Returns true when ambient/idle (unsolicited) escalations are allowed to
+   *  fire. Idle messages are opt-in and default OFF; they are DECOUPLED from
+   *  escalation mode and agent selection, so picking a chat agent, a gateway,
+   *  or a bare-agent re-register can never silently turn them on. User-initiated
+   *  turns (hasUserCommand) always bypass this gate. When the dep is absent
+   *  (e.g. unit tests) the gate is inert and ambient behaves as before. */
+  isIdleMessagesEnabled?: () => boolean;
 }
 
 /**
@@ -369,6 +376,16 @@ export class Escalator {
 
     if (!escalate && !hasUserCommand) {
       log(TAG, `tick #${entry.id}: not escalating (mode=${this.deps.escalationConfig.mode}, score=${score.total}, hud="${entry.hud.slice(0, 40)}")`);
+      return;
+    }
+
+    // Idle/ambient messages are opt-in and default OFF. When disabled, suppress
+    // every UNSOLICITED escalation — only user-initiated turns (hasUserCommand)
+    // pass. This is independent of escalation mode, so the gateway WS lifecycle
+    // and direct MAIN chat keep working while the HUD stays quiet.
+    if (!hasUserCommand && this.deps.isIdleMessagesEnabled
+        && !this.deps.isIdleMessagesEnabled()) {
+      log(TAG, `tick #${entry.id}: ambient escalation suppressed (idle messages off)`);
       return;
     }
 

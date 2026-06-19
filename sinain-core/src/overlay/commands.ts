@@ -34,6 +34,9 @@ export interface CommandDeps {
    *  Unlike onToggleEscalation (a flip), an explicit set can't desync into
    *  flipping the wrong way when the overlay's displayed state lags core. */
   onSetEscalationEnabled?: (enabled: boolean) => boolean;
+  /** Set ambient/idle (unsolicited) HUD messages on/off. Opt-in, default off,
+   *  persisted, and independent of escalation mode — returns the new state. */
+  onSetIdleMessagesEnabled?: (enabled: boolean) => boolean;
   /** Set the agent for a lane. agent="" means Off (lane disabled).
    *  Returns { ok: false, error } if agent isn't in the current roster. */
   onSetAgent?: (lane: "escalation" | "terminal", agent: string) => { ok: boolean; error?: string };
@@ -255,6 +258,27 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         "normal"
       );
       log(TAG, `escalation set ${nowActive ? "ON" : "OFF"}`);
+      break;
+    }
+    case "set_idle_messages_enabled": {
+      const enabled = (msg as any).enabled;
+      if (typeof enabled !== "boolean") {
+        log(TAG, `set_idle_messages_enabled: missing or non-boolean enabled field`);
+        break;
+      }
+      if (!deps.onSetIdleMessagesEnabled) {
+        log(TAG, `set_idle_messages_enabled: no handler wired`);
+        break;
+      }
+      const nowOn = deps.onSetIdleMessagesEnabled(enabled);
+      wsHandler.updateState({ idleMessages: nowOn ? "on" : "off" });
+      wsHandler.broadcast(
+        nowOn
+          ? "Idle messages ON — Sinain will message you proactively (uses API tokens)"
+          : "Idle messages OFF",
+        "normal"
+      );
+      log(TAG, `idle messages set ${nowOn ? "ON" : "OFF"}`);
       break;
     }
     case "set_response_size": {
