@@ -234,26 +234,11 @@ class AppDelegate: FlutterAppDelegate {
             nil
         )
 
-        // Navigation
-        registerHotKey(id: 1,  keyCode: UInt32(kVK_Space),      modifiers: UInt32(cmdKey | shiftKey)) // toggle visibility
-        registerHotKey(id: 3,  keyCode: UInt32(kVK_ANSI_M),     modifiers: UInt32(cmdKey | shiftKey)) // cycle state
-        registerHotKey(id: 4,  keyCode: UInt32(kVK_ANSI_H),     modifiers: UInt32(cmdKey | shiftKey)) // quit
-        registerHotKey(id: 19, keyCode: UInt32(kVK_ANSI_F),     modifiers: UInt32(cmdKey | shiftKey)) // toggle chat
-        registerHotKey(id: 12, keyCode: UInt32(kVK_ANSI_E),     modifiers: UInt32(cmdKey | shiftKey)) // cycle tab
-        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P),     modifiers: UInt32(cmdKey | shiftKey)) // reset position
-        registerHotKey(id: 18, keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(cmdKey | shiftKey)) // focus input
-
-        // Capture toggles
-        registerHotKey(id: 5,  keyCode: UInt32(kVK_ANSI_T),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio capture
-        registerHotKey(id: 10, keyCode: UInt32(kVK_ANSI_S),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen capture
-        registerHotKey(id: 15, keyCode: UInt32(kVK_ANSI_R),     modifiers: UInt32(cmdKey | shiftKey)) // toggle demo/privacy
-
-        // Feed display
-        registerHotKey(id: 7,  keyCode: UInt32(kVK_ANSI_A),     modifiers: UInt32(cmdKey | shiftKey)) // toggle audio feed
-        registerHotKey(id: 11, keyCode: UInt32(kVK_ANSI_V),     modifiers: UInt32(cmdKey | shiftKey)) // toggle screen feed
-        registerHotKey(id: 8,  keyCode: UInt32(kVK_UpArrow),    modifiers: UInt32(cmdKey | shiftKey)) // scroll up
-        registerHotKey(id: 9,  keyCode: UInt32(kVK_DownArrow),  modifiers: UInt32(cmdKey | shiftKey)) // scroll down
-        registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_Y),     modifiers: UInt32(cmdKey | shiftKey)) // copy message
+        // The overlay is mouse-driven — every action has a clickable affordance
+        // except resetting a dragged-off-screen window, so P is the sole global
+        // hotkey. (Quit is the overlay's button/menu; it still tears down the
+        // whole stack via applicationWillTerminate → BackendLauncher.stop.)
+        registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)) // reset position
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -298,52 +283,9 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     private func processHotKey(id: UInt32) {
-        guard let window = mainFlutterWindow else { return }
-
         switch id {
-        // ── Navigation ──
-        case 1: // Space → toggle visibility
-            let wasVisible = window.isVisible
-            if wasVisible { window.orderOut(nil) } else { window.orderFront(nil) }
-            hotkeyChannel?.invokeMethod("onToggleVisibility", arguments: !wasVisible)
-        case 3: // M → cycle state (Eye → Controls → Chat → Eye)
-            hotkeyChannel?.invokeMethod("onCycleState", arguments: nil)
-        case 4: // H → quit
-            hotkeyChannel?.invokeMethod("onQuit", arguments: nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
-        case 19: // F → toggle Eye ↔ Chat
-            hotkeyChannel?.invokeMethod("onToggleChat", arguments: nil)
-        case 12: // E → cycle tab (Agent ↔ Tasks)
-            hotkeyChannel?.invokeMethod("onCycleTab", arguments: nil)
         case 13: // P → reset position to default
             hotkeyChannel?.invokeMethod("onResetPosition", arguments: nil)
-        case 18: // / → focus command input (transition to Chat if needed)
-            hotkeyChannel?.invokeMethod("onFocusInput", arguments: nil)
-
-        // ── Capture toggles ──
-        case 5: // T → toggle audio capture
-            hotkeyChannel?.invokeMethod("onToggleAudio", arguments: nil)
-        case 10: // S → toggle screen capture
-            hotkeyChannel?.invokeMethod("onToggleScreen", arguments: nil)
-        case 15: // R → toggle demo/privacy mode
-            if #available(macOS 12.0, *) {
-                let currentlyPrivate = window.sharingType == .none
-                window.sharingType = currentlyPrivate ? .readOnly : .none
-                hotkeyChannel?.invokeMethod("onTogglePrivacy", arguments: !currentlyPrivate)
-            }
-
-        // ── Feed display ──
-        case 7: // A → toggle audio feed filter
-            hotkeyChannel?.invokeMethod("onToggleAudioFeed", arguments: nil)
-        case 11: // V → toggle screen feed filter
-            hotkeyChannel?.invokeMethod("onToggleScreenFeed", arguments: nil)
-        case 8: // Up → scroll feed up
-            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "up")
-        case 9: // Down → scroll feed down
-            hotkeyChannel?.invokeMethod("onScrollFeed", arguments: "down")
-        case 14: // Y → copy selected message
-            hotkeyChannel?.invokeMethod("onCopyMessage", arguments: nil)
-
         default:
             break
         }
@@ -371,6 +313,52 @@ final class BackendLauncher {
     /// True when this build bundles its own backend (packaged DMG).
     var isBundled: Bool { launchScriptURL != nil }
 
+    /// Path to `stop.sh` — the canonical, supervisor-independent teardown for
+    /// the whole stack. In a packaged build it's staged at
+    /// `Contents/Resources/scripts/stop.sh`. In development (`flutter run`) it
+    /// lives at the repo root, which we find by walking up from the running
+    /// .app bundle until we hit a directory containing both `stop.sh` and
+    /// `start.sh` (the repo-root marker).
+    private var stopScriptURL: URL? {
+        if let resourceURL = Bundle.main.resourceURL {
+            let staged = resourceURL.appendingPathComponent("scripts/stop.sh")
+            if FileManager.default.fileExists(atPath: staged.path) { return staged }
+        }
+        var dir = URL(fileURLWithPath: Bundle.main.bundlePath).deletingLastPathComponent()
+        for _ in 0..<8 {
+            let candidate = dir.appendingPathComponent("stop.sh")
+            let marker = dir.appendingPathComponent("start.sh")
+            if FileManager.default.fileExists(atPath: candidate.path),
+               FileManager.default.fileExists(atPath: marker.path) {
+                return candidate
+            }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { break } // reached filesystem root
+            dir = parent
+        }
+        return nil
+    }
+
+    /// Run `stop.sh` detached so it outlives this app's own termination. A GUI
+    /// app has no controlling terminal, so the spawned bash is orphaned to
+    /// launchd and finishes the teardown (SIGTERM → core distills the session →
+    /// SIGKILL stragglers) even after the overlay process exits.
+    private func runStopScript() {
+        guard let script = stopScriptURL else {
+            NSLog("[SinainHUD] BackendLauncher: stop.sh not found — cannot tear down full stack")
+            return
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = [script.path]
+        do {
+            try task.run()
+            NSLog("[SinainHUD] BackendLauncher: ran stop.sh (\(script.path))")
+        } catch {
+            NSLog("[SinainHUD] BackendLauncher: failed to run stop.sh: \(error)")
+        }
+    }
+
     /// Start the bundled backend if present. Safe to call when unbundled (no-op).
     func start() {
         guard let script = launchScriptURL else {
@@ -394,12 +382,25 @@ final class BackendLauncher {
         }
     }
 
-    /// Terminate the backend on app quit. sinain-core kills its own sck-capture
-    /// child on SIGTERM.
+    /// Tear down the whole stack on app quit — not just the overlay.
+    ///
+    /// Two paths, unified through `stop.sh`:
+    ///   • Bundled DMG: SIGTERM the launch script we spawned (its `trap cleanup`
+    ///     kills core/agent/sense; core kills its own sck-capture child).
+    ///   • Dev mode (`flutter run`): we spawned nothing — `start.sh` is the
+    ///     supervisor — so terminating the process is a no-op and the backend
+    ///     would survive. `stop.sh` kills the stack by process pattern + port
+    ///     regardless of who launched it.
+    ///
+    /// `stop.sh` runs in both modes: it's the dev-mode fix and a harmless
+    /// backstop in bundled mode (the patterns target the same processes the
+    /// launch-script trap already handles).
     func stop() {
-        guard let proc = process, proc.isRunning else { return }
-        proc.terminate() // SIGTERM
-        process = nil
-        NSLog("[SinainHUD] BackendLauncher: sent SIGTERM to backend")
+        if let proc = process, proc.isRunning {
+            proc.terminate() // SIGTERM → bundled launch script's cleanup trap
+            process = nil
+            NSLog("[SinainHUD] BackendLauncher: sent SIGTERM to bundled backend")
+        }
+        runStopScript()
     }
 }

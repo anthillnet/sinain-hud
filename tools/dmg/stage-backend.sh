@@ -307,6 +307,11 @@ for _ps in provision-python.sh provision-whisper.sh provision-ollama.sh; do
   chmod +x "$RES/scripts/$_ps"
 done
 
+# stop.sh — canonical full-stack teardown the overlay runs on "Quit Sinain"
+# (AppDelegate BackendLauncher.stop finds it at Resources/scripts/stop.sh).
+cp "$REPO/stop.sh" "$RES/scripts/stop.sh"
+chmod +x "$RES/scripts/stop.sh"
+
 # Build stamp — launch-backend.sh compares this against ~/.sinain/installed-build
 # to detect a DMG installed over an older version and refresh provisioned deps.
 _git_sha="$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"

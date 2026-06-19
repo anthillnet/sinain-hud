@@ -46,8 +46,6 @@ class WebSocketService extends ChangeNotifier {
   // HUD shows "Chat sidecar not running" + a Run-to-restart.
   bool _chatSidecarUp = false;
   bool _agentRegistered = false;
-  bool _audioFeedEnabled = true;
-  bool _screenFeedEnabled = true;
   double _totalCost = 0.0;
   int _costCallCount = 0;
   bool _costDisplayEnabled = false;
@@ -153,8 +151,6 @@ class WebSocketService extends ChangeNotifier {
   /// FeedView can read from this on mount to restore state.
   final List<FeedItem> agentFeedItems = [];
   static const _maxFeedItems = 50;
-  bool get audioFeedEnabled => _audioFeedEnabled;
-  bool get screenFeedEnabled => _screenFeedEnabled;
 
   void setResponseSize(String size) {
     sendCommand('set_response_size', {'responseSize': size});
@@ -191,30 +187,6 @@ class WebSocketService extends ChangeNotifier {
   /// Ask core to (re)start the built-in sinain chat sidecar (:9610).
   void restartChatSidecar() {
     sendCommand('restart_chat_sidecar');
-  }
-
-  void toggleAudioFeed() {
-    _audioFeedEnabled = !_audioFeedEnabled;
-    _log('Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}');
-    _feedController.add(FeedItem(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      text: 'Audio feed ${_audioFeedEnabled ? "enabled" : "disabled"}',
-    ));
-    notifyListeners();
-  }
-
-  void toggleScreenFeed() {
-    _screenFeedEnabled = !_screenFeedEnabled;
-    _log('Screen feed ${_screenFeedEnabled ? "enabled" : "disabled"}');
-    _feedController.add(FeedItem(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      text: 'Screen feed ${_screenFeedEnabled ? "enabled" : "disabled"}',
-    ));
-    notifyListeners();
-  }
-
-  void scrollFeed(String direction) {
-    _scrollController.add(direction);
   }
 
   void requestCopy(String activeTab) {
@@ -303,15 +275,6 @@ class WebSocketService extends ChangeNotifier {
           _log(
               'FEED [${item.channel.name}]: ${item.text.substring(0, item.text.length > 60 ? 60 : item.text.length)}');
           _captureSystemAlert(item);
-          if (!_audioFeedEnabled &&
-              (item.text.startsWith('[📝]') ||
-                  item.text.startsWith('[🔊]') ||
-                  item.text.startsWith('[🎤]'))) {
-            break;
-          }
-          if (!_screenFeedEnabled && item.text.startsWith('[👁]')) {
-            break;
-          }
           if (item.regionId != null) {
             // Region thread message — route to its tab, not the main feed
             final thread = regionThreads.putIfAbsent(item.regionId!, () => []);
