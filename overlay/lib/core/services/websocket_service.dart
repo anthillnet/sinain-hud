@@ -23,6 +23,9 @@ class WebSocketService extends ChangeNotifier {
   String _micState = 'muted';
   String _screenState = 'off';
   String _escalationState = 'active';
+  // Ambient/idle (unsolicited) HUD messages. Opt-in, default off, decoupled
+  // from escalation state so selecting a chat agent never flips it on.
+  bool _idleMessagesEnabled = false;
   String _responseSize = 'medium';
   String _envPath = '';
   // Bare-agent roster + per-lane current choice. Populated from status
@@ -124,6 +127,7 @@ class WebSocketService extends ChangeNotifier {
   String get micState => _micState;
   String get screenState => _screenState;
   String get escalationState => _escalationState;
+  bool get idleMessagesEnabled => _idleMessagesEnabled;
   String get responseSize => _responseSize;
   String get envPath => _envPath;
   List<String> get availableAgents => _availableAgents;
@@ -350,6 +354,14 @@ class WebSocketService extends ChangeNotifier {
             _escalationState = escalation;
             notifyListeners();
           }
+          final idleMessages = statusData['idleMessages'] as String?;
+          if (idleMessages != null) {
+            final on = idleMessages == 'on';
+            if (on != _idleMessagesEnabled) {
+              _idleMessagesEnabled = on;
+              notifyListeners();
+            }
+          }
           final respSize = statusData['responseSize'] as String?;
           if (respSize != null && respSize != _responseSize) {
             _responseSize = respSize;
@@ -567,6 +579,11 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void _captureSystemAlert(FeedItem item) {
+    // Only genuine SYSTEM messages (the stream channel) can raise the yellow
+    // banner. Agent chat replies and region-thread messages are conversational
+    // — an answer that merely mentions "error"/"failed" must never turn the
+    // bottom panel yellow. This is what kept leaking idle/chat text there.
+    if (item.channel == FeedChannel.agent || item.regionId != null) return;
     final text = item.text.trim();
     final lower = text.toLowerCase();
     final isAlert = item.priority == FeedPriority.urgent ||

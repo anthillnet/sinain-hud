@@ -71,6 +71,40 @@ function resolveLocalMemoryDir(): string {
   return raw.startsWith("~") ? raw.replace("~", process.env.HOME || "") : raw;
 }
 
+/** Persisted overlay/UI preferences that must survive core restarts. Kept in a
+ *  tiny JSON next to the memory dir so an explicit choice (e.g. idle messages
+ *  ON) isn't silently reset to the default on the next launch. */
+function resolveUiPrefsPath(): string {
+  return `${resolve(resolveLocalMemoryDir(), "..")}/ui-prefs.json`;
+}
+
+interface UiPrefs {
+  /** Ambient/idle (unsolicited) HUD messages. Default OFF — the user opts in. */
+  idleMessagesEnabled: boolean;
+}
+
+function loadUiPrefs(): UiPrefs {
+  const defaults: UiPrefs = { idleMessagesEnabled: false };
+  try {
+    const p = resolveUiPrefsPath();
+    if (!existsSync(p)) return defaults;
+    const parsed = JSON.parse(readFileSync(p, "utf-8"));
+    return { idleMessagesEnabled: parsed?.idleMessagesEnabled === true };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveUiPrefs(prefs: UiPrefs): void {
+  try {
+    const p = resolveUiPrefsPath();
+    mkdirSync(resolve(p, ".."), { recursive: true });
+    writeFileSync(p, JSON.stringify(prefs, null, 2));
+  } catch {
+    /* best-effort — a failed write just means the choice won't persist */
+  }
+}
+
 function resolveLocalAgentScript(): string | null {
   const candidates = [
     resolve(PACKAGE_ROOT, "sinain-agent-runner", "run.sh"),
@@ -844,6 +878,14 @@ async function main() {
   // config.ts reads at startup; re-loading here keeps the dispatch lookup
   // contained to a closure (no need to expose agentsCfg through CoreConfig).
   const escalatorAgentsCfg = loadAgentsConfig();
+
+  // Idle/ambient messages: opt-in, default OFF, persisted across restarts.
+  // Decoupled from escalation mode + agent selection so it can never be
+  // turned on as a side effect (the long-standing "idle keeps popping to ON"
+  // bug). Only the overlay's explicit On/Off toggle (set_idle_messages_enabled)
+  // changes it.
+  let idleMessagesEnabled = loadUiPrefs().idleMessagesEnabled;
+
   const escalator = new Escalator({
     feedBuffer,
     wsHandler,
@@ -862,7 +904,12 @@ async function main() {
     // (chatService is constructed just below; referenced lazily at call time.)
     isResidentAgent: (name: string) => isSinainProfile(escalatorAgentsCfg, name),
     runResidentChat: (message: string) => chatService.handle(message, { kind: "main", source: "escalation" }),
+    isIdleMessagesEnabled: () => idleMessagesEnabled,
   });
+
+  // Seed the broadcast state so a late-joining overlay reflects the persisted
+  // idle-messages choice on connect (the in-memory default is "off").
+  wsHandler.updateState({ idleMessages: idleMessagesEnabled ? "on" : "off" });
 
   // ── Chat sidecar (type "sinain" roster profile) ──
   // Resident OpenHands chat agent on a local WS. When the selected escalation-lane
@@ -2044,6 +2091,15 @@ async function main() {
       }
       pauseEscalationInternal();
       return false;
+    },
+    onSetIdleMessagesEnabled: (enabled: boolean): boolean => {
+      // The ONLY thing that flips ambient/idle messages. Persisted so the
+      // choice survives restarts; default OFF. Independent of escalation mode
+      // and agent selection — nothing else can turn it on.
+      idleMessagesEnabled = enabled;
+      saveUiPrefs({ idleMessagesEnabled });
+      log(TAG, `idle messages ${enabled ? "ON (ambient HUD messages WILL consume API tokens)" : "OFF"}`);
+      return idleMessagesEnabled;
     },
       onSetChatgptHarness: (enabled: boolean): void => {
         chatgptHarnessEnabled = enabled;

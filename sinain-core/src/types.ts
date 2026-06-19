@@ -24,6 +24,8 @@ export interface StatusMessage {
   mic: string;
   screen: string;
   escalation?: string;
+  /** "on" | "off" — ambient/idle messages toggle (opt-in, default off). */
+  idleMessages?: string;
   connection: string;
   responseSize?: string;
   /** Bare-agent roster + per-lane current choice. Omitted until the bare
@@ -568,6 +570,9 @@ export interface BridgeState {
   mic: "active" | "muted";
   screen: "active" | "off";
   escalation: "active" | "paused";
+  /** Ambient/idle (unsolicited) HUD messages. Opt-in, default "off",
+   *  decoupled from `escalation` so selecting a chat agent never flips it on. */
+  idleMessages: "on" | "off";
   connection: "connected" | "disconnected" | "connecting";
   responseSize: ResponseSize;
   /** Bare-agent roster + per-lane current choice. Populated after the
