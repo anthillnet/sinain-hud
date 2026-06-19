@@ -38,6 +38,9 @@
   label { display: block; color: #475569; font-size: 12px; margin: 12px 0 4px; }
   .small { color: #94a3b8; font-size: 12px; margin-top: 16px; line-height: 1.5; }
   .small a { color: #2563eb; }
+  .get-link { display: block; text-align: center; margin-top: 14px;
+              color: #2563eb; text-decoration: none; font-size: 13px; font-weight: 500; }
+  .get-link:hover { text-decoration: underline; }
   .err { color: #b91c1c; }
   details { margin-top: 16px; }
   summary { cursor: pointer; color: #475569; font-size: 13px; user-select: none; }
@@ -52,6 +55,8 @@
 
     <a id="openBtn" class="open-btn" href="#">📥 Open in Sinain</a>
 
+    <a class="get-link" href="https://sinain.com" target="_blank">New to Sinain? Download it at sinain.com to open this shared context →</a>
+
     <details>
       <summary>Sinain-core on a different port?</summary>
       <label for="port">Port</label>
@@ -62,9 +67,10 @@
     </details>
 
     <p class="small">
-      <strong>Don't have sinain-core?</strong>
-      <a href="https://github.com/anthillnet/sinain-hud" target="_blank">Install it from GitHub</a>
-      and start it before clicking the button.
+      <strong>Don't have Sinain yet?</strong>
+      To open this shared context you'll need Sinain running on your Mac.
+      <a href="https://sinain.com" target="_blank">Download it at sinain.com</a>,
+      then start it and click the button above.
       <br><br>
       <strong>Privacy:</strong> everything — the concept name, port, and bundle —
       lives in the URL fragment (after <code>#</code>), which browsers never send

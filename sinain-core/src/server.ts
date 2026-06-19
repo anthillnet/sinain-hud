@@ -1531,15 +1531,18 @@ function renderKnowledgeUiV2(): string {
   const peerHost = process.env.SINAIN_PEERJS_HOST || "";  // empty = peerjs.com cloud default
   const inlineMax = parseInt(process.env.SINAIN_SHARE_INLINE_MAX_BYTES || "6000");
   const ttlHours = parseInt(process.env.SINAIN_SHARE_TTL_HOURS || "24");
-  // Public URL of the share-redirector. Self-hosted on the existing
-  // sinain.duckdns.org Caddy + Let's Encrypt setup that already fronts the
-  // OpenClaw gateway. We control the host, headers, and reliability — no
-  // CDN policy quirks (jsDelivr serves gh-path HTML as text/plain;
-  // raw.githack.com returns 403 with body). Browsers preserve URL fragments
-  // through redirects without sending them to the server, so bundle bytes
-  // in #bundle=… never touch our host either.
+  // Public URL of the share-redirector. Defaults to sinain.com — the
+  // Firebase-deployed site that always carries the current docs/share.html
+  // (whoever merges to main redeploys it). The old self-hosted
+  // sinain.duckdns.org host serves a STALE share.html (legacy ?entity= query
+  // parser) that can't read the current all-in-fragment link format, so links
+  // pointed there fail with "Missing share data". Browsers preserve URL
+  // fragments through redirects without sending them to the server, so bundle
+  // bytes in #bundle=… never touch the host either. Override with
+  // SINAIN_SHARE_BASE_URL only for self-hosted redirectors running an
+  // up-to-date share.html.
   const shareBaseUrl = process.env.SINAIN_SHARE_BASE_URL
-    || "https://sinain.duckdns.org/share.html";
+    || "https://sinain.com/share.html";
   return KNOWLEDGE_UI_V2_HTML
     .replace(/__SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
     .replace(/__SHARE_INLINE_MAX_BYTES__/g, String(inlineMax))
