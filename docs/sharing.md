@@ -18,7 +18,7 @@ The Share button picks between two transports automatically based on bundle size
 Small entities (1–2 facts with all metadata) ride directly inside the URL itself: the entire concept bundle is gzipped, base64-encoded, and placed after the URL's `#`.
 
 ```
-https://sinain.duckdns.org/share.html#e=ZmFjdDpmb28&p=9500&bundle=H4sIAAAAA…
+https://sinain.com/share.html#e=ZmFjdDpmb28&p=9500&bundle=H4sIAAAAA…
 ```
 
 The concept name, port, and bundle all live after the `#`, so the redirector's
@@ -39,7 +39,7 @@ at a glance either.
 Larger entities use WebRTC peer-to-peer transfer. The URL contains a peer ID (a 16-character random hex token), and the recipient's browser opens a direct connection to your browser through the **peerjs.com** public signaling cloud.
 
 ```
-https://sinain.duckdns.org/share.html#e=ZW50aXR5OmZvbw&p=9500&peer=ab12cd34ef567890
+https://sinain.com/share.html#e=ZW50aXR5OmZvbw&p=9500&peer=ab12cd34ef567890
 ```
 
 | Property | Value |
@@ -55,14 +55,14 @@ https://sinain.duckdns.org/share.html#e=ZW50aXR5OmZvbw&p=9500&peer=ab12cd34ef567
 
 This is the part worth being precise about.
 
-### Our redirector at `sinain.duckdns.org/share.html` sees nothing about the share
+### Our redirector at `sinain.com/share.html` sees nothing about the share
 
 URL fragments — the part of a URL after `#` — are **never sent to servers by browsers**. This is part of the URI specification ([RFC 3986 §3.5](https://www.rfc-editor.org/rfc/rfc3986#section-3.5)) and is enforced consistently by every major browser.
 
 Every piece of share data — the concept name, port, and bundle/peer token — lives in the fragment:
 
 ```
-https://sinain.duckdns.org/share.html#e=ZmFjdDpmb28&p=9500&bundle=H4sIA…
+https://sinain.com/share.html#e=ZmFjdDpmb28&p=9500&bundle=H4sIA…
                                       ┬ ──────────────────────────────────
                                       │ all stays in the browser
                           sent to our server: just "GET /share.html"
@@ -138,7 +138,7 @@ If your machine reboots, the SPA tab is gone but the share metadata persists in 
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `SINAIN_SHARE_BASE_URL` | `https://sinain.duckdns.org/share.html` | Public redirector. Override to self-host. |
+| `SINAIN_SHARE_BASE_URL` | `https://sinain.com/share.html` | Public redirector. Override to self-host. |
 | `SINAIN_SHARE_INLINE_MAX_BYTES` | `6000` | Fragment-vs-peer threshold. Raw JSON bytes before gzip. |
 | `SINAIN_SHARE_TTL_HOURS` | `24` | Auto-expiry for `waiting`/`disconnected` shares. |
 | `SINAIN_PEERJS_HOST` | _(empty → peerjs.com cloud)_ | Override the peerjs signaling broker. |
@@ -169,7 +169,7 @@ Some link previewers strip the part after `#` because they treat fragments as pa
 
 ## Self-hosting the redirector
 
-The redirector is a single static HTML file (`docs/share.html` in the repo). Caddy currently serves it on `sinain.duckdns.org`. To host your own:
+The redirector is a single static HTML file (`docs/share.html` in the repo), served from `sinain.com` (the Firebase-deployed site — merging `docs/` to main redeploys it). To host your own:
 
 1. Copy `docs/share.html` to your web server.
 2. Make sure it's served with `Content-Type: text/html`.
