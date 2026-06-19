@@ -125,18 +125,17 @@ class ThreadTerminalSession {
         ThreadTerminalSession._(terminal, controller, pty, command, args);
 
     // Some agent TUIs (claude, openclaude, hermes) accept no seed prompt via
-    // CLI — run.sh writes the context to a file and emits ⟦SINAIN-SEED:<p>⟧;
-    // we type a pointer message into the TUI once it's ready. "Ready" =
+    // CLI — run.sh mints an roiSeed and emits ⟦SINAIN-ROI:<id>⟧; we type a
+    // "pull it via sinain_roi" pointer into the TUI once it's ready. "Ready" =
     // output quiescent for 800ms after the marker (the TUI finished its
     // initial render — typing earlier risks the raw-mode init flushing the
     // TTY input queue), with a 6s hard cap for TUIs that keep animating.
-    var seedFile = '';
+    // Context is ALWAYS pulled via the MCP tool — never read from a file.
     var seedRoiId = ''; // ⟦SINAIN-ROI:<id>⟧ — pull the seed via sinain_roi(id)
     var seedTyped = false;
     var carry = '';
     Timer? settle;
     Timer? cap;
-    final seedMarker = RegExp('⟦SINAIN-SEED:([^⟧]+)⟧');
     final roiMarker = RegExp('⟦SINAIN-ROI:([^⟧]+)⟧');
     // Startup modals (claude's folder-trust check, theme pickers) own the
     // keyboard — typing into them answers the dialog and the seed is lost.
@@ -195,20 +194,13 @@ class ThreadTerminalSession {
       attemptInFlight = true;
       settle?.cancel();
       // Probe must be unique to our TYPED text — NOT the marker line (still in
-      // the buffer), or every verify falsely "confirms". These phrases appear
-      // only in the message we type, never in the ⟦SINAIN-…⟧ marker.
-      //   ROI mode  → pull the rich seed via the sinain_roi MCP tool (same
-      //               mechanic as Claude Desktop / ChatGPT).
-      //   SEED mode → read the embedded seed file (MAIN / no-region fallback).
-      final String typed;
-      final String probe;
-      if (seedRoiId.isNotEmpty) {
-        typed = 'Call the sinain_roi tool (id "$seedRoiId") to load context on what I\'m working on, then help me with it.';
-        probe = 'sinain_roi tool';
-      } else {
-        typed = 'Read $seedFile and follow its instructions.';
-        probe = 'follow its instructions';
-      }
+      // the buffer), or every verify falsely "confirms". This phrase appears
+      // only in the message we type, never in the ⟦SINAIN-ROI:…⟧ marker.
+      // Context is pulled via the sinain_roi MCP tool (same mechanic as Claude
+      // Desktop / ChatGPT) — never read from a file.
+      final typed =
+          'Call the sinain_roi tool (id "$seedRoiId") to load context on what I\'m working on, then help me with it.';
+      const probe = 'sinain_roi tool';
       if (kDebugMode) print('[seed] attempt $attempts — typing pointer');
       pty.write(const Utf8Encoder().convert(typed));
       Timer(const Duration(milliseconds: 400), () {
@@ -238,7 +230,7 @@ class ThreadTerminalSession {
       terminal.write(data);
       if (seedTyped) return;
       lastOutputAt = DateTime.now();
-      if (seedFile.isNotEmpty || seedRoiId.isNotEmpty) {
+      if (seedRoiId.isNotEmpty) {
         if (seedDone || seedTyped) return;
         settle?.cancel();
         settle = Timer(const Duration(milliseconds: 800), attemptSeed);
@@ -246,25 +238,17 @@ class ThreadTerminalSession {
       }
       carry += data;
       final roi = roiMarker.firstMatch(carry);
-      final m = seedMarker.firstMatch(carry);
       if (roi != null) {
         seedRoiId = roi.group(1)!;
         if (kDebugMode) print('[seed] ROI marker seen → sinain_roi($seedRoiId)');
         carry = '';
-        // See the SEED branch below: don't arm settle here (agent hasn't drawn
-        // yet); its first output arms it. cap is the long safety net.
-        cap = Timer(const Duration(seconds: 12), attemptSeed);
-      } else if (m != null) {
-        seedFile = m.group(1)!;
-        if (kDebugMode) print('[seed] marker seen → $seedFile');
-        carry = '';
         // Do NOT arm settle here. run.sh prints the marker just before
-        // exec'ing the agent, so the agent hasn't drawn anything yet — a
-        // timer started now fires into an empty screen and types before the
-        // TUI (and its trust dialog) exists. The agent's OWN output (next
-        // chunks, seedFile.isNotEmpty branch) arms settle, so the screen
-        // buffer always has real content when attemptSeed checks it. cap
-        // is a long safety net for an agent that somehow emits nothing.
+        // exec'ing the agent, so the agent hasn't drawn anything yet — a timer
+        // started now fires into an empty screen and types before the TUI (and
+        // its trust dialog) exists. The agent's OWN output (next chunks, the
+        // seedRoiId.isNotEmpty branch) arms settle, so the screen buffer always
+        // has real content when attemptSeed checks it. cap is the long safety
+        // net for an agent that somehow emits nothing.
         cap = Timer(const Duration(seconds: 12), attemptSeed);
       } else if (carry.length > 4096) {
         carry = carry.substring(carry.length - 256);

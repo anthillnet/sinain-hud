@@ -162,9 +162,14 @@ class OverlayShellState extends State<OverlayShell> {
         _openTerminalForTab(picked.id); // marks started + opens the PTY
       } else {
         setState(() => _startedRegionThreads.add(picked.id));
-        if (desktopChat) {
-          _regionEyes?.run(picked); // launch the desktop app with this region
-        } else {
+        // Start the agent turn on the selected ROI so the user gets an initial
+        // response about what they selected — selecting a region IS the intent
+        // to talk about it. Mirrors the auto-ROI card's Chat action (which
+        // always calls run()). For a desktop lane run() launches the external
+        // app; for the in-HUD native chat it fires the spawn command (→ an
+        // agent reply scoped to this thread) and we also open the thread.
+        _regionEyes?.run(picked);
+        if (!desktopChat) {
           _selectThread(picked.id);
         }
       }
@@ -493,6 +498,84 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
+  /// Hand the ACTIVE thread off to another agent — the composer's ⑂ control.
+  /// Terminal target: switch the terminal lane and open (or surface) the PTY
+  /// for this tab, which run.sh seeds with the thread's context. Chat target:
+  /// switch the chat lane so this thread's follow-ups route to the new agent,
+  /// closing any open terminal so one session never has two writers.
+  /// [includeTranscript] is captured for the Phase 2 reseed; today's seeds
+  /// already carry the region/main context.
+  void _handoffThread({
+    required String agent,
+    required bool isTerminal,
+    required bool includeTranscript,
+  }) {
+    final ws = context.read<WebSocketService>();
+    final tabKey = _activeTabKey;
+    final thread = _activeThread;
+    // Carry the conversation so the destination agent continues the thread
+    // rather than cold-starting. Sent FIRST so core has it stashed before the
+    // destination's seed is built — the terminal pull, desktop seed, and chat
+    // kickoff that follow all run after this command on the same socket.
+    if (includeTranscript) {
+      final items = thread != null
+          ? (ws.regionThreads[thread] ?? const <FeedItem>[])
+          : ws.agentFeedItems;
+      final transcript = _composeTranscript(items);
+      if (transcript.isNotEmpty) {
+        ws.sendCommand('set_handoff_context',
+            {'key': thread ?? 'main', 'transcript': transcript});
+      }
+    }
+    if (isTerminal) {
+      ws.setAgent('terminal', agent);
+      _openTerminalForTab(tabKey); // seeds this thread's context into the PTY
+      _syncBusyState();
+      return;
+    }
+    // Chat handoff: switch the chat lane, then fire one kickoff turn so the new
+    // agent actually picks up this thread. set_agent is applied synchronously
+    // by core (same socket, in order) before the kickoff, so routing reflects
+    // the new agent — crucially, a desktop lane (Claude Desktop / ChatGPT) only
+    // launches its app when a turn is sent (routeDesktopChat). Without this the
+    // handoff just re-pointed the lane and nothing opened.
+    if (_terminalThreads.contains(tabKey)) {
+      ThreadTerminalSession.close(tabKey);
+      setState(() => _terminalThreads.remove(tabKey));
+    }
+    ws.setAgent('escalation', agent);
+    // Phase 1 kickoff: core seeds the real context (region ROI / main digest);
+    // the transcript carry lands in Phase 2.
+    const kickoff = '[handoff] continue this thread';
+    if (thread != null) {
+      _sendToRegionThread(thread, kickoff);
+    } else {
+      ws.sendUserCommand(kickoff);
+    }
+    _syncBusyState();
+  }
+
+  /// Format a thread's feed items into a compact dialogue transcript for a
+  /// handoff. Caps to the recent turns + a char budget so the WS payload and
+  /// the destination seed stay reasonable.
+  String _composeTranscript(List<FeedItem> items) {
+    final recent =
+        items.length > 40 ? items.sublist(items.length - 40) : items;
+    final buf = StringBuffer();
+    for (final it in recent) {
+      final text = it.text.trim();
+      if (text.isEmpty) continue;
+      buf.writeln('${it.isUserOriginated ? 'User' : 'sinain'}: $text');
+      buf.writeln();
+    }
+    var out = buf.toString().trim();
+    const maxChars = 6000;
+    if (out.length > maxChars) {
+      out = '…(earlier turns trimmed)…\n\n${out.substring(out.length - maxChars)}';
+    }
+    return out;
+  }
+
   /// True while any spawn task for this region is still in flight.
   bool _regionWorking(WebSocketService ws, String regionId) {
     for (final t in ws.spawnTasks.values) {
@@ -626,18 +709,9 @@ class OverlayShellState extends State<OverlayShell> {
           selected: false,
           onTap: _startManualRoi,
         ),
-        // Fork MAIN into a new thread (visible only on the MAIN tab): the
-        // new thread starts from the MAIN transcript + digest and runs its
-        // own agent session, chat or terminal.
-        if (_activeThread == null)
-          pill(
-            text: '⑂',
-            selected: false,
-            onTap: () {
-              _awaitingFork = true;
-              context.read<WebSocketService>().forkMain();
-            },
-          ),
+        // (The ⑂ fork pill moved into the chat composer as the inline-left
+        // "continue this thread elsewhere" handoff control — see
+        // ChatThreadView.onHandoff / _handoffThread.)
         // Chat ⇄ terminal toggle for the ACTIVE tab — pinned at the right
         // edge, outside the scrolling tab strip, so a crowd of tabs can
         // never squeeze it out of sight. Term→chat closes the PTY so one
@@ -1169,6 +1243,7 @@ class OverlayShellState extends State<OverlayShell> {
                           }
                           _syncBusyState();
                         },
+                        onHandoff: _handoffThread,
                       ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(

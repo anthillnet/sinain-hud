@@ -26,6 +26,7 @@ class ChatThreadView extends StatefulWidget {
     required this.onSend,
     this.threadId,
     this.accentColor = 0xff00ff88,
+    this.onHandoff,
   });
 
   final WebSocketService ws;
@@ -34,6 +35,16 @@ class ChatThreadView extends StatefulWidget {
   /// null → MAIN; otherwise a region/forked thread id.
   final String? threadId;
   final int accentColor;
+
+  /// "Continue this thread elsewhere" — pick a chat or terminal agent to take
+  /// over this conversation. Null hides the inline handoff (⑂) control. The
+  /// shell does the actual routing (lane switch / open terminal); this widget
+  /// only surfaces the destination picker.
+  final void Function({
+    required String agent,
+    required bool isTerminal,
+    required bool includeTranscript,
+  })? onHandoff;
 
   /// Drop a thread's cached history (thread tab closed).
   static void closeThread(String threadId) {
@@ -53,6 +64,10 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   StreamSubscription? _sub;
   StreamSubscription? _thinkSub;
   bool _thinking = false;
+
+  // Handoff destination popover (⑂ → "Continue this thread in").
+  bool _showHandoff = false;
+  bool _includeTranscript = true; // carry the conversation by default
 
   String get _key => widget.threadId ?? 'main';
   Set<String> get _seen =>
@@ -113,6 +128,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   @override
   Widget build(BuildContext context) {
     final accent = Color(widget.accentColor);
+    final showHandoff = widget.onHandoff != null;
     final chat = Chat(
       chatController: _controller,
       currentUserId: 'user',
@@ -120,6 +136,10 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         final t = text.trim();
         if (t.isNotEmpty) widget.onSend(t);
       },
+      // Repurpose the composer's leading "attachment" slot as the inline-left
+      // handoff (⑂) control — tapping it opens the destination popover.
+      onAttachmentTap:
+          showHandoff ? () => setState(() => _showHandoff = !_showHandoff) : null,
       resolveUser: (id) async =>
           User(id: id, name: id == 'user' ? 'You' : 'sinain'),
       builders: Builders(
@@ -136,6 +156,11 @@ class _ChatThreadViewState extends State<ChatThreadView> {
           textColor: Colors.white.withValues(alpha: 0.92),
           hintColor: Colors.white.withValues(alpha: 0.35),
           sendIconColor: accent,
+          // Inline-left branch glyph (the old tab-strip ⑂, now by the input).
+          attachmentIcon: showHandoff
+              ? Icon(Icons.call_split,
+                  size: 18, color: accent.withValues(alpha: 0.85))
+              : null,
         ),
       ),
       theme: ChatTheme.dark().copyWith(
@@ -178,8 +203,199 @@ class _ChatThreadViewState extends State<ChatThreadView> {
           ),
         // SelectionArea: native text selection + ⌘C across all messages —
         // copy without per-message buttons.
-        Expanded(child: SelectionArea(child: chat)),
+        Expanded(
+          child: Stack(
+            children: [
+              SelectionArea(child: chat),
+              // Destination popover, anchored above the composer's ⑂ button.
+              if (_showHandoff && widget.onHandoff != null)
+                Positioned(
+                  left: 8,
+                  bottom: 58,
+                  child: _handoffMenu(accent),
+                ),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  /// "Continue this thread in <agent>" — lists chat and terminal destinations
+  /// from the live roster plus the "include full transcript" toggle. Selecting
+  /// a destination hands the routing back to the shell via [widget.onHandoff].
+  Widget _handoffMenu(Color accent) {
+    final ws = widget.ws;
+    final chatAgents = ws.availableAgents;
+    final termAgents = ws.terminalAvailable;
+
+    Widget header(String text) => Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 9,
+              letterSpacing: 0.8,
+              fontWeight: FontWeight.w700,
+              color: Colors.white.withValues(alpha: 0.4),
+            ),
+          ),
+        );
+
+    Widget option(String agent, {required bool isTerminal}) => MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () {
+              setState(() => _showHandoff = false);
+              widget.onHandoff!(
+                agent: agent,
+                isTerminal: isTerminal,
+                includeTranscript: _includeTranscript,
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Row(
+                children: [
+                  Icon(isTerminal ? Icons.terminal : Icons.chat_bubble_outline,
+                      size: 13, color: Colors.white.withValues(alpha: 0.55)),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      agent,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+    return Material(
+      color: Colors.transparent,
+      child: ConstrainedBox(
+        // Bound the height so a long roster scrolls instead of overflowing
+        // off the top of the chat area.
+        constraints: const BoxConstraints(maxHeight: 320),
+        child: Container(
+        width: 220,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: accent.withValues(alpha: 0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(12, 12, 12, 2),
+              child: Text(
+                'Continue this thread in',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            // Agent groups scroll; title + transcript toggle stay pinned.
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (chatAgents.isNotEmpty) ...[
+                      header('CHAT'),
+                      for (final a in chatAgents) option(a, isTerminal: false),
+                    ],
+                    if (termAgents.isNotEmpty) ...[
+                      header('TERMINAL'),
+                      for (final a in termAgents) option(a, isTerminal: true),
+                    ],
+                    if (chatAgents.isEmpty && termAgents.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                        child: Text(
+                          'No agents available',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white.withValues(alpha: 0.4)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.08),
+            ),
+            // Carry the conversation transcript into the destination (Phase 2
+            // wires the actual reseed; the choice is captured here).
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () =>
+                    setState(() => _includeTranscript = !_includeTranscript),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Include full transcript',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.white.withValues(alpha: 0.75),
+                          ),
+                        ),
+                      ),
+                      // Custom toggle (matches the agent panel's idle switch —
+                      // avoids Switch API skew between local/CI Flutter).
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        width: 36,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          color: _includeTranscript
+                              ? accent
+                              : const Color(0x29FFFFFF),
+                        ),
+                        child: AnimatedAlign(
+                          duration: const Duration(milliseconds: 120),
+                          alignment: _includeTranscript
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.all(2),
+                            width: 16,
+                            height: 16,
+                            decoration: const BoxDecoration(
+                                color: Colors.white, shape: BoxShape.circle),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
     );
   }
 }

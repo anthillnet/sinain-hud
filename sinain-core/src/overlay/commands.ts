@@ -22,6 +22,10 @@ export interface CommandDeps {
   /** Fork MAIN into a new thread: mints a thread id and stores a seed built
    *  from the MAIN transcript + digest. Returns the new thread's identity. */
   onForkMain?: () => { id: string; label: string };
+  /** Stash a thread's conversation transcript for a pending handoff — the
+   *  destination agent's next seed picks it up so it continues the thread.
+   *  key = regionId for a region thread, "main" for the main thread. */
+  onSetHandoffContext?: (key: string, transcript: string) => void;
   /** User drag-selected a screen region — create a manual ROI from it. */
   onRegionSelect?: (sel: { x: number; y: number; w: number; h: number; screenW: number; screenH: number }) => void;
   /** Frontmost app changed (fast NSWorkspace signal) — instant ROI restore. */
@@ -357,6 +361,21 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
       } else {
         wsHandler.broadcast("Starting chat sidecar…", "normal");
         log(TAG, "restart_chat_sidecar launched");
+      }
+      break;
+    }
+    case "set_handoff_context": {
+      const key = String((msg as any).key ?? "").trim();
+      const transcript = String((msg as any).transcript ?? "");
+      if (!key || !transcript.trim()) {
+        log(TAG, `set_handoff_context: missing key/transcript`);
+        break;
+      }
+      if (deps.onSetHandoffContext) {
+        deps.onSetHandoffContext(key, transcript);
+        log(TAG, `set_handoff_context: ${key} (${transcript.length} chars)`);
+      } else {
+        log(TAG, `set_handoff_context: no handler wired`);
       }
       break;
     }

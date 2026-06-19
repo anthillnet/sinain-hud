@@ -1000,6 +1000,26 @@ async function main() {
   // MAIN forks: thread id → seed (MAIN transcript + digest at fork time).
   // Consumed by the thread's first chat message and by terminal seeding.
   const forkSeeds = new Map<string, string>();
+  // Thread handoff transcripts: thread key (regionId, or "main") → the prior
+  // conversation, sent by the overlay when the user continues a thread in
+  // another agent ("Include full transcript"). One-shot: taken (and cleared)
+  // by the next seed build for that thread so the destination agent picks up
+  // where the chat left off, then it doesn't leak into later turns.
+  const handoffContexts = new Map<string, string>();
+  function takeHandoffBlock(key: string): string {
+    const transcript = handoffContexts.get(key);
+    if (!transcript) return "";
+    handoffContexts.delete(key);
+    return (
+      "## Continued from Sinain chat\n" +
+      "The user is continuing an existing Sinain conversation here. " +
+      "Briefly acknowledge that you've loaded the prior context, then pick up " +
+      "where it left off.\n\n" +
+      "### Conversation so far\n" +
+      transcript.trim() +
+      "\n\n---\n\n"
+    );
+  }
 
   // Shared region sink — RegionTracker.update + broadcast on change. Fed by
   // BOTH the cloud analyzer (loop.onRegions) and the Tier-0 SLM detector.
@@ -1639,6 +1659,13 @@ async function main() {
     // SAME seed via the SAME mechanic (sinain_roi id=…); this is the one builder.
     getRegionTask: async (regionId: string) => composeAndStoreRoiSeed(regionId),
 
+    // One-shot pending handoff transcript (MAIN terminal pulls + prepends it).
+    getHandoffBlock: (key: string) => takeHandoffBlock(key),
+
+    // Mint a seed from arbitrary text → id for the unified sinain_roi MCP pull.
+    // Interactive terminals seed ALL context this way — no seed files on disk.
+    mintRoiSeed: (text: string) => roiSeeds.put(text, ""),
+
     getHealthPayload: () => {
       const escStats = escalator.getStats();
       const warnings: string[] = [];
@@ -1776,9 +1803,13 @@ async function main() {
     const region = regionTracker.get(regionId);
     if (!region) return null;
     const digest = agentLoop.getDigest()?.digest;
+    // Handoff transcript (if the user continued a chat thread here). Captured
+    // once so both the fast seed and the async-enriched update carry it — a
+    // one-shot take inside the enrichment closure would come up empty.
+    const handoff = takeHandoffBlock(regionId);
     // FAST seed: region + OCR + digest, NO knowledge wait — store + return now
     // so the app (or terminal) launches instantly.
-    const fastText = buildRegionTaskText(region, digest);
+    const fastText = handoff + buildRegionTaskText(region, digest);
     const id = roiSeeds.put(fastText, regionId);
     // ASYNC enrich: run the full knowledge-graph query (no 1.5s race — it has a
     // ~5s cold start) and upgrade the stored seed in place. The agent pulls via
@@ -1795,7 +1826,7 @@ async function main() {
         if (entities.length === 0) return;
         const knowledge = await queryKnowledgeFactsMulti(entities, 8);
         if (knowledge?.trim()) {
-          roiSeeds.update(id, buildRegionTaskText(region, digest, undefined, knowledge));
+          roiSeeds.update(id, handoff + buildRegionTaskText(region, digest, undefined, knowledge));
         }
       } catch { /* enrichment is optional */ }
     })();
@@ -1815,6 +1846,10 @@ async function main() {
       if (region) seed = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
       else if (forkSeed) seed = forkSeed;
     }
+    // Thread handoff into the resident sidecar: prepend the carried transcript
+    // so the sidecar continues the prior conversation rather than cold-starting.
+    const handoff = takeHandoffBlock(regionId ?? "main");
+    if (handoff) seed = handoff + (seed ?? "");
     wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
     chatService
       .handle(text, { kind, seed })
@@ -1860,8 +1895,10 @@ async function main() {
     // Same rich seed + same store + same id the terminal pulls — one mechanic.
     // Main-chat (no region) has no ROI seed: stash the user's text so the app
     // still has something to pull.
+    // Region seed already absorbed any handoff transcript in composeAndStoreRoiSeed;
+    // main-chat has no ROI seed, so fold the transcript (if any) into the stash.
     const composed = regionId ? await composeAndStoreRoiSeed(regionId) : null;
-    const id = composed ? composed.id : roiSeeds.put(text, "");
+    const id = composed ? composed.id : roiSeeds.put(takeHandoffBlock("main") + text, "");
     launchDesktop(dType, id);
     const appLabel = dType === "claude_desktop" ? "Claude Desktop" : "ChatGPT";
     const note = `↗ Opened this in ${appLabel} — it pulls the context via sinain_roi.`;
@@ -2019,6 +2056,9 @@ async function main() {
       ].filter(Boolean).join("\n"));
       return { id, label: "⑂ fork" };
     },
+    onSetHandoffContext: (key, transcript) => {
+      handoffContexts.set(key, transcript);
+    },
     onSpawnCommand: (text, regionId) => {
       // Region/ROI chat uses the CHAT selector — there is no spawn lane. The
       // chat selector serves chat regardless of thread (chat + terminal are the
@@ -2058,6 +2098,11 @@ async function main() {
             task = `${forkSeed}\n\n## User message\n${text}`;
           }
         }
+        // Thread handoff onto a bare chat-lane agent: prepend the carried
+        // transcript regardless of started state (handoff usually happens
+        // mid-conversation, after the thread is already started).
+        const handoff = takeHandoffBlock(regionId);
+        if (handoff) task = handoff + task;
       }
       escalator.dispatchSpawnTask(task, label, opts).catch((err) => {
         log("cmd", `spawn command failed: ${err}`);
