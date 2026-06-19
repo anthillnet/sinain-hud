@@ -180,13 +180,26 @@ class OverlayShellState extends State<OverlayShell> {
         windowService: _windowService,
         ws: ws,
         settingsService: _settingsService,
-        onRegionTap: (region, pos) {
-          // Register the tab immediately so it persists in the unified tab
-          // bar even before the thread starts or another ROI is selected.
+        onRegionTap: (region, pos, teleport) {
+          // Single tap → toggle the lightweight preview (no chat needed to see
+          // what the ROI is about). Tapping the same eye again closes it.
+          if (!teleport) {
+            setState(() {
+              if (_activeRegion?.id == region.id) {
+                _activeRegion = null; // toggle off
+              } else {
+                ws.registerRegionThread(region.id, region.issue);
+                _activeRegion = region;
+                _activeThread = region.id;
+              }
+            });
+            return;
+          }
+          // Double tap → bring the HUD/chat to the region.
           ws.registerRegionThread(region.id, region.issue);
           setState(() {
             _activeRegion = region;
-            _activeThread = region.id; // select this region's tab
+            _activeThread = region.id;
           });
           _openChatNearRegion(pos.dx, pos.dy, region.display);
         },

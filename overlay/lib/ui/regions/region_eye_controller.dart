@@ -40,8 +40,9 @@ class RegionEyeController {
   final SettingsService settingsService;
 
   /// Tapped region + its eye position (top-left origin screen points).
-  /// The shell opens the chat there and shows the region action banner.
-  final void Function(RegionHighlight region, Offset pos) onRegionTap;
+  /// [teleport] is false for a single tap (toggle the lightweight preview) and
+  /// true for a double tap (move the HUD/chat to the region).
+  final void Function(RegionHighlight region, Offset pos, bool teleport) onRegionTap;
 
   // Eye size follows the HUD font-size setting (default 12 → 24pt eyes,
   // matching the original fixed size); color follows the accent setting.
@@ -56,7 +57,9 @@ class RegionEyeController {
   final Map<String, Offset> _eyePositions = {};
   // 'idle' | 'working' | 'ready' | 'failed' — survives region set refreshes
   final Map<String, String> _eyeStates = {};
-  DateTime _lastTap = DateTime.fromMillisecondsSinceEpoch(0);
+  // Single/double-tap discrimination on the native eye-tap stream.
+  String? _pendingTapId;
+  Timer? _pendingTapTimer;
 
   RegionEyeController({
     required this.windowService,
@@ -122,6 +125,7 @@ class RegionEyeController {
   void dispose() {
     _regionSub?.cancel();
     _tapSub?.cancel();
+    _pendingTapTimer?.cancel();
     _taskSub?.cancel();
     if (_settingsListener != null) {
       settingsService.removeListener(_settingsListener!);
@@ -212,14 +216,20 @@ class RegionEyeController {
     final pos = _eyePositions[id];
     if (region == null || pos == null) return;
 
-    // Debounce double-taps
-    final now = DateTime.now();
-    if (now.difference(_lastTap).inMilliseconds < 500) return;
-    _lastTap = now;
-
-    // Never auto-run — surface the issue + suggested approach in the chat
-    // and let the user launch the thread explicitly (see run()).
-    onRegionTap(region, pos);
+    // Single vs double tap: a second tap on the same eye within the window is a
+    // double → teleport the HUD to it; a lone tap → toggle its preview.
+    if (_pendingTapId == id && _pendingTapTimer?.isActive == true) {
+      _pendingTapTimer?.cancel();
+      _pendingTapId = null;
+      onRegionTap(region, pos, true); // double → teleport
+      return;
+    }
+    _pendingTapTimer?.cancel();
+    _pendingTapId = id;
+    _pendingTapTimer = Timer(const Duration(milliseconds: 280), () {
+      _pendingTapId = null;
+      onRegionTap(region, pos, false); // single → preview (toggle)
+    });
   }
 
   /// Start the region's agent thread — called from the region action
