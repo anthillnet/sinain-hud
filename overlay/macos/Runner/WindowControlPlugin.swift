@@ -209,6 +209,11 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             regionEyes.hidePreview()
             result(nil)
 
+        case "confirmRegionCopy":
+            // Flutter finished copying the seed → green check + auto-dismiss.
+            regionEyes.confirmCopy(id: args?["id"] as? String ?? "")
+            result(nil)
+
         case "selectRegion":
             // Screenshot-style drag-select. Resolves with the rect in
             // top-left-origin screen points, or nil on Esc/cancel.
@@ -550,6 +555,7 @@ private class RegionSelectView: NSView {
 
     @objc private func chatTapped() { finish("chat") }
     @objc private func termTapped() { finish("term") }
+    @objc private func copyTapped() { finish("copy") }
     @objc private func closeTapped() { finish(nil) }
 
     // MARK: drawing
@@ -639,11 +645,15 @@ private class RegionSelectView: NSView {
         // Buttons self-size to their content (icon + label + symmetric padding).
         let chat = makeTextButton(title: "Chat", symbol: "message", filled: true, action: #selector(chatTapped))
         let term = makeTextButton(title: "Term", symbol: "terminal", filled: false, action: #selector(termTapped))
+        // Copy the composed seed to the clipboard — for agents we don't
+        // integrate with (paste it into any tool).
+        let copy = makeIconButton(symbol: "doc.on.clipboard", action: #selector(copyTapped))
         let close = makeIconButton(symbol: "xmark", action: #selector(closeTapped))
 
         chat.setFrameOrigin(NSPoint(x: pad, y: pad))
         term.setFrameOrigin(NSPoint(x: chat.frame.maxX + gap, y: pad))
-        let divX = term.frame.maxX + gap
+        copy.setFrameOrigin(NSPoint(x: term.frame.maxX + gap, y: pad))
+        let divX = copy.frame.maxX + gap
         let divider = NSView(frame: NSRect(x: divX, y: pad + (h - 18) / 2, width: 1, height: 18))
         divider.wantsLayer = true
         divider.layer?.backgroundColor = NSColor(white: 1, alpha: 0.14).cgColor
@@ -664,6 +674,7 @@ private class RegionSelectView: NSView {
         bar.layer?.borderColor = NSColor(white: 1, alpha: 0.14).cgColor
         bar.addSubview(chat)
         bar.addSubview(term)
+        bar.addSubview(copy)
         bar.addSubview(divider)
         bar.addSubview(close)
         addSubview(bar)

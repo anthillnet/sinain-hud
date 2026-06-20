@@ -1601,6 +1601,10 @@ export interface ServerDeps {
    *  sinain_roi MCP pull. Lets interactive terminals seed ANY context (main
    *  digest, fallbacks) through the MCP mechanic — never a seed file on disk. */
   mintRoiSeed?: (text: string) => string;
+  /** Build a portable seed (the same context we feed agents, knowledge inlined)
+   *  for the clipboard "copy seed" action. key = regionId or "main"; null when
+   *  the region is unknown. */
+  buildSeed?: (key: string, transcript?: string) => Promise<string | null>;
   /** Stable agent session for a thread (get-or-create) — terminals resume it. */
   getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
@@ -1860,6 +1864,34 @@ export function createAppServer(deps: ServerDeps) {
         const key = decodeURIComponent(url.pathname.slice("/handoff/".length));
         const block = deps.getHandoffBlock?.(key) ?? "";
         res.end(JSON.stringify({ ok: true, block }));
+        return;
+      }
+
+      // ── POST /seed — portable seed text for the clipboard "copy seed" ──
+      // Body: { key: regionId|"main", transcript? }. Returns the composed
+      // context as plain text (knowledge inlined, header + transcript folded
+      // in) for pasting into an agent we don't integrate with.
+      if (req.method === "POST" && url.pathname === "/seed") {
+        const body = await readBody(req, 256 * 1024);
+        let key = "";
+        let transcript: string | undefined;
+        try {
+          const d = JSON.parse(body);
+          key = String(d.key ?? "").trim();
+          if (d.transcript) transcript = String(d.transcript);
+        } catch { /* bad body */ }
+        if (!key || !deps.buildSeed) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: "missing key or handler" }));
+          return;
+        }
+        const text = await deps.buildSeed(key, transcript);
+        if (text === null) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "unknown thread" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true, text }));
         return;
       }
 

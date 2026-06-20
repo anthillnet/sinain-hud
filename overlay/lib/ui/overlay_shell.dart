@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/app_control.dart';
@@ -154,6 +155,12 @@ class OverlayShellState extends State<OverlayShell> {
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
+      // "Copy" — just put this region's composed seed on the clipboard (for an
+      // agent we don't integrate with). No thread, no HUD, no agent turn.
+      if (_pendingManualMode == 'copy') {
+        _copySeed(key: picked.id);
+        return;
+      }
       // A chat on a desktop lane (Claude Desktop / ChatGPT) opens the external
       // app, not the in-HUD chat — so route it through run() (which seeds the
       // ROI + launches the app via core) and leave the HUD collapsed.
@@ -248,6 +255,12 @@ class OverlayShellState extends State<OverlayShell> {
           _openTerminalForTab(region.id);
           _openChatNearRegion(pos.dx, pos.dy, region.display);
         },
+        // "Copy" on the native ROI card → copy this region's composed seed,
+        // then flash the green check on the card and auto-dismiss it.
+        onRegionCopy: (region) => _copySeed(
+          key: region.id,
+          onDone: () => _windowService.confirmRegionCopy(region.id),
+        ),
       )..start();
     }
   }
@@ -429,8 +442,10 @@ class OverlayShellState extends State<OverlayShell> {
     final ws = context.read<WebSocketService>();
     final res = await _windowService.selectRegion();
     if (res == null) return; // cancelled (Esc / ✕)
-    // The toolbar under the box returns the destination: 'chat' | 'term'.
-    _pendingManualMode = res['mode'] == 'term' ? 'term' : 'chat';
+    // The toolbar under the box returns the destination: 'chat' | 'term' |
+    // 'copy' (copy the seed to the clipboard).
+    final mode = res['mode'] as String?;
+    _pendingManualMode = (mode == 'term' || mode == 'copy') ? mode! : 'chat';
     // Remember where to teleport the HUD: the selection's bottom-left corner
     // (selector reports main-display, top-left-origin points → display 0).
     final rx = (res['x'] as num?)?.toDouble() ?? 0;
@@ -576,6 +591,51 @@ class OverlayShellState extends State<OverlayShell> {
     }
     return out;
   }
+
+  /// Build the portable seed for [key] (regionId or "main") server-side and
+  /// copy it to the clipboard — for agents we don't integrate with (paste it
+  /// anywhere). Shared by the ROI card, the handoff popover, and the hotkey.
+  Future<void> _copySeed(
+      {required String key, String? transcript, VoidCallback? onDone}) async {
+    final ws = context.read<WebSocketService>();
+    // Building the seed can take a few seconds on a cold cache. Put a
+    // placeholder on the clipboard NOW so an early paste lands a helpful note
+    // instead of stale/empty content — then swap in the real seed when ready.
+    // (A warm cache overwrites this within ~100ms, so the user never sees it.)
+    await Clipboard.setData(const ClipboardData(
+      text: '⏳ Sinain context is being prepared — paste again in a couple of seconds.',
+    ));
+    try {
+      final text = await ws.fetchSeedText(key, transcript: transcript);
+      await Clipboard.setData(ClipboardData(
+        text: (text != null && text.isNotEmpty)
+            ? text
+            : '⚠ Sinain couldn\'t prepare this context. Try Copy again.',
+      ));
+    } catch (_) {
+      await Clipboard.setData(const ClipboardData(
+        text: '⚠ Sinain couldn\'t prepare this context. Try Copy again.',
+      ));
+    } finally {
+      // Always fire — the UI must clear its loading state even on failure.
+      onDone?.call();
+    }
+  }
+
+  /// Copy the seed for the active thread (region or MAIN), carrying its
+  /// transcript. Wired to the global "copy seed" hotkey and the handoff popover.
+  Future<void> _copySeedForActiveThread() async {
+    final ws = context.read<WebSocketService>();
+    final thread = _activeThread;
+    final items = thread != null
+        ? (ws.regionThreads[thread] ?? const <FeedItem>[])
+        : ws.agentFeedItems;
+    final t = _composeTranscript(items);
+    await _copySeed(key: thread ?? 'main', transcript: t.isEmpty ? null : t);
+  }
+
+  /// Public entry for the global "copy seed" hotkey (main.dart → hotkey channel).
+  void copySeedHotkey() => _copySeedForActiveThread();
 
   /// True while any spawn task for this region is still in flight.
   bool _regionWorking(WebSocketService ws, String regionId) {
@@ -1242,6 +1302,20 @@ class OverlayShellState extends State<OverlayShell> {
                           _syncBusyState();
                         },
                         onHandoff: _handoffThread,
+                        onCopySeed: ({required includeTranscript}) {
+                          final thread = _activeThread;
+                          String? transcript;
+                          if (includeTranscript) {
+                            final items = thread != null
+                                ? (ws.regionThreads[thread] ??
+                                    const <FeedItem>[])
+                                : ws.agentFeedItems;
+                            final t = _composeTranscript(items);
+                            if (t.isNotEmpty) transcript = t;
+                          }
+                          return _copySeed(
+                              key: thread ?? 'main', transcript: transcript);
+                        },
                       ),
                 if (_showDisplaySettings)
                   DisplaySettingsPanel(
@@ -1262,6 +1336,7 @@ class OverlayShellState extends State<OverlayShell> {
           // height) when no tasks are pending. Mirrors Tasks tab — does not
           // remove tasks from that view.
           const _AgentAvailabilityBanner(),
+          const _ServiceHealthBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
           // Input lives in the chat surface now (flyer composer) — terminal
@@ -1503,7 +1578,7 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     // Resident chat lane → Run restarts the sidecar; CLI lane → Run launches it.
     final resident = ws.escalationResident;
     final label = resident
-        ? 'Start chat sidecar'
+        ? 'Start sinain-chat'
         : (agent.isEmpty ? 'Start local agent' : 'Start $agent');
     return HudTooltip(
       message: label,
@@ -1513,7 +1588,7 @@ class _AgentAvailabilityBanner extends StatelessWidget {
           onTap: () {
             if (resident) {
               ws.restartChatSidecar();
-              ws.showSystemAlert('Starting chat sidecar…',
+              ws.showSystemAlert('Starting sinain-chat…',
                   priority: FeedPriority.high);
             } else {
               ws.startLocalAgent(agent);
@@ -1552,7 +1627,7 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     if (ws.escalationAgent.isEmpty) return 'No chat agent selected';
     // Built-in sinain sidecar: connected only if it's actually reachable.
     if (ws.escalationResident) {
-      return ws.chatSidecarUp ? null : 'Chat sidecar not running';
+      return ws.chatSidecarUp ? null : 'sinain-chat not running';
     }
     // A CLI chat agent needs bare-agent registration before it can answer.
     if (!ws.agentRegistered) {
@@ -1568,6 +1643,58 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     // CLI lane: show Run only for an unstarted agent (Run launches it).
     if (ws.agentRegistered) return false;
     return ws.escalationAgent.isNotEmpty;
+  }
+}
+
+/// Service guard: warns when a stack service goes stale (running but data is
+/// old — e.g. a stuck screen pipeline) or down (expected but unreachable), so a
+/// dead service is visible instead of silently feeding stale context.
+class _ServiceHealthBanner extends StatelessWidget {
+  const _ServiceHealthBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.watch<WebSocketService>();
+    final stale = ws.staleServices;
+    if (stale.isEmpty) return const SizedBox.shrink();
+    const color = Color(0xFFFFAA00);
+    final msg = stale.map((s) {
+      final label = (s['label'] ?? s['name'] ?? 'service').toString();
+      final down = s['state'] == 'down';
+      final detail = s['detail'];
+      return down
+          ? '$label down'
+          : '$label stale${detail != null ? ' ($detail)' : ''}';
+    }).join(' · ');
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.38)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.sensors_off, size: 14, color: color),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              '$msg — context may be outdated',
+              style: const TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 10,
+                color: color,
+                height: 1.2,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

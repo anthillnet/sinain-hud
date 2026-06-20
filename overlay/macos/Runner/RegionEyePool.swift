@@ -102,6 +102,13 @@ class RegionEyePool {
             self?.channel?.invokeMethod("onRegionCardAction", arguments: ["id": id, "action": "term"])
             self?.hidePreview()
         }
+        card.onCopy = { [weak self, weak card] in
+            // Dim the icon and KEEP the card up; Flutter copies the seed, then
+            // calls confirmCopy → green check → auto-dismiss. (Other actions
+            // dismiss immediately; copy shows completion in place.)
+            card?.copyLoading()
+            self?.channel?.invokeMethod("onRegionCardAction", arguments: ["id": id, "action": "copy"])
+        }
         card.onClose = { [weak self] in self?.hidePreview() }
 
         // Below the eye, left-aligned with it, clamped to the eye's screen.
@@ -136,6 +143,17 @@ class RegionEyePool {
         previewPanel?.orderOut(nil)
         previewPanel = nil
         previewId = nil
+    }
+
+    /// Flutter finished copying this region's seed → flash a green check on the
+    /// card's copy icon, then auto-dismiss. No-op if the card already closed.
+    func confirmCopy(id: String) {
+        guard id == previewId,
+              let card = previewPanel?.contentView as? RegionCardView else { return }
+        card.copyDone()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            if self?.previewId == id { self?.hidePreview() }
+        }
     }
 
     // MARK: - Private
@@ -351,11 +369,31 @@ class RegionEyeView: NSView {
 class RegionCardView: NSView {
     var onChat: (() -> Void)?
     var onTerm: (() -> Void)?
+    var onCopy: (() -> Void)?
     var onClose: (() -> Void)?
+    private var copyButton: NSButton?
 
     static let cardBg = NSColor(srgbRed: 0x2B / 255.0, green: 0x2D / 255.0, blue: 0x30 / 255.0, alpha: 1)
     static let blue = NSColor(srgbRed: 0x33 / 255.0, green: 0x69 / 255.0, blue: 0xD6 / 255.0, alpha: 1)
+    static let green = NSColor(srgbRed: 0x1F / 255.0, green: 0x80 / 255.0, blue: 0x39 / 255.0, alpha: 1)
     static let muted = NSColor(srgbRed: 0xA8 / 255.0, green: 0xAD / 255.0, blue: 0xBD / 255.0, alpha: 1)
+
+    /// Copy tapped → dim the icon while the seed is built/fetched.
+    func copyLoading() {
+        copyButton?.isEnabled = false
+        copyButton?.animator().alphaValue = 0.35
+    }
+
+    /// Copy finished → swap the icon for a green checkmark.
+    func copyDone() {
+        guard let b = copyButton else { return }
+        b.alphaValue = 1
+        b.contentTintColor = RegionCardView.green
+        if #available(macOS 11.0, *),
+           let img = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied") {
+            b.image = img
+        }
+    }
 
     init(width: CGFloat, issue: String, tip: String, hasTerminal: Bool) {
         let pad: CGFloat = 12
@@ -394,11 +432,19 @@ class RegionCardView: NSView {
         let chat = makeTextButton(title: "Chat", symbol: "message", filled: true, action: #selector(chatTapped))
         chat.setFrameOrigin(NSPoint(x: pad, y: btnY))
         addSubview(chat)
+        var trailingX = chat.frame.maxX
         if hasTerminal {
             let term = makeTextButton(title: "Term", symbol: "terminal", filled: false, action: #selector(termTapped))
-            term.setFrameOrigin(NSPoint(x: chat.frame.maxX + 4, y: btnY))
+            term.setFrameOrigin(NSPoint(x: trailingX + 4, y: btnY))
             addSubview(term)
+            trailingX = term.frame.maxX
         }
+        // Copy the composed seed to the clipboard — for agents we don't
+        // integrate with (paste it into any tool).
+        let copy = makeIconButton(symbol: "doc.on.clipboard", action: #selector(copyTapped))
+        copy.setFrameOrigin(NSPoint(x: trailingX + 4, y: btnY))
+        addSubview(copy)
+        copyButton = copy
         let close = makeIconButton(symbol: "xmark", action: #selector(closeTapped))
         close.setFrameOrigin(NSPoint(x: width - pad - 28, y: btnY))
         addSubview(close)
@@ -408,6 +454,7 @@ class RegionCardView: NSView {
 
     @objc private func chatTapped() { onChat?() }
     @objc private func termTapped() { onTerm?() }
+    @objc private func copyTapped() { onCopy?() }
     @objc private func closeTapped() { onClose?() }
 
     private static func makeLabel(_ text: String, size: CGFloat, weight: NSFont.Weight,

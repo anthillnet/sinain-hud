@@ -23,6 +23,14 @@ class WebSocketService extends ChangeNotifier {
   String _micState = 'muted';
   String _screenState = 'off';
   String _escalationState = 'active';
+  // Service guard: per-service liveness from core. Each: {name,label,state,detail}.
+  List<Map<String, dynamic>> _services = const [];
+  List<Map<String, dynamic>> get services => _services;
+  /// Services in a state the user should be warned about (running-but-stale or
+  /// expected-but-down). 'off'/'live' are silent.
+  List<Map<String, dynamic>> get staleServices => _services
+      .where((s) => s['state'] == 'stale' || s['state'] == 'down')
+      .toList();
   // Ambient/idle (unsolicited) HUD messages. Opt-in, default off, decoupled
   // from escalation state so selecting a chat agent never flips it on.
   bool _idleMessagesEnabled = false;
@@ -318,6 +326,17 @@ class WebSocketService extends ChangeNotifier {
             _screenState = screen;
             notifyListeners();
           }
+          // Service guard: per-service liveness (sense/backend/sinain-chat/runner).
+          final svc = statusData['services'] as List?;
+          if (svc != null) {
+            final list = svc.whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();
+            String key(List<Map<String, dynamic>> l) =>
+                l.map((s) => '${s['name']}:${s['state']}').join('|');
+            if (key(list) != key(_services)) {
+              _services = list;
+              notifyListeners();
+            }
+          }
           final escalation = statusData['escalation'] as String?;
           if (escalation != null && escalation != _escalationState) {
             _escalationState = escalation;
@@ -519,6 +538,41 @@ class WebSocketService extends ChangeNotifier {
       if (regionId != null) 'regionId': regionId,
     });
     _log('Spawn command sent${regionId != null ? " (region=$regionId)" : ""}: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+  }
+
+  /// Core's HTTP base derived from the WS url (ws→http, wss→https).
+  String? get _httpBase {
+    if (url.startsWith('wss://')) return 'https://${url.substring(6)}';
+    if (url.startsWith('ws://')) return 'http://${url.substring(5)}';
+    return null;
+  }
+
+  /// Fetch the portable seed text for a thread (key = regionId or "main") so it
+  /// can be copied to the clipboard — the same context we feed supported
+  /// agents, built server-side. Returns null on any failure.
+  Future<String?> fetchSeedText(String key, {String? transcript}) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.postUrl(Uri.parse('$base/seed'));
+      req.headers.contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode({
+        'key': key,
+        if (transcript != null) 'transcript': transcript,
+      })));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return data['ok'] == true ? data['text'] as String? : null;
+    } catch (e) {
+      _log('fetchSeedText failed: $e');
+      return null;
+    } finally {
+      client?.close();
+    }
   }
 
   void disconnect() {

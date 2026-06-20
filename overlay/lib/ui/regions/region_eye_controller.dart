@@ -48,6 +48,10 @@ class RegionEyeController {
   /// thread (vs onRegionTap which opens a chat thread).
   final void Function(RegionHighlight region, Offset pos) onRegionTerminal;
 
+  /// "Copy" chosen on the native ROI card — copy this region's composed seed
+  /// to the clipboard (for agents we don't integrate with).
+  final void Function(RegionHighlight region) onRegionCopy;
+
   // Eye size follows the HUD font-size setting (default 12 → 24pt eyes,
   // matching the original fixed size); color follows the accent setting.
   double get _eyeSize => settingsService.settings.fontSize * 2;
@@ -72,6 +76,7 @@ class RegionEyeController {
     required this.settingsService,
     required this.onRegionTap,
     required this.onRegionTerminal,
+    required this.onRegionCopy,
   });
 
   bool get _enabled => settingsService.settings.autoDetectIssues;
@@ -250,7 +255,9 @@ class RegionEyeController {
     final region = _regions[ev.$1];
     final pos = _eyePositions[ev.$1];
     if (region == null || pos == null) return;
-    if (ev.$2 == 'term') {
+    if (ev.$2 == 'copy') {
+      onRegionCopy(region);
+    } else if (ev.$2 == 'term') {
       onRegionTerminal(region, pos);
     } else {
       run(region); // start the agent (desktop lane → core launches the app)

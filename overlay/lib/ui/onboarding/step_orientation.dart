@@ -52,9 +52,16 @@ class StepOrientation extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _hotkey(mod, 'P', 'Reset window position'),
+                if (Platform.isMacOS) ...[
+                  const SizedBox(height: 8),
+                  _hotkey('Ctrl+Opt+Cmd', 'C',
+                      'Copy the current context to paste into any tool'),
+                ],
                 const SizedBox(height: 8),
                 Text(
-                  'Everything else is a click away in the overlay.',
+                  'Tip: any region eye → Copy hands its context to an agent '
+                  'we don\'t plug into — paste the seed anywhere. Everything '
+                  'else is a click away in the overlay.',
                   style: TextStyle(
                     fontSize: 10,
                     color: Colors.white.withValues(alpha: 0.45),

@@ -154,7 +154,7 @@ function pipeLocalAgentOutput(stream: NodeJS.ReadableStream, sink: (line: string
  * Checks local (~/.sinain/memory) first, then workspace (~/.openclaw/workspace/memory).
  * Merges results, deduplicates, returns up to maxFacts.
  */
-async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): Promise<string> {
+async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number, queryText?: string): Promise<string> {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const execFileAsync = promisify(execFile);
@@ -186,7 +186,7 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
   const perDb = await Promise.all(dbPaths.map(async (dbPath) => {
     if (!existsSync(dbPath)) return [] as Array<Record<string, string>>;
     try {
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic"];
+      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic", "--no-raw-excerpts"];
       if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
       const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 10000, encoding: "utf-8" });
       const out = stdout.trim();
@@ -196,15 +196,35 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
       return Array.isArray(facts) ? facts as Array<Record<string, string>> : [];
     } catch { return [] as Array<Record<string, string>>; }
   }));
-  const candidateFacts: Array<Record<string, string>> = perDb.flat();
+  let candidateFacts: Array<Record<string, string>> = perDb.flat();
+
+  // Keep durable knowledge; drop episodic activity. The graph is dominated by
+  // session activity (domain "session": ~1200 vs ~25 durable) which, being
+  // topically close to any work ROI, otherwise floods the "long-term knowledge"
+  // section with logs of what the user did. Two episodic shapes:
+  //   • kind="verbatim" — raw per-tick observations ("Reviewing X in Zed").
+  //   • timestamp-keyed session digests (`fact:2026-06-18t08_08-…`) — "the user
+  //     spent the session editing X".
+  // The CURRENT activity is already carried by the situation digest; this
+  // section should be durable facts (preferences, decisions, relationships).
+  const SESSION_DIGEST_ID = /^fact:\d{4}-\d{2}-\d{2}t\d{2}_\d{2}-/;
+  candidateFacts = candidateFacts.filter(
+    (f) =>
+      (f as any).kind !== "verbatim" &&
+      !SESSION_DIGEST_ID.test(String((f as any).entity_id || "")),
+  );
 
   if (candidateFacts.length === 0) return "";
 
-  // Step 2: Re-rank by embedding similarity in-process (no deadlock — model is in this process)
-  const queryText = entities.join(" ");
+  // Step 2: Re-rank by embedding similarity in-process (no deadlock — model is
+  // in this process). Prefer the caller's rich query text (e.g. the ROI's
+  // on-screen content) over the bare entity slugs — the slugs are a coarse
+  // recall net (generic words like "posted/while/keep" match random sessions),
+  // so the embedding query must represent what's ACTUALLY on screen to rank by.
+  const embedQuery = (queryText && queryText.trim()) ? queryText.trim() : entities.join(" ");
   try {
     if (embeddingService?.ready) {
-      const allTexts = [queryText, ...candidateFacts.map(f => f.value || "")];
+      const allTexts = [embedQuery, ...candidateFacts.map(f => f.value || "")];
       const embeddings = await embeddingService.embed(allTexts);
       const queryEmb = embeddings[0];
       const scored = candidateFacts.map((f, i) => ({
@@ -212,30 +232,61 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number): P
         sim: EmbeddingService.cosine(queryEmb, embeddings[i + 1]),
       }));
       scored.sort((a, b) => b.sim - a.sim);
+      // Relevance floor: a seed should surface facts ABOUT the ROI, not the
+      // top-N of whatever vaguely matched the entity slugs. Below the floor the
+      // facts are unrelated — drop them (an empty knowledge section is the
+      // correct result for novel on-screen content, not a pile of off-topic
+      // session digests).
+      const RELEVANCE_FLOOR = 0.30;
       candidateFacts.length = 0;
-      candidateFacts.push(...scored.slice(0, maxFacts).map(s => s.fact));
+      candidateFacts.push(
+        ...scored.filter((s) => s.sim >= RELEVANCE_FLOOR).slice(0, maxFacts).map((s) => s.fact),
+      );
     }
   } catch { /* embedding unavailable — use RRF order */ }
 
-  // Step 3: Format as compact text
+  // Step 3: Format as a clean fact list. Values are self-contained sentences —
+  // emit them as bullets WITHOUT the internal entity-id hash or
+  // (confidence,count) metadata, which read as noise in an LLM seed. Drop
+  // empty/fragment values and any raw episodic excerpt that slipped past the
+  // Python --no-raw-excerpts gate (belt-and-suspenders).
   const seen = new Set<string>();
   const lines: string[] = [];
   let total = 0;
   const maxChars = 1200;
   for (const f of candidateFacts.slice(0, maxFacts)) {
-    const eid = ((f as any).entity_id || (f as any).entityId || "").split(":").pop()?.slice(0, 20) || "?";
-    const value = (f as any).value || "";
-    const conf = (f as any).confidence || "?";
-    const count = (f as any).reinforce_count || "1";
-    const line = `${eid}: ${value} (${conf},${count}x)`;
-    const key = value.slice(0, 60);
+    if ((f as any).source === "raw-excerpt" || (f as any).entity === "excerpt") continue;
+    const value = String((f as any).value || "").trim();
+    if (value.length < 8) continue; // skip empty / fragment values
+    const key = value.slice(0, 60).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (total + line.length + 2 > maxChars) break;
+    const line = `- ${value}`;
+    if (total + line.length + 1 > maxChars) break;
     lines.push(line);
-    total += line.length + 2;
+    total += line.length + 1;
   }
-  return lines.join("; ");
+  return lines.join("\n");
+}
+
+/** Build the "long-term knowledge" block for an ROI seed: facts RANKED against
+ *  the ROI's on-screen content, filtered to distilled non-episodic facts.
+ *
+ *  We rank FACTS (not entities) against the ROI because auto entity-selection
+ *  lands on generic mega-buckets (`user`/`sinain`/`claude`, thousands of facts)
+ *  whose page summaries are useless ("the user works with IntelliJ/Zed/Slack").
+ *  The web UI's entity pages read well because the human clicks the SPECIFIC
+ *  entity — fact-level ranking against the actual screen text is the auto
+ *  equivalent, surfacing the on-topic facts (e.g. the thread-handoff ones for a
+ *  thread-handoff ROI) directly. */
+async function buildRoiKnowledge(region: { issue: string; sourceOcr?: string; app?: string }): Promise<string> {
+  const roiText = `${region.issue}\n${region.sourceOcr ?? ""}`.slice(0, 1200);
+  const entities = [
+    ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
+    ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i).filter((w) => w.length > 3).slice(0, 5),
+  ];
+  if (entities.length === 0) return "";
+  return queryKnowledgeFactsMulti(entities, 8, roiText);
 }
 
 // Reference to embedding service — set during init
@@ -489,7 +540,7 @@ async function retractOrRestoreFact(
 /** Render a Confluence-style page for an entity via Python LLM script. */
 async function renderEntityPageMulti(
   entity: string,
-  opts: { refresh: boolean; maxFacts: number },
+  opts: { refresh: boolean; maxFacts: number; model?: string },
 ): Promise<unknown> {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
@@ -509,8 +560,14 @@ async function renderEntityPageMulti(
     ];
     if (opts.refresh) args.push("--refresh");
     try {
+      // Per-call model override (the seed routes to a local SLM for a fast,
+      // free, parallel render; the web UI keeps the cloud default).
+      const execOpts: { timeout: number; encoding: "utf-8"; env?: NodeJS.ProcessEnv } = {
+        timeout: 60_000, encoding: "utf-8",
+      };
+      if (opts.model) execOpts.env = { ...process.env, SINAIN_PAGE_MODEL: opts.model };
       // 60s budget — LLM rendering for large entities can take 20-30s.
-      const { stdout } = await pExecFile(PYTHON_BIN, args, { timeout: 60_000, encoding: "utf-8" });
+      const { stdout } = await pExecFile(PYTHON_BIN, args, execOpts);
       const parsed = JSON.parse(stdout);
       if (parsed.fact_count > 0) return parsed;
     } catch (e) {
@@ -967,7 +1024,7 @@ async function main() {
     pipeLocalAgentOutput(child.stderr, (line) => warn("chat", line));
     child.once("error", (err) => {
       warn(TAG, `chat sidecar failed to start: ${err.message}`);
-      wsHandler.broadcast(`⚠ Chat sidecar failed to start: ${err.message.slice(0, 120)}`, "high");
+      wsHandler.broadcast(`⚠ sinain-chat failed to start: ${err.message.slice(0, 120)}`, "high");
     });
     return { ok: true };
   }
@@ -1320,6 +1377,38 @@ async function main() {
   } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, escalationDesktop: false, chatSidecarUp: false, registered: false };
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
+
+  // ── Service guard ── liveness/freshness of each stack service, surfaced in
+  // /health and broadcast to the overlay (banner) so a dead/stale service is
+  // VISIBLE instead of silently serving stale data (e.g. a stuck screen
+  // pipeline feeding 6-hour-old OCR into a seed). State per service:
+  //   live  — healthy / fresh
+  //   stale — running but data is old (sense frames not arriving)
+  //   down  — expected but unreachable (sidecar/runner needed yet absent)
+  //   off   — not in use (no warning) — e.g. screen toggled off, lane not selected
+  const SENSE_STALE_MS = 60_000;
+  let lastSenseAt = 0;
+  function serviceStatuses(): Array<{ name: string; label: string; state: string; detail?: string }> {
+    const now = Date.now();
+    const senseAge = lastSenseAt ? now - lastSenseAt : Infinity;
+    const senseState = !screenActive
+      ? "off"
+      : lastSenseAt === 0 ? "down" : senseAge > SENSE_STALE_MS ? "stale" : "live";
+    // sinain-chat (resident chat sidecar) only matters when it's the chat lane.
+    const chatState = !bareAgentState.escalationResident
+      ? "off" : bareAgentState.chatSidecarUp ? "live" : "down";
+    // The agent runner (run.sh) only matters when a bare-agent lane is selected.
+    const usingBare = !!bareAgentState.escalationAgent
+      && !bareAgentState.escalationResident && !bareAgentState.escalationDesktop;
+    const runnerState = !usingBare ? "off" : bareAgentState.registered ? "live" : "down";
+    return [
+      { name: "backend", label: "Backend", state: "live" },
+      { name: "sense", label: "Screen capture", state: senseState,
+        detail: lastSenseAt ? `${Math.round(senseAge / 1000)}s ago` : "no frames" },
+      { name: "sinain-chat", label: "sinain-chat", state: chatState },
+      { name: "agent-runner", label: "Agent Runner", state: runnerState },
+    ];
+  }
   let shuttingDown = false;
   // ChatGPT "network harness" gate — exposes the local MCP server over a public
   // tunnel, so it's a security-sensitive opt-in. Runtime-toggled from the
@@ -1583,6 +1672,7 @@ async function main() {
       // Respect toggle_screen — if user disabled screen, ignore sense events
       if (!screenActive) return;
 
+      lastSenseAt = Date.now(); // service guard: screen pipeline is fresh
       wsHandler.updateState({ screen: "active" });
 
       // Track app context for recorder
@@ -1674,6 +1764,9 @@ async function main() {
     // Interactive terminals seed ALL context this way — no seed files on disk.
     mintRoiSeed: (text: string) => roiSeeds.put(text, ""),
 
+    // Portable seed text for the clipboard "copy seed" action.
+    buildSeed: (key: string, transcript?: string) => buildPortableSeed(key, transcript),
+
     getHealthPayload: () => {
       const escStats = escalator.getStats();
       const warnings: string[] = [];
@@ -1701,6 +1794,7 @@ async function main() {
 
       return {
         warnings,
+        services: serviceStatuses(),
         agent: agentLoop.getStats(),
         escalation: escStats,
         transcription: transcription.getProfilingStats(),
@@ -1826,19 +1920,44 @@ async function main() {
     // seed + can call sinain_memory_query itself.
     void (async () => {
       try {
-        const entities = [
-          ...(region.app ? [region.app.toLowerCase().replace(/\s+/g, "-")] : []),
-          ...region.issue.toLowerCase().split(/[^a-z0-9а-яё-]+/i)
-            .filter((w) => w.length > 3).slice(0, 5),
-        ];
-        if (entities.length === 0) return;
-        const knowledge = await queryKnowledgeFactsMulti(entities, 8);
+        // Entity-path knowledge (web-UI quality, local-SLM consolidated) —
+        // runs off the critical path; updates the stored seed when it lands.
+        const knowledge = await buildRoiKnowledge(region);
         if (knowledge?.trim()) {
           roiSeeds.update(id, handoff + buildRegionTaskText(region, digest, undefined, knowledge));
         }
       } catch { /* enrichment is optional */ }
     })();
     return { id, text: fastText };
+  }
+
+  // Portable seed for the clipboard ("copy seed" — for agents we don't
+  // integrate with). Builds the SAME context we feed supported agents (region
+  // task text incl. MCP-tool note, or the MAIN digest), but synchronously
+  // AWAITS knowledge enrichment so the pasted text is self-contained, folds in
+  // the carried transcript, and prepends a readable header. key = regionId or
+  // "main". Returns null when the region is unknown.
+  async function buildPortableSeed(key: string, transcript?: string): Promise<string | null> {
+    const header = "# Context from Sinain\n\n";
+    const tx = transcript?.trim()
+      ? `## Continued from Sinain chat\n${transcript.trim()}\n\n---\n\n`
+      : "";
+    if (key === "main") {
+      const digest = agentLoop.getDigest()?.digest;
+      const body = digest ? `Current situation:\n${digest}` : "(No situation digest yet.)";
+      return header + tx + body;
+    }
+    const region = regionTracker.get(key);
+    if (!region) return null;
+    const digest = agentLoop.getDigest()?.digest;
+    let knowledge: string | undefined;
+    try {
+      // Entity-path knowledge (web-UI quality, local-SLM consolidated). The
+      // clipboard awaits it (~1-2s local) so the pasted seed is self-contained.
+      const k = await buildRoiKnowledge(region);
+      if (k?.trim()) knowledge = k;
+    } catch { /* knowledge is optional */ }
+    return header + tx + buildRegionTaskText(region, digest, undefined, knowledge);
   }
 
   const routeSinainChat = (text: string, regionId?: string): void => {
@@ -1882,10 +2001,10 @@ async function main() {
       .catch((e: Error) => {
         wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
         if (regionId) {
-          wsHandler.broadcast(`⚠ chat sidecar error: ${e.message}`, "normal", "agent", regionId);
+          wsHandler.broadcast(`⚠ sinain-chat error: ${e.message}`, "normal", "agent", regionId);
         } else {
           wsHandler.broadcastRaw({
-            type: "feed", text: `⚠ chat sidecar error: ${e.message}`, priority: "normal",
+            type: "feed", text: `⚠ sinain-chat error: ${e.message}`, priority: "normal",
             ts: Date.now(), channel: "agent", sender: "agent",
           } as any);
         }
@@ -2257,6 +2376,18 @@ async function main() {
   // Start profiler
   profiler.start();
   // Periodically sample buffer gauges
+  // Service guard: broadcast per-service liveness to the overlay every 10s (and
+  // on change) so the HUD banner reflects a stale/dead service promptly.
+  let lastServicesKey = "";
+  const serviceGuardTimer = setInterval(() => {
+    const svc = serviceStatuses();
+    const key = svc.map((s) => `${s.name}:${s.state}`).join("|");
+    if (key !== lastServicesKey) {
+      lastServicesKey = key;
+      wsHandler.updateState({ services: svc } as any);
+    }
+  }, 10_000);
+
   const bufferGaugeTimer = setInterval(() => {
     profiler.gauge("buffer.feed", feedBuffer.size);
     profiler.gauge("buffer.sense", senseBuffer.size);
