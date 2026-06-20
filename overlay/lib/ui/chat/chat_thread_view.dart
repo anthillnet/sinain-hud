@@ -304,7 +304,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         // off the top of the chat area.
         constraints: const BoxConstraints(maxHeight: 320),
         child: Container(
-        width: 220,
+        width: 248,
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.92),
           borderRadius: BorderRadius.circular(10),
@@ -438,12 +438,15 @@ class _ChatThreadViewState extends State<ChatThreadView> {
                                   alpha: _copyState == 1 ? 0.3 : 0.55),
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          _copyState == 2 ? 'Copied' : 'Copy seed for another tool',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.white.withValues(
-                                alpha: _copyState == 1 ? 0.4 : 0.85),
+                        Flexible(
+                          child: Text(
+                            _copyState == 2 ? 'Copied' : 'Copy seed for another tool',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withValues(
+                                  alpha: _copyState == 1 ? 0.4 : 0.85),
+                            ),
                           ),
                         ),
                       ],
