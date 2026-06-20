@@ -57,6 +57,10 @@ class FirstRunService extends ChangeNotifier {
     // redundant and would otherwise trap the user after relaunch.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('onboarding_complete', true);
+    // Arm the post-install feature tour. We relaunch right after this, so the
+    // tour can't be triggered in-process — FeatureTourService reads this flag
+    // on the next boot. See feature_tour_service.dart for why it's persisted.
+    await prefs.setBool('feature_tour_pending', true);
     _envExists = true;
     _completed = true;
     notifyListeners();
