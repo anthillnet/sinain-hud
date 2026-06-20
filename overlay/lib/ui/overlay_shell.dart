@@ -598,11 +598,24 @@ class OverlayShellState extends State<OverlayShell> {
   Future<void> _copySeed(
       {required String key, String? transcript, VoidCallback? onDone}) async {
     final ws = context.read<WebSocketService>();
+    // Building the seed can take a few seconds on a cold cache. Put a
+    // placeholder on the clipboard NOW so an early paste lands a helpful note
+    // instead of stale/empty content — then swap in the real seed when ready.
+    // (A warm cache overwrites this within ~100ms, so the user never sees it.)
+    await Clipboard.setData(const ClipboardData(
+      text: '⏳ Sinain context is being prepared — paste again in a couple of seconds.',
+    ));
     try {
       final text = await ws.fetchSeedText(key, transcript: transcript);
-      if (text != null && text.isNotEmpty) {
-        await Clipboard.setData(ClipboardData(text: text));
-      }
+      await Clipboard.setData(ClipboardData(
+        text: (text != null && text.isNotEmpty)
+            ? text
+            : '⚠ Sinain couldn\'t prepare this context. Try Copy again.',
+      ));
+    } catch (_) {
+      await Clipboard.setData(const ClipboardData(
+        text: '⚠ Sinain couldn\'t prepare this context. Try Copy again.',
+      ));
     } finally {
       // Always fire — the UI must clear its loading state even on failure.
       onDone?.call();
