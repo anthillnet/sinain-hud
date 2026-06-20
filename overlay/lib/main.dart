@@ -9,12 +9,14 @@ import 'core/services/onboarding_service.dart';
 import 'core/models/hud_settings.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/first_run_service.dart';
+import 'core/services/feature_tour_service.dart';
 import 'core/services/provisioning_service.dart';
 import 'core/services/websocket_service.dart';
 import 'core/services/update_check_service.dart';
 import 'core/services/window_service.dart';
 import 'ui/first_run/first_run_wizard.dart';
 import 'ui/first_run/provisioning_banner.dart';
+import 'ui/tour/onboarding_tour.dart';
 import 'ui/overlay_shell.dart';
 
 /// Global key for OverlayShell so hotkey handler can trigger state changes.
@@ -58,6 +60,11 @@ Future<void> _startApp() async {
   final firstRunService = FirstRunService();
   await firstRunService.init();
 
+  // Post-install feature tour gate. Armed by the first-run wizard (persisted,
+  // survives its relaunch); shows once after setup. No-op for existing users.
+  final featureTourService = FeatureTourService();
+  await featureTourService.init();
+
   // Local-mode setup progress (polls ~/.sinain/provisioning/*.status).
   final provisioningService = ProvisioningService();
 
@@ -84,9 +91,13 @@ Future<void> _startApp() async {
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
 
-  // During first-run setup, resize window for the wizard panel.
+  // During first-run setup, resize window for the wizard panel; for the
+  // post-install tour, size for the scene card (the widget re-asserts this in
+  // its post-frame callback, so this just avoids an initial flash).
   if (firstRunService.needsSetup) {
     await windowService.setWindowFrame(100, 200, 340, 420);
+  } else if (featureTourService.needsTour) {
+    await windowService.setWindowFrame(120, 120, 460, 504);
   }
 
   // Resize for the setup-progress banner while provisioning runs; restore the
@@ -161,6 +172,7 @@ Future<void> _startApp() async {
       providers: [
         ChangeNotifierProvider.value(value: onboardingService),
         ChangeNotifierProvider.value(value: firstRunService),
+        ChangeNotifierProvider.value(value: featureTourService),
         ChangeNotifierProvider.value(value: provisioningService),
         ChangeNotifierProvider.value(value: settingsService),
         ChangeNotifierProvider.value(value: wsService),
@@ -197,8 +209,9 @@ class SinainHudApp extends StatelessWidget {
       ),
       home: Scaffold(
         backgroundColor: Colors.transparent,
-        body: Consumer2<FirstRunService, ProvisioningService>(
-          builder: (context, firstRun, provisioning, _) {
+        body: Consumer4<FirstRunService, ProvisioningService,
+            FeatureTourService, SettingsService>(
+          builder: (context, firstRun, provisioning, featureTour, settings, _) {
             if (firstRun.needsSetup) {
               return Center(
                 child: FirstRunWizard(
@@ -220,6 +233,16 @@ class SinainHudApp extends StatelessWidget {
                       Provider.of<WindowService>(context, listen: false)
                           .moveWindowBy(d.delta.dx, -d.delta.dy),
                 ),
+              );
+            }
+            // Post-install feature walkthrough — shows once after setup, before
+            // the HUD. complete() flips needsTour → this rebuilds into the shell,
+            // whose initState resizes the window back to its own geometry.
+            if (featureTour.needsTour) {
+              return OnboardingTour(
+                service: featureTour,
+                settings: settings,
+                onComplete: () {},
               );
             }
             return OverlayShell(key: overlayShellKey);
