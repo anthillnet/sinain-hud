@@ -23,15 +23,44 @@ import '../../ui/first_run/install_tier.dart';
 class FirstRunService extends ChangeNotifier {
   static const _channel = MethodChannel('sinain_hud/backend');
 
+  // Checkpoint keys. Granting Screen Recording in System Settings makes macOS
+  // offer to quit-and-reopen Sinain so the new permission takes effect. That
+  // relaunch happens *mid-wizard* (before `~/.sinain/.env` exists), so without
+  // a checkpoint the wizard would restart at Welcome and drop the user's tier +
+  // key. We persist just enough to resume at the permission step. Cleared once
+  // setup completes; the user's key only lives here transiently (it's about to
+  // be written to `.env` in plaintext anyway).
+  static const _keyResumePermission = 'first_run_resume_permission';
+  static const _keyResumeTier = 'first_run_resume_tier';
+  static const _keyResumeKey = 'first_run_resume_key';
+
   bool _envExists = false;
   bool _initialized = false;
   bool _completed = false;
+
+  bool _resumeAtPermission = false;
+  InstallTier? _resumeTier;
+  String? _resumeKey;
+
+  /// QA / preview override: `SINAIN_WIZARD_PREVIEW=1` forces the wizard to show
+  /// on a machine that already has `~/.sinain/.env`, and makes [completeSetup]
+  /// non-destructive (no env write, no backend relaunch). Mirrors the tour's
+  /// `SINAIN_FORCE_TOUR` hook. Resolved in [init].
+  bool _previewMode = false;
 
   bool get initialized => _initialized;
 
   /// True when there's no config yet → run the first-run wizard. Once setup
   /// writes `~/.sinain/.env`, this is false and the wizard won't re-run.
-  bool get needsSetup => !_envExists && !_completed;
+  /// In preview mode the env-existence check is bypassed so the wizard always
+  /// shows until it's stepped through.
+  bool get needsSetup => (_previewMode || !_envExists) && !_completed;
+
+  /// When a permission-step checkpoint survived a macOS relaunch, the wizard
+  /// jumps straight back to the Screen Recording step with these restored.
+  bool get resumeAtPermission => _resumeAtPermission;
+  InstallTier? get resumeTier => _resumeTier;
+  String? get resumeKey => _resumeKey;
 
   String get _envPath {
     final home = Platform.environment['HOME'] ?? '';
@@ -39,15 +68,65 @@ class FirstRunService extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    final preview = Platform.environment['SINAIN_WIZARD_PREVIEW'];
+    _previewMode = preview == '1' || preview == 'true';
     _envExists = await File(_envPath).exists();
+    // Only honour a checkpoint while the wizard would actually run (no env yet).
+    if (!_envExists) {
+      final prefs = await SharedPreferences.getInstance();
+      _resumeAtPermission = prefs.getBool(_keyResumePermission) ?? false;
+      if (_resumeAtPermission) {
+        final tierIdx = prefs.getInt(_keyResumeTier);
+        if (tierIdx != null && tierIdx >= 0 && tierIdx < InstallTier.values.length) {
+          _resumeTier = InstallTier.values[tierIdx];
+        }
+        _resumeKey = prefs.getString(_keyResumeKey);
+        // A checkpoint with no tier is unusable — discard it.
+        if (_resumeTier == null) _resumeAtPermission = false;
+      }
+    }
     _initialized = true;
     notifyListeners();
+  }
+
+  /// Persist the wizard's choices before triggering the Screen Recording prompt,
+  /// so the flow resumes at the permission step if macOS relaunches Sinain to
+  /// apply the grant. Safe to call repeatedly.
+  Future<void> savePermissionCheckpoint(
+    InstallTier tier, {
+    String? openRouterKey,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyResumePermission, true);
+    await prefs.setInt(_keyResumeTier, tier.index);
+    if (openRouterKey != null && openRouterKey.isNotEmpty) {
+      await prefs.setString(_keyResumeKey, openRouterKey);
+    } else {
+      await prefs.remove(_keyResumeKey);
+    }
+  }
+
+  Future<void> _clearCheckpoint() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyResumePermission);
+    await prefs.remove(_keyResumeTier);
+    await prefs.remove(_keyResumeKey);
   }
 
   /// Persist the wizard's choices to `~/.sinain/.env`, then relaunch the app so
   /// it boots through the normal startup path with config present. Relaunch is
   /// more robust than an in-place handoff (correct window sizing + key window).
   Future<void> completeSetup(InstallTier tier, {String? openRouterKey}) async {
+    // Preview mode: show the finish screen and dismiss the wizard WITHOUT
+    // touching `~/.sinain/.env` or relaunching (which would run stop.sh and
+    // tear down a live dev stack). Lets `SINAIN_WIZARD_PREVIEW=1` step the whole
+    // flow safely on a configured machine.
+    if (_previewMode) {
+      await _clearCheckpoint();
+      _completed = true;
+      notifyListeners();
+      return;
+    }
     final vars = _envForTier(tier, openRouterKey: openRouterKey);
     await _writeEnv(vars);
     // Mark the legacy OnboardingService complete too — this wizard already
@@ -59,6 +138,8 @@ class FirstRunService extends ChangeNotifier {
     // tour can't be triggered in-process — FeatureTourService reads this flag
     // on the next boot. See feature_tour_service.dart for why it's persisted.
     await prefs.setBool('feature_tour_pending', true);
+    // Setup finished — the permission checkpoint is no longer needed.
+    await _clearCheckpoint();
     _envExists = true;
     _completed = true;
     notifyListeners();

@@ -1,4 +1,5 @@
 import Cocoa
+import CoreGraphics
 import FlutterMacOS
 
 /// Native NSWindow control via Flutter platform channel.
@@ -246,6 +247,29 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                     result(nil)
                 }
             }
+
+        // MARK: Screen Recording permission (first-run wizard, Section B)
+
+        case "screenRecordingStatus":
+            // Non-prompting check of the current grant. Drives the wizard's
+            // "Waiting for grant" poll so it auto-advances once the user flips
+            // Sinain on in System Settings.
+            result(CGPreflightScreenCaptureAccess())
+
+        case "requestScreenRecording":
+            // Triggers the macOS Screen Recording prompt the first time it's
+            // called (no-op + returns true once already granted). The system
+            // dialog names the capture helper ("sck-capture"), which is why the
+            // pre-warn card explains that wording up front.
+            result(CGRequestScreenCaptureAccess())
+
+        case "openScreenRecordingSettings":
+            // Deep-link straight to Privacy & Security → Screen Recording.
+            if let url = URL(string:
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                _ = NSWorkspace.shared.open(url)
+            }
+            result(nil)
 
         default:
             result(FlutterMethodNotImplemented)

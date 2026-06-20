@@ -149,6 +149,41 @@ class WindowService {
     }
   }
 
+  // ── Screen Recording permission (first-run wizard, Section B) ──
+
+  /// Current Screen Recording grant — non-prompting. Drives the wizard's
+  /// "Waiting for grant" poll. False on any platform without the native check.
+  Future<bool> screenRecordingStatus() async {
+    try {
+      final granted = await _channel.invokeMethod('screenRecordingStatus');
+      return granted == true;
+    } catch (e) {
+      _log('screenRecordingStatus failed: $e');
+      return false;
+    }
+  }
+
+  /// Trigger the macOS Screen Recording prompt (no-op once granted). Returns
+  /// whether access is already granted at call time.
+  Future<bool> requestScreenRecording() async {
+    try {
+      final granted = await _channel.invokeMethod('requestScreenRecording');
+      return granted == true;
+    } catch (e) {
+      _log('requestScreenRecording failed: $e');
+      return false;
+    }
+  }
+
+  /// Deep-link to System Settings → Privacy & Security → Screen Recording.
+  Future<void> openScreenRecordingSettings() async {
+    try {
+      await _channel.invokeMethod('openScreenRecordingSettings');
+    } catch (e) {
+      _log('openScreenRecordingSettings failed: $e');
+    }
+  }
+
   /// Start native drag tracking (macOS only). Native handles all mouse events
   /// and calls back onNativeDragComplete when done.
   Future<void> beginNativeDrag() async {

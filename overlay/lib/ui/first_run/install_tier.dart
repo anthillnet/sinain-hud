@@ -54,7 +54,7 @@ class InstallTierInfo {
   static const cloudPlusLocalWhisper = InstallTierInfo(
     tier: InstallTier.cloudPlusLocalWhisper,
     shortName: 'Hybrid',
-    tagline: 'Audio transcribed on-device; analysis still in the cloud.',
+    tagline: 'Audio transcribed on your Mac; analysis runs in the cloud.',
     cloudEgress: 'Screen context only — audio never leaves your Mac',
     approxDiskGb: 1.6,
     productizes: './start-local.sh',
