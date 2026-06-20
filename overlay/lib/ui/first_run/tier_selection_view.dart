@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'install_tier.dart';
+import 'wizard_theme.dart';
 
-/// SEED-001 Phase 5 — tier picker step of the first-run wizard (SCAFFOLD).
-///
-/// Presents T0 / T1 / T2 with plain-language tradeoffs. This is a visual stub:
-/// it renders and reports the chosen tier via [onSelected], but the downstream
-/// steps (permissions → tier-config → Ollama detection → model download →
-/// smoke test → write .env) are not implemented yet. See
-/// docs/dmg-distribution-spec.md §6 and overlay/lib/ui/first_run/README.md.
+/// Tier picker step of the first-run wizard, recreated from the Claude Design
+/// handoff (`Setup Wizard.dc.html`). Presents Cloud / Hybrid / Private as
+/// selectable cards — the chosen one gets the Ring UI green border, a tinted
+/// fill, and a check. Reports the choice via [onSelected]; the wizard owns the
+/// downstream config / permission / write-.env steps.
 class TierSelectionView extends StatelessWidget {
   const TierSelectionView({
     super.key,
@@ -22,30 +21,19 @@ class TierSelectionView extends StatelessWidget {
   /// Called when the user taps a tier card.
   final ValueChanged<InstallTier> onSelected;
 
-  static const Color _accent = Color(0xFF00FF88);
-
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Choose how Sinain runs',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.white.withValues(alpha: 0.9),
-          ),
-        ),
-        const SizedBox(height: 12),
         for (final info in InstallTierInfo.all) ...[
           _TierCard(
             info: info,
             isSelected: info.tier == selected,
             onTap: () => onSelected(info.tier),
           ),
-          const SizedBox(height: 8),
+          if (info != InstallTierInfo.all.last) const SizedBox(height: 7),
         ],
       ],
     );
@@ -63,62 +51,77 @@ class _TierCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
 
+  String get _sizeLabel {
+    final gb = info.approxDiskGb;
+    if (gb == 0) return 'no download';
+    final n = gb == gb.roundToDouble() ? gb.toStringAsFixed(0) : gb.toString();
+    return '~$n GB';
+  }
+
+  /// Privacy highlight — the Hybrid tier keeps audio on-device, which is its
+  /// headline tradeoff in the design.
+  String? get _highlight => info.tier == InstallTier.cloudPlusLocalWhisper
+      ? 'Screen context only — audio stays on your Mac'
+      : null;
+
   @override
   Widget build(BuildContext context) {
-    final border = isSelected
-        ? TierSelectionView._accent
-        : Colors.white.withValues(alpha: 0.12);
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: isSelected ? 0.06 : 0.03),
+          color: isSelected ? const Color(0x1F1F8039) : null,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: border, width: isSelected ? 1.5 : 1),
+          border: Border.all(
+            color: isSelected ? kWizardGreen : const Color(0x1FFFFFFF),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   info.shortName,
                   style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: TierSelectionView._accent,
-                    letterSpacing: 1.5,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                 ),
-                Text(
-                  info.approxDiskGb == 0
-                      ? 'no download'
-                      : '~${info.approxDiskGb.toStringAsFixed(0)} GB',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.white.withValues(alpha: 0.4),
+                if (isSelected) ...[
+                  const SizedBox(width: 6),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: WizardCheck(size: 13),
                   ),
+                ],
+                const Spacer(),
+                Text(
+                  _sizeLabel,
+                  style: const TextStyle(fontSize: 11, color: kWizardTextDim),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               info.tagline,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 11,
-                color: Colors.white.withValues(alpha: 0.75),
+                height: 1.36,
+                color: kWizardTextMuted,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Cloud: ${info.cloudEgress}',
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.white.withValues(alpha: 0.45),
+            if (_highlight != null) ...[
+              const SizedBox(height: 5),
+              Text(
+                _highlight!,
+                style: const TextStyle(fontSize: 11, color: kWizardGreen),
               ),
-            ),
+            ],
           ],
         ),
       ),
