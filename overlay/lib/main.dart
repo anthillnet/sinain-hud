@@ -125,8 +125,11 @@ Future<void> _startApp() async {
   }
   provisioningService.addListener(syncProvisioningWindow);
 
-  // Restore persisted position (if saved)
-  if (settingsService.settings.eyeX >= 0) {
+  // Restore persisted HUD geometry — but NOT while the wizard or feature tour
+  // owns the window, or their panel size gets clobbered back to the eye/chat
+  // frame (visible when dev runs share prefs with an installed HUD).
+  final hudOwnsWindow = !firstRunService.needsSetup && !featureTourService.needsTour;
+  if (hudOwnsWindow && settingsService.settings.eyeX >= 0) {
     final s = settingsService.settings;
     // Size depends on saved state
     final w = s.overlayState == HudState.chat
@@ -139,7 +142,7 @@ Future<void> _startApp() async {
   }
 
   // Default state is chat — make key window so text input works immediately
-  if (settingsService.settings.overlayState == HudState.chat) {
+  if (hudOwnsWindow && settingsService.settings.overlayState == HudState.chat) {
     await windowService.makeKeyWindow();
   }
 

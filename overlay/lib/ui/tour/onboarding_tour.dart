@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -49,6 +51,17 @@ const _shimmer1 = Color(0xFFDFE1E5);
 const _shimmer2 = Color(0xFFEBECF0);
 const _hairline = Color(0x14FFFFFF); // rgba(255,255,255,.08)
 
+// Knowledge web-UI "day theme" tokens — copied from the :root vars in
+// sinain-core/src/server.ts so scenes 7–8 render the real browser UI, not a
+// dark stand-in.
+const _webBg = Color(0xFFFFFFFF);
+const _webElev = Color(0xFFF8FAFC);
+const _webFg = Color(0xFF0F172A);
+const _webFgDim = Color(0xFF475569);
+const _webFgFaint = Color(0xFF94A3B8);
+const _webAccent = Color(0xFF2563EB);
+const _webBorder = Color(0xFFE2E8F0);
+
 class _Scene {
   const _Scene({
     required this.title,
@@ -63,16 +76,32 @@ class _Scene {
 }
 
 class _LiveAction {
-  const _LiveAction(this.label, this.path);
+  const _LiveAction(this.label, this.path, {this.icon});
   final String label;
 
   /// Path appended to the derived sinain-core http origin (e.g. /knowledge/ui).
   final String path;
+
+  /// Leading glyph — the real HUD control the user taps for this destination.
+  final IconData? icon;
 }
 
 class _OnboardingTourState extends State<OnboardingTour> {
+  static final bool _isMacOS = Platform.isMacOS;
   int _i = 0;
   late final List<_Scene> _scenes = _buildScenes();
+
+  // Window drag — mirror the HUD (overlay_shell._onDragStart/Update). On macOS,
+  // hand off to a native OS-level drag (smooth); only fall back to per-delta
+  // moveWindowBy off-macOS, which is the laggy path.
+  void _onDragStart(DragStartDetails _) {
+    if (_isMacOS) context.read<WindowService>().beginNativeDrag();
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    if (_isMacOS) return; // native handles it
+    context.read<WindowService>().moveWindowBy(d.delta.dx, -d.delta.dy);
+  }
 
   @override
   void initState() {
@@ -126,71 +155,76 @@ class _OnboardingTourState extends State<OnboardingTour> {
     // Drag anywhere to move the frameless window (mirrors FirstRunWizard).
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onPanUpdate: (d) =>
-          context.read<WindowService>().moveWindowBy(d.delta.dx, -d.delta.dy),
+      onPanStart: _onDragStart,
+      onPanUpdate: _onDragUpdate,
       child: Center(
-        child: Container(
-          width: 460,
-          decoration: BoxDecoration(
-            color: _cardBg,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                  color: Color(0x2E001C36),
-                  blurRadius: 24,
-                  offset: Offset(0, 4)),
-              BoxShadow(
-                  color: Color(0x1A001C36),
-                  blurRadius: 6,
-                  offset: Offset(0, 2)),
-            ],
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(height: 200, child: scene.visual),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(28, 28, 28, 22),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      scene.title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        height: 1.2,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 60),
-                      child: Text(
-                        scene.body,
+        // Scrollable so a transient too-small window constraint degrades to a
+        // scroll instead of a RenderFlex overflow (the window is sized to fit).
+        child: SingleChildScrollView(
+          child: Container(
+            width: 460,
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: const [
+                BoxShadow(
+                    color: Color(0x2E001C36),
+                    blurRadius: 24,
+                    offset: Offset(0, 4)),
+                BoxShadow(
+                    color: Color(0x1A001C36),
+                    blurRadius: 6,
+                    offset: Offset(0, 2)),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(height: 200, child: scene.visual),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 28, 28, 22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        scene.title,
                         style: const TextStyle(
-                          fontSize: 14,
-                          height: 1.43,
-                          color: _textMuted,
+                          fontSize: 20,
+                          height: 1.2,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
                         ),
                       ),
-                    ),
-                    if (scene.action != null) ...[
-                      const SizedBox(height: 12),
-                      _SecondaryAction(
-                        label: scene.action!.label,
-                        onTap: () => _openPath(scene.action!.path),
+                      const SizedBox(height: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 60),
+                        child: Text(
+                          scene.body,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            height: 1.43,
+                            color: _textMuted,
+                          ),
+                        ),
                       ),
+                      if (scene.action != null) ...[
+                        const SizedBox(height: 12),
+                        _SecondaryAction(
+                          label: scene.action!.label,
+                          icon: scene.action!.icon,
+                          onTap: () => _openPath(scene.action!.path),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      _footer(isLast),
                     ],
-                    const SizedBox(height: 20),
-                    _footer(isLast),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -239,16 +273,14 @@ class _OnboardingTourState extends State<OnboardingTour> {
         // 1 · Welcome
         const _Scene(
           title: 'Meet Sinain',
-          body:
-              "Sinain watches what's on your screen and offers help exactly "
+          body: "Sinain watches what's on your screen and offers help exactly "
               'where you need it — without getting in your way.',
           visual: _WelcomeVisual(),
         ),
         // 2 · The markers
         const _Scene(
           title: 'Spot the markers',
-          body:
-              'When Sinain sees something it can help with, it drops an eye '
+          body: 'When Sinain sees something it can help with, it drops an eye '
               'marker on it. Click for a quick tip, double-click to jump '
               'straight into a thread.',
           visual: _MarkersVisual(),
@@ -256,16 +288,14 @@ class _OnboardingTourState extends State<OnboardingTour> {
         // 3 · Ask about anything (region) — copy resolved from design default
         const _Scene(
           title: 'Or ask about anything',
-          body:
-              'Double-tap the eye, then drag a box around any part of your '
+          body: 'Double-tap the eye, then drag a box around any part of your '
               'screen — like a screenshot. Sinain hides while you drag.',
           visual: _RegionVisual(),
         ),
         // 4 · Where chat lands
         const _Scene(
           title: 'Chat, your way',
-          body:
-              'A thread can stay in the Sinain HUD, or pop out into a '
+          body: 'A thread can stay in the Sinain HUD, or pop out into a '
               'standalone app you already use — ChatGPT, Claude, anything. '
               'Either way Sinain seeds it with the context first.',
           visual: _WhereChatLandsVisual(),
@@ -291,12 +321,12 @@ class _OnboardingTourState extends State<OnboardingTour> {
         // 7 · Memory & knowledge browser (NEW)
         const _Scene(
           title: 'Sinain remembers',
-          body:
-              'Everything Sinain learns becomes searchable memory — facts, '
+          body: 'Everything Sinain learns becomes searchable memory — facts, '
               'people, decisions — across every session. Open the knowledge '
               'browser to explore or search it.',
           visual: _KnowledgeVisual(),
-          action: _LiveAction('Open knowledge browser  ↗', '/knowledge/ui'),
+          action: _LiveAction('Open knowledge browser  ↗', '/knowledge/ui',
+              icon: Icons.psychology_outlined),
         ),
         // 8 · Share a concept (NEW)
         const _Scene(
@@ -306,13 +336,13 @@ class _OnboardingTourState extends State<OnboardingTour> {
               'Mac; whoever you send it to sees the knowledge, never your '
               'screen — and the host only ever logs a generic page view.',
           visual: _ShareVisual(),
-          action: _LiveAction('Open your share links  ↗', '/knowledge/ui/shares'),
+          action:
+              _LiveAction('Open your share links  ↗', '/knowledge/ui/shares'),
         ),
         // 9 · Screen & audio
         const _Scene(
           title: 'Screen and audio',
-          body:
-              'Sinain reads your screen and can capture video and audio for '
+          body: 'Sinain reads your screen and can capture video and audio for '
               'richer context. Flip either one on or off from the controls '
               'whenever you like.',
           visual: _CaptureVisual(),
@@ -320,8 +350,7 @@ class _OnboardingTourState extends State<OnboardingTour> {
         // 10 · Private by design
         const _Scene(
           title: 'Private by design',
-          body:
-              'When you share your screen, others see only your apps — never '
+          body: 'When you share your screen, others see only your apps — never '
               'Sinain. In demo mode the eye turns red and Sinain sees itself, '
               'which can cause vision artifacts.',
           visual: _PrivacyVisual(),
@@ -352,8 +381,9 @@ class _EyeGlyph extends StatelessWidget {
   final Color? circleFill;
 
   @override
-  Widget build(BuildContext context) =>
-      CustomPaint(size: Size.square(size), painter: _EyePainter(_green, strokeWidth, circleFill));
+  Widget build(BuildContext context) => CustomPaint(
+      size: Size.square(size),
+      painter: _EyePainter(_green, strokeWidth, circleFill));
 }
 
 class _EyePainter extends CustomPainter {
@@ -388,7 +418,9 @@ class _EyePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EyePainter old) =>
-      old.color != color || old.strokeWidth != strokeWidth || old.circleFill != circleFill;
+      old.color != color ||
+      old.strokeWidth != strokeWidth ||
+      old.circleFill != circleFill;
 }
 
 class _PrimaryButton extends StatelessWidget {
@@ -408,13 +440,16 @@ class _PrimaryButton extends StatelessWidget {
           ),
           child: Text(label,
               style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w500, color: Colors.white)),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white)),
         ),
       );
 }
 
 class _TextButton extends StatelessWidget {
-  const _TextButton({required this.label, required this.onTap, required this.color});
+  const _TextButton(
+      {required this.label, required this.onTap, required this.color});
   final String label;
   final VoidCallback onTap;
   final Color color;
@@ -431,9 +466,10 @@ class _TextButton extends StatelessWidget {
 }
 
 class _SecondaryAction extends StatelessWidget {
-  const _SecondaryAction({required this.label, required this.onTap});
+  const _SecondaryAction({required this.label, required this.onTap, this.icon});
   final String label;
   final VoidCallback onTap;
+  final IconData? icon;
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
@@ -448,9 +484,20 @@ class _SecondaryAction extends StatelessWidget {
               borderRadius: BorderRadius.circular(6),
               border: Border.all(color: _green),
             ),
-            child: Text(label,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFF4CC56A))),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 15, color: const Color(0xFF4CC56A)),
+                  const SizedBox(width: 7),
+                ],
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF4CC56A))),
+              ],
+            ),
           ),
         ),
       );
@@ -492,8 +539,8 @@ Widget _chatTermChips() => Row(
           height: 22,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           alignment: Alignment.center,
-          decoration:
-              BoxDecoration(color: _blue, borderRadius: BorderRadius.circular(3)),
+          decoration: BoxDecoration(
+              color: _blue, borderRadius: BorderRadius.circular(3)),
           child: const Text('Chat',
               style: TextStyle(fontSize: 11, color: Colors.white)),
         ),
@@ -519,30 +566,15 @@ class _WelcomeVisual extends StatelessWidget {
   const _WelcomeVisual();
   @override
   Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0x1A1F8039)),
-                ),
-              ),
-              Container(
-                width: 140,
-                height: 140,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0x2E1F8039)),
-                ),
-              ),
-              const _EyeGlyph(size: 84, strokeWidth: 2.4, circleFill: _cardBg),
-            ],
-          ),
+        // Match the animation's baked-in background (#0d0d12) so the looping
+        // WebP blends seamlessly into the scene area.
+        color: const Color(0xFF0D0D12),
+        alignment: Alignment.center,
+        child: Image.asset(
+          'assets/sinain_eye.webp',
+          height: 200,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
         ),
       );
 }
@@ -565,27 +597,33 @@ class _MarkersVisual extends StatelessWidget {
               top: 64,
               child: Container(
                 width: 280,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: _panel,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: const Color(0x731F8039)),
                   boxShadow: const [
-                    BoxShadow(color: Color(0x4D000000), blurRadius: 16, offset: Offset(0, 4))
+                    BoxShadow(
+                        color: Color(0x4D000000),
+                        blurRadius: 16,
+                        offset: Offset(0, 4))
                   ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('High memory usage in Gmail',
+                    const Text('Tighten your email opening',
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             color: Colors.white)),
                     const SizedBox(height: 3),
-                    const Text('Close unused tabs to free up memory.',
-                        style: TextStyle(fontSize: 11, height: 1.36, color: _textMuted)),
+                    const Text(
+                        'Lead with the ask — it’s buried in paragraph two.',
+                        style: TextStyle(
+                            fontSize: 11, height: 1.36, color: _textMuted)),
                     const SizedBox(height: 8),
                     _chatTermChips(),
                   ],
@@ -634,7 +672,9 @@ class _RegionVisual extends StatelessWidget {
                             borderRadius: BorderRadius.circular(3)),
                         child: const Text('240 × 104',
                             style: TextStyle(
-                                fontSize: 10, color: Colors.white, fontFamily: 'monospace')),
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontFamily: 'monospace')),
                       ),
                     ),
                     // bottom toolbar (Chat / Term)
@@ -703,7 +743,9 @@ class _WhereChatLandsVisual extends StatelessWidget {
                   SizedBox(width: 6),
                   Text('Sinain HUD',
                       style: TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w500, color: Colors.white)),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white)),
                 ],
               ),
               footerColor: Colors.white,
@@ -711,7 +753,8 @@ class _WhereChatLandsVisual extends StatelessWidget {
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 14),
-              child: Text('or', style: TextStyle(fontSize: 12, color: _textDim)),
+              child:
+                  Text('or', style: TextStyle(fontSize: 12, color: _textDim)),
             ),
             // External app card (ChatGPT)
             _appCard(
@@ -724,7 +767,9 @@ class _WhereChatLandsVisual extends StatelessWidget {
                   SizedBox(width: 6),
                   Text('Your app',
                       style: TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w500, color: _textMuted)),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: _textMuted)),
                 ],
               ),
               footerColor: _textMuted,
@@ -799,15 +844,17 @@ class _WhereChatLandsVisual extends StatelessWidget {
                           decoration: BoxDecoration(
                               color: _panel,
                               borderRadius: BorderRadius.circular(7),
-                              border: Border.all(color: const Color(0x1AFFFFFF)))),
+                              border:
+                                  Border.all(color: const Color(0x1AFFFFFF)))),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration:
-                    const BoxDecoration(border: Border(top: BorderSide(color: _hairline))),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: const BoxDecoration(
+                    border: Border(top: BorderSide(color: _hairline))),
                 child: header,
               ),
             ],
@@ -819,7 +866,8 @@ class _WhereChatLandsVisual extends StatelessWidget {
               child: Container(
                 width: 16,
                 height: 16,
-                decoration: const BoxDecoration(color: _green, shape: BoxShape.circle),
+                decoration:
+                    const BoxDecoration(color: _green, shape: BoxShape.circle),
                 child: const Icon(Icons.check, size: 10, color: Colors.white),
               ),
             ),
@@ -828,8 +876,10 @@ class _WhereChatLandsVisual extends StatelessWidget {
     );
   }
 
-  Widget _dot(Color c) =>
-      Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle));
+  Widget _dot(Color c) => Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle));
 }
 
 class _AgentsVisual extends StatelessWidget {
@@ -859,7 +909,8 @@ class _AgentsVisual extends StatelessWidget {
         ),
       );
 
-  Widget _row(Color badge, String letter, String name, String? tag, {bool isMono = false}) {
+  Widget _row(Color badge, String letter, String name, String? tag,
+      {bool isMono = false}) {
     return Container(
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -874,11 +925,13 @@ class _AgentsVisual extends StatelessWidget {
             width: 18,
             height: 18,
             alignment: Alignment.center,
-            decoration:
-                BoxDecoration(color: badge, borderRadius: BorderRadius.circular(4)),
+            decoration: BoxDecoration(
+                color: badge, borderRadius: BorderRadius.circular(4)),
             child: Text(letter,
                 style: const TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white)),
           ),
           const SizedBox(width: 8),
           Text(name,
@@ -934,7 +987,8 @@ class _HandoffVisual extends StatelessWidget {
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                   decoration: BoxDecoration(
                     color: _cardBg,
                     borderRadius: BorderRadius.circular(8),
@@ -973,7 +1027,9 @@ class _HandoffVisual extends StatelessWidget {
                       border: Border.all(color: const Color(0x24FFFFFF)),
                       boxShadow: const [
                         BoxShadow(
-                            color: Color(0x73000000), blurRadius: 16, offset: Offset(0, 4))
+                            color: Color(0x73000000),
+                            blurRadius: 16,
+                            offset: Offset(0, 4))
                       ],
                     ),
                     clipBehavior: Clip.antiAlias,
@@ -982,7 +1038,8 @@ class _HandoffVisual extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 11, vertical: 7),
                           child: Text('Continue in',
                               style: TextStyle(fontSize: 11, color: _textDim)),
                         ),
@@ -998,7 +1055,8 @@ class _HandoffVisual extends StatelessWidget {
         ),
       );
 
-  Widget _agentRow(Color badge, String mono, String name, {bool selected = false}) =>
+  Widget _agentRow(Color badge, String mono, String name,
+          {bool selected = false}) =>
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
@@ -1013,193 +1071,241 @@ class _HandoffVisual extends StatelessWidget {
               width: 16,
               height: 16,
               alignment: Alignment.center,
-              decoration:
-                  BoxDecoration(color: badge, borderRadius: BorderRadius.circular(4)),
+              decoration: BoxDecoration(
+                  color: badge, borderRadius: BorderRadius.circular(4)),
               child: Text(mono,
                   style: const TextStyle(
-                      fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
             ),
             const SizedBox(width: 8),
             Text(name,
                 style: const TextStyle(
-                    fontSize: 12, color: Colors.white, fontFamily: 'monospace')),
+                    fontSize: 12,
+                    color: Colors.white,
+                    fontFamily: 'monospace')),
           ],
         ),
       );
 }
 
+/// Scene 7 — the actual knowledge web UI (day theme), shown as a browser window
+/// floating in the dark scene area. Header (blue SINAIN logo + search + 📤
+/// Shares), then bookmark cards — matching sinain-core/src/server.ts.
 class _KnowledgeVisual extends StatelessWidget {
   const _KnowledgeVisual();
   @override
   Widget build(BuildContext context) => Container(
         color: _visualDark,
+        // FittedBox so the (taller) browser window scales to fit the 200px
+        // scene area instead of overflowing it.
         child: Center(
-          child: Container(
-            width: 300,
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0x1FFFFFFF)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // header: logo + search
-                Container(
-                  color: _panel,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  child: Row(
-                    children: [
-                      const _EyeGlyph(size: 14, strokeWidth: 3),
-                      const SizedBox(width: 6),
-                      const Text('SINAIN',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.5,
-                              color: Colors.white)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Container(
-                          height: 22,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          alignment: Alignment.centerLeft,
-                          decoration: BoxDecoration(
-                            color: _visualDarker,
-                            borderRadius: BorderRadius.circular(11),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Container(
+              width: 320,
+              decoration: BoxDecoration(
+                color: _webBg,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x40000000),
+                      blurRadius: 20,
+                      offset: Offset(0, 6)),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // sticky header: logo · search · Shares
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: _webBg,
+                      border: Border(bottom: BorderSide(color: _webBorder)),
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    child: Row(
+                      children: [
+                        const Text('SINAIN',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: _webAccent)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            height: 26,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            alignment: Alignment.centerLeft,
+                            decoration: BoxDecoration(
+                              color: _webElev,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: _webBorder),
+                            ),
+                            child: const Text('Search memory…',
+                                style: TextStyle(
+                                    fontSize: 11, color: _webFgFaint)),
                           ),
-                          child: const Text('Search memory…',
-                              style: TextStyle(fontSize: 10, color: _textDim)),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Container(
+                          height: 26,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _webElev,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: _webBorder),
+                          ),
+                          child: const Text('📤 Shares',
+                              style: TextStyle(fontSize: 11, color: _webFg)),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                _entity('Gmail', 'high memory · 1,002 MB · 17k emails', _blue),
-                const Divider(height: 1, color: _hairline),
-                _entity('Chrome extensions', 'Copilot + GitHub loaded together', _green),
-              ],
+                  // bookmark cards
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _entityCard(
+                            'Email style', 'concise · ask-first · warm tone'),
+                        const SizedBox(height: 8),
+                        _entityCard(
+                            'Follow-ups', 'nudge after 2 business days'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       );
 
-  Widget _entity(String name, String sub, Color badge) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        child: Row(
+  Widget _entityCard(String entity, String meta) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _webElev,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: _webBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 22,
-              height: 22,
-              alignment: Alignment.center,
-              decoration:
-                  BoxDecoration(color: badge, borderRadius: BorderRadius.circular(5)),
-              child: const Icon(Icons.bubble_chart, size: 13, color: Colors.white),
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
-                  const SizedBox(height: 2),
-                  Text(sub, style: const TextStyle(fontSize: 10, color: _textMuted)),
-                ],
-              ),
-            ),
+            Text(entity,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _webAccent)),
+            const SizedBox(height: 4),
+            Text(meta, style: const TextStyle(fontSize: 11, color: _webFgDim)),
           ],
         ),
       );
 }
 
+/// Scene 8 — the real entity page (day theme) with the 📤 Share icon button
+/// (server.ts #actShare). Clicking it mints the privacy-preserving share link.
 class _ShareVisual extends StatelessWidget {
   const _ShareVisual();
   @override
   Widget build(BuildContext context) => Container(
         color: _visualDark,
         child: Center(
-          child: Container(
-            width: 300,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0x1FFFFFFF)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text('High memory usage in Gmail',
-                          style: TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      height: 26,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                          color: _green, borderRadius: BorderRadius.circular(4)),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.ios_share, size: 13, color: Colors.white),
-                          SizedBox(width: 5),
-                          Text('Share',
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Container(
+              width: 320,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _webBg,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x40000000),
+                      blurRadius: 20,
+                      offset: Offset(0, 6)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // page-header: title + page-actions (📤 share icon button)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text('Email writing style',
                               style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white)),
-                        ],
-                      ),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _webFg)),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          height: 28,
+                          padding: const EdgeInsets.symmetric(horizontal: 9),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _webElev,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: _webBorder),
+                          ),
+                          child:
+                              const Text('📤', style: TextStyle(fontSize: 14)),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // link chip
-                Container(
-                  height: 30,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: _visualDarker,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0x1FFFFFFF)),
                   ),
-                  child: const Row(
+                  // minted share link
+                  Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: _webElev,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: _webBorder),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.link, size: 14, color: _webFgDim),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text('sinain.com/share.html#…',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: _webFgDim,
+                                  fontFamily: 'monospace')),
+                        ),
+                        Text('📋', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Row(
                     children: [
-                      Icon(Icons.link, size: 14, color: _textMuted),
-                      SizedBox(width: 8),
+                      Icon(Icons.lock_outline, size: 12, color: _webAccent),
+                      SizedBox(width: 6),
                       Expanded(
-                        child: Text('sinain.com/share.html#…',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 11, color: _textMuted, fontFamily: 'monospace')),
+                        child: Text(
+                            'Host logs only “GET /share.html” — never the concept',
+                            style: TextStyle(fontSize: 10, color: _webFgFaint)),
                       ),
-                      Icon(Icons.copy, size: 13, color: _textDim),
                     ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Row(
-                  children: [
-                    Icon(Icons.lock_outline, size: 12, color: _green),
-                    SizedBox(width: 6),
-                    Expanded(
-                      child: Text('Host logs only “GET /share.html” — never the concept',
-                          style: TextStyle(fontSize: 10, color: _textDim)),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1217,10 +1323,13 @@ class _CaptureVisual extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _toggleRow(Icons.desktop_windows_outlined, 'Screen & video',
+                // Real in-app control glyphs (overlay_shell.dart): screen =
+                // desktop_windows, audio = volume_up_rounded.
+                _toggleRow(Icons.desktop_windows, 'Screen & video',
                     "What's on your display"),
                 const SizedBox(height: 10),
-                _toggleRow(Icons.graphic_eq, 'Audio', 'Mic and system sound'),
+                _toggleRow(
+                    Icons.volume_up_rounded, 'Audio', 'Mic and system sound'),
               ],
             ),
           ),
@@ -1246,8 +1355,11 @@ class _CaptureVisual extends StatelessWidget {
                 children: [
                   Text(title,
                       style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w500, color: Colors.white)),
-                  Text(sub, style: const TextStyle(fontSize: 11, color: _textDim)),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white)),
+                  Text(sub,
+                      style: const TextStyle(fontSize: 11, color: _textDim)),
                 ],
               ),
             ),
@@ -1264,8 +1376,8 @@ class _CaptureVisual extends StatelessWidget {
                   child: Container(
                     width: 16,
                     height: 16,
-                    decoration:
-                        const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                    decoration: const BoxDecoration(
+                        color: Colors.white, shape: BoxShape.circle),
                   ),
                 ),
               ]),
@@ -1285,20 +1397,30 @@ class _PrivacyVisual extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _screenEye(_green, struck: true, caption: 'Hidden from capture · vision stays clean'),
-              Container(width: 1, height: 90, color: _hairline, margin: const EdgeInsets.symmetric(horizontal: 30)),
-              _screenEye(_red, struck: false, caption: 'Demo mode · Sinain is visible'),
+              _screenEye(_green,
+                  struck: true,
+                  caption: 'Hidden from capture · vision stays clean'),
+              Container(
+                  width: 1,
+                  height: 90,
+                  color: _hairline,
+                  margin: const EdgeInsets.symmetric(horizontal: 30)),
+              _screenEye(_red,
+                  struck: false, caption: 'Demo mode · Sinain is visible'),
             ],
           ),
         ),
       );
 
-  Widget _screenEye(Color c, {required bool struck, required String caption}) => SizedBox(
+  Widget _screenEye(Color c, {required bool struck, required String caption}) =>
+      SizedBox(
         width: 130,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CustomPaint(size: const Size(70, 49), painter: _ScreenEyePainter(c, struck)),
+            CustomPaint(
+                size: const Size(70, 49),
+                painter: _ScreenEyePainter(c, struck)),
             const SizedBox(height: 12),
             Text(caption,
                 textAlign: TextAlign.center,
@@ -1345,7 +1467,8 @@ class _ScreenEyePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ScreenEyePainter old) => old.color != color || old.struck != struck;
+  bool shouldRepaint(_ScreenEyePainter old) =>
+      old.color != color || old.struck != struck;
 }
 
 class _DoneVisual extends StatelessWidget {
@@ -1367,7 +1490,8 @@ class _DoneVisual extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    const Icon(Icons.circle_outlined, size: 14, color: _textDim),
+                    const Icon(Icons.circle_outlined,
+                        size: 14, color: _textDim),
                     const SizedBox(width: 10),
                     const Icon(Icons.settings, size: 14, color: _textDim),
                     const SizedBox(width: 10),
@@ -1397,7 +1521,7 @@ class _DoneVisual extends StatelessWidget {
                     SizedBox(
                       width: 200,
                       child: Text(
-                        'Sinain lives up here. Tap the eye to pause everything, anytime.',
+                        'Sinain lives up here. Tap the eye to collapse the HUD, anytime.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: _textMuted),
                       ),
