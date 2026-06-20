@@ -61,7 +61,7 @@ class _TierCard extends StatelessWidget {
   /// Privacy highlight — the Hybrid tier keeps audio on-device, which is its
   /// headline tradeoff in the design.
   String? get _highlight => info.tier == InstallTier.cloudPlusLocalWhisper
-      ? 'Screen context only — audio stays on your Mac'
+      ? 'Your audio never leaves the device.'
       : null;
 
   @override

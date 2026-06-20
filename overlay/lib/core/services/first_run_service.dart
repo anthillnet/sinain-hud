@@ -42,11 +42,19 @@ class FirstRunService extends ChangeNotifier {
   InstallTier? _resumeTier;
   String? _resumeKey;
 
+  /// QA / preview override: `SINAIN_WIZARD_PREVIEW=1` forces the wizard to show
+  /// on a machine that already has `~/.sinain/.env`, and makes [completeSetup]
+  /// non-destructive (no env write, no backend relaunch). Mirrors the tour's
+  /// `SINAIN_FORCE_TOUR` hook. Resolved in [init].
+  bool _previewMode = false;
+
   bool get initialized => _initialized;
 
   /// True when there's no config yet → run the first-run wizard. Once setup
   /// writes `~/.sinain/.env`, this is false and the wizard won't re-run.
-  bool get needsSetup => !_envExists && !_completed;
+  /// In preview mode the env-existence check is bypassed so the wizard always
+  /// shows until it's stepped through.
+  bool get needsSetup => (_previewMode || !_envExists) && !_completed;
 
   /// When a permission-step checkpoint survived a macOS relaunch, the wizard
   /// jumps straight back to the Screen Recording step with these restored.
@@ -60,6 +68,8 @@ class FirstRunService extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    final preview = Platform.environment['SINAIN_WIZARD_PREVIEW'];
+    _previewMode = preview == '1' || preview == 'true';
     _envExists = await File(_envPath).exists();
     // Only honour a checkpoint while the wizard would actually run (no env yet).
     if (!_envExists) {
@@ -107,6 +117,16 @@ class FirstRunService extends ChangeNotifier {
   /// it boots through the normal startup path with config present. Relaunch is
   /// more robust than an in-place handoff (correct window sizing + key window).
   Future<void> completeSetup(InstallTier tier, {String? openRouterKey}) async {
+    // Preview mode: show the finish screen and dismiss the wizard WITHOUT
+    // touching `~/.sinain/.env` or relaunching (which would run stop.sh and
+    // tear down a live dev stack). Lets `SINAIN_WIZARD_PREVIEW=1` step the whole
+    // flow safely on a configured machine.
+    if (_previewMode) {
+      await _clearCheckpoint();
+      _completed = true;
+      notifyListeners();
+      return;
+    }
     final vars = _envForTier(tier, openRouterKey: openRouterKey);
     await _writeEnv(vars);
     // Mark the legacy OnboardingService complete too — this wizard already

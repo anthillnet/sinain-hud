@@ -167,6 +167,18 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     }
   }
 
+  // ── Window drag ──────────────────────────────────────────────────────────
+  // Mirror the HUD / feature tour: on macOS hand off to a native OS-level drag
+  // (smooth), and only fall back to per-delta moveWindowBy off-macOS (laggy).
+  void _onDragStart(DragStartDetails _) {
+    if (_isMacOS) context.read<WindowService>().beginNativeDrag();
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    if (_isMacOS) return; // native handles it
+    context.read<WindowService>().moveWindowBy(d.delta.dx, -d.delta.dy);
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -175,8 +187,8 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     // reach the buttons / text field (pan vs tap).
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onPanUpdate: (d) =>
-          context.read<WindowService>().moveWindowBy(d.delta.dx, -d.delta.dy),
+      onPanStart: _onDragStart,
+      onPanUpdate: _onDragUpdate,
       child: Container(
         width: 340,
         height: 420,
@@ -279,20 +291,30 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Choose how Sinain runs',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Choose how Sinain runs',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TierSelectionView(
+                  selected: _tier,
+                  onSelected: (t) => setState(() => _tier = t),
+                ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 12),
-        TierSelectionView(
-          selected: _tier,
-          onSelected: (t) => setState(() => _tier = t),
-        ),
-        const Spacer(),
+        const SizedBox(height: 14),
         WizardButton(
           label: 'Continue',
           onTap: _tier == null ? null : _goToConfig,
@@ -491,62 +513,76 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 2),
-        const Center(child: WizardEyeGlyph(size: 46)),
-        const SizedBox(height: 12),
-        const Text(
-          'One quick permission',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Sinain reads your screen to offer help in context, and hears system '
-          'audio the same way. macOS will ask you to allow Screen Recording.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, height: 1.38, color: kWizardTextMuted),
-        ),
-        const SizedBox(height: 14),
-        // Helper warning — the system prompt names the capture helper.
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0x1AE56D17),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-          child: const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: EdgeInsets.only(top: 1),
-                child: Icon(Icons.warning_amber_rounded,
-                    size: 14, color: kWizardOrange),
-              ),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 2),
+                const Center(child: WizardEyeGlyph(size: 46)),
+                const SizedBox(height: 12),
+                const Text(
+                  'One quick permission',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Sinain reads your screen to offer help in context, and hears '
+                  'system audio the same way. macOS will ask you to allow Screen '
+                  'Recording.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13, height: 1.38, color: kWizardTextMuted),
+                ),
+                const SizedBox(height: 14),
+                // Helper warning — the system prompt names the capture helper.
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0x1AE56D17),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TextSpan(text: 'The system prompt will say '),
-                      TextSpan(
-                        text: '“sck-capture”',
-                        style: TextStyle(fontFamily: 'monospace'),
+                      Padding(
+                        padding: EdgeInsets.only(top: 1),
+                        child: Icon(Icons.warning_amber_rounded,
+                            size: 14, color: kWizardOrange),
                       ),
-                      TextSpan(text: ' — that’s Sinain’s capture helper.'),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(text: 'The system prompt will say '),
+                              TextSpan(
+                                text: '“sck-capture”',
+                                style: TextStyle(fontFamily: 'monospace'),
+                              ),
+                              TextSpan(
+                                  text: ' — that’s Sinain’s capture helper.'),
+                            ],
+                          ),
+                          style: TextStyle(
+                              fontSize: 11, height: 1.36, color: kWizardCodeText),
+                        ),
+                      ),
                     ],
                   ),
-                  style: TextStyle(
-                      fontSize: 11, height: 1.36, color: kWizardCodeText),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-        const Spacer(),
+        const SizedBox(height: 14),
         WizardButton(label: 'Allow Screen Recording', onTap: _requestPermission),
         const SizedBox(height: 12),
         Center(child: WizardTextLink(label: 'Do this later', onTap: _finish)),
@@ -558,87 +594,101 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Row(
-          children: [
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2.5, color: kWizardGreen),
-            ),
-            SizedBox(width: 10),
-            Text(
-              'Waiting for permission',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        const Text(
-          'In System Settings → Privacy & Security → Screen Recording, turn on '
-          'Sinain.',
-          style: TextStyle(fontSize: 12, height: 1.42, color: kWizardTextMuted),
-        ),
-        const SizedBox(height: 10),
-        // Faux Settings row mirroring what the user will see + toggle ON.
-        Container(
-          decoration: BoxDecoration(
-            color: kWizardPanel,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: const Color(0x1AFFFFFF)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-          child: Row(
-            children: [
-              const WizardEyeGlyph(size: 20, strokeWidth: 3),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Row(
                   children: [
-                    Text('Sinain',
+                    SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: kWizardGreen),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Waiting for permission',
                         style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white)),
-                    Text('listed as “sck-capture”',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                            color: kWizardTextDim)),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              // toggle (on)
-              Container(
-                width: 34,
-                height: 19,
-                decoration: BoxDecoration(
-                  color: kWizardGreen,
-                  borderRadius: BorderRadius.circular(10),
+                const SizedBox(height: 14),
+                const Text(
+                  'In System Settings → Privacy & Security → Screen Recording, '
+                  'turn on Sinain.',
+                  style: TextStyle(
+                      fontSize: 12, height: 1.42, color: kWizardTextMuted),
                 ),
-                child: Stack(children: [
-                  Positioned(
-                    top: 2,
-                    left: 17,
-                    child: Container(
-                      width: 15,
-                      height: 15,
-                      decoration: const BoxDecoration(
-                          color: Colors.white, shape: BoxShape.circle),
-                    ),
+                const SizedBox(height: 10),
+                // Faux Settings row mirroring what the user will see + toggle.
+                Container(
+                  decoration: BoxDecoration(
+                    color: kWizardPanel,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0x1AFFFFFF)),
                   ),
-                ]),
-              ),
-            ],
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  child: Row(
+                    children: [
+                      const WizardEyeGlyph(size: 20, strokeWidth: 3),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Sinain',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.white)),
+                            Text('listed as “sck-capture”',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    color: kWizardTextDim)),
+                          ],
+                        ),
+                      ),
+                      // toggle (on)
+                      Container(
+                        width: 34,
+                        height: 19,
+                        decoration: BoxDecoration(
+                          color: kWizardGreen,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Stack(children: [
+                          Positioned(
+                            top: 2,
+                            left: 17,
+                            child: Container(
+                              width: 15,
+                              height: 15,
+                              decoration: const BoxDecoration(
+                                  color: Colors.white, shape: BoxShape.circle),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        const Spacer(),
+        const SizedBox(height: 14),
         WizardButton(
           label: 'Open System Settings',
           onTap: () =>
