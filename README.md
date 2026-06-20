@@ -9,12 +9,25 @@
 **Context OS** — ambient intelligence for builders. Captures what you see and hear, distills it into a private knowledge graph, accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay.
 
 <p align="center">
-  <img src="docs/media/sinain-demo-full.gif" alt="Sinain demo" width="720">
+  <img src="docs/media/sinain-flow.gif" alt="Sinain flow — highlight a region, open chat or a CLI agent with full context, hand off to any assistant" width="720">
 </p>
 
 **[Quick Start](#quick-start)** · **[Docs](docs/)** · **[Privacy](docs/privacy-protection-design.md)** · **[Configuration](docs/CONFIGURATION.md)** · **[Contributing](CONTRIBUTING.md)**
 
 ---
+
+### From a glance to a working agent
+
+Stop copy-pasting context into your AI. Sinain watches your screen and **highlights the regions where an agent could help** — then opens that region as a chat or a CLI agent already holding your full context (see the demo above).
+
+1. **Spot a region** — Sinain highlights actionable areas on the screen as you work.
+2. **Engage** — click a highlighted region and choose how to act on it: a **chat** or a **CLI agent**.
+3. **Chat, in context** — the chat opens already holding the region, your live situational context, and relevant facts from the knowledge graph.
+4. **Hand off to a CLI agent** — escalate the same thread into a coding agent (Claude Code, Codex, Goose, Junie…), preseeded with identical knowledge.
+5. **Your tools, your setup** — pick which assistant backs the chat and the handoff; carry the full transcript, or copy a portable context seed for any other tool.
+6. **Or aim it yourself** — double-tap the eye to draw a region manually and ask about exactly what you want.
+
+No dump, no re-paste — the context travels with the task. Every assistant in the loop is yours to choose, configured in [`agents.json`](docs/AGENT-ROSTER.md).
 
 ### You, Augmented
 

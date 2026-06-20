@@ -222,19 +222,29 @@
   .hc-foot .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 1.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 
-  /* ─── Flow walkthrough (§01 — how it works) ─── */
-  .flow-video-wrap{
-    margin:0 0 36px;border-radius:12px;overflow:hidden;
-    border:1px solid var(--border);box-shadow:var(--shadow-lg);background:#0d0d12;
+  /* ─── Flow walkthrough (§01) — product tour cards, mirroring the
+        post-install onboarding tour (Onboarding.dc.html / PR #190) ─── */
+  @keyframes sinAnts{to{stroke-dashoffset:-16}}
+  .tour-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .tour-card{
+    margin:0;background:#1E1F22;border-radius:12px;overflow:hidden;color:#fff;
+    border:1px solid var(--border);
+    box-shadow:0 4px 24px rgba(0,28,54,.10), 0 2px 6px rgba(0,28,54,.06);
+    transition:transform .15s, box-shadow .15s;
   }
-  .flow-video-wrap video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#0d0d12}
-  .flow-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
-  .flow-card{
-    margin:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;
-    background:#0d0d12;box-shadow:var(--shadow);transition:border-color .15s, transform .15s;
-  }
-  .flow-card:hover{border-color:var(--border-strong);transform:translateY(-1px)}
-  .flow-card img{display:block;width:100%;height:auto}
+  .tour-card:hover{transform:translateY(-2px);box-shadow:0 12px 34px rgba(0,28,54,.16)}
+  .tour-vis{height:178px;position:relative;overflow:hidden}
+  .tour-body{padding:20px 22px 22px}
+  .tour-step{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#3DA35D}
+  .tour-body h3{margin:7px 0 7px;font-size:18px;font-weight:600;line-height:1.18;color:#fff}
+  .tour-body p{margin:0;font-size:13px;line-height:1.5;color:#A8ADBD}
+  /* shared illustration primitives */
+  .tv-skel{position:absolute;inset:0;padding:20px;opacity:.55}
+  .tv-bar{background:#EBECF0;border-radius:3px}
+  .tv-pop{position:absolute;background:#2B2D30;border:1px solid rgba(31,128,57,.45);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+  .tv-chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;border-radius:4px;font-size:12px;font-weight:500}
+  .tv-chip.chat{background:#3369D6;color:#fff}
+  .tv-chip.term{background:transparent;border:1px solid rgba(255,255,255,.2);color:#fff;font-family:var(--mono)}
 
   /* ─── Section header pattern ─── */
   section.s{padding:88px 0;border-top:1px solid var(--border)}
@@ -499,6 +509,7 @@
     .sec-head{grid-template-columns:1fr;gap:8px}
     h1.hero-title{font-size:42px}
     .pillars,.modes,.lm,.mcp,.prereq{grid-template-columns:1fr;gap:10px}
+    .tour-grid{grid-template-columns:1fr;gap:10px}
     .ctable .crow{grid-template-columns:1fr;gap:6px}
     .ctable .crow.head{display:none}
     .hot,.dd{grid-template-columns:1fr}
@@ -560,8 +571,9 @@
         <p class="hero-sub">
           A private Context OS that runs ambient in the background, distilling your screen and audio
           into a <strong>structured knowledge graph</strong> of facts, entities, and decisions —
-          accessible from MCP, a web UI, and a screen-recording-invisible HUD overlay,
-          plus <strong>peer-to-peer sharing</strong> between users.
+          then moving that live context <strong>frictionlessly into any AI assistant</strong> you use.
+          Reach it from MCP, a web UI, a screen-recording-invisible HUD overlay, and peer-to-peer
+          sharing between users.
         </p>
 
         <div class="cta">
@@ -581,7 +593,7 @@
         </div>
 
         <div class="meta" aria-label="Project facts">
-          <span><span class="k">license</span><b>MIT</b></span>
+          <span><span class="k">license</span><b>FSL-1.1-ALv2</b></span>
           <span><span class="k">CI</span><b style="color:var(--good)">passing</b></span>
           <span><span class="k">npm</span><b>@geravant/sinain</b></span>
           <span><span class="k">LongMemEval</span><b>82.8% IPR</b></span>
@@ -594,19 +606,19 @@
           <img
             id="demo-img"
             class="demo-img"
-            src="media/sinain-demo-full.gif"
-            alt="Sinain HUD demo — ambient knowledge graph in action"
+            src="media/sinain-flow.gif"
+            alt="Sinain flow — highlight a region, open chat or a CLI agent with full context, hand off to any assistant"
             loading="eager"
             decoding="async"
             style="display:none" />
           <div class="demo-fallback" id="demo-fallback">
-            <div class="df-title">Demo GIF</div>
-            <div class="df-path">media/sinain-demo-full.gif</div>
+            <div class="df-title">Flow demo</div>
+            <div class="df-path">media/sinain-flow.gif</div>
             <div class="df-hint">loads from raw.githubusercontent.com in production</div>
           </div>
           <figcaption class="demo-cap">
             <span class="demo-cap-rule"></span>
-            <span class="demo-cap-text">Real capture · HUD overlay over a live coding session</span>
+            <span class="demo-cap-text">From a glance to a working agent · captured live</span>
           </figcaption>
         </figure>
       </div>
@@ -620,25 +632,177 @@
     <div class="sec-head">
       <div class="sec-num">§ 01 — From a glance to a working agent</div>
       <div>
-        <h2 class="sec-title">Stop copy-pasting context into your AI.</h2>
+        <h2 class="sec-title">Context that moves with you — across every AI.</h2>
         <p class="sec-lede">
-          Sinain watches your screen and spots where an agent could help. One click hands the
-          task to the agent of your choice — already holding the full context. No dump, no re-paste.
+          Modern, ambient UX with zero context juggling. Sinain grounds every thread in your
+          <strong>current situation on screen</strong> and the facts in your <strong>knowledge graph</strong> —
+          then carries that context wherever the work goes: built-in chat, a CLI agent, or any
+          assistant you hand the thread to. It follows <strong>frictionlessly across all of them</strong>.
+          No copy-paste, no re-explaining.
         </p>
       </div>
     </div>
 
-    <div class="flow-video-wrap">
-      <video src="media/sinain-flow.mp4" poster="media/sinain-flow-poster.jpg"
-             autoplay loop muted playsinline preload="metadata"
-             aria-label="Sinain flow — sees where AI can help, point at an area, pick your agent, it works with full context"></video>
-    </div>
+    <div class="tour-grid">
 
-    <div class="flow-grid">
-      <figure class="flow-card"><img src="media/flow-01.png" alt="Step 1 — Sinain sees where AI can help" loading="lazy"></figure>
-      <figure class="flow-card"><img src="media/flow-02.png" alt="Step 2 — or you point it at an area on your screen" loading="lazy"></figure>
-      <figure class="flow-card"><img src="media/flow-03.png" alt="Step 3 — pick your agent" loading="lazy"></figure>
-      <figure class="flow-card"><img src="media/flow-04.png" alt="Step 4 — it works, knowing your whole context" loading="lazy"></figure>
+      <!-- 1 · Markers -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#F7F8FA">
+          <div class="tv-skel">
+            <div style="height:10px;width:140px;background:#DFE1E5;border-radius:3px;margin-bottom:14px"></div>
+            <div class="tv-bar" style="height:8px;width:82%;margin-bottom:9px"></div>
+            <div class="tv-bar" style="height:8px;width:64%;margin-bottom:9px"></div>
+            <div class="tv-bar" style="height:8px;width:72%"></div>
+          </div>
+          <svg width="24" height="24" viewBox="0 0 30 30" style="position:absolute;left:38px;top:118px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
+          <div class="tv-pop" style="left:62px;top:50px;width:244px;padding:10px 12px">
+            <div style="font-size:12px;font-weight:600;color:#fff;margin-bottom:3px">High memory usage in Gmail</div>
+            <div style="font-size:11px;line-height:15px;color:#A8ADBD;margin-bottom:8px">Close unused tabs to free up memory.</div>
+            <div style="display:flex;gap:5px">
+              <span class="tv-chip chat" style="height:22px;padding:0 10px">Chat</span>
+              <span class="tv-chip term" style="height:22px;padding:0 10px">Term</span>
+            </div>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Step 1</span>
+          <h3>Proactive help</h3>
+          <p>Sinain watches your screen and drops an eye marker where it can help. Click for a quick tip, double-click to open a thread.</p>
+        </div>
+      </article>
+
+      <!-- 2 · Aim it yourself (manual region) -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#F7F8FA;cursor:crosshair">
+          <div class="tv-skel" style="opacity:.5">
+            <div style="height:10px;width:140px;background:#DFE1E5;border-radius:3px;margin-bottom:14px"></div>
+            <div class="tv-bar" style="height:8px;width:80%;margin-bottom:9px"></div>
+            <div class="tv-bar" style="height:8px;width:66%"></div>
+          </div>
+          <div style="position:absolute;inset:0;background:rgba(30,31,34,.3)"></div>
+          <div style="position:absolute;left:56px;top:40px;width:228px;height:92px">
+            <svg width="228" height="92" style="position:absolute;inset:0;overflow:visible"><rect x="0.5" y="0.5" width="227" height="91" fill="rgba(51,105,214,0.06)" stroke="#3369D6" stroke-width="1.5" stroke-dasharray="6 4" rx="2" style="animation:sinAnts .6s linear infinite"/></svg>
+            <div style="position:absolute;left:0;top:-22px;height:17px;padding:0 6px;background:#27282E;color:#fff;font-size:10px;font-family:var(--mono);line-height:17px;border-radius:3px">228 × 92</div>
+            <div style="position:absolute;left:-3px;top:-3px;width:6px;height:6px;background:#fff;border:1px solid #3369D6"></div>
+            <div style="position:absolute;right:-3px;bottom:-3px;width:6px;height:6px;background:#fff;border:1px solid #3369D6"></div>
+            <div style="position:absolute;left:50%;bottom:-34px;transform:translateX(-50%);display:flex;gap:4px;padding:4px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.45);white-space:nowrap">
+              <span class="tv-chip chat" style="height:24px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>Chat</span>
+              <span class="tv-chip term" style="height:24px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>Term</span>
+            </div>
+          </div>
+          <div style="position:absolute;right:14px;top:14px;display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 9px;background:rgba(43,45,48,.92);border-radius:12px;color:#fff;font-size:11px">
+            <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
+            Double-tap the eye
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Step 2</span>
+          <h3>Or aim it yourself</h3>
+          <p>Double-tap the eye and drag a box around anything on screen — like a screenshot. Sinain picks it up with full context.</p>
+        </div>
+      </article>
+
+      <!-- 3 · Where chat lands -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center;gap:14px;padding:0 22px;box-sizing:border-box">
+          <div style="position:relative;flex:1;max-width:142px;background:#1E1F22;border:1px solid #1F8039;border-radius:8px;overflow:hidden">
+            <div style="height:74px;background:#15161a;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;padding:10px">
+              <div style="align-self:flex-end;width:52px;height:13px;border-radius:7px 7px 2px 7px;background:#1F8039"></div>
+              <div style="align-self:flex-start;width:68px;height:13px;border-radius:7px 7px 7px 2px;background:#2B2D30;border:1px solid rgba(255,255,255,.1)"></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
+              <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
+              <span style="font-size:11px;font-weight:500">Sinain HUD</span>
+            </div>
+            <div style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;background:#1F8039;display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+          <span style="font-size:12px;color:#6C707E">or</span>
+          <div style="flex:1;max-width:142px;background:#1E1F22;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden">
+            <div style="height:22px;background:#2B2D30;display:flex;align-items:center;gap:4px;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.06)">
+              <span style="width:7px;height:7px;border-radius:50%;background:#CC3645"></span>
+              <span style="width:7px;height:7px;border-radius:50%;background:#E56D17"></span>
+              <span style="width:7px;height:7px;border-radius:50%;background:#1F8039"></span>
+              <span style="font-size:10px;color:#A8ADBD;margin-left:6px">ChatGPT</span>
+            </div>
+            <div style="height:52px;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;padding:10px">
+              <div style="align-self:flex-end;width:52px;height:13px;border-radius:7px;background:#3369D6"></div>
+              <div style="align-self:flex-start;width:68px;height:13px;border-radius:7px;background:#2B2D30;border:1px solid rgba(255,255,255,.1)"></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#A8ADBD" stroke-width="1.6"><path d="M7 17L17 7M9 7h8v8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span style="font-size:11px;font-weight:500;color:#A8ADBD">Your app</span>
+            </div>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Step 3</span>
+          <h3>Chat, your way</h3>
+          <p>A thread stays in the Sinain HUD or pops out into an app you already use — seeded with the full context first.</p>
+        </div>
+      </article>
+
+      <!-- 4 · Move a thread -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#171819;position:relative;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;box-sizing:border-box">
+          <div style="align-self:flex-start;max-width:84%;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:10px 10px 10px 2px;padding:8px 11px;font-size:12px;line-height:16px;color:#A8ADBD;margin-bottom:12px">I can't run commands myself — want me to hand this to a terminal agent?</div>
+          <div style="position:relative;display:flex;align-items:center;gap:8px;background:#1E1F22;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:7px 10px">
+            <div style="width:28px;height:28px;border-radius:6px;background:rgba(31,128,57,.16);border:1px solid #1F8039;display:flex;align-items:center;justify-content:center;flex:none">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="7" r="1.6"/><path d="M4 5.6v4.8M5.6 12h3.2a2.6 2.6 0 0 0 2.6-2.6V8.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <span style="flex:1;font-size:12px;color:#6C707E">Type a message</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#6C707E"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
+            <div style="position:absolute;left:0;bottom:40px;width:184px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.45);overflow:hidden">
+              <div style="padding:7px 11px;font-size:11px;color:#6C707E;border-bottom:1px solid rgba(255,255,255,.08)">Continue in</div>
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;background:rgba(31,128,57,.16);border-left:2px solid #1F8039"><span style="width:16px;height:16px;border-radius:4px;background:#834DF0;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">C</span><span style="font-size:12px;font-family:var(--mono)">claude code</span></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 11px"><span style="width:16px;height:16px;border-radius:4px;background:#1F8039;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">X</span><span style="font-size:12px;font-family:var(--mono)">codex</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Step 4</span>
+          <h3>Move it to any agent</h3>
+          <p>Hand the whole thread — its context and your messages — to a coding agent like claude code or codex. Nothing is lost.</p>
+        </div>
+      </article>
+
+      <!-- 5 · Pick your agents -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
+          <div style="width:300px;max-width:86%">
+            <div style="font-size:11px;color:#A8ADBD;margin-bottom:5px">Chat opens with</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 10px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:6px;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:4px;background:#1F8039;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">S</span><span style="font-size:13px;font-weight:500">Sinain</span><span style="font-size:11px;color:#6C707E">Built in</span></div>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="font-size:11px;color:#A8ADBD;margin-bottom:5px">Terminal runs</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 10px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:6px">
+              <div style="display:flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:4px;background:#3369D6;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">O</span><span style="font-size:13px;font-weight:500;font-family:var(--mono)">openclaude</span></div>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Step 5</span>
+          <h3>All your setup</h3>
+          <p>Pick which assistant backs chat and which terminal agent runs. Sinain lists the ones found on your machine — change them anytime.</p>
+        </div>
+      </article>
+
+      <!-- 6 · Chat or terminal action -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
+          <div style="display:flex;gap:8px;padding:8px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.45)">
+            <span class="tv-chip chat" style="height:30px;padding:0 14px;font-size:13px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>Chat</span>
+            <span class="tv-chip term" style="height:30px;padding:0 14px;font-size:13px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>Term</span>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Step 6</span>
+          <h3>Chat or terminal</h3>
+          <p>Every marker opens a thread. Reply in built-in chat, or hand it straight to a terminal agent — your choice, per region.</p>
+        </div>
+      </article>
+
     </div>
   </div>
 </section>
@@ -964,7 +1128,7 @@
       <div>
         <span class="eyebrow"><span class="bar"></span> Ready?</span>
         <h2>Context that follows you across every agent, every project, every machine.</h2>
-        <p>One install. macOS 12.3+. MIT-licensed. Private by default.</p>
+        <p>One install. macOS 12.3+. Source-available (FSL-1.1-ALv2). Private by default.</p>
       </div>
       <div class="right">
         <a class="btn primary btn-lg" href="#quickstart">npx @geravant/sinain@latest start</a>
@@ -991,7 +1155,7 @@
           <span class="sub mono">/ context os</span>
         </div>
         <p class="blurb">A private Context OS that runs ambient in the background, distilling your screen and audio into a structured knowledge graph.</p>
-        <p style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-faint);letter-spacing:.04em">MIT · anthillnet/sinain-hud</p>
+        <p style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-faint);letter-spacing:.04em">FSL-1.1-ALv2 · anthillnet/sinain-hud</p>
       </div>
       <div>
         <h5>Product</h5>
@@ -1028,7 +1192,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
         contact@sinain.com
       </a>
-      <span>BUILT FOR BUILDERS · MIT</span>
+      <span>BUILT FOR BUILDERS · FSL-1.1-ALv2</span>
     </div>
   </div>
 </footer>
