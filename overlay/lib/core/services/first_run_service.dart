@@ -6,27 +6,32 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../ui/first_run/install_tier.dart';
 
-/// SEED-001 Stage 5 — first-run setup for the packaged DMG build.
+/// SEED-001 Stage 5 — first-run setup for the packaged app.
 ///
-/// In a bundled .app the overlay is the entry point and there is no CLI
-/// `sinain onboard` to write `~/.sinain/.env`. This service detects the
-/// first-run condition (bundled app + no env file), writes the env from the
-/// wizard's choices, and restarts the bundled backend so it picks up the config.
+/// The overlay is the entry point and there is no CLI `sinain onboard` to write
+/// `~/.sinain/.env`. This service shows the first-run wizard whenever there is
+/// no config yet (a fresh install on a clean machine), writes the env from the
+/// wizard's choices, and relaunches so the backend picks up the config.
 ///
-/// In development (`flutter run`) `isBundled` is false, so [needsSetup] is
-/// always false and the existing OnboardingService flow is untouched.
+/// The wizard gate is purely "no `~/.sinain/.env` yet." We deliberately do NOT
+/// gate on a bundled-vs-dev (`isBundled`) check: that check round-tripped to the
+/// `sinain_hud/backend` platform channel, which the Flutter engine queried
+/// (during awakeFromNib) before AppDelegate.applicationDidFinishLaunching
+/// registered its handler — so it raced, threw MissingPluginException, was
+/// swallowed to false, and the wizard silently never ran on real installs.
+/// Removing it makes the wizard run on every fresh install, deterministically.
 class FirstRunService extends ChangeNotifier {
   static const _channel = MethodChannel('sinain_hud/backend');
 
-  bool _bundled = false;
   bool _envExists = false;
   bool _initialized = false;
   bool _completed = false;
 
   bool get initialized => _initialized;
 
-  /// True when the packaged app has no config yet and should show the wizard.
-  bool get needsSetup => _bundled && !_envExists && !_completed;
+  /// True when there's no config yet → run the first-run wizard. Once setup
+  /// writes `~/.sinain/.env`, this is false and the wizard won't re-run.
+  bool get needsSetup => !_envExists && !_completed;
 
   String get _envPath {
     final home = Platform.environment['HOME'] ?? '';
@@ -34,13 +39,6 @@ class FirstRunService extends ChangeNotifier {
   }
 
   Future<void> init() async {
-    try {
-      _bundled = await _channel.invokeMethod<bool>('isBundled') ?? false;
-    } on PlatformException {
-      _bundled = false; // dev / non-macOS — channel not wired
-    } on MissingPluginException {
-      _bundled = false;
-    }
     _envExists = await File(_envPath).exists();
     _initialized = true;
     notifyListeners();

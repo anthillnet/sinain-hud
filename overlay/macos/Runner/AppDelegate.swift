@@ -55,8 +55,10 @@ class AppDelegate: FlutterAppDelegate {
         backendChannel?.setMethodCallHandler { [weak self] call, result in
             guard let self = self else { result(false); return }
             switch call.method {
-            case "isBundled":
-                result(self.backend.isBundled)
+            // (No "isBundled" case: the first-run wizard no longer asks native
+            // whether the app is bundled — that channel query raced this very
+            // handler's registration and silently suppressed the wizard. The
+            // wizard now gates purely on "is ~/.sinain/.env present" in Dart.)
             case "restart":
                 self.backend.stop()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
