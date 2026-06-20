@@ -521,6 +521,41 @@ class WebSocketService extends ChangeNotifier {
     _log('Spawn command sent${regionId != null ? " (region=$regionId)" : ""}: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
+  /// Core's HTTP base derived from the WS url (ws→http, wss→https).
+  String? get _httpBase {
+    if (url.startsWith('wss://')) return 'https://${url.substring(6)}';
+    if (url.startsWith('ws://')) return 'http://${url.substring(5)}';
+    return null;
+  }
+
+  /// Fetch the portable seed text for a thread (key = regionId or "main") so it
+  /// can be copied to the clipboard — the same context we feed supported
+  /// agents, built server-side. Returns null on any failure.
+  Future<String?> fetchSeedText(String key, {String? transcript}) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.postUrl(Uri.parse('$base/seed'));
+      req.headers.contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode({
+        'key': key,
+        if (transcript != null) 'transcript': transcript,
+      })));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return data['ok'] == true ? data['text'] as String? : null;
+    } catch (e) {
+      _log('fetchSeedText failed: $e');
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
   void disconnect() {
     _profilingTimer?.cancel();
     _profilingTimer = null;

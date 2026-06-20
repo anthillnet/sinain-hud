@@ -24,6 +24,12 @@ from pathlib import Path
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+
+class _SkipRawExcerpts(Exception):
+    """Internal sentinel — bail out of the raw-excerpt append when a caller
+    asked for distilled facts only (live seed/chat). Swallowed by the block's
+    own ``except Exception``."""
+
 # Preference-shape detection (shared by the dd0c94c preference augmentation and the #7-PREF
 # scaffold). NOTE: _USER_REF was referenced at the preference-augment site but never defined or
 # imported here — the surrounding `except Exception: pass` silently swallowed the NameError, so
@@ -943,6 +949,7 @@ def query_facts_hybrid(
     format: str = "facts",
     as_of: str | None = None,
     mentioned_by_speaker: list[str] | None = None,
+    include_raw_excerpts: bool = True,
 ) -> list[dict]:
     """Hybrid retrieval with Reciprocal Rank Fusion (Graphiti pattern).
 
@@ -1701,6 +1708,13 @@ def query_facts_hybrid(
     # agent) gets them — not a bench-only QA hack. Gated by SINAIN_RAW_CHUNKS.
     # See .planning/phases/discourse-reconstruction/00-PLAN.md § Memory architecture.
     try:
+        # The live seed/chat retrieval wants distilled FACTS only — raw episodic
+        # excerpts (UI chrome, OCR noise, [🧠] markers, JSON shards) read as
+        # garbage there. They stay on for the eval/QA recall harness, which is
+        # the channel that benefits. (Caught by the except below → skips the
+        # whole excerpt append, including the retrieve_chunks fetch.)
+        if not include_raw_excerpts:
+            raise _SkipRawExcerpts
         from raw_store import retrieve_chunks
         # Always-on: returns [] when no sidecar exists, so legacy stores are
         # unaffected. Whether raw chunks are STORED at all is the privacy
@@ -2313,6 +2327,8 @@ def main() -> None:
     parser.add_argument("--search-limit", type=int, default=20, help="Max entity results")
     parser.add_argument("--no-semantic", action="store_true",
                         help="Skip semantic keyword expansion (avoids the in-process model load — use when the caller re-ranks with its own embeddings)")
+    parser.add_argument("--no-raw-excerpts", action="store_true",
+                        help="Exclude raw episodic transcript excerpts (distilled facts only) — for the live seed/chat retrieval; the eval/QA harness keeps them")
     parser.add_argument("--graph-children", default=None, help="Entity to expand for graph tree")
     parser.add_argument("--graph-limit", type=int, default=50, help="Max children per parent")
     args = parser.parse_args()
@@ -2340,7 +2356,8 @@ def main() -> None:
         # Use hybrid retrieval (FTS5 + tags + entity graph + RRF) for best results
         query_text = " ".join(entities)
         facts = query_facts_hybrid(args.db, query_text, max_facts=args.max_facts,
-                                   semantic=not args.no_semantic)
+                                   semantic=not args.no_semantic,
+                                   include_raw_excerpts=not args.no_raw_excerpts)
         # Fallback to tag-only if hybrid returns nothing
         if not facts:
             facts = query_facts_by_entities(args.db, entities, max_facts=args.max_facts)

@@ -298,6 +298,15 @@ class WindowService {
     }
   }
 
+  /// Seed copied for a region's ROI card → green check + auto-dismiss.
+  Future<void> confirmRegionCopy(String id) async {
+    try {
+      await _channel.invokeMethod('confirmRegionCopy', {'id': id});
+    } catch (e) {
+      _log('confirmRegionCopy failed: $e');
+    }
+  }
+
   /// Update one eye's badge state: 'idle' | 'working' | 'ready' | 'failed'.
   Future<void> updateRegionEye(String id, String state) async {
     try {

@@ -132,14 +132,17 @@ Future<void> _startApp() async {
     await windowService.makeKeyWindow();
   }
 
-  // Listen for hotkey events from native side. The overlay is mouse-driven, so
-  // P (reset window position) is the only global hotkey — every other action
-  // has a clickable affordance in the HUD.
+  // Listen for hotkey events from native side. The overlay is mouse-driven;
+  // global hotkeys are kept minimal — ⌘⇧P resets the window position, ⌃⌥⌘C
+  // copies the current thread's seed to the clipboard. Everything else has a clickable
+  // affordance in the HUD.
   const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
   hotkeyChannel.setMethodCallHandler((call) async {
     switch (call.method) {
       case 'onResetPosition':
         overlayShellKey.currentState?.resetPosition();
+      case 'onCopySeed':
+        overlayShellKey.currentState?.copySeedHotkey();
     }
   });
 

@@ -234,11 +234,14 @@ class AppDelegate: FlutterAppDelegate {
             nil
         )
 
-        // The overlay is mouse-driven — every action has a clickable affordance
-        // except resetting a dragged-off-screen window, so P is the sole global
-        // hotkey. (Quit is the overlay's button/menu; it still tears down the
-        // whole stack via applicationWillTerminate → BackendLauncher.stop.)
+        // The overlay is mouse-driven — most actions have a clickable
+        // affordance. Two global hotkeys: P resets a dragged-off-screen window,
+        // and ⌃⌥⌘C copies the current thread's seed to the clipboard. The seed
+        // hotkey uses three modifiers (Ctrl+Opt+Cmd) deliberately — a global
+        // hotkey overrides the combo system-wide, so it must be obscure enough
+        // not to clobber a common app shortcut.
         registerHotKey(id: 13, keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey)) // reset position
+        registerHotKey(id: 14, keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(controlKey | optionKey | cmdKey)) // copy seed
     }
 
     private func registerHotKey(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
@@ -286,6 +289,8 @@ class AppDelegate: FlutterAppDelegate {
         switch id {
         case 13: // P → reset position to default
             hotkeyChannel?.invokeMethod("onResetPosition", arguments: nil)
+        case 14: // C → copy the current thread's seed to the clipboard
+            hotkeyChannel?.invokeMethod("onCopySeed", arguments: nil)
         default:
             break
         }

@@ -27,6 +27,7 @@ class ChatThreadView extends StatefulWidget {
     this.threadId,
     this.accentColor = 0xff00ff88,
     this.onHandoff,
+    this.onCopySeed,
   });
 
   final WebSocketService ws;
@@ -45,6 +46,11 @@ class ChatThreadView extends StatefulWidget {
     required bool isTerminal,
     required bool includeTranscript,
   })? onHandoff;
+
+  /// "Copy seed" in the handoff popover — copy this thread's composed seed to
+  /// the clipboard for an agent we don't integrate with. Returns a Future the
+  /// row awaits to drive its dim→check feedback.
+  final Future<void> Function({required bool includeTranscript})? onCopySeed;
 
   /// Drop a thread's cached history (thread tab closed).
   static void closeThread(String threadId) {
@@ -68,6 +74,8 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   // Handoff destination popover (⑂ → "Continue this thread in").
   bool _showHandoff = false;
   bool _includeTranscript = true; // carry the conversation by default
+  // Copy-seed row feedback: 0 idle, 1 loading (dimmed), 2 done (green check).
+  int _copyState = 0;
 
   String get _key => widget.threadId ?? 'main';
   Set<String> get _seen =>
@@ -219,6 +227,22 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         ),
       ],
     );
+  }
+
+  /// Run the copy-seed action with dim→check feedback, then close the popover.
+  Future<void> _runCopySeed(Color accent) async {
+    setState(() => _copyState = 1); // dim while building/copying
+    try {
+      await widget.onCopySeed!(includeTranscript: _includeTranscript);
+    } catch (_) {/* swallow — UI still resolves below */}
+    if (!mounted) return;
+    setState(() => _copyState = 2); // green check
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    setState(() {
+      _copyState = 0;
+      _showHandoff = false;
+    });
   }
 
   /// "Continue this thread in <agent>" — lists chat and terminal destinations
@@ -392,6 +416,42 @@ class _ChatThreadViewState extends State<ChatThreadView> {
                 ),
               ),
             ),
+            // Copy the composed seed for an agent we don't integrate with.
+            // Tap → dim while building (the seed can render server-side), then
+            // a green check, then the popover closes.
+            if (widget.onCopySeed != null) ...[
+              Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: _copyState != 0 ? null : () => _runCopySeed(accent),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 9, 12, 11),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _copyState == 2 ? Icons.check : Icons.content_copy,
+                          size: 13,
+                          color: _copyState == 2
+                              ? accent
+                              : Colors.white.withValues(
+                                  alpha: _copyState == 1 ? 0.3 : 0.55),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _copyState == 2 ? 'Copied' : 'Copy seed for another tool',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.white.withValues(
+                                alpha: _copyState == 1 ? 0.4 : 0.85),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
