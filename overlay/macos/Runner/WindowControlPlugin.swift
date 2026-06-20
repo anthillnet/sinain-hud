@@ -399,6 +399,8 @@ class RegionSelector {
     private static var active: RegionSelector?
 
     private var panel: NSPanel!
+    private var keyMonitor: Any?
+    private var finished = false
     private let completion: (NSRect?, String?) -> Void
 
     static func begin(privacyEnabled: Bool, completion: @escaping (NSRect?, String?) -> Void) {
@@ -429,11 +431,27 @@ class RegionSelector {
             p.sharingType = privacyEnabled ? .none : .readOnly
         }
         p.contentView = view
-        p.makeKeyAndOrderFront(nil)      // key: the view needs Esc + mouse
+        // The selector starts from the HUD, which is a nonactivating panel — so
+        // the overlay app is usually NOT frontmost and the panel can't receive
+        // key events (mouse still works; it routes by cursor position). Activate
+        // the app and make the view first responder so Esc reaches keyDown.
+        NSApp.activate(ignoringOtherApps: true)
+        p.makeKeyAndOrderFront(nil)
+        p.makeFirstResponder(view)
         panel = p
+        // Belt-and-suspenders: a local key monitor catches Esc even if the
+        // first-responder chain isn't cooperating (consumes the event so it
+        // doesn't leak to whatever is underneath).
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            if e.keyCode == 53 { self?.finish(nil, nil); return nil }  // Esc
+            return e
+        }
     }
 
     private func finish(_ rect: NSRect?, _ mode: String?) {
+        if finished { return }
+        finished = true
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         panel?.orderOut(nil)
         panel = nil
         if Self.active === self { Self.active = nil }
