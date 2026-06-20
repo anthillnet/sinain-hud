@@ -23,6 +23,14 @@ class WebSocketService extends ChangeNotifier {
   String _micState = 'muted';
   String _screenState = 'off';
   String _escalationState = 'active';
+  // Service guard: per-service liveness from core. Each: {name,label,state,detail}.
+  List<Map<String, dynamic>> _services = const [];
+  List<Map<String, dynamic>> get services => _services;
+  /// Services in a state the user should be warned about (running-but-stale or
+  /// expected-but-down). 'off'/'live' are silent.
+  List<Map<String, dynamic>> get staleServices => _services
+      .where((s) => s['state'] == 'stale' || s['state'] == 'down')
+      .toList();
   // Ambient/idle (unsolicited) HUD messages. Opt-in, default off, decoupled
   // from escalation state so selecting a chat agent never flips it on.
   bool _idleMessagesEnabled = false;
@@ -317,6 +325,17 @@ class WebSocketService extends ChangeNotifier {
           if (screen != null && screen != _screenState) {
             _screenState = screen;
             notifyListeners();
+          }
+          // Service guard: per-service liveness (sense/backend/sinain-chat/runner).
+          final svc = statusData['services'] as List?;
+          if (svc != null) {
+            final list = svc.whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();
+            String key(List<Map<String, dynamic>> l) =>
+                l.map((s) => '${s['name']}:${s['state']}').join('|');
+            if (key(list) != key(_services)) {
+              _services = list;
+              notifyListeners();
+            }
           }
           final escalation = statusData['escalation'] as String?;
           if (escalation != null && escalation != _escalationState) {

@@ -354,15 +354,15 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
     case "restart_chat_sidecar": {
       if (!deps.onRestartChatSidecar) {
         log(TAG, "restart_chat_sidecar: no handler wired");
-        wsHandler.broadcast("⚠ Chat sidecar launcher is not available", "high");
+        wsHandler.broadcast("⚠ sinain-chat launcher is not available", "high");
         break;
       }
       const result = deps.onRestartChatSidecar();
       if (!result.ok) {
-        wsHandler.broadcast(`⚠ ${result.error ?? "Failed to start chat sidecar"}`, "high");
+        wsHandler.broadcast(`⚠ ${result.error ?? "Failed to start sinain-chat"}`, "high");
         log(TAG, `restart_chat_sidecar failed: ${result.error ?? "unknown error"}`);
       } else {
-        wsHandler.broadcast("Starting chat sidecar…", "normal");
+        wsHandler.broadcast("Starting sinain-chat…", "normal");
         log(TAG, "restart_chat_sidecar launched");
       }
       break;

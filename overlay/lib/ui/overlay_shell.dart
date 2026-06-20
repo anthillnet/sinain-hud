@@ -1336,6 +1336,7 @@ class OverlayShellState extends State<OverlayShell> {
           // height) when no tasks are pending. Mirrors Tasks tab — does not
           // remove tasks from that view.
           const _AgentAvailabilityBanner(),
+          const _ServiceHealthBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
           // Input lives in the chat surface now (flyer composer) — terminal
@@ -1577,7 +1578,7 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     // Resident chat lane → Run restarts the sidecar; CLI lane → Run launches it.
     final resident = ws.escalationResident;
     final label = resident
-        ? 'Start chat sidecar'
+        ? 'Start sinain-chat'
         : (agent.isEmpty ? 'Start local agent' : 'Start $agent');
     return HudTooltip(
       message: label,
@@ -1587,7 +1588,7 @@ class _AgentAvailabilityBanner extends StatelessWidget {
           onTap: () {
             if (resident) {
               ws.restartChatSidecar();
-              ws.showSystemAlert('Starting chat sidecar…',
+              ws.showSystemAlert('Starting sinain-chat…',
                   priority: FeedPriority.high);
             } else {
               ws.startLocalAgent(agent);
@@ -1626,7 +1627,7 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     if (ws.escalationAgent.isEmpty) return 'No chat agent selected';
     // Built-in sinain sidecar: connected only if it's actually reachable.
     if (ws.escalationResident) {
-      return ws.chatSidecarUp ? null : 'Chat sidecar not running';
+      return ws.chatSidecarUp ? null : 'sinain-chat not running';
     }
     // A CLI chat agent needs bare-agent registration before it can answer.
     if (!ws.agentRegistered) {
@@ -1642,6 +1643,58 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     // CLI lane: show Run only for an unstarted agent (Run launches it).
     if (ws.agentRegistered) return false;
     return ws.escalationAgent.isNotEmpty;
+  }
+}
+
+/// Service guard: warns when a stack service goes stale (running but data is
+/// old — e.g. a stuck screen pipeline) or down (expected but unreachable), so a
+/// dead service is visible instead of silently feeding stale context.
+class _ServiceHealthBanner extends StatelessWidget {
+  const _ServiceHealthBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.watch<WebSocketService>();
+    final stale = ws.staleServices;
+    if (stale.isEmpty) return const SizedBox.shrink();
+    const color = Color(0xFFFFAA00);
+    final msg = stale.map((s) {
+      final label = (s['label'] ?? s['name'] ?? 'service').toString();
+      final down = s['state'] == 'down';
+      final detail = s['detail'];
+      return down
+          ? '$label down'
+          : '$label stale${detail != null ? ' ($detail)' : ''}';
+    }).join(' · ');
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.38)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.sensors_off, size: 14, color: color),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              '$msg — context may be outdated',
+              style: const TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 10,
+                color: color,
+                height: 1.2,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

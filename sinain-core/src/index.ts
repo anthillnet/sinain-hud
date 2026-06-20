@@ -1024,7 +1024,7 @@ async function main() {
     pipeLocalAgentOutput(child.stderr, (line) => warn("chat", line));
     child.once("error", (err) => {
       warn(TAG, `chat sidecar failed to start: ${err.message}`);
-      wsHandler.broadcast(`⚠ Chat sidecar failed to start: ${err.message.slice(0, 120)}`, "high");
+      wsHandler.broadcast(`⚠ sinain-chat failed to start: ${err.message.slice(0, 120)}`, "high");
     });
     return { ok: true };
   }
@@ -1377,6 +1377,38 @@ async function main() {
   } = { available: [], terminalAvailable: [], escalationAgent: "", terminalAgent: "", escalationResident: false, escalationDesktop: false, chatSidecarUp: false, registered: false };
   let localAgentProcess: ReturnType<typeof spawn> | null = null;
   let localAgentName = "";
+
+  // ── Service guard ── liveness/freshness of each stack service, surfaced in
+  // /health and broadcast to the overlay (banner) so a dead/stale service is
+  // VISIBLE instead of silently serving stale data (e.g. a stuck screen
+  // pipeline feeding 6-hour-old OCR into a seed). State per service:
+  //   live  — healthy / fresh
+  //   stale — running but data is old (sense frames not arriving)
+  //   down  — expected but unreachable (sidecar/runner needed yet absent)
+  //   off   — not in use (no warning) — e.g. screen toggled off, lane not selected
+  const SENSE_STALE_MS = 60_000;
+  let lastSenseAt = 0;
+  function serviceStatuses(): Array<{ name: string; label: string; state: string; detail?: string }> {
+    const now = Date.now();
+    const senseAge = lastSenseAt ? now - lastSenseAt : Infinity;
+    const senseState = !screenActive
+      ? "off"
+      : lastSenseAt === 0 ? "down" : senseAge > SENSE_STALE_MS ? "stale" : "live";
+    // sinain-chat (resident chat sidecar) only matters when it's the chat lane.
+    const chatState = !bareAgentState.escalationResident
+      ? "off" : bareAgentState.chatSidecarUp ? "live" : "down";
+    // The agent runner (run.sh) only matters when a bare-agent lane is selected.
+    const usingBare = !!bareAgentState.escalationAgent
+      && !bareAgentState.escalationResident && !bareAgentState.escalationDesktop;
+    const runnerState = !usingBare ? "off" : bareAgentState.registered ? "live" : "down";
+    return [
+      { name: "backend", label: "Backend", state: "live" },
+      { name: "sense", label: "Screen capture", state: senseState,
+        detail: lastSenseAt ? `${Math.round(senseAge / 1000)}s ago` : "no frames" },
+      { name: "sinain-chat", label: "sinain-chat", state: chatState },
+      { name: "agent-runner", label: "Agent Runner", state: runnerState },
+    ];
+  }
   let shuttingDown = false;
   // ChatGPT "network harness" gate — exposes the local MCP server over a public
   // tunnel, so it's a security-sensitive opt-in. Runtime-toggled from the
@@ -1640,6 +1672,7 @@ async function main() {
       // Respect toggle_screen — if user disabled screen, ignore sense events
       if (!screenActive) return;
 
+      lastSenseAt = Date.now(); // service guard: screen pipeline is fresh
       wsHandler.updateState({ screen: "active" });
 
       // Track app context for recorder
@@ -1761,6 +1794,7 @@ async function main() {
 
       return {
         warnings,
+        services: serviceStatuses(),
         agent: agentLoop.getStats(),
         escalation: escStats,
         transcription: transcription.getProfilingStats(),
@@ -1967,10 +2001,10 @@ async function main() {
       .catch((e: Error) => {
         wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
         if (regionId) {
-          wsHandler.broadcast(`⚠ chat sidecar error: ${e.message}`, "normal", "agent", regionId);
+          wsHandler.broadcast(`⚠ sinain-chat error: ${e.message}`, "normal", "agent", regionId);
         } else {
           wsHandler.broadcastRaw({
-            type: "feed", text: `⚠ chat sidecar error: ${e.message}`, priority: "normal",
+            type: "feed", text: `⚠ sinain-chat error: ${e.message}`, priority: "normal",
             ts: Date.now(), channel: "agent", sender: "agent",
           } as any);
         }
@@ -2342,6 +2376,18 @@ async function main() {
   // Start profiler
   profiler.start();
   // Periodically sample buffer gauges
+  // Service guard: broadcast per-service liveness to the overlay every 10s (and
+  // on change) so the HUD banner reflects a stale/dead service promptly.
+  let lastServicesKey = "";
+  const serviceGuardTimer = setInterval(() => {
+    const svc = serviceStatuses();
+    const key = svc.map((s) => `${s.name}:${s.state}`).join("|");
+    if (key !== lastServicesKey) {
+      lastServicesKey = key;
+      wsHandler.updateState({ services: svc } as any);
+    }
+  }, 10_000);
+
   const bufferGaugeTimer = setInterval(() => {
     profiler.gauge("buffer.feed", feedBuffer.size);
     profiler.gauge("buffer.sense", senseBuffer.size);
