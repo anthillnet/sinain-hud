@@ -320,6 +320,45 @@ final class BackendLauncher {
     /// True when this build bundles its own backend (packaged DMG).
     var isBundled: Bool { launchScriptURL != nil }
 
+    /// True when the .app is running from a read-only location — the mounted
+    /// DMG (`/Volumes/Sinain`) or a quarantine AppTranslocation copy — rather
+    /// than a real install (`/Applications`). The backend's node, python, and
+    /// sck-capture all execute from inside the bundle, so when that volume
+    /// unmounts they're SIGKILL'd and the backend never stays online (the user
+    /// sees the HUD start but "backend never came online"). We only flag
+    /// genuinely read-only mounts, so a read-write external-drive install isn't
+    /// blocked.
+    private var runningFromReadOnlyLocation: Bool {
+        let url = Bundle.main.bundleURL
+        if url.path.contains("/AppTranslocation/") { return true }
+        if let values = try? url.resourceValues(forKeys: [.volumeIsReadOnlyKey]),
+           values.volumeIsReadOnly == true {
+            return true
+        }
+        return false
+    }
+
+    /// Tell the user to install before the backend silently fails, then quit —
+    /// running the HUD from a read-only volume can't work.
+    private func presentMoveToApplicationsAlert() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Move Sinain to Applications"
+        alert.informativeText = """
+        Sinain is running from a read-only location (the disk image), so its \
+        background service can't stay running.
+
+        Quit, drag Sinain into your Applications folder, then open it from there.
+        """
+        alert.addButton(withTitle: "Quit Sinain")
+        alert.addButton(withTitle: "Reveal in Finder")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+        }
+        NSApp.terminate(nil)
+    }
+
     /// Path to `stop.sh` — the canonical, supervisor-independent teardown for
     /// the whole stack. In a packaged build it's staged at
     /// `Contents/Resources/scripts/stop.sh`. In development (`flutter run`) it
@@ -373,6 +412,15 @@ final class BackendLauncher {
             return
         }
         guard process == nil else { return }
+
+        // The backend can't survive on a read-only volume (DMG/translocation):
+        // its processes get SIGKILL'd when the volume unmounts. Don't spawn a
+        // doomed backend — tell the user to install to /Applications first.
+        if runningFromReadOnlyLocation {
+            NSLog("[SinainHUD] BackendLauncher: running from a read-only location (\(Bundle.main.bundlePath)) — not starting backend; prompting move to /Applications")
+            presentMoveToApplicationsAlert()
+            return
+        }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/bash")
