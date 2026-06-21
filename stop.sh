@@ -17,20 +17,23 @@
 
 PORT="${SINAIN_CORE_PORT:-9500}"
 
-# Process patterns covering both dev (tsx) and bundled (node dist/index.js) runs.
+# Process patterns covering both dev (tsx) and bundled runs. These match the
+# CURRENT command line, so they account for our process renaming: core/proxy set
+# process.title (-> "sinain-core" / "sinain-proxy"), and the Python helpers are
+# launched via sinain-named symlinks. We match on the stable module/script name
+# (e.g. "sense_client", "sidecar.py") so a renamed interpreter still matches.
 # sck-capture is core's child and dies on core's SIGTERM, but we list it too as
 # a backstop in case core was killed uncleanly on a previous run.
 PATTERNS=(
   "sinain_hud.app/Contents/MacOS/sinain_hud"   # overlay (packaged + dev build)
   "flutter run -d macos"                        # dev overlay wrapper
-  "python3 -m sense_client"                     # sense_client (python3)
-  "Python -m sense_client"                       # sense_client (framework Python)
-  "sense_client/__main__"                        # sense_client (bundled python)
-  "sinain-chat-agent/sidecar.py"                 # chat sidecar (dev path)
-  "[Pp]ython3* sidecar.py"                       # chat sidecar (bundled)
+  "sinain-core"                                  # core (process.title; dev + bundled)
+  "tsx.*src/index.ts"                            # core (dev, pre-title fallback)
+  "sense_client"                                 # sense_client (any interpreter / sinain-sense)
+  "sidecar.py"                                    # chat sidecar (sinain-chat / python)
+  "sinain-proxy"                                 # OpenRouter proxy (process.title)
+  "openrouter-proxy"                             # OpenRouter proxy (pre-title fallback)
   "sck-capture"                                   # ScreenCaptureKit binary
-  "tsx.*src/index.ts"                            # core (dev: tsx watch)
-  "sinain-core/dist/index.js"                    # core (bundled: node dist)
 )
 
 # Snapshot the PIDs to stop ONCE, up front — every process matching a pattern
