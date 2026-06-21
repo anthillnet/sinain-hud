@@ -38,6 +38,11 @@ import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { log, warn, error, debug } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
+// Brand this process so it shows as "sinain-core" (not bare "node") in Activity
+// Monitor / `ps` — so users can recognise + clean up our services. macOS reads
+// the name from process.title once set.
+process.title = "sinain-core";
+
 const TAG = "core";
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(MODULE_DIR, "..", "..");
@@ -1011,7 +1016,11 @@ async function main() {
     // Prefer the sidecar's own .venv (dev); fall back to system python3 (prod,
     // where the launcher pip-installs deps into the system interpreter).
     const venvPy = resolve(sidecarDir, ".venv", "bin", "python");
-    const py = existsSync(venvPy) ? venvPy : "python3";
+    // Prod fallback prefers the sinain-chat shim (a sinain-named symlink the
+    // launcher creates) so the sidecar shows as "sinain-chat", not bare "Python".
+    const py = existsSync(venvPy)
+      ? venvPy
+      : (process.env.SINAIN_CHAT_PYTHON || "python3");
     log(TAG, `restarting chat sidecar: ${py} ${sidecar}`);
     const child = spawn(py, ["sidecar.py"], {
       cwd: sidecarDir,
