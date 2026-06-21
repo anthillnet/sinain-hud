@@ -90,6 +90,10 @@ Future<void> _startApp() async {
   await windowService.setTransparent();
   await windowService.setPrivacyMode(true);
   await windowService.setAlwaysOnTop(true);
+  // Re-assert the Dock-icon preference. AppDelegate already applies it natively
+  // at launch (no flash) by reading UserDefaults directly; this guards against
+  // any shared_preferences key-prefix drift and keeps native + Dart in sync.
+  await windowService.setDockIconVisible(settingsService.settings.showInDock);
 
   // During first-run setup, resize window for the wizard panel; for the
   // post-install tour, size for the scene card (the widget re-asserts this in
