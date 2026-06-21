@@ -1604,7 +1604,7 @@ export interface ServerDeps {
   /** Build a portable seed (the same context we feed agents, knowledge inlined)
    *  for the clipboard "copy seed" action. key = regionId or "main"; null when
    *  the region is unknown. */
-  buildSeed?: (key: string, transcript?: string) => Promise<string | null>;
+  buildSeed?: (key: string, transcript?: string, focus?: string) => Promise<string | null>;
   /** Stable agent session for a thread (get-or-create) — terminals resume it. */
   getThreadSession?: (regionId: string) => { sessionId: string; isNew: boolean };
   getKnowledgeDocPath?: () => string | null;
@@ -1868,24 +1868,28 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── POST /seed — portable seed text for the clipboard "copy seed" ──
-      // Body: { key: regionId|"main", transcript? }. Returns the composed
-      // context as plain text (knowledge inlined, header + transcript folded
-      // in) for pasting into an agent we don't integrate with.
+      // Body: { key: regionId|"main"|"clipboard", transcript?, focus? }.
+      // Returns the composed context as plain text (knowledge inlined, header +
+      // transcript folded in) for pasting into an agent we don't integrate with.
+      // `focus` (clipboard enrichment) treats arbitrary text as a pseudo-ROI:
+      // the seed is the situational digest + KG retrieved against that text.
       if (req.method === "POST" && url.pathname === "/seed") {
         const body = await readBody(req, 256 * 1024);
         let key = "";
         let transcript: string | undefined;
+        let focus: string | undefined;
         try {
           const d = JSON.parse(body);
           key = String(d.key ?? "").trim();
           if (d.transcript) transcript = String(d.transcript);
+          if (d.focus) focus = String(d.focus);
         } catch { /* bad body */ }
         if (!key || !deps.buildSeed) {
           res.statusCode = 400;
           res.end(JSON.stringify({ ok: false, error: "missing key or handler" }));
           return;
         }
-        const text = await deps.buildSeed(key, transcript);
+        const text = await deps.buildSeed(key, transcript, focus);
         if (text === null) {
           res.statusCode = 404;
           res.end(JSON.stringify({ ok: false, error: "unknown thread" }));

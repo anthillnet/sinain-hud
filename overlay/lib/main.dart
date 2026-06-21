@@ -148,7 +148,8 @@ Future<void> _startApp() async {
 
   // Listen for hotkey events from native side. The overlay is mouse-driven;
   // global hotkeys are kept minimal — ⌘⇧P resets the window position, ⌃⌥⌘C
-  // copies the current thread's seed to the clipboard. Everything else has a clickable
+  // enriches the clipboard with Sinain's situational + KG context (paste lands
+  // your content + an enriched seed). Everything else has a clickable
   // affordance in the HUD.
   const hotkeyChannel = MethodChannel('sinain_hud/hotkeys');
   hotkeyChannel.setMethodCallHandler((call) async {
@@ -156,7 +157,7 @@ Future<void> _startApp() async {
       case 'onResetPosition':
         overlayShellKey.currentState?.resetPosition();
       case 'onCopySeed':
-        overlayShellKey.currentState?.copySeedHotkey();
+        overlayShellKey.currentState?.enrichClipboardHotkey();
     }
   });
 

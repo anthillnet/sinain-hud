@@ -637,6 +637,23 @@ class OverlayShellState extends State<OverlayShell> {
   /// Public entry for the global "copy seed" hotkey (main.dart → hotkey channel).
   void copySeedHotkey() => _copySeedForActiveThread();
 
+  /// Global Ctrl+Opt+Cmd+C hotkey: enrich whatever's on the clipboard with
+  /// Sinain's situational + KG context (treating the copied text like an ROI),
+  /// then write back "your content + Sinain seed" so the next paste is already
+  /// enriched. The original clipboard is left untouched if it's empty/non-text
+  /// or enrichment fails — and we don't pre-clobber it, so an early paste still
+  /// lands the user's own content rather than a placeholder.
+  Future<void> enrichClipboardHotkey() async {
+    final ws = context.read<WebSocketService>();
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final original = data?.text ?? '';
+    if (original.trim().isEmpty) return;
+    final seed = await ws.fetchSeedText('clipboard', focus: original);
+    if (seed == null || seed.trim().isEmpty) return;
+    final combined = '$original\n\n——— Context from Sinain ———\n$seed';
+    await Clipboard.setData(ClipboardData(text: combined));
+  }
+
   /// True while any spawn task for this region is still in flight.
   bool _regionWorking(WebSocketService ws, String regionId) {
     for (final t in ws.spawnTasks.values) {
