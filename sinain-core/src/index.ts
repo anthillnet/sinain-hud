@@ -1774,7 +1774,7 @@ async function main() {
     mintRoiSeed: (text: string) => roiSeeds.put(text, ""),
 
     // Portable seed text for the clipboard "copy seed" action.
-    buildSeed: (key: string, transcript?: string) => buildPortableSeed(key, transcript),
+    buildSeed: (key: string, transcript?: string, focus?: string) => buildPortableSeed(key, transcript, focus),
 
     getHealthPayload: () => {
       const escStats = escalator.getStats();
@@ -1946,11 +1946,29 @@ async function main() {
   // AWAITS knowledge enrichment so the pasted text is self-contained, folds in
   // the carried transcript, and prepends a readable header. key = regionId or
   // "main". Returns null when the region is unknown.
-  async function buildPortableSeed(key: string, transcript?: string): Promise<string | null> {
+  async function buildPortableSeed(key: string, transcript?: string, focus?: string): Promise<string | null> {
     const header = "# Context from Sinain\n\n";
     const tx = transcript?.trim()
       ? `## Continued from Sinain chat\n${transcript.trim()}\n\n---\n\n`
       : "";
+    // Clipboard enrichment: treat the focus text (the user's copied content) as
+    // a pseudo-ROI and return the situational digest + KG retrieved against it.
+    // Body only (no header) — the overlay frames it under a separator after the
+    // user's own content.
+    if (key === "clipboard" || (focus && focus.trim())) {
+      const digest = agentLoop.getDigest()?.digest;
+      let knowledge = "";
+      if (focus && focus.trim()) {
+        try {
+          knowledge = await buildRoiKnowledge({ issue: focus.trim().slice(0, 1200), sourceOcr: "" });
+        } catch { /* knowledge is optional */ }
+      }
+      const parts: string[] = [
+        digest ? `Current situation:\n${digest}` : "(No situation digest yet.)",
+      ];
+      if (knowledge.trim()) parts.push(`Relevant knowledge:\n${knowledge.trim()}`);
+      return parts.join("\n\n");
+    }
     if (key === "main") {
       const digest = agentLoop.getDigest()?.digest;
       const body = digest ? `Current situation:\n${digest}` : "(No situation digest yet.)";

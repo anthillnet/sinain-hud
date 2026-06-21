@@ -550,7 +550,7 @@ class WebSocketService extends ChangeNotifier {
   /// Fetch the portable seed text for a thread (key = regionId or "main") so it
   /// can be copied to the clipboard — the same context we feed supported
   /// agents, built server-side. Returns null on any failure.
-  Future<String?> fetchSeedText(String key, {String? transcript}) async {
+  Future<String?> fetchSeedText(String key, {String? transcript, String? focus}) async {
     final base = _httpBase;
     if (base == null) return null;
     HttpClient? client;
@@ -561,6 +561,7 @@ class WebSocketService extends ChangeNotifier {
       req.add(utf8.encode(jsonEncode({
         'key': key,
         if (transcript != null) 'transcript': transcript,
+        if (focus != null) 'focus': focus,
       })));
       final resp = await req.close();
       if (resp.statusCode != 200) return null;

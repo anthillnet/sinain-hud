@@ -190,11 +190,12 @@ See [Privacy Threat Model](docs/privacy-protection-design.md) for the full desig
 
 ## Hotkeys
 
-SinainHUD is mouse-driven — there's a single global hotkey:
+SinainHUD is mouse-driven — two global hotkeys, everything else is a click:
 
 | Shortcut | Action |
 |---|---|
 | `Cmd+Shift+P` | Reset window position (recover an off-screen overlay) |
+| `Ctrl+Opt+Cmd+C` | **Enrich clipboard** — adds Sinain's live context + knowledge-graph facts to whatever you just copied, so the next paste is already enriched |
 
 Everything else (cycle view, switch tabs, capture toggles, quit) is a click in the overlay. See [docs/HOTKEYS.md](docs/HOTKEYS.md).
 

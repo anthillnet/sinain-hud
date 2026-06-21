@@ -11,6 +11,7 @@ class EyeWidget extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onSecondaryTap;
   final VoidCallback? onDragEnd;
   final double pupilDilation;
   final Color eyeColor;
@@ -20,6 +21,7 @@ class EyeWidget extends StatefulWidget {
     required this.onTap,
     this.onDoubleTap,
     this.onLongPress,
+    this.onSecondaryTap,
     this.onDragEnd,
     this.pupilDilation = 0.0,
     this.eyeColor = const Color(0xFF00FF88),
@@ -43,13 +45,16 @@ class _EyeWidgetState extends State<EyeWidget> {
   @override
   Widget build(BuildContext context) {
     return HudTooltip(
-      message: widget.onDoubleTap != null
-          ? 'Tap to expand · double-tap to grab a region · long-press to hide'
-          : 'Tap to expand, long-press to hide',
+      message: widget.onSecondaryTap != null
+          ? 'Tap to expand · double-tap to grab a region · right-click for all actions · long-press to hide'
+          : widget.onDoubleTap != null
+              ? 'Tap to expand · double-tap to grab a region · long-press to hide'
+              : 'Tap to expand, long-press to hide',
       child: GestureDetector(
         onTap: _isDragging ? null : widget.onTap,
         onDoubleTap: _isDragging ? null : widget.onDoubleTap,
         onLongPress: widget.onLongPress,
+        onSecondaryTap: _isDragging ? null : widget.onSecondaryTap,
         onPanStart: _onDragStart,
         onPanUpdate: _onDragUpdate,
         onPanEnd: _onDragEnd,
