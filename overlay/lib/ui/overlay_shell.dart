@@ -654,6 +654,41 @@ class OverlayShellState extends State<OverlayShell> {
     await Clipboard.setData(ClipboardData(text: combined));
   }
 
+  /// Right-click the eye → a native context menu listing every action, so the
+  /// user never has to remember the hotkeys (the menu shows them too). Reuses
+  /// the existing handlers; the native NSMenu renders outside the tiny eye panel.
+  Future<void> _showEyeContextMenu() async {
+    final items = <Map<String, dynamic>>[
+      {'id': 'enrich', 'title': 'Enrich Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
+      if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
+      {'id': 'copySeed', 'title': 'Copy Context Seed'},
+      {'separator': true},
+      {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
+      {'id': 'hide', 'title': 'Hide HUD'},
+      {'id': 'settings', 'title': 'Settings…'},
+      {'separator': true},
+      {'id': 'quit', 'title': 'Quit Sinain'},
+    ];
+    final selected = await _windowService.showContextMenu(items);
+    if (!mounted || selected == null) return;
+    switch (selected) {
+      case 'enrich':
+        await enrichClipboardHotkey();
+      case 'region':
+        _startManualRoi();
+      case 'copySeed':
+        await _copySeedForActiveThread();
+      case 'reset':
+        resetPosition();
+      case 'hide':
+        toggleVisibility(false);
+      case 'settings':
+        _openSettings();
+      case 'quit':
+        await quitApp();
+    }
+  }
+
   /// True while any spawn task for this region is still in flight.
   bool _regionWorking(WebSocketService ws, String regionId) {
     for (final t in ws.spawnTasks.values) {
@@ -941,6 +976,7 @@ class OverlayShellState extends State<OverlayShell> {
           // the ⊕ tab pill). macOS only — the drag selector is native.
           onDoubleTap: _isMacOS ? _startManualRoi : null,
           onLongPress: () => toggleVisibility(false),
+          onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
           eyeColor: _eyeColor,

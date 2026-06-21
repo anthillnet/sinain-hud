@@ -131,6 +131,19 @@ class WindowService {
     }
   }
 
+  /// Pop a native right-click context menu at the cursor. [items] is a list of
+  /// maps: {id, title, key?, mods?, enabled?} or {separator: true}. Returns the
+  /// selected item's id, or null if dismissed.
+  Future<String?> showContextMenu(List<Map<String, dynamic>> items) async {
+    try {
+      final id = await _channel.invokeMethod('showContextMenu', {'items': items});
+      return id as String?;
+    } catch (e) {
+      _log('showContextMenu failed: $e');
+      return null;
+    }
+  }
+
   /// Reset window to default position (bottom-right corner, eye size).
   Future<void> resetToDefaultPosition() async {
     try {

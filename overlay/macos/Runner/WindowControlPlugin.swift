@@ -279,9 +279,61 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             }
             result(nil)
 
+        case "showContextMenu":
+            // Right-click on the eye → native NSMenu at the cursor. The item
+            // list (id/title/shortcut/separator) is owned by Dart; we render it
+            // natively (the eye panel is too small for a Flutter popup) and
+            // return the selected id synchronously so Dart dispatches the action.
+            let items = (args?["items"] as? [[String: Any]]) ?? []
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            selectedContextMenuId = nil
+            for item in items {
+                if (item["separator"] as? Bool) == true {
+                    menu.addItem(.separator())
+                    continue
+                }
+                let mi = NSMenuItem(
+                    title: (item["title"] as? String) ?? "",
+                    action: #selector(contextMenuItemSelected(_:)),
+                    keyEquivalent: (item["key"] as? String) ?? "")
+                mi.target = self
+                mi.representedObject = item["id"] as? String
+                mi.isEnabled = (item["enabled"] as? Bool) ?? true
+                if let mods = item["mods"] as? [String] {
+                    mi.keyEquivalentModifierMask = modifierMask(from: mods)
+                }
+                menu.addItem(mi)
+            }
+            // popUp runs modally; the item's action fires before it returns.
+            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+            result(selectedContextMenuId)
+
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    // MARK: - Right-click context menu
+
+    private var selectedContextMenuId: String?
+
+    @objc private func contextMenuItemSelected(_ sender: NSMenuItem) {
+        selectedContextMenuId = sender.representedObject as? String
+    }
+
+    private func modifierMask(from mods: [String]) -> NSEvent.ModifierFlags {
+        var m: NSEvent.ModifierFlags = []
+        for s in mods {
+            switch s {
+            case "cmd": m.insert(.command)
+            case "shift": m.insert(.shift)
+            case "opt": m.insert(.option)
+            case "ctrl": m.insert(.control)
+            default: break
+            }
+        }
+        return m
     }
 
     // MARK: - Screen Recording permission (via the capture helper)

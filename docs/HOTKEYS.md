@@ -9,4 +9,6 @@ SinainHUD is mouse-driven — every action has a clickable affordance in the ove
 
 Registered via Carbon's `RegisterEventHotKey` in `overlay/macos/Runner/AppDelegate.swift`. It works system-wide — no need to focus the overlay window.
 
+> **Don't want to remember these?** **Right-click the eye** (macOS) for a native context menu of every action — enrich clipboard, select region, copy seed, reset position, hide, settings, quit — with the shortcuts shown next to each, so the menu doubles as a cheat-sheet.
+
 > **Quit** is the overlay's button/menu, not a hotkey. It still tears down the whole stack (overlay + backend) via `applicationWillTerminate → BackendLauncher.stop`.
