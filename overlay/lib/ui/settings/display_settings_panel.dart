@@ -8,7 +8,6 @@ import '../../core/services/settings_service.dart';
 import '../../core/services/window_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/update_check_service.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../hud_tooltip.dart';
 
 /// Compact display-settings popover for font size and accent color.
@@ -352,37 +351,9 @@ class DisplaySettingsPanel extends StatelessWidget {
           // wrong key at setup had no graceful fix).
           const _OpenRouterKeyField(),
 
-          // Update available (DMG installs — checked daily against the
-          // latest macos-v* release; DMGs have no auto-update)
-          if (context.watch<UpdateCheckService>().availableVersion != null) ...[
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                onTap: () => launchUrl(
-                  Uri.parse(UpdateCheckService.downloadUrl),
-                  mode: LaunchMode.externalApplication,
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.system_update_alt,
-                        size: 12, color: Color(accentColor)),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Update available: v${context.watch<UpdateCheckService>().availableVersion} — download',
-                      style: TextStyle(
-                        fontFamily: HudConstants.monoFont,
-                        fontFamilyFallback: HudConstants.monoFontFallbacks,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Color(accentColor),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
+          // Update available (DMG installs — checked daily against the latest
+          // macos-v* release). One-click download + in-place install.
+          const _UpdateRow(),
 
           // Current session log
           MouseRegion(
@@ -580,6 +551,113 @@ class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
             child: Text(_status!, style: _mono(0.5, 8)),
           ),
         const SizedBox(height: 10),
+      ],
+    );
+  }
+}
+
+/// "Update available" row: one-click download + in-place install, with a live
+/// progress bar while it runs and a website fallback. Only renders for DMG
+/// installs that are behind the latest macos-v* release.
+class _UpdateRow extends StatelessWidget {
+  const _UpdateRow();
+
+  TextStyle _mono(double alpha, double size, {FontWeight? w, Color? color}) =>
+      TextStyle(
+        fontFamily: HudConstants.monoFont,
+        fontFamilyFallback: HudConstants.monoFontFallbacks,
+        fontSize: size,
+        fontWeight: w,
+        color: color ?? Colors.white.withValues(alpha: alpha),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final update = context.watch<UpdateCheckService>();
+    final version = update.availableVersion;
+    if (version == null) return const SizedBox.shrink();
+    final accent = Color(context.watch<SettingsService>().settings.accentColor);
+
+    final Widget action;
+    if (update.installStage == 'downloading') {
+      final p = update.installProgress;
+      action = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(p < 0 ? 'Downloading…' : 'Downloading… ${(p * 100).round()}%',
+              style: _mono(0.6, 9)),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: p < 0 ? null : p,
+              minHeight: 3,
+              backgroundColor: Colors.white.withValues(alpha: 0.1),
+              valueColor: AlwaysStoppedAnimation(accent),
+            ),
+          ),
+        ],
+      );
+    } else if (update.installStage == 'installing') {
+      action = Text('Installing — the app will restart…', style: _mono(0.6, 9));
+    } else {
+      action = Row(
+        children: [
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () =>
+                  context.read<UpdateCheckService>().downloadAndInstall(),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: accent.withValues(alpha: 0.5)),
+                ),
+                child: Text('DOWNLOAD & INSTALL',
+                    style: _mono(1, 9, w: FontWeight.bold, color: accent)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () =>
+                  context.read<UpdateCheckService>().launchDownloadPage(),
+              child: Text('website',
+                  style: _mono(0.4, 9)
+                      .copyWith(decoration: TextDecoration.underline)),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.system_update_alt, size: 12, color: accent),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Update available: v$version',
+                  style: _mono(1, 10, w: FontWeight.bold, color: accent)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        action,
+        if (update.installError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Install failed — opening the download page instead.',
+                style: _mono(0.5, 8)),
+          ),
+        const SizedBox(height: 8),
       ],
     );
   }

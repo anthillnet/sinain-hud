@@ -88,6 +88,51 @@ class AppDelegate: FlutterAppDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     NSApp.terminate(nil)
                 }
+            case "installUpdate":
+                // One-click update: a detached shell waits for us to quit, then
+                // mounts the downloaded DMG, swaps THIS .app bundle in place, and
+                // relaunches. Falls back to opening the DMG if the swap can't be
+                // done (e.g. the install dir isn't user-writable). The app is
+                // notarized, so the relaunched copy passes Gatekeeper.
+                let args = call.arguments as? [String: Any]
+                guard let dmg = args?["dmgPath"] as? String, !dmg.isEmpty,
+                      FileManager.default.fileExists(atPath: dmg) else {
+                    result(false); return
+                }
+                let appPath = Bundle.main.bundlePath
+                guard appPath.hasSuffix(".app") else { result(false); return }
+                let pid = ProcessInfo.processInfo.processIdentifier
+                // Single-quote the paths (temp + bundle paths carry no quotes).
+                let script = """
+                PID=\(pid); DMG='\(dmg)'; APP='\(appPath)'
+                for _ in $(seq 1 150); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
+                MNT=$(mktemp -d /tmp/sinain-update.XXXXXX)
+                if ! hdiutil attach "$DMG" -nobrowse -noverify -mountpoint "$MNT" >/dev/null 2>&1; then
+                  open "$DMG"; exit 1
+                fi
+                SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -1)
+                OK=0
+                if [ -n "$SRC" ]; then
+                  NEW="$APP.update-$$"
+                  if /usr/bin/ditto "$SRC" "$NEW" 2>/dev/null && rm -rf "$APP" && mv "$NEW" "$APP"; then
+                    /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+                    OK=1
+                  else
+                    rm -rf "$NEW" 2>/dev/null
+                  fi
+                fi
+                hdiutil detach "$MNT" >/dev/null 2>&1; rm -rf "$MNT"; rm -f "$DMG"
+                if [ "$OK" = 1 ]; then open "$APP"; else open "$DMG"; fi
+                """
+                self.backend.stop()
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/bin/sh")
+                task.arguments = ["-c", script]
+                do { try task.run() } catch { result(false); return }
+                result(true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    NSApp.terminate(nil)
+                }
             case "start":
                 self.backend.start(); result(true)
             case "stop":
