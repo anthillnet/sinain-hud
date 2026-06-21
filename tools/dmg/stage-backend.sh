@@ -119,6 +119,38 @@ if [ -n "$APP_CONTAINER" ]; then
   rm -f "$_probe" 2>/dev/null || true
 fi
 
+# ── Self-uninstall on trash ──────────────────────────────────────────────────
+# Install a LaunchAgent that watches THIS app's bundle path. When the user moves
+# Sinain.app to the Trash, launchd fires uninstall-watch.sh, which (after
+# debouncing a DMG update) runs the uninstaller — removing Sinain everywhere but
+# keeping the knowledge graph. Re-written each launch so it tracks the current
+# install location. (We only get here past the read-only guard → a real install.)
+APP_BUNDLE="$(cd "$RES/../.." 2>/dev/null && pwd || true)"
+if [ -n "$APP_BUNDLE" ] && [ -f "$HERE/uninstall.sh" ] && [ -f "$HERE/uninstall-watch.sh" ]; then
+  WATCH_DIR="$HOME/.sinain/uninstall"
+  mkdir -p "$WATCH_DIR" "$HOME/Library/LaunchAgents"
+  cp "$HERE/uninstall.sh" "$WATCH_DIR/uninstall.sh" 2>/dev/null || true
+  cp "$HERE/uninstall-watch.sh" "$WATCH_DIR/uninstall-watch.sh" 2>/dev/null || true
+  chmod +x "$WATCH_DIR/uninstall.sh" "$WATCH_DIR/uninstall-watch.sh" 2>/dev/null || true
+  WPLIST="$HOME/Library/LaunchAgents/com.sinain.hud.trash-watcher.plist"
+  cat > "$WPLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.sinain.hud.trash-watcher</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string>
+    <string>$WATCH_DIR/uninstall-watch.sh</string>
+  </array>
+  <key>WatchPaths</key><array><string>$APP_BUNDLE</string></array>
+  <key>RunAtLoad</key><false/>
+</dict></plist>
+PL
+  launchctl bootout "gui/$(id -u)/com.sinain.hud.trash-watcher" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$WPLIST" 2>/dev/null \
+    || launchctl load "$WPLIST" 2>/dev/null || true
+fi
+
 # Reset per-launch provisioning status (the overlay polls these files for the
 # setup-progress banner; stale 'done' files from a prior run shouldn't linger).
 mkdir -p "$HOME/.sinain/provisioning"
@@ -345,7 +377,8 @@ chmod +x "$RES/scripts/stop.sh"
 # uninstall.sh — user-facing uninstaller (removes Sinain everywhere, keeps the
 # knowledge graph). Reachable via `npx @geravant/sinain uninstall` or directly.
 cp "$REPO/uninstall.sh" "$RES/scripts/uninstall.sh"
-chmod +x "$RES/scripts/uninstall.sh"
+cp "$REPO/uninstall-watch.sh" "$RES/scripts/uninstall-watch.sh"
+chmod +x "$RES/scripts/uninstall.sh" "$RES/scripts/uninstall-watch.sh"
 
 # Build stamp — launch-backend.sh compares this against ~/.sinain/installed-build
 # to detect a DMG installed over an older version and refresh provisioned deps.

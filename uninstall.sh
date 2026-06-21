@@ -111,7 +111,12 @@ if [ -d "$HOME/.openclaw/workspace" ]; then
   rmdir "$HOME/.openclaw/workspace" "$HOME/.openclaw" 2>/dev/null || true
 fi
 
-echo -e "${B}6. Remove the app's macOS state (prefs, container, caches, LaunchAgent — ${BUNDLE})${X}"
+echo -e "${B}6. Remove the trash-watcher LaunchAgent (the thing that ran this on trash)${X}"
+WATCHER="com.sinain.hud.trash-watcher"
+run "launchctl bootout gui/$(id -u)/${WATCHER}" launchctl bootout "gui/$(id -u)/${WATCHER}"
+rmrf "$HOME/Library/LaunchAgents/${WATCHER}.plist"
+
+echo -e "${B}7. Remove the app's macOS state (prefs, container, caches, LaunchAgent — ${BUNDLE})${X}"
 rmrf "$HOME/Library/Containers/${BUNDLE}" \
      "$HOME/Library/Preferences/${BUNDLE}.plist" \
      "$HOME/Library/Caches/${BUNDLE}" \
@@ -121,12 +126,12 @@ rmrf "$HOME/Library/Containers/${BUNDLE}" \
      "$HOME/Library/Saved Application State/${BUNDLE}.savedState" \
      "$HOME/Library/LaunchAgents/${BUNDLE}.plist"
 
-echo -e "${B}7. Revoke the app's macOS permission grants (Screen Recording, etc.)${X}"
+echo -e "${B}8. Revoke the app's macOS permission grants (Screen Recording, etc.)${X}"
 for svc in ScreenCapture Accessibility Microphone ListenEvent; do
   run "tccutil reset ${svc} ${BUNDLE}" tccutil reset "$svc" "$BUNDLE"
 done
 
-echo -e "${B}8. Remove leftover temp files${X}"
+echo -e "${B}9. Remove leftover temp files${X}"
 rmrf /tmp/sinain-pids.txt /tmp/sinain-sense-control.json \
      /tmp/openrouter-proxy.log /tmp/openrouter-proxy.stdout.log
 
