@@ -33,30 +33,38 @@ PATTERNS=(
   "sinain-core/dist/index.js"                    # core (bundled: node dist)
 )
 
-term_pass() {
-  for pat in "${PATTERNS[@]}"; do
-    pkill -TERM -f "$pat" 2>/dev/null || true
-  done
-  # Anything still listening on the core port (covers an orphaned core whose
-  # command line drifted from the patterns above).
-  local pids
-  pids=$(lsof -i ":$PORT" -sTCP:LISTEN -t 2>/dev/null || true)
-  [ -n "$pids" ] && kill -TERM $pids 2>/dev/null || true
+# Snapshot the PIDs to stop ONCE, up front — every process matching a pattern
+# or holding the core port, minus this script itself. We SIGTERM these, wait,
+# then SIGKILL only the same PIDs. Crucially we never re-scan at SIGKILL time:
+# a backend that (re)starts during the grace window has a brand-new PID (and is
+# the new owner of :$PORT) that was never in the snapshot, so we leave it alone.
+# Without this, a first-run-wizard relaunch (stop old backend → start new one)
+# races the SIGKILL pass and the freshly-started core + sck-capture get killed
+# by pattern + port — the backend "never comes online" after setup.
+collect_pids() {
+  {
+    for pat in "${PATTERNS[@]}"; do
+      pgrep -f "$pat" 2>/dev/null || true
+    done
+    # Anything listening on the core port (covers an orphaned core whose command
+    # line drifted from the patterns above).
+    lsof -i ":$PORT" -sTCP:LISTEN -t 2>/dev/null || true
+  } | grep -E '^[0-9]+$' | sort -u | grep -vx "$$" || true
 }
 
-kill_pass() {
-  for pat in "${PATTERNS[@]}"; do
-    pkill -KILL -f "$pat" 2>/dev/null || true
-  done
-  local pids
-  pids=$(lsof -i ":$PORT" -sTCP:LISTEN -t 2>/dev/null || true)
-  [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true
-}
+SNAPSHOT_PIDS="$(collect_pids | tr '\n' ' ')"
 
-term_pass
-# Give core a moment to distill the session and exit cleanly before the hammer.
-sleep 2
-kill_pass
+if [ -n "${SNAPSHOT_PIDS// /}" ]; then
+  # SIGTERM first so core's graceful-shutdown hook can flush/distill the session.
+  kill -TERM $SNAPSHOT_PIDS 2>/dev/null || true
+  # Give core a moment to exit cleanly before the hammer.
+  sleep 2
+  # SIGKILL only the still-alive snapshot PIDs — never a fresh re-scan, so a
+  # backend that (re)started during the grace window survives.
+  for pid in $SNAPSHOT_PIDS; do
+    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+  done
+fi
 
 rm -f /tmp/sinain-pids.txt 2>/dev/null || true
 exit 0
