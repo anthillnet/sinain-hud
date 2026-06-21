@@ -98,6 +98,27 @@ echo "===== backend launch $(date '+%Y-%m-%d %H:%M:%S') ====="
 [ -f "$RES/DMG_VERSION" ] && export SINAIN_DMG_VERSION="$(cat "$RES/DMG_VERSION")"
 echo "[launch] versions: dmg=${SINAIN_DMG_VERSION:-n/a} build=${SINAIN_BUILD_ID:-n/a}"
 
+# ── Refuse to run from a read-only location ──────────────────────────────────
+# If the user double-clicked Sinain inside the mounted DMG (or a quarantine
+# AppTranslocation copy) instead of moving it to /Applications, the bundle lives
+# on a read-only volume. core/sense/sck-capture all execute from inside the
+# bundle, so when that volume unmounts they're SIGKILL'd and the backend never
+# stays online. The overlay shows a native "move to Applications" alert
+# (AppDelegate BackendLauncher); this is the backstop when the script is run
+# directly. Probe the directory *containing* the .app — writable on
+# /Applications (and read-write external drives), read-only on a DMG — so we
+# don't touch the signed bundle itself.
+APP_CONTAINER="$(cd "$RES/../../.." 2>/dev/null && pwd || true)"
+if [ -n "$APP_CONTAINER" ]; then
+  _probe="$APP_CONTAINER/.sinain-write-probe.$$"
+  if ! ( : > "$_probe" ) 2>/dev/null; then
+    echo "[launch] ✗ Sinain is running from a read-only location ($APP_CONTAINER) — likely the mounted DMG."
+    echo "[launch]   Move Sinain.app to /Applications and open it from there. Aborting backend startup."
+    exit 78   # EX_CONFIG
+  fi
+  rm -f "$_probe" 2>/dev/null || true
+fi
+
 # Reset per-launch provisioning status (the overlay polls these files for the
 # setup-progress banner; stale 'done' files from a prior run shouldn't linger).
 mkdir -p "$HOME/.sinain/provisioning"
