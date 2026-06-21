@@ -911,10 +911,11 @@ async function main() {
   const localCuration = new LocalCurationService(
     (text) => wsHandler.broadcast(text),
   );
-  // Distill pending session in background — don't block server startup
-  setImmediate(() => {
-    localCuration.distillPendingSession();
-  });
+  // NB: pending-session distillation is triggered later, AFTER the HTTP server
+  // is listening (see end of main()). runDistillation() uses execFileSync (the
+  // f-coref model load alone can take ~8s), which blocks the event loop — doing
+  // it here raced server.start() and could starve /health past start.sh's 15s
+  // gate. It carries no time pressure, so it waits until health is answerable.
 
   // ── Entity subscription cache ���─
   // Detects entity mentions in transcription, prefetches knowledge facts async.
@@ -2461,6 +2462,19 @@ async function main() {
   log(TAG, `  agent:   ${config.agentConfig.enabled ? "enabled" : "disabled"}`);
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
   log(TAG, `  cost:    display=${config.costDisplayEnabled ? "on" : "off"} (always logged)`);
+
+  // ── Distill any leftover pending session from a prior shutdown ──
+  // Deferred until here, after server.start() has bound the port and /health is
+  // answerable, so the synchronous (execFileSync) distillation can't starve the
+  // startup health gate. The short delay also lets the overlay's first health
+  // checks land before the event loop blocks on the f-coref model load.
+  setTimeout(() => {
+    try {
+      localCuration.distillPendingSession();
+    } catch (err: any) {
+      warn(TAG, `pending session distillation failed: ${err.message?.slice(0, 100)}`);
+    }
+  }, 5000);
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
