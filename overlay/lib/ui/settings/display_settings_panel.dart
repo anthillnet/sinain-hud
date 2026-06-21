@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/app_control.dart';
 import '../../core/constants.dart';
@@ -307,6 +309,10 @@ class DisplaySettingsPanel extends StatelessWidget {
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
           const SizedBox(height: 8),
 
+          // OpenRouter API key — editable recovery path (was .env-only, so a
+          // wrong key at setup had no graceful fix).
+          const _OpenRouterKeyField(),
+
           // Update available (DMG installs — checked daily against the
           // latest macos-v* release; DMGs have no auto-update)
           if (context.watch<UpdateCheckService>().availableVersion != null) ...[
@@ -395,6 +401,147 @@ class DisplaySettingsPanel extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Editable OpenRouter API key. Merges `OPENROUTER_API_KEY` into ~/.sinain/.env
+/// (preserving other vars) and restarts the backend so the new key takes effect
+/// — the graceful recovery for a wrong key entered during setup.
+class _OpenRouterKeyField extends StatefulWidget {
+  const _OpenRouterKeyField();
+
+  @override
+  State<_OpenRouterKeyField> createState() => _OpenRouterKeyFieldState();
+}
+
+class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
+  final _ctl = TextEditingController();
+  String? _status;
+  bool _saving = false;
+
+  String? get _envPath {
+    final home = Platform.environment['HOME'];
+    return home == null ? null : '$home/.sinain/.env';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final p = _envPath;
+    if (p != null && File(p).existsSync()) {
+      for (final l in File(p).readAsLinesSync()) {
+        if (l.startsWith('OPENROUTER_API_KEY=')) {
+          _ctl.text = l.substring('OPENROUTER_API_KEY='.length).trim();
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final p = _envPath;
+    if (p == null) {
+      setState(() => _status = 'no HOME');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _status = null;
+    });
+    try {
+      final f = File(p);
+      final key = _ctl.text.trim();
+      final lines = await f.exists() ? await f.readAsLines() : <String>[];
+      var found = false;
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('OPENROUTER_API_KEY=')) {
+          lines[i] = 'OPENROUTER_API_KEY=$key';
+          found = true;
+        }
+      }
+      if (!found) lines.add('OPENROUTER_API_KEY=$key');
+      await f.parent.create(recursive: true);
+      await f.writeAsString('${lines.join('\n')}\n');
+      await const MethodChannel('sinain_hud/backend').invokeMethod('restart');
+      if (mounted) setState(() => _status = 'Saved · restarting backend');
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  TextStyle _mono(double alpha, double size) => TextStyle(
+        fontFamily: HudConstants.monoFont,
+        fontFamilyFallback: HudConstants.monoFontFallbacks,
+        fontSize: size,
+        color: Colors.white.withValues(alpha: alpha),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('OPENROUTER KEY', style: _mono(0.35, 9)),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 26,
+                child: TextField(
+                  controller: _ctl,
+                  obscureText: true,
+                  style: _mono(1.0, 10),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    hintText: 'sk-or-…',
+                    hintStyle: _mono(0.25, 10),
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.06),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: _saving ? null : _save,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(_saving ? '…' : 'SAVE',
+                      style: _mono(0.9, 9).copyWith(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_status != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(_status!, style: _mono(0.5, 8)),
+          ),
+        const SizedBox(height: 10),
+      ],
     );
   }
 }
