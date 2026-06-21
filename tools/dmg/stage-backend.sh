@@ -204,8 +204,18 @@ if [ -z "$SENSE_PY" ] && [ -x "$HERE/provision-python.sh" ]; then
   fi
 fi
 if [ -n "$SENSE_PY" ]; then
-  export SINAIN_PYTHON="$SENSE_PY"
-  echo "[launch] python (sense + knowledge): $SENSE_PY"
+  # Brand our Python helpers so they show as sinain-* (not bare "Python") in
+  # Activity Monitor / ps — macOS names a process from its executable's
+  # basename, so we exec the one interpreter through sinain-named symlinks.
+  SINAIN_BIN="$HOME/.sinain/bin"
+  mkdir -p "$SINAIN_BIN"
+  ln -sf "$SENSE_PY" "$SINAIN_BIN/sinain-sense"      # sense_client
+  ln -sf "$SENSE_PY" "$SINAIN_BIN/sinain-knowledge"  # core's knowledge scripts
+  ln -sf "$SENSE_PY" "$SINAIN_BIN/sinain-chat"       # chat sidecar
+  export SINAIN_PYTHON="$SINAIN_BIN/sinain-knowledge"
+  export SINAIN_CHAT_PYTHON="$SINAIN_BIN/sinain-chat"
+  export SINAIN_SENSE_PYTHON="$SINAIN_BIN/sinain-sense"
+  echo "[launch] python (sense + knowledge): $SENSE_PY (as sinain-sense / sinain-knowledge)"
 else
   echo "[launch] python provisioning failed — sense_client + knowledge pages degraded"
 fi
@@ -313,9 +323,9 @@ fi
 # Start sense_client (screen capture → OCR → POST /sense), reusing the python3
 # picked above (SENSE_PY). CWD = Resources so `-m sense_client` imports it.
 if [ -n "$SENSE_PY" ] && [ -d "$RES/sense_client" ]; then
-  ( cd "$RES" && exec "$SENSE_PY" -m sense_client ) &
+  ( cd "$RES" && exec "${SINAIN_SENSE_PYTHON:-$SENSE_PY}" -m sense_client ) &
   SENSE_PID=$!
-  echo "[launch] sense_client started ($SENSE_PY)"
+  echo "[launch] sense_client started (${SINAIN_SENSE_PYTHON:-$SENSE_PY})"
 else
   echo "[launch] sense_client skipped — no full-dep python3"
 fi

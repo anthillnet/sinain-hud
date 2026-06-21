@@ -29,6 +29,9 @@
 //   OPENROUTER_PROXY_PORT=11435   (default: 11435)
 //   OPENROUTER_PROXY_LOG=/tmp/openrouter-proxy.log
 //
+// Brand this process as "sinain-proxy" (not bare "node") in Activity Monitor.
+process.title = "sinain-proxy";
+//
 // Point openclaude at the proxy in .env:
 //   OPENAI_BASE_URL=http://localhost:11435/api/v1
 
