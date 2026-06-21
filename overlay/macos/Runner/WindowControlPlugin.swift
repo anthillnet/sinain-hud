@@ -251,17 +251,25 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         // MARK: Screen Recording permission (first-run wizard, Section B)
 
         case "screenRecordingStatus":
-            // Non-prompting check of the current grant. Drives the wizard's
-            // "Waiting for grant" poll so it auto-advances once the user flips
-            // Sinain on in System Settings.
-            result(CGPreflightScreenCaptureAccess())
+            // Non-prompting check of the current grant. We run the actual
+            // capture helper (sck-capture --check-permission) so the status
+            // reflects the binary that really captures, not the overlay app — a
+            // different TCC identity. Falls back to an in-process check in dev
+            // builds where the helper isn't bundled.
+            runSckCapturePermission("--check-permission") { granted in
+                result(granted ?? CGPreflightScreenCaptureAccess())
+            }
 
         case "requestScreenRecording":
-            // Triggers the macOS Screen Recording prompt the first time it's
-            // called (no-op + returns true once already granted). The system
-            // dialog names the capture helper ("sck-capture"), which is why the
-            // pre-warn card explains that wording up front.
-            result(CGRequestScreenCaptureAccess())
+            // Trigger the macOS Screen Recording prompt by exercising the real
+            // capture path inside the helper (sck-capture --request-permission →
+            // SCShareableContent). The grant lands on sck-capture's identity —
+            // the same one the backend uses — and the dialog names "sck-capture",
+            // which is why the pre-warn card explains that wording up front.
+            // Falls back to the in-process request in dev builds.
+            runSckCapturePermission("--request-permission") { granted in
+                result(granted ?? CGRequestScreenCaptureAccess())
+            }
 
         case "openScreenRecordingSettings":
             // Deep-link straight to Privacy & Security → Screen Recording.
@@ -273,6 +281,48 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         default:
             result(FlutterMethodNotImplemented)
+        }
+    }
+
+    // MARK: - Screen Recording permission (via the capture helper)
+
+    /// Locate the bundled `sck-capture` binary — the process whose Screen
+    /// Recording grant actually gates capture. Prefers the app bundle; falls
+    /// back to the `~/.sinain` symlink the launcher maintains. nil in dev
+    /// builds where neither exists (caller uses an in-process fallback).
+    private func sckCaptureURL() -> URL? {
+        let fm = FileManager.default
+        if let res = Bundle.main.resourceURL {
+            let bundled = res.appendingPathComponent("sck-capture/sck-capture")
+            if fm.isExecutableFile(atPath: bundled.path) { return bundled }
+        }
+        let linked = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sinain/sck-capture/sck-capture")
+        if fm.isExecutableFile(atPath: linked.path) { return linked }
+        return nil
+    }
+
+    /// Run `sck-capture <flag>` off the main thread and report whether it
+    /// exited 0 (granted). `completion` runs on the main thread; `nil` means the
+    /// helper couldn't be found/run so the caller should fall back in-process.
+    private func runSckCapturePermission(_ flag: String,
+                                         completion: @escaping (Bool?) -> Void) {
+        guard let bin = sckCaptureURL() else { completion(nil); return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.executableURL = bin
+            task.arguments = [flag]
+            task.standardError = FileHandle.nullDevice
+            task.standardOutput = FileHandle.nullDevice
+            var granted: Bool?
+            do {
+                try task.run()
+                task.waitUntilExit()
+                granted = (task.terminationStatus == 0)
+            } catch {
+                granted = nil
+            }
+            DispatchQueue.main.async { completion(granted) }
         }
     }
 
