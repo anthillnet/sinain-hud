@@ -342,6 +342,10 @@ done
 # (AppDelegate BackendLauncher.stop finds it at Resources/scripts/stop.sh).
 cp "$REPO/stop.sh" "$RES/scripts/stop.sh"
 chmod +x "$RES/scripts/stop.sh"
+# uninstall.sh — user-facing uninstaller (removes Sinain everywhere, keeps the
+# knowledge graph). Reachable via `npx @geravant/sinain uninstall` or directly.
+cp "$REPO/uninstall.sh" "$RES/scripts/uninstall.sh"
+chmod +x "$RES/scripts/uninstall.sh"
 
 # Build stamp — launch-backend.sh compares this against ~/.sinain/installed-build
 # to detect a DMG installed over an older version and refresh provisioned deps.

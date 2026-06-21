@@ -95,6 +95,26 @@ switch (cmd) {
     break;
   }
 
+  case "uninstall": {
+    // Remove Sinain from everywhere, keeping the knowledge graph. Delegates to
+    // uninstall.sh (staged in the .app bundle, or repo root in dev). Pass-through
+    // flags: --yes, --purge-knowledge, --skip-mcp.
+    const { spawnSync } = await import("child_process");
+    const candidates = [
+      path.join(PKG_DIR, "uninstall.sh"),
+      path.join(PKG_DIR, "..", "uninstall.sh"),
+      "/Applications/Sinain.app/Contents/Resources/scripts/uninstall.sh",
+      path.join(HOME, "Applications", "Sinain.app", "Contents", "Resources", "scripts", "uninstall.sh"),
+    ];
+    const script = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+    if (!script) {
+      console.error("uninstall.sh not found. Grab it from the repo and run: bash uninstall.sh --yes");
+      process.exit(1);
+    }
+    const r = spawnSync("bash", [script, ...process.argv.slice(3)], { stdio: "inherit" });
+    process.exit(r.status ?? 0);
+  }
+
   case "export-knowledge":
     await exportKnowledge();
     break;
