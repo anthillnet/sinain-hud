@@ -16,6 +16,12 @@ var audioEnabled: Bool = true
 // follow is the source of wrong-display ROI placement; pinning keeps every frame
 // (and every eye) on one known screen until that's solid.
 var pinDisplay: Bool = false
+// Permission probes for the first-run wizard. The grant that matters belongs to
+// THIS binary (the actual capturer), not the overlay app, so the wizard runs us
+// to trigger / poll it — and the macOS prompt names sck-capture, as the wizard
+// copy promises.
+var requestPermission: Bool = false   // exercise the real capture path → prompt
+var checkPermission: Bool = false     // non-prompting status poll
 
 var args = CommandLine.arguments.dropFirst()
 while let arg = args.first {
@@ -35,10 +41,15 @@ while let arg = args.first {
         audioEnabled = false
     case "--pin-display":
         pinDisplay = true
+    case "--request-permission":
+        requestPermission = true
+    case "--check-permission":
+        checkPermission = true
     case "--help", "-h":
         fputs("Usage: sck-capture [--sample-rate 16000] [--channels 1]\n", stderr)
         fputs("                 [--screen-dir ~/.sinain/capture] [--fps 1] [--scale 0.5]\n", stderr)
         fputs("                 [--no-audio] [--pin-display]\n", stderr)
+        fputs("                 [--request-permission] [--check-permission]\n", stderr)
         fputs("Captures system audio + screen via ScreenCaptureKit.\n", stderr)
         fputs("Audio: raw s16le PCM to stdout.\n", stderr)
         fputs("Screen: JPEG frames to --screen-dir (atomic write).\n", stderr)
@@ -48,6 +59,31 @@ while let arg = args.first {
         fputs("Unknown arg: \(arg)\n", stderr)
         exit(1)
     }
+}
+
+// ── Permission probes (first-run wizard) ──
+// Exit before any capture setup. --check-permission is a non-prompting status
+// read (CGPreflight); --request-permission exercises the real capture entry
+// point (SCShareableContent), which triggers the macOS Screen Recording prompt
+// on first run. Both report via exit code: 0 = granted, 1 = not granted.
+if checkPermission {
+    exit(CGPreflightScreenCaptureAccess() ? 0 : 1)
+}
+if requestPermission {
+    let sem = DispatchSemaphore(value: 0)
+    var granted = false
+    Task {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: false)
+            granted = !content.displays.isEmpty
+        } catch {
+            granted = false   // permission missing — the prompt has been shown
+        }
+        sem.signal()
+    }
+    sem.wait()
+    exit(granted ? 0 : 1)
 }
 
 fputs("[sck-capture] sample_rate=\(sampleRate) channels=\(channels) fps=\(fps) scale=\(scale) audio=\(audioEnabled)\n", stderr)
