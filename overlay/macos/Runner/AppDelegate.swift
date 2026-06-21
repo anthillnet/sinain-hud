@@ -33,6 +33,15 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     override func applicationDidFinishLaunching(_ notification: Notification) {
+        // Dock icon (opt-out). Info.plist sets LSUIElement=true so we launch as
+        // an accessory; flip to .regular up front for the default/opt-in case so
+        // the Dock icon appears without a flash. shared_preferences stores the
+        // Dart bool under the "flutter." key prefix; absent ⇒ visible (default).
+        let showInDock = (UserDefaults.standard.object(forKey: "flutter.show_in_dock") as? Bool) ?? true
+        if showInDock {
+            NSApp.setActivationPolicy(.regular)
+        }
+
         // Start the bundled backend ASAP so it's healthy by the time the
         // overlay's WebSocket tries to connect. No-op in dev builds.
         backend.start()

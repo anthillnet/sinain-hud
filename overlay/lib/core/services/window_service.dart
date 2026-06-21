@@ -42,6 +42,16 @@ class WindowService {
     }
   }
 
+  /// Show or hide the Dock icon (and app menu bar) live by flipping the
+  /// NSApplication activation policy (.regular ↔ .accessory). macOS only.
+  Future<void> setDockIconVisible(bool visible) async {
+    try {
+      await _channel.invokeMethod('setDockIconVisible', {'visible': visible});
+    } catch (e) {
+      _log('setDockIconVisible failed: $e');
+    }
+  }
+
   Future<void> hideWindow() async {
     try {
       await _channel.invokeMethod('hideWindow');

@@ -28,6 +28,11 @@ class HudSettings {
   /// so ChatGPT can pull ROI context. Off by default — security-sensitive.
   bool chatgptHarness;
 
+  /// Show a Dock icon (and app menu bar). On by default; users who want the
+  /// ambient/invisible feel can opt out, dropping the app back to an accessory
+  /// (NSApplicationActivationPolicy.accessory — the LSUIElement behavior).
+  bool showInDock;
+
   HudSettings({
     this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
@@ -41,6 +46,7 @@ class HudSettings {
     this.accentColor = 0xFF00FF88,
     this.autoDetectIssues = false,
     this.chatgptHarness = false,
+    this.showInDock = true,
   });
 
   HudTab get nextTab {
@@ -62,6 +68,7 @@ class HudSettings {
     int? accentColor,
     bool? autoDetectIssues,
     bool? chatgptHarness,
+    bool? showInDock,
   }) {
     return HudSettings(
       overlayState: overlayState ?? this.overlayState,
@@ -76,6 +83,7 @@ class HudSettings {
       accentColor: accentColor ?? this.accentColor,
       autoDetectIssues: autoDetectIssues ?? this.autoDetectIssues,
       chatgptHarness: chatgptHarness ?? this.chatgptHarness,
+      showInDock: showInDock ?? this.showInDock,
     );
   }
 }
