@@ -16,6 +16,10 @@ class SettingsService extends ChangeNotifier {
   static const _keyAccentColor = 'accent_color';
   static const _keyAutoDetectIssues = 'auto_detect_issues';
   static const _keyChatgptHarness = 'chatgpt_harness';
+  // NB: shared_preferences stores this under UserDefaults key
+  // "flutter.show_in_dock" — AppDelegate reads it natively at launch to set the
+  // activation policy with no Dock-icon flash. Keep the string in sync.
+  static const _keyShowInDock = 'show_in_dock';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -37,6 +41,7 @@ class SettingsService extends ChangeNotifier {
       accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
       autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
       chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
+      showInDock: _prefs.getBool(_keyShowInDock) ?? true,
     );
     notifyListeners();
   }
@@ -130,6 +135,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setChatgptHarness(bool value) async {
     _settings.chatgptHarness = value;
     await _prefs.setBool(_keyChatgptHarness, value);
+    notifyListeners();
+  }
+
+  Future<void> setShowInDock(bool value) async {
+    _settings.showInDock = value;
+    await _prefs.setBool(_keyShowInDock, value);
     notifyListeners();
   }
 }

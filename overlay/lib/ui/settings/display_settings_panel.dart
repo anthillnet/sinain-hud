@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/app_control.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
+import '../../core/services/window_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/update_check_service.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -246,6 +247,44 @@ class DisplaySettingsPanel extends StatelessWidget {
                         : Icons.toggle_off,
                     size: 22,
                     color: settings.settings.autoDetectIssues
+                        ? Color(accentColor)
+                        : Colors.white.withValues(alpha: 0.3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Show in Dock — flip the macOS Dock icon (and app menu) live. On by
+          // default; opting out drops the app back to an accessory for the
+          // ambient/invisible feel.
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () {
+                final next = !settings.settings.showInDock;
+                settings.setShowInDock(next);
+                context.read<WindowService>().setDockIconVisible(next);
+              },
+              child: Row(
+                children: [
+                  Text(
+                    'SHOW IN DOCK',
+                    style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 9,
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    settings.settings.showInDock
+                        ? Icons.toggle_on
+                        : Icons.toggle_off,
+                    size: 22,
+                    color: settings.settings.showInDock
                         ? Color(accentColor)
                         : Colors.white.withValues(alpha: 0.3),
                   ),

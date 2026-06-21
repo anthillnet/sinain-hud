@@ -50,6 +50,21 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.level = enabled ? .floating : .normal
             result(nil)
 
+        case "setDockIconVisible":
+            // Flip the Dock icon (and app menu) live. .regular shows it,
+            // .accessory hides it (the LSUIElement default). Going .accessory →
+            // .regular needs a re-activation to actually surface the icon; the
+            // overlay panel is nonactivating so this only momentarily focuses us.
+            let visible = args?["visible"] as? Bool ?? true
+            let policy: NSApplication.ActivationPolicy = visible ? .regular : .accessory
+            if NSApp.activationPolicy() != policy {
+                NSApp.setActivationPolicy(policy)
+                if visible {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+            result(nil)
+
         case "setTransparent":
             window.isOpaque = false
             window.backgroundColor = .clear
