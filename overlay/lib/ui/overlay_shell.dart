@@ -664,7 +664,6 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
-      {'id': 'hide', 'title': 'Hide HUD'},
       {'id': 'settings', 'title': 'Settings…'},
       {'separator': true},
       {'id': 'quit', 'title': 'Quit Sinain'},
@@ -680,8 +679,6 @@ class OverlayShellState extends State<OverlayShell> {
         await _copySeedForActiveThread();
       case 'reset':
         resetPosition();
-      case 'hide':
-        toggleVisibility(false);
       case 'settings':
         _openSettings();
       case 'quit':
