@@ -68,7 +68,18 @@ def dispatch(name: str, args: dict) -> str:
     if name == "sinain_context":
         return (_get("/agent/digest") + "\n---\n" + _get("/agent/context"))[:_MAX]
     if name == "sinain_memory_store":
-        return _post("/knowledge/import", {"content": args.get("text", "")})
+        # /knowledge/import expects the sinain export shape {"facts":[{entity,
+        # attribute,value}]} (same as the MCP sinain_memory_store tool) — NOT
+        # {"content": ...}, which it rejected. If the agent already supplied a
+        # facts array, pass it through; otherwise wrap the free text as one
+        # note triple the deterministic integrator dedups + makes queryable.
+        facts = args.get("facts")
+        if not isinstance(facts, list) or not facts:
+            txt = (args.get("text") or "").strip()
+            if not txt:
+                return json.dumps({"ok": False, "error": "nothing to store"})
+            facts = [{"entity": "user", "attribute": "note", "value": txt, "confidence": 0.7}]
+        return _post("/knowledge/import", {"facts": facts})
     if name == "read_file":
         try:
             with open(args["path"], encoding="utf-8") as fh:
