@@ -5,6 +5,7 @@ import type { AudioPipeline } from "../audio/pipeline.js";
 import type { CoreConfig } from "../types.js";
 import { WebSocket } from "ws";
 import { loadedEnvPath } from "../config.js";
+import { resolveWritableAgentsConfigPath } from "../agents-loader.js";
 import { log } from "../log.js";
 
 const TAG = "cmd";
@@ -428,6 +429,18 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         if (err) log(TAG, `open_settings failed: ${err.message}`);
       });
       log(TAG, `open_settings: ${envPath}`);
+      break;
+    }
+    case "open_roster_config": {
+      // Open the agents.json roster file in a text editor — mirrors
+      // open_settings (.env), seeding a writable copy if none exists yet.
+      const cfgPath = resolveWritableAgentsConfigPath();
+      const cmd = process.platform === "win32" ? "notepad" : "open";
+      const args = process.platform === "win32" ? [cfgPath] : ["-t", cfgPath];
+      execFile(cmd, args, (err) => {
+        if (err) log(TAG, `open_roster_config failed: ${err.message}`);
+      });
+      log(TAG, `open_roster_config: ${cfgPath}`);
       break;
     }
     default:

@@ -410,6 +410,40 @@ class DisplaySettingsPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
 
+                    // Open Roster Config — edit agents.json (chat/terminal
+                    // agents). Mirrors Open Session Log; core seeds a writable
+                    // copy from the example if none exists yet.
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => ws.sendCommand('open_roster_config'),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.smart_toy_outlined,
+                              size: 12,
+                              color: Colors.white.withValues(alpha: 0.55),
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Open Roster Config',
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: HudConstants.monoFont,
+                                  fontFamilyFallback:
+                                      HudConstants.monoFontFallbacks,
+                                  fontSize: 10,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
                     // Quit Sinain
                     MouseRegion(
                       cursor: SystemMouseCursors.click,
