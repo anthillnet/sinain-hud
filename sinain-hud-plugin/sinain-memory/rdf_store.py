@@ -238,12 +238,17 @@ class _FtsIndex:
 class RdfStore:
     """Oxigraph-backed triple store with the sinain triplestore API surface."""
 
-    def __new__(cls, path: str | Path | None = None):
+    def __new__(cls, path: str | Path | None = None, read_only: bool = False):
         if path is None:
             inst = super().__new__(cls)
             inst._cache_key = None
             return inst
-        key = str(Path(path).expanduser().resolve())
+        # SINAIN_KG_READONLY=1 makes the WHOLE process open read-only — the KG
+        # daemon sets it so graph_query's internal RdfStore(path) opens also stay
+        # read-only (and out of the writer's lock). Read-only opens get a
+        # distinct cache key so they never share an instance with a writer.
+        read_only = read_only or os.environ.get("SINAIN_KG_READONLY") == "1"
+        key = ("ro:" if read_only else "") + str(Path(path).expanduser().resolve())
         cached = _STORE_CACHE.get(key)
         if cached is not None:
             return cached
@@ -252,14 +257,21 @@ class RdfStore:
         _STORE_CACHE[key] = inst
         return inst
 
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, read_only: bool = False):
         if getattr(self, "_initialized", False):
             return
         self._initialized = True
+        read_only = read_only or os.environ.get("SINAIN_KG_READONLY") == "1"
+        self.read_only = read_only
         self.db_path = "" if path is None else str(Path(path).expanduser())
         self._fts: _FtsIndex | None = None  # lazy inverted index for fts_search
         if path is None:
             self._store = ox.Store()
+        elif read_only:
+            # Read-only open does NOT take the exclusive RocksDB write lock, so a
+            # long-lived reader (KG warm-index daemon) coexists with the
+            # distillation writer. Snapshot at open time; reopen to refresh.
+            self._store = ox.Store.read_only(str(Path(path).expanduser()))
         else:
             p = Path(path).expanduser()
             p.parent.mkdir(parents=True, exist_ok=True)
