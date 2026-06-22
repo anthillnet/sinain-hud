@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 
 import websockets
@@ -33,6 +34,13 @@ from pydantic import SecretStr
 from openhands.sdk import LLM, Agent, Conversation, Tool
 
 import tools
+
+# Per-turn idle watchdog. If a turn produces NO event for this long, the
+# underlying LLM call is treated as wedged (e.g. an OpenRouter stream that only
+# emits `: PROCESSING` keepalives and never finishes). We abandon it and rebuild
+# the Conversation so one stalled turn can't permanently wedge the resident chat
+# lane — previously this required a manual sidecar restart. Default 90s.
+TURN_TIMEOUT = float(os.environ.get("SINAIN_CHAT_TURN_TIMEOUT", "90"))
 
 SYSTEM = (
     "You are Sinain's chat assistant — a fast, concise helper with access to the user's "
@@ -55,6 +63,12 @@ class ChatAgent:
         # is never starved. _lock = one turn at a time; _active = its source.
         self._lock = asyncio.Lock()
         self._active_source: str | None = None
+        # Set when a turn stalls and we abandon its (wedged) worker thread — the
+        # next turn rebuilds a fresh Conversation before running. _gen tags the
+        # current turn so a late-unwinding abandoned worker can't emit its
+        # done/error into a newer turn's queue.
+        self._needs_resetup = False
+        self._gen = 0
 
     async def setup(self) -> None:
         tools.register_all()
@@ -138,6 +152,13 @@ class ChatAgent:
             self.cancel()
 
         async with self._lock:
+            # Recover from a prior wedged turn: rebuild a fresh Conversation so a
+            # stalled turn we abandoned can't block this one.
+            if self._needs_resetup:
+                await self.setup()
+                self._needs_resetup = False
+            self._gen += 1
+            gen = self._gen
             self._active_source = source
             self._acc = ""
             self._q = asyncio.Queue()
@@ -147,19 +168,40 @@ class ChatAgent:
                 try:
                     self._conv.send_message(msg)
                     self._conv.run()
-                    self._emit({"type": "done", "text": self._acc})
+                    if self._gen == gen:
+                        self._emit({"type": "done", "text": self._acc})
                 except Exception as e:  # noqa: BLE001
-                    self._emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
+                    if self._gen == gen:
+                        self._emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
 
             worker = asyncio.create_task(asyncio.to_thread(_work))
+            stalled = False
             try:
                 while True:
-                    ev = await self._q.get()
+                    try:
+                        ev = await asyncio.wait_for(self._q.get(), timeout=TURN_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        # No event for the whole window — the LLM call is wedged.
+                        # Abandon it (don't block the lane) and rebuild next turn.
+                        stalled = True
+                        self.cancel()
+                        yield {"type": "error",
+                               "text": f"chat turn stalled (>{int(TURN_TIMEOUT)}s) — resetting the chat lane"}
+                        break
                     yield ev
                     if ev["type"] in ("done", "error"):
                         break
             finally:
-                await worker
+                if stalled:
+                    # The worker thread is stuck in a blocking call we can't
+                    # cancel; flag a rebuild and let it unwind in the background
+                    # rather than awaiting it (which would re-wedge the lane).
+                    self._needs_resetup = True
+                else:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(worker), timeout=5)
+                    except asyncio.TimeoutError:
+                        self._needs_resetup = True
                 self._active_source = None
 
     def cancel(self) -> None:
@@ -186,6 +228,12 @@ async def _handler(agent: "ChatAgent", ws) -> None:
 
 async def main() -> None:
     _load_env()
+    # core's liveness check (probeChatSidecar) opens a plain TCP socket to :9610
+    # and closes it; the websockets server logs that as a failed handshake — a
+    # full traceback every poll, which floods backend.log and buries real
+    # errors. Quiet it. Genuine chat clients use a proper WS handshake and are
+    # unaffected.
+    logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
     port = int(os.environ.get("SINAIN_CHAT_WS_PORT", "9610"))
     agent = ChatAgent()
     print(f"[sinain-chat] warming OpenHands ({os.environ.get('SINAIN_CHAT_MODEL', 'qwen/qwen3.5-flash-02-23')}, "
