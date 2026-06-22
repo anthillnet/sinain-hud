@@ -1477,7 +1477,7 @@ async function main() {
     /** Chat-lane roster: conversational agents only (sinain sidecar, desktop
      *  chat apps, gateways). CLI agents are terminal-only — excluded here. */
     available: string[];
-    /** Terminal-lane roster: CLI binaries (+ gateways); sinain/desktop excluded. */
+    /** Terminal-lane roster: CLI binaries only; sinain/desktop/gateway excluded. */
     terminalAvailable: string[];
     escalationAgent: string;
     /** Interactive terminal lane — decoupled from escalation, excludes sinain. */
@@ -1594,8 +1594,8 @@ async function main() {
     //    desktop chat apps (Claude/ChatGPT), and gateway profiles. CLI agents
     //    (claude, openclaude, codex, goose, …) are NO LONGER offered for chat —
     //    they're terminal tools and now appear ONLY in the terminal roster.
-    //  • TERMINAL lane — interactive REPL agents: the CLI binaries (+ gateway
-    //    profiles). sinain/desktop are excluded (no interactive TUI).
+    //  • TERMINAL lane — interactive REPL agents: the CLI binaries only.
+    //    sinain/desktop (no TUI) and gateways (WS-routed, no TUI) are excluded.
     // A "CLI" profile is anything that isn't sinain-, desktop-, or gateway-typed
     // (i.e. a PATH binary run.sh dispatches as a subprocess).
     const isCliProfile = (a: string): boolean =>
@@ -1603,9 +1603,10 @@ async function main() {
       && !isDesktopProfile(escalatorAgentsCfg, a)
       && !isGatewayProfile(escalatorAgentsCfg, a);
     const chatRoster = clean.filter((a) => !isCliProfile(a));
-    const terminalRoster = clean.filter(
-      (a) => !isSinainProfile(escalatorAgentsCfg, a) && !isDesktopProfile(escalatorAgentsCfg, a),
-    );
+    // Terminal is CLI-only: gateways are chat-routed (WS RPC) with no TUI, so
+    // selecting one for the terminal would only trip run.sh's auto-substitution
+    // warning. They live in the chat roster above, never here.
+    const terminalRoster = clean.filter((a) => isCliProfile(a));
     bareAgentState.available = chatRoster;
     bareAgentState.terminalAvailable = terminalRoster;
     // Decoupled defaults: chat lane prefers `default` (sinain), then a
