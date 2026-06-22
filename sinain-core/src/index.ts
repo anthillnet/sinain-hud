@@ -338,6 +338,33 @@ async function buildRoiKnowledge(region: { issue: string; sourceOcr?: string; ap
   return queryKnowledgeFactsMulti(entities, 8, roiText);
 }
 
+// Per-ROI knowledge cache. Warmed when a region is DETECTED (pushRegions) so
+// engaging it is INSTANT instead of waiting on retrieval — the KG daemon makes
+// each prefetch ~0.5s, cheap enough to keep the visible ROIs hot. Keyed by ROI
+// content (app + issue + an OCR slice), so position-only re-anchors hit the
+// cache and don't re-query; TTL bounds staleness; size-bounded LRU-ish.
+const ROI_KNOWLEDGE_TTL_MS = Number(process.env.ROI_KNOWLEDGE_TTL_MS) || 90_000;
+const roiKnowledgeCache = new Map<string, { knowledge: Promise<string>; ts: number }>();
+function roiKnowledgeKey(region: { issue: string; sourceOcr?: string; app?: string }): string {
+  return `${(region.app ?? "").toLowerCase()}|${region.issue.toLowerCase().slice(0, 120)}|${(region.sourceOcr ?? "").slice(0, 80)}`;
+}
+/** buildRoiKnowledge, memoized by ROI content so a detect-time prefetch is reused
+ *  on engage. Always resolves to a string (errors → ""). */
+function buildRoiKnowledgeCached(region: { issue: string; sourceOcr?: string; app?: string }): Promise<string> {
+  const key = roiKnowledgeKey(region);
+  const hit = roiKnowledgeCache.get(key);
+  if (hit && Date.now() - hit.ts < ROI_KNOWLEDGE_TTL_MS) return hit.knowledge;
+  const knowledge = buildRoiKnowledge(region).catch(() => "");
+  roiKnowledgeCache.set(key, { knowledge, ts: Date.now() });
+  if (roiKnowledgeCache.size > 24) {
+    let oldestKey: string | undefined;
+    let oldestTs = Infinity;
+    for (const [k, v] of roiKnowledgeCache) if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+    if (oldestKey) roiKnowledgeCache.delete(oldestKey);
+  }
+  return knowledge;
+}
+
 // Reference to embedding service — set during init
 let embeddingService: import("./embedding/service.js").EmbeddingService | null = null;
 
@@ -1127,8 +1154,11 @@ async function main() {
   const regionTracker = new RegionTracker({
     // Off-screen eyes older than this aren't optimistically flashed back on
     // app re-entry (their anchored content is stale) — the analyzer re-detects
-    // live ones fresh. Tunable for fast app-bouncers who want a longer window.
-    restoreMaxAgeMs: Number(process.env.REGION_RESTORE_MAX_AGE_MS) || 45_000,
+    // live ones fresh. Restored eyes come back DIMMED/pending and the sense
+    // path re-anchors or drops them within ~2s, so a generous window trades a
+    // briefly-stale eye for an instant mount on app switch (the common "slow to
+    // detect after switching back" case) instead of a blank wait. Tunable.
+    restoreMaxAgeMs: Number(process.env.REGION_RESTORE_MAX_AGE_MS) || 180_000,
   });
   // Frontmost app last seen on the sense path — drives instant ROI restore +
   // urgent re-analysis the moment the user switches apps (region snappiness).
@@ -1173,6 +1203,13 @@ async function main() {
   const pushRegions = (regions: RawRegion[] | undefined, ctx: ContextWindow): void => {
     const changed = regionTracker.update(regions, ctx);
     if (changed) {
+      // Warm KG enrichment for the visible ROIs the instant they're detected so
+      // engaging one is instant. Deduped by content (roiKnowledgeKey), so the
+      // frequent position-only re-anchor broadcasts hit the cache, not the KG.
+      for (const r of changed) {
+        const full = regionTracker.get((r as { id?: string }).id ?? "");
+        if (full) void buildRoiKnowledgeCached(full as { issue: string; sourceOcr?: string; app?: string });
+      }
       wsHandler.broadcastRaw({ type: "region_highlight", regions: changed, ts: Date.now() });
     }
   };
@@ -1823,7 +1860,9 @@ async function main() {
 
       // Tier-0 SLM region lane runs on the raw screen-change cadence (no-op
       // unless REGION_SLM_ENABLED) \u2014 decoupled from the cloud loop's debounce.
-      regionDetector.onContextChange();
+      // App switch / big viewport change \u2192 urgent (skip debounce) so the new
+      // screen's eyes mount the instant its OCR lands.
+      regionDetector.onContextChange(appChanged || bigChange);
     },
 
     onFeedPost: (text: string, priority: string) => {
@@ -2005,9 +2044,10 @@ async function main() {
     // seed + can call sinain_memory_query itself.
     void (async () => {
       try {
-        // Entity-path knowledge (web-UI quality, local-SLM consolidated) —
-        // runs off the critical path; updates the stored seed when it lands.
-        const knowledge = await buildRoiKnowledge(region);
+        // Entity-path knowledge (web-UI quality, local-SLM consolidated). Reads
+        // the detect-time prefetch cache — usually already warm, so this no
+        // longer races the cold KG; updates the stored seed when it lands.
+        const knowledge = await buildRoiKnowledgeCached(region);
         if (knowledge?.trim()) {
           roiSeeds.update(id, handoff + buildRegionTaskText(region, digest, undefined, knowledge));
         }
@@ -2055,9 +2095,10 @@ async function main() {
     const digest = agentLoop.getDigest()?.digest;
     let knowledge: string | undefined;
     try {
-      // Entity-path knowledge (web-UI quality, local-SLM consolidated). The
-      // clipboard awaits it (~1-2s local) so the pasted seed is self-contained.
-      const k = await buildRoiKnowledge(region);
+      // Entity-path knowledge (web-UI quality, local-SLM consolidated). Reads
+      // the detect-time prefetch cache — usually warm, so the pasted seed is
+      // self-contained without waiting on a cold KG query.
+      const k = await buildRoiKnowledgeCached(region);
       if (k?.trim()) knowledge = k;
     } catch { /* knowledge is optional */ }
     return header + tx + buildRegionTaskText(region, digest, undefined, knowledge);
