@@ -410,9 +410,9 @@ class DisplaySettingsPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
 
-                    // Open Roster Config — edit agents.json (chat/terminal
-                    // agents). Mirrors Open Session Log; core seeds a writable
-                    // copy from the example if none exists yet.
+                    // Chat/Terminal config — edit agents.json (the chat &
+                    // terminal agent rosters). Mirrors Open Session Log; core
+                    // seeds a writable copy from the example if none exists yet.
                     MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
@@ -427,7 +427,7 @@ class DisplaySettingsPanel extends StatelessWidget {
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                'Open Roster Config',
+                                'Chat/Terminal config',
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontFamily: HudConstants.monoFont,
