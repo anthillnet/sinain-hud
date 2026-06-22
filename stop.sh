@@ -31,6 +31,7 @@ PATTERNS=(
   "tsx.*src/index.ts"                            # core (dev, pre-title fallback)
   "sense_client"                                 # sense_client (any interpreter / sinain-sense)
   "sidecar.py"                                    # chat sidecar (sinain-chat / python)
+  "kg_daemon.py"                                  # warm KG retrieval daemon (sinain-kg)
   "sinain-proxy"                                 # OpenRouter proxy (process.title)
   "openrouter-proxy"                             # OpenRouter proxy (pre-title fallback)
   "sck-capture"                                   # ScreenCaptureKit binary

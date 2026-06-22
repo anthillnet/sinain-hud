@@ -159,6 +159,49 @@ function pipeLocalAgentOutput(stream: NodeJS.ReadableStream, sink: (line: string
  * Checks local (~/.sinain/memory) first, then workspace (~/.openclaw/workspace/memory).
  * Merges results, deduplicates, returns up to maxFacts.
  */
+/** Unix socket the warm KG daemon (kg_daemon.py) listens on. */
+const KG_SOCK = process.env.SINAIN_KG_SOCK || "/tmp/sinain-kg.sock";
+
+/** Ask the warm KG daemon for lean RRF candidates (it holds the Oxigraph stores
+ *  + FTS resident read-only). Returns null on any unreachable/slow/error so the
+ *  caller transparently falls back to a one-shot graph_query.py spawn. */
+async function kgDaemonCandidates(
+  entities: string[],
+  queryText: string | undefined,
+  maxFacts: number,
+  dbPaths: string[],
+): Promise<Array<Record<string, string>> | null> {
+  const net = await import("node:net");
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (val: Array<Record<string, string>> | null) => {
+      if (done) return;
+      done = true;
+      try { sock.destroy(); } catch { /* ignore */ }
+      resolve(val);
+    };
+    const sock = net.connect(KG_SOCK);
+    sock.setTimeout(4000, () => finish(null));
+    sock.on("error", () => finish(null));
+    sock.on("connect", () => {
+      sock.write(JSON.stringify({
+        op: "roi", query: queryText || "", entities,
+        dbs: dbPaths, max_facts: maxFacts * 2,
+      }) + "\n");
+    });
+    let buf = "";
+    sock.on("data", (d) => {
+      buf += d.toString();
+      const nl = buf.indexOf("\n");
+      if (nl < 0) return;
+      try {
+        const facts = JSON.parse(buf.slice(0, nl)).facts;
+        finish(Array.isArray(facts) ? facts as Array<Record<string, string>> : null);
+      } catch { finish(null); }
+    });
+  });
+}
+
 async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number, queryText?: string): Promise<string> {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
@@ -175,33 +218,34 @@ async function queryKnowledgeFactsMulti(entities: string[], maxFacts: number, qu
     `${workspaceDir}/knowledge-graph.db`,
   ];
 
-  const scriptPath = resolveSinainMemoryScript("graph_query.py");
-
-  // Step 1: Get candidates from Python (RRF-ranked, no embedding — avoids deadlock)
-  // Request 2x candidates in JSON for re-ranking in Node.js
-  // Query the stores CONCURRENTLY. They're separate Oxigraph paths (local +
-  // workspace) so there's no lock contention, and total latency becomes the
-  // slowest single store (~5.5s for the ~285k-triple workspace) instead of the
-  // SUM (~10s). The old sequential loop summed to ~10s, which (a) brushed the
-  // caller's HTTP timeout and (b) with the prior 5s per-db cap silently dropped
-  // the workspace store entirely → chat memory missed workspace-only facts
-  // (e.g. "Y Combinator"). 10s per-db cap covers the slow store with headroom.
-  // --no-semantic: keyword expansion would load the MiniLM model inside the
-  // one-shot python (~4s); we re-rank with in-process embeddings in Step 2.
-  const perDb = await Promise.all(dbPaths.map(async (dbPath) => {
-    if (!existsSync(dbPath)) return [] as Array<Record<string, string>>;
-    try {
-      const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic", "--no-raw-excerpts"];
-      if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
-      const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 10000, encoding: "utf-8" });
-      const out = stdout.trim();
-      if (!out) return [] as Array<Record<string, string>>;
-      const parsed = JSON.parse(out);
-      const facts = parsed.facts || parsed;
-      return Array.isArray(facts) ? facts as Array<Record<string, string>> : [];
-    } catch { return [] as Array<Record<string, string>>; }
-  }));
-  let candidateFacts: Array<Record<string, string>> = perDb.flat();
+  // Step 1: get RRF candidates. Prefer the warm KG daemon (Oxigraph stores +
+  // FTS resident read-only → ~0.3-0.7s vs the ~5-10s cold spawn, which on a
+  // large store brushed the 10s timeout and effectively broke enrichment). Fall
+  // back to a one-shot graph_query.py spawn if the daemon is down/slow. Either
+  // way these are CANDIDATES — Step 2 re-ranks in-process — so the source is
+  // interchangeable. Both use the lean profile (FTS + tag, no graph expansion).
+  let candidateFacts = await kgDaemonCandidates(entities, queryText, maxFacts, dbPaths);
+  if (candidateFacts === null) {
+    const scriptPath = resolveSinainMemoryScript("graph_query.py");
+    // Query the stores CONCURRENTLY (separate Oxigraph paths, no lock
+    // contention) so latency is the slowest store, not the sum. --no-semantic:
+    // keyword expansion would load MiniLM in the one-shot python (~4s); we
+    // re-rank with in-process embeddings in Step 2.
+    const perDb = await Promise.all(dbPaths.map(async (dbPath) => {
+      if (!existsSync(dbPath)) return [] as Array<Record<string, string>>;
+      try {
+        const args = [scriptPath, "--db", dbPath, "--max-facts", String(maxFacts * 2), "--format", "json", "--no-semantic", "--no-raw-excerpts"];
+        if (entities.length > 0) args.push("--entities", JSON.stringify(entities));
+        const { stdout } = await execFileAsync(PYTHON_BIN, args, { timeout: 10000, encoding: "utf-8" });
+        const out = stdout.trim();
+        if (!out) return [] as Array<Record<string, string>>;
+        const parsed = JSON.parse(out);
+        const facts = parsed.facts || parsed;
+        return Array.isArray(facts) ? facts as Array<Record<string, string>> : [];
+      } catch { return [] as Array<Record<string, string>>; }
+    }));
+    candidateFacts = perDb.flat();
+  }
 
   // Keep durable knowledge; drop episodic activity. The graph is dominated by
   // session activity (domain "session": ~1200 vs ~25 durable) which, being
@@ -989,6 +1033,34 @@ async function main() {
   })();
   let chatSidecarProc: ReturnType<typeof spawn> | null = null;
 
+  // ── Warm KG retrieval daemon (kg_daemon.py) ──
+  // Holds the Oxigraph stores + FTS resident read-only and serves lean ROI
+  // candidates over KG_SOCK, so queryKnowledgeFactsMulti is ~0.3-0.7s instead
+  // of a ~5-10s cold graph_query.py spawn. If it's down, that function falls
+  // back to the spawn transparently — so this is pure acceleration.
+  let kgDaemonProc: ReturnType<typeof spawn> | null = null;
+  function startKgDaemon(): void {
+    if (kgDaemonProc && !kgDaemonProc.killed && kgDaemonProc.exitCode === null) return;
+    const script = resolveSinainMemoryScript("kg_daemon.py");
+    if (!existsSync(script)) {
+      warn(TAG, "kg_daemon.py not found — KG retrieval uses one-shot spawn");
+      return;
+    }
+    log(TAG, `starting KG daemon: ${PYTHON_BIN} ${script}`);
+    const child = spawn(PYTHON_BIN, [script], {
+      cwd: dirname(script), env: process.env,
+      stdio: ["ignore", "pipe", "pipe"], detached: true,
+    });
+    kgDaemonProc = child;
+    pipeLocalAgentOutput(child.stdout, (line) => log("kg", line));
+    pipeLocalAgentOutput(child.stderr, (line) => warn("kg", line));
+    child.once("exit", (code) => {
+      warn(TAG, `KG daemon exited (${code}); KG retrieval falls back to one-shot spawn`);
+      kgDaemonProc = null;
+    });
+    child.once("error", (err) => warn(TAG, `KG daemon failed to start: ${err.message}`));
+  }
+
   function probeChatSidecar(): Promise<boolean> {
     return new Promise((res) => {
       const sock = netConnect({ host: "127.0.0.1", port: chatSidecarPort });
@@ -1648,6 +1720,9 @@ async function main() {
   // Start chat-sidecar liveness polling now that bareAgentState exists.
   const chatProbeTimer = setInterval(() => { void probeChatLoop(); }, 5000);
   void probeChatLoop();
+
+  // Warm the KG retrieval daemon at boot (no-op if the script is missing).
+  startKgDaemon();
 
   // ── Create HTTP + WS server ──
   const server = createAppServer({
@@ -2492,6 +2567,9 @@ async function main() {
     escalator.stop();
     if (localAgentProcess && localAgentProcess.exitCode === null) {
       localAgentProcess.kill("SIGTERM");
+    }
+    if (kgDaemonProc && kgDaemonProc.exitCode === null) {
+      try { process.kill(-kgDaemonProc.pid!); } catch { try { kgDaemonProc.kill("SIGTERM"); } catch { /* gone */ } }
     }
     signalCollector?.destroy();
     feedbackStore?.destroy();
