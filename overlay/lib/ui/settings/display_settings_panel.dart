@@ -58,368 +58,390 @@ class DisplaySettingsPanel extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Color(accentColor).withValues(alpha: 0.3)),
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Text(
-                    'DISPLAY',
-                    style: TextStyle(
-                      fontFamily: HudConstants.monoFont,
-                      fontFamilyFallback: HudConstants.monoFontFallbacks,
-                      fontSize: 9,
-                      color: Colors.white.withValues(alpha: 0.5),
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                  const Spacer(),
-                  HudTooltip(
-                    message: 'Close',
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: GestureDetector(
-                        onTap: onClose,
-                        child: Icon(
-                          Icons.close,
-                          size: 12,
-                          color: Colors.white.withValues(alpha: 0.4),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-
-              // Font size
-              Row(
-                children: [
-                  Text(
-                    'SIZE',
-                    style: TextStyle(
-                      fontFamily: HudConstants.monoFont,
-                      fontFamilyFallback: HudConstants.monoFontFallbacks,
-                      fontSize: 9,
-                      color: Colors.white.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${fontSize.round()}',
-                    style: TextStyle(
-                      fontFamily: HudConstants.monoFont,
-                      fontFamilyFallback: HudConstants.monoFontFallbacks,
-                      fontSize: 10,
-                      color: Color(accentColor),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              SizedBox(
-                height: 20,
-                child: SliderTheme(
-                  data: SliderThemeData(
-                    trackHeight: 2,
-                    thumbShape:
-                        const RoundSliderThumbShape(enabledThumbRadius: 5),
-                    activeTrackColor: Color(accentColor),
-                    inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
-                    thumbColor: Color(accentColor),
-                    overlayShape: SliderComponentShape.noOverlay,
-                  ),
-                  child: Slider(
-                    value: fontSize,
-                    min: 8.0,
-                    max: 24.0,
-                    onChanged: (v) => settings.setFontSize(v),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-
-              // Accent color
-              Text(
-                'ACCENT',
-                style: TextStyle(
-                  fontFamily: HudConstants.monoFont,
-                  fontFamilyFallback: HudConstants.monoFontFallbacks,
-                  fontSize: 9,
-                  color: Colors.white.withValues(alpha: 0.35),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _presetColors.map((color) {
-                  final isSelected = color == accentColor;
-                  return MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () => settings.setAccentColor(color),
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                          color: Color(color),
-                          shape: BoxShape.circle,
-                          border: isSelected
-                              ? Border.all(color: Colors.white, width: 2)
-                              : Border.all(
-                                  color: Colors.white.withValues(alpha: 0.15),
-                                ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 10),
-
-              // Response size
-              Row(
-                children: [
-                  Text(
-                    'RESPONSE',
-                    style: TextStyle(
-                      fontFamily: HudConstants.monoFont,
-                      fontFamilyFallback: HudConstants.monoFontFallbacks,
-                      fontSize: 9,
-                      color: Colors.white.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _sizeLabels[responseSizeIndex],
-                    style: TextStyle(
-                      fontFamily: HudConstants.monoFont,
-                      fontFamilyFallback: HudConstants.monoFontFallbacks,
-                      fontSize: 10,
-                      color: Color(accentColor),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              SizedBox(
-                height: 20,
-                child: SliderTheme(
-                  data: SliderThemeData(
-                    trackHeight: 2,
-                    thumbShape:
-                        const RoundSliderThumbShape(enabledThumbRadius: 5),
-                    activeTrackColor: Color(accentColor),
-                    inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
-                    thumbColor: Color(accentColor),
-                    overlayShape: SliderComponentShape.noOverlay,
-                  ),
-                  child: Slider(
-                    value: responseSizeIndex.toDouble(),
-                    min: 0,
-                    max: 2,
-                    divisions: 2,
-                    onChanged: (v) =>
-                        ws.setResponseSize(_sizeValues[v.round()]),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // Auto-detect issues (Grammarly mode region eyes) toggle
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () => settings
-                      .setAutoDetectIssues(!settings.settings.autoDetectIssues),
-                  child: Row(
-                    children: [
-                      Text(
-                        'AUTO-DETECT ISSUES',
-                        style: TextStyle(
-                          fontFamily: HudConstants.monoFont,
-                          fontFamilyFallback: HudConstants.monoFontFallbacks,
-                          fontSize: 9,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(
-                        settings.settings.autoDetectIssues
-                            ? Icons.toggle_on
-                            : Icons.toggle_off,
-                        size: 22,
-                        color: settings.settings.autoDetectIssues
-                            ? Color(accentColor)
-                            : Colors.white.withValues(alpha: 0.3),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // Show in Dock — flip the macOS Dock icon (and app menu) live. On by
-              // default; opting out drops the app back to an accessory for the
-              // ambient/invisible feel.
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () {
-                    final next = !settings.settings.showInDock;
-                    settings.setShowInDock(next);
-                    context.read<WindowService>().setDockIconVisible(next);
-                  },
-                  child: Row(
-                    children: [
-                      Text(
-                        'SHOW IN DOCK',
-                        style: TextStyle(
-                          fontFamily: HudConstants.monoFont,
-                          fontFamilyFallback: HudConstants.monoFontFallbacks,
-                          fontSize: 9,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(
-                        settings.settings.showInDock
-                            ? Icons.toggle_on
-                            : Icons.toggle_off,
-                        size: 22,
-                        color: settings.settings.showInDock
-                            ? Color(accentColor)
-                            : Colors.white.withValues(alpha: 0.3),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // ChatGPT network harness — exposes the local MCP server over a public
-              // tunnel so ChatGPT can reach it. Security-sensitive → off by default.
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () {
-                    final next = !settings.settings.chatgptHarness;
-                    settings.setChatgptHarness(next);
-                    ws.setChatgptHarness(next);
-                  },
-                  child: Row(
-                    children: [
-                      Text(
-                        'CHATGPT NETWORK HARNESS',
-                        style: TextStyle(
-                          fontFamily: HudConstants.monoFont,
-                          fontFamilyFallback: HudConstants.monoFontFallbacks,
-                          fontSize: 9,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(
-                        settings.settings.chatgptHarness
-                            ? Icons.toggle_on
-                            : Icons.toggle_off,
-                        size: 22,
-                        color: settings.settings.chatgptHarness
-                            ? const Color(0xFFFF6644)
-                            : Colors.white.withValues(alpha: 0.3),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 3, right: 24),
-                child: Text(
-                  '⚠ Opens a public tunnel to your local context (screen/audio). '
-                  'Anyone with the URL could reach it. Enable only while using '
-                  'ChatGPT, and turn it off when done.',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header — pinned outside the scroll so the close button stays
+            // reachable even when a slider sits directly below it.
+            Row(
+              children: [
+                Text(
+                  'DISPLAY',
                   style: TextStyle(
                     fontFamily: HudConstants.monoFont,
                     fontFamilyFallback: HudConstants.monoFontFallbacks,
-                    fontSize: 8,
-                    height: 1.3,
-                    color: const Color(0xFFFF6644).withValues(alpha: 0.85),
+                    fontSize: 9,
+                    color: Colors.white.withValues(alpha: 0.5),
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Divider(height: 1, color: Colors.white.withValues(alpha: 0.1)),
-              const SizedBox(height: 8),
-
-              // OpenRouter API key — editable recovery path (was .env-only, so a
-              // wrong key at setup had no graceful fix).
-              const _OpenRouterKeyField(),
-
-              // Update available (DMG installs — checked daily against the latest
-              // macos-v* release). One-click download + in-place install.
-              const _UpdateRow(),
-
-              // Current session log
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: () => _openSessionLog(context),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.article_outlined,
+                const Spacer(),
+                HudTooltip(
+                  message: 'Close',
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: onClose,
+                      child: Icon(
+                        Icons.close,
                         size: 12,
-                        color: Colors.white.withValues(alpha: 0.55),
+                        color: Colors.white.withValues(alpha: 0.4),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Open Session Log',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+
+            // Everything below the header scrolls; the header above stays put.
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Font size
+                    Row(
+                      children: [
+                        Text(
+                          'SIZE',
+                          style: TextStyle(
+                            fontFamily: HudConstants.monoFont,
+                            fontFamilyFallback: HudConstants.monoFontFallbacks,
+                            fontSize: 9,
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${fontSize.round()}',
+                          style: TextStyle(
+                            fontFamily: HudConstants.monoFont,
+                            fontFamilyFallback: HudConstants.monoFontFallbacks,
+                            fontSize: 10,
+                            color: Color(accentColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: 20,
+                      child: SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 2,
+                          thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 5),
+                          activeTrackColor: Color(accentColor),
+                          inactiveTrackColor:
+                              Colors.white.withValues(alpha: 0.1),
+                          thumbColor: Color(accentColor),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Slider(
+                          value: fontSize,
+                          min: 8.0,
+                          max: 24.0,
+                          onChanged: (v) => settings.setFontSize(v),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Accent color
+                    Text(
+                      'ACCENT',
+                      style: TextStyle(
+                        fontFamily: HudConstants.monoFont,
+                        fontFamilyFallback: HudConstants.monoFontFallbacks,
+                        fontSize: 9,
+                        color: Colors.white.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _presetColors.map((color) {
+                        final isSelected = color == accentColor;
+                        return MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            onTap: () => settings.setAccentColor(color),
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: Color(color),
+                                shape: BoxShape.circle,
+                                border: isSelected
+                                    ? Border.all(color: Colors.white, width: 2)
+                                    : Border.all(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.15),
+                                      ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Response size
+                    Row(
+                      children: [
+                        Text(
+                          'RESPONSE',
+                          style: TextStyle(
+                            fontFamily: HudConstants.monoFont,
+                            fontFamilyFallback: HudConstants.monoFontFallbacks,
+                            fontSize: 9,
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _sizeLabels[responseSizeIndex],
+                          style: TextStyle(
+                            fontFamily: HudConstants.monoFont,
+                            fontFamilyFallback: HudConstants.monoFontFallbacks,
+                            fontSize: 10,
+                            color: Color(accentColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: 20,
+                      child: SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 2,
+                          thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 5),
+                          activeTrackColor: Color(accentColor),
+                          inactiveTrackColor:
+                              Colors.white.withValues(alpha: 0.1),
+                          thumbColor: Color(accentColor),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Slider(
+                          value: responseSizeIndex.toDouble(),
+                          min: 0,
+                          max: 2,
+                          divisions: 2,
+                          onChanged: (v) =>
+                              ws.setResponseSize(_sizeValues[v.round()]),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Auto-detect issues (Grammarly mode region eyes) toggle
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => settings.setAutoDetectIssues(
+                            !settings.settings.autoDetectIssues),
+                        child: Row(
+                          children: [
+                            Text(
+                              'AUTO-DETECT ISSUES',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 9,
+                                color: Colors.white.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              settings.settings.autoDetectIssues
+                                  ? Icons.toggle_on
+                                  : Icons.toggle_off,
+                              size: 22,
+                              color: settings.settings.autoDetectIssues
+                                  ? Color(accentColor)
+                                  : Colors.white.withValues(alpha: 0.3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Show in Dock — flip the macOS Dock icon (and app menu) live. On by
+                    // default; opting out drops the app back to an accessory for the
+                    // ambient/invisible feel.
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () {
+                          final next = !settings.settings.showInDock;
+                          settings.setShowInDock(next);
+                          context
+                              .read<WindowService>()
+                              .setDockIconVisible(next);
+                        },
+                        child: Row(
+                          children: [
+                            Text(
+                              'SHOW IN DOCK',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 9,
+                                color: Colors.white.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              settings.settings.showInDock
+                                  ? Icons.toggle_on
+                                  : Icons.toggle_off,
+                              size: 22,
+                              color: settings.settings.showInDock
+                                  ? Color(accentColor)
+                                  : Colors.white.withValues(alpha: 0.3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // ChatGPT network harness — exposes the local MCP server over a public
+                    // tunnel so ChatGPT can reach it. Security-sensitive → off by default.
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () {
+                          final next = !settings.settings.chatgptHarness;
+                          settings.setChatgptHarness(next);
+                          ws.setChatgptHarness(next);
+                        },
+                        child: Row(
+                          children: [
+                            Text(
+                              'CHATGPT NETWORK HARNESS',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 9,
+                                color: Colors.white.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              settings.settings.chatgptHarness
+                                  ? Icons.toggle_on
+                                  : Icons.toggle_off,
+                              size: 22,
+                              color: settings.settings.chatgptHarness
+                                  ? const Color(0xFFFF6644)
+                                  : Colors.white.withValues(alpha: 0.3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3, right: 24),
+                      child: Text(
+                        '⚠ Opens a public tunnel to your local context (screen/audio). '
+                        'Anyone with the URL could reach it. Enable only while using '
+                        'ChatGPT, and turn it off when done.',
                         style: TextStyle(
                           fontFamily: HudConstants.monoFont,
                           fontFamilyFallback: HudConstants.monoFontFallbacks,
-                          fontSize: 10,
-                          color: Colors.white.withValues(alpha: 0.7),
+                          fontSize: 8,
+                          height: 1.3,
+                          color:
+                              const Color(0xFFFF6644).withValues(alpha: 0.85),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
+                    ),
+                    const SizedBox(height: 10),
+                    Divider(
+                        height: 1, color: Colors.white.withValues(alpha: 0.1)),
+                    const SizedBox(height: 8),
 
-              // Quit Sinain
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: quitApp,
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.power_settings_new,
-                        size: 12,
-                        color: Color(0xFFFF6B6B),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Quit Sinain',
-                        style: TextStyle(
-                          fontFamily: HudConstants.monoFont,
-                          fontFamilyFallback: HudConstants.monoFontFallbacks,
-                          fontSize: 10,
-                          color: Colors.white.withValues(alpha: 0.7),
+                    // OpenRouter API key — editable recovery path (was .env-only, so a
+                    // wrong key at setup had no graceful fix).
+                    const _OpenRouterKeyField(),
+
+                    // Update available (DMG installs — checked daily against the latest
+                    // macos-v* release). One-click download + in-place install.
+                    const _UpdateRow(),
+
+                    // Current session log
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => _openSessionLog(context),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.article_outlined,
+                              size: 12,
+                              color: Colors.white.withValues(alpha: 0.55),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Open Session Log',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 10,
+                                color: Colors.white.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Quit Sinain
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: quitApp,
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.power_settings_new,
+                              size: 12,
+                              color: Color(0xFFFF6B6B),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Quit Sinain',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 10,
+                                color: Colors.white.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
