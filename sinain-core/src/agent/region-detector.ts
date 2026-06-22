@@ -62,10 +62,17 @@ export class RegionDetector {
 
   constructor(private readonly deps: RegionDetectorDeps) {}
 
-  /** Call on every screen change (sense event). Coalesces a burst into one run. */
-  onContextChange(): void {
+  /** Call on every screen change (sense event). Coalesces a burst into one run.
+   *  `urgent` (app switch / big viewport change) skips the debounce so the new
+   *  screen's regions detect the instant its OCR lands, not ~500ms later. */
+  onContextChange(urgent = false): void {
     if (!this.deps.isEnabled()) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (urgent) {
+      this.debounceTimer = null;
+      this.detect().catch(err => error(TAG, "detect error:", err?.message ?? err));
+      return;
+    }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       this.detect().catch(err => error(TAG, "detect error:", err?.message ?? err));

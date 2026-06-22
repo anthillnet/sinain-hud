@@ -52,7 +52,22 @@ class RegionEyePool {
 
             let origin = Self.toMacOrigin(x: x, y: y, size: size, display: display)
             if let panel = panels[id] {
-                panel.setFrame(NSRect(x: origin.x, y: origin.y, width: size, height: size), display: true)
+                let target = NSRect(x: origin.x, y: origin.y, width: size, height: size)
+                let cur = panel.frame.origin
+                let dist = hypot(target.origin.x - cur.x, target.origin.y - cur.y)
+                // Small moves are scroll/typing re-anchors — keep them INSTANT so
+                // the eye stays glued to its content (animating here would make it
+                // trail the scroll). Larger moves are re-detections jumping the eye
+                // to a new spot — glide those so they don't teleport.
+                if dist > 48 {
+                    NSAnimationContext.runAnimationGroup { ctx in
+                        ctx.duration = 0.16
+                        ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        panel.animator().setFrame(target, display: true)
+                    }
+                } else {
+                    panel.setFrame(target, display: true)
+                }
                 if let view = panel.contentView as? RegionEyeView {
                     view.state = state
                     if let accent = accent { view.accentColor = accent }
@@ -227,7 +242,14 @@ class RegionEyePool {
             self?.channel?.invokeMethod("onRegionTap", arguments: ["id": id])
         }
         panel.contentView = view
+        // Fade in instead of a hard pop-in.
+        panel.alphaValue = 0
         panel.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
         return panel
     }
 }
