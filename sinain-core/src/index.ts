@@ -1474,8 +1474,10 @@ async function main() {
   // Two selectors only: chat (escalation) + terminal. The spawn lane was
   // removed — region/thread tasks run on the chat lane, never a spawn lane.
   const bareAgentState: {
+    /** Chat-lane roster: conversational agents only (sinain sidecar, desktop
+     *  chat apps, gateways). CLI agents are terminal-only — excluded here. */
     available: string[];
-    /** Terminal-lane roster: `available` minus sinain-typed (no-TUI) profiles. */
+    /** Terminal-lane roster: CLI binaries (+ gateways); sinain/desktop excluded. */
     terminalAvailable: string[];
     escalationAgent: string;
     /** Interactive terminal lane — decoupled from escalation, excludes sinain. */
@@ -1586,17 +1588,34 @@ async function main() {
     for (const dName of desktopProfileNames(escalatorAgentsCfg)) {
       if (desktopOk(dName) && !clean.includes(dName)) clean.push(dName);
     }
-    bareAgentState.available = clean;
     bareAgentState.registered = registered;
-    // Terminal lane is sinain/desktop-INELIGIBLE: neither can host a REPL. The
-    // interactive terminal draws from this filtered roster.
+    // Two disjoint rosters by agent kind:
+    //  • CHAT lane — conversational agents only: the resident sinain sidecar,
+    //    desktop chat apps (Claude/ChatGPT), and gateway profiles. CLI agents
+    //    (claude, openclaude, codex, goose, …) are NO LONGER offered for chat —
+    //    they're terminal tools and now appear ONLY in the terminal roster.
+    //  • TERMINAL lane — interactive REPL agents: the CLI binaries (+ gateway
+    //    profiles). sinain/desktop are excluded (no interactive TUI).
+    // A "CLI" profile is anything that isn't sinain-, desktop-, or gateway-typed
+    // (i.e. a PATH binary run.sh dispatches as a subprocess).
+    const isCliProfile = (a: string): boolean =>
+      !isSinainProfile(escalatorAgentsCfg, a)
+      && !isDesktopProfile(escalatorAgentsCfg, a)
+      && !isGatewayProfile(escalatorAgentsCfg, a);
+    const chatRoster = clean.filter((a) => !isCliProfile(a));
     const terminalRoster = clean.filter(
       (a) => !isSinainProfile(escalatorAgentsCfg, a) && !isDesktopProfile(escalatorAgentsCfg, a),
     );
+    bareAgentState.available = chatRoster;
     bareAgentState.terminalAvailable = terminalRoster;
-    // Decoupled defaults: chat lane prefers `default` (sinain-eligible);
-    // terminal lane prefers `terminalDefault`, then the reported `current`,
-    // then the first terminal-eligible profile.
+    // Decoupled defaults: chat lane prefers `default` (sinain), then a
+    // chat-eligible `current`, then the first chat agent; terminal lane prefers
+    // `terminalDefault`, then `current`, then the first terminal-eligible one.
+    const chatDefault = escalatorAgentsCfg?.default;
+    const pickChat = (): string =>
+      (chatDefault && chatRoster.includes(chatDefault)) ? chatDefault
+      : chatRoster.includes(current) ? current
+      : (chatRoster[0] ?? "");
     const terminalDefault = escalatorAgentsCfg?.terminalDefault;
     const pickTerminal = (): string =>
       (terminalDefault && terminalRoster.includes(terminalDefault)) ? terminalDefault
@@ -1605,8 +1624,8 @@ async function main() {
     // If neither lane is set yet (fresh boot), adopt the relevant default. If
     // state survives from a prior register call AND the agent still exists in
     // the lane's roster, keep it; otherwise fall back.
-    if (!bareAgentState.escalationAgent || !clean.includes(bareAgentState.escalationAgent)) {
-      bareAgentState.escalationAgent = clean.includes(current) ? current : (clean[0] ?? "");
+    if (!bareAgentState.escalationAgent || !chatRoster.includes(bareAgentState.escalationAgent)) {
+      bareAgentState.escalationAgent = pickChat();
     }
     if (!bareAgentState.terminalAgent || !terminalRoster.includes(bareAgentState.terminalAgent)) {
       bareAgentState.terminalAgent = pickTerminal();
@@ -1614,7 +1633,7 @@ async function main() {
     bareAgentState.escalationResident = isSinainProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
     bareAgentState.escalationDesktop = isDesktopProfile(escalatorAgentsCfg, bareAgentState.escalationAgent);
     wsHandler.updateState({ agents: { ...bareAgentState } });
-    log(TAG, `bareagent register: available=[${clean.join(",")}] terminal=[${terminalRoster.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} term=${bareAgentState.terminalAgent}`);
+    log(TAG, `bareagent register: chat=[${chatRoster.join(",")}] terminal=[${terminalRoster.join(",")}] current=${current} → lanes esc=${bareAgentState.escalationAgent} term=${bareAgentState.terminalAgent}`);
 
     // Lane is the source of truth for "is escalation active?". If a lane is
     // set but mode is still "off" (e.g. an old wizard run wrote mode=off and
