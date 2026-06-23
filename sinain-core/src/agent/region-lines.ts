@@ -49,9 +49,9 @@ export function buildLineList(ctx: ContextWindow, maxLines = 40): { prompt: stri
 
 /**
  * Resolve a model's raw `{line, issue, tip, action}` objects to pre-resolved
- * RawRegions against the line list. Tolerates the id as 2/"2"/"L2". When
- * `placeholder` is given, the label is templated (SLM provisional path) and the
- * model's own prose is ignored; otherwise the model's `issue` is used (quality).
+ * RawRegions against the line list. Tolerates the id as 2/"2"/"L2". The model's
+ * own `issue` is used when present; `placeholder` (if given) is only a fallback
+ * for when the model omitted a description.
  */
 export function resolveLineRegions(
   parsedRegions: any,
@@ -66,7 +66,10 @@ export function resolveLineRegions(
     if (!Number.isInteger(li) || li < 0 || li >= lines.length) continue;
     const ln = lines[li];
     const modelIssue = typeof r?.issue === "string" ? r.issue.trim() : "";
-    const issue = opts.placeholder ? opts.placeholder(ln) : modelIssue;
+    // Prefer the model's own description; fall back to the templated placeholder
+    // only when the model didn't supply one (so the SLM lane can pass a
+    // placeholder as a safety net while still using its real prose when present).
+    const issue = modelIssue || (opts.placeholder ? opts.placeholder(ln) : "");
     if (!issue) continue;
     out.push({
       issue: issue.slice(0, 200),
