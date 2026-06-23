@@ -473,12 +473,17 @@ async function callOllama(
 
   try {
     const imageB64List = (images || []).map((img) => img.data);
+    // Route image ticks to the vision-capable model (e.g. qwen2.5vl), mirroring
+    // the OpenRouter auto-upgrade above. config.model (e.g. phi4-mini) is
+    // text-only — handing it images yields blind, hallucinated analysis.
+    const hasImages = imageB64List.length > 0;
+    const model = (hasImages && config.visionModel) ? config.visionModel : config.model;
 
     const response = await fetch(`${config.endpoint}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: config.model,
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt, images: imageB64List },
@@ -504,7 +509,7 @@ async function callOllama(
     const tokensIn = data.prompt_eval_count || 0;
     const tokensOut = data.eval_count || 0;
 
-    log(TAG, `ollama vision: model=${config.model} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
+    log(TAG, `ollama ${hasImages ? "vision" : "text"}: model=${model} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
 
     // Parse the response (same format as OpenRouter)
     // Parse JSON response (same logic as callModel)
@@ -520,7 +525,7 @@ async function callOllama(
         regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
         latencyMs,
         tokensIn, tokensOut,
-        model: config.model,
+        model,
         parsedOk: true,
       };
     } catch {
@@ -538,7 +543,7 @@ async function callOllama(
         regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
               latencyMs,
               tokensIn, tokensOut,
-              model: config.model,
+              model,
               parsedOk: true,
             };
           }
@@ -549,7 +554,7 @@ async function callOllama(
         digest: content || "\u2014",
         latencyMs,
         tokensIn, tokensOut,
-        model: config.model,
+        model,
         parsedOk: false,
       };
     }
