@@ -142,6 +142,16 @@ If your machine reboots, the SPA tab is gone but the share metadata persists in 
 | `SINAIN_SHARE_INLINE_MAX_BYTES` | `6000` | Fragment-vs-peer threshold. Raw JSON bytes before gzip. |
 | `SINAIN_SHARE_TTL_HOURS` | `24` | Auto-expiry for `waiting`/`disconnected` shares. |
 | `SINAIN_PEERJS_HOST` | _(empty → peerjs.com cloud)_ | Override the peerjs signaling broker. |
+| `SINAIN_TURN_CREDENTIALS_URL` | `https://turn.sinain.com/turn-credentials` | Endpoint that mints ephemeral TURN credentials + `iceServers` for peer shares. Empty → STUN-only (no relay). See [openclaw deploy/strato.md](../../openclaw/docs/deploy/strato.md). |
+
+### TURN relay (NAT traversal)
+
+Peer shares connect browser-to-browser over WebRTC. ~10–20% of peer pairs sit behind symmetric NAT / restrictive firewalls where direct (STUN) connection fails — those need a **TURN relay** to succeed. On load the SPA fetches `iceServers` (incl. TURN creds) from `SINAIN_TURN_CREDENTIALS_URL` and passes them to PeerJS.
+
+- TURN is **last-resort only** — ICE always prefers a direct path; the relay is used solely when none exists.
+- The relay forwards **DTLS-encrypted** bytes it can't read; it's not a content middlebox. Metadata (IP pair, byte counts) is visible to the relay operator.
+- Credentials are short-lived (HMAC, ~1h TTL) and minted server-side, so no static secret ships in the app.
+- Unset the var (or set it empty) to disable TURN and fall back to STUN-only behavior.
 
 ## Troubleshooting
 
