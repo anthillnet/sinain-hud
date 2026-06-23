@@ -414,6 +414,7 @@ const SHARE_PEERJS_HOST = __SHARE_PEERJS_HOST__;     // empty string → peerjs.
 const SHARE_INLINE_MAX_BYTES = __SHARE_INLINE_MAX_BYTES__;
 const SHARE_TTL_HOURS = __SHARE_TTL_HOURS__;
 const SHARE_BASE_URL = __SHARE_BASE_URL__;            // public redirector that points to localhost
+const SHARE_TURN_CREDENTIALS_URL = __SHARE_TURN_CREDENTIALS_URL__; // empty → STUN-only (no TURN relay)
 
 // ── Router ────────────────────────────────────────────────────────────────
 function navigate(path) {
@@ -505,11 +506,38 @@ function ensurePeerJsLoaded() {
   return _peerjsLoading;
 }
 
-function newPeer(idOrUndef) {
+// Fetch ephemeral TURN credentials (+ ready-to-use iceServers) from the configured
+// minter. Cached until ~1 min before the creds' TTL so we don't re-fetch per peer.
+// Returns [] when unconfigured or on any error — PeerJS then uses its STUN-only
+// defaults (i.e. we degrade to the old behavior rather than break sharing entirely).
+let _iceCache = null;  // { servers, expiresAt }
+async function getIceServers() {
+  if (!SHARE_TURN_CREDENTIALS_URL) return [];
+  if (_iceCache && Date.now() < _iceCache.expiresAt) return _iceCache.servers;
+  try {
+    const r = await fetch(SHARE_TURN_CREDENTIALS_URL, { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const servers = Array.isArray(data.iceServers) ? data.iceServers : [];
+    const ttlMs = (Number(data.ttl) || 3600) * 1000;
+    _iceCache = { servers, expiresAt: Date.now() + Math.max(0, ttlMs - 60_000) };
+    const hasTurn = servers.some(s => /^turns?:/.test([].concat(s.urls || []).join(",")));
+    console.log("[sinain-share] iceServers loaded: " + servers.length + " entries, TURN=" + hasTurn);
+    return servers;
+  } catch (e) {
+    console.warn("[sinain-share] TURN creds fetch failed (" + SHARE_TURN_CREDENTIALS_URL + "): " + (e && e.message) + " — falling back to STUN-only");
+    return [];
+  }
+}
+
+function newPeer(idOrUndef, iceServers) {
   // Honor SHARE_PEERJS_HOST env-injected override. Empty string = peerjs.com default.
   // debug: 3 enables verbose peerjs logging in console — critical for diagnosing
   // WebRTC handshake failures (NAT, ICE state transitions, peer-unavailable, etc.).
   const opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST, debug: 3 } : { debug: 3 };
+  // iceServers carry our TURN relay (last-resort path for NAT-blocked pairs). When
+  // absent, PeerJS supplies its own STUN-only defaults.
+  if (iceServers && iceServers.length) opts.config = { iceServers };
   return idOrUndef ? new window.Peer(idOrUndef, opts) : new window.Peer(opts);
 }
 
@@ -534,10 +562,17 @@ function instrumentConnection(conn, label) {
   conn.on("close", () => console.log(tag, "conn.close"));
   conn.on("iceStateChanged", s => console.log(tag, "conn.iceStateChanged →", s));
   // Tap into the underlying RTCPeerConnection. peerjs exposes it as
-  // conn.peerConnection (it might not exist immediately — wait a tick).
-  setTimeout(() => {
+  // conn.peerConnection, which may not exist for the first tick — so poll briefly
+  // and attach the moment it appears (a fixed delay used to miss the earliest ICE
+  // candidates, hiding the host/srflx/relay types we most need when debugging).
+  let _attachTries = 0;
+  (function attachPc() {
     const pc = conn.peerConnection;
-    if (!pc) { console.warn(tag, "no peerConnection exposed"); return; }
+    if (!pc) {
+      if (_attachTries++ < 200) { setTimeout(attachPc, 10); }
+      else console.warn(tag, "no peerConnection exposed after 2s");
+      return;
+    }
     pc.addEventListener("iceconnectionstatechange",
       () => console.log(tag, "iceConnectionState →", pc.iceConnectionState));
     pc.addEventListener("connectionstatechange",
@@ -555,7 +590,7 @@ function instrumentConnection(conn, label) {
       const type = (c.candidate.match(/typ (\\S+)/) || [])[1] || "?";
       console.log(tag, "iceCandidate type=" + type + " proto=" + c.protocol + " addr=" + (c.address || "?") + ":" + (c.port || "?"));
     });
-  }, 100);
+  })();
 }
 
 const ShareManager = (() => {
@@ -608,7 +643,7 @@ const ShareManager = (() => {
 
     // Peer mode
     await ensurePeerJsLoaded();
-    const peer = newPeer(token);
+    const peer = newPeer(token, await getIceServers());
     instrumentPeer(peer, "sender:" + token.slice(0, 8));
     await new Promise((res, rej) => {
       peer.on("open", () => res());
@@ -679,7 +714,7 @@ const ShareManager = (() => {
       if (share.mode !== "peer") continue;
       try {
         await ensurePeerJsLoaded();
-        const peer = newPeer(share.share_token);
+        const peer = newPeer(share.share_token, await getIceServers());
         instrumentPeer(peer, "sender-resume:" + share.share_token.slice(0, 8));
         await new Promise((res, rej) => {
           peer.on("open", () => res());
@@ -726,7 +761,7 @@ const ShareManager = (() => {
     showToast('<span class="spinner"></span> Connecting peer-to-peer…', 30_000);
     console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] connectAsRecipient start");
     await ensurePeerJsLoaded();
-    const me = newPeer();
+    const me = newPeer(undefined, await getIceServers());
     instrumentPeer(me, "recipient:" + token.slice(0, 8));
     await new Promise((res, rej) => {
       me.on("open", () => res());
@@ -739,10 +774,25 @@ const ShareManager = (() => {
       instrumentConnection(conn, "recipient");
       const cleanup = () => { try { conn.close(); } catch {} try { me.destroy(); } catch {} };
       const openTimeout = setTimeout(() => {
-        console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] 15s timeout — conn.open never fired. Almost certainly NAT traversal failed (no TURN). Look for ICE candidate types above — only host/srflx without 'relay' = TURN missing.");
+        // Signaling reached the broker but the DataChannel never opened. If the
+        // source were simply offline we'd have gotten peer-unavailable (handled
+        // below) instead — so this is a network/NAT failure where no working ICE
+        // pair was found. With TURN configured this should be rare; if it still
+        // happens, check the ICE candidate logs above for a 'relay' candidate.
+        console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] 15s timeout — DataChannel never opened. NAT traversal failed; look for a 'relay' (TURN) ICE candidate above. " + (SHARE_TURN_CREDENTIALS_URL ? "TURN is configured — check the relay is reachable." : "No TURN configured (SINAIN_TURN_CREDENTIALS_URL unset)."));
         cleanup();
-        reject(new Error("source offline or unreachable"));
+        reject(new Error("couldn't reach source over the network (NAT/relay) — try again"));
       }, 15_000);
+      // peer-unavailable = the dialed share token isn't registered on the broker,
+      // i.e. the sender's Sinain isn't running. Distinct from the NAT timeout above.
+      me.on("error", (e) => {
+        if (e && e.type === "peer-unavailable") {
+          clearTimeout(openTimeout);
+          console.warn("[sinain-share:recipient:" + token.slice(0, 8) + "] peer-unavailable — source peer not registered (sender offline/closed)");
+          cleanup();
+          reject(new Error("source offline — the sender's Sinain isn't running"));
+        }
+      });
       conn.on("open", () => {
         clearTimeout(openTimeout);
         console.log("[sinain-share:recipient:" + token.slice(0, 8) + "] DataChannel open — waiting for bundle");
@@ -1543,11 +1593,17 @@ function renderKnowledgeUiV2(): string {
   // up-to-date share.html.
   const shareBaseUrl = process.env.SINAIN_SHARE_BASE_URL
     || "https://sinain.com/share.html";
+  // Endpoint that mints ephemeral TURN credentials (+ iceServers) for WebRTC peer
+  // shares. Empty → STUN-only (no relay). Hosted TURN relay lives on the Strato box;
+  // see openclaw docs/deploy/strato.md. Default points at the deployed minter.
+  const turnCredsUrl = process.env.SINAIN_TURN_CREDENTIALS_URL
+    || "https://turn.sinain.com/turn-credentials";
   return KNOWLEDGE_UI_V2_HTML
     .replace(/__SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
     .replace(/__SHARE_INLINE_MAX_BYTES__/g, String(inlineMax))
     .replace(/__SHARE_TTL_HOURS__/g, String(ttlHours))
-    .replace(/__SHARE_BASE_URL__/g, JSON.stringify(shareBaseUrl));
+    .replace(/__SHARE_BASE_URL__/g, JSON.stringify(shareBaseUrl))
+    .replace(/__SHARE_TURN_CREDENTIALS_URL__/g, JSON.stringify(turnCredsUrl));
 }
 
 /** Server epoch — lets clients detect restarts. */
