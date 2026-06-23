@@ -439,7 +439,9 @@ export class AgentLoop extends EventEmitter {
 
       if (this.outage) {
         this.outage = false;
-        const note = "✓ Connectivity restored — sinain analysis is back online.";
+        const note = this.deps.agentConfig.provider === "ollama"
+          ? "✓ Local analysis is back online."
+          : "✓ Connectivity restored — sinain analysis is back online.";
         this.deps.feedBuffer.push(note, "normal", "system", "stream");
         this.deps.onHudUpdate(note);
       }
@@ -457,7 +459,13 @@ export class AgentLoop extends EventEmitter {
         this.lastTickSenseVersion = prevSenseVersion;
         if (!this.outage) {
           this.outage = true;
-          const note = "⚠ Network issue: can't reach the analysis API — sinain keeps retrying in the background. Chat and escalations resume automatically when connectivity returns.";
+          // Provider-aware: in local mode there's no network/API — the failure
+          // is the on-device model (usually a timeout under GPU load). Don't
+          // claim a connectivity problem that doesn't exist.
+          const aborted = err?.name === "AbortError" || /aborted|timed? ?out/i.test(err?.message || "");
+          const note = this.deps.agentConfig.provider === "ollama"
+            ? `⚠ Local analysis model ${aborted ? "timed out (busy GPU)" : "errored"} — sinain keeps retrying in the background. Nothing leaves your device.`
+            : "⚠ Network issue: can't reach the analysis API — sinain keeps retrying in the background. Chat and escalations resume automatically when connectivity returns.";
           this.deps.feedBuffer.push(note, "high", "system", "stream");
           this.deps.onHudUpdate(note);
         }

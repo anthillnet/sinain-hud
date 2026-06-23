@@ -468,16 +468,20 @@ async function callOllama(
 ): Promise<AgentResult> {
   const start = Date.now();
   const controller = new AbortController();
-  // Local Ollama models need more time than cloud APIs (cold start + generation)
-  const timeout = setTimeout(() => controller.abort(), Math.max(config.timeout, 45_000));
+  const imageB64List = (images || []).map((img) => img.data);
+  // Route image ticks to the vision-capable model (e.g. qwen2.5vl), mirroring
+  // the OpenRouter auto-upgrade above. config.model (e.g. phi4-mini) is
+  // text-only — handing it images yields blind, hallucinated analysis.
+  const hasImages = imageB64List.length > 0;
+  const model = (hasImages && config.visionModel) ? config.visionModel : config.model;
+  // Local models are slow (cold start + generation), and a vision model under
+  // GPU contention (region-SLM + sense-vision share the same Ollama) is slower
+  // still. Floor generously per call type so a busy GPU doesn't abort a healthy
+  // tick and trip a false "analysis unreachable" outage.
+  const timeoutMs = Math.max(config.timeout, hasImages ? 120_000 : 60_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const imageB64List = (images || []).map((img) => img.data);
-    // Route image ticks to the vision-capable model (e.g. qwen2.5vl), mirroring
-    // the OpenRouter auto-upgrade above. config.model (e.g. phi4-mini) is
-    // text-only — handing it images yields blind, hallucinated analysis.
-    const hasImages = imageB64List.length > 0;
-    const model = (hasImages && config.visionModel) ? config.visionModel : config.model;
 
     const response = await fetch(`${config.endpoint}/api/chat`, {
       method: "POST",
