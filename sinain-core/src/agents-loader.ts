@@ -26,7 +26,7 @@
 //      against process.env. Mirrors run.sh's apply_profile_env regex
 //      (\$\{[A-Za-z_][A-Za-z0-9_]*\}).
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -162,6 +162,35 @@ function candidatePaths(): string[] {
     resolve(repoRoot, "sinain-agent-runner", "agents.json"),
     resolve(repoRoot, "sinain-agent-runner", "agents.example.json"),
   ];
+}
+
+/**
+ * Resolve a WRITABLE roster-config path for the user to edit (the overlay's
+ * "Open Roster Config" action). Prefers an existing config — explicit override,
+ * then ~/.sinain/agents.json (the wizard's write target), then a repo
+ * agents.json. If none exists, seeds ~/.sinain/agents.json from the shipped
+ * agents.example.json (or a minimal stub) so editing always opens a real,
+ * commented file rather than failing on a missing path. The shipped
+ * agents.example.json is never returned — it's read-only on npm installs.
+ */
+export function resolveWritableAgentsConfigPath(): string {
+  const explicit = process.env.AGENTS_CONFIG_PATH;
+  if (explicit && existsSync(resolve(explicit))) return resolve(explicit);
+  const userHome = resolve(homedir(), ".sinain", "agents.json");
+  if (existsSync(userHome)) return userHome;
+  const repoRoot = resolve(__dirname, "..", "..");
+  const repoCfg = resolve(repoRoot, "sinain-agent-runner", "agents.json");
+  if (existsSync(repoCfg)) return repoCfg;
+  // Nothing exists yet — seed the user-home target from the example template.
+  try {
+    mkdirSync(dirname(userHome), { recursive: true });
+    const example = resolve(repoRoot, "sinain-agent-runner", "agents.example.json");
+    if (existsSync(example)) copyFileSync(example, userHome);
+    else writeFileSync(userHome, '{\n  "default": "sinain",\n  "terminalDefault": "openclaude",\n  "profiles": {}\n}\n');
+  } catch (err) {
+    console.warn(`[agents-loader] could not seed ${userHome}: ${(err as Error).message}`);
+  }
+  return userHome;
 }
 
 /**

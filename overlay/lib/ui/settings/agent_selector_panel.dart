@@ -38,6 +38,7 @@ class _AgentSelectorPanelState extends State<AgentSelectorPanel> {
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
     final available = ws.availableAgents;
+    final terminalAvailable = ws.terminalAvailable;
 
     return Container(
       width: 280,
@@ -63,7 +64,7 @@ class _AgentSelectorPanelState extends State<AgentSelectorPanel> {
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               children: [
-              available.isEmpty
+              (available.isEmpty && terminalAvailable.isEmpty)
                   ? Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                       child: _emptyState(),
@@ -74,22 +75,28 @@ class _AgentSelectorPanelState extends State<AgentSelectorPanel> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _selectField(
-                            label: 'Chat opens with',
-                            lane: 'escalation',
-                            current: ws.escalationAgent,
-                            options: available,
-                            // The CHAT lane may resolve to the resident Sinain sidecar.
-                            builtIn: ws.escalationResident,
-                          ),
-                          const SizedBox(height: 16),
-                          _selectField(
-                            label: 'Terminal runs',
-                            lane: 'terminal',
-                            current: ws.terminalAgent,
-                            options: ws.terminalAvailable,
-                            builtIn: false,
-                          ),
+                          // Chat lane — conversational agents only (Sinain, desktop
+                          // chat apps, gateways). CLI tools live in Terminal below.
+                          if (available.isNotEmpty) ...[
+                            _selectField(
+                              label: 'Chat opens with',
+                              lane: 'escalation',
+                              current: ws.escalationAgent,
+                              options: available,
+                              // The CHAT lane may resolve to the resident Sinain sidecar.
+                              builtIn: ws.escalationResident,
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                          // Terminal lane — the CLI agents (claude, openclaude, …).
+                          if (terminalAvailable.isNotEmpty)
+                            _selectField(
+                              label: 'Terminal runs',
+                              lane: 'terminal',
+                              current: ws.terminalAgent,
+                              options: terminalAvailable,
+                              builtIn: false,
+                            ),
                           const SizedBox(height: 20),
                           Container(height: 1, color: _hairline),
                           const SizedBox(height: 12),
