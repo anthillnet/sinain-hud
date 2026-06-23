@@ -485,6 +485,13 @@ def main():
                             log(f"vision: {scene[:80]}...")
                         ctx_ev = SenseEvent(type="context", ts=ts)
                         ctx_ev.observation = SenseObservation(scene=scene or "")
+                        # Also carry the scene caption as the event's `ocr` text:
+                        # sinain-core only ingests `ocr` (not `observation`), so
+                        # without this the caption was computed and DISCARDED.
+                        # Routing it here feeds the agent's text context (so the
+                        # agent can reason over vision without re-running the
+                        # vision model itself).
+                        ctx_ev.ocr = scene or ""
                         ctx_ev.meta = meta
                         ctx_ev.roi = package_full_frame(frame)
                         ctx_ev.vision_cost = v_cost

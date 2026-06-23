@@ -296,6 +296,11 @@ export async function analyzeContext(
   try {
     if (levelFor("screen_images", privacyDest) === "none") images = [];
   } catch { images = []; /* SECURITY: fail CLOSED — drop images when privacy uninitialized */ }
+  // Single-vision-pass (local mode default): the agent doesn't re-run the vision
+  // model — sense_client owns vision and feeds its scene caption in as text, so
+  // the agent reasons text-only on the fast model. Dropping images here makes
+  // callOllama pick config.model (text) instead of config.visionModel.
+  if (config.agentVision === false) images = [];
 
   if (config.provider === "ollama") {
     return resolveRegions(await callOllama(systemPrompt, userPrompt, images, config));
