@@ -9,10 +9,11 @@ const TAG = "region-slm";
 const MAX_REGIONS = 2;  // quality over quantity — better to surface fewer, real ones
 
 /**
- * Prompt for the fast local lane. It only has to pick WHICH on-screen lines are
- * worth help (relevance) — the eye's label is a templated placeholder, and the
- * main analyzer lane supplies the real description later, so the model's own
- * prose is intentionally ignored. Tight schema; `format: json` constrains it.
+ * Prompt for the fast local lane. It picks WHICH on-screen lines are worth help
+ * AND writes the eye's real issue/tip — a 3B handles this focused schema cleanly
+ * (unlike the heavy combined analyzer prompt, which drops the regions field), so
+ * the eye is useful the instant it's detected with no second-lane upgrade.
+ * Tight schema; `format: json` constrains it.
  */
 const SLM_SYSTEM_PROMPT = `You pick the on-screen line(s) at the CENTER of what the user is doing, so an assistant can offer to help. Return JSON only.
 
@@ -25,14 +26,15 @@ that best represents that focus. Picking something is expected on most screens.
 Skip only pure chrome (menu bars, toolbars, tab strips, status bars) and blank
 screens. Don't pick navigation or decoration.
 
-For each: {"line": <integer id>, "action": "fix"|"explain"|"research"}.
+For each, write a SHORT, CLEAN description in your OWN words (don't quote raw OCR):
+{"line": <integer id>, "issue": "≤8 words: what they're doing / what you'd help with", "tip": "the concrete thing you'd do to advance their work", "action": "fix"|"explain"|"research"}
 Max 2 — the main thing(s) in focus. Output JSON only — no prose.
 
 Example input:
 [L2] Slide 3: Why Sinain — the ambient intelligence layer
 [L7] File  Edit  View  Insert  Format
 Example output (L7 is chrome → skip):
-{"regions":[{"line":2,"action":"explain"}]}`;
+{"regions":[{"line":2,"issue":"Drafting the Sinain intro slide","tip":"Sharpen the headline into a one-line value prop","action":"explain"}]}`;
 
 export interface RegionDetectorDeps {
   feedBuffer: FeedBuffer;
@@ -135,11 +137,19 @@ export class RegionDetector {
       try { parsed = JSON.parse(content); }
       catch { const m = content.match(/\{[\s\S]*\}/); if (m) { try { parsed = JSON.parse(m[0]); } catch { /* */ } } }
 
-      // Provisional eyes: the line-id gives the exact anchor; the LABEL is a
-      // templated placeholder (the SLM's own prose is ignored). The main lane
-      // upgrades these to real descriptions.
-      const regions = resolveLineRegions(parsed?.regions, lines, {
-        provisional: true,
+      // Normalize output shape: the richer issue/tip schema makes a 3B sometimes
+      // drop the {"regions":[...]} wrapper and return a bare object or array.
+      // Accept all three so a well-formed region isn't discarded on a wrapper miss.
+      const rawRegions = Array.isArray(parsed?.regions) ? parsed.regions
+        : Array.isArray(parsed) ? parsed
+        : (parsed && parsed.line !== undefined) ? [parsed]
+        : undefined;
+
+      // Quality eyes: the line-id gives the exact anchor; the SLM now writes its
+      // OWN real issue/tip (it's reliable in this focused prompt — the heavier
+      // combined analyzer prompt is what dropped regions on a 3B). The templated
+      // placeholder is kept only as a fallback for when the model omits prose.
+      const regions = resolveLineRegions(rawRegions, lines, {
         maxRegions: MAX_REGIONS,
         placeholder: (l) => placeholderFor(l.app, l.text),
       });

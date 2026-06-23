@@ -296,6 +296,11 @@ export async function analyzeContext(
   try {
     if (levelFor("screen_images", privacyDest) === "none") images = [];
   } catch { images = []; /* SECURITY: fail CLOSED — drop images when privacy uninitialized */ }
+  // Single-vision-pass (local mode default): the agent doesn't re-run the vision
+  // model — sense_client owns vision and feeds its scene caption in as text, so
+  // the agent reasons text-only on the fast model. Dropping images here makes
+  // callOllama pick config.model (text) instead of config.visionModel.
+  if (config.agentVision === false) images = [];
 
   if (config.provider === "ollama") {
     return resolveRegions(await callOllama(systemPrompt, userPrompt, images, config));
@@ -468,17 +473,26 @@ async function callOllama(
 ): Promise<AgentResult> {
   const start = Date.now();
   const controller = new AbortController();
-  // Local Ollama models need more time than cloud APIs (cold start + generation)
-  const timeout = setTimeout(() => controller.abort(), Math.max(config.timeout, 45_000));
+  const imageB64List = (images || []).map((img) => img.data);
+  // Route image ticks to the vision-capable model (e.g. qwen2.5vl), mirroring
+  // the OpenRouter auto-upgrade above. config.model (e.g. phi4-mini) is
+  // text-only — handing it images yields blind, hallucinated analysis.
+  const hasImages = imageB64List.length > 0;
+  const model = (hasImages && config.visionModel) ? config.visionModel : config.model;
+  // Local models are slow (cold start + generation), and a vision model under
+  // GPU contention (region-SLM + sense-vision share the same Ollama) is slower
+  // still. Floor generously per call type so a busy GPU doesn't abort a healthy
+  // tick and trip a false "analysis unreachable" outage.
+  const timeoutMs = Math.max(config.timeout, hasImages ? 120_000 : 60_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const imageB64List = (images || []).map((img) => img.data);
 
     const response = await fetch(`${config.endpoint}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: config.model,
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt, images: imageB64List },
@@ -504,7 +518,7 @@ async function callOllama(
     const tokensIn = data.prompt_eval_count || 0;
     const tokensOut = data.eval_count || 0;
 
-    log(TAG, `ollama vision: model=${config.model} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
+    log(TAG, `ollama ${hasImages ? "vision" : "text"}: model=${model} latency=${latencyMs}ms tokens=${tokensIn}+${tokensOut}`);
 
     // Parse the response (same format as OpenRouter)
     // Parse JSON response (same logic as callModel)
@@ -520,7 +534,7 @@ async function callOllama(
         regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
         latencyMs,
         tokensIn, tokensOut,
-        model: config.model,
+        model,
         parsedOk: true,
       };
     } catch {
@@ -538,7 +552,7 @@ async function callOllama(
         regions: (Array.isArray(parsed.regions) && parsed.regions.length ? parsed.regions : undefined),
               latencyMs,
               tokensIn, tokensOut,
-              model: config.model,
+              model,
               parsedOk: true,
             };
           }
@@ -549,7 +563,7 @@ async function callOllama(
         digest: content || "\u2014",
         latencyMs,
         tokensIn, tokensOut,
-        model: config.model,
+        model,
         parsedOk: false,
       };
     }

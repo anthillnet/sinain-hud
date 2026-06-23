@@ -199,7 +199,7 @@ export function loadConfig(): CoreConfig {
   // Must run BEFORE transcriptionConfig / analysisConfig are read.
   const localMode = boolEnv("SINAIN_LOCAL_MODE", false);
   if (localMode) {
-    const localLlm = env("SINAIN_LOCAL_LLM", "phi4-mini");
+    const localLlm = env("SINAIN_LOCAL_LLM", "qwen2.5:3b");
     const localVision = env("SINAIN_LOCAL_VISION", "qwen2.5vl:7b");
     if (!process.env.ANALYSIS_PROVIDER) process.env.ANALYSIS_PROVIDER = "ollama";
     if (!process.env.ANALYSIS_MODEL) process.env.ANALYSIS_MODEL = localLlm;
@@ -241,6 +241,12 @@ export function loadConfig(): CoreConfig {
     provider: analysisProvider,
     model: env("ANALYSIS_MODEL", "google/gemini-2.5-flash-lite"),
     visionModel: env("ANALYSIS_VISION_MODEL", "google/gemini-2.5-flash"),
+    // Whether the AGENT analyzer itself does vision. In local mode it defaults
+    // OFF — sense_client owns the single on-device vision pass (qwen2.5vl) and
+    // the agent reasons over OCR + sense's scene caption on the fast text model,
+    // so the heavy vision model isn't run twice on the same GPU. Cloud defaults
+    // ON (cloud vision is cheap + parallel). Override with SINAIN_AGENT_VISION.
+    agentVision: boolEnv("SINAIN_AGENT_VISION", !localMode),
     endpoint: env("ANALYSIS_ENDPOINT", defaultEndpoint),
     apiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
     maxTokens: intEnv("ANALYSIS_MAX_TOKENS", 800),

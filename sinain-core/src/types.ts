@@ -404,6 +404,10 @@ export interface AnalysisConfig {
   provider: AnalysisProvider;
   model: string;
   visionModel: string;
+  /** Whether the agent analyzer runs vision itself. When false (local mode
+   *  default), sense_client owns the single vision pass and the agent stays
+   *  text-only. Undefined ⇒ treated as true (preserves cloud behavior). */
+  agentVision?: boolean;
   endpoint: string;
   apiKey: string;
   maxTokens: number;
