@@ -16,7 +16,9 @@ export const PRESETS: Record<string, PrivacyMatrix> = {
   standard: {
     audio_transcript: { local_buffer: "full",    local_llm: "redacted", triple_store: "redacted", openrouter: "redacted", agent_gateway: "redacted" },
     screen_ocr:       { local_buffer: "redacted", local_llm: "redacted", triple_store: "redacted", openrouter: "redacted", agent_gateway: "redacted" },
-    screen_images:    { local_buffer: "full",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
+    // Local vision: the on-device model may see screenshots (they never persist
+    // or leave the machine — triple_store/openrouter/agent_gateway stay "none").
+    screen_images:    { local_buffer: "full",     local_llm: "full",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     window_titles:    { local_buffer: "full",     local_llm: "summary",  triple_store: "summary",  openrouter: "summary",  agent_gateway: "none"     },
     credentials:      { local_buffer: "none",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     metadata:         { local_buffer: "full",     local_llm: "full",     triple_store: "full",     openrouter: "summary",  agent_gateway: "summary"  },
@@ -24,7 +26,9 @@ export const PRESETS: Record<string, PrivacyMatrix> = {
   strict: {
     audio_transcript: { local_buffer: "redacted", local_llm: "summary",  triple_store: "summary",  openrouter: "summary",  agent_gateway: "none"     },
     screen_ocr:       { local_buffer: "redacted", local_llm: "summary",  triple_store: "none",     openrouter: "summary",  agent_gateway: "none"     },
-    screen_images:    { local_buffer: "none",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
+    // Local vision stays on: images live only in the in-memory buffer for the
+    // on-device model — never written to the triplestore or sent off-device.
+    screen_images:    { local_buffer: "full",     local_llm: "full",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     window_titles:    { local_buffer: "summary",  local_llm: "summary",  triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     credentials:      { local_buffer: "none",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     metadata:         { local_buffer: "full",     local_llm: "summary",  triple_store: "summary",  openrouter: "none",     agent_gateway: "none"     },
@@ -32,6 +36,8 @@ export const PRESETS: Record<string, PrivacyMatrix> = {
   paranoid: {
     audio_transcript: { local_buffer: "redacted", local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     screen_ocr:       { local_buffer: "redacted", local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
+    // Paranoid is the explicit opt-out: even on-device vision is off — images
+    // are never buffered or analyzed anywhere.
     screen_images:    { local_buffer: "none",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     window_titles:    { local_buffer: "none",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
     credentials:      { local_buffer: "none",     local_llm: "none",     triple_store: "none",     openrouter: "none",     agent_gateway: "none"     },
