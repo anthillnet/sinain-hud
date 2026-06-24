@@ -61,10 +61,14 @@ export class RegionDetector {
   private running = false;
   private lastLatencyMs = 0;
   private runs = 0;
-  /** Set true once Ollama reports the region model is missing (404). Disables
-   *  this lane so we don't spam a failing call every 500ms — the cloud analyzer
-   *  still emits regions, so eyes keep working without the local model. */
+  /** Set true once the local model is gone AND no cloud fallback is configured.
+   *  Disables the lane so we don't spam a failing call every 500ms — the cloud
+   *  analyzer still emits regions, so eyes keep working without the local model. */
   private modelMissing = false;
+  /** Set true once we've switched this lane to the cloud model (local Ollama
+   *  absent but a cloud key is configured) — keeps the FAST tier-0 lane alive in
+   *  cloud mode with no local models. */
+  private useCloud = false;
 
   constructor(private readonly deps: RegionDetectorDeps) {}
 
@@ -114,25 +118,7 @@ export class RegionDetector {
     const start = Date.now();
 
     try {
-      const response = await fetch(`${this.deps.config.endpoint}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.deps.config.model,
-          messages: [
-            { role: "system", content: SLM_SYSTEM_PROMPT },
-            { role: "user", content: userPrompt },
-          ],
-          stream: false,
-          format: "json", // Ollama structured output — keeps small models valid
-          options: { num_predict: this.deps.config.maxTokens, temperature: 0.2 },
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`ollama ${response.status}: ${await response.text()}`);
-
-      const data = await response.json() as { message?: { content?: string } };
-      const content = data.message?.content?.trim() || "";
+      const content = await this.callModel(userPrompt, controller.signal);
       const latencyMs = Date.now() - start;
       this.lastLatencyMs = latencyMs;
       this.runs++;
@@ -165,7 +151,8 @@ export class RegionDetector {
       }
       if (!this.deps.isEnabled()) return;
 
-      log(TAG, `detect #${this.runs} ${latencyMs}ms model=${this.deps.config.model} ${lines.length} lines → ${regions?.length ?? 0} region(s)${regions?.length ? ": " + regions.map(r => `"${r.issue.slice(0, 36)}"`).join("; ") : ""}`);
+      const activeModel = this.useCloud ? `${this.deps.config.cloudModel} (cloud)` : this.deps.config.model;
+      log(TAG, `detect #${this.runs} ${latencyMs}ms model=${activeModel} ${lines.length} lines → ${regions?.length ?? 0} region(s)${regions?.length ? ": " + regions.map(r => `"${r.issue.slice(0, 36)}"`).join("; ") : ""}`);
       // Always call (even with undefined) so RegionTracker expiry advances.
       this.deps.onRegions(regions, ctx);
     } catch (err: any) {
@@ -173,15 +160,21 @@ export class RegionDetector {
         debug(TAG, "generation aborted (superseded or timed out)");
       } else {
         const m = String(err?.message ?? err);
-        // Model-not-found (404): the local region model isn't pulled. Disable
-        // this lane (one-time, actionable log) instead of failing every 500ms —
-        // the cloud analyzer keeps emitting regions, so eyes still work.
-        if (/\b404\b/.test(m) && /not found/i.test(m)) {
+        // Local Ollama gone — model not pulled (404) or daemon down (conn refused).
+        // Prefer switching the FAST lane to the cloud model (same focused prompt)
+        // so tier-0 eyes keep working in cloud mode with no local models. Only
+        // disable (and let the analyzer cover regions) if there's no cloud key.
+        const localGone = !this.useCloud &&
+          ((/\b404\b/.test(m) && /not found/i.test(m)) || /fetch failed|econnrefused|connection refused/i.test(m));
+        if (localGone && this.deps.config.cloudApiKey) {
+          this.useCloud = true;
+          log(TAG, `local region model unavailable — switching region detection to cloud (${this.deps.config.cloudModel})`);
+        } else if (localGone) {
           this.modelMissing = true;
           this.stop();
-          error(TAG, `region model "${this.deps.config.model}" not found in Ollama — local ROI detection disabled (regions fall back to the analyzer). Pull it with:  ollama pull ${this.deps.config.model}`);
+          error(TAG, `region model "${this.deps.config.model}" unavailable and no cloud key — local ROI detection disabled (regions fall back to the analyzer). Pull it with:  ollama pull ${this.deps.config.model}`);
         } else {
-          error(TAG, `ollama call failed: ${m}`);
+          error(TAG, `region call failed: ${m}`);
         }
       }
     } finally {
@@ -189,6 +182,44 @@ export class RegionDetector {
       this.running = false;
       if (this.inflight === controller) this.inflight = null;
     }
+  }
+
+  /** Run the focused region prompt on the active provider, returning the raw
+   *  JSON content string. Local Ollama (/api/chat) by default; OpenRouter
+   *  (OpenAI-shaped) once this.useCloud has flipped (local model absent). */
+  private async callModel(userPrompt: string, signal: AbortSignal): Promise<string> {
+    const cfg = this.deps.config;
+    const messages = [
+      { role: "system", content: SLM_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ];
+    if (this.useCloud) {
+      const response = await fetch(cfg.cloudEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.cloudApiKey}` },
+        body: JSON.stringify({
+          model: cfg.cloudModel, messages, temperature: 0.2,
+          max_tokens: cfg.maxTokens, response_format: { type: "json_object" },
+        }),
+        signal,
+      });
+      if (!response.ok) throw new Error(`openrouter ${response.status}: ${await response.text()}`);
+      const data = await response.json() as { choices?: { message?: { content?: string } }[] };
+      return data.choices?.[0]?.message?.content?.trim() || "";
+    }
+    const response = await fetch(`${cfg.endpoint}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: cfg.model, messages, stream: false,
+        format: "json", // Ollama structured output — keeps small models valid
+        options: { num_predict: cfg.maxTokens, temperature: 0.2 },
+      }),
+      signal,
+    });
+    if (!response.ok) throw new Error(`ollama ${response.status}: ${await response.text()}`);
+    const data = await response.json() as { message?: { content?: string } };
+    return data.message?.content?.trim() || "";
   }
 
   stats(): { runs: number; lastLatencyMs: number } {
