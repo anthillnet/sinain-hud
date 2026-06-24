@@ -2654,6 +2654,35 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
+      // ── /cost ── live LLM cost + token summary with derived rates.
+      if (req.method === "GET" && url.pathname === "/cost") {
+        const s = deps.costTracker?.getSnapshot();
+        if (!s) { res.end(JSON.stringify({ ok: false, error: "cost tracking unavailable" })); return; }
+        const elapsedMin = Math.max(0.001, (Date.now() - s.startedAt) / 60_000);
+        const round = (n: number, p = 6) => Math.round(n * 10 ** p) / 10 ** p;
+        res.end(JSON.stringify({
+          ok: true,
+          totalCost: round(s.totalCost),
+          callCount: s.callCount,
+          elapsedMinutes: round(elapsedMin, 1),
+          costBySource: s.costBySource,
+          costByModel: s.costByModel,
+          tokens: {
+            totalIn: s.totalTokensIn,
+            totalOut: s.totalTokensOut,
+            inBySource: s.tokensInBySource,
+            outBySource: s.tokensOutBySource,
+          },
+          rates: {
+            costPerHour: round(s.totalCost / (elapsedMin / 60)),
+            costPerCall: round(s.callCount ? s.totalCost / s.callCount : 0),
+            avgTokensIn: s.callCount ? Math.round(s.totalTokensIn / s.callCount) : 0,
+            avgTokensOut: s.callCount ? Math.round(s.totalTokensOut / s.callCount) : 0,
+          },
+        }));
+        return;
+      }
+
       // ── /setup/status ── (used by overlay onboarding wizard)
       if (req.method === "GET" && url.pathname === "/setup/status") {
         const health = deps.getHealthPayload();

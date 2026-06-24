@@ -109,6 +109,7 @@ class ChatAgent:
             if os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on":
                 llm_kwargs["litellm_extra_body"] = {"reasoning": {"enabled": False}}
         llm = LLM(**llm_kwargs)
+        self._llm = llm  # kept so each turn can read OpenHands usage metrics
         agent = Agent(llm=llm, tools=[Tool(name=n) for n, _, _ in tools.SPECS],
                       system_prompt_kwargs={}, system_prompt=SYSTEM)
         ws = os.path.join(os.path.dirname(__file__), ".workspace")
@@ -164,12 +165,33 @@ class ChatAgent:
             self._q = asyncio.Queue()
             msg = message if not seed else f"[{kind} context]\n{seed}\n\n{message}"
 
+            def _usage_snapshot():
+                # OpenHands accumulates cost + tokens on the LLM across turns;
+                # snapshot before/after so we can emit this turn's delta.
+                try:
+                    m = self._llm.metrics
+                    tu = m.accumulated_token_usage
+                    return (m.accumulated_cost or 0.0,
+                            tu.prompt_tokens if tu else 0,
+                            tu.completion_tokens if tu else 0)
+                except Exception:  # noqa: BLE001
+                    return (0.0, 0, 0)
+
             def _work():
                 try:
+                    c0, p0, k0 = _usage_snapshot()
                     self._conv.send_message(msg)
                     self._conv.run()
                     if self._gen == gen:
-                        self._emit({"type": "done", "text": self._acc})
+                        c1, p1, k1 = _usage_snapshot()
+                        usage = {
+                            "cost": max(0.0, c1 - c0),
+                            "tokensIn": max(0, p1 - p0),
+                            "tokensOut": max(0, k1 - k0),
+                            "model": getattr(self._llm.metrics, "model_name", "")
+                                     or os.environ.get("SINAIN_CHAT_MODEL", "sinain-chat"),
+                        }
+                        self._emit({"type": "done", "text": self._acc, "usage": usage})
                 except Exception as e:  # noqa: BLE001
                     if self._gen == gen:
                         self._emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
