@@ -271,11 +271,48 @@ class RdfStore:
             # Read-only open does NOT take the exclusive RocksDB write lock, so a
             # long-lived reader (KG warm-index daemon) coexists with the
             # distillation writer. Snapshot at open time; reopen to refresh.
-            self._store = ox.Store.read_only(str(Path(path).expanduser()))
+            try:
+                self._store = ox.Store.read_only(str(Path(path).expanduser()))
+            except Exception as e:  # noqa: BLE001
+                # Corrupt/absent on-disk store; we can't repair it read-only (the
+                # writer owns recreation). Serve an empty in-memory store so
+                # queries return nothing instead of raising — a later reopen picks
+                # up the store once the writer has recreated it.
+                print(f"[rdf_store] read-only KG open failed ({e}); serving empty until rebuilt", file=sys.stderr)
+                self._store = ox.Store()
         else:
             p = Path(path).expanduser()
             p.parent.mkdir(parents=True, exist_ok=True)
-            self._store = ox.Store(str(p))
+            self._store = self._open_writable_or_recover(p)
+
+    @staticmethod
+    def _open_writable_or_recover(p: Path) -> "ox.Store":
+        """Open the on-disk RocksDB store, recovering from corruption.
+
+        A missing WAL (`*.log`) or SST file — e.g. after an unclean shutdown —
+        makes RocksDB raise on open or on the first file access. The graph is
+        rebuildable from sessions, so we quarantine the broken store and start
+        fresh rather than stay permanently broken. We ONLY do this for
+        corruption signatures — a lock-contention error (another writer holds
+        the exclusive lock) must NOT destroy a healthy store, so it re-raises."""
+        try:
+            return ox.Store(str(p))
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            corrupt = any(k in msg for k in (
+                "no such file", "corrupt", "while stat", "io error", "not found", "truncated",
+            ))
+            if not (corrupt and p.exists()):
+                raise  # lock contention / unknown — don't touch the data
+            import shutil
+            import time
+            bak = p.with_name(f"{p.name}.corrupt-{int(time.time())}")
+            try:
+                shutil.move(str(p), str(bak))
+                print(f"[rdf_store] quarantined corrupt KG → {bak.name} ({e}); starting fresh", file=sys.stderr)
+            except Exception as me:  # noqa: BLE001
+                print(f"[rdf_store] could not quarantine corrupt KG ({me})", file=sys.stderr)
+            return ox.Store(str(p))
 
     # ----- Lifecycle -----
 

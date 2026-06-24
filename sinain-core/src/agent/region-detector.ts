@@ -61,6 +61,10 @@ export class RegionDetector {
   private running = false;
   private lastLatencyMs = 0;
   private runs = 0;
+  /** Set true once Ollama reports the region model is missing (404). Disables
+   *  this lane so we don't spam a failing call every 500ms — the cloud analyzer
+   *  still emits regions, so eyes keep working without the local model. */
+  private modelMissing = false;
 
   constructor(private readonly deps: RegionDetectorDeps) {}
 
@@ -68,7 +72,7 @@ export class RegionDetector {
    *  `urgent` (app switch / big viewport change) skips the debounce so the new
    *  screen's regions detect the instant its OCR lands, not ~500ms later. */
   onContextChange(urgent = false): void {
-    if (!this.deps.isEnabled()) return;
+    if (!this.deps.isEnabled() || this.modelMissing) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (urgent) {
       this.debounceTimer = null;
@@ -168,7 +172,17 @@ export class RegionDetector {
       if (err?.name === "AbortError") {
         debug(TAG, "generation aborted (superseded or timed out)");
       } else {
-        error(TAG, `ollama call failed: ${err?.message ?? err}`);
+        const m = String(err?.message ?? err);
+        // Model-not-found (404): the local region model isn't pulled. Disable
+        // this lane (one-time, actionable log) instead of failing every 500ms —
+        // the cloud analyzer keeps emitting regions, so eyes still work.
+        if (/\b404\b/.test(m) && /not found/i.test(m)) {
+          this.modelMissing = true;
+          this.stop();
+          error(TAG, `region model "${this.deps.config.model}" not found in Ollama — local ROI detection disabled (regions fall back to the analyzer). Pull it with:  ollama pull ${this.deps.config.model}`);
+        } else {
+          error(TAG, `ollama call failed: ${m}`);
+        }
       }
     } finally {
       clearTimeout(timeout);

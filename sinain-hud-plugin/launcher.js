@@ -137,19 +137,21 @@ async function main() {
   // Auto-download sck-capture binary if missing (macOS only)
   if (!IS_WINDOWS) {
     const sckBinary = path.join(SINAIN_DIR, "sck-capture", "sck-capture");
-    if (!fs.existsSync(sckBinary)) {
-      log("sck-capture not found — downloading from GitHub Releases...");
-      try {
-        const { downloadBinary } = await import("./setup-sck-capture.js");
-        const success = await downloadBinary({ silent: true });
-        if (success) {
-          ok("sck-capture downloaded");
-        } else {
-          warn("sck-capture download failed — audio capture may not work");
-        }
-      } catch (e) {
-        warn(`sck-capture auto-download failed: ${e.message}`);
+    // Always check/refresh — downloadBinary() compares version.json and is a
+    // no-op when up-to-date. Checking only when ABSENT left stale binaries from
+    // older installs in place, so a new core's flags (e.g. --pin-display) made
+    // the old binary die on launch (killing audio + degrading screen capture).
+    const hadBinary = fs.existsSync(sckBinary);
+    if (!hadBinary) log("sck-capture not found — downloading from GitHub Releases...");
+    try {
+      const { downloadBinary } = await import("./setup-sck-capture.js");
+      const success = await downloadBinary({ silent: true });
+      if (!hadBinary) {
+        if (success) ok("sck-capture downloaded");
+        else warn("sck-capture download failed — audio capture may not work");
       }
+    } catch (e) {
+      if (!hadBinary) warn(`sck-capture auto-download failed: ${e.message}`);
     }
   }
 
@@ -162,6 +164,35 @@ async function main() {
     } catch (e) {
       warn(`embedding model pre-cache skipped: ${e.message}`);
     }
+  }
+
+  // Region-SLM model (provisional ROI eyes) — provision once if Ollama is
+  // running. Mirrors start.sh. The lane is on by default but is hardcoded to a
+  // local Ollama model that nothing else pulled on npm installs. Graceful: if
+  // Ollama is down or the pull fails, regions fall back to the main analyzer
+  // lane (sinain-core disables the SLM lane on a 404 instead of spamming).
+  if (process.env.REGION_SLM_ENABLED !== "false") {
+    const slmModel = process.env.REGION_SLM_MODEL || "qwen2.5:3b";
+    const ollamaUrl = process.env.REGION_SLM_ENDPOINT || "http://localhost:11434";
+    try {
+      const tagsRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+      if (tagsRes && tagsRes.ok) {
+        const tags = await tagsRes.json().catch(() => ({ models: [] }));
+        const have = (tags.models || []).some((m) => (m.name || "").startsWith(slmModel));
+        if (have) {
+          ok(`region-SLM model present: ${slmModel}`);
+        } else {
+          log(`Pulling region-SLM model ${slmModel} (one-time, for instant ROI previews)...`);
+          try {
+            execSync(`ollama pull ${slmModel}`, { stdio: "ignore", timeout: 600_000 });
+            ok(`region-SLM model pulled: ${slmModel}`);
+          } catch {
+            warn(`could not pull ${slmModel} — provisional ROI eyes off (the analyzer still labels regions)`);
+          }
+        }
+      }
+      // Ollama unreachable → skip silently; sinain-core degrades gracefully.
+    } catch { /* best-effort provisioning */ }
   }
 
   // Start core

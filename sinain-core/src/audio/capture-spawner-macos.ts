@@ -16,7 +16,7 @@ const TAG = "audio";
  * Mic mode uses AVAudioEngine for audio only.
  */
 export class MacOSCaptureSpawner implements CaptureSpawner {
-  spawn(config: AudioPipelineConfig, source: AudioSourceTag): ChildProcess {
+  spawn(config: AudioPipelineConfig, source: AudioSourceTag, opts?: { compat?: boolean }): ChildProcess {
     // Check ~/.sinain/sck-capture/ first (npx install), then dev path
     const homeBinary = resolve(os.homedir(), ".sinain", "sck-capture", "sck-capture");
     const devBinary = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
@@ -58,7 +58,9 @@ export class MacOSCaptureSpawner implements CaptureSpawner {
       );
       // Pin to the primary display by default — multi-display "follow active"
       // mis-places ROIs (wrong screen). Opt back in with CAPTURE_FOLLOW_DISPLAY=true.
-      if (process.env.CAPTURE_FOLLOW_DISPLAY !== "true") {
+      // Skipped in compat mode (stale binary that doesn't know the flag) — capture
+      // still works; ROI placement just falls back to the primary screen.
+      if (process.env.CAPTURE_FOLLOW_DISPLAY !== "true" && !opts?.compat) {
         args.push("--pin-display");
       }
     }
