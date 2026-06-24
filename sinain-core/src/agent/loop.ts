@@ -95,6 +95,14 @@ export class AgentLoop extends EventEmitter {
   private lastTickFeedVersion = 0;
   private lastTickSenseVersion = 0;
   private authErrorNotified = false;
+  // Salience measurement (no behavior change): tracks how often a Tier-2 tick
+  // runs on content identical to the last analyzed state — i.e. how many LLM
+  // calls a deterministic salience gate would skip.
+  private lastSalienceHash = "";
+  private lastSalienceNorm = "";
+  private salienceTotal = 0;
+  private salienceDup = 0;
+  private salienceDupNorm = 0;
 
   private stats = {
     totalCalls: 0,
@@ -298,6 +306,31 @@ export class AgentLoop extends EventEmitter {
     }
 
     this.deps.profiler?.timerRecord("agent.contextBuild", Date.now() - ctxStart);
+
+    // ── Salience probe (MEASUREMENT ONLY — does not skip anything) ──
+    // Hash the meaningful inputs the LLM sees (app + screen OCR + audio text;
+    // NOT the rendered "Xs ago" timestamps), compare to the last analyzed tick,
+    // and log whether a salience gate would have skipped this LLM call.
+    {
+      const ocrJoined = contextWindow.screen.map(e => e.ocr || "").join("");
+      const audioJoined = contextWindow.audio.map(a => a.text).join("");
+      const key = `${contextWindow.currentApp}${ocrJoined}${audioJoined}`;
+      let h = 2166136261 >>> 0; // FNV-1a
+      for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+      const hash = h.toString(16);
+      const normKey = `${contextWindow.currentApp}${(ocrJoined + audioJoined).toLowerCase().replace(/[^a-z]+/g, "")}`;
+      let hn = 2166136261 >>> 0;
+      for (let i = 0; i < normKey.length; i++) { hn ^= normKey.charCodeAt(i); hn = Math.imul(hn, 16777619) >>> 0; }
+      const normHash = hn.toString(16);
+      const dup = hash === this.lastSalienceHash;
+      const dupNorm = normHash === this.lastSalienceNorm;
+      this.salienceTotal++;
+      if (dup) this.salienceDup++;
+      if (dupNorm) this.salienceDupNorm++;
+      this.lastSalienceHash = hash;
+      this.lastSalienceNorm = normHash;
+      log("salience", `app=${contextWindow.currentApp} dupExact=${dup} dupNorm=${dupNorm} ocrChars=${ocrJoined.length} audio=${contextWindow.audio.length} | would-skip exact ${this.salienceDup}/${this.salienceTotal} (${Math.round(100 * this.salienceDup / Math.max(1, this.salienceTotal))}%) norm ${this.salienceDupNorm}/${this.salienceTotal} (${Math.round(100 * this.salienceDupNorm / Math.max(1, this.salienceTotal))}%)`);
+    }
 
     this.running = true;
     const traceCtx = this.deps.onTraceStart?.(this.agentNextId) ?? null;

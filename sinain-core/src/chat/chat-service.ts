@@ -22,9 +22,19 @@ export interface ChatContext {
   source?: "user" | "escalation";
 }
 
+/** Per-turn LLM usage reported by the sidecar's `done` event (from OpenHands
+ *  metrics). cost is 0 for local models; tokens are always present. */
+export interface ChatUsage {
+  cost: number;
+  tokensIn: number;
+  tokensOut: number;
+  model: string;
+}
+
 export interface ChatHandlers {
   onToken?: (text: string) => void;
   onTool?: (name: string) => void;
+  onUsage?: (usage: ChatUsage) => void;
 }
 
 export class ChatService {
@@ -61,11 +71,14 @@ export class ChatService {
         ws.send(JSON.stringify({ message: text, context }));
       });
       ws.on("message", (data: unknown) => {
-        let ev: { type?: string; text?: string; tool_name?: string };
+        let ev: { type?: string; text?: string; tool_name?: string; usage?: ChatUsage };
         try {
           ev = JSON.parse(String(data));
         } catch {
           return;
+        }
+        if (ev.usage && handlers.onUsage) {
+          try { handlers.onUsage(ev.usage); } catch { /* metering must never break chat */ }
         }
         switch (ev.type) {
           case "token":
