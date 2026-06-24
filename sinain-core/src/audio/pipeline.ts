@@ -81,6 +81,9 @@ export class AudioPipeline extends EventEmitter {
   private speechChunks: number = 0;
   private errorCount: number = 0;
   private muted: boolean = false;
+  /** Set after a stale capture binary rejects a newer flag ("Unknown arg") —
+   *  the next spawn drops the optional flags so capture launches anyway. */
+  private sckCompat: boolean = false;
   private profiler: Profiler | null = null;
 
   setProfiler(p: Profiler): void { this.profiler = p; }
@@ -199,7 +202,7 @@ export class AudioPipeline extends EventEmitter {
   // ── Capture process spawn (platform-dispatched via CaptureSpawner) ──
 
   private spawnCaptureProcess(): void {
-    this.process = this.captureSpawner.spawn(this.config, this.audioSourceTag);
+    this.process = this.captureSpawner.spawn(this.config, this.audioSourceTag, { compat: this.sckCompat });
     const name = process.platform === "win32" ? "win-audio-capture" : "sck-capture";
     this.wireProcessEvents(name);
   }
@@ -297,6 +300,17 @@ export class AudioPipeline extends EventEmitter {
 
           this.stop();
           this.emit("tcc-denied");
+          return;
+        }
+
+        // Version skew: a stale sck-capture binary rejects a newer flag and
+        // exits immediately. Retry once in compat mode (drops the optional
+        // flags) so capture works instead of dying — self-heals mixed-version
+        // installs (new core + old sck-capture binary).
+        if (!this.sckCompat && elapsedMs < 5000 && /unknown arg/i.test(stderrAccum)) {
+          this.sckCompat = true;
+          warn(TAG, `${name} rejected a flag (stale binary) — retrying without optional flags. Update it: npx @geravant/sinain setup-sck-capture`);
+          this.spawnCaptureProcess();
           return;
         }
 

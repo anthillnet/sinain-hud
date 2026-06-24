@@ -9,6 +9,9 @@ export interface CaptureSpawner {
   /**
    * Spawn the audio capture process for the given source.
    * The process must output raw 16-bit PCM on stdout.
+   * `opts.compat` drops newer optional flags (e.g. --pin-display) so a stale
+   * capture binary that predates them still launches instead of exiting on an
+   * "Unknown arg" — used by the pipeline to self-heal a version-skewed install.
    */
-  spawn(config: AudioPipelineConfig, source: AudioSourceTag): ChildProcess;
+  spawn(config: AudioPipelineConfig, source: AudioSourceTag, opts?: { compat?: boolean }): ChildProcess;
 }
