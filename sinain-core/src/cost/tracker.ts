@@ -7,6 +7,10 @@ export class CostTracker {
   private totalCost = 0;
   private costBySource = new Map<string, number>();
   private costByModel = new Map<string, number>();
+  private totalTokensIn = 0;
+  private totalTokensOut = 0;
+  private tokensInBySource = new Map<string, number>();
+  private tokensOutBySource = new Map<string, number>();
   private callCount = 0;
   private startedAt = Date.now();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -17,17 +21,22 @@ export class CostTracker {
   }
 
   record(entry: CostEntry): void {
-    if (entry.cost <= 0) return;
-    this.totalCost += entry.cost;
+    const tokIn = entry.tokensIn || 0;
+    const tokOut = entry.tokensOut || 0;
+    // Record an entry that carries either money OR tokens — so local-mode calls
+    // (cost 0) still contribute token throughput. Money only accumulates when
+    // cost > 0; tokens always accumulate.
+    if (entry.cost <= 0 && tokIn === 0 && tokOut === 0) return;
     this.callCount++;
-    this.costBySource.set(
-      entry.source,
-      (this.costBySource.get(entry.source) || 0) + entry.cost,
-    );
-    this.costByModel.set(
-      entry.model,
-      (this.costByModel.get(entry.model) || 0) + entry.cost,
-    );
+    if (entry.cost > 0) {
+      this.totalCost += entry.cost;
+      this.costBySource.set(entry.source, (this.costBySource.get(entry.source) || 0) + entry.cost);
+      this.costByModel.set(entry.model, (this.costByModel.get(entry.model) || 0) + entry.cost);
+    }
+    this.totalTokensIn += tokIn;
+    this.totalTokensOut += tokOut;
+    this.tokensInBySource.set(entry.source, (this.tokensInBySource.get(entry.source) || 0) + tokIn);
+    this.tokensOutBySource.set(entry.source, (this.tokensOutBySource.get(entry.source) || 0) + tokOut);
     this.onCostUpdate(this.getSnapshot());
   }
 
@@ -38,6 +47,10 @@ export class CostTracker {
       costByModel: Object.fromEntries(this.costByModel),
       callCount: this.callCount,
       startedAt: this.startedAt,
+      totalTokensIn: this.totalTokensIn,
+      totalTokensOut: this.totalTokensOut,
+      tokensInBySource: Object.fromEntries(this.tokensInBySource),
+      tokensOutBySource: Object.fromEntries(this.tokensOutBySource),
     };
   }
 

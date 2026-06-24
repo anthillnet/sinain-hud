@@ -947,6 +947,14 @@ async function main() {
   // ── Initialize cost tracker ──
   const costTracker = new CostTracker((snapshot) => wsHandler.broadcastCost(snapshot, config.costDisplayEnabled));
   costTracker.startPeriodicLog(60_000);
+  // Record a chat-sidecar turn's usage (OpenHands metrics; cost 0 for local
+  // models, tokens always present) into the same tracker as analyzer/vision.
+  const recordChatUsage = (u: { cost: number; tokensIn: number; tokensOut: number; model: string }): void => {
+    costTracker.record({
+      source: "chat", model: u.model || "sinain-chat",
+      cost: u.cost || 0, tokensIn: u.tokensIn || 0, tokensOut: u.tokensOut || 0, ts: Date.now(),
+    });
+  };
 
   // ── Initialize tracing ──
   const tracer = config.traceEnabled ? new Tracer() : null;
@@ -1037,7 +1045,7 @@ async function main() {
     // escalator delivers idle/ambient escalations in-process via ChatService.
     // (chatService is constructed just below; referenced lazily at call time.)
     isResidentAgent: (name: string) => isSinainProfile(escalatorAgentsCfg, name),
-    runResidentChat: (message: string) => chatService.handle(message, { kind: "main", source: "escalation" }),
+    runResidentChat: (message: string) => chatService.handle(message, { kind: "main", source: "escalation" }, { onUsage: recordChatUsage }),
     isIdleMessagesEnabled: () => idleMessagesEnabled,
   });
 
@@ -2143,7 +2151,7 @@ async function main() {
     if (handoff) seed = handoff + (seed ?? "");
     wsHandler.broadcastRaw({ type: "thinking", active: true } as any);
     chatService
-      .handle(text, { kind, seed })
+      .handle(text, { kind, seed }, { onUsage: recordChatUsage })
       .then((reply) => {
         wsHandler.broadcastRaw({ type: "thinking", active: false } as any);
         if (regionId) {

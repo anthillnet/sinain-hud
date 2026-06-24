@@ -245,7 +245,7 @@ export interface CostMessage {
 
 /** Entry recorded by CostTracker for each LLM call. */
 export interface CostEntry {
-  source: "analyzer" | "transcription" | "vision";
+  source: "analyzer" | "transcription" | "vision" | "chat";
   model: string;
   cost: number;
   tokensIn: number;
@@ -260,6 +260,12 @@ export interface CostSnapshot {
   costByModel: Record<string, number>;
   callCount: number;
   startedAt: number;
+  /** Token throughput — accumulated even when cost is 0 (local models), so the
+   *  /cost endpoint stays useful in local mode and shows chat token volume. */
+  totalTokensIn: number;
+  totalTokensOut: number;
+  tokensInBySource: Record<string, number>;
+  tokensOutBySource: Record<string, number>;
 }
 
 export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage;
