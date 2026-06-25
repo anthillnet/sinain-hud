@@ -95,6 +95,10 @@ switch (cmd) {
     break;
   }
 
+  case "wipe":
+    await import("./wipe-data.js");
+    break;
+
   case "export-knowledge":
     await exportKnowledge();
     break;
@@ -421,6 +425,8 @@ Usage:
   sinain setup-embedding       Pre-cache sentence-transformer model (~90MB)
   sinain export-knowledge      Export knowledge for transfer to another machine
   sinain import-knowledge <file>  Import knowledge from export file
+  sinain wipe [--yes]          Erase on-device user data (graph, transcripts, OCR, captures, logs)
+                               Preserves config/keys; --include-config removes those too
   sinain install               Install OpenClaw plugin (server-side)
   sinain mcp install           Register sinain MCP for your agents (Claude, Cursor, Codex, Goose, Junie)
   sinain mcp list              Show MCP registration status across agents

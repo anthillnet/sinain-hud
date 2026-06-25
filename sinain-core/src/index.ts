@@ -37,6 +37,7 @@ import { CostTracker } from "./cost/tracker.js";
 import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { hardenLocalDataPermissions } from "./util/harden-permissions.js";
+import { runRetention } from "./util/retention.js";
 import { log, warn, error, debug, preview } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
@@ -919,6 +920,9 @@ async function main() {
   // SECURITY: fix up permissions on data left world-readable by older builds
   // (umask above only covers files we create from now on). Best-effort.
   hardenLocalDataPermissions();
+  // SECURITY: prune old derived artifacts (daily notes, traces) past the
+  // retention window and drop any stale capture frame. Best-effort.
+  runRetention(parseInt(process.env.SINAIN_DATA_RETENTION_DAYS || "30", 10));
   // Version banner: core package version + (DMG installs) bundle identifiers
   // exported by launch-backend.sh. Source runs show "source".
   try {
