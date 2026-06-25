@@ -1,0 +1,18 @@
+[Unit]
+Description=sinain frps-device-authz — NewProxy device-signature plugin for frps
+After=network.target
+
+[Service]
+Environment=FRPS_AUTHZ_PORT=18798
+ExecStart=/usr/bin/node /opt/sinain-mcp-tunnel/frps-device-authz.mjs
+Restart=always
+RestartSec=2
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

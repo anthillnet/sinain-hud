@@ -38,7 +38,7 @@ function tightenTree(p: string, depth = 0): void {
  * Tighten permissions on on-device user data so it is not world/group-readable.
  * Runs once at startup and is best-effort (never throws). The process umask
  * (set at the top of index.ts) keeps *newly* created files private; this pass
- * fixes files left world-readable by older builds. See docs/SECURITY.md.
+ * fixes files left world-readable by older builds.
  */
 export function hardenLocalDataPermissions(): void {
   const home = homedir();

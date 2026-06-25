@@ -36,6 +36,9 @@ class WebSocketService extends ChangeNotifier {
   bool _idleMessagesEnabled = false;
   String _responseSize = 'medium';
   String _envPath = '';
+  // ChatGPT MCP-tunnel state pushed by sinain-core when the harness is on:
+  // {status, connectorUrl, pairingCode, pairingExpiresAt, handle, error}.
+  Map<String, dynamic>? _tunnel;
   // Bare-agent roster + per-lane current choice. Populated from status
   // messages once the bare agent registers with sinain-core. Empty string
   // for a lane means "Off" (lane disabled). Empty availableAgents means
@@ -139,6 +142,14 @@ class WebSocketService extends ChangeNotifier {
   bool get idleMessagesEnabled => _idleMessagesEnabled;
   String get responseSize => _responseSize;
   String get envPath => _envPath;
+  /// ChatGPT MCP-tunnel state (null until the harness is enabled).
+  Map<String, dynamic>? get tunnel => _tunnel;
+  String get tunnelStatus => (_tunnel?['status'] as String?) ?? 'off';
+  String? get tunnelConnectorUrl => _tunnel?['connectorUrl'] as String?;
+  String? get tunnelPairingCode => _tunnel?['pairingCode'] as String?;
+  bool get tunnelLinked => _tunnel?['linked'] == true;
+  String? get tunnelAccountEmail => _tunnel?['accountEmail'] as String?;
+  String? get tunnelError => _tunnel?['error'] as String?;
   List<String> get availableAgents => _availableAgents;
   /// Terminal-lane roster (sinain-excluded). Falls back to the full roster
   /// when core hasn't populated it.
@@ -181,6 +192,16 @@ class WebSocketService extends ChangeNotifier {
   /// public tunnel so ChatGPT can reach it). Off by default — security-sensitive.
   void setChatgptHarness(bool enabled) {
     sendCommand('set_chatgpt_harness', {'enabled': enabled});
+  }
+
+  /// Open the Sinain account sign-in (Auth0) in the browser to link this device.
+  void signInToSinain() {
+    sendCommand('mcp_tunnel_signin');
+  }
+
+  /// Disconnect this device from its Sinain account.
+  void signOutOfSinain() {
+    sendCommand('mcp_tunnel_signout');
   }
 
   /// Hold ambient escalations for [seconds] — the user is actively
@@ -358,6 +379,12 @@ class WebSocketService extends ChangeNotifier {
           final envPath = statusData['envPath'] as String?;
           if (envPath != null && envPath.isNotEmpty) {
             _envPath = envPath;
+          }
+          // ChatGPT MCP-tunnel state — replace wholesale (it carries a rotating
+          // pairing code); a status frame without it leaves the last known state.
+          if (statusData.containsKey('tunnel')) {
+            _tunnel = (statusData['tunnel'] as Map?)?.cast<String, dynamic>();
+            notifyListeners();
           }
           final agents = statusData['agents'] as Map<String, dynamic>?;
           if (agents != null) {

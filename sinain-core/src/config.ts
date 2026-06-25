@@ -284,6 +284,11 @@ export function loadConfig(): CoreConfig {
     debounceMs: intEnv("REGION_SLM_DEBOUNCE_MS", 500),
     maxTokens: intEnv("REGION_SLM_MAX_TOKENS", 256),
     timeoutMs: intEnv("REGION_SLM_TIMEOUT_MS", 6000),
+    // Cloud fallback: a cheap/fast model runs the SAME focused region prompt when
+    // local Ollama is absent — keeps tier-0 eyes working for no-Ollama cloud users.
+    cloudModel: env("REGION_SLM_CLOUD_MODEL", "google/gemini-2.5-flash-lite"),
+    cloudEndpoint: env("REGION_SLM_CLOUD_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"),
+    cloudApiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.

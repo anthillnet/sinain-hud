@@ -1,0 +1,19 @@
+[Unit]
+Description=sinain demo fixture MCP server (real sinain-mcp-server → fixture-core)
+After=network.target sinain-fixture-core.service
+Wants=sinain-fixture-core.service
+
+[Service]
+Environment=MCP_TRANSPORT=http
+Environment=MCP_HTTP_PORT=9520
+Environment=SINAIN_CORE_URL=http://127.0.0.1:9530
+WorkingDirectory=/opt/sinain-fixture/mcp-server
+ExecStart=/opt/sinain-fixture/mcp-server/node_modules/.bin/tsx index.ts
+Restart=always
+RestartSec=3
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

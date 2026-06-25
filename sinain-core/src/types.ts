@@ -454,6 +454,12 @@ export interface RegionSlmConfig {
   maxTokens: number;
   /** Per-call timeout; aborts a slow/superseded generation (default 6000ms). */
   timeoutMs: number;
+  /** Cloud fallback (OpenRouter) for when the local Ollama model is absent, so
+   *  the fast region lane keeps working in cloud mode with NO local models.
+   *  Empty cloudApiKey ⇒ no fallback (lane disables on a missing local model). */
+  cloudModel: string;
+  cloudEndpoint: string;
+  cloudApiKey: string;
 }
 
 export interface AgentResult {

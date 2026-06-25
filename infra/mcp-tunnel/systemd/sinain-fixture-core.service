@@ -1,0 +1,18 @@
+[Unit]
+Description=sinain demo fixture-core (canned data for OpenAI review)
+After=network.target
+
+[Service]
+Environment=FIXTURE_CORE_PORT=9530
+ExecStart=/usr/bin/node /opt/sinain-mcp-tunnel/fixture-core.mjs
+Restart=always
+RestartSec=2
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

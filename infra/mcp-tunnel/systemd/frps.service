@@ -1,0 +1,18 @@
+[Unit]
+Description=frps — sinain MCP reverse-tunnel server
+After=network.target sinain-frps-authz.service
+Wants=sinain-frps-authz.service
+
+[Service]
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+Restart=always
+RestartSec=2
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
