@@ -13,6 +13,7 @@ import type {
   Priority,
   FeedChannel,
 } from "../types.js";
+import type { TunnelState } from "../mcp-tunnel/controller.js";
 import { log, warn } from "../log.js";
 import { loadedEnvPath } from "../config.js";
 
@@ -48,6 +49,9 @@ export class WsHandler {
   private spawnTaskBuffer: Map<string, ThreadStatusMessage> = new Map();
   private latestCostMsg: CostMessage | null = null;
   private latestRegionMsg: RegionHighlightMessage | null = null;
+  // ChatGPT MCP-tunnel state (connector URL + pairing code). Kept here rather
+  // than in BridgeState so the feature is self-contained in the WS layer.
+  private tunnelState: TunnelState | null = null;
 
   constructor() {
     this.startHeartbeat();
@@ -166,7 +170,7 @@ export class WsHandler {
 
   /** Send a status update to all connected overlays. */
   broadcastStatus(): void {
-    const msg: StatusMessage & { envPath?: string; escalation?: string; responseSize?: string } = {
+    const msg: StatusMessage & { envPath?: string; escalation?: string; responseSize?: string; tunnel?: TunnelState } = {
       type: "status",
       audio: this.state.audio,
       mic: this.state.mic,
@@ -178,7 +182,14 @@ export class WsHandler {
       agents: this.state.agents,
     };
     if (loadedEnvPath) msg.envPath = loadedEnvPath;
+    if (this.tunnelState) msg.tunnel = this.tunnelState;
     this.broadcastMessage(msg);
+  }
+
+  /** Update the ChatGPT MCP-tunnel state and rebroadcast status. */
+  updateTunnel(s: TunnelState): void {
+    this.tunnelState = s;
+    this.broadcastStatus();
   }
 
   /** Broadcast any outbound message (used by escalator for spawn_task events). */

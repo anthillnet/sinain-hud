@@ -1,0 +1,26 @@
+# frps — reverse-tunnel server for the ChatGPT⇄sinain MCP bridge.
+# Deploy to /etc/frp/frps.toml on the Strato box. See DESIGN-CHATGPT-MCP-TUNNEL.md.
+
+bindPort = 7000              # PUBLIC — frpc control connections land here
+vhostHTTPPort = 7080         # LOOPBACK-fronted by Caddy (see Caddyfile.snippet)
+
+# Bind the HTTP vhost to loopback so it's reachable only through Caddy (which
+# enforces the JWT). Only 7000 is exposed to the internet.
+vhostHTTPTimeout = 60
+subDomainHost = "mcp.sinain.com"
+
+# Per-handle tunnel authorization via the device-signature server plugin.
+# frps POSTs each NewProxy to this loopback endpoint; it confirms the client
+# owns the subdomain it claims (no shared frp secret ships in the app).
+[[httpPlugins]]
+name = "device-authz"
+addr = "http://127.0.0.1:18798"
+path = "/handle"
+ops = ["NewProxy"]
+
+# No global auth.token: authorization is the device signature checked by the
+# plugin above. (A shared token would be extractable from the shipped app.)
+
+log.to = "/var/log/frp/frps.log"
+log.level = "info"
+log.maxDays = 7

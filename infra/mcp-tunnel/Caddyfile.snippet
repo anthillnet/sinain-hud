@@ -1,0 +1,40 @@
+# Sinain MCP tunnel — Caddy sites. Deploy to /etc/caddy/sites/sinain-mcp-tunnel.caddy
+# and ensure the main Caddyfile contains:   import /etc/caddy/sites/*.caddy
+#
+# auth.sinain.com uses Caddy's automatic HTTP-01 (grey-cloud A record).
+# *.mcp.sinain.com needs a WILDCARD cert → issued by certbot DNS-01 (deploy.sh),
+# referenced here as files (matches the coturn cert pattern already on the box;
+# avoids rebuilding Caddy with a DNS module).
+
+*.mcp.sinain.com {
+	tls /etc/sinain-mcp-tunnel/tls/fullchain.pem /etc/sinain-mcp-tunnel/tls/privkey.pem
+
+	# OAuth protected-resource metadata, templated by the request Host
+	# (= <handle>.mcp.sinain.com) so ChatGPT can discover the AS.
+	handle /.well-known/oauth-protected-resource {
+		header Content-Type application/json
+		header Cache-Control "public, max-age=300"
+		respond `{"resource":"https://{host}","authorization_servers":["https://auth.sinain.com"]}` 200
+	}
+
+	# All MCP traffic: verify the JWT at the edge, then proxy to the frps vhost.
+	handle /mcp* {
+		forward_auth 127.0.0.1:18796 {
+			uri /verify
+			method GET
+			header_up X-Forwarded-Host {host}
+			copy_headers X-Mcp-Handle
+		}
+		reverse_proxy 127.0.0.1:7080 {
+			header_up Host {host}          # frps routes by Host → the right frpc
+		}
+	}
+
+	handle {
+		respond "sinain mcp tunnel" 404
+	}
+}
+
+auth.sinain.com {
+	reverse_proxy 127.0.0.1:18797          # the accountless OAuth AS
+}

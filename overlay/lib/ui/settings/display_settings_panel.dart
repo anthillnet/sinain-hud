@@ -368,6 +368,10 @@ class DisplaySettingsPanel extends StatelessWidget {
                         ),
                       ),
                     ),
+                    // Connector details (URL + pairing code) — shown while the
+                    // harness is on so the user can wire it into ChatGPT.
+                    if (settings.settings.chatgptHarness)
+                      const _ChatGptConnectorPanel(),
                     const SizedBox(height: 10),
                     Divider(
                         height: 1, color: Colors.white.withValues(alpha: 0.1)),
@@ -726,6 +730,123 @@ class _UpdateRow extends StatelessWidget {
                 style: _mono(0.5, 8)),
           ),
         const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+/// Connector details for the ChatGPT MCP tunnel — connector URL + rotating
+/// pairing code, shown while the harness is enabled. Reads tunnel state pushed
+/// by sinain-core over the WebSocket (websocket_service.dart `tunnel*`).
+class _ChatGptConnectorPanel extends StatelessWidget {
+  const _ChatGptConnectorPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.watch<WebSocketService>();
+    final status = ws.tunnelStatus;
+    final url = ws.tunnelConnectorUrl;
+    final code = ws.tunnelPairingCode;
+    final err = ws.tunnelError;
+    const accent = Color(0xFFFF6644);
+
+    final (label, dot) = switch (status) {
+      'live' => ('connector live', const Color(0xFF00FF88)),
+      'starting' => ('starting tunnel…', accent),
+      'error' => ('tunnel error', const Color(0xFFFF4444)),
+      _ => ('off', Colors.white24),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, right: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(width: 6, height: 6, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Text(label.toUpperCase(),
+                style: TextStyle(
+                    fontFamily: HudConstants.monoFont,
+                    fontFamilyFallback: HudConstants.monoFontFallbacks,
+                    fontSize: 8,
+                    color: Colors.white.withValues(alpha: 0.45))),
+          ]),
+          if (url != null) ...[
+            const SizedBox(height: 6),
+            _copyRow(context, 'CONNECTOR URL', url, url, accent),
+          ],
+          if (code != null) ...[
+            const SizedBox(height: 6),
+            _copyRow(context, 'PAIRING CODE', code, code, accent, big: true),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            'In ChatGPT (Developer Mode): Settings → Connectors → add a custom '
+            'connector → paste the URL, choose OAuth, then enter the pairing code. '
+            'Requires ChatGPT Plus/Pro (or an admin-enabled workspace).',
+            style: TextStyle(
+                fontFamily: HudConstants.monoFont,
+                fontFamilyFallback: HudConstants.monoFontFallbacks,
+                fontSize: 8,
+                height: 1.3,
+                color: Colors.white.withValues(alpha: 0.4)),
+          ),
+          if (err != null && status != 'live') ...[
+            const SizedBox(height: 4),
+            Text(err,
+                style: TextStyle(
+                    fontFamily: HudConstants.monoFont,
+                    fontFamilyFallback: HudConstants.monoFontFallbacks,
+                    fontSize: 8,
+                    color: const Color(0xFFFF6644).withValues(alpha: 0.8))),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _copyRow(BuildContext context, String label, String shown, String copyValue,
+      Color accent, {bool big = false}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: 7,
+                      color: Colors.white.withValues(alpha: 0.35))),
+              const SizedBox(height: 1),
+              Text(shown,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontFamily: HudConstants.monoFont,
+                      fontFamilyFallback: HudConstants.monoFontFallbacks,
+                      fontSize: big ? 13 : 9,
+                      letterSpacing: big ? 2 : 0,
+                      color: Colors.white.withValues(alpha: big ? 0.9 : 0.7))),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: copyValue));
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                SnackBar(content: Text('$label copied'), duration: const Duration(seconds: 1)),
+              );
+            },
+            child: Icon(Icons.copy, size: 12, color: accent.withValues(alpha: 0.85)),
+          ),
+        ),
       ],
     );
   }
