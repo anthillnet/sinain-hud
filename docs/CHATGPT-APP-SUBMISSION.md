@@ -18,7 +18,7 @@ Everything needed to submit Sinain to the ChatGPT app directory. Pairs with
 | Privacy policy | ✅ `docs/privacy.html` → `https://sinain.com/privacy` (live on next site deploy) |
 | Logo | ✅ `docs/logo-512.png` (existing brand asset) |
 | Listing copy + test prompts | ✅ below |
-| Screenshots | ⏳ **Igor** (§9 — the HUD is capture-invisible by design) |
+| Screenshots | ✅ `docs/media/flow-demo-ux-redesign/flow-1…6.png` (retina HUD flow) |
 
 ## 1. Listing metadata
 
@@ -115,13 +115,18 @@ the dashboard:
 (An interim test account currently holds the fixture link so the path is testable now;
 the real demo login transfers it.)
 
-### 9. Screenshots (Igor — manual)
+### 9. Screenshots
 
-The HUD overlay is **invisible to screen capture by design** (`NSWindow.sharingType =
-.none`), so `screencapture` produces a blank where the overlay is. To capture listing
-screenshots of the HUD, temporarily build with `sharingType = .readOnly` (or photograph
-the screen). Shots to grab: (1) HUD with a region eye, (2) the settings connector panel
-("Connected as …"), (3) a ChatGPT thread calling `sinain_context`, (4) the Auth0 sign-in.
+**Available:** `docs/media/flow-demo-ux-redesign/flow-1…6.png` — retina captures of the
+real HUD flow (the overlay is visible in these), e.g. flow-1 "Sinain highlights actionable
+regions on the screen", flow-4 "CLI agent opens preseeded with the same knowledge". Use
+these for the listing; they tell the region-highlight → context-enhance → agent-preseed
+story. (Captioned for the demo; crop/use as-is.) A clean shot of the **settings connector
+panel** ("Connected as …") is a nice optional add if you want one without a caption.
+
+> Note for future shots: the HUD is normally capture-invisible (`sharingType = .none`);
+> these were captured for the UX-redesign demo. To grab new ones, build with
+> `sharingType = .readOnly`.
 
 ## 7. Privacy policy
 
