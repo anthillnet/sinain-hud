@@ -283,6 +283,22 @@ export class TunnelController {
       await this.refreshAccount();
     }
   }
+
+  /** Disconnect this device from its Sinain account (device-signed unlink). */
+  async signOut(): Promise<void> {
+    const id = this.identity ?? loadTunnelIdentity();
+    if (!id) return;
+    const ts = Math.floor(Date.now() / 1000), nonce = randomBytes(8).toString("hex");
+    const sig = signMessage(id.privateKeyPem, `unlink|${ts}|${nonce}`);
+    try {
+      await fetch(`${AS_BASE}/device-unlink`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pubkey: id.publicKeyPem, ts, nonce, sig }),
+      });
+      this.push({ linked: false, accountEmail: undefined });
+      log(TAG, "disconnected device from account");
+    } catch (e: any) { error(TAG, `signOut failed: ${e?.message ?? e}`); }
+  }
 }
 
 /** Open a URL in the user's default browser (macOS/Windows/Linux). */

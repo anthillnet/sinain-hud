@@ -788,6 +788,16 @@ class _ChatGptConnectorPanel extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(child: Text('Connected as ${email ?? 'your account'}',
                   maxLines: 1, overflow: TextOverflow.ellipsis, style: mono(9, 0.8))),
+              const SizedBox(width: 8),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: ws.signOutOfSinain,
+                  child: Text('Disconnect',
+                      style: mono(8, 0.6).copyWith(
+                          color: accent, decoration: TextDecoration.underline)),
+                ),
+              ),
             ])
           else
             MouseRegion(

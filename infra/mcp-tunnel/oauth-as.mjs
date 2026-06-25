@@ -360,6 +360,21 @@ async function handleDeviceAccount(req, res) {
   return json(res, 200, { linked: !!acct, email });
 }
 
+// POST /device-unlink — device-signed; disconnects this device from its account
+// (so account tokens stop routing here). Idempotent.
+async function handleDeviceUnlink(req, res) {
+  let b;
+  try { b = JSON.parse(await readBody(req)); } catch { return oauthErr(res, 400, "invalid_request", "bad json"); }
+  const { pubkey, ts, nonce, sig } = b || {};
+  if (!pubkey || !ts || !nonce || !sig) return oauthErr(res, 400, "invalid_request", "missing fields");
+  if (Math.abs(nowSec() - Number(ts)) > CLOCK_SKEW) return oauthErr(res, 400, "invalid_request", "stale timestamp");
+  if (!verifyEd25519(pubkey, `unlink|${ts}|${nonce}`, sig)) return oauthErr(res, 401, "invalid_client", "bad signature");
+  const handle = deriveHandle(pubkey);
+  accounts.unlinkDevice(handle);
+  console.error(`[as] device ${handle} unlinked from its account`);
+  return json(res, 200, { linked: false });
+}
+
 // GET /idp/callback — IdP returned. Resolve the account, then finish whichever
 // flow started it (ChatGPT authorize → issue our code; device link → record map).
 async function handleIdpCallback(req, res, url) {
@@ -439,6 +454,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "GET" && path === "/idp/callback") return handleIdpCallback(req, res, url);
       if (req.method === "GET" && path === "/device-link") return handleDeviceLink(req, res, url);
       if (req.method === "POST" && path === "/device-account") return handleDeviceAccount(req, res);
+      if (req.method === "POST" && path === "/device-unlink") return handleDeviceUnlink(req, res);
       if (idp.isStub && req.method === "GET" && path === "/idp-stub/login") return handleStubLoginGet(res, url);
       if (idp.isStub && req.method === "POST" && path === "/idp-stub/login") return handleStubLoginPost(req, res);
     }

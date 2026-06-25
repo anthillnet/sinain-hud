@@ -199,6 +199,11 @@ class WebSocketService extends ChangeNotifier {
     sendCommand('mcp_tunnel_signin');
   }
 
+  /// Disconnect this device from its Sinain account.
+  void signOutOfSinain() {
+    sendCommand('mcp_tunnel_signout');
+  }
+
   /// Hold ambient escalations for [seconds] — the user is actively
   /// interacting (visible thread terminal). Chat messages set this
   /// server-side; this covers terminal sessions. Throttled by callers.

@@ -51,6 +51,7 @@ export interface CommandDeps {
   /** Toggle the ChatGPT network harness (public-tunnel exposure) at runtime. */
   onSetChatgptHarness?: (enabled: boolean) => void;
   onMcpTunnelSignin?: () => void;
+  onMcpTunnelSignout?: () => void;
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
@@ -333,6 +334,12 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
     case "mcp_tunnel_signin": {
       deps.onMcpTunnelSignin?.();
       log(TAG, "mcp_tunnel_signin");
+      break;
+    }
+
+    case "mcp_tunnel_signout": {
+      deps.onMcpTunnelSignout?.();
+      log(TAG, "mcp_tunnel_signout");
       break;
     }
     case "start_local_agent": {

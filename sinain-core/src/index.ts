@@ -2484,6 +2484,7 @@ async function main() {
         registerBareAgent(bareAgentState.available, bareAgentState.escalationAgent, bareAgentState.registered);
       },
       onMcpTunnelSignin: (): void => { void tunnelController.signIn(); },
+      onMcpTunnelSignout: (): void => { void tunnelController.signOut(); },
       onSetAgent: (lane: "escalation" | "terminal", agent: string): { ok: boolean; error?: string } => {
       // Empty-string agent = Off (lane disabled). Non-empty agent must be in
       // the lane's roster: the chat/escalation lane draws from the full roster
