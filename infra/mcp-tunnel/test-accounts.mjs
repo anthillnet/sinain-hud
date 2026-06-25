@@ -30,7 +30,7 @@ const AS_PORT = 18997, AUTHZ_PORT = 18996, FRPS_PORT = 18998;
 const ISSUER = `http://127.0.0.1:${AS_PORT}`;
 const RESOURCE = "https://mcp.sinain.com";
 const env = {
-  ...process.env, AS_KEY_DIR: KEY_DIR, ACCOUNTS_ENABLED: "1", IDP_MODE: "stub",
+  ...process.env, AS_KEY_DIR: KEY_DIR, ACCOUNTS_ENABLED: "1", ACCOUNT_AUTHORIZE: "1", IDP_MODE: "stub",
   AS_ALLOW_HTTP_CIMD: "1", SINAIN_MCP_RESOURCE: RESOURCE,
 };
 

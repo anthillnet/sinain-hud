@@ -47,6 +47,10 @@ const KEY = loadOrCreateKey();
 
 // --- optional accounts layer (ChatGPT-only; off unless ACCOUNTS_ENABLED) ----
 const ACCOUNTS_ENABLED = process.env.ACCOUNTS_ENABLED === "1" || process.env.ACCOUNTS_ENABLED === "true";
+// Whether GET /authorize federates to the IdP (account login) vs shows the
+// device-pairing form. Kept SEPARATE from ACCOUNTS_ENABLED so we can turn on the
+// account endpoints (/device-link) without disrupting the live pairing connector.
+const ACCOUNT_AUTHORIZE = process.env.ACCOUNT_AUTHORIZE === "1" || process.env.ACCOUNT_AUTHORIZE === "true";
 const idp = new Idp({
   mode: process.env.IDP_MODE || "stub",
   issuer: process.env.IDP_ISSUER, clientId: process.env.IDP_CLIENT_ID,
@@ -414,7 +418,7 @@ const server = http.createServer(async (req, res) => {
     // Accounts mode federates /authorize to the IdP; the pairing form is the
     // fallback when accounts are off.
     if (req.method === "GET" && path === "/authorize")
-      return ACCOUNTS_ENABLED ? handleAuthorizeAccounts(req, res, url) : handleAuthorizeGet(req, res, url);
+      return ACCOUNT_AUTHORIZE ? handleAuthorizeAccounts(req, res, url) : handleAuthorizeGet(req, res, url);
     if (req.method === "POST" && path === "/authorize") return handleAuthorizePost(req, res);
     if (req.method === "POST" && path === "/token") return handleToken(req, res);
     if (ACCOUNTS_ENABLED) {
