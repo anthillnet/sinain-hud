@@ -43,7 +43,7 @@ import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 // SECURITY: make every file/dir this process (and its children — sense_client,
 // sck-capture, distiller one-shots) creates owner-only (files 0600, dirs 0700).
 // On-device user data (knowledge graph, transcripts, OCR, screenshots) must not
-// be world/group-readable. Set before any filesystem work. See docs/SECURITY.md.
+// be world/group-readable. Set before any filesystem work.
 process.umask(0o077);
 
 // Brand this process so it shows as "sinain-core" (not bare "node") in Activity
