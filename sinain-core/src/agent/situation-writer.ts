@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ContextWindow, AgentEntry, RecorderStatus } from "../types.js";
 import type { EscalationScore } from "../escalation/scorer.js";
 import { normalizeAppName } from "./context-window.js";
+import { redactForDisk, redactText } from "../privacy/index.js";
 import { log, error } from "../log.js";
 
 const TAG = "situation";
@@ -69,7 +70,9 @@ export function writeSituationMd(
 
   lines.push("## Digest");
   lines.push("");
-  lines.push(digest);
+  // The digest is an LLM summary that can quote screen/audio verbatim — strip
+  // secrets before it's persisted to SITUATION.md.
+  lines.push(redactText(digest));
   lines.push("");
 
   const currentApp = normalizeAppName(contextWindow.currentApp);
@@ -94,7 +97,7 @@ export function writeSituationMd(
     for (const e of contextWindow.screen) {
       const app = normalizeAppName(e.meta.app);
       const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
-      const ocr = e.ocr ? e.ocr.replace(/\n/g, " ").slice(0, 500) : "(no text)";
+      const ocr = e.ocr ? redactForDisk(e.ocr.replace(/\n/g, " ").slice(0, 500), "screen_ocr") : "(no text)";
       lines.push(`- [${ago}s ago] [${app}] ${ocr}`);
     }
     lines.push("");
@@ -105,7 +108,7 @@ export function writeSituationMd(
     lines.push("");
     for (const e of contextWindow.audio) {
       const ago = Math.round((Date.now() - (e.ts || Date.now())) / 1000);
-      lines.push(`- [${ago}s ago] ${e.text.slice(0, 500)}`);
+      lines.push(`- [${ago}s ago] ${redactForDisk(e.text.slice(0, 500), "audio_transcript")}`);
     }
     lines.push("");
   }

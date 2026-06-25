@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import type { FeedbackRecord, FeedbackSignals } from "../types.js";
 import { log, error } from "../log.js";
+import { redactText } from "../privacy/index.js";
 
 const TAG = "feedback-store";
 
@@ -50,14 +51,16 @@ export class FeedbackStore {
       id: crypto.randomUUID(),
       ts: Date.now(),
       tickId: params.tickId,
-      digest: params.digest.slice(0, 2048),
-      hud: params.hud,
+      // Secret-strip floor: these fields can quote screen/audio verbatim and
+      // are persisted to disk (~/.sinain-core/feedback/*.jsonl).
+      digest: redactText(params.digest.slice(0, 2048)),
+      hud: redactText(params.hud),
       currentApp: params.currentApp,
       escalationScore: params.escalationScore,
       escalationReasons: params.escalationReasons,
       codingContext: params.codingContext,
-      escalationMessage: params.escalationMessage.slice(0, 2048),
-      openclawResponse: params.openclawResponse.slice(0, 2048),
+      escalationMessage: redactText(params.escalationMessage.slice(0, 2048)),
+      openclawResponse: redactText(params.openclawResponse.slice(0, 2048)),
       responseLatencyMs: params.responseLatencyMs,
       signals: {
         errorCleared: null,

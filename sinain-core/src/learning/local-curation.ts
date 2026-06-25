@@ -17,6 +17,16 @@ import { fileURLToPath } from "node:url";
 import type { FeedItem } from "../types.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import { log, warn, error, preview } from "../log.js";
+import { redactForDisk, redactText } from "../privacy/index.js";
+
+// Feed-item text is tagged by source; audio items start with the speaker emoji.
+// Persisted feed text gets the on-disk privacy level (audio level for audio
+// items; secret-strip floor for the rest, which are agent/system responses).
+function redactFeedTextForDisk(text: string): string {
+  return text.startsWith("[🔊]")
+    ? redactForDisk(text, "audio_transcript")
+    : redactText(text);
+}
 
 const TAG = "local-curation";
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -219,7 +229,9 @@ export class LocalCurationService {
       sessionKey: "local-session",
       durationMs: Date.now() - this.sessionStartTs,
       items: feedItems.map(item => ({
-        text: item.text,
+        // Redact before persisting — pending-session.json is re-distilled into
+        // the knowledge store on next startup, so it gets the on-disk level.
+        text: redactFeedTextForDisk(item.text),
         ts: item.ts,
         source: item.source || "unknown",
         channel: item.channel || "agent",
@@ -519,7 +531,7 @@ export class LocalCurationService {
       `## Session ${new Date().toISOString().slice(11, 16)} UTC`,
       "",
       `### Summary`,
-      digest.whatHappened || "(no summary)",
+      redactText(digest.whatHappened || "(no summary)"),
       "",
     ];
 
@@ -572,7 +584,7 @@ export class LocalCurationService {
     if (agentItems.length > 0) {
       sections.push("### Agent Responses");
       for (const item of agentItems.slice(-10)) {
-        sections.push(`- ${item.text.slice(0, 200)}`);
+        sections.push(`- ${redactText(item.text.slice(0, 200))}`);
       }
       sections.push("");
     }
@@ -582,7 +594,7 @@ export class LocalCurationService {
     if (meaningfulAudio.length > 0) {
       sections.push("### Audio Highlights");
       for (const item of meaningfulAudio.slice(0, 10)) {
-        sections.push(`- ${item.text}`);
+        sections.push(`- ${redactForDisk(item.text, "audio_transcript")}`);
       }
       sections.push("");
     }
