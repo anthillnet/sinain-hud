@@ -35,8 +35,15 @@ import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
 import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
+import { hardenLocalDataPermissions } from "./util/harden-permissions.js";
 import { log, warn, error, debug } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
+
+// SECURITY: make every file/dir this process (and its children — sense_client,
+// sck-capture, distiller one-shots) creates owner-only (files 0600, dirs 0700).
+// On-device user data (knowledge graph, transcripts, OCR, screenshots) must not
+// be world/group-readable. Set before any filesystem work. See docs/SECURITY.md.
+process.umask(0o077);
 
 // Brand this process so it shows as "sinain-core" (not bare "node") in Activity
 // Monitor / `ps` — so users can recognise + clean up our services. macOS reads
@@ -908,6 +915,9 @@ print(json.dumps(stats))
 
 async function main() {
   log(TAG, "sinain-core starting...");
+  // SECURITY: fix up permissions on data left world-readable by older builds
+  // (umask above only covers files we create from now on). Best-effort.
+  hardenLocalDataPermissions();
   // Version banner: core package version + (DMG installs) bundle identifiers
   // exported by launch-backend.sh. Source runs show "source".
   try {

@@ -42,6 +42,11 @@ if sys.platform == "win32":
 else:
     CONTROL_FILE = "/tmp/sinain-sense-control.json"
 
+# SECURITY: files this process creates (control file, any temp/cache) must be
+# owner-only — never world/group-readable. POSIX only; no-op effect on Windows.
+if sys.platform != "win32":
+    os.umask(0o077)
+
 
 def log(msg: str):
     print(f"[sense] {msg}", flush=True)
