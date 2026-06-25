@@ -211,7 +211,11 @@ class VisionOCR:
                     h = bb.size.height * img_h
                     line_boxes.append({
                         "text": text.strip(),
-                        "bbox": [round(x), round(y), round(w), round(h)],
+                        # Keep sub-pixel precision (Vision boxes are float) — the
+                        # anchor + sub-pixel motion glide track content more
+                        # tightly than integer-rounded boxes allowed. 1 decimal
+                        # keeps the payload small.
+                        "bbox": [round(x, 1), round(y, 1), round(w, 1), round(h, 1)],
                     })
                 except Exception:
                     pass  # box is best-effort; text still counts
