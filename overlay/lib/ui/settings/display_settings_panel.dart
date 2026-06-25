@@ -368,9 +368,12 @@ class DisplaySettingsPanel extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Connector details (URL + pairing code) — shown while the
-                    // harness is on so the user can wire it into ChatGPT.
-                    if (settings.settings.chatgptHarness)
+                    // Connector details (URL + pairing code) — shown whenever the
+                    // harness is on (local toggle) OR the tunnel is actually live,
+                    // so an env-seeded / remotely-enabled tunnel still surfaces its
+                    // connector URL + pairing code here.
+                    if (settings.settings.chatgptHarness ||
+                        (ws.tunnel != null && ws.tunnelStatus != 'off'))
                       const _ChatGptConnectorPanel(),
                     const SizedBox(height: 10),
                     Divider(
