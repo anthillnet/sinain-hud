@@ -326,6 +326,10 @@ fi
   if [ -n "$SNAPSHOT_REPO" ]; then echo "SINAIN_SNAPSHOT_REPO=${SNAPSHOT_REPO}"; fi
 } >> "$ENV_FILE"
 
+# SECURITY: .env holds the OpenRouter API key + gateway tokens — owner-only.
+chmod 700 "$(dirname "$ENV_FILE")" 2>/dev/null || true
+chmod 600 "$ENV_FILE" 2>/dev/null || true
+
 ok "Configuration saved to sinain-core/.env"
 echo ""
 echo -e "${bold}Starting sinain...${reset}"

@@ -9,6 +9,10 @@ import os from "os";
 import net from "net";
 import readline from "readline";
 
+// SECURITY: owner-only for everything this launcher and its spawned services
+// create (on-device user data must not be world/group-readable). Set first.
+process.umask(0o077);
+
 // ── Colors ──────────────────────────────────────────────────────────────────
 
 const CYAN    = "\x1b[36m";
@@ -594,9 +598,9 @@ function loadUserEnv() {
     }
   }
 
-  // Ensure ~/.sinain directory exists
-  fs.mkdirSync(SINAIN_DIR, { recursive: true });
-  fs.mkdirSync(path.join(HOME, ".sinain/capture"), { recursive: true });
+  // Ensure ~/.sinain directory exists (owner-only)
+  fs.mkdirSync(SINAIN_DIR, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.join(HOME, ".sinain/capture"), { recursive: true, mode: 0o700 });
 
   // Check for API key
   if (!process.env.OPENROUTER_API_KEY) {

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SECURITY: owner-only for everything this script and its child services create
+# — backend.log holds OCR/vision/transcript output and must not be world-readable.
+umask 077
+
 # ── SinainHUD — Launch All Services ──────────────────────────────────────────
 # After the sinain-core redesign, only 3 processes:
 #   1. sinain-core (Node.js) — HTTP + WS on :9500

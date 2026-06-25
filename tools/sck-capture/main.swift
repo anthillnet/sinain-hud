@@ -91,11 +91,18 @@ fputs("[sck-capture] sample_rate=\(sampleRate) channels=\(channels) fps=\(fps) s
 // Disable stdout buffering for real-time piping
 setbuf(stdout, nil)
 
-// ── Ensure screen output directory exists ──
+// SECURITY: the captured frame is a live screenshot — never world/group
+// readable. Make every file we create owner-only (frame.jpg, meta.json, tmp).
+umask(0o077)
+
+// ── Ensure screen output directory exists (owner-only) ──
 do {
     let fm = FileManager.default
     if !fm.fileExists(atPath: screenDir) {
-        try? fm.createDirectory(atPath: screenDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(atPath: screenDir, withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o700])
+    } else {
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: screenDir)
     }
 }
 
