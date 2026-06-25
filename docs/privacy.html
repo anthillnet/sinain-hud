@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sinain — Privacy Policy</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<script defer src="https://analytics.sinain.duckdns.org/script.js" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
+<style>
+  :root{
+    --bg:#ffffff; --bg-elev:#f8fafc; --fg:#0f172a; --fg-dim:#475569; --fg-faint:#94a3b8;
+    --accent:#2563eb; --border:#e2e8f0; --good:#15803d;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.6;font-size:17px}
+  .wrap{max-width:44rem;margin:0 auto;padding:3.5rem 1.4rem 5rem}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  header{display:flex;align-items:center;gap:.7rem;margin-bottom:2.2rem}
+  header img{width:34px;height:34px;border-radius:8px}
+  header .name{font-weight:700;font-size:1.15rem}
+  h1{font-size:1.8rem;margin:0 0 .3rem}
+  .updated{color:var(--fg-faint);font-size:.9rem;margin-bottom:2rem}
+  h2{font-size:1.18rem;margin:2.2rem 0 .6rem;padding-top:.4rem}
+  .lead{background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:1.1rem 1.3rem;margin:1.4rem 0}
+  .lead strong{color:var(--good)}
+  ul{padding-left:1.3rem}
+  li{margin:.35rem 0}
+  code{background:var(--bg-elev);border:1px solid var(--border);border-radius:5px;padding:.05rem .35rem;font-size:.92em}
+  footer{margin-top:3rem;padding-top:1.4rem;border-top:1px solid var(--border);color:var(--fg-faint);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="logo-240.png" alt="Sinain" />
+    <span class="name">Sinain</span>
+  </header>
+
+  <h1>Privacy Policy</h1>
+  <div class="updated">Last updated: 25 June 2026</div>
+
+  <p>Sinain is a privacy-first context layer that runs on your own computer. This policy
+  explains what Sinain collects and, more importantly, what it does <strong>not</strong>.</p>
+
+  <div class="lead">
+    <ul style="margin:0">
+      <li>Sinain runs on <strong>your machine</strong>. Your screen text, audio transcripts, and memory stay on your device.</li>
+      <li>If you connect Sinain to <strong>ChatGPT</strong>, that context is sent <strong>from your device to your own ChatGPT</strong> — only while you have Sinain running and the connector enabled.</li>
+      <li>The only data Sinain stores on its servers is your <strong>email</strong> and <strong>which devices are yours</strong>. <strong>Never</strong> your screen, audio, or memory.</li>
+    </ul>
+  </div>
+
+  <h2>What we collect</h2>
+  <p><strong>Account (server-side, only if you create one for ChatGPT):</strong></p>
+  <ul>
+    <li>Your <strong>email address</strong>, obtained when you sign in through our identity provider (Auth0).</li>
+    <li>A mapping of your <strong>account to your device(s)</strong> (an opaque device identifier).</li>
+  </ul>
+  <p>That is the complete list of what Sinain stores on its servers.</p>
+  <p><strong>On your device (never sent to Sinain's servers):</strong> screen text (OCR), audio
+  transcripts, and your local knowledge graph — used by Sinain locally to assist you. Audio is
+  transcribed in memory and not persisted to disk.</p>
+
+  <h2>The ChatGPT connector</h2>
+  <ul>
+    <li>ChatGPT can call Sinain tools that read your <strong>current local context</strong> (screen text, recent audio transcript, a region you flagged, your memory) and write notes/notifications back to your overlay.</li>
+    <li>This data travels <strong>from your device to your ChatGPT</strong>, relayed through Sinain's connection service. The relay terminates TLS to route the request to your machine and <strong>does not store</strong> the content — it only ever carries what you have chosen to send to ChatGPT, while the connector is on.</li>
+    <li>It works <strong>only while your Sinain app is running</strong>. Disconnect the device or turn the connector off and the path closes immediately.</li>
+  </ul>
+
+  <h2>Data minimization</h2>
+  <ul>
+    <li>Text you wrap in <code>&lt;private&gt;</code> tags is stripped before it leaves your device.</li>
+    <li>Credit-card numbers, API keys, bearer/AWS tokens, and passwords are auto-redacted.</li>
+    <li>Sinain does <strong>not</strong> collect or process government IDs, health information, or payment data, and never returns authentication secrets.</li>
+  </ul>
+
+  <h2>Third parties</h2>
+  <ul>
+    <li><strong>Auth0 (identity):</strong> handles sign-in. It receives your email/login to authenticate you.</li>
+    <li><strong>OpenAI / ChatGPT:</strong> your own ChatGPT receives the context you choose to send via the connector, under OpenAI's terms.</li>
+  </ul>
+  <p>Sinain does not sell your data and does not use your context to train models.</p>
+
+  <h2>Security</h2>
+  <p>Connections use TLS. Devices authenticate with per-device cryptographic keys; account
+  sign-in uses OAuth 2.1 with PKCE.</p>
+
+  <h2>Your controls &amp; retention</h2>
+  <ul>
+    <li><strong>Disconnect</strong> a device any time from the Sinain settings panel — it removes the account&#8596;device mapping.</li>
+    <li><strong>Delete your account</strong> by contacting us; we remove your email and device mapping.</li>
+    <li>We retain the account record only while your account exists.</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>Questions or deletion requests: <a href="mailto:contact@sinain.com">contact@sinain.com</a>.</p>
+
+  <footer>© 2026 Sinain · <a href="/">sinain.com</a></footer>
+</div>
+</body>
+</html>

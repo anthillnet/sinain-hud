@@ -159,6 +159,22 @@ async function main() {
     }
   }
 
+  // Provision frpc for the ChatGPT MCP tunnel — ONLY when the harness is wanted
+  // (env, or the marker sinain-core writes when the user enables it), so the
+  // ~10MB download never hits users who don't connect ChatGPT.
+  if (!IS_WINDOWS) {
+    const tunnelMarker = path.join(SINAIN_DIR, "mcp-tunnel-enabled");
+    if (process.env.SINAIN_ENABLE_CHATGPT_DESKTOP === "true" || fs.existsSync(tunnelMarker)) {
+      try {
+        const { setupFrpc } = await import("./setup-frpc.js");
+        const frpcPath = await setupFrpc({ silent: true });
+        if (frpcPath) ok("frpc ready (ChatGPT MCP tunnel)");
+      } catch (e) {
+        warn(`frpc provisioning failed: ${e.message}`);
+      }
+    }
+  }
+
   // Pre-cache embedding model if not already cached (prevents 10s huggingface.co
   // download at sinain-core first-startup; skipped silently if SINAIN_SKIP_EMBEDDING_SETUP=1)
   if (process.env.SINAIN_SKIP_EMBEDDING_SETUP !== "1") {

@@ -1,0 +1,20 @@
+[Unit]
+Description=sinain mcp-authz — Caddy forward_auth JWT verifier for the MCP tunnel
+After=network.target sinain-oauth-as.service
+Wants=sinain-oauth-as.service
+
+[Service]
+Environment=AUTHZ_PORT=18796
+Environment=AS_KEY_DIR=/mnt/openclaw-state/sinain-mcp-tunnel
+ExecStart=/usr/bin/node /opt/sinain-mcp-tunnel/mcp-authz.mjs
+Restart=always
+RestartSec=2
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

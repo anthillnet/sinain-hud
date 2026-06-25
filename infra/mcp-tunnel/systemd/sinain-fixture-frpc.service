@@ -1,0 +1,15 @@
+[Unit]
+Description=sinain demo fixture frpc (registers the always-online demo device)
+After=network.target frps.service sinain-fixture-mcp.service
+Wants=frps.service sinain-fixture-mcp.service
+
+[Service]
+ExecStart=/usr/local/bin/frpc -c /etc/frp/frpc-fixture.toml
+Restart=always
+RestartSec=3
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

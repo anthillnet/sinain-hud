@@ -20,6 +20,7 @@ import { TranscriptionService } from "./audio/transcription.js";
 import { AgentLoop } from "./agent/loop.js";
 import { RegionTracker, buildRegionTaskText } from "./agent/region-tracker.js";
 import { RegionDetector } from "./agent/region-detector.js";
+import { TunnelController } from "./mcp-tunnel/controller.js";
 import { shortAppName } from "./agent/context-window.js";
 import { Escalator } from "./escalation/escalator.js";
 import { Recorder } from "./recorder.js";
@@ -1553,6 +1554,16 @@ async function main() {
   // tunnel, so it's a security-sensitive opt-in. Runtime-toggled from the
   // overlay settings (set_chatgpt_harness); seeded from the env for headless.
   let chatgptHarnessEnabled = process.env.SINAIN_ENABLE_CHATGPT_DESKTOP === "true";
+  // Brings the public MCP tunnel up/down with the harness toggle (spawns the
+  // HTTP MCP transport + frpc, runs the device-signed /pair, surfaces the
+  // connector URL + pairing code to the overlay). See mcp-tunnel/controller.ts.
+  const tunnelController = new TunnelController({
+    packageRoot: PACKAGE_ROOT,
+    corePort: config.port,
+    workspace: resolveWorkspace(),
+    onState: (s) => wsHandler.updateTunnel(s),
+  });
+  if (chatgptHarnessEnabled) void tunnelController.start(); // env-seeded headless
 
   function registerBareAgent(availableList: string[], current: string, registered = true): void {
     const clean = availableList.filter((a) => typeof a === "string" && AGENT_NAME_RE.test(a));
@@ -2476,10 +2487,14 @@ async function main() {
       onSetChatgptHarness: (enabled: boolean): void => {
         chatgptHarnessEnabled = enabled;
         log(TAG, `chatgpt network harness ${enabled ? "ENABLED (public tunnel exposure)" : "disabled"}`);
+        // Bring the public MCP tunnel up/down to match the toggle.
+        if (enabled) void tunnelController.start(); else void tunnelController.stop();
         // Re-evaluate the roster with the new flag — the desktop add/filter in
         // registerBareAgent surfaces or drops chatgpt-desktop accordingly.
         registerBareAgent(bareAgentState.available, bareAgentState.escalationAgent, bareAgentState.registered);
       },
+      onMcpTunnelSignin: (): void => { void tunnelController.signIn(); },
+      onMcpTunnelSignout: (): void => { void tunnelController.signOut(); },
       onSetAgent: (lane: "escalation" | "terminal", agent: string): { ok: boolean; error?: string } => {
       // Empty-string agent = Off (lane disabled). Non-empty agent must be in
       // the lane's roster: the chat/escalation lane draws from the full roster
@@ -2644,6 +2659,7 @@ async function main() {
     if (micPipeline) micPipeline.stop();
     transcription.destroy();
     escalator.stop();
+    void tunnelController.stop(); // kill frpc + the HTTP MCP transport
     if (localAgentProcess && localAgentProcess.exitCode === null) {
       localAgentProcess.kill("SIGTERM");
     }

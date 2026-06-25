@@ -72,6 +72,7 @@ server.tool(
   "sinain_get_escalation",
   "Get the current pending escalation from sinain-core",
   {},
+  { title: "Get pending escalation", readOnlyHint: true, openWorldHint: false },
   async () => {
     try {
       const data = await coreRequest("GET", "/escalation/pending");
@@ -90,6 +91,7 @@ server.tool(
   "sinain_respond",
   "Respond to a pending escalation",
   { id: z.string(), response: z.string() },
+  { title: "Respond to escalation", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   async ({ id, response }) => {
     try {
       const data = await coreRequest("POST", "/escalation/respond", { id, response });
@@ -106,6 +108,7 @@ server.tool(
   "sinain_context",
   "Get the user's current situation: the agent digest (one-paragraph summary) plus the full context window (screen OCR, audio transcripts, app history)",
   {},
+  { title: "Get current context", readOnlyHint: true, openWorldHint: false },
   async () => {
     try {
       const [digest, context] = await Promise.all([
@@ -137,6 +140,7 @@ server.tool(
     id: z.string().optional()
       .describe("The ROI seed id from the request that opened this chat. Omit to get the most recent pending seed."),
   },
+  { title: "Fetch ROI seed", readOnlyHint: true, openWorldHint: false },
   async ({ id }) => {
     try {
       const qs = id ? `?id=${encodeURIComponent(id)}` : "";
@@ -179,6 +183,7 @@ server.tool(
     include_document: z.boolean().optional().default(false)
       .describe("Also include the portable knowledge document (playbook + top facts)"),
   },
+  { title: "Query long-term memory", readOnlyHint: true, openWorldHint: false },
   async ({ entities, max_facts, include_document }) => {
     const parts: string[] = [];
     if (entities.length > 0) {
@@ -225,6 +230,7 @@ server.tool(
       domain: z.string().optional().describe("Optional domain tag, e.g. 'work', 'german'"),
     })).min(1),
   },
+  { title: "Store to long-term memory", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   async ({ facts }) => {
     try {
       const data = await coreRequest("POST", "/knowledge/import", { facts });
@@ -244,6 +250,7 @@ server.tool(
     text: z.string(),
     priority: z.enum(["normal", "high", "urgent"]).optional().default("normal"),
   },
+  { title: "Notify on the HUD", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   async ({ text, priority }) => {
     try {
       const data = await coreRequest("POST", "/feed", { text, priority });
@@ -259,6 +266,7 @@ server.tool(
   "sinain_health",
   "Check sinain-core health status",
   {},
+  { title: "Check sinain health", readOnlyHint: true, openWorldHint: false },
   async () => {
     try {
       const data = await coreRequest("GET", "/health");

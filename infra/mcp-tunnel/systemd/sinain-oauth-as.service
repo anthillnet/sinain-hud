@@ -1,0 +1,21 @@
+[Unit]
+Description=sinain OAuth Authorization Server (accountless MCP-tunnel AS)
+After=network.target
+
+[Service]
+Environment=AS_PORT=18797
+Environment=AS_ISSUER=https://auth.sinain.com
+Environment=AS_KEY_DIR=/mnt/openclaw-state/sinain-mcp-tunnel
+ExecStart=/usr/bin/node /opt/sinain-mcp-tunnel/oauth-as.mjs
+Restart=always
+RestartSec=2
+User=sinain-tunnel
+Group=sinain-tunnel
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/mnt/openclaw-state/sinain-mcp-tunnel
+
+[Install]
+WantedBy=multi-user.target
