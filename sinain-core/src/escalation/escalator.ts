@@ -11,7 +11,7 @@ import type { SlotEntry, QueueFeedbackCtx } from "./escalation-slot.js";
 import { shouldEscalate, calculateEscalationScore } from "./scorer.js";
 import { isCodingContext, buildEscalationMessage, fetchKnowledgeFacts } from "./message-builder.js";
 import { loadPendingTasks, savePendingTasks, type PendingTaskEntry } from "../util/task-store.js";
-import { log, warn, error } from "../log.js";
+import { log, warn, error, preview } from "../log.js";
 
 export interface HttpPendingEscalation {
   id: string;
@@ -375,7 +375,7 @@ export class Escalator {
     );
 
     if (!escalate && !hasUserCommand) {
-      log(TAG, `tick #${entry.id}: not escalating (mode=${this.deps.escalationConfig.mode}, score=${score.total}, hud="${entry.hud.slice(0, 40)}")`);
+      log(TAG, `tick #${entry.id}: not escalating (mode=${this.deps.escalationConfig.mode}, score=${score.total}, hud=${preview(entry.hud, 40)})`);
       return;
     }
 

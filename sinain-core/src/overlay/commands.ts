@@ -6,7 +6,7 @@ import type { CoreConfig } from "../types.js";
 import { WebSocket } from "ws";
 import { loadedEnvPath } from "../config.js";
 import { resolveWritableAgentsConfigPath } from "../agents-loader.js";
-import { log } from "../log.js";
+import { log, preview } from "../log.js";
 
 const TAG = "cmd";
 
@@ -86,7 +86,7 @@ export function setupCommands(deps: CommandDeps): void {
         break;
       }
       case "user_command": {
-        log(TAG, `user command received: "${msg.text.slice(0, 60)}"`);
+        log(TAG, `user command received: ${preview(msg.text, 60)}`);
         // Echo user message to all overlay clients as a feed item
         wsHandler.broadcastRaw({
           type: "feed",
