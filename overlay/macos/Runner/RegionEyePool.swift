@@ -15,6 +15,21 @@ class RegionEyePool {
     private var previewId: String?
     private weak var channel: FlutterMethodChannel?
 
+    /// Desired origin per eye (Cocoa, bottom-left). The glide loop eases each
+    /// panel toward its target every display frame, so the 4 fps stream of
+    /// position packets (scroll re-anchors, motion glides, re-detections)
+    /// renders as continuous ~60 fps motion instead of 250 ms steps.
+    private var targets: [String: NSPoint] = [:]
+    private var glideTimer: Timer?
+    private var lastGlideTick: TimeInterval = 0
+    /// Follow time constant: ~95% caught up in ~3·tau ≈ 90 ms. Small enough to
+    /// stay glued to scrolling content, large enough to erase the per-packet
+    /// step. Frame-rate independent (see glideTick).
+    private static let glideTau: Double = 0.03
+    /// Below this gap (points) an eye is considered arrived — snap and stop.
+    private static let glideSnap: CGFloat = 0.5
+    private static let glideHz: Double = 60.0
+
     /// Mirrors the main HUD's privacy mode: true → invisible to screen
     /// capture; false (demo mode) → visible so recordings show the eyes.
     private var privacyEnabled = true
@@ -52,35 +67,75 @@ class RegionEyePool {
 
             let origin = Self.toMacOrigin(x: x, y: y, size: size, display: display)
             if let panel = panels[id] {
-                let target = NSRect(x: origin.x, y: origin.y, width: size, height: size)
-                let cur = panel.frame.origin
-                let dist = hypot(target.origin.x - cur.x, target.origin.y - cur.y)
-                // Small moves are scroll/typing re-anchors — keep them INSTANT so
-                // the eye stays glued to its content (animating here would make it
-                // trail the scroll). Larger moves are re-detections jumping the eye
-                // to a new spot — glide those so they don't teleport.
-                if dist > 48 {
-                    NSAnimationContext.runAnimationGroup { ctx in
-                        ctx.duration = 0.16
-                        ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                        panel.animator().setFrame(target, display: true)
-                    }
-                } else {
-                    panel.setFrame(target, display: true)
+                // Size is set immediately (it only changes on a settings tweak);
+                // the origin is handed to the glide loop, which eases the panel
+                // there continuously. No distance threshold — every move, scroll
+                // re-anchor or re-detection jump alike, follows the same critically
+                // damped path, so motion speed scales with distance and there's no
+                // snap/ease discontinuity.
+                if abs(panel.frame.width - CGFloat(size)) > 0.5 {
+                    panel.setFrame(NSRect(x: origin.x, y: origin.y, width: size, height: size),
+                                   display: true)
                 }
+                targets[id] = origin
+                startGlideIfNeeded()
                 if let view = panel.contentView as? RegionEyeView {
                     view.state = state
                     if let accent = accent { view.accentColor = accent }
                 }
             } else {
                 panels[id] = makePanel(id: id, origin: origin, state: state, size: size, accent: accent)
+                targets[id] = origin
             }
         }
         for (id, panel) in panels where !seen.contains(id) {
             panel.orderOut(nil)
             panels.removeValue(forKey: id)
+            targets.removeValue(forKey: id)
             if id == previewId { hidePreview() }
         }
+    }
+
+    private func startGlideIfNeeded() {
+        if glideTimer != nil { return }
+        lastGlideTick = 0
+        let t = Timer(timeInterval: 1.0 / Self.glideHz, target: self,
+                      selector: #selector(glideTick), userInfo: nil, repeats: true)
+        // .common so the eye keeps gliding during scroll/drag event tracking,
+        // when the default run-loop mode is suspended.
+        RunLoop.main.add(t, forMode: .common)
+        glideTimer = t
+    }
+
+    private func stopGlide() {
+        glideTimer?.invalidate()
+        glideTimer = nil
+        lastGlideTick = 0
+    }
+
+    /// Ease every panel a frame-rate-independent fraction toward its target.
+    /// alpha = 1 − e^(−dt/tau) makes the follow identical whether the timer
+    /// fires at 60 or 120 Hz, or skips a beat under load. Stops itself once all
+    /// eyes have arrived so it costs nothing at rest.
+    @objc private func glideTick() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt = lastGlideTick > 0 ? min(now - lastGlideTick, 0.1) : (1.0 / Self.glideHz)
+        lastGlideTick = now
+        let alpha = CGFloat(1.0 - exp(-dt / Self.glideTau))
+
+        var anyMoving = false
+        for (id, target) in targets {
+            guard let panel = panels[id] else { continue }
+            let cur = panel.frame.origin
+            let dx = target.x - cur.x, dy = target.y - cur.y
+            if abs(dx) < Self.glideSnap && abs(dy) < Self.glideSnap {
+                if cur.x != target.x || cur.y != target.y { panel.setFrameOrigin(target) }
+                continue
+            }
+            anyMoving = true
+            panel.setFrameOrigin(NSPoint(x: cur.x + dx * alpha, y: cur.y + dy * alpha))
+        }
+        if !anyMoving { stopGlide() }
     }
 
     func update(id: String, state: String) {
@@ -89,10 +144,12 @@ class RegionEyePool {
     }
 
     func clear() {
+        stopGlide()
         for (_, panel) in panels {
             panel.orderOut(nil)
         }
         panels.removeAll()
+        targets.removeAll()
         hidePreview()
     }
 

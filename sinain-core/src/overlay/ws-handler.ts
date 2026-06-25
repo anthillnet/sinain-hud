@@ -49,6 +49,7 @@ export class WsHandler {
   private spawnTaskBuffer: Map<string, ThreadStatusMessage> = new Map();
   private latestCostMsg: CostMessage | null = null;
   private latestRegionMsg: RegionHighlightMessage | null = null;
+  private regionFlushScheduled = false;
   // ChatGPT MCP-tunnel state (connector URL + pairing code). Kept here rather
   // than in BridgeState so the feature is self-contained in the WS layer.
   private tunnelState: TunnelState | null = null;
@@ -202,6 +203,20 @@ export class WsHandler {
     }
     if (msg.type === "region_highlight") {
       this.latestRegionMsg = msg;
+      // Coalesce: one sense event can fire several region_highlight broadcasts
+      // (restore → dim → reanchor, plus analyzer/SLM). Collapse them into a
+      // single send per event-loop turn so the overlay reconciles only the
+      // final state — no intermediate dim/undim flicker, fewer reconciles. The
+      // microtask flushes within the same tick (sub-ms), so "instant" restores
+      // stay instant.
+      if (!this.regionFlushScheduled) {
+        this.regionFlushScheduled = true;
+        queueMicrotask(() => {
+          this.regionFlushScheduled = false;
+          if (this.latestRegionMsg) this.broadcastMessage(this.latestRegionMsg);
+        });
+      }
+      return;
     }
     this.broadcastMessage(msg);
   }

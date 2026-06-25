@@ -139,17 +139,26 @@ class VisionOCR:
     def _do_extract(self, image: Image.Image) -> OCRResult:
         import objc
         import Quartz
-        from Foundation import NSData
 
-        # Convert PIL Image to CGImage via PNG bytes
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        png_data = buf.getvalue()
-
-        ns_data = NSData.dataWithBytes_length_(png_data, len(png_data))
-        ci_image = Quartz.CIImage.imageWithData_(ns_data)
-        context = Quartz.CIContext.context()
-        cg_image = context.createCGImage_fromRect_(ci_image, ci_image.extent())
+        # Build a CGImage straight from the pixel buffer — skips the PNG encode
+        # + CIImage/CIContext decode round-trip the old path paid on every frame
+        # (~50-100ms on a full-screen capture). Vision text recognition is
+        # luminance-based, so premultiplied-alpha / byte-order nuances don't
+        # affect accuracy on opaque screenshots (alpha is 255). `raw` must stay
+        # referenced until performRequests runs — it lives for this whole
+        # synchronous method, and the provider retains it.
+        rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+        w, h = rgba.width, rgba.height
+        raw = rgba.tobytes()
+        provider = Quartz.CGDataProviderCreateWithData(None, raw, len(raw), None)
+        if provider is None:
+            return OCRResult(text="", confidence=0, word_count=0)
+        colorspace = Quartz.CGColorSpaceCreateDeviceRGB()
+        cg_image = Quartz.CGImageCreate(
+            w, h, 8, 32, w * 4, colorspace,
+            Quartz.kCGImageAlphaPremultipliedLast,
+            provider, None, False, Quartz.kCGRenderingIntentDefault,
+        )
 
         if cg_image is None:
             return OCRResult(text="", confidence=0, word_count=0)
