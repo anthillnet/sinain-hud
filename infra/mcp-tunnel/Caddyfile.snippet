@@ -36,5 +36,37 @@
 }
 
 auth.sinain.com {
-	reverse_proxy 127.0.0.1:18797          # the accountless OAuth AS
+	reverse_proxy 127.0.0.1:18797          # the OAuth AS (pairing + account/IdP)
+}
+
+# Single published MCP endpoint — one URL for everyone (the published-app target).
+# mcp-authz resolves the bearer (account → online device, or handle) and emits
+# X-Mcp-Handle; Caddy sets the upstream Host from it so frps routes to the right
+# device. Account routing requires ACCOUNT_AUTHORIZE=1 on the AS.
+mcp.sinain.com {
+	tls /etc/sinain-mcp-tunnel/tls/fullchain.pem /etc/sinain-mcp-tunnel/tls/privkey.pem
+
+	handle /.well-known/oauth-protected-resource {
+		header Content-Type application/json
+		header Cache-Control "public, max-age=300"
+		respond `{"resource":"https://mcp.sinain.com","authorization_servers":["https://auth.sinain.com"]}` 200
+	}
+
+	handle /mcp* {
+		route {
+			forward_auth 127.0.0.1:18796 {
+				uri /verify
+				method GET
+				header_up X-Forwarded-Host {host}
+				copy_headers X-Mcp-Handle
+			}
+			reverse_proxy 127.0.0.1:7080 {
+				header_up Host {http.request.header.X-Mcp-Handle}.mcp.sinain.com
+			}
+		}
+	}
+
+	handle {
+		respond "sinain mcp" 404
+	}
 }
