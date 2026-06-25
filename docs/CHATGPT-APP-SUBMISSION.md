@@ -13,10 +13,12 @@ Everything needed to submit Sinain to the ChatGPT app directory. Pairs with
 | OAuth 2.1 (PKCE) per MCP spec | ✅ AS + Auth0 (`auth.sinain.com`) |
 | Tool annotations (readOnly/destructive/openWorld) | ✅ all 8 tools |
 | Data minimization (`<private>` strip + secret redaction) | ✅ in `sinain-mcp-server` + `sense_client` |
-| Demo account → fixture device (reviewer access) | ⏳ **build remaining** (§6) |
+| Demo account → fixture device (reviewer access) | ✅ **live** (§6) — needs the Auth0 demo user (§6.1) |
 | Developer identity/business verification | ⏳ **Igor** (platform.openai.com) |
-| Privacy policy URL + logo | ⏳ **Igor** (host §7; logo) |
-| Listing copy + screenshots + test prompts | ✅ draft below (screenshots: capture from the app) |
+| Privacy policy | ✅ `docs/privacy.html` → `https://sinain.com/privacy` (live on next site deploy) |
+| Logo | ✅ `docs/logo-512.png` (existing brand asset) |
+| Listing copy + test prompts | ✅ below |
+| Screenshots | ⏳ **Igor** (§9 — the HUD is capture-invisible by design) |
 
 ## 1. Listing metadata
 
@@ -94,13 +96,39 @@ real users' backends are their own Macs, we provide a **server-side fixture devi
    (the AS already supports `DEMO_FIXTURE_HANDLE`/`DEMO_EMAIL`). The demo account's token
    then resolves to the fixture handle → reviewers get sample responses with zero setup.
 
-> This is the one engineering piece left before submission. Spec is above; ~a day of work
-> (fixture MCP with canned `context`/`roi`/`memory` + a box-side frpc + the Auth0 demo user).
+**Built & live** (`deploy-fixture.sh`): fixture-core (canned data) + the real
+sinain-mcp-server + a box-side frpc registering the always-online fixture handle.
+Verified: a demo-account token → `mcp.sinain.com/mcp` → `sinain_context` returns the
+fixture's sample digest + context window.
 
-## 7. Privacy policy (draft — host at `https://sinain.com/privacy`)
+### 6.1 Create the Auth0 demo user (Igor — dashboard)
 
-See [`PRIVACY.md`](PRIVACY.md). Publish it to the marketing site (`docs/`) so the listing
-can point at a stable `sinain.com/privacy` URL.
+The Regular Web App isn't authorized for the Auth0 Management API, so create the user in
+the dashboard:
+1. Auth0 → **User Management → Users → Create User**.
+2. Email `demo@sinain.com`, a strong password (no MFA), Connection
+   `Username-Password-Authentication`; mark **email verified**.
+3. Put that email/password in the OpenAI submission's demo-account field. On the demo
+   user's **first login**, the AS auto-links it to the fixture handle (email match), so
+   the reviewer's tools return the fixture data with zero further setup.
+
+(An interim test account currently holds the fixture link so the path is testable now;
+the real demo login transfers it.)
+
+### 9. Screenshots (Igor — manual)
+
+The HUD overlay is **invisible to screen capture by design** (`NSWindow.sharingType =
+.none`), so `screencapture` produces a blank where the overlay is. To capture listing
+screenshots of the HUD, temporarily build with `sharingType = .readOnly` (or photograph
+the screen). Shots to grab: (1) HUD with a region eye, (2) the settings connector panel
+("Connected as …"), (3) a ChatGPT thread calling `sinain_context`, (4) the Auth0 sign-in.
+
+## 7. Privacy policy
+
+**Done:** [`docs/privacy.html`](privacy.html) (styled to the marketing site;
+[`PRIVACY.md`](PRIVACY.md) is the markdown source). It serves at
+**`https://sinain.com/privacy`** once `docs/` is deployed (merge to main → Firebase).
+Use that URL in the submission. **Logo:** `docs/logo-512.png` (existing).
 
 ## 8. Submission steps
 
