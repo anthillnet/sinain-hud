@@ -749,16 +749,22 @@ class _ChatGptConnectorPanel extends StatelessWidget {
     final ws = context.watch<WebSocketService>();
     final status = ws.tunnelStatus;
     final url = ws.tunnelConnectorUrl;
-    final code = ws.tunnelPairingCode;
+    final linked = ws.tunnelLinked;
+    final email = ws.tunnelAccountEmail;
     final err = ws.tunnelError;
     const accent = Color(0xFFFF6644);
+    const green = Color(0xFF00FF88);
 
     final (label, dot) = switch (status) {
-      'live' => ('connector live', const Color(0xFF00FF88)),
+      'live' => ('connector live', green),
       'starting' => ('starting tunnel…', accent),
       'error' => ('tunnel error', const Color(0xFFFF4444)),
       _ => ('off', Colors.white24),
     };
+    TextStyle mono(double size, double alpha) => TextStyle(
+        fontFamily: HudConstants.monoFont,
+        fontFamilyFallback: HudConstants.monoFontFallbacks,
+        fontSize: size, height: 1.3, color: Colors.white.withValues(alpha: alpha));
 
     return Padding(
       padding: const EdgeInsets.only(top: 8, right: 18),
@@ -768,41 +774,49 @@ class _ChatGptConnectorPanel extends StatelessWidget {
           Row(children: [
             Container(width: 6, height: 6, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
             const SizedBox(width: 6),
-            Text(label.toUpperCase(),
-                style: TextStyle(
-                    fontFamily: HudConstants.monoFont,
-                    fontFamilyFallback: HudConstants.monoFontFallbacks,
-                    fontSize: 8,
-                    color: Colors.white.withValues(alpha: 0.45))),
+            Text(label.toUpperCase(), style: mono(8, 0.45)),
           ]),
           if (url != null) ...[
             const SizedBox(height: 6),
             _copyRow(context, 'CONNECTOR URL', url, url, accent),
           ],
-          if (code != null) ...[
-            const SizedBox(height: 6),
-            _copyRow(context, 'PAIRING CODE', code, code, accent, big: true),
-          ],
+          const SizedBox(height: 8),
+          // Account: linked → "Connected as <email>"; else → Sign in button.
+          if (linked)
+            Row(children: [
+              const Icon(Icons.check_circle, size: 12, color: green),
+              const SizedBox(width: 6),
+              Expanded(child: Text('Connected as ${email ?? 'your account'}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: mono(9, 0.8))),
+            ])
+          else
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: ws.signInToSinain,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: accent.withValues(alpha: 0.5))),
+                  child: Text('Sign in to Sinain',
+                      style: mono(10, 0.95).copyWith(color: accent, height: 1.0)),
+                ),
+              ),
+            ),
           const SizedBox(height: 6),
           Text(
-            'In ChatGPT (Developer Mode): Settings → Connectors → add a custom '
-            'connector → paste the URL, choose OAuth, then enter the pairing code. '
-            'Requires ChatGPT Plus/Pro (or an admin-enabled workspace).',
-            style: TextStyle(
-                fontFamily: HudConstants.monoFont,
-                fontFamilyFallback: HudConstants.monoFontFallbacks,
-                fontSize: 8,
-                height: 1.3,
-                color: Colors.white.withValues(alpha: 0.4)),
+            linked
+                ? 'In ChatGPT: add a connector → paste the URL → OAuth → it connects '
+                    'to this device via your account. (Developer Mode until Sinain is published.)'
+                : 'Sign in once to link this device to your Sinain account, then add '
+                    'the connector URL in ChatGPT and authorize with the same account.',
+            style: mono(8, 0.4),
           ),
           if (err != null && status != 'live') ...[
             const SizedBox(height: 4),
-            Text(err,
-                style: TextStyle(
-                    fontFamily: HudConstants.monoFont,
-                    fontFamilyFallback: HudConstants.monoFontFallbacks,
-                    fontSize: 8,
-                    color: const Color(0xFFFF6644).withValues(alpha: 0.8))),
+            Text(err, style: mono(8, 0.8).copyWith(color: accent.withValues(alpha: 0.8))),
           ],
         ],
       ),

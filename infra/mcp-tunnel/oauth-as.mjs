@@ -346,6 +346,20 @@ async function handleDeviceLink(req, res, url) {
   res.end();
 }
 
+// POST /device-account — device-signed; reports whether this device is linked
+// to an account (so the app can show "Sign in" vs "Connected as <email>").
+async function handleDeviceAccount(req, res) {
+  let b;
+  try { b = JSON.parse(await readBody(req)); } catch { return oauthErr(res, 400, "invalid_request", "bad json"); }
+  const { pubkey, ts, nonce, sig } = b || {};
+  if (!pubkey || !ts || !nonce || !sig) return oauthErr(res, 400, "invalid_request", "missing fields");
+  if (Math.abs(nowSec() - Number(ts)) > CLOCK_SKEW) return oauthErr(res, 400, "invalid_request", "stale timestamp");
+  if (!verifyEd25519(pubkey, `status|${ts}|${nonce}`, sig)) return oauthErr(res, 401, "invalid_client", "bad signature");
+  const acct = accounts.accountForDevice(deriveHandle(pubkey));
+  const email = acct ? (accounts.getAccount(acct)?.email || "") : "";
+  return json(res, 200, { linked: !!acct, email });
+}
+
 // GET /idp/callback — IdP returned. Resolve the account, then finish whichever
 // flow started it (ChatGPT authorize → issue our code; device link → record map).
 async function handleIdpCallback(req, res, url) {
@@ -424,6 +438,7 @@ const server = http.createServer(async (req, res) => {
     if (ACCOUNTS_ENABLED) {
       if (req.method === "GET" && path === "/idp/callback") return handleIdpCallback(req, res, url);
       if (req.method === "GET" && path === "/device-link") return handleDeviceLink(req, res, url);
+      if (req.method === "POST" && path === "/device-account") return handleDeviceAccount(req, res);
       if (idp.isStub && req.method === "GET" && path === "/idp-stub/login") return handleStubLoginGet(res, url);
       if (idp.isStub && req.method === "POST" && path === "/idp-stub/login") return handleStubLoginPost(req, res);
     }

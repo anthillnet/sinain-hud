@@ -18,9 +18,11 @@ export interface TunnelState {
   enabled: boolean;
   status: TunnelStatus;
   handle?: string;
-  connectorUrl?: string;
-  pairingCode?: string;
-  pairingExpiresAt?: number; // epoch ms
+  connectorUrl?: string;       // the single published endpoint (same for everyone)
+  linked?: boolean;            // is this device linked to a Sinain account?
+  accountEmail?: string;       // the linked account's email (when linked)
+  pairingCode?: string;        // legacy device-pairing fallback (no account)
+  pairingExpiresAt?: number;   // epoch ms
   error?: string;
 }
 
@@ -32,6 +34,8 @@ export interface TunnelDeps {
 }
 
 const AS_BASE = (process.env.SINAIN_OAUTH_AS_URL || "https://auth.sinain.com").replace(/\/$/, "");
+// The single published MCP endpoint shown to the user (one URL for everyone).
+const CONNECTOR_URL = process.env.SINAIN_MCP_CONNECTOR_URL || "https://mcp.sinain.com/mcp";
 const TUNNEL_HOST = process.env.SINAIN_MCP_TUNNEL_HOST || "mcp.sinain.com";
 const TUNNEL_PORT = Number(process.env.SINAIN_MCP_TUNNEL_PORT || 7000);
 const MCP_HTTP_PORT = Number(process.env.MCP_HTTP_PORT || 9510);
@@ -56,6 +60,7 @@ export class TunnelController {
   private frpc: ChildProcess | null = null;
   private identity: TunnelIdentity | null = null;
   private pairTimer: ReturnType<typeof setTimeout> | null = null;
+  private accountTimer: ReturnType<typeof setInterval> | null = null;
   private starting = false;
 
   constructor(private readonly deps: TunnelDeps) {}
@@ -78,7 +83,7 @@ export class TunnelController {
     const id = loadTunnelIdentity();
     if (!id) { this.fail("device identity not ready"); return; }
     this.identity = id;
-    const connectorUrl = `https://${id.handle}.${TUNNEL_HOST}/mcp`;
+    const connectorUrl = CONNECTOR_URL; // single endpoint; identity decides routing
 
     const frpcBin = resolveFrpcBin();
     if (!frpcBin) { this.fail("frpc not installed yet — relaunch sinain to provision it, then re-enable"); return; }
@@ -92,15 +97,18 @@ export class TunnelController {
     }
 
     this.push({ status: "live", handle: id.handle, connectorUrl });
-    log(TAG, `tunnel up → ${connectorUrl} (frps ${TUNNEL_HOST}:${TUNNEL_PORT})`);
+    log(TAG, `tunnel up → ${connectorUrl} (device ${id.handle}, frps ${TUNNEL_HOST}:${TUNNEL_PORT})`);
     this.starting = false;
-    await this.refreshPairing(); // mint the first pairing code
+    void this.refreshAccount(); // reflect account link state in the panel
+    if (this.accountTimer) clearInterval(this.accountTimer);
+    this.accountTimer = setInterval(() => { void this.refreshAccount(); }, 30_000);
   }
 
   async stop(): Promise<void> {
     this.push({ enabled: false, status: "off", pairingCode: undefined, pairingExpiresAt: undefined });
     try { rmSync(TUNNEL_MARKER, { force: true }); } catch { /* */ }
     if (this.pairTimer) { clearTimeout(this.pairTimer); this.pairTimer = null; }
+    if (this.accountTimer) { clearInterval(this.accountTimer); this.accountTimer = null; }
     this.killChild("frpc");
     this.killChild("mcpHttp");
     await this.unpair(); // best-effort: block token refresh ("off means off")
@@ -234,4 +242,51 @@ export class TunnelController {
       });
     } catch { /* best-effort */ }
   }
+
+  // --- account link --------------------------------------------------------
+  /** Reflect whether this device is linked to a Sinain account (drives the
+   *  panel's "Sign in" vs "Connected as <email>"). */
+  private async refreshAccount(): Promise<void> {
+    const id = this.identity;
+    if (!id) return;
+    const ts = Math.floor(Date.now() / 1000), nonce = randomBytes(8).toString("hex");
+    const sig = signMessage(id.privateKeyPem, `status|${ts}|${nonce}`);
+    try {
+      const res = await fetch(`${AS_BASE}/device-account`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pubkey: id.publicKeyPem, ts, nonce, sig }),
+      });
+      if (!res.ok) throw new Error(`AS /device-account ${res.status}`);
+      const { linked, email } = await res.json() as { linked: boolean; email: string };
+      this.push({ linked, accountEmail: email || undefined });
+    } catch (e: any) {
+      debug(TAG, `account status unavailable: ${e?.message ?? e}`);
+    }
+  }
+
+  /** Open the browser to the device-signed Auth0 sign-in (links this device to
+   *  the account the user logs into), then poll the link state for the panel. */
+  async signIn(): Promise<void> {
+    const id = this.identity ?? loadTunnelIdentity();
+    if (!id) { error(TAG, "signIn: device identity not ready"); return; }
+    const ts = Math.floor(Date.now() / 1000), nonce = randomBytes(8).toString("hex");
+    const sig = signMessage(id.privateKeyPem, `link|${ts}|${nonce}`);
+    const u = new URL(`${AS_BASE}/device-link`);
+    u.searchParams.set("pubkey", id.publicKeyPem);
+    u.searchParams.set("ts", String(ts));
+    u.searchParams.set("nonce", nonce);
+    u.searchParams.set("sig", sig);
+    openBrowser(u.href);
+    log(TAG, "opened Sinain sign-in in the browser");
+    for (let i = 0; i < 6 && !this.state.linked; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      await this.refreshAccount();
+    }
+  }
+}
+
+/** Open a URL in the user's default browser (macOS/Windows/Linux). */
+function openBrowser(url: string): void {
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  try { spawn(cmd, [url], { detached: true, stdio: "ignore" }).unref(); } catch { /* */ }
 }

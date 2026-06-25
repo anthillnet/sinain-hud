@@ -147,6 +147,8 @@ class WebSocketService extends ChangeNotifier {
   String get tunnelStatus => (_tunnel?['status'] as String?) ?? 'off';
   String? get tunnelConnectorUrl => _tunnel?['connectorUrl'] as String?;
   String? get tunnelPairingCode => _tunnel?['pairingCode'] as String?;
+  bool get tunnelLinked => _tunnel?['linked'] == true;
+  String? get tunnelAccountEmail => _tunnel?['accountEmail'] as String?;
   String? get tunnelError => _tunnel?['error'] as String?;
   List<String> get availableAgents => _availableAgents;
   /// Terminal-lane roster (sinain-excluded). Falls back to the full roster
@@ -190,6 +192,11 @@ class WebSocketService extends ChangeNotifier {
   /// public tunnel so ChatGPT can reach it). Off by default — security-sensitive.
   void setChatgptHarness(bool enabled) {
     sendCommand('set_chatgpt_harness', {'enabled': enabled});
+  }
+
+  /// Open the Sinain account sign-in (Auth0) in the browser to link this device.
+  void signInToSinain() {
+    sendCommand('mcp_tunnel_signin');
   }
 
   /// Hold ambient escalations for [seconds] — the user is actively
