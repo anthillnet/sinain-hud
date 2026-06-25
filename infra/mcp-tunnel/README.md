@@ -4,6 +4,15 @@ Makes a user's **local** sinain-core MCP server reachable by **ChatGPT** at a
 public, OAuth-secured URL `https://<handle>.mcp.sinain.com/mcp`. Design &
 rationale: [`docs/DESIGN-CHATGPT-MCP-TUNNEL.md`](../../docs/DESIGN-CHATGPT-MCP-TUNNEL.md).
 
+> **As-built (deployed 2026-06-25).** Live on `85.214.180.247`. DNS records
+> `mcp` / `*.mcp` / `auth.sinain.com` are grey-cloud A records; the `*.mcp`
+> wildcard cert is certbot DNS-01 (`sinain-mcp-wildcard`), `auth` is Caddy
+> HTTP-01. All five services active; `:7080` kept loopback-only by
+> `sinain-mcp-firewall`. Verified end-to-end: an authenticated MCP `initialize`
+> over the public URL round-trips to a local frpc client (HTTP 200), an
+> unauth request returns `401 + WWW-Authenticate`, and a cross-handle token is
+> rejected (`401`). frp 0.61.1 linux_amd64.
+
 ## Pieces (all on the Strato box)
 
 | File | Runs as | Port (loopback unless noted) | Role |
@@ -12,6 +21,7 @@ rationale: [`docs/DESIGN-CHATGPT-MCP-TUNNEL.md`](../../docs/DESIGN-CHATGPT-MCP-T
 | `mcp-authz.mjs` | `sinain-mcp-authz` | 18796 | Caddy `forward_auth` — validates the JWT against the request Host; emits the `401 + WWW-Authenticate` discovery challenge. |
 | `frps-device-authz.mjs` | `sinain-frps-authz` | 18798 | frps `NewProxy` plugin — authorizes tunnel registration by **device signature** (no shared frp secret in the app). |
 | `frps` | `frps` | **7000 public**, 7080 loopback | Reverse-tunnel server; routes `<handle>.mcp.sinain.com` → the right `frpc`. |
+| `sinain-mcp-firewall` | root (oneshot) | — | Keeps `:7080` loopback-only (frp has no per-vhost bind addr) so the JWT edge can't be bypassed. |
 | `lib.mjs` | — | — | Shared crypto/contract (handle derivation, EdDSA JWS, PKCE). Must match `sinain-core/src/mcp-tunnel/*`. |
 
 Only **7000** (frp control) and **443** (Caddy) are public. Everything else is loopback.

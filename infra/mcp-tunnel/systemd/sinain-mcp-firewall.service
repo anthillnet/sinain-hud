@@ -1,0 +1,15 @@
+[Unit]
+# frp binds vhostHTTPPort (7080) on 0.0.0.0 with no per-vhost bind address, so
+# without this it would be publicly reachable — letting a spoofed Host header
+# bypass the Caddy JWT edge. This keeps :7080 loopback-only (Caddy → frps).
+Description=sinain MCP tunnel — keep frps vhost port (7080) loopback-only
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/bin/sh -c 'iptables -C INPUT ! -i lo -p tcp --dport 7080 -j DROP 2>/dev/null || iptables -A INPUT ! -i lo -p tcp --dport 7080 -j DROP'
+ExecStart=/bin/sh -c 'ip6tables -C INPUT ! -i lo -p tcp --dport 7080 -j DROP 2>/dev/null || ip6tables -A INPUT ! -i lo -p tcp --dport 7080 -j DROP'
+
+[Install]
+WantedBy=multi-user.target

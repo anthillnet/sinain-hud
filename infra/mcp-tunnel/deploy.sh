@@ -28,10 +28,9 @@ say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
 say "user + directories"
 id -u "$USER" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$USER"
-install -d -m755 "$APP_DIR" /etc/frp /etc/caddy/sites /var/log/frp
+install -d -m755 "$APP_DIR" /etc/frp /etc/caddy/sites
 install -d -m750 -o "$USER" -g "$USER" "$KEY_DIR"
 install -d -m750 -o "$USER" -g "$USER" "$(dirname "$TLS_DIR")" "$TLS_DIR"
-chown "$USER:$USER" /var/log/frp
 
 say "frps ${FRP_VERSION}"
 if ! command -v frps >/dev/null || [[ "$(frps --version 2>/dev/null || true)" != "$FRP_VERSION" ]]; then
@@ -77,6 +76,9 @@ else
 fi
 
 say "enable services"
+# Firewall first (keeps :7080 loopback-only) so the vhost is never briefly
+# exposed between frps starting and the rule landing.
+systemctl enable --now sinain-mcp-firewall.service
 systemctl enable --now sinain-frps-authz.service sinain-oauth-as.service sinain-mcp-authz.service frps.service
 sleep 1
 systemctl --no-pager --lines=0 status sinain-oauth-as sinain-mcp-authz sinain-frps-authz frps | grep -E 'Active:' || true
