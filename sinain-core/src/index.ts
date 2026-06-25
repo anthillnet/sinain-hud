@@ -37,7 +37,7 @@ import { CostTracker } from "./cost/tracker.js";
 import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } from "./types.js";
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { hardenLocalDataPermissions } from "./util/harden-permissions.js";
-import { log, warn, error, debug } from "./log.js";
+import { log, warn, error, debug, preview } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 // SECURITY: make every file/dir this process (and its children — sense_client,
@@ -1412,7 +1412,7 @@ async function main() {
 
     // Skip near-duplicate transcripts within same source
     if (isDuplicateTranscript(result.text, recentSame)) {
-      log(TAG, `transcript deduped (${result.audioSource}): "${result.text.slice(0, 60)}..."`);
+      log(TAG, `transcript deduped (${result.audioSource}): ${preview(result.text, 60)}`);
       return;
     }
 
@@ -1421,7 +1421,7 @@ async function main() {
       const trimmed = result.text.trim();
       for (const recent of recentSystemTranscripts) {
         if (bigramSimilarity(trimmed, recent) > 0.70) {
-          log(TAG, `mic transcript cross-deduped (speakers pickup): "${trimmed.slice(0, 60)}..."`);
+          log(TAG, `mic transcript cross-deduped (speakers pickup): ${preview(trimmed, 60)}`);
           return;
         }
       }

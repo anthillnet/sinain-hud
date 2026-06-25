@@ -16,7 +16,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeedItem } from "../types.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
-import { log, warn, error } from "../log.js";
+import { log, warn, error, preview } from "../log.js";
 
 const TAG = "local-curation";
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -368,7 +368,7 @@ export class LocalCurationService {
         return false;
       }
 
-      log(TAG, `distilled: "${(digest.whatHappened || "").slice(0, 80)}..."`);
+      log(TAG, `distilled: ${preview(digest.whatHappened, 80)}`);
 
       // Write daily session notes
       this.writeDailyNotes(digest, transcript as any);

@@ -52,6 +52,17 @@ def log(msg: str):
     print(f"[sense] {msg}", flush=True)
 
 
+# SECURITY: screen content (OCR text, vision scene descriptions) must NOT land
+# in the persistent session log (stdout → backend.log). preview() logs a length
+# by default; set SINAIN_LOG_CONTENT=true for truncated plaintext when debugging.
+_LOG_CONTENT = os.environ.get("SINAIN_LOG_CONTENT") == "true"
+
+
+def preview(s, max_len: int = 80) -> str:
+    s = s or ""
+    return repr(s[:max_len]) if _LOG_CONTENT else f"{len(s)} chars"
+
+
 def _gate_reason(gate, change, ocr, app_changed, window_changed):
     """Diagnose why the gate dropped an event."""
     now = time.time() * 1000
@@ -487,7 +498,7 @@ def main():
                     v_cost = result.cost
                     if scene or v_cost:
                         if scene:
-                            log(f"vision: {scene[:80]}...")
+                            log(f"vision: {preview(scene, 80)}")
                         ctx_ev = SenseEvent(type="context", ts=ts)
                         ctx_ev.observation = SenseObservation(scene=scene or "")
                         # Also carry the scene caption as the event's `ocr` text:

@@ -14,7 +14,7 @@ import type {
   FeedChannel,
 } from "../types.js";
 import type { TunnelState } from "../mcp-tunnel/controller.js";
-import { log, warn } from "../log.js";
+import { log, warn, preview } from "../log.js";
 import { loadedEnvPath } from "../config.js";
 
 const TAG = "ws";
@@ -253,16 +253,16 @@ export class WsHandler {
         (ws as any).__alive = true;
         return;
       case "message":
-        log(TAG, `\u2190 user message: ${msg.text.slice(0, 100)}`);
+        log(TAG, `\u2190 user message: ${preview(msg.text, 100)}`);
         break;
       case "command":
         log(TAG, `\u2190 command: ${msg.action}`);
         break;
       case "user_command":
-        log(TAG, `\u2190 user command: ${msg.text.slice(0, 100)}`);
+        log(TAG, `\u2190 user command: ${preview(msg.text, 100)}`);
         break;
       case "spawn_command":
-        log(TAG, `\u2190 spawn command: ${msg.text.slice(0, 100)}`);
+        log(TAG, `\u2190 spawn command: ${preview(msg.text, 100)}`);
         break;
       case "spawn_reply":
         log(TAG, `\u2190 spawn reply: taskId=${(msg as any).taskId}`);
