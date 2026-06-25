@@ -88,7 +88,10 @@ const server = http.createServer(async (req, res) => {
       const devices = accountStore()?.devicesFor(sub) || [];
       const live = await onlineHandles();
       const route = devices.find((h) => live.has(h));
-      if (!route) return offline(res);
+      if (!route) {
+        console.error(`[authz] device_offline account=${sub} (${devices.length} linked, ${live.size} online)`);
+        return offline(res);
+      }
       return allow(res, route);
     }
 

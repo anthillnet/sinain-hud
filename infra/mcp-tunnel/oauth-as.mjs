@@ -60,11 +60,11 @@ const accounts = new AccountStore(join(KEY_DIR, "accounts.json"));
 const pendingFed = new Map(); // fedState → { type, ...payload, exp }  (OIDC round-trip)
 const FED_TTL = 600;
 setInterval(() => { const n = nowSec(); for (const [k, v] of pendingFed) if (v.exp < n) pendingFed.delete(k); }, 60_000).unref();
-// Seed the demo account → fixture device for OpenAI review (stable, always-on).
-if (ACCOUNTS_ENABLED && process.env.DEMO_FIXTURE_HANDLE) {
-  accounts.ensureDemo(`stub|${process.env.DEMO_EMAIL || "demo@sinain.com"}`,
-    process.env.DEMO_EMAIL || "demo@sinain.com", process.env.DEMO_FIXTURE_HANDLE);
-}
+// Demo account → fixture device for OpenAI review. The link is (re)applied on
+// every login whose email matches DEMO_EMAIL, so it works regardless of which
+// IdP subject Auth0 assigns the reviewer (the boot seed alone wouldn't match).
+const DEMO_EMAIL = process.env.DEMO_EMAIL || "demo@sinain.com";
+const DEMO_FIXTURE_HANDLE = process.env.DEMO_FIXTURE_HANDLE || "";
 
 // --- ephemeral state --------------------------------------------------------
 const pairings = new Map();     // code → { handle, exp }
@@ -387,6 +387,8 @@ async function handleIdpCallback(req, res, url) {
   try { ({ idpSub, email } = await idp.exchange(code, CALLBACK())); }
   catch (e) { return oauthErr(res, 400, "access_denied", `IdP exchange failed: ${e.message}`); }
   const accountId = accounts.upsertByIdpSub(idpSub, email);
+  // Demo reviewer → always linked to the always-on fixture device.
+  if (DEMO_FIXTURE_HANDLE && email === DEMO_EMAIL) accounts.linkDevice(accountId, DEMO_FIXTURE_HANDLE);
 
   if (p.type === "authz") {
     const jti = newJti();
