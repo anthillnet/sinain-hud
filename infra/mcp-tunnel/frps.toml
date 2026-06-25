@@ -16,7 +16,7 @@ subDomainHost = "mcp.sinain.com"
 name = "device-authz"
 addr = "http://127.0.0.1:18798"
 path = "/handle"
-ops = ["NewProxy"]
+ops = ["NewProxy", "CloseProxy"]
 
 # No global auth.token: authorization is the device signature checked by the
 # plugin above. (A shared token would be extractable from the shipped app.)

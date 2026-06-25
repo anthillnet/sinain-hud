@@ -137,3 +137,15 @@ export function randomCode(len = 8) {
   for (let i = 0; i < len; i++) out += B32[bytes[i] & 31];
   return out;
 }
+
+// --- accounts (optional ChatGPT-only identity layer) -----------------------
+// The single published MCP endpoint — the `resource` an account token is bound
+// to (vs a per-handle resource in the device-pairing path).
+export const SHARED_RESOURCE = (process.env.SINAIN_MCP_RESOURCE || "https://mcp.sinain.com").replace(/\/$/, "");
+export const ACCOUNT_RE = /^acct_[0-9a-f]{24}$/;
+export function isAccountId(s) {
+  return typeof s === "string" && ACCOUNT_RE.test(s);
+}
+export function newAccountId() {
+  return "acct_" + crypto.randomBytes(12).toString("hex");
+}

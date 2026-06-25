@@ -12,8 +12,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   deriveHandle, isHandle, verifyEd25519, jwsSign, jwsVerify,
-  pkceMatches, resourceForHandle, randomCode,
+  pkceMatches, resourceForHandle, randomCode, SHARED_RESOURCE, isAccountId,
 } from "./lib.mjs";
+import { Idp } from "./idp.mjs";
+import { AccountStore } from "./accounts.mjs";
 
 const PORT = Number(process.env.AS_PORT || 18797);
 const ISSUER = (process.env.AS_ISSUER || "https://auth.sinain.com").replace(/\/$/, "");
@@ -42,6 +44,23 @@ function loadOrCreateKey() {
   return { privateKey, publicKey };
 }
 const KEY = loadOrCreateKey();
+
+// --- optional accounts layer (ChatGPT-only; off unless ACCOUNTS_ENABLED) ----
+const ACCOUNTS_ENABLED = process.env.ACCOUNTS_ENABLED === "1" || process.env.ACCOUNTS_ENABLED === "true";
+const idp = new Idp({
+  mode: process.env.IDP_MODE || "stub",
+  issuer: process.env.IDP_ISSUER, clientId: process.env.IDP_CLIENT_ID,
+  clientSecret: process.env.IDP_CLIENT_SECRET, asIssuer: ISSUER,
+});
+const accounts = new AccountStore(join(KEY_DIR, "accounts.json"));
+const pendingFed = new Map(); // fedState → { type, ...payload, exp }  (OIDC round-trip)
+const FED_TTL = 600;
+setInterval(() => { const n = nowSec(); for (const [k, v] of pendingFed) if (v.exp < n) pendingFed.delete(k); }, 60_000).unref();
+// Seed the demo account → fixture device for OpenAI review (stable, always-on).
+if (ACCOUNTS_ENABLED && process.env.DEMO_FIXTURE_HANDLE) {
+  accounts.ensureDemo(`stub|${process.env.DEMO_EMAIL || "demo@sinain.com"}`,
+    process.env.DEMO_EMAIL || "demo@sinain.com", process.env.DEMO_FIXTURE_HANDLE);
+}
 
 // --- ephemeral state --------------------------------------------------------
 const pairings = new Map();     // code → { handle, exp }
@@ -227,7 +246,7 @@ async function handleAuthorizePost(req, res) {
     return oauthErr(res, 400, "invalid_request", "redirect_uri not registered");
   const jti = newJti();
   const code = jwsSign({
-    act: true, h: handle, cc: q.code_challenge, ru: q.redirect_uri,
+    act: true, sub: handle, cc: q.code_challenge, ru: q.redirect_uri,
     iat: nowSec(), exp: nowSec() + AUTHCODE_TTL, jti,
   }, KEY.privateKey, "authcode");
   const loc = new URL(q.redirect_uri);
@@ -247,32 +266,137 @@ async function handleToken(req, res) {
     if (!consumeJti(claims.jti, claims.exp)) return oauthErr(res, 400, "invalid_grant", "code already used");
     if (q.redirect_uri !== claims.ru) return oauthErr(res, 400, "invalid_grant", "redirect_uri mismatch");
     if (!pkceMatches(q.code_verifier, claims.cc)) return oauthErr(res, 400, "invalid_grant", "PKCE verification failed");
-    if (revoked.has(claims.h)) return oauthErr(res, 400, "invalid_grant", "handle revoked");
-    return issueTokens(res, claims.h);
+    const sub = claims.sub ?? claims.h; // back-compat with pre-account codes
+    if (revoked.has(sub)) return oauthErr(res, 400, "invalid_grant", "revoked");
+    return issueTokens(res, sub);
   }
   if (q.grant_type === "refresh_token") {
     const claims = jwsVerify(q.refresh_token, KEY.publicKey);
     if (!claims || !claims.rt) return oauthErr(res, 400, "invalid_grant", "bad refresh token");
-    if (revoked.has(claims.h)) return oauthErr(res, 400, "invalid_grant", "handle revoked");
+    const sub = claims.sub ?? claims.h;
+    if (revoked.has(sub)) return oauthErr(res, 400, "invalid_grant", "revoked");
     if (!consumeJti(claims.jti, claims.exp)) return oauthErr(res, 400, "invalid_grant", "refresh token reused");
-    return issueTokens(res, claims.h);
+    return issueTokens(res, sub);
   }
   return oauthErr(res, 400, "unsupported_grant_type", "authorization_code or refresh_token");
 }
 
-function issueTokens(res, handle) {
+function issueTokens(res, sub) {
   const iat = nowSec();
+  // Account tokens bind to the single shared resource; device-pairing tokens
+  // bind to that one handle's resource (mcp-authz enforces the match).
+  const resource = isAccountId(sub) ? SHARED_RESOURCE : resourceForHandle(sub);
   const access = jwsSign({
-    iss: ISSUER, sub: handle, aud: resourceForHandle(handle), resource: resourceForHandle(handle),
+    iss: ISSUER, sub, aud: resource, resource,
     scope: "mcp", iat, exp: iat + ACCESS_TTL,
   }, KEY.privateKey, "at+jwt");
   const refresh = jwsSign({
-    rt: true, h: handle, iat, exp: iat + REFRESH_TTL, jti: newJti(),
+    rt: true, sub, iat, exp: iat + REFRESH_TTL, jti: newJti(),
   }, KEY.privateKey, "rt+jwt");
   return json(res, 200, {
     access_token: access, token_type: "Bearer", expires_in: ACCESS_TTL,
     refresh_token: refresh, scope: "mcp",
   });
+}
+
+// --- accounts: OIDC-federated authorize, callback, device link -------------
+const CALLBACK = () => `${ISSUER}/idp/callback`;
+
+// GET /authorize in accounts mode → validate the ChatGPT request, then bounce
+// the user to the IdP to log in. The original PKCE/redirect params are parked
+// under a fedState we hand the IdP and recover in /idp/callback.
+async function handleAuthorizeAccounts(req, res, url) {
+  const p = url.searchParams;
+  if (p.get("response_type") !== "code") return oauthErr(res, 400, "unsupported_response_type", "only code");
+  if (p.get("code_challenge_method") !== "S256" || !p.get("code_challenge"))
+    return oauthErr(res, 400, "invalid_request", "PKCE S256 required");
+  const clientId = p.get("client_id"), redirectUri = p.get("redirect_uri");
+  if (!clientId || !redirectUri) return oauthErr(res, 400, "invalid_request", "client_id + redirect_uri required");
+  const cimd = await fetchCimd(clientId);
+  if (!cimd) return oauthErr(res, 400, "invalid_client", "client_id metadata (CIMD) not resolvable");
+  if (!redirectUriAllowed(cimd, redirectUri))
+    return oauthErr(res, 400, "invalid_request", "redirect_uri not registered for client");
+  const fedState = newJti();
+  pendingFed.set(fedState, {
+    type: "authz", cc: p.get("code_challenge"), ru: redirectUri,
+    cs: p.get("state") || "", exp: nowSec() + FED_TTL,
+  });
+  const loc = await idp.authorizeUrl(fedState, CALLBACK());
+  res.writeHead(302, { location: loc, "cache-control": "no-store" });
+  res.end();
+}
+
+// GET /device-link?pubkey&ts&nonce&sig — the app opens this (device-signed) to
+// link THIS device to whichever account the user logs into.
+async function handleDeviceLink(req, res, url) {
+  const p = url.searchParams;
+  const pubkey = p.get("pubkey"), ts = p.get("ts"), nonce = p.get("nonce"), sig = p.get("sig");
+  if (!pubkey || !ts || !nonce || !sig) return oauthErr(res, 400, "invalid_request", "missing fields");
+  if (Math.abs(nowSec() - Number(ts)) > CLOCK_SKEW) return oauthErr(res, 400, "invalid_request", "stale timestamp");
+  if (!verifyEd25519(pubkey, `link|${ts}|${nonce}`, sig)) return oauthErr(res, 401, "invalid_client", "bad signature");
+  const handle = deriveHandle(pubkey);
+  const fedState = newJti();
+  pendingFed.set(fedState, { type: "link", handle, exp: nowSec() + FED_TTL });
+  const loc = await idp.authorizeUrl(fedState, CALLBACK());
+  res.writeHead(302, { location: loc, "cache-control": "no-store" });
+  res.end();
+}
+
+// GET /idp/callback — IdP returned. Resolve the account, then finish whichever
+// flow started it (ChatGPT authorize → issue our code; device link → record map).
+async function handleIdpCallback(req, res, url) {
+  const fedState = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const p = fedState && pendingFed.get(fedState);
+  if (!p || p.exp < nowSec()) return oauthErr(res, 400, "invalid_request", "expired or unknown login state");
+  pendingFed.delete(fedState);
+  let idpSub, email;
+  try { ({ idpSub, email } = await idp.exchange(code, CALLBACK())); }
+  catch (e) { return oauthErr(res, 400, "access_denied", `IdP exchange failed: ${e.message}`); }
+  const accountId = accounts.upsertByIdpSub(idpSub, email);
+
+  if (p.type === "authz") {
+    const jti = newJti();
+    const ourCode = jwsSign({
+      act: true, sub: accountId, cc: p.cc, ru: p.ru,
+      iat: nowSec(), exp: nowSec() + AUTHCODE_TTL, jti,
+    }, KEY.privateKey, "authcode");
+    const loc = new URL(p.ru);
+    loc.searchParams.set("code", ourCode);
+    if (p.cs) loc.searchParams.set("state", p.cs);
+    console.error(`[as] account authorize ${accountId} (${email}) → code issued`);
+    res.writeHead(302, { location: loc.href, "cache-control": "no-store" });
+    return res.end();
+  }
+  if (p.type === "link") {
+    accounts.linkDevice(accountId, p.handle);
+    console.error(`[as] device ${p.handle} linked to ${accountId} (${email})`);
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    return res.end(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<style>body{font:16px -apple-system,system-ui,sans-serif;max-width:24rem;margin:12vh auto;text-align:center;color:#111}</style>
+<h2>✓ Connected</h2><p>This device is now linked to <b>${esc(email)}</b>. You can use Sinain from ChatGPT.</p>`);
+  }
+  return oauthErr(res, 400, "invalid_request", "unknown login state");
+}
+
+// Stub IdP login (IDP_MODE=stub only) — stands in for the real provider in tests.
+function handleStubLoginGet(res, url) {
+  const state = url.searchParams.get("state") || "", cb = url.searchParams.get("cb") || "";
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(`<!doctype html><title>Sinain login (stub)</title>
+<form method=post action="/idp-stub/login">
+<input type=hidden name=state value="${esc(state)}"><input type=hidden name=cb value="${esc(cb)}">
+<input name=email type=email placeholder=email required><button>Sign in</button></form>`);
+}
+async function handleStubLoginPost(req, res) {
+  const q = parseForm(await readBody(req));
+  if (!q.email || !q.cb) return oauthErr(res, 400, "invalid_request", "email + cb required");
+  const code = "stub:" + Buffer.from(q.email, "utf8").toString("base64url");
+  const loc = new URL(q.cb);
+  loc.searchParams.set("code", code);
+  if (q.state) loc.searchParams.set("state", q.state);
+  res.writeHead(302, { location: loc.href });
+  res.end();
 }
 
 // --- router -----------------------------------------------------------------
@@ -287,9 +411,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && path === "/healthz") return json(res, 200, { ok: true });
     if (req.method === "POST" && path === "/pair") return handlePair(req, res);
     if (req.method === "POST" && path === "/unpair") return handleUnpair(req, res);
-    if (req.method === "GET" && path === "/authorize") return handleAuthorizeGet(req, res, url);
+    // Accounts mode federates /authorize to the IdP; the pairing form is the
+    // fallback when accounts are off.
+    if (req.method === "GET" && path === "/authorize")
+      return ACCOUNTS_ENABLED ? handleAuthorizeAccounts(req, res, url) : handleAuthorizeGet(req, res, url);
     if (req.method === "POST" && path === "/authorize") return handleAuthorizePost(req, res);
     if (req.method === "POST" && path === "/token") return handleToken(req, res);
+    if (ACCOUNTS_ENABLED) {
+      if (req.method === "GET" && path === "/idp/callback") return handleIdpCallback(req, res, url);
+      if (req.method === "GET" && path === "/device-link") return handleDeviceLink(req, res, url);
+      if (idp.isStub && req.method === "GET" && path === "/idp-stub/login") return handleStubLoginGet(res, url);
+      if (idp.isStub && req.method === "POST" && path === "/idp-stub/login") return handleStubLoginPost(req, res);
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not_found" }));
   } catch (err) {
