@@ -540,6 +540,19 @@ async function preflight() {
     }
   }
 
+  // FileVault — at-rest encryption baseline. Sinain keeps the knowledge graph,
+  // transcripts, and screen text on disk; full-disk encryption is what protects
+  // them if the device is lost/stolen. Warn if off; never block. (macOS-only
+  // launcher, so fdesetup is always available here.)
+  try {
+    const fv = execSync("fdesetup status", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    if (/FileVault is On/i.test(fv)) {
+      ok("FileVault on (data encrypted at rest)");
+    } else {
+      warn("FileVault is OFF — on-device data (knowledge graph, transcripts, screen text) is NOT encrypted at rest. Enable it: System Settings → Privacy & Security → FileVault.");
+    }
+  } catch { /* fdesetup unavailable / no perms — skip silently */ }
+
   // Port 9500
   const portFree = await isPortFree(9500);
   if (!portFree) {
