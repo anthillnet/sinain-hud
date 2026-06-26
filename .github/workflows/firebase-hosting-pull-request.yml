@@ -18,6 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pin Node 20: firebase-tools hits "Premature close" (undici keep-alive bug)
+      # under the runner-default Node 24, breaking auth/release intermittently.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

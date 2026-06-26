@@ -8,6 +8,7 @@ on:
       - 'firebase.json'
       - '.firebaserc'
       - 'RELEASE_VERSIONS.json'
+  workflow_dispatch:
 
 permissions:
   checks: write
@@ -18,6 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pin Node 20: firebase-tools hits "Premature close" (undici keep-alive bug)
+      # under the runner-default Node 24, breaking auth/release intermittently.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       # Render the DMG download CTA from RELEASE_VERSIONS.json (with a
       # fallback to the newest published macos-v* release) — the committed
       # URL in docs/index.html is never authoritative.
