@@ -15,6 +15,40 @@ class RegionEyePool {
     private var previewId: String?
     private weak var channel: FlutterMethodChannel?
 
+    /// Desired origin per eye (Cocoa, bottom-left). The glide loop eases each
+    /// panel toward its target every display frame, so the 4 fps stream of
+    /// position packets (scroll re-anchors, motion glides, re-detections)
+    /// renders as continuous ~60 fps motion instead of 250 ms steps.
+    private var targets: [String: NSPoint] = [:]
+    private var glideTimer: Timer?
+    private var lastGlideTick: TimeInterval = 0
+    /// Follow time constant: ~95% caught up in ~3·tau ≈ 90 ms. Small enough to
+    /// stay glued to scrolling content, large enough to erase the per-packet
+    /// step. Frame-rate independent (see glideTick).
+    private static let glideTau: Double = 0.03
+    /// Below this gap (points) an eye is considered arrived — snap and stop.
+    private static let glideSnap: CGFloat = 0.5
+    private static let glideHz: Double = 60.0
+
+    // Velocity feed-forward: an exponential follower always TRAILS a moving
+    // target by a fixed offset (it's perpetually catching up). We estimate each
+    // target's velocity from successive packets and aim the follower slightly
+    // AHEAD, so during steady scroll the eye sits on the content instead of
+    // lagging behind it. The lead decays when packets stop (scroll ends) and is
+    // reset on big jumps (re-detection teleports aren't velocity).
+    private var targetVel: [String: NSPoint] = [:]       // points/sec, smoothed
+    private var lastTargetTs: [String: TimeInterval] = [:]
+    /// Lead time ≈ the follow lag we're cancelling. Larger → more anticipation.
+    private static let glideLead: Double = 0.03
+    /// Velocity decays toward 0 with this constant once packets stop arriving,
+    /// so a stale estimate never leads the eye off into empty space.
+    private static let glideVelDecayTau: Double = 0.12
+    /// A single target move beyond this (points) is a re-detection jump, not
+    /// scroll — don't fold it into the velocity estimate.
+    private static let glideJumpReset: CGFloat = 200
+    /// Clamp the lead so a fast flick can't overshoot wildly.
+    private static let glideMaxLead: CGFloat = 60
+
     /// Mirrors the main HUD's privacy mode: true → invisible to screen
     /// capture; false (demo mode) → visible so recordings show the eyes.
     private var privacyEnabled = true
@@ -52,35 +86,123 @@ class RegionEyePool {
 
             let origin = Self.toMacOrigin(x: x, y: y, size: size, display: display)
             if let panel = panels[id] {
-                let target = NSRect(x: origin.x, y: origin.y, width: size, height: size)
-                let cur = panel.frame.origin
-                let dist = hypot(target.origin.x - cur.x, target.origin.y - cur.y)
-                // Small moves are scroll/typing re-anchors — keep them INSTANT so
-                // the eye stays glued to its content (animating here would make it
-                // trail the scroll). Larger moves are re-detections jumping the eye
-                // to a new spot — glide those so they don't teleport.
-                if dist > 48 {
-                    NSAnimationContext.runAnimationGroup { ctx in
-                        ctx.duration = 0.16
-                        ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                        panel.animator().setFrame(target, display: true)
-                    }
-                } else {
-                    panel.setFrame(target, display: true)
+                // Size is set immediately (it only changes on a settings tweak);
+                // the origin is handed to the glide loop, which eases the panel
+                // there continuously. No distance threshold — every move, scroll
+                // re-anchor or re-detection jump alike, follows the same critically
+                // damped path, so motion speed scales with distance and there's no
+                // snap/ease discontinuity.
+                if abs(panel.frame.width - CGFloat(size)) > 0.5 {
+                    panel.setFrame(NSRect(x: origin.x, y: origin.y, width: size, height: size),
+                                   display: true)
                 }
+                updateTargetVelocity(id: id, newTarget: origin)
+                targets[id] = origin
+                startGlideIfNeeded()
                 if let view = panel.contentView as? RegionEyeView {
                     view.state = state
                     if let accent = accent { view.accentColor = accent }
                 }
             } else {
                 panels[id] = makePanel(id: id, origin: origin, state: state, size: size, accent: accent)
+                targets[id] = origin
+                lastTargetTs[id] = ProcessInfo.processInfo.systemUptime
+                targetVel[id] = .zero
             }
         }
         for (id, panel) in panels where !seen.contains(id) {
             panel.orderOut(nil)
             panels.removeValue(forKey: id)
+            targets.removeValue(forKey: id)
+            targetVel.removeValue(forKey: id)
+            lastTargetTs.removeValue(forKey: id)
             if id == previewId { hidePreview() }
         }
+    }
+
+    /// Fold a new target position into the per-eye velocity estimate
+    /// (points/sec, EMA-smoothed). Reset on stale gaps, long pauses, or big
+    /// jumps — those are re-detection teleports, not scroll. Call BEFORE
+    /// updating targets[id] (it reads the previous target as the baseline).
+    private func updateTargetVelocity(id: String, newTarget: NSPoint) {
+        let now = ProcessInfo.processInfo.systemUptime
+        defer { lastTargetTs[id] = now }
+        guard let prev = targets[id], let prevTs = lastTargetTs[id] else {
+            targetVel[id] = .zero
+            return
+        }
+        let dt = now - prevTs
+        let move = hypot(newTarget.x - prev.x, newTarget.y - prev.y)
+        if dt <= 0.001 || dt > 0.5 || move > Self.glideJumpReset {
+            targetVel[id] = .zero
+            return
+        }
+        let vx = (newTarget.x - prev.x) / CGFloat(dt)
+        let vy = (newTarget.y - prev.y) / CGFloat(dt)
+        let blend: CGFloat = 0.5  // EMA — damps packet-to-packet noise
+        let old = targetVel[id] ?? .zero
+        targetVel[id] = NSPoint(x: old.x * (1 - blend) + vx * blend,
+                                y: old.y * (1 - blend) + vy * blend)
+    }
+
+    private func startGlideIfNeeded() {
+        if glideTimer != nil { return }
+        lastGlideTick = 0
+        let t = Timer(timeInterval: 1.0 / Self.glideHz, target: self,
+                      selector: #selector(glideTick), userInfo: nil, repeats: true)
+        // .common so the eye keeps gliding during scroll/drag event tracking,
+        // when the default run-loop mode is suspended.
+        RunLoop.main.add(t, forMode: .common)
+        glideTimer = t
+    }
+
+    private func stopGlide() {
+        glideTimer?.invalidate()
+        glideTimer = nil
+        lastGlideTick = 0
+    }
+
+    /// Ease every panel a frame-rate-independent fraction toward its target.
+    /// alpha = 1 − e^(−dt/tau) makes the follow identical whether the timer
+    /// fires at 60 or 120 Hz, or skips a beat under load. Stops itself once all
+    /// eyes have arrived so it costs nothing at rest.
+    @objc private func glideTick() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt = lastGlideTick > 0 ? min(now - lastGlideTick, 0.1) : (1.0 / Self.glideHz)
+        lastGlideTick = now
+        let alpha = CGFloat(1.0 - exp(-dt / Self.glideTau))
+        let velDecay = CGFloat(exp(-dt / Self.glideVelDecayTau))
+
+        var anyMoving = false
+        for (id, target) in targets {
+            guard let panel = panels[id] else { continue }
+
+            // Decay the velocity estimate so a stale value never leads the eye
+            // off into empty space once packets stop (scroll ended).
+            var vel = (targetVel[id] ?? .zero)
+            vel = NSPoint(x: vel.x * velDecay, y: vel.y * velDecay)
+            targetVel[id] = vel
+
+            // Aim slightly AHEAD of the target along its velocity (clamped), so
+            // a constant-velocity scroll doesn't leave the eye trailing.
+            let leadX = max(-Self.glideMaxLead, min(Self.glideMaxLead, vel.x * CGFloat(Self.glideLead)))
+            let leadY = max(-Self.glideMaxLead, min(Self.glideMaxLead, vel.y * CGFloat(Self.glideLead)))
+            let aim = NSPoint(x: target.x + leadX, y: target.y + leadY)
+
+            let cur = panel.frame.origin
+            let dx = aim.x - cur.x, dy = aim.y - cur.y
+            // Settle only when the aim is reached AND velocity has died — else
+            // we'd stop mid-scroll the instant the eye caught a transient aim.
+            if abs(dx) < Self.glideSnap && abs(dy) < Self.glideSnap
+                && abs(vel.x) < 1 && abs(vel.y) < 1 {
+                if cur.x != target.x || cur.y != target.y { panel.setFrameOrigin(target) }
+                targetVel[id] = .zero
+                continue
+            }
+            anyMoving = true
+            panel.setFrameOrigin(NSPoint(x: cur.x + dx * alpha, y: cur.y + dy * alpha))
+        }
+        if !anyMoving { stopGlide() }
     }
 
     func update(id: String, state: String) {
@@ -89,10 +211,14 @@ class RegionEyePool {
     }
 
     func clear() {
+        stopGlide()
         for (_, panel) in panels {
             panel.orderOut(nil)
         }
         panels.removeAll()
+        targets.removeAll()
+        targetVel.removeAll()
+        lastTargetTs.removeAll()
         hidePreview()
     }
 

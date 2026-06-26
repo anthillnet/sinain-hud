@@ -10,10 +10,19 @@
  * Memory directory: SINAIN_MEMORY_DIR (default: ~/.sinain/memory)
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, appendFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Promisified execFile — the distillation/curation pipelines run heavy Python
+// subprocesses (LLM distiller ~16s, integrator ~19s, recon, periodic scripts).
+// The previous execFileSync BLOCKED the Node event loop for the whole run, so
+// during a buffer-full distillation core stopped serving /sense, /motion and
+// WebSocket — freezing the overlay (region eyes stuck) for ~40s at a time.
+// Async execFile lets these run in a child process without stalling the loop.
+const execFileAsync = promisify(execFile);
 import type { FeedItem } from "../types.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import { log, warn, error, preview } from "../log.js";
@@ -106,7 +115,7 @@ export class LocalCurationService {
     if (this.curationTimer) return;
     const intervalMs = 30 * 60 * 1000; // 30 minutes
     this.curationTimer = setInterval(() => {
-      this.runCurationPipeline();
+      void this.runCurationPipeline();
     }, intervalMs);
     log(TAG, `periodic curation started (every 30 min)`);
   }
@@ -200,7 +209,7 @@ export class LocalCurationService {
         log(TAG, `including ${senseItems.length} screen context items in distillation`);
       }
 
-      if (this.runDistillation(transcript, sessionMeta)) {
+      if (await this.runDistillation(transcript, sessionMeta)) {
         this._lastDistilledTs = Date.now();
         log(TAG, `incremental distillation complete — ${itemCount} audio + ${senseItems.length} screen items processed`);
       }
@@ -246,7 +255,7 @@ export class LocalCurationService {
    * Distill a previously saved pending session (from a prior shutdown).
    * Called on startup — runs LLM distillation when there's no time pressure.
    */
-  distillPendingSession(): void {
+  async distillPendingSession(): Promise<void> {
     const pendingPath = resolve(this.memoryDir, "pending-session.json");
     if (!existsSync(pendingPath)) return;
 
@@ -271,7 +280,7 @@ export class LocalCurationService {
     // Remove pending file first so a crash here doesn't loop
     unlinkSync(pendingPath);
 
-    this.runDistillation(items, {
+    await this.runDistillation(items, {
       ts: data.ts,
       sessionKey: data.sessionKey || "local-session",
       durationMs: data.durationMs || 0,
@@ -314,7 +323,7 @@ export class LocalCurationService {
     }));
 
     // Step 1+2: Attempt LLM distillation (may be killed by tsx)
-    if (this.runDistillation(transcript, sessionMeta)) {
+    if (await this.runDistillation(transcript, sessionMeta)) {
       // Success — remove the pending file since we distilled in-place
       const pendingPath = resolve(this.memoryDir, "pending-session.json");
       try { unlinkSync(pendingPath); } catch { /* already gone */ }
@@ -326,7 +335,7 @@ export class LocalCurationService {
    * Run the actual distillation pipeline (session_distiller + knowledge_integrator).
    * Returns true if distillation succeeded.
    */
-  private runDistillation(transcript: any[], sessionMeta: { ts: string; sessionKey: string; durationMs: number }): boolean {
+  private async runDistillation(transcript: any[], sessionMeta: { ts: string; sessionKey: string; durationMs: number }): Promise<boolean> {
     if (!existsSync(resolve(this.scriptsDir, "session_distiller.py"))) {
       warn(TAG, "session_distiller.py not found — skipping distillation");
       this.writeDailyNotesFallback(transcript as any);
@@ -341,7 +350,7 @@ export class LocalCurationService {
       const dbPath = resolve(this.memoryDir, "knowledge-graph.db");
       if (existsSync(dbPath)) {
         try {
-          existingEntities = execFileSync("python3", [
+          existingEntities = (await execFileAsync("python3", [
             resolve(this.scriptsDir, "graph_query.py"),
             "--db", dbPath,
             "--top", "20",
@@ -350,7 +359,7 @@ export class LocalCurationService {
             timeout: 5_000,
             encoding: "utf-8",
             env: { ...process.env, PYTHONPATH: this.scriptsDir },
-          }).trim();
+          })).stdout.trim();
         } catch {
           // Non-fatal — distillation works without existing entities
         }
@@ -366,7 +375,7 @@ export class LocalCurationService {
       if (existingEntities) {
         distillerArgs.push("--existing-entities", existingEntities);
       }
-      const digestJson = execFileSync("python3", distillerArgs, {
+      const { stdout: digestJson } = await execFileAsync("python3", distillerArgs, {
         timeout: 30_000,
         encoding: "utf-8",
         env: { ...process.env, PYTHONPATH: this.scriptsDir },
@@ -390,7 +399,7 @@ export class LocalCurationService {
       digest._rawItems = transcript;
       digest._feedItemCount = transcript.length;
       try {
-        const integratorOutput = execFileSync("python3", [
+        const { stdout: integratorOutput } = await execFileAsync("python3", [
           resolve(this.scriptsDir, "knowledge_integrator.py"),
           "--memory-dir", this.memoryDir,
           "--digest", JSON.stringify(digest),
@@ -417,7 +426,7 @@ export class LocalCurationService {
       // disable); fail-open. See reconstruct.py.
       if ((process.env.SINAIN_RECON ?? "1") !== "0") {
         try {
-          const reconOut = execFileSync("python3", [
+          const { stdout: reconOut } = await execFileAsync("python3", [
             resolve(this.scriptsDir, "reconstruct.py"),
             "--memory-dir", this.memoryDir,
             "--transcript", JSON.stringify(transcript),
@@ -446,21 +455,21 @@ export class LocalCurationService {
    * insight_synthesizer output is parsed and, if it emits a suggestion or
    * insight, broadcast to HUD via the constructor's broadcast callback.
    */
-  private runCurationPipeline(): void {
+  private async runCurationPipeline(): Promise<void> {
     log(TAG, "running periodic curation...");
 
     const sessionSummary = "Periodic curation cycle";
     const currentTime = new Date().toISOString();
 
     // Step 1: signal_analyzer — detects actionable signals from session memory
-    this.runScript("signal_analyzer.py", [
+    await this.runScript("signal_analyzer.py", [
       "--memory-dir", this.memoryDir,
       "--session-summary", sessionSummary,
       "--current-time", currentTime,
     ]);
 
     // Step 2: insight_synthesizer — produces {suggestion, insight}, broadcast to HUD
-    const insightOut = this.runScript("insight_synthesizer.py", [
+    const insightOut = await this.runScript("insight_synthesizer.py", [
       "--memory-dir", this.memoryDir,
       "--session-summary", sessionSummary,
       "--current-time", currentTime,
@@ -469,21 +478,21 @@ export class LocalCurationService {
 
     // Steps 3-5: existing periodic pipeline (feedback → mining → curation)
     for (const script of ["feedback_analyzer.py", "memory_miner.py", "playbook_curator.py"]) {
-      this.runScript(script, ["--memory-dir", this.memoryDir]);
+      await this.runScript(script, ["--memory-dir", this.memoryDir]);
     }
 
     log(TAG, "periodic curation complete");
   }
 
   /** Run a single curation script. Returns captured stdout when requested, else empty. */
-  private runScript(script: string, args: string[], captureStdout = false): string {
+  private async runScript(script: string, args: string[], captureStdout = false): Promise<string> {
     const scriptPath = resolve(this.scriptsDir, script);
     if (!existsSync(scriptPath)) {
       warn(TAG, `${script} not found — skipping`);
       return "";
     }
     try {
-      const stdout = execFileSync("python3", [scriptPath, ...args], {
+      const { stdout } = await execFileAsync("python3", [scriptPath, ...args], {
         timeout: 60_000,
         encoding: "utf-8",
         env: { ...process.env, PYTHONPATH: this.scriptsDir },

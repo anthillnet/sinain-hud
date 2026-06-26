@@ -53,7 +53,10 @@ class MotionEstimator:
         pc = prev[y0:y1, x0:x1]
         cc = gray[y0:y1, x0:x1]
         try:
-            shift, _err, _ = phase_cross_correlation(pc, cc, upsample_factor=1)
+            # upsample_factor=2 → half-pixel scroll precision. The overlay
+            # follower interpolates between packets, so sub-pixel dx/dy gives it
+            # a smoother target track during slow/precise scrolling.
+            shift, _err, _ = phase_cross_correlation(pc, cc, upsample_factor=2)
         except Exception:
             return None
         # phase_cross_correlation(ref, moving) returns [-dy, -dx] of content

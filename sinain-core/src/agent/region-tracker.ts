@@ -27,6 +27,12 @@ interface TrackedRegion {
    *  doesn't upgrade it to a quality description within PROVISIONAL_TTL_MS, it
    *  was SLM noise the analyzer declined to ratify → expire it. */
   provisionalSinceTs?: number;
+  /** Last sense-motion applied to this eye: {ts, |dx|+|dy|}. Drives the
+   *  complementary anchor fusion — while motion is recent/active the (current)
+   *  glide owns the eye's position and the OCR re-anchor (which is ~OCR-latency
+   *  stale, so it points where the content WAS) is deferred; once motion
+   *  settles, OCR snaps the eye to ground truth, correcting glide drift. */
+  recentMotion?: { ts: number; speed: number };
 }
 
 /** True if two [x,y,w,h] rects overlap (touching edges don't count). */
@@ -85,17 +91,52 @@ function anchorByText(issue: string, screen: ScreenEvent[]): ScreenEvent | undef
   return bestScore >= 1 ? best : undefined;
 }
 
+/** Significant issue tokens (≥3 chars) for OCR line/phrase matching. */
+function issueTokens(issue: string): string[] {
+  return issue.toLowerCase().split(/[^a-z0-9_а-яё]+/i).filter(t => t.length >= 3);
+}
+
+/** Narrow a whole-line bbox to just the span of the matched issue tokens by
+ *  interpolating their character offsets across the line width. The overlay
+ *  anchors the eye at the box's top-right, so a full-line box drops it at the
+ *  line's far end — narrowing lands it ON the relevant phrase instead.
+ *  Proportional-font approximation (char position ≈ fractional pixel position);
+ *  precise enough to pick the phrase's region of the line. Returns the full line
+ *  bbox unchanged when no token span is found (e.g. a paraphrased issue whose
+ *  words aren't verbatim on the line) — never worse than line-level anchoring. */
+function narrowToPhrase(
+  lineText: string,
+  lineBbox: [number, number, number, number],
+  tokens: string[],
+): [number, number, number, number] {
+  const [x, y, w, h] = lineBbox;
+  const lt = lineText.toLowerCase();
+  const len = lt.length;
+  if (len === 0 || w <= 0 || tokens.length === 0) return lineBbox;
+  let lo = Infinity, hi = -Infinity;
+  for (const t of tokens) {
+    const i = lt.indexOf(t);
+    if (i >= 0) { lo = Math.min(lo, i); hi = Math.max(hi, i + t.length); }
+  }
+  if (!isFinite(lo) || hi <= lo) return lineBbox;
+  // Half-char pad each side so the eye isn't clipped to the glyph edge.
+  const startFrac = Math.max(0, (lo - 0.5) / len);
+  const endFrac = Math.min(1, (hi + 0.5) / len);
+  return [x + startFrac * w, y, Math.max(1, (endFrac - startFrac) * w), h];
+}
+
 /** Refine the anchor from the event's change-region bbox to the exact OCR
- *  LINE matching the issue text. The change-region can span half a screen —
- *  an eye at its corner sits nowhere near the problem. Line boxes come from
- *  Vision OCR (full-frame pixel coords, same space as imageBbox). */
+ *  LINE matching the issue text, then narrow to the matched phrase within it.
+ *  The change-region can span half a screen — an eye at its corner sits nowhere
+ *  near the problem. Line boxes come from Vision OCR (full-frame pixel coords,
+ *  same space as imageBbox). */
 function refineToLine(
   issue: string,
   src: ScreenEvent,
 ): { bbox: [number, number, number, number]; text: string } | undefined {
   const lines = src.ocrLines;
   if (!lines?.length) return undefined;
-  const tokens = issue.toLowerCase().split(/[^a-z0-9_а-яё]+/i).filter(t => t.length >= 3);
+  const tokens = issueTokens(issue);
   if (tokens.length === 0) return undefined;
   let best: { score: number; bbox: [number, number, number, number]; text: string } | undefined;
   for (const l of lines) {
@@ -108,7 +149,10 @@ function refineToLine(
   }
   // Require a solid match: at least 2 tokens, or all of them for short issues.
   const need = Math.min(2, tokens.length);
-  return best && best.score >= need ? { bbox: best.bbox, text: best.text } : undefined;
+  if (!best || best.score < need) return undefined;
+  // text stays the FULL line (re-anchoring finds it verbatim across frames);
+  // the bbox narrows to the matched phrase so the eye lands on it.
+  return { bbox: narrowToPhrase(best.text, best.bbox, tokens), text: best.text };
 }
 
 /** Find a previously-anchored OCR line verbatim on a fresh frame, returning its
@@ -119,14 +163,16 @@ function refineToLine(
 function findLineByText(
   anchorText: string,
   frame: ScreenEvent,
-): [number, number, number, number] | undefined {
+): { bbox: [number, number, number, number]; text: string } | undefined {
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   const target = norm(anchorText);
   if (target.length < 4) return undefined; // too short to match safely
   for (const l of frame.ocrLines ?? []) {
     if (!Array.isArray(l.bbox) || l.bbox.length !== 4 || !l.text) continue;
     const lt = norm(l.text);
-    if (lt === target || lt.includes(target) || target.includes(lt)) return l.bbox;
+    if (lt === target || lt.includes(target) || target.includes(lt)) {
+      return { bbox: l.bbox, text: l.text };
+    }
   }
   return undefined;
 }
@@ -175,6 +221,11 @@ export class RegionTracker {
   /** Min single-axis bbox shift (px) before a local re-anchor re-broadcasts —
    *  suppresses sub-pixel OCR jitter while still following real scroll/typing. */
   private static readonly BBOX_MOVE_EPSILON = 4;
+  /** Anchor fusion: a sense-motion newer than this (ms) with speed above
+   *  MOTION_MIN_SPEED counts as "actively scrolling" — the motion glide owns
+   *  the eye position and the stale OCR re-anchor is deferred until it settles. */
+  private static readonly MOTION_ACTIVE_MS = 250;
+  private static readonly MOTION_MIN_SPEED = 2;
   /** A provisional (SLM placeholder) eye the main lane hasn't upgraded within
    *  this long is dropped — ~2-3 analyzer ticks, generous enough to ratify a
    *  real region, short enough that SLM over-flags don't linger. */
@@ -567,6 +618,24 @@ export class RegionTracker {
    * Manual (user-pinned), foreign-app, and other-display eyes are left
    * untouched. Returns the changed set to broadcast, or null.
    */
+  /** Fuse the OCR-measured line position with the eye's current (motion-glided)
+   *  position. While the eye is actively scrolling, the OCR frame is ~OCR-
+   *  latency stale — trusting it would yank the eye backward to where the line
+   *  WAS — so the current motion-owned position is kept. Once motion settles,
+   *  the OCR measurement is ground truth and wins, correcting any glide drift. */
+  private fuseAnchor(
+    t: TrackedRegion,
+    ocrBbox: [number, number, number, number],
+  ): [number, number, number, number] {
+    const cur = t.region.bbox;
+    if (!cur) return ocrBbox; // no prior position — adopt the OCR measurement
+    const rm = t.recentMotion;
+    const scrolling = !!rm
+      && (Date.now() - rm.ts) < RegionTracker.MOTION_ACTIVE_MS
+      && rm.speed > RegionTracker.MOTION_MIN_SPEED;
+    return scrolling ? cur : ocrBbox;
+  }
+
   reanchorLive(frame: ScreenEvent): RegionHighlight[] | null {
     if (!frame.ocrLines?.length) return null; // need line boxes to re-anchor
     const frameApp = (frame.meta.app || "").toLowerCase().trim();
@@ -583,11 +652,14 @@ export class RegionTracker {
       if (regionApp && regionApp !== frameApp) continue; // foreign — archiveForeign owns it
 
       // Track the verbatim anchored line first (robust to the issue being a
-      // paraphrase that no longer token-matches); fall back to issue tokens,
-      // refreshing anchorText when that path finds the line.
-      let newBbox = t.region.anchorText
-        ? findLineByText(t.region.anchorText, frame)
-        : undefined;
+      // paraphrase that no longer token-matches), then re-narrow to the issue's
+      // phrase within it so the eye stays on the words, not the line's far end;
+      // fall back to issue tokens, refreshing anchorText when that path finds it.
+      let newBbox: [number, number, number, number] | undefined;
+      if (t.region.anchorText) {
+        const m = findLineByText(t.region.anchorText, frame);
+        if (m) newBbox = narrowToPhrase(m.text, m.bbox, issueTokens(t.region.issue));
+      }
       if (!newBbox) {
         const line = refineToLine(t.region.issue, frame);
         if (line) { newBbox = line.bbox; t.region.anchorText = line.text; }
@@ -595,8 +667,12 @@ export class RegionTracker {
       if (newBbox) {
         t.localMisses = 0;
         // A1: slide to the content's current position (above jitter threshold).
-        if (!t.region.bbox || bboxShift(t.region.bbox, newBbox) > RegionTracker.BBOX_MOVE_EPSILON) {
-          t.region.bbox = newBbox;
+        // Complementary fusion: mid-scroll the OCR frame is stale, so the
+        // motion glide (current) keeps the position and this correction waits;
+        // once settled, snap to OCR ground truth (fixes glide drift).
+        const fused = this.fuseAnchor(t, newBbox);
+        if (!t.region.bbox || bboxShift(t.region.bbox, fused) > RegionTracker.BBOX_MOVE_EPSILON) {
+          t.region.bbox = fused;
           if (frameSize) t.region.frameSize = frameSize;
           changed = true;
         }
@@ -682,6 +758,7 @@ export class RegionTracker {
         }
         x = nx; y = ny;
         t.region.bbox = [x, y, w, h];
+        t.recentMotion = { ts: Date.now(), speed: Math.abs(dx) + Math.abs(dy) };
         changed = true;
       }
 
