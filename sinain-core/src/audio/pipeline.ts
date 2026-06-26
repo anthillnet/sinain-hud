@@ -67,6 +67,19 @@ function calculateRmsEnergy(pcmData: Buffer): number {
  */
 const PREALLOC_BUFFER_SIZE = 320 * 1024;
 
+// ── VAD endpointing ──
+// Segment audio on SILENCE boundaries (end of an utterance) instead of a fixed
+// wall-clock timer — so chunks are cut at natural pauses, never mid-word. A
+// frame-level energy VAD with an adaptive noise floor decides speech/silence;
+// after speech, a run of silence ≥ hangover ends the utterance and emits it.
+// Pure JS (no model dependency). Tunable via env.
+const VAD_FRAME_MS = 30;                                                        // analysis frame size
+const VAD_HANGOVER_MS = Number(process.env.AUDIO_VAD_HANGOVER_MS) || 700;       // trailing silence that ends an utterance
+const VAD_MAX_SEGMENT_MS = Number(process.env.AUDIO_MAX_SEGMENT_MS) || 18000;   // force-cut a long monologue
+const VAD_MIN_SEGMENT_MS = Number(process.env.AUDIO_MIN_SEGMENT_MS) || 300;     // drop blips (clicks / coughs)
+const VAD_PREROLL_MS = Number(process.env.AUDIO_PREROLL_MS) || 300;             // lead-in kept before speech onset
+const VAD_SPEECH_FACTOR = Number(process.env.AUDIO_VAD_SPEECH_FACTOR) || 3.5;   // speech = energy > noiseFloor × this
+
 export class AudioPipeline extends EventEmitter {
   private config: AudioPipelineConfig;
   private audioSourceTag: AudioSourceTag;
@@ -75,8 +88,18 @@ export class AudioPipeline extends EventEmitter {
   // Pre-allocated buffer to reduce GC pressure (vs Buffer.concat per chunk)
   private preallocBuffer: Buffer = Buffer.allocUnsafe(PREALLOC_BUFFER_SIZE);
   private bufferWriteOffset: number = 0;
-  private chunkTimer: ReturnType<typeof setInterval> | null = null;
   private running: boolean = false;
+
+  // ── VAD endpointing state ──
+  private gainMult: number = 1;                         // precomputed from gainDb
+  private frameBytes: number = 960;                     // VAD_FRAME_MS at the configured rate
+  private preRollBytes: number = 9600;                  // VAD_PREROLL_MS of audio
+  private preRoll: Buffer = Buffer.allocUnsafe(9600);   // sliding lead-in ring
+  private preRollLen: number = 0;
+  private frameLeftover: Buffer = Buffer.alloc(0);      // partial frame carried between data events
+  private inUtterance: boolean = false;
+  private trailingSilenceMs: number = 0;
+  private noiseFloor: number = 0;                       // adaptive energy floor
   private silentChunks: number = 0;
   private speechChunks: number = 0;
   private errorCount: number = 0;
@@ -113,9 +136,13 @@ export class AudioPipeline extends EventEmitter {
     }
 
     this.muted = false;
-    this.chunkTimer = setInterval(() => {
-      this.emitChunk();
-    }, this.config.chunkDurationMs);
+    // Precompute VAD framing for the configured rate/channels + gain.
+    this.gainMult = this.config.gainDb ? Math.pow(10, this.config.gainDb / 20) : 1;
+    const bytesPerMs = (this.config.sampleRate * this.config.channels * 2) / 1000;
+    this.frameBytes = Math.max(2, Math.round(bytesPerMs * VAD_FRAME_MS));
+    this.preRollBytes = Math.max(this.frameBytes, Math.round(bytesPerMs * VAD_PREROLL_MS));
+    this.preRoll = Buffer.allocUnsafe(this.preRollBytes);
+    this.resetVadState();
 
     this.running = true;
     this.emit("started");
@@ -129,11 +156,6 @@ export class AudioPipeline extends EventEmitter {
     this.running = false;
     this.muted = false;
 
-    if (this.chunkTimer) {
-      clearInterval(this.chunkTimer);
-      this.chunkTimer = null;
-    }
-
     if (this.process) {
       this.process.removeAllListeners();
       this.process.kill("SIGTERM");
@@ -144,11 +166,11 @@ export class AudioPipeline extends EventEmitter {
       this.process = null;
     }
 
-    if (this.bufferWriteOffset > 0) {
-      this.emitChunk();
+    if (this.inUtterance) {
+      this.flushUtterance(true);  // emit whatever speech was in flight
     }
 
-    this.bufferWriteOffset = 0;
+    this.resetVadState();
     this.emit("stopped");
     log(TAG, "capture stopped");
   }
@@ -160,11 +182,7 @@ export class AudioPipeline extends EventEmitter {
   mute(): void {
     if (!this.running || this.muted) return;
     this.muted = true;
-    if (this.chunkTimer) {
-      clearInterval(this.chunkTimer);
-      this.chunkTimer = null;
-    }
-    this.bufferWriteOffset = 0;
+    this.resetVadState();
     log(TAG, `muted (${this.config.captureCommand} process still running)`);
     this.emit("muted");
   }
@@ -172,9 +190,6 @@ export class AudioPipeline extends EventEmitter {
   unmute(): void {
     if (!this.running || !this.muted) return;
     this.muted = false;
-    this.chunkTimer = setInterval(() => {
-      this.emitChunk();
-    }, this.config.chunkDurationMs);
     log(TAG, "unmuted");
     this.emit("unmuted");
   }
@@ -228,13 +243,13 @@ export class AudioPipeline extends EventEmitter {
           headerSkipped = true;
           headerBuf = Buffer.alloc(0);
           if (remaining.length > 0) {
-            this.writeToBuffer(remaining);
+            this.feedAudio(remaining);
           }
         }
         return;
       }
 
-      this.writeToBuffer(data);
+      this.feedAudio(data);
     });
 
     proc.stderr?.on("data", (data: Buffer) => {
@@ -342,55 +357,139 @@ export class AudioPipeline extends EventEmitter {
     this.profiler?.gauge("audio.accumulatorKb", Math.round(this.bufferWriteOffset / 1024));
   }
 
-  // ── Chunk emission ──
+  // ── VAD endpointing ──
 
-  private emitChunk(): void {
-    if (this.bufferWriteOffset === 0) return;
-
-    // Extract PCM data from pre-allocated buffer (no concat allocation)
-    const pcmData = this.preallocBuffer.subarray(0, this.bufferWriteOffset);
+  private resetVadState(): void {
     this.bufferWriteOffset = 0;
+    this.preRollLen = 0;
+    this.frameLeftover = Buffer.alloc(0);
+    this.inUtterance = false;
+    this.trailingSilenceMs = 0;
+    this.noiseFloor = 0;
+  }
 
-    const alignedLength = pcmData.length - (pcmData.length % 2);
-    // Copy aligned portion to new buffer since we'll reuse preallocBuffer
-    const alignedPcm = Buffer.from(pcmData.subarray(0, alignedLength));
+  private bytesToMs(bytes: number): number {
+    const bytesPerSample = 2 * this.config.channels;
+    return Math.round((bytes / bytesPerSample / this.config.sampleRate) * 1000);
+  }
 
-    if (alignedPcm.length === 0) return;
-
-    // Apply gain (amplify quiet ScreenCaptureKit audio before VAD + transcription)
-    if (this.config.gainDb !== 0) {
-      const multiplier = Math.pow(10, this.config.gainDb / 20);
-      for (let i = 0; i < alignedPcm.length - 1; i += 2) {
-        const sample = alignedPcm.readInt16LE(i);
-        const amplified = Math.max(-32768, Math.min(32767, Math.round(sample * multiplier)));
-        alignedPcm.writeInt16LE(amplified, i);
+  /** Apply gain in-place and return the frame's RMS energy (0..1). */
+  private gainAndEnergy(frame: Buffer): number {
+    const n = frame.length >> 1;
+    if (n === 0) return 0;
+    const mult = this.gainMult;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const off = i << 1;
+      let s = frame.readInt16LE(off);
+      if (mult !== 1) {
+        s = Math.max(-32768, Math.min(32767, Math.round(s * mult)));
+        frame.writeInt16LE(s, off);
       }
+      const norm = s / 32768;
+      sum += norm * norm;
     }
+    return Math.sqrt(sum / n);
+  }
 
-    const energy = calculateRmsEnergy(alignedPcm);
-    this.profiler?.gauge("audio.lastChunkKb", Math.round(alignedPcm.length / 1024));
+  /** Slide a frame into the pre-roll ring (last VAD_PREROLL_MS of audio). */
+  private pushPreRoll(frame: Buffer): void {
+    const fb = frame.length;
+    if (fb >= this.preRollBytes) {
+      frame.copy(this.preRoll, 0, fb - this.preRollBytes);
+      this.preRollLen = this.preRollBytes;
+      return;
+    }
+    if (this.preRollLen + fb > this.preRollBytes) {
+      const drop = this.preRollLen + fb - this.preRollBytes;
+      this.preRoll.copy(this.preRoll, 0, drop, this.preRollLen);  // shift oldest out
+      this.preRollLen -= drop;
+    }
+    frame.copy(this.preRoll, this.preRollLen);
+    this.preRollLen += fb;
+  }
 
-    if (this.config.vadEnabled && energy < this.config.vadThreshold) {
+  /**
+   * Feed raw PCM through the VAD state machine. Frames are classified
+   * speech/silence against an adaptive noise floor; speech accumulates into the
+   * current utterance (with a pre-roll lead-in), and a hangover of silence — or
+   * the max-segment cap — flushes it as a chunk. Replaces fixed-timer chunking.
+   */
+  private feedAudio(data: Buffer): void {
+    if (!this.running || this.muted) return;
+    const buf = this.frameLeftover.length ? Buffer.concat([this.frameLeftover, data]) : data;
+    const fb = this.frameBytes;
+    const nFrames = Math.floor(buf.length / fb);
+    this.frameLeftover = Buffer.from(buf.subarray(nFrames * fb)); // carry partial frame
+    for (let f = 0; f < nFrames; f++) {
+      const frame = buf.subarray(f * fb, (f + 1) * fb);
+      const energy = this.gainAndEnergy(frame); // mutates frame to apply gain
+      // Track the noise floor as the running MINIMUM energy: snap down instantly
+      // to any new quiet (true silence/room tone), creep up slowly so it adapts
+      // to rising ambient. This works at any absolute level — speech then reads
+      // as energy a few× above the floor, independent of gain/source loudness.
+      if (this.noiseFloor === 0 || energy < this.noiseFloor) {
+        this.noiseFloor = energy;
+      } else {
+        this.noiseFloor += (energy - this.noiseFloor) * 0.0005;
+      }
+      // Speech = clearly above the floor, but never below the configured minimum.
+      const threshold = Math.max(this.config.vadThreshold, this.noiseFloor * VAD_SPEECH_FACTOR);
+      const isSpeech = !this.config.vadEnabled || energy >= threshold;
+      this.processFrame(frame, isSpeech);
+    }
+  }
+
+  private processFrame(frame: Buffer, isSpeech: boolean): void {
+    if (isSpeech) {
+      if (!this.inUtterance) {
+        this.inUtterance = true;
+        this.trailingSilenceMs = 0;
+        // Prepend the pre-roll so the utterance onset isn't clipped.
+        if (this.preRollLen > 0) this.writeToBuffer(this.preRoll.subarray(0, this.preRollLen));
+        this.preRollLen = 0;
+      }
+      this.writeToBuffer(frame);
+      this.trailingSilenceMs = 0;
+    } else if (this.inUtterance) {
+      this.writeToBuffer(frame); // keep short trailing silence inside the segment
+      this.trailingSilenceMs += VAD_FRAME_MS;
+      if (this.trailingSilenceMs >= VAD_HANGOVER_MS) {
+        this.flushUtterance();
+        return;
+      }
+    } else {
       this.silentChunks++;
-      this.profiler?.gauge("audio.silentChunks", this.silentChunks);
-      debug(TAG, `VAD: silent (energy=${energy.toFixed(4)} < ${this.config.vadThreshold}), ${this.silentChunks} silent chunk(s)`);
+      this.pushPreRoll(frame);
+    }
+    if (this.inUtterance && this.bytesToMs(this.bufferWriteOffset) >= VAD_MAX_SEGMENT_MS) {
+      this.flushUtterance(true);
+    }
+  }
+
+  /** Emit the accumulated utterance as a WAV chunk (PCM is already gain-applied). */
+  private flushUtterance(forced = false): void {
+    const bytes = this.bufferWriteOffset;
+    this.bufferWriteOffset = 0;
+    this.inUtterance = false;
+    this.trailingSilenceMs = 0;
+    const aligned = bytes - (bytes % 2);
+    if (aligned === 0) return;
+
+    const durationMs = this.bytesToMs(aligned);
+    if (durationMs < VAD_MIN_SEGMENT_MS) {
+      debug(TAG, `VAD: dropping short utterance (${durationMs}ms)`);
       return;
     }
 
-    if (this.silentChunks > 0) {
-      debug(TAG, `VAD: speech detected after ${this.silentChunks} silent chunk(s) (energy=${energy.toFixed(4)})`);
-      this.silentChunks = 0;
-    }
-
+    const pcm = Buffer.from(this.preallocBuffer.subarray(0, aligned));
+    const energy = calculateRmsEnergy(pcm);
     this.speechChunks++;
     this.profiler?.gauge("audio.speechChunks", this.speechChunks);
+    this.profiler?.gauge("audio.lastChunkKb", Math.round(pcm.length / 1024));
 
-    const wavHeader = createWavHeader(alignedPcm.length, this.config.sampleRate, this.config.channels, 16);
-    const wavBuffer = Buffer.concat([wavHeader, alignedPcm]);
-
-    const bytesPerSample = 2 * this.config.channels;
-    const sampleCount = alignedPcm.length / bytesPerSample;
-    const durationMs = Math.round((sampleCount / this.config.sampleRate) * 1000);
+    const wavHeader = createWavHeader(pcm.length, this.config.sampleRate, this.config.channels, 16);
+    const wavBuffer = Buffer.concat([wavHeader, pcm]);
 
     const chunk: AudioChunk = {
       buffer: wavBuffer,
@@ -401,7 +500,7 @@ export class AudioPipeline extends EventEmitter {
       audioSource: this.audioSourceTag,
     };
 
-    debug(TAG, `chunk: ${durationMs}ms, ${wavBuffer.length} bytes, energy=${energy.toFixed(4)}`);
+    debug(TAG, `utterance: ${durationMs}ms${forced ? " (max-len cut)" : ""}, ${wavBuffer.length} bytes, energy=${energy.toFixed(4)}`);
     this.emit("chunk", chunk);
   }
 }
