@@ -8,6 +8,7 @@ import path from "path";
 import os from "os";
 import net from "net";
 import readline from "readline";
+import { ensureMounted as mountEncryptedStore, detach as detachEncryptedStore } from "./encrypted-store.js";
 
 // SECURITY: owner-only for everything this launcher and its spawned services
 // create (on-device user data must not be world/group-readable). Set first.
@@ -79,6 +80,15 @@ async function main() {
     process.exit(0);
   }
   // ── End platform guard ────────────────────────────────────────────────────
+
+  // SECURITY: if the opt-in encrypted store is enabled, mount it BEFORE anything
+  // writes to ~/.sinain/memory. Fail-closed — abort rather than write plaintext.
+  try {
+    mountEncryptedStore();
+  } catch (e) {
+    console.error(`\n  \x1b[31m✗ encrypted store: ${e.message}\x1b[0m\n`);
+    process.exit(1);
+  }
 
   setupSignalHandlers();
 
@@ -937,6 +947,10 @@ function setupSignalHandlers() {
       try {
         execSync("lsof -i :9500 -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null", { stdio: "pipe" });
       } catch { /* ok */ }
+
+      // Unmount the encrypted store last — after core (which held the DB open)
+      // is killed, so the volume isn't busy. No-op unless the store is enabled.
+      try { detachEncryptedStore(); } catch { /* best-effort */ }
 
       if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
       console.log(`${BOLD}[start]${RESET} All services stopped.`);

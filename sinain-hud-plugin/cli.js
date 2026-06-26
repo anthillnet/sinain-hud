@@ -5,6 +5,7 @@ import os from "os";
 import fs from "fs";
 import path from "path";
 import { checkForUpdate } from "./self-update.js";
+import { detach as detachEncryptedStore } from "./encrypted-store.js";
 
 const cmd = process.argv[2];
 const IS_WINDOWS = os.platform() === "win32";
@@ -166,6 +167,9 @@ async function stopServices() {
   if (fs.existsSync(pidFile)) {
     fs.unlinkSync(pidFile);
   }
+
+  // Unmount the encrypted store after core is stopped (no-op unless enabled).
+  try { detachEncryptedStore(); } catch { /* best-effort */ }
 
   if (killed) {
     console.log("sinain services stopped.");
