@@ -117,9 +117,12 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         run: ./tools/sck-capture/build.sh
 
-      - name: Build whisper-cli (optional, local STT)
+      - name: Build whisper binaries (cli + server, local STT)
         if: steps.preflight.outputs.ready == 'true'
-        continue-on-error: true   # stage-backend.sh tolerates a missing binary
+        continue-on-error: true   # stage-backend.sh tolerates missing binaries
+        # Builds self-contained whisper-cli + whisper-server (model-resident
+        # fast path). Done here in CI rather than committing the ~3.6MB server
+        # binary; stage-backend.sh degrades to the CLI if this step is skipped.
         run: ./tools/whisper/build-whisper.sh
 
       # ── Stage backend + assemble the .app ───────────────────────────────────
