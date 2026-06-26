@@ -1,5 +1,5 @@
 import type { SenseEvent } from "../types.js";
-import { levelFor } from "../privacy/index.js";
+import { levelFor, applyLevel } from "../privacy/index.js";
 
 /**
  * Delta change from semantic layer
@@ -121,6 +121,28 @@ export class SenseBuffer {
     } catch {
       delete event.imageData;
       delete event.imageBbox;
+    }
+
+    // Privacy: apply the screen_ocr / window_titles local_buffer level to text
+    // on ingestion — mirrors the audio_transcript handling in index.ts, so the
+    // in-memory buffer (and everything that later reads OCR from it: analyzer,
+    // SITUATION.md, daily notes) never holds more than the configured level.
+    // Fail CLOSED — redact rather than retain raw text if privacy isn't ready.
+    try {
+      const ocrLevel = levelFor("screen_ocr", "local_buffer");
+      if (event.ocr) event.ocr = applyLevel(event.ocr, ocrLevel, "ocr");
+      if (event.ocrLines) {
+        event.ocrLines = event.ocrLines
+          .map(l => ({ ...l, text: applyLevel(l.text, ocrLevel, "ocr") }))
+          .filter(l => l.text !== "");
+      }
+      if (event.meta?.windowTitle) {
+        event.meta.windowTitle = applyLevel(event.meta.windowTitle, levelFor("window_titles", "local_buffer"), "titles");
+      }
+    } catch {
+      if (event.ocr) event.ocr = "";
+      if (event.ocrLines) event.ocrLines = [];
+      if (event.meta?.windowTitle) event.meta.windowTitle = "";
     }
 
     // Track activity type
