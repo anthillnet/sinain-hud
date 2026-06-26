@@ -33,6 +33,13 @@ export class TranscriptionService extends EventEmitter {
   private readonly MAX_CONCURRENT = 5;
   private localBackend: TranscriptionBackend | null = null;
 
+  // Rolling context (A2): the last emitted transcript per audio source, used to
+  // prompt whisper for cross-segment continuity. Per-source so system/mic don't
+  // contaminate each other; age-gated so a pause doesn't carry stale context.
+  private lastBySource = new Map<string, { text: string; ts: number }>();
+  private readonly useContext = process.env.TRANSCRIPTION_CONTEXT !== "false";
+  private readonly contextMaxAgeMs = Number(process.env.TRANSCRIPTION_CONTEXT_MAX_AGE_MS) || 12_000;
+
   private latencies: number[] = [];
   private cumulativeLatencies: number[] = [];
   private latencyStatsTimer: ReturnType<typeof setInterval> | null = null;
@@ -128,9 +135,23 @@ export class TranscriptionService extends EventEmitter {
 
   // ── Local whisper backend ──
 
+  /** Rolling-context prompt for this chunk: the tail of the previous same-source
+   *  transcript, only if recent enough to still be relevant. */
+  private buildContextPrompt(chunk: AudioChunk): string | undefined {
+    if (!this.useContext) return undefined;
+    const prev = this.lastBySource.get(chunk.audioSource || "system");
+    if (!prev || Date.now() - prev.ts > this.contextMaxAgeMs) return undefined;
+    const tail = prev.text.slice(-140).trim();
+    return tail.length >= 8 ? tail : undefined;
+  }
+
+  private rememberContext(chunk: AudioChunk, text: string): void {
+    if (this.useContext) this.lastBySource.set(chunk.audioSource || "system", { text, ts: Date.now() });
+  }
+
   private async transcribeViaLocal(chunk: AudioChunk): Promise<void> {
     const startTs = Date.now();
-    const result = await this.localBackend!.transcribe(chunk);
+    const result = await this.localBackend!.transcribe(chunk, this.buildContextPrompt(chunk));
     const elapsed = Date.now() - startTs;
 
     this.latencies.push(elapsed);
@@ -153,6 +174,7 @@ export class TranscriptionService extends EventEmitter {
       return;
     }
 
+    this.rememberContext(chunk, text);
     this.emit("transcript", result);
   }
 

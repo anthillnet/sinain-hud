@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { AudioChunk, TranscriptResult } from "../types.js";
 import { log, warn, error, debug } from "../log.js";
-import { LocalTranscriptionBackend, type LocalTranscriptionConfig, type TranscriptionBackend } from "./transcription-local.js";
+import { LocalTranscriptionBackend, composeWhisperPrompt, type LocalTranscriptionConfig, type TranscriptionBackend } from "./transcription-local.js";
 
 const TAG = "transcribe-server";
 
@@ -130,10 +130,10 @@ export class WhisperServerBackend implements TranscriptionBackend {
     return false;
   }
 
-  async transcribe(chunk: AudioChunk): Promise<TranscriptResult | null> {
+  async transcribe(chunk: AudioChunk, contextPrompt?: string): Promise<TranscriptResult | null> {
     if (this.destroyed) return null;
     const up = await this.ensureStarted();
-    if (!up) return this.fallback!.transcribe(chunk);
+    if (!up) return this.fallback!.transcribe(chunk, contextPrompt);
 
     const startTs = Date.now();
     try {
@@ -141,10 +141,9 @@ export class WhisperServerBackend implements TranscriptionBackend {
       form.append("file", new Blob([new Uint8Array(chunk.buffer)], { type: "audio/wav" }), "chunk.wav");
       form.append("response_format", "json");
       form.append("language", this.lang);
-      // Hotword/entity biasing — same intent as whisper-cli's --prompt.
-      if (this.config.initialPrompt && this.config.initialPrompt.trim()) {
-        form.append("prompt", this.config.initialPrompt.slice(0, 200));
-      }
+      // Hotwords + recent rolling context (A2) — same intent as whisper-cli --prompt.
+      const prompt = composeWhisperPrompt(this.config.initialPrompt, contextPrompt);
+      if (prompt) form.append("prompt", prompt);
 
       const res = await fetch(`${this.baseUrl}${process.env.LOCAL_WHISPER_SERVER_PATH || "/inference"}`, {
         method: "POST",

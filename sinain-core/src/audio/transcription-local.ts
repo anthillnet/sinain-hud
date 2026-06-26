@@ -27,10 +27,21 @@ export interface LocalTranscriptionConfig {
 }
 
 /** Common shape for local transcription backends (CLI spawn or persistent
- *  server) so TranscriptionService can hold either behind one field. */
+ *  server) so TranscriptionService can hold either behind one field.
+ *  contextPrompt is the recent rolling transcript (A2) — passed as whisper's
+ *  prompt for cross-segment continuity. */
 export interface TranscriptionBackend {
-  transcribe(chunk: AudioChunk): Promise<TranscriptResult | null>;
+  transcribe(chunk: AudioChunk, contextPrompt?: string): Promise<TranscriptResult | null>;
   destroy(): void;
+}
+
+/** Combine static hotwords with the recent rolling context into one whisper
+ *  prompt, keeping the most recent tail within whisper's ~224-token budget
+ *  (recent context sits LAST, adjacent to the audio it precedes). */
+export function composeWhisperPrompt(hotwords?: string, context?: string): string | undefined {
+  const combined = [hotwords?.trim(), context?.trim()].filter(Boolean).join(" ");
+  if (!combined) return undefined;
+  return combined.slice(-220);
 }
 
 /**
@@ -48,7 +59,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
     log(TAG, `initialized: bin=${config.bin} model=${config.modelPath} lang=${config.language}`);
   }
 
-  async transcribe(chunk: AudioChunk): Promise<TranscriptResult | null> {
+  async transcribe(chunk: AudioChunk, contextPrompt?: string): Promise<TranscriptResult | null> {
     if (this.destroyed) return null;
 
     const tmpDir = await mkdtemp(join(tmpdir(), "sinain-whisper-"));
@@ -58,7 +69,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
       await writeFile(wavPath, chunk.buffer);
 
       const startTs = Date.now();
-      const text = await this.runWhisper(wavPath);
+      const text = await this.runWhisper(wavPath, composeWhisperPrompt(this.config.initialPrompt, contextPrompt));
       const elapsed = Date.now() - startTs;
 
       if (!text) {
@@ -86,7 +97,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
     }
   }
 
-  private runWhisper(wavPath: string): Promise<string> {
+  private runWhisper(wavPath: string, prompt?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       // whisper-cli expects ISO 639-1 codes ("en"), not BCP-47 ("en-US")
       const lang = this.config.language.split("-")[0].toLowerCase();
@@ -106,11 +117,11 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
       // entity names better than asking gemini-audio to translate directly
       // (gemini-audio dropped "raccoon/енот" entirely; whisper retains it
       // in Cyrillic for the distiller to preserve).
-      if (this.config.initialPrompt && this.config.initialPrompt.trim()) {
-        // Whisper-cli's --prompt biases recognition toward listed names.
-        // Capped at 200 chars — whisper truncates beyond that and the bias
-        // value flattens with longer prompts.
-        args.push("--prompt", this.config.initialPrompt.slice(0, 200));
+      if (prompt && prompt.trim()) {
+        // Whisper-cli's --prompt biases recognition toward this text (hotwords
+        // + recent rolling context). Capped at 200 chars — whisper truncates
+        // beyond that and the bias flattens with longer prompts.
+        args.push("--prompt", prompt.slice(0, 200));
       }
 
       debug(TAG, `exec: ${this.config.bin} ${args.join(" ")}`);
