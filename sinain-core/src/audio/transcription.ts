@@ -2,7 +2,8 @@ import { EventEmitter } from "node:events";
 import type { TranscriptionConfig, AudioChunk, TranscriptResult } from "../types.js";
 import type { Profiler } from "../profiler.js";
 import type { CostTracker } from "../cost/tracker.js";
-import { LocalTranscriptionBackend } from "./transcription-local.js";
+import { LocalTranscriptionBackend, type TranscriptionBackend } from "./transcription-local.js";
+import { WhisperServerBackend } from "./transcription-server.js";
 import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe";
@@ -30,7 +31,7 @@ export class TranscriptionService extends EventEmitter {
   private destroyed: boolean = false;
   private pendingRequests: number = 0;
   private readonly MAX_CONCURRENT = 5;
-  private localBackend: LocalTranscriptionBackend | null = null;
+  private localBackend: TranscriptionBackend | null = null;
 
   private latencies: number[] = [];
   private cumulativeLatencies: number[] = [];
@@ -52,7 +53,11 @@ export class TranscriptionService extends EventEmitter {
     this.config = config;
 
     if (config.backend === "local") {
-      this.localBackend = new LocalTranscriptionBackend(config.local);
+      // Persistent whisper-server (model resident) by default; opt out with
+      // LOCAL_WHISPER_SERVER=false to use the per-chunk whisper-cli backend.
+      this.localBackend = process.env.LOCAL_WHISPER_SERVER === "false"
+        ? new LocalTranscriptionBackend(config.local)
+        : new WhisperServerBackend(config.local);
     } else if (!config.openrouterApiKey) {
       warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
     }

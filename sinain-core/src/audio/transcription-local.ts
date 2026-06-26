@@ -26,13 +26,20 @@ export interface LocalTranscriptionConfig {
   initialPrompt?: string;
 }
 
+/** Common shape for local transcription backends (CLI spawn or persistent
+ *  server) so TranscriptionService can hold either behind one field. */
+export interface TranscriptionBackend {
+  transcribe(chunk: AudioChunk): Promise<TranscriptResult | null>;
+  destroy(): void;
+}
+
 /**
  * Local transcription via whisper.cpp CLI.
  *
  * Writes WAV chunk to a temp file, runs whisper-cli, parses stdout.
  * Fully isolated — does not touch the OpenRouter path.
  */
-export class LocalTranscriptionBackend {
+export class LocalTranscriptionBackend implements TranscriptionBackend {
   private config: LocalTranscriptionConfig;
   private destroyed = false;
 
