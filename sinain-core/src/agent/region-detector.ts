@@ -70,7 +70,15 @@ export class RegionDetector {
    *  cloud mode with no local models. */
   private useCloud = false;
 
-  constructor(private readonly deps: RegionDetectorDeps) {}
+  constructor(private readonly deps: RegionDetectorDeps) {
+    // Pure-cloud prototype: start the fast lane on the cloud model immediately
+    // (skip local Ollama) when REGION_SLM_FORCE_CLOUD is set and a cloud key is
+    // configured. Otherwise the lane stays local and only flips to cloud if the
+    // local model turns out to be absent (see detect()'s error path).
+    if (deps.config.forceCloud && deps.config.cloudApiKey) {
+      this.useCloud = true;
+    }
+  }
 
   /** Call on every screen change (sense event). Coalesces a burst into one run.
    *  `urgent` (app switch / big viewport change) skips the debounce so the new
@@ -185,8 +193,9 @@ export class RegionDetector {
   }
 
   /** Run the focused region prompt on the active provider, returning the raw
-   *  JSON content string. Local Ollama (/api/chat) by default; OpenRouter
-   *  (OpenAI-shaped) once this.useCloud has flipped (local model absent). */
+   *  JSON content string. Local Ollama (/api/chat) by default; the configured
+   *  cloud endpoint (OpenAI-shaped — OpenRouter or Cerebras) once this.useCloud
+   *  has flipped (local model absent). */
   private async callModel(userPrompt: string, signal: AbortSignal): Promise<string> {
     const cfg = this.deps.config;
     const messages = [
@@ -203,7 +212,7 @@ export class RegionDetector {
         }),
         signal,
       });
-      if (!response.ok) throw new Error(`openrouter ${response.status}: ${await response.text()}`);
+      if (!response.ok) throw new Error(`cloud region ${response.status}: ${await response.text()}`);
       const data = await response.json() as { choices?: { message?: { content?: string } }[] };
       return data.choices?.[0]?.message?.content?.trim() || "";
     }

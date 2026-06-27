@@ -22,7 +22,8 @@ function isHallucination(text: string): boolean {
 }
 
 /**
- * Transcription service — sends audio chunks to OpenRouter (Gemini) for transcription.
+ * Transcription service — sends audio chunks to a cloud OpenAI-compatible
+ * endpoint (OpenRouter/Gemini by default) or transcribes locally (whisper).
  *
  * Events: 'transcript' (TranscriptResult)
  */
@@ -66,7 +67,7 @@ export class TranscriptionService extends EventEmitter {
         ? new LocalTranscriptionBackend(config.local)
         : new WhisperServerBackend(config.local);
     } else if (!config.openrouterApiKey) {
-      warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
+      warn(TAG, "cloud transcription API key not set (TRANSCRIPTION_API_KEY / OPENROUTER_API_KEY) \u2014 transcription will fail");
     }
 
     log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
@@ -91,7 +92,7 @@ export class TranscriptionService extends EventEmitter {
       if (this.localBackend) {
         await this.transcribeViaLocal(chunk);
       } else {
-        await this.transcribeViaOpenRouter(chunk);
+        await this.transcribeViaCloud(chunk);
       }
     } catch (err) {
       this.errorCount++;
@@ -204,24 +205,24 @@ export class TranscriptionService extends EventEmitter {
     };
   }
 
-  private async transcribeViaOpenRouter(chunk: AudioChunk): Promise<void> {
+  private async transcribeViaCloud(chunk: AudioChunk): Promise<void> {
     if (!this.config.openrouterApiKey) {
       this.errorCount++;
       this.profiler?.gauge("transcription.errors", this.errorCount);
-      error(TAG, "OpenRouter API key not configured");
+      error(TAG, "cloud transcription API key not configured");
       return;
     }
 
     const base64Audio = chunk.buffer.toString("base64");
     const startTs = Date.now();
 
-    debug(TAG, `sending ${chunk.durationMs}ms chunk to OpenRouter (${Math.round(chunk.buffer.length / 1024)}KB)`);
+    debug(TAG, `sending ${chunk.durationMs}ms chunk to cloud transcription (${Math.round(chunk.buffer.length / 1024)}KB)`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const response = await fetch(this.config.endpoint, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${this.config.openrouterApiKey}`,
@@ -268,7 +269,7 @@ export class TranscriptionService extends EventEmitter {
         this.errorCount++;
         this.profiler?.gauge("transcription.errors", this.errorCount);
         const body = await response.text().catch(() => "(no body)");
-        error(TAG, `OpenRouter error ${response.status}: ${body.slice(0, 300)}`);
+        error(TAG, `cloud transcription error ${response.status}: ${body.slice(0, 300)}`);
         return;
       }
 
@@ -302,7 +303,7 @@ export class TranscriptionService extends EventEmitter {
       }
 
       if (!text) {
-        warn(TAG, `OpenRouter returned empty transcript (${elapsed}ms)`);
+        warn(TAG, `cloud transcription returned empty transcript (${elapsed}ms)`);
         return;
       }
 

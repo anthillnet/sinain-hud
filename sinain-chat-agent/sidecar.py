@@ -18,7 +18,9 @@ sinain-core's ChatService connects over WS and relays to the overlay. Protocol:
       {"type":"done","text":"<full reply>"}
       {"type":"error","text":"..."}
 
-Env: OPENROUTER_API_KEY (required), SINAIN_CHAT_MODEL (default qwen/qwen3.5-flash-02-23),
+Env: SINAIN_CHAT_PROVIDER (openrouter|cerebras|ollama; default openrouter),
+     OPENROUTER_API_KEY (openrouter) / CEREBRAS_API_KEY (cerebras),
+     SINAIN_CHAT_MODEL (default qwen/qwen3.5-flash-02-23; on cerebras defaults to gpt-oss-120b),
      SINAIN_CHAT_REASONING (off|on, default off), SINAIN_CORE_URL, SINAIN_CHAT_WS_PORT (9610).
 """
 from __future__ import annotations
@@ -73,12 +75,36 @@ class ChatAgent:
     async def setup(self) -> None:
         tools.register_all()
         model = os.environ.get("SINAIN_CHAT_MODEL", "qwen/qwen3.5-flash-02-23")
-        # Provider: openrouter (cloud, default) or ollama (local). Auto-detect
-        # local from SINAIN_LOCAL_MODE if SINAIN_CHAT_PROVIDER is unset.
+        # Provider: openrouter (cloud, default), cerebras (cloud), or ollama
+        # (local). Auto-detect local from SINAIN_LOCAL_MODE if SINAIN_CHAT_PROVIDER
+        # is unset.
         provider = os.environ.get("SINAIN_CHAT_PROVIDER", "").lower()
         if not provider:
             provider = "ollama" if os.environ.get("SINAIN_LOCAL_MODE") == "true" else "openrouter"
-        if provider in ("ollama", "local"):
+        if provider == "cerebras":
+            # Cerebras via LiteLLM's native provider (OpenAI-compatible, supports
+            # tool-calling). The default SINAIN_CHAT_MODEL is an OpenRouter slug
+            # that doesn't exist on Cerebras, so normalize to a Cerebras id and
+            # fall back to gpt-oss-120b. Key from CEREBRAS_API_KEY (then
+            # ANALYSIS_API_KEY). reasoning_effort=low keeps chat snappy on the
+            # reasoning-capable gpt-oss.
+            lm = os.environ.get("SINAIN_CHAT_MODEL", "")
+            if lm.startswith("cerebras/"):
+                model_id = lm
+            elif lm and "/" not in lm:
+                model_id = f"cerebras/{lm}"          # bare id, e.g. gpt-oss-120b
+            else:
+                model_id = "cerebras/gpt-oss-120b"   # unset / openrouter slug → default
+            api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANALYSIS_API_KEY", "")
+            llm_kwargs = dict(model=model_id,
+                              api_key=SecretStr(api_key),
+                              service_id="sinain-chat", stream=True)
+            base = os.environ.get("SINAIN_CHAT_BASE_URL")
+            if base:
+                llm_kwargs["base_url"] = base
+            if os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on":
+                llm_kwargs["litellm_extra_body"] = {"reasoning_effort": "low"}
+        elif provider in ("ollama", "local"):
             base = (os.environ.get("SINAIN_CHAT_BASE_URL")
                     or os.environ.get("OLLAMA_BASE_URL")
                     or "http://localhost:11434")

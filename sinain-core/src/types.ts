@@ -344,6 +344,14 @@ export type TranscriptionBackend = "openrouter" | "local";
 
 export interface TranscriptionConfig {
   backend: TranscriptionBackend;
+  /** Cloud transcription endpoint (OpenAI-compatible /chat/completions with an
+   *  audio-capable model). Defaults to OpenRouter; override via
+   *  TRANSCRIPTION_ENDPOINT to point at any OpenAI-compatible audio backend.
+   *  NB: text-only backends (e.g. Cerebras) cannot transcribe — use backend=local
+   *  (on-device whisper) or keep an audio-capable cloud endpoint here. */
+  endpoint: string;
+  /** Bearer key for the cloud transcription endpoint. From TRANSCRIPTION_API_KEY,
+   *  falling back to OPENROUTER_API_KEY. */
   openrouterApiKey: string;
   geminiModel: string;
   language: string;
@@ -403,7 +411,7 @@ export type EscalationMode = "off" | "selective" | "focus" | "rich";
 export type ContextRichness = "lean" | "standard" | "rich";
 export type ResponseSize = "small" | "medium" | "large";
 
-export type AnalysisProvider = "openrouter" | "ollama";
+export type AnalysisProvider = "openrouter" | "ollama" | "cerebras";
 
 export interface AnalysisConfig {
   enabled: boolean;
@@ -427,6 +435,10 @@ export interface AnalysisConfig {
   cooldownMs: number;
   maxAgeMs: number;
   historyLimit: number;
+  /** Hard per-tick deadline (ms) — backstop above the analyzer's own per-call
+   *  timeout, after which the loop watchdog aborts + recreates the consumer.
+   *  Undefined ⇒ provider default (cloud 30s / ollama 150s). */
+  tickDeadlineMs?: number;
   /** Grammarly mode: ask the LLM for actionable screen regions each tick */
   regionsEnabled: boolean;
 }
@@ -460,6 +472,11 @@ export interface RegionSlmConfig {
   cloudModel: string;
   cloudEndpoint: string;
   cloudApiKey: string;
+  /** Force the fast lane onto the cloud model from the start (skip local Ollama
+   *  entirely), instead of only falling back when the local model is absent.
+   *  For pure-cloud prototypes (e.g. running the ROI lane on Cerebras even when
+   *  Ollama is installed). Requires cloudApiKey. From REGION_SLM_FORCE_CLOUD. */
+  forceCloud?: boolean;
 }
 
 export interface AgentResult {

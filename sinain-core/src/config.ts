@@ -217,7 +217,10 @@ export function loadConfig(): CoreConfig {
 
   const transcriptionInitialPrompt = env("TRANSCRIPTION_INITIAL_PROMPT", "");
   const whisperModelPath = resolvePath(env("LOCAL_WHISPER_MODEL", "~/.sinain/models/whisper/ggml-large-v3-turbo.bin"));
-  const transcriptionApiKey = env("OPENROUTER_API_KEY", "");
+  // Cloud transcription key: a dedicated TRANSCRIPTION_API_KEY wins, else reuse
+  // OPENROUTER_API_KEY. This lets the analyzer run on one provider (e.g. Cerebras)
+  // while audio transcription keeps using an audio-capable cloud endpoint.
+  const transcriptionApiKey = env("TRANSCRIPTION_API_KEY", env("OPENROUTER_API_KEY", ""));
   // Local-first by default: audio stays on-device (privacy) and whisper quality
   // beats the cloud LLM path (see eval). But the ~1.5GB model downloads in the
   // background on first launch — until it's present we fall back to cloud (when
@@ -235,6 +238,7 @@ export function loadConfig(): CoreConfig {
   }
   const transcriptionConfig: TranscriptionConfig = {
     backend: transcriptionBackend,
+    endpoint: env("TRANSCRIPTION_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"),
     openrouterApiKey: transcriptionApiKey,
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
     language: env("TRANSCRIPTION_LANGUAGE", "auto"),
@@ -249,26 +253,38 @@ export function loadConfig(): CoreConfig {
   };
 
   const analysisProvider = env("ANALYSIS_PROVIDER", "openrouter") as import("./types.js").AnalysisProvider;
+  // Cerebras is an OpenAI-compatible cloud backend (Bearer auth, /v1/chat/completions)
+  // — it rides the same callOpenRouter path in analyzer.ts; only the endpoint, API
+  // key, and model defaults differ. Its `usage` has no `cost` field (token counts
+  // only), so CostTracker reports $0 for cerebras ticks — expected. Cerebras models
+  // are text-only, so agent vision defaults OFF (see agentVision below).
+  const cerebras = analysisProvider === "cerebras";
   const defaultEndpoint = analysisProvider === "ollama"
     ? "http://localhost:11434"
-    : "https://openrouter.ai/api/v1/chat/completions";
+    : cerebras
+      ? "https://api.cerebras.ai/v1/chat/completions"
+      : "https://openrouter.ai/api/v1/chat/completions";
 
   const agentConfig: import("./types.js").AnalysisConfig = {
     enabled: boolEnv("AGENT_ENABLED", true),
     provider: analysisProvider,
-    model: env("ANALYSIS_MODEL", "google/gemini-2.5-flash-lite"),
-    visionModel: env("ANALYSIS_VISION_MODEL", "google/gemini-2.5-flash"),
+    model: env("ANALYSIS_MODEL", cerebras ? "gpt-oss-120b" : "google/gemini-2.5-flash-lite"),
+    visionModel: env("ANALYSIS_VISION_MODEL", cerebras ? "gpt-oss-120b" : "google/gemini-2.5-flash"),
     // Whether the AGENT analyzer itself does vision. In local mode it defaults
     // OFF — sense_client owns the single on-device vision pass (qwen2.5vl) and
     // the agent reasons over OCR + sense's scene caption on the fast text model,
     // so the heavy vision model isn't run twice on the same GPU. Cloud defaults
     // ON (cloud vision is cheap + parallel). Override with SINAIN_AGENT_VISION.
-    agentVision: boolEnv("SINAIN_AGENT_VISION", !localMode),
+    agentVision: boolEnv("SINAIN_AGENT_VISION", !localMode && !cerebras),
     endpoint: env("ANALYSIS_ENDPOINT", defaultEndpoint),
-    apiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
-    maxTokens: intEnv("ANALYSIS_MAX_TOKENS", 800),
+    apiKey: env("ANALYSIS_API_KEY", cerebras ? env("CEREBRAS_API_KEY", "") : env("OPENROUTER_API_KEY", "")),
+    // 800 fits Gemini's terse hud+digest. gpt-oss-120b on Cerebras writes a much
+    // longer digest and blows past 800 mid-string → the two-output JSON truncates,
+    // fails to parse, and the raw broken JSON leaks into the hud. Give the verbose
+    // model headroom (it's a ceiling — short replies still stop early).
+    maxTokens: intEnv("ANALYSIS_MAX_TOKENS", cerebras ? 2000 : 800),
     temperature: floatEnv("ANALYSIS_TEMPERATURE", 0.3),
-    fallbackModels: env("ANALYSIS_FALLBACK_MODELS", "google/gemini-2.5-flash,anthropic/claude-3.5-haiku")
+    fallbackModels: env("ANALYSIS_FALLBACK_MODELS", cerebras ? "" : "google/gemini-2.5-flash,anthropic/claude-3.5-haiku")
       .split(",").map(s => s.trim()).filter(Boolean),
     timeout: intEnv("ANALYSIS_TIMEOUT", 15000),
     pushToFeed: boolEnv("AGENT_PUSH_TO_FEED", true),
@@ -299,13 +315,27 @@ export function loadConfig(): CoreConfig {
     model: env("REGION_SLM_MODEL", "qwen2.5:3b"),
     endpoint: env("REGION_SLM_ENDPOINT", "http://localhost:11434"),
     debounceMs: intEnv("REGION_SLM_DEBOUNCE_MS", 500),
-    maxTokens: intEnv("REGION_SLM_MAX_TOKENS", 256),
+    // 256 is plenty for a terse local 3B. The Cerebras cloud lane runs a large
+    // model that pretty-prints JSON and can blow past 256 mid-object (observed
+    // finish_reason=length → truncated, unparseable, no eyes that tick), so give
+    // the cloud path headroom. It's only a ceiling — generation still stops at the
+    // closing brace, so the extra cap costs no latency on a normal 2-region reply.
+    maxTokens: intEnv("REGION_SLM_MAX_TOKENS", cerebras ? 512 : 256),
     timeoutMs: intEnv("REGION_SLM_TIMEOUT_MS", 6000),
     // Cloud fallback: a cheap/fast model runs the SAME focused region prompt when
     // local Ollama is absent — keeps tier-0 eyes working for no-Ollama cloud users.
-    cloudModel: env("REGION_SLM_CLOUD_MODEL", "google/gemini-2.5-flash-lite"),
-    cloudEndpoint: env("REGION_SLM_CLOUD_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"),
-    cloudApiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
+    // Follows the analyzer's provider by default: on ANALYSIS_PROVIDER=cerebras the
+    // ROI lane runs in parallel on Cerebras (text-only JSON prompt, no vision — a
+    // great fit for its high token/s), so eyes don't silently fall back to a
+    // google/* model on an OpenRouter key that may not be set. Override any of the
+    // three REGION_SLM_CLOUD_* knobs to point the ROI lane elsewhere independently.
+    cloudModel: env("REGION_SLM_CLOUD_MODEL", cerebras ? "gpt-oss-120b" : "google/gemini-2.5-flash-lite"),
+    cloudEndpoint: env("REGION_SLM_CLOUD_ENDPOINT", cerebras ? "https://api.cerebras.ai/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions"),
+    cloudApiKey: env("ANALYSIS_API_KEY", cerebras ? env("CEREBRAS_API_KEY", "") : env("OPENROUTER_API_KEY", "")),
+    // Force the fast lane onto the cloud model from the start (skip local Ollama).
+    // Defaults ON under cerebras so the ROI lane runs on Cerebras for a pure-cloud
+    // prototype even when Ollama is installed; override with REGION_SLM_FORCE_CLOUD.
+    forceCloud: boolEnv("REGION_SLM_FORCE_CLOUD", cerebras),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.
