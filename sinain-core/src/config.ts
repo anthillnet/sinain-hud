@@ -216,15 +216,32 @@ export function loadConfig(): CoreConfig {
   }
 
   const transcriptionInitialPrompt = env("TRANSCRIPTION_INITIAL_PROMPT", "");
+  const whisperModelPath = resolvePath(env("LOCAL_WHISPER_MODEL", "~/.sinain/models/whisper/ggml-large-v3-turbo.bin"));
+  const transcriptionApiKey = env("OPENROUTER_API_KEY", "");
+  // Local-first by default: audio stays on-device (privacy) and whisper quality
+  // beats the cloud LLM path (see eval). But the ~1.5GB model downloads in the
+  // background on first launch — until it's present we fall back to cloud (when
+  // a key exists) rather than silently producing nothing. The model-presence
+  // gate also keeps a bare `npm run dev` (no provisioning) safe: no model →
+  // cloud, no surprise download. A restart picks up local once the model lands.
+  let transcriptionBackend = env("TRANSCRIPTION_BACKEND", "local") as TranscriptionConfig["backend"];
+  if (transcriptionBackend === "local" && !existsSync(whisperModelPath)) {
+    if (transcriptionApiKey) {
+      console.warn(`[config] whisper model not present yet (${whisperModelPath}) — using cloud transcription until it finishes downloading (restart to switch to local)`);
+      transcriptionBackend = "openrouter";
+    } else {
+      console.warn(`[config] whisper model not present (${whisperModelPath}) and no OPENROUTER_API_KEY — transcription unavailable until the model downloads`);
+    }
+  }
   const transcriptionConfig: TranscriptionConfig = {
-    backend: env("TRANSCRIPTION_BACKEND", "openrouter") as TranscriptionConfig["backend"],
-    openrouterApiKey: env("OPENROUTER_API_KEY", ""),
+    backend: transcriptionBackend,
+    openrouterApiKey: transcriptionApiKey,
     geminiModel: env("TRANSCRIPTION_MODEL", "google/gemini-2.5-flash"),
     language: env("TRANSCRIPTION_LANGUAGE", "auto"),
     initialPrompt: transcriptionInitialPrompt || undefined,
     local: {
       bin: env("LOCAL_WHISPER_BIN", "whisper-cli"),
-      modelPath: resolvePath(env("LOCAL_WHISPER_MODEL", "~/.sinain/models/whisper/ggml-large-v3-turbo.bin")),
+      modelPath: whisperModelPath,
       language: env("TRANSCRIPTION_LANGUAGE", "auto"),
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
       initialPrompt: transcriptionInitialPrompt || undefined,

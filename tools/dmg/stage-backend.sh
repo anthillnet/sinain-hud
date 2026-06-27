@@ -61,13 +61,21 @@ cp -R "$REPO/sense_client" "$RES/sense_client"
 cp -R "$REPO/sinain-hud-plugin/sinain-memory" "$RES/sinain-memory"
 find "$RES/sense_client" "$RES/sinain-memory" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
-bold "3d · Staging whisper-cli (local transcription, T1/T2)"
-# Self-contained arm64 whisper.cpp binary (system frameworks only). The model
-# downloads at runtime (T1/T2) via provision-whisper.sh.
+bold "3d · Staging whisper-cli + whisper-server (local transcription, T1/T2)"
+# Self-contained arm64 whisper.cpp binaries (system frameworks only). The model
+# downloads at runtime (T1/T2) via provision-whisper.sh. whisper-server keeps
+# the model resident (fast path, ~3x lower latency); whisper-cli is the
+# per-chunk fallback the server backend degrades to if the server is missing.
 if [ -f "$REPO/tools/whisper/whisper-cli" ]; then
   mkdir -p "$RES/whisper"
   cp "$REPO/tools/whisper/whisper-cli" "$RES/whisper/whisper-cli"
   chmod +x "$RES/whisper/whisper-cli"
+  if [ -f "$REPO/tools/whisper/whisper-server" ]; then
+    cp "$REPO/tools/whisper/whisper-server" "$RES/whisper/whisper-server"
+    chmod +x "$RES/whisper/whisper-server"
+  else
+    echo "  ⚠ tools/whisper/whisper-server missing — run tools/whisper/build-whisper.sh (local STT will use the slower per-chunk CLI)"
+  fi
 else
   echo "  ⚠ tools/whisper/whisper-cli missing — run tools/whisper/build-whisper.sh (local STT will be unavailable)"
 fi
@@ -248,8 +256,15 @@ fi
 # online when downloads finish. All idempotent + resumable. T1 (local STT) →
 # whisper model; T2 (full local) → whisper + Ollama SLMs.
 PROV_PIDS=""
-if [ "${TRANSCRIPTION_BACKEND:-}" = "local" ]; then
+# Local-first default (matches sinain-core config): provision + run whisper
+# unless the user explicitly chose cloud. Exported so core inherits the same
+# default — core's model-presence gate falls back to cloud until the download
+# lands, so this is safe even mid-download.
+export TRANSCRIPTION_BACKEND="${TRANSCRIPTION_BACKEND:-local}"
+if [ "$TRANSCRIPTION_BACKEND" = "local" ]; then
   [ -x "$RES/whisper/whisper-cli" ] && export LOCAL_WHISPER_BIN="${LOCAL_WHISPER_BIN:-$RES/whisper/whisper-cli}"
+  # Prefer the model-resident server (fast path); falls back to the CLI if absent.
+  [ -x "$RES/whisper/whisper-server" ] && export LOCAL_WHISPER_SERVER_BIN="${LOCAL_WHISPER_SERVER_BIN:-$RES/whisper/whisper-server}"
   if [ -x "$HERE/provision-whisper.sh" ]; then
     echo "[launch] local transcription — ensuring whisper model (background)…"
     bash "$HERE/provision-whisper.sh" "$HOME/.sinain/models/whisper" &
