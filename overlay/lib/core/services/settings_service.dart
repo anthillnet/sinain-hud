@@ -21,6 +21,9 @@ class SettingsService extends ChangeNotifier {
   // activation policy with no Dock-icon flash. Keep the string in sync.
   static const _keyShowInDock = 'show_in_dock';
   static const _keyHudStyle = 'hud_style';
+  static const _keyFeedbackStatus = 'feedback_status';
+  static const _keyFeedbackSnoozeUntil = 'feedback_snooze_until';
+  static const _keyFeedbackAskCount = 'feedback_ask_count';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -44,6 +47,9 @@ class SettingsService extends ChangeNotifier {
       chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
       showInDock: _prefs.getBool(_keyShowInDock) ?? true,
       hudStyle: _loadHudStyle(),
+      feedbackStatus: _loadFeedbackStatus(),
+      feedbackSnoozeUntilMs: _prefs.getInt(_keyFeedbackSnoozeUntil) ?? 0,
+      feedbackAskCount: _prefs.getInt(_keyFeedbackAskCount) ?? 0,
     );
     notifyListeners();
   }
@@ -53,6 +59,14 @@ class SettingsService extends ChangeNotifier {
     return HudStyle.values.firstWhere(
       (s) => s.name == val,
       orElse: () => HudStyle.solid,
+    );
+  }
+
+  FeedbackPromptStatus _loadFeedbackStatus() {
+    final val = _prefs.getString(_keyFeedbackStatus);
+    return FeedbackPromptStatus.values.firstWhere(
+      (s) => s.name == val,
+      orElse: () => FeedbackPromptStatus.pending,
     );
   }
 
@@ -157,6 +171,26 @@ class SettingsService extends ChangeNotifier {
   Future<void> setHudStyle(HudStyle style) async {
     _settings.hudStyle = style;
     await _prefs.setString(_keyHudStyle, style.name);
+    notifyListeners();
+  }
+
+  /// Persist the feedback prompt lifecycle. [snoozeUntilMs] and [askCount] are
+  /// optional — pass them when "Later" advances the re-arm time / ask count.
+  Future<void> setFeedbackState(
+    FeedbackPromptStatus status, {
+    int? snoozeUntilMs,
+    int? askCount,
+  }) async {
+    _settings.feedbackStatus = status;
+    await _prefs.setString(_keyFeedbackStatus, status.name);
+    if (snoozeUntilMs != null) {
+      _settings.feedbackSnoozeUntilMs = snoozeUntilMs;
+      await _prefs.setInt(_keyFeedbackSnoozeUntil, snoozeUntilMs);
+    }
+    if (askCount != null) {
+      _settings.feedbackAskCount = askCount;
+      await _prefs.setInt(_keyFeedbackAskCount, askCount);
+    }
     notifyListeners();
   }
 }

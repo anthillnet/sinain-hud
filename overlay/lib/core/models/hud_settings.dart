@@ -12,6 +12,13 @@ enum HudTab { agent, tasks }
 /// `core/theme/hud_theme.dart`.
 enum HudStyle { transparent, solid }
 
+/// Lifecycle of the one-time "Was that helpful?" feedback prompt.
+///
+/// [pending] — never shown; eligible to fire at the first value-proof moment.
+/// [snoozed] — user tapped "Later"; re-arms once [feedbackSnoozeUntilMs] passes.
+/// [retired] — answered or dismissed for good; never shows again.
+enum FeedbackPromptStatus { pending, snoozed, retired }
+
 class HudSettings {
   HudState overlayState;
   HudTab activeTab;
@@ -45,6 +52,15 @@ class HudSettings {
   /// Panel presentation style (solid cards vs see-through). Defaults to solid.
   HudStyle hudStyle;
 
+  /// One-time feedback prompt state (see [FeedbackPromptStatus]).
+  FeedbackPromptStatus feedbackStatus;
+
+  /// Epoch ms after which a [FeedbackPromptStatus.snoozed] prompt re-arms.
+  int feedbackSnoozeUntilMs;
+
+  /// How many times the prompt has been shown. Capped at 2.
+  int feedbackAskCount;
+
   HudSettings({
     this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
@@ -60,7 +76,25 @@ class HudSettings {
     this.chatgptHarness = false,
     this.showInDock = true,
     this.hudStyle = HudStyle.solid,
+    this.feedbackStatus = FeedbackPromptStatus.pending,
+    this.feedbackSnoozeUntilMs = 0,
+    this.feedbackAskCount = 0,
   });
+
+  /// Max times the prompt is ever shown.
+  static const int feedbackMaxAsks = 2;
+
+  /// Whether the feedback prompt may fire right now. True when it hasn't been
+  /// retired, is under the ask cap, and is either fresh ([pending]) or a
+  /// [snoozed] prompt whose re-arm time ([feedbackSnoozeUntilMs]) has passed.
+  bool feedbackEligible(int nowMs) {
+    if (feedbackStatus == FeedbackPromptStatus.retired) return false;
+    if (feedbackAskCount >= feedbackMaxAsks) return false;
+    if (feedbackStatus == FeedbackPromptStatus.snoozed) {
+      return nowMs >= feedbackSnoozeUntilMs;
+    }
+    return true; // pending
+  }
 
   HudTab get nextTab {
     const tabs = HudTab.values;
@@ -83,6 +117,9 @@ class HudSettings {
     bool? chatgptHarness,
     bool? showInDock,
     HudStyle? hudStyle,
+    FeedbackPromptStatus? feedbackStatus,
+    int? feedbackSnoozeUntilMs,
+    int? feedbackAskCount,
   }) {
     return HudSettings(
       overlayState: overlayState ?? this.overlayState,
@@ -99,6 +136,9 @@ class HudSettings {
       chatgptHarness: chatgptHarness ?? this.chatgptHarness,
       showInDock: showInDock ?? this.showInDock,
       hudStyle: hudStyle ?? this.hudStyle,
+      feedbackStatus: feedbackStatus ?? this.feedbackStatus,
+      feedbackSnoozeUntilMs: feedbackSnoozeUntilMs ?? this.feedbackSnoozeUntilMs,
+      feedbackAskCount: feedbackAskCount ?? this.feedbackAskCount,
     );
   }
 }

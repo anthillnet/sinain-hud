@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/app_control.dart';
+import '../core/constants.dart';
 import '../core/models/hud_settings.dart';
 import '../core/services/settings_service.dart';
 import '../core/theme/hud_theme.dart';
@@ -16,6 +17,7 @@ import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
+import 'chat/feedback_prompt.dart';
 import 'regions/region_eye_controller.dart';
 import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
@@ -72,6 +74,12 @@ class OverlayShellState extends State<OverlayShell> {
   // Display settings panel
   bool _showDisplaySettings = false;
   bool _showAgentPicker = false;
+
+  // One-time "Was that helpful?" feedback prompt. Armed once per app run at the
+  // first value-proof moment (first agent reply); lifecycle persisted in
+  // SettingsService. _feedbackEvaluated guards against re-arming every reply.
+  bool _feedbackVisible = false;
+  bool _feedbackEvaluated = false;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -202,6 +210,10 @@ class OverlayShellState extends State<OverlayShell> {
       _contentResetTimer = Timer(const Duration(seconds: 5), () {
         if (mounted) setState(() => _hasNewContent = false);
       });
+      // First agent reply = the first value-proof moment. Arm the one-time
+      // feedback prompt here (once per run) if it's still eligible. An agent
+      // reply only happens after setup, so this is inherently post-onboarding.
+      _maybeArmFeedbackPrompt();
     });
 
     // Watch pending-permission count from WebSocketService (ChangeNotifier).
@@ -666,6 +678,7 @@ class OverlayShellState extends State<OverlayShell> {
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
       {'id': 'settings', 'title': 'Settings…'},
+      {'id': 'feedback', 'title': 'Send feedback'},
       {'separator': true},
       {'id': 'quit', 'title': 'Quit Sinain'},
     ];
@@ -682,6 +695,8 @@ class OverlayShellState extends State<OverlayShell> {
         resetPosition();
       case 'settings':
         _openSettings();
+      case 'feedback':
+        await _openFeedbackUrl(HudConstants.feedbackIssueUrl);
       case 'quit':
         await quitApp();
     }
@@ -963,6 +978,51 @@ class OverlayShellState extends State<OverlayShell> {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+
+  // ── Feedback prompt ─────────────────────────────────────────────────────────
+
+  /// Open a feedback URL in the user's browser. Mirrors [_openKnowledgeUI].
+  Future<void> _openFeedbackUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// First value-proof moment of the run: show the one-time prompt if eligible.
+  /// Arming counts as an "ask" (capped at [HudSettings.feedbackMaxAsks]) so the
+  /// prompt is bounded even when the user keeps ignoring it across restarts.
+  void _maybeArmFeedbackPrompt() {
+    if (_feedbackEvaluated) return;
+    _feedbackEvaluated = true;
+    final s = _settingsService.settings;
+    if (!s.feedbackEligible(DateTime.now().millisecondsSinceEpoch)) return;
+    _settingsService.setFeedbackState(s.feedbackStatus,
+        askCount: s.feedbackAskCount + 1);
+    if (mounted) setState(() => _feedbackVisible = true);
+  }
+
+  /// "Answer the poll" → open the survey, retire the prompt.
+  void _feedbackAnswer() {
+    _openFeedbackUrl(HudConstants.feedbackSurveyUrl);
+    _settingsService.setFeedbackState(FeedbackPromptStatus.retired);
+    if (mounted) setState(() => _feedbackVisible = false);
+  }
+
+  /// "Later" → snooze; re-arms at the next value-proof after ~3 days.
+  void _feedbackLater() {
+    final reArm =
+        DateTime.now().add(const Duration(days: 3)).millisecondsSinceEpoch;
+    _settingsService.setFeedbackState(FeedbackPromptStatus.snoozed,
+        snoozeUntilMs: reArm);
+    if (mounted) setState(() => _feedbackVisible = false);
+  }
+
+  /// "Don't ask again" → retire for good.
+  void _feedbackDismiss() {
+    _settingsService.setFeedbackState(FeedbackPromptStatus.retired);
+    if (mounted) setState(() => _feedbackVisible = false);
   }
 
   @override
@@ -1410,6 +1470,15 @@ class OverlayShellState extends State<OverlayShell> {
           const _ServiceHealthBanner(),
           const _SystemAlertBanner(),
           const PermissionBanner(),
+          // One-time "Was that helpful?" prompt — armed at the first agent reply
+          // (see _maybeArmFeedbackPrompt). Sits with the banner stack above the
+          // composer so it reads as Sinain speaking at a natural breakpoint.
+          if (_feedbackVisible)
+            FeedbackPrompt(
+              onAnswer: _feedbackAnswer,
+              onLater: _feedbackLater,
+              onDismiss: _feedbackDismiss,
+            ),
           // Input lives in the chat surface now (flyer composer) — terminal
           // tabs type directly into the PTY. CommandInput retired with the
           // chat-threads redesign (spawn input mode removed with it).

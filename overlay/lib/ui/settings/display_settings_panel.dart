@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/app_control.dart';
 import '../../core/constants.dart';
 import '../../core/services/settings_service.dart';
@@ -486,6 +487,42 @@ class DisplaySettingsPanel extends StatelessWidget {
                             const SizedBox(width: 6),
                             Text(
                               'Open Session Log',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 10,
+                                color: Colors.white.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Send feedback — opens a new GitHub issue. The always-on
+                    // counterpart to the opportunistic "Was that helpful?" prompt.
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () async {
+                          final uri = Uri.parse(HudConstants.feedbackIssueUrl);
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri,
+                                mode: LaunchMode.externalApplication);
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.feedback_outlined,
+                              size: 12,
+                              color: Colors.white.withValues(alpha: 0.55),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Send feedback',
                               style: TextStyle(
                                 fontFamily: HudConstants.monoFont,
                                 fontFamilyFallback:
