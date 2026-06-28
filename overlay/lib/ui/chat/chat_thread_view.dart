@@ -6,6 +6,7 @@ import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 
 import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/theme/hud_theme.dart';
 import '../feed/idle_animation.dart';
 
 /// Chat surface for a thread (chat-threads redesign).
@@ -26,6 +27,7 @@ class ChatThreadView extends StatefulWidget {
     required this.onSend,
     this.threadId,
     this.accentColor = 0xff00ff88,
+    this.title,
     this.onHandoff,
     this.onCopySeed,
   });
@@ -36,6 +38,10 @@ class ChatThreadView extends StatefulWidget {
   /// null → MAIN; otherwise a region/forked thread id.
   final String? threadId;
   final int accentColor;
+
+  /// Display title for the thread. Shown as a slim card header in solid mode
+  /// (region threads only); ignored in transparent mode and on MAIN.
+  final String? title;
 
   /// "Continue this thread elsewhere" — pick a chat or terminal agent to take
   /// over this conversation. Null hides the inline handoff (⑂) control. The
@@ -136,6 +142,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   @override
   Widget build(BuildContext context) {
     final accent = Color(widget.accentColor);
+    final theme = HudTheme.of(context);
     final showHandoff = widget.onHandoff != null;
     final chat = Chat(
       chatController: _controller,
@@ -159,10 +166,10 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         // frame around the input on our translucent panel.
         composerBuilder: (context) => Composer(
           sendOnEnter: true,
-          backgroundColor: Colors.black.withValues(alpha: 0.85),
-          inputFillColor: Colors.black.withValues(alpha: 0.6),
-          textColor: Colors.white.withValues(alpha: 0.92),
-          hintColor: Colors.white.withValues(alpha: 0.35),
+          backgroundColor: theme.composerBg,
+          inputFillColor: theme.inputFill,
+          textColor: theme.textPrimary,
+          hintColor: theme.textDim,
           sendIconColor: accent,
           // Inline-left branch glyph (the old tab-strip ⑂, now by the input).
           attachmentIcon: showHandoff
@@ -175,15 +182,20 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         colors: ChatTheme.dark().colors.copyWith(
               primary: accent.withValues(alpha: 0.25),
               surface: Colors.transparent,
-              surfaceContainer: Colors.white.withValues(alpha: 0.06),
-              surfaceContainerLow: Colors.white.withValues(alpha: 0.04),
-              onPrimary: Colors.white.withValues(alpha: 0.92),
-              onSurface: Colors.white.withValues(alpha: 0.88),
+              surfaceContainer: theme.bubbleBg,
+              surfaceContainerLow: theme.bubbleBgLow,
+              onPrimary: theme.textPrimary,
+              onSurface: theme.textPrimary,
             ),
       ),
     );
     return Column(
       children: [
+        // Solid mode: a slim card header naming the region thread (the tab
+        // label is truncated; this gives the thread a clear card title). MAIN
+        // and transparent mode rely on the toolbar/tab strip instead.
+        if (theme.isSolid && widget.title != null && widget.threadId != null)
+          _threadHeader(theme),
         if (_thinking)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -229,6 +241,42 @@ class _ChatThreadViewState extends State<ChatThreadView> {
     );
   }
 
+  /// Slim card header for a region thread in solid mode: a state dot + title.
+  /// No close/handoff buttons here — those live in the tab strip and composer.
+  Widget _threadHeader(HudTheme theme) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: theme.headerBg,
+        border: Border(bottom: BorderSide(color: theme.hairline)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: theme.selectionAccent,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              widget.title!,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: theme.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Run the copy-seed action with dim→check feedback, then close the popover.
   Future<void> _runCopySeed(Color accent) async {
     setState(() => _copyState = 1); // dim while building/copying
@@ -250,6 +298,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   /// a destination hands the routing back to the shell via [widget.onHandoff].
   Widget _handoffMenu(Color accent) {
     final ws = widget.ws;
+    final theme = HudTheme.of(context);
     final chatAgents = ws.availableAgents;
     final termAgents = ws.terminalAvailable;
 
@@ -306,9 +355,12 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         child: Container(
         width: 248,
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.92),
+          color: theme.isSolid
+              ? theme.panelBg
+              : Colors.black.withValues(alpha: 0.92),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: accent.withValues(alpha: 0.4)),
+          border: Border.all(
+              color: theme.isSolid ? theme.border : accent.withValues(alpha: 0.4)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.5),

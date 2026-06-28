@@ -8,6 +8,8 @@ import '../../core/services/settings_service.dart';
 import '../../core/services/window_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/update_check_service.dart';
+import '../../core/models/hud_settings.dart';
+import '../../core/theme/hud_theme.dart';
 import '../hud_tooltip.dart';
 
 /// Compact display-settings popover for font size and accent color.
@@ -38,10 +40,54 @@ class DisplaySettingsPanel extends StatelessWidget {
     }
   }
 
+  /// One segment of the STYLE picker — a small pill that lights up its accent
+  /// border + label when selected.
+  Widget _styleSegment({
+    required String label,
+    required bool selected,
+    required int accent,
+    required VoidCallback onTap,
+  }) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: selected
+                ? Color(accent).withValues(alpha: 0.15)
+                : Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: selected
+                  ? Color(accent).withValues(alpha: 0.6)
+                  : Colors.white.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: HudConstants.monoFont,
+              fontFamilyFallback: HudConstants.monoFontFallbacks,
+              fontSize: 9,
+              letterSpacing: 0.5,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              color: selected
+                  ? Color(accent)
+                  : Colors.white.withValues(alpha: 0.45),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
     final ws = context.watch<WebSocketService>();
+    final theme = HudTheme.of(context);
     final fontSize = settings.settings.fontSize;
     final accentColor = settings.settings.accentColor;
     final responseSizeIndex = _sizeValues.indexOf(ws.responseSize).clamp(0, 2);
@@ -54,9 +100,14 @@ class DisplaySettingsPanel extends StatelessWidget {
         constraints: BoxConstraints(maxHeight: constraints.maxHeight),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Color(accentColor).withValues(alpha: 0.3)),
+          color: theme.panelBgStrong,
+          borderRadius: BorderRadius.circular(theme.radius),
+          border: Border.all(
+            color: theme.isSolid
+                ? theme.border
+                : Color(accentColor).withValues(alpha: 0.3),
+          ),
+          boxShadow: theme.shadow,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -188,6 +239,38 @@ class DisplaySettingsPanel extends StatelessWidget {
                           ),
                         );
                       }).toList(),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Panel style — see-through vs solid cards.
+                    Text(
+                      'STYLE',
+                      style: TextStyle(
+                        fontFamily: HudConstants.monoFont,
+                        fontFamilyFallback: HudConstants.monoFontFallbacks,
+                        fontSize: 9,
+                        color: Colors.white.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        _styleSegment(
+                          label: 'TRANSPARENT',
+                          selected:
+                              settings.settings.hudStyle == HudStyle.transparent,
+                          accent: accentColor,
+                          onTap: () =>
+                              settings.setHudStyle(HudStyle.transparent),
+                        ),
+                        const SizedBox(width: 6),
+                        _styleSegment(
+                          label: 'SOLID',
+                          selected: settings.settings.hudStyle == HudStyle.solid,
+                          accent: accentColor,
+                          onTap: () => settings.setHudStyle(HudStyle.solid),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 10),
 
