@@ -55,4 +55,43 @@ void main() {
       expect(settings.nextTab, HudTab.tasks);
     });
   });
+
+  group('Feedback prompt eligibility', () {
+    const now = 1000000;
+
+    test('pending under cap is eligible', () {
+      final s = HudSettings();
+      expect(s.feedbackStatus, FeedbackPromptStatus.pending);
+      expect(s.feedbackEligible(now), isTrue);
+    });
+
+    test('retired is never eligible', () {
+      final s = HudSettings(feedbackStatus: FeedbackPromptStatus.retired);
+      expect(s.feedbackEligible(now), isFalse);
+    });
+
+    test('ask cap retires it even when pending', () {
+      final s = HudSettings(
+        feedbackStatus: FeedbackPromptStatus.pending,
+        feedbackAskCount: HudSettings.feedbackMaxAsks,
+      );
+      expect(s.feedbackEligible(now), isFalse);
+    });
+
+    test('snoozed before re-arm time is not eligible', () {
+      final s = HudSettings(
+        feedbackStatus: FeedbackPromptStatus.snoozed,
+        feedbackSnoozeUntilMs: now + 1,
+      );
+      expect(s.feedbackEligible(now), isFalse);
+    });
+
+    test('snoozed after re-arm time is eligible', () {
+      final s = HudSettings(
+        feedbackStatus: FeedbackPromptStatus.snoozed,
+        feedbackSnoozeUntilMs: now - 1,
+      );
+      expect(s.feedbackEligible(now), isTrue);
+    });
+  });
 }
