@@ -3,6 +3,15 @@ enum HudState { eye, controls, chat, hidden }
 
 enum HudTab { agent, tasks }
 
+/// Presentation style for the HUD's panels.
+///
+/// [solid] (the default) renders panels as opaque dark cards, matching the
+/// design system already used by the native ROI card and the agent selector.
+/// [transparent] is the original see-through HUD (translucent black over the
+/// transparent macOS window). The eye stays see-through regardless. See
+/// `core/theme/hud_theme.dart`.
+enum HudStyle { transparent, solid }
+
 class HudSettings {
   HudState overlayState;
   HudTab activeTab;
@@ -33,6 +42,9 @@ class HudSettings {
   /// (NSApplicationActivationPolicy.accessory — the LSUIElement behavior).
   bool showInDock;
 
+  /// Panel presentation style (solid cards vs see-through). Defaults to solid.
+  HudStyle hudStyle;
+
   HudSettings({
     this.overlayState = HudState.chat,
     this.activeTab = HudTab.agent,
@@ -47,6 +59,7 @@ class HudSettings {
     this.autoDetectIssues = false,
     this.chatgptHarness = false,
     this.showInDock = true,
+    this.hudStyle = HudStyle.solid,
   });
 
   HudTab get nextTab {
@@ -69,6 +82,7 @@ class HudSettings {
     bool? autoDetectIssues,
     bool? chatgptHarness,
     bool? showInDock,
+    HudStyle? hudStyle,
   }) {
     return HudSettings(
       overlayState: overlayState ?? this.overlayState,
@@ -84,6 +98,7 @@ class HudSettings {
       autoDetectIssues: autoDetectIssues ?? this.autoDetectIssues,
       chatgptHarness: chatgptHarness ?? this.chatgptHarness,
       showInDock: showInDock ?? this.showInDock,
+      hudStyle: hudStyle ?? this.hudStyle,
     );
   }
 }

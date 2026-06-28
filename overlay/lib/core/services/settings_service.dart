@@ -20,6 +20,7 @@ class SettingsService extends ChangeNotifier {
   // "flutter.show_in_dock" — AppDelegate reads it natively at launch to set the
   // activation policy with no Dock-icon flash. Keep the string in sync.
   static const _keyShowInDock = 'show_in_dock';
+  static const _keyHudStyle = 'hud_style';
 
   late SharedPreferences _prefs;
   HudSettings _settings = HudSettings();
@@ -42,8 +43,17 @@ class SettingsService extends ChangeNotifier {
       autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
       chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
       showInDock: _prefs.getBool(_keyShowInDock) ?? true,
+      hudStyle: _loadHudStyle(),
     );
     notifyListeners();
+  }
+
+  HudStyle _loadHudStyle() {
+    final val = _prefs.getString(_keyHudStyle);
+    return HudStyle.values.firstWhere(
+      (s) => s.name == val,
+      orElse: () => HudStyle.solid,
+    );
   }
 
   HudState _loadHudState() {
@@ -141,6 +151,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setShowInDock(bool value) async {
     _settings.showInDock = value;
     await _prefs.setBool(_keyShowInDock, value);
+    notifyListeners();
+  }
+
+  Future<void> setHudStyle(HudStyle style) async {
+    _settings.hudStyle = style;
+    await _prefs.setString(_keyHudStyle, style.name);
     notifyListeners();
   }
 }

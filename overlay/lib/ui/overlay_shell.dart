@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/app_control.dart';
 import '../core/models/hud_settings.dart';
 import '../core/services/settings_service.dart';
+import '../core/theme/hud_theme.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/window_service.dart';
 import 'eye/eye_widget.dart';
@@ -700,7 +701,27 @@ class OverlayShellState extends State<OverlayShell> {
   /// thread messages (`regionThreads`). Merely tapping an eye registers a
   /// label but must NOT spawn a tab, or the strip fills with not-started
   /// threads the user never opened.
+  /// Resolve a region thread's full (untruncated) title from the live labels,
+  /// falling back to the region's issue. Shared by the tab strip and the
+  /// solid-mode chat card header.
+  String _threadTitleFor(WebSocketService ws, String id) {
+    var label = ws.regionThreadLabels[id];
+    if (label == null || label.isEmpty) {
+      for (final r in ws.regions) {
+        if (r.id == id) {
+          label = r.issue;
+          break;
+        }
+      }
+    }
+    if ((label == null || label.isEmpty) && _activeRegion?.id == id) {
+      label = _activeRegion!.issue;
+    }
+    return (label == null || label.isEmpty) ? 'region' : label;
+  }
+
   Widget _buildThreadTabs(WebSocketService ws) {
+    final theme = HudTheme.of(context);
     final ids = <String>{
       ...ws.regionThreads.keys,
       ..._startedRegionThreads,
@@ -710,19 +731,7 @@ class OverlayShellState extends State<OverlayShell> {
     if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
 
     String labelFor(String id) {
-      var label = ws.regionThreadLabels[id];
-      if (label == null || label.isEmpty) {
-        for (final r in ws.regions) {
-          if (r.id == id) {
-            label = r.issue;
-            break;
-          }
-        }
-      }
-      if ((label == null || label.isEmpty) && _activeRegion?.id == id) {
-        label = _activeRegion!.issue;
-      }
-      label ??= 'region';
+      final label = _threadTitleFor(ws, id);
       return label.length > 18 ? '${label.substring(0, 18)}…' : label;
     }
 
@@ -743,13 +752,19 @@ class OverlayShellState extends State<OverlayShell> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: selected
-                    ? accent.withValues(alpha: 0.15)
-                    : Colors.white.withValues(alpha: 0.04),
+                    ? (theme.isSolid
+                        ? theme.selectionAccent.withValues(alpha: 0.18)
+                        : accent.withValues(alpha: 0.15))
+                    : (theme.isSolid
+                        ? theme.bubbleBg
+                        : Colors.white.withValues(alpha: 0.04)),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: selected
-                      ? accent.withValues(alpha: 0.5)
-                      : Colors.white.withValues(alpha: 0.12),
+                      ? (theme.isSolid
+                          ? theme.selectionAccent.withValues(alpha: 0.6)
+                          : accent.withValues(alpha: 0.5))
+                      : theme.border,
                 ),
               ),
               child: Row(
@@ -761,8 +776,8 @@ class OverlayShellState extends State<OverlayShell> {
                       fontFamily: 'JetBrainsMono',
                       fontSize: 9,
                       color: selected
-                          ? accent
-                          : Colors.white.withValues(alpha: 0.55),
+                          ? (theme.isSolid ? theme.selectionAccent : accent)
+                          : theme.textMuted,
                       fontWeight:
                           selected ? FontWeight.bold : FontWeight.normal,
                     ),
@@ -1149,10 +1164,13 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   Widget _buildChatPanelContent(WebSocketService ws) {
+    final theme = HudTheme.of(context);
     final chatContent = Container(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(8),
+        color: theme.panelBg,
+        borderRadius: BorderRadius.circular(theme.radius),
+        border: theme.isSolid ? Border.all(color: theme.border) : null,
+        boxShadow: theme.shadow,
       ),
       child: Column(
         children: [
@@ -1165,9 +1183,9 @@ class OverlayShellState extends State<OverlayShell> {
               height: 40,
               padding: const EdgeInsets.symmetric(horizontal: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(8),
+                color: theme.headerBg,
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(theme.radius),
                 ),
               ),
               child: Row(
@@ -1342,6 +1360,9 @@ class OverlayShellState extends State<OverlayShell> {
                         ws: ws,
                         threadId: _activeThread,
                         accentColor: _settingsService.settings.accentColor,
+                        title: _activeThread == null
+                            ? null
+                            : _threadTitleFor(ws, _activeThread!),
                         onSend: (text) {
                           final thread = _activeThread;
                           if (thread != null) {
