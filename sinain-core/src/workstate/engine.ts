@@ -223,6 +223,18 @@ export class WorkStateEngine {
     this.lastWorkSource = fn;
   }
 
+  /** Episode sink (DESIGN-MEMORY-V2 §3.8): breakpoint/return events flow into
+   *  memoryd's T1 store — estimates earn their way into memory by becoming
+   *  events. The engine stays fire-and-forget: memory owns what happened. */
+  private episodeSink?: (ev: {
+    kind: "breakpoint" | "return"; threadId: string; label: string;
+    at: number; gapMs?: number; lastWork?: LastWork;
+  }) => void;
+
+  setEpisodeSink(fn: NonNullable<WorkStateEngine["episodeSink"]>): void {
+    this.episodeSink = fn;
+  }
+
   /** Roll the active thread's live snapshot. The global digest lags a thread
    *  switch, so only TRUST it once the user has dwelled long enough ON THIS
    *  THREAD for it to be about this thread (else null → the brief falls back to
@@ -274,6 +286,10 @@ export class WorkStateEngine {
           // not a fresh read here (the global digest already lags the switch and
           // the surface is becoming the new thread). See DESIGN-WSM §3.
           if (outgoing.liveWork) outgoing.lastWork = outgoing.liveWork;
+          this.episodeSink?.({
+            kind: "breakpoint", threadId: outgoing.topicId,
+            label: outgoing.label, at: now, lastWork: outgoing.lastWork,
+          });
           this.leftThisSession.add(outgoing.topicId); // a genuine in-session leave
           // Don't close the open return yet — mark the leave and let the sweep
           // (or a bounce-back) decide whether this was an excursion or the end.
@@ -303,6 +319,10 @@ export class WorkStateEngine {
         this.appendHistory("resumed", existing, now); // logs the gap
         this.resumeThreadId = routeId; // returned to a thread we actually left this session
         justResumed = true;
+        this.episodeSink?.({
+          kind: "return", threadId: routeId, label: existing.label,
+          at: now, gapMs: gap,
+        });
       } else {
         // Bounce-back within the gap: the excursion didn't end the open return —
         // clear the leave marker so the duration keeps accruing.
