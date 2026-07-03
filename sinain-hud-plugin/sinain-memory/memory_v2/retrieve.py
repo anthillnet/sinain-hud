@@ -259,6 +259,7 @@ def person_profiles(
     *,
     max_persons: int = 2,
     max_lines: int = 14,
+    domains: tuple = ("people",),
     allowed_layers: set[str] | None = None,
 ) -> str:
     """Render identity cards for persons named in the query (scope-filtered)."""
@@ -276,14 +277,10 @@ def person_profiles(
             canonicals.append(c)
     if not canonicals:
         return ""
-    # A persona card is identity + tastes + notable events — not identity
-    # alone. Enumeration questions ("what activities does X do?") need the
-    # person's preference/event facts gathered from ALL sessions in one place;
-    # scattered per-fact retrieval systematically returns subsets.
-    # v3d measured: widening cards to preferences+events at 30 lines DILUTED
-    # (single-hop 9→7, multi-hop unchanged) — third confirmation that context
-    # budget is the binding constraint. Identity-only cards are the keeper.
-    _CARD_DOMAINS = ("people",)
+    # Caller picks card breadth: identity-only by default (v3d measured that
+    # UNGATED wide cards dilute — single-hop 9→7); judgment-intent queries get
+    # the wide card (values/tastes/activities are the inference substrate).
+    _CARD_DOMAINS = domains
     blocks: list[str] = []
     for c in canonicals[:max_persons]:
         rows = [
@@ -358,6 +355,11 @@ def build_context_block(
     # Synthius retrieves, and it is what makes possessive-chain multi-hop
     # ("Caroline's grandma...") a single-lookup question.
     if facts:
+        # Identity-only cards. Measured twice at n=200: intent-gated WIDE cards
+        # (preferences+events on judgment questions) were FLAT overall (v3c,
+        # 2026-07-03) — the remaining open-domain failures need world-knowledge
+        # bridging, not more persona lines. Ungated wide cards actively dilute
+        # (v3d). Keep lean.
         cards = person_profiles(facts, query, aliases or {},
                                 allowed_layers=allowed_layers)
         if cards:

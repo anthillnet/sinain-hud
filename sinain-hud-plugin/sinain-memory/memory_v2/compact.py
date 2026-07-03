@@ -275,6 +275,100 @@ def consolidate(facts: list[Fact]) -> list[Fact]:
     return list(by_id.values())
 
 
+LINK_VERSION = "link-1"
+
+
+def link_facts(facts: list[Fact], *, model: str = DEFAULT_MODEL,
+               cache_dir: "str | Path | None" = None) -> list[Fact]:
+    """Reference-chain resolution WITHIN one subject's fact sheet (multi-hop
+    at write time — Synthius: do the inference once at compaction, not per
+    question). "Moved from her home country 4 years ago" + "home country:
+    Sweden" -> "moved from Sweden 4 years ago", provenance = both source
+    facts. HARD guards (the adversarial win must not regress): one subject
+    per call — cross-person joins are impossible by construction; >=2 cited
+    sources; no outside knowledge; deterministic subject check on output.
+    Own cache stage — does not invalidate the extraction cache."""
+    # DEFAULT OFF (measured 2026-07-03, n=200): the linker emitted keyword-
+    # dense RESTATEMENTS rather than true chain resolutions; they outranked
+    # and displaced the atomic facts multi-hop needed (20/40 -> 14/40,
+    # overall 68 -> 65). Before re-enabling, add a composition-validity gate:
+    # the output must contain content tokens from BOTH sources that never
+    # co-occur in either source alone (a real bridge test, not source-count).
+    if os.environ.get("SINAIN_V2_LINK", "0") == "0":
+        return []
+    from collections import defaultdict
+    groups: dict[str, list[Fact]] = defaultdict(list)
+    for f in facts:
+        if not f.invalid_at:
+            groups[_norm(f.subject)].append(f)
+    # Largest sheets first — reference chains live where facts accumulate.
+    cand = sorted((g for g in groups.values() if len(g) >= 4),
+                  key=len, reverse=True)[:6]
+    out: list[Fact] = []
+    for group in cand:
+        subject = group[0].subject
+        lines = [f"{i+1}. [{f.valid_at}] ({f.domain}) {f.fact}"
+                 for i, f in enumerate(group[:40])]
+        key = hashlib.sha256(("\n".join(lines) + f"|{LINK_VERSION}|{model}")
+                             .encode()).hexdigest()[:16]
+        cpath = Path(cache_dir) / f"link-{key}.json" if cache_dir else None
+        if cpath and cpath.exists():
+            rows = json.loads(cpath.read_text(encoding="utf-8"))
+        else:
+            from common import call_llm
+            try:
+                raw = call_llm(
+                    system_prompt=(
+                        "You resolve reference chains within ONE person's fact "
+                        "sheet. Emit facts that COMBINE two or more listed facts "
+                        "to state something no single fact states alone — e.g. "
+                        "'moved from her home country 4 years ago' + 'home "
+                        "country: Sweden' -> 'moved from Sweden 4 years ago'.\n"
+                        'STRICT JSON: {"facts": [{"fact": "...", "domain": '
+                        '"people|events|preferences|decisions|endeavors", '
+                        '"date": "YYYY-MM-DD", "sources": [1, 4]}]}\n'
+                        "Rules: the missing piece MUST be explicit in another "
+                        "listed fact; cite >=2 sources; NEVER use outside "
+                        "knowledge; NEVER attribute another person's fact to "
+                        "this person; empty list when nothing resolves."),
+                    user_prompt=f"Person: {subject}\n\n" + "\n".join(lines),
+                    model=model, max_tokens=1200, temperature=0.0, seed=42)
+                m = re.search(r"\{.*\}", raw, re.DOTALL)
+                rows = (json.loads(m.group(0)).get("facts") if m else []) or []
+            except Exception as e:
+                print(f"[v2-link] {subject}: failed (fail-open): {str(e)[:80]}",
+                      file=sys.stderr)
+                rows = []
+            if cpath:
+                cpath.parent.mkdir(parents=True, exist_ok=True)
+                cpath.write_text(json.dumps(rows, ensure_ascii=False),
+                                 encoding="utf-8")
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            text = str(r.get("fact", "")).strip()
+            srcs = [i for i in (r.get("sources") or []) if isinstance(i, int)
+                    and 1 <= i <= len(group)]
+            dom = str(r.get("domain", "")).strip().lower()
+            if len(text) < 8 or len(srcs) < 2:
+                continue  # structural gate: composition requires >=2 sources
+            if dom not in DOMAINS:
+                dom = "events"
+            src_facts = [group[i - 1] for i in srcs]
+            out.append(Fact(
+                id=_fact_id(dom, subject, text),
+                domain=dom, subject=subject, fact=text,
+                valid_at=str(r.get("date", "") or src_facts[0].valid_at)[:10],
+                layers=sorted({l for sf in src_facts for l in sf.layers}),
+                episode_ids=sorted({e for sf in src_facts for e in sf.episode_ids}),
+                meta={"pass": "link", "sources": [sf.id for sf in src_facts]},
+            ))
+    if out:
+        print(f"[v2-link] resolved {len(out)} chained facts "
+              f"across {len(cand)} subjects")
+    return out
+
+
 def compact_store(
     store: EpisodeStore,
     *,
@@ -316,6 +410,8 @@ def compact_store(
             )
             print(f"[v2-compact] cache hit: {len(res.facts)} facts "
                   f"({cache_path.name})")
+            res.facts = res.facts + link_facts(res.facts, model=model,
+                                               cache_dir=cache_dir)
             _apply_summaries(store, res.summaries, res.seg_summaries)
             return res
 
@@ -423,6 +519,7 @@ def compact_store(
         }, ensure_ascii=False), encoding="utf-8")
 
     _apply_summaries(store, res.summaries, res.seg_summaries)
+    res.facts = res.facts + link_facts(res.facts, model=model, cache_dir=cache_dir)
     return res
 
 
