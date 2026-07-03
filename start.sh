@@ -176,6 +176,9 @@ kill_stale() {
   if pkill -f "sinain-memory/kg_daemon.py" 2>/dev/null; then
     killed=true
   fi
+  if pkill -f "sinain-memory/memoryd.py" 2>/dev/null; then
+    killed=true
+  fi
   if pkill -f "whisper-server.*\.sinain/models" 2>/dev/null; then
     killed=true
   fi
@@ -275,6 +278,7 @@ cleanup() {
   pkill -f "sinain-chat-agent/sidecar.py" 2>/dev/null || true
   pkill -f "[Pp]ython3* sidecar.py" 2>/dev/null || true
   pkill -f "sinain-memory/kg_daemon.py" 2>/dev/null || true
+  pkill -f "sinain-memory/memoryd.py" 2>/dev/null || true
   pkill -f "whisper-server.*\.sinain/models" 2>/dev/null || true
   pkill -f "tsx.*src/index.ts" 2>/dev/null || true
 

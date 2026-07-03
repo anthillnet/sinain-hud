@@ -43,8 +43,14 @@ class EpisodeStore:
         self.episodes: list[Episode] = []
         if self.path and self.path.exists():
             for line in self.path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
+                if not line.strip():
+                    continue
+                # Journal contract: each append is one line; a kill mid-write
+                # leaves at most one partial trailing line — skip, never fail.
+                try:
                     self.episodes.append(Episode(**json.loads(line)))
+                except (json.JSONDecodeError, TypeError):
+                    continue
 
     def append(self, ep: Episode) -> None:
         self.episodes.append(ep)

@@ -1098,20 +1098,22 @@ async function main() {
   })();
   let chatSidecarProc: ReturnType<typeof spawn> | null = null;
 
-  // ── Warm KG retrieval daemon (kg_daemon.py) ──
-  // Holds the Oxigraph stores + FTS resident read-only and serves lean ROI
-  // candidates over KG_SOCK, so queryKnowledgeFactsMulti is ~0.3-0.7s instead
-  // of a ~5-10s cold graph_query.py spawn. If it's down, that function falls
-  // back to the spawn transparently — so this is pure acceleration.
+  // ── Resident memory worker (memoryd.py — DESIGN-MEMORY-V2 P1) ──
+  // Supersedes kg_daemon on the SAME socket: serves the warm read-only ROI
+  // protocol unchanged, plus the T1 episodic tier (ingest/episodes/
+  // context_block). Episode ingest is deterministic and zero-LLM; the legacy
+  // distillation pipeline stays the T2 writer during the dual-write
+  // transition. Falls back to kg_daemon.py, then to one-shot spawns.
   let kgDaemonProc: ReturnType<typeof spawn> | null = null;
   function startKgDaemon(): void {
     if (kgDaemonProc && !kgDaemonProc.killed && kgDaemonProc.exitCode === null) return;
-    const script = resolveSinainMemoryScript("kg_daemon.py");
+    let script = resolveSinainMemoryScript("memoryd.py");
+    if (!existsSync(script)) script = resolveSinainMemoryScript("kg_daemon.py");
     if (!existsSync(script)) {
-      warn(TAG, "kg_daemon.py not found — KG retrieval uses one-shot spawn");
+      warn(TAG, "memoryd.py/kg_daemon.py not found — KG retrieval uses one-shot spawn");
       return;
     }
-    log(TAG, `starting KG daemon: ${PYTHON_BIN} ${script}`);
+    log(TAG, `starting memory daemon: ${PYTHON_BIN} ${script}`);
     const child = spawn(PYTHON_BIN, [script], {
       cwd: dirname(script), env: process.env,
       stdio: ["ignore", "pipe", "pipe"], detached: true,

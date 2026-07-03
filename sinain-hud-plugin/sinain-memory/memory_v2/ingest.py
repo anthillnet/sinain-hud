@@ -50,7 +50,9 @@ def ingest_sessions(
     (t_start/t_end/entities) — the summary-tree node that tier-1 compaction
     later fills in.
     """
-    st = store or EpisodeStore()
+    # `store or EpisodeStore()` would DISCARD an empty caller store — an
+    # EpisodeStore defines __len__, so a fresh (0-episode) store is falsy.
+    st = store if store is not None else EpisodeStore()
     for si, items in enumerate(sessions):
         if not items:
             continue

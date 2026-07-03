@@ -42,6 +42,35 @@ function redactFeedTextForDisk(text: string): string {
 const TAG = "local-curation";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// ── T1 episode capture (memoryd, DESIGN-MEMORY-V2 P1) ──
+// Fire-and-forget over the memory daemon's socket. Deterministic + zero-LLM
+// on the daemon side; text is redacted to the on-disk level BEFORE sending
+// (episodes persist to episodes.jsonl). Failure is silent by design: the
+// daemon may be starting up / absent — episode capture is additive during
+// the dual-write transition, never load-bearing for the legacy pipeline.
+const MEMORYD_SOCK = process.env.SINAIN_KG_SOCK || "/tmp/sinain-kg.sock";
+
+function sendEpisodes(items: Array<{ text: string; ts: number | string; source: string; channel: string }>): void {
+  if (items.length === 0) return;
+  import("node:net").then(({ connect }) => {
+    const payload = JSON.stringify({
+      op: "ingest",
+      context_id: "live",
+      items: items.map((i) => ({
+        source: i.source,
+        text: redactFeedTextForDisk(String(i.text)),
+        ts: typeof i.ts === "number" ? new Date(i.ts).toISOString() : String(i.ts),
+        channel: i.channel,
+      })),
+    }) + "\n";
+    const sock = connect(MEMORYD_SOCK);
+    sock.setTimeout(3000, () => sock.destroy());
+    sock.on("error", () => { /* daemon absent — additive capture, no-op */ });
+    sock.on("connect", () => sock.write(payload));
+    sock.on("data", () => sock.destroy());
+  }).catch(() => { /* ignore */ });
+}
+
 /** Resolve the sinain-memory Python scripts directory. */
 function resolveScriptsDir(): string {
   // Look for sinain-memory scripts in known locations.
@@ -245,6 +274,10 @@ export class LocalCurationService {
       const senseItems = this.getSenseContext();
       const transcript = [...audioItems, ...senseItems].sort((a, b) => a.ts - b.ts);
 
+      // T1 episode capture — every new window, regardless of whether the LLM
+      // distillation below runs. Instant on the daemon side.
+      sendEpisodes(transcript as any);
+
       if (transcript.length < 3) {
         log(TAG, `incremental distillation skipped — only ${transcript.length} new items since watermark`);
         return;
@@ -299,6 +332,8 @@ export class LocalCurationService {
 
     writeFileSync(pendingPath, JSON.stringify(data), "utf-8");
     log(TAG, `saved ${feedItems.length} feed items to pending-session.json`);
+    // Shutdown episode — items already disk-redacted above.
+    sendEpisodes(data.items as any);
   }
 
   /**

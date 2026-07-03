@@ -176,6 +176,7 @@ def search_facts(
     allowed_layers: set[str] | None = None,
     include_superseded: bool = False,
     score_floor: float = 0.8,
+    cos_floor: float = 0.30,
 ) -> list[tuple[float, object]]:
     """Rank typed facts (memory_v2.compact.Fact) against the query.
 
@@ -192,7 +193,7 @@ def search_facts(
         return []
     texts = [f"{f.subject} {f.fact}" for f in pool]
     fused = _hybrid_rank(query, [f.id for f in pool], texts, id(facts) if facts else 0)
-    hits = [(s, pool[i]) for s, i, bm, cos in fused[:k] if bm >= score_floor or cos >= 0.30]
+    hits = [(s, pool[i]) for s, i, bm, cos in fused[:k] if bm >= score_floor or cos >= cos_floor]
 
     # Subject-join expansion (multi-hop): pull the other currently-valid facts
     # about the subjects of the top hits — deterministic 1-hop graph expansion,
