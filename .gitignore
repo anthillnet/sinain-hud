@@ -90,9 +90,11 @@ firebase-debug.log
 # GSD planning workspace (commit_docs=false; baseline kept on chore/gsd-init via 4bbb543/d886792)
 .planning/
 
-# Eval tree is LOCAL-ONLY: harnesses, adapters, judges, runbooks, datasets and
-# results all stay out of the public repo (confidential meeting transcripts/QA
-# under data/; methodology docs reference internal context).
+# Eval tree is LOCAL-ONLY (per feedback_memory_eval_local_only.md, enforced
+# 2026-07-03): harnesses, adapters, judges, runbooks, datasets and results all
+# stay out of the public repo. Confidential inputs (internal meeting
+# transcripts/QA mirroring .planning/eval-internal) live under data/;
+# methodology docs reference internal context. Datasets re-download on demand.
 sinain-hud-plugin/sinain-memory/eval/
 sinain-hud-plugin/sinain-memory/eval/local_models/results/
 sinain-hud-plugin/sinain-memory/eval/local_models/vision_dataset/
