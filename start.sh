@@ -163,6 +163,15 @@ kill_stale() {
   if pkill -f "[Pp]ython3* sidecar.py" 2>/dev/null; then
     killed=true
   fi
+  # setproctitle renames our Python services (sinain-sense / sinain-kg /
+  # sinain-memoryd / sinain-chat) — script-path patterns above MISS renamed
+  # processes, which is exactly how orphaned daemons accumulated. Match the
+  # runtime names too.
+  for _pname in sinain-sense sinain-kg sinain-memoryd sinain-chat; do
+    if pkill -f "$_pname" 2>/dev/null; then
+      killed=true
+    fi
+  done
 
   # Kill previous sck-capture instances
   if pkill -f "tools/sck-capture/sck-capture" 2>/dev/null; then
@@ -279,6 +288,9 @@ cleanup() {
   pkill -f "[Pp]ython3* sidecar.py" 2>/dev/null || true
   pkill -f "sinain-memory/kg_daemon.py" 2>/dev/null || true
   pkill -f "sinain-memory/memoryd.py" 2>/dev/null || true
+  pkill -f "sinain-sense" 2>/dev/null || true
+  pkill -f "sinain-kg" 2>/dev/null || true
+  pkill -f "sinain-memoryd" 2>/dev/null || true
   pkill -f "whisper-server.*\.sinain/models" 2>/dev/null || true
   pkill -f "tsx.*src/index.ts" 2>/dev/null || true
 
