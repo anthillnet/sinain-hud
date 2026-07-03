@@ -1,0 +1,18 @@
+name = "sinain-download-redirect"
+main = "src/worker.js"
+compatibility_date = "2026-06-01"
+
+# Route the first-party download funnel through this Worker.
+# Requires the sinain.com zone to live on this Cloudflare account (it does:
+# nameservers are *.ns.cloudflare.com). The Worker only handles /download/*;
+# everything else on sinain.com continues to hit the Firebase origin.
+routes = [
+  { pattern = "sinain.com/download/*", zone_name = "sinain.com" },
+]
+
+# Persistent human/bot/day counters. One-time setup:
+#   wrangler kv namespace create DL_COUNTERS
+# then paste the printed id below (leave the binding name as-is).
+[[kv_namespaces]]
+binding = "DL_COUNTERS"
+id = "PASTE_KV_NAMESPACE_ID_HERE"

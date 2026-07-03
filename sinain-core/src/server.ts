@@ -1674,6 +1674,12 @@ export interface ServerDeps {
   respondSpawn?: (id: string, result: string) => { ok: boolean; error?: string };
   embedTexts?: (texts: string[]) => Promise<Float32Array[]>;
   isEmbeddingReady?: () => boolean;
+  /** Work-State Model (WSM/Athium P0) — current vector + decision, and prior info. */
+  getWorkState?: () => unknown;
+  getWorkStatePrior?: () => unknown;
+  /** Overlay feedback on a resume/offer: accept|dismiss act on it; useful|
+   *  somewhat|not-useful are calibration labels (P5). All logged. */
+  onWorkStateFeedback?: (threadId: string, action: string) => void;
 
   /** Web UI metadata DB (bookmarks, page cache, retraction undo). */
   webDb?: WebDb;
@@ -1843,6 +1849,38 @@ export function createAppServer(deps: ServerDeps) {
         const metaOnly = url.searchParams.get("meta_only") === "true";
         const events = senseBuffer.query(after, metaOnly);
         res.end(JSON.stringify({ events, epoch: serverEpoch }));
+        return;
+      }
+
+      // ── /workstate ── current WSM vector + Athium decision (P0; read-only) ──
+      if (req.method === "GET" && url.pathname === "/workstate") {
+        res.end(JSON.stringify({
+          current: deps.getWorkState?.() ?? null,
+          prior: deps.getWorkStatePrior?.() ?? null,
+          ts: Date.now(),
+        }));
+        return;
+      }
+
+      // ── /workstate/feedback ── overlay accept/dismiss on an offer (P2 label) ──
+      if (req.method === "POST" && url.pathname === "/workstate/feedback") {
+        const body = await readBody(req, 4096);
+        try {
+          const { threadId, action } = JSON.parse(body) as { threadId?: string; action?: string };
+          // accept|dismiss act on the resume; useful|somewhat|not-useful are
+          // pure calibration labels (P5 one-tap feedback) — all logged.
+          const ALLOWED = ["accept", "dismiss", "useful", "somewhat", "not-useful"];
+          if (!threadId || !action || !ALLOWED.includes(action)) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: "threadId + action(accept|dismiss|useful|somewhat|not-useful) required" }));
+            return;
+          }
+          deps.onWorkStateFeedback?.(threadId, action);
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "invalid JSON" }));
+        }
         return;
       }
 

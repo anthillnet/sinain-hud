@@ -1,5 +1,5 @@
 /// The 3 visible states of the overlay widget (plus hidden).
-enum HudState { eye, controls, chat, hidden }
+enum HudState { eye, controls, chat, cockpit, resume, hidden }
 
 enum HudTab { agent, tasks }
 

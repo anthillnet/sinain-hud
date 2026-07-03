@@ -23,6 +23,17 @@ Env: OPENROUTER_API_KEY (required), SINAIN_CHAT_MODEL (default qwen/qwen3.5-flas
 """
 from __future__ import annotations
 
+# Brand this process as "sinain-chat" (not bare "Python") in Activity Monitor /
+# `ps` — the Python analog of sinain-core's `process.title`. Works regardless of
+# launcher (the symlink trick is defeated by the macOS framework Python's
+# self-re-exec; setproctitle runs in the final process). Graceful no-op if absent.
+try:
+    import setproctitle as _setproctitle
+
+    _setproctitle.setproctitle("sinain-chat")
+except Exception:
+    pass
+
 import asyncio
 import json
 import logging

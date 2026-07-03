@@ -65,7 +65,10 @@ class SettingsService extends ChangeNotifier {
     // Controls (middle) mode is disabled for now — only eye + chat remain.
     // Coerce any persisted `controls` so an upgrading user never boots into
     // a mode that no longer has a path back out.
-    return state == HudState.controls ? HudState.chat : state;
+    if (state == HudState.controls) return HudState.chat;
+    if (state == HudState.cockpit) return HudState.eye; // cockpit is transient
+    if (state == HudState.resume) return HudState.eye; // resume marker is transient
+    return state;
   }
 
   HudTab _loadActiveTab() {
