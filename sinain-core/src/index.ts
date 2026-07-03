@@ -1083,20 +1083,20 @@ async function main() {
   })();
   let chatSidecarProc: ReturnType<typeof spawn> | null = null;
 
-  // ── Warm KG retrieval daemon (kg_daemon.py) ──
-  // Holds the Oxigraph stores + FTS resident read-only and serves lean ROI
-  // candidates over KG_SOCK, so queryKnowledgeFactsMulti is ~0.3-0.7s instead
-  // of a ~5-10s cold graph_query.py spawn. If it's down, that function falls
-  // back to the spawn transparently — so this is pure acceleration.
+  // ── Resident memory worker (memoryd.py — DESIGN-MEMORY-V2 P1) ──
+  // Supersedes kg_daemon on the SAME socket: warm read-only ROI protocol
+  // unchanged, plus the T1 episodic tier (ingest/episodes/context_block).
+  // Falls back to kg_daemon.py, then to one-shot spawns.
   let kgDaemonProc: ReturnType<typeof spawn> | null = null;
   function startKgDaemon(): void {
     if (kgDaemonProc && !kgDaemonProc.killed && kgDaemonProc.exitCode === null) return;
-    const script = resolveSinainMemoryScript("kg_daemon.py");
+    let script = resolveSinainMemoryScript("memoryd.py");
+    if (!existsSync(script)) script = resolveSinainMemoryScript("kg_daemon.py");
     if (!existsSync(script)) {
-      warn(TAG, "kg_daemon.py not found — KG retrieval uses one-shot spawn");
+      warn(TAG, "memoryd.py/kg_daemon.py not found — KG retrieval uses one-shot spawn");
       return;
     }
-    log(TAG, `starting KG daemon: ${PYTHON_BIN} ${script}`);
+    log(TAG, `starting memory daemon: ${PYTHON_BIN} ${script}`);
     const child = spawn(PYTHON_BIN, [script], {
       cwd: dirname(script), env: process.env,
       stdio: ["ignore", "pipe", "pipe"], detached: true,
@@ -2637,17 +2637,16 @@ async function main() {
   log(TAG, `  cost:    display=${config.costDisplayEnabled ? "on" : "off"} (always logged)`);
 
   // ── Distill any leftover pending session from a prior shutdown ──
-  // Deferred until here, after server.start() has bound the port and /health is
-  // answerable, so the synchronous (execFileSync) distillation can't starve the
-  // startup health gate. The short delay also lets the overlay's first health
-  // checks land before the event loop blocks on the f-coref model load.
+  // Deferred 2 minutes past startup: at +5s this pipeline (4-5 Python spawns)
+  // stacked against the memory daemon spawn, the ONNX embedding load and
+  // prior builders, contending for the exclusive RocksDB write lock — the
+  // spin-up crash/corruption window (knowledge-graph.db.corrupt-* quarantines).
+  // distillPendingSession also self-defers if a distillation is in flight.
   setTimeout(() => {
-    try {
-      localCuration.distillPendingSession();
-    } catch (err: any) {
+    void localCuration.distillPendingSession().catch((err: any) => {
       warn(TAG, `pending session distillation failed: ${err.message?.slice(0, 100)}`);
-    }
-  }, 5000);
+    });
+  }, 120_000).unref?.();
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
@@ -2674,23 +2673,21 @@ async function main() {
     feedbackStore?.destroy();
     traceStore?.destroy();
 
-    // Save session knowledge — write feed items to disk FIRST (instant),
-    // then attempt LLM distillation. If tsx force-kills before distillation
-    // finishes, the saved file is recovered on next startup.
+    // Save session knowledge — write feed items to disk (instant, redacted)
+    // and let the NEXT startup distill them. No LLM at shutdown: the old path
+    // kept the process alive minutes with Python children mid-RocksDB-write,
+    // exactly where start.sh's kill -9 landed -> corruption -> store wipe.
     localCuration.stop();
-    const feedItems = feedBuffer.query(0);
+    const feedItems = feedBuffer.query(0).filter((i) => i.ts > localCuration.lastDistilledTs);
     try {
       localCuration.savePendingSession(feedItems);
     } catch (err: any) {
       warn(TAG, `failed to save pending session: ${err.message?.slice(0, 100)}`);
     }
-    try {
-      if (feedItems.length >= 3) {
-        log(TAG, `distilling session (${feedItems.length} feed items)...`);
-        await localCuration.distillSession(feedItems);
-      }
-    } catch (err: any) {
-      warn(TAG, `session distillation failed (will retry on next startup): ${err.message?.slice(0, 100)}`);
+    if (localCuration.distillRunning) {
+      log(TAG, "waiting for in-flight distillation to finish (max 20s)...");
+      const idle = await localCuration.waitForIdle(20_000);
+      if (!idle) warn(TAG, "distillation still running at shutdown — child may be orphaned");
     }
 
     await server.destroy();

@@ -121,6 +121,18 @@ if [ "$PARANOID_MODE" = true ]; then
 fi
 
 # ── Kill stale processes from previous runs ──────────────────────────────────
+# Wait (bounded) for processes to exit after SIGTERM. kill -9 too early is how
+# core mid-distillation got killed mid-RocksDB-write -> KG corruption -> wipe.
+wait_gone() {
+  local pattern="$1" timeout="${2:-25}" i=0
+  while [ "$i" -lt "$timeout" ]; do
+    pgrep -f "$pattern" >/dev/null 2>&1 || return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
 kill_stale() {
   local killed=false
 
@@ -190,7 +202,9 @@ kill_stale() {
   fi
 
   if $killed; then
-    sleep 2
+    wait_gone "tsx.*src/index.ts" 25 || warn "sinain-core did not exit within 25s — forcing"
+    wait_gone "sinain-memory/(knowledge_integrator|reconstruct|session_distiller)" 20 \
+      || warn "distillation child did not exit within 20s — forcing"
     pkill -9 -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
     pkill -9 -f "sck-capture" 2>/dev/null || true
     pkill -9 -f "tsx.*src/index.ts" 2>/dev/null || true
@@ -216,7 +230,16 @@ cleanup() {
         kill -TERM "$pid" 2>/dev/null || true
       fi
     done
-    sleep 2
+    local waited=0
+    while [ "$waited" -lt 25 ]; do
+      local alive=false
+      for pid in "${PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then alive=true; break; fi
+      done
+      $alive || break
+      sleep 1
+      waited=$((waited + 1))
+    done
     for pid in "${PIDS[@]}"; do
       if kill -0 "$pid" 2>/dev/null; then
         kill -9 "$pid" 2>/dev/null || true

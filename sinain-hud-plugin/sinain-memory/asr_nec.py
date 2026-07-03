@@ -113,7 +113,11 @@ def build_gazetteer(
     if db_path:
         try:
             from triplestore import TripleStore
-            store = TripleStore(db_path)
+            # Read-only: the gazetteer only reads entity names. A writable open
+            # here contends for the exclusive RocksDB lock with the integrator/
+            # recon writers — one of the corruption vectors behind the
+            # knowledge-graph.db.corrupt-* quarantines.
+            store = TripleStore(db_path, read_only=True)
             for eid, val in store.entities_with_attr("name"):
                 if str(eid).startswith("entity:"):
                     _add(str(val))

@@ -2316,6 +2316,14 @@ def graph_children(db_path: str, entity: str, limit: int = 200) -> dict:
 
 
 def main() -> None:
+    # CLI mode is a pure reader. Force read-only store opens (rdf_store honors
+    # this env process-wide) so one-shot graph_query spawns never contend for
+    # the exclusive RocksDB write lock with the integrator/recon writers — a
+    # known corruption vector (knowledge-graph.db.corrupt-* quarantines).
+    # setdefault: callers may still override with SINAIN_KG_READONLY=0.
+    # Deliberately inside main(), not module level — library importers of
+    # graph_query (which may hold writable stores) are unaffected.
+    os.environ.setdefault("SINAIN_KG_READONLY", "1")
     parser = argparse.ArgumentParser(description="Graph Query")
     parser.add_argument("--db", required=True, help="Path to knowledge-graph.db")
     parser.add_argument("--entities", default=None, help="JSON array of entity/domain names")

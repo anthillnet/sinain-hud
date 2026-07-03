@@ -2111,6 +2111,42 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
+      // ── /memory/episodes ── T1 episodic tier via memoryd (DESIGN-MEMORY-V2
+      // P1): raw dated episode windows — recent-dialogue recall that is not
+      // distillation-dependent and not capped by the feed ring.
+      if (req.method === "GET" && url.pathname === "/memory/episodes") {
+        const payload = JSON.stringify({
+          op: "episodes",
+          query: url.searchParams.get("q") || "",
+          since: url.searchParams.get("since") || "",
+          until: url.searchParams.get("until") || "",
+          limit: Math.min(parseInt(url.searchParams.get("limit") || "20"), 100),
+          include_text: url.searchParams.get("text") === "1",
+        }) + "\n";
+        try {
+          const { connect } = await import("node:net");
+          const sockPath = process.env.SINAIN_KG_SOCK || "/tmp/sinain-kg.sock";
+          const result = await new Promise<string>((resolvP, rejectP) => {
+            const sock = connect(sockPath);
+            let buf = "";
+            sock.setTimeout(5000, () => { sock.destroy(); rejectP(new Error("memoryd timeout")); });
+            sock.on("error", rejectP);
+            sock.on("connect", () => sock.write(payload));
+            sock.on("data", (d) => {
+              buf += d.toString();
+              const nl = buf.indexOf("\n");
+              if (nl >= 0) { sock.destroy(); resolvP(buf.slice(0, nl)); }
+            });
+          });
+          const parsed = JSON.parse(result);
+          res.end(JSON.stringify({ ok: !parsed.error, ...parsed }));
+        } catch (err) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: `memoryd unavailable: ${String(err)}` }));
+        }
+        return;
+      }
+
       // ── /knowledge/query ── (combined entity recall — used by topic page) ──
       if (req.method === "GET" && url.pathname === "/knowledge/query") {
         const q = url.searchParams.get("q") || "";

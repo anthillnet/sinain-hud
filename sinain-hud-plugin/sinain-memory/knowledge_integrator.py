@@ -1911,16 +1911,35 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Knowledge Integrator")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
     parser.add_argument("--digest", default=None, help="SessionDigest JSON string")
+    parser.add_argument("--digest-file", default=None,
+                        help="Path to a JSON file with the SessionDigest. Preferred over --digest "
+                             "for large digests (argv can brush macOS ARG_MAX).")
     parser.add_argument("--transcript", default=None,
                         help="Raw transcript JSON (list of {source,text,ts} items). When provided, "
                              "the zero-LLM typed-link extractor + user-attribute extractor "
                              "run post-LLM to recover facts the distiller missed. gbrain "
                              "Proposal A pattern — topic-robust, deterministic.")
+    parser.add_argument("--transcript-file", default=None,
+                        help="Path to a JSON file with the raw transcript. Preferred over --transcript.")
     parser.add_argument("--bootstrap", action="store_true", help="One-time: seed graph from playbook")
     parser.add_argument("--retag", action="store_true", help="Re-extract tags for all existing facts")
     parser.add_argument("--dedup-entities", action="store_true", help="Merge fragmented entity nodes")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying")
     args = parser.parse_args()
+    # File variants take precedence; downstream code keeps reading args.digest /
+    # args.transcript as inline JSON strings.
+    if args.digest_file:
+        try:
+            args.digest = Path(args.digest_file).read_text(encoding="utf-8")
+        except OSError as e:
+            output_json({"error": f"cannot read --digest-file: {e}"})
+            return
+    if args.transcript_file:
+        try:
+            args.transcript = Path(args.transcript_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"cannot read --transcript-file (non-fatal): {e}", file=sys.stderr)
+            args.transcript = None
 
     memory_dir = args.memory_dir
     db_path = str(Path(memory_dir) / "knowledge-graph.db")
