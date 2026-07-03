@@ -50,6 +50,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // the dual-write transition, never load-bearing for the legacy pipeline.
 const MEMORYD_SOCK = process.env.SINAIN_KG_SOCK || "/tmp/sinain-kg.sock";
 
+/** Send one pre-redacted event episode (WSM breakpoint/return, §3.8) to
+ *  memoryd. Fire-and-forget like sendEpisodes; caller redacts text. */
+export function sendMemorydEpisode(ep: {
+  kind: string; context_id: string; text: string; ts: string;
+  summary?: string; entities?: string[]; meta?: Record<string, unknown>;
+}): void {
+  import("node:net").then(({ connect }) => {
+    const sock = connect(MEMORYD_SOCK);
+    sock.setTimeout(3000, () => sock.destroy());
+    sock.on("error", () => { /* daemon absent — additive */ });
+    sock.on("connect", () => sock.write(JSON.stringify({ op: "ingest", episode: ep }) + "\n"));
+    sock.on("data", () => sock.destroy());
+  }).catch(() => { /* ignore */ });
+}
+
 function sendEpisodes(items: Array<{ text: string; ts: number | string; source: string; channel: string }>): void {
   if (items.length === 0) return;
   import("node:net").then(({ connect }) => {

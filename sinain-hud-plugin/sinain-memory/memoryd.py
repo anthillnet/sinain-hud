@@ -46,7 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kg_daemon as kd  # noqa: E402 — sets SINAIN_KG_READONLY for the process
 from memory_v2 import ingest_sessions
-from memory_v2.store import EpisodeStore
+from memory_v2.store import Episode, EpisodeStore
 from memory_v2.retrieve import build_context_block, search_episodes
 
 MEMORY_DIR = Path(os.path.expanduser(os.environ.get("SINAIN_MEMORY_DIR", "~/.sinain/memory")))
@@ -65,6 +65,29 @@ def _store() -> EpisodeStore:
 
 
 def op_ingest(req: dict) -> dict:
+    # Single-episode form — WSM breakpoint/return events (§3.8: the engine's
+    # frozen snapshots become attested episodes; the engine keeps no durable
+    # state of its own). {"op":"ingest","episode":{kind,context_id,text,ts,...}}
+    ep = req.get("episode")
+    if isinstance(ep, dict):
+        import hashlib
+        kind = str(ep.get("kind") or "breakpoint")
+        ts = str(ep.get("ts") or "")
+        ctx = str(ep.get("context_id") or "live")
+        with _STORE_LOCK:
+            st = _store()
+            st.append(Episode(
+                id="ep-" + hashlib.sha256(f"{ctx}|{ts}|{kind}".encode()).hexdigest()[:12],
+                context_id=ctx, t_start=ts, t_end=str(ep.get("t_end") or ts),
+                kind=kind, source=str(ep.get("source") or "agent"),
+                layers=[l for l in (ep.get("layers") or []) if isinstance(l, str)],
+                text=str(ep.get("text") or "")[:6000],
+                summary=str(ep.get("summary") or "")[:500],
+                entities=[str(e) for e in (ep.get("entities") or [])][:12],
+                meta=ep.get("meta") if isinstance(ep.get("meta"), dict) else {},
+            ))
+            return {"ok": True, "episodes": 1, "total": len(st)}
+
     items = req.get("items") or []
     items = [i for i in items if isinstance(i, dict) and str(i.get("text", "")).strip()]
     if not items:

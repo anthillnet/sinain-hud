@@ -40,7 +40,8 @@ import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { hardenLocalDataPermissions } from "./util/harden-permissions.js";
 import { runRetention } from "./util/retention.js";
 import { log, warn, error, debug, preview } from "./log.js";
-import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
+import { initPrivacy, levelFor, applyLevel, redactText, redactForDisk } from "./privacy/index.js";
+import { sendMemorydEpisode } from "./learning/local-curation.js";
 
 // SECURITY: make every file/dir this process (and its children — sense_client,
 // sck-capture, distiller one-shots) creates owner-only (files 0600, dirs 0700).
@@ -1348,6 +1349,30 @@ async function main() {
       hud: entry?.hud ?? null,
       ocrLines, transcriptTail, regions, errorReasons,
     };
+  });
+
+  // ── Breakpoint/return events → memoryd episodes (DESIGN-MEMORY-V2 §3.8) ──
+  // The engine's frozen snapshots become attested T1 episodes ("what
+  // happened"), replacing side-JSONL growth over time. Redacted to the
+  // on-disk level here — episodes persist to episodes.jsonl.
+  workStateEngine.setEpisodeSink((ev) => {
+    const lw = ev.lastWork;
+    const parts: string[] = [];
+    if (ev.kind === "return") parts.push(`returned after ${Math.round((ev.gapMs ?? 0) / 60000)} min away`);
+    if (lw?.digest) parts.push(`digest: ${redactText(String(lw.digest)).slice(0, 400)}`);
+    if (lw?.transcriptTail) parts.push(`last said: ${redactForDisk(String(lw.transcriptTail), "audio_transcript").slice(0, 200)}`);
+    if (lw?.ocrLines?.length) parts.push(`screen: ${redactText(lw.ocrLines.slice(0, 3).join(" | ")).slice(0, 240)}`);
+    if (lw?.regions?.length) parts.push(`open issues: ${lw.regions.map((r) => redactText(r.issue)).join("; ").slice(0, 200)}`);
+    if (lw?.errorReasons?.length) parts.push(`errors: ${lw.errorReasons.join("; ")}`);
+    sendMemorydEpisode({
+      kind: ev.kind,
+      context_id: ev.threadId,
+      ts: new Date(ev.at).toISOString(),
+      text: parts.join("\n"),
+      summary: `${ev.kind === "breakpoint" ? "left" : "resumed"}: ${redactText(ev.label).slice(0, 120)}`,
+      entities: [ev.label].filter(Boolean),
+      meta: ev.kind === "return" ? { gap_ms: ev.gapMs } : {},
+    });
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
