@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,7 +25,9 @@ import 'terminal/thread_terminal_view.dart';
 import '../core/models/context_cards.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
+import '../core/models/work_state.dart';
 import 'capture/capture_ui.dart';
+import 'cockpit/cockpit_view.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -39,6 +42,12 @@ class OverlayShellState extends State<OverlayShell> {
 
   late HudState _state;
   late HudState _lastVisibleState;
+
+  // Resume marker (§9): collapsed "Back to…" dashed marker vs the expanded
+  // ResumptionCard. `_resumeHandledId` suppresses re-arming the marker for a
+  // thread the user just acted on, until the engine disarms it (race guard).
+  bool _resumeExpanded = false;
+  String? _resumeHandledId;
 
   late final WindowService _windowService;
   late final SettingsService _settingsService;
@@ -460,6 +469,150 @@ class OverlayShellState extends State<OverlayShell> {
     _windowService.resetToDefaultPosition();
   }
 
+  /// Summon/dismiss the Athium attention board (P1 cockpit). Hotkey-driven.
+  void toggleCockpit() {
+    if (_state == HudState.cockpit) {
+      _transitionTo(HudState.eye);
+      return;
+    }
+    _windowService.showWindow(); // ensure visible if collapsed/hidden
+    _transitionTo(HudState.cockpit);
+  }
+
+  /// The cockpit surface — the ranked thread board (work_state over WS).
+  Widget _buildCockpit() {
+    final ws = context.watch<WebSocketService>();
+    final view = ws.workState ?? const WorkStateView();
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        mainAxisSize: MainAxisSize.max,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Fixed control line — stays pinned while the board scrolls beneath.
+          _plainIcon(
+            Icons.close,
+            () => _transitionTo(HudState.eye),
+            small: true,
+            tooltip: 'Close board',
+          ),
+          const SizedBox(height: 4),
+          Flexible(
+            child: SingleChildScrollView(
+              child: AthiumCockpit(
+                  view: view, onFeedback: _sendWorkStateFeedback),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Resume marker (§9 return-to-thread) ───────────────────────────────────
+  /// Surface the collapsed "Back to…" dashed marker when the engine arms a
+  /// resume (only from the passive eye — never yank the user out of chat).
+  void _enterResume() {
+    _windowService.showWindow();
+    setState(() {
+      _resumeExpanded = false;
+      _state = HudState.resume;
+    });
+    _resizeWindowForState(HudState.resume);
+  }
+
+  /// The engine disarmed the resume (acted on / switched away) → back to eye.
+  void _exitResume() {
+    setState(() {
+      _resumeExpanded = false;
+      _state = HudState.eye;
+    });
+    _resizeWindowForState(HudState.eye);
+  }
+
+  /// Tapping the marker expands it in place into the ResumptionCard.
+  void _expandResume() {
+    setState(() => _resumeExpanded = true);
+    _resizeWindowForState(HudState.resume);
+    _windowService.makeKeyWindow();
+  }
+
+  /// Tapping the card's eye collapses it back to the marker (hero ↔ card toggle).
+  void _collapseResume() {
+    setState(() => _resumeExpanded = false);
+    _resizeWindowForState(HudState.resume);
+  }
+
+  /// The resume surface: collapsed dashed ROI-eye marker, or the expanded
+  /// Calibrated Resume Card (its expanded state — not a separate panel).
+  Widget _buildResume() {
+    final view = context.watch<WebSocketService>().workState;
+    final t = view?.resumeThread;
+    if (t == null) return const SizedBox.shrink();
+    if (!_resumeExpanded) {
+      // Draggable like the eye it replaces: tap expands, drag moves the window
+      // (native handles tracking on macOS; Flutter-side on Windows).
+      return Align(
+        alignment: Alignment.topRight,
+        child: GestureDetector(
+          onPanStart: _onDragStart,
+          onPanUpdate: _onDragUpdate,
+          onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
+          child: ResumeMarker(t: t, onTap: _expandResume),
+        ),
+      );
+    }
+    final card = view?.resumeCard;
+    if (card == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.topRight,
+      child: SingleChildScrollView(
+        child: CalibratedResumeCard(
+          card: card,
+          onFeedback: _sendWorkStateFeedback,
+          onResume: _resumeThreadInChat,
+          onCollapse: _collapseResume,
+        ),
+      ),
+    );
+  }
+
+  /// "Resume thread" on the §9 resume card → open sinain chat with a re-entry
+  /// nudge. Core records the accept, composes the thread's frozen context as the
+  /// chat seed, and routes a resumption nudge through the resident sinain lane;
+  /// we just fire the command and transition into chat.
+  void _resumeThreadInChat(String threadId) {
+    // Guard the marker from re-arming in the window between the command and the
+    // engine's next (disarmed) view — same guard as accept/dismiss feedback.
+    _resumeHandledId = threadId;
+    _resumeExpanded = false;
+    context.read<WebSocketService>().resumeThreadInChat(threadId);
+    // The nudge routes through the MAIN sinain lane — land on the main tab
+    // with the command input focused so typing goes straight into the chat.
+    setState(() => _activeThread = null);
+    focusInput();
+  }
+
+  /// Athium offer accept/dismiss → POST /workstate/feedback (P2 label channel),
+  /// then collapse the board.
+  Future<void> _sendWorkStateFeedback(String threadId, String action) async {
+    // Mark this thread handled so the marker doesn't re-arm in the window
+    // between the POST and the engine's next (disarmed) view.
+    _resumeHandledId = threadId;
+    _resumeExpanded = false;
+    final base = _settingsService.settings.wsUrl
+        .replaceFirst('wss://', 'https://')
+        .replaceFirst('ws://', 'http://');
+    try {
+      final client = HttpClient();
+      final req = await client.postUrl(Uri.parse('$base/workstate/feedback'));
+      req.headers.contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode({'threadId': threadId, 'action': action})));
+      await req.close();
+      client.close();
+    } catch (_) {/* best-effort */}
+    if (mounted) _transitionTo(HudState.eye);
+  }
+
   /// Transition to Chat state and focus the command input.
   void focusInput() {
     if (_state != HudState.chat) {
@@ -485,7 +638,7 @@ class OverlayShellState extends State<OverlayShell> {
     _settingsService.setHudState(target);
     _resizeWindowForState(target);
 
-    if (target == HudState.chat) {
+    if (target == HudState.chat || target == HudState.cockpit) {
       _windowService.makeKeyWindow();
     } else {
       _windowService.resignKeyWindow();
@@ -518,6 +671,11 @@ class OverlayShellState extends State<OverlayShell> {
           _settingsService.settings.chatWidth,
           _settingsService.settings.chatHeight,
         );
+      case HudState.cockpit:
+        place(380, 460); // Athium attention board (top-right anchored)
+      case HudState.resume:
+        // Collapsed ROI-eye + tether → expanded Calibrated Resume Card (top-right).
+        place(_resumeExpanded ? 332 : 260, _resumeExpanded ? 520 : 40);
       case HudState.hidden:
         break;
     }
@@ -812,6 +970,7 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'capBuild', 'title': 'Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
+      {'id': 'cockpit', 'title': 'Attention Board'},
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
       {'id': 'settings', 'title': 'Settings…'},
@@ -838,6 +997,8 @@ class OverlayShellState extends State<OverlayShell> {
         await _startRegionSelect();
       case 'copySeed':
         await _copySeedForActiveThread();
+      case 'cockpit':
+        toggleCockpit();
       case 'reset':
         resetPosition();
       case 'settings':
@@ -1620,6 +1781,21 @@ class OverlayShellState extends State<OverlayShell> {
     // screen that trapped users after the wizard.
     context
         .watch<SettingsService>(); // rebuild on privacy mode change (eye color)
+
+    // Resume marker (§9): the engine arms `resumeThreadId` the moment the user
+    // returns to a cooled thread. Auto-surface the collapsed "Back to…" marker
+    // from the passive eye, and dismiss it once the engine disarms.
+    final resumeT = context.watch<WebSocketService>().workState?.resumeThread;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (resumeT == null) {
+        _resumeHandledId = null; // disarmed → ready for the next resume
+        if (_state == HudState.resume) _exitResume();
+      } else if (_state == HudState.eye && resumeT.topicId != _resumeHandledId) {
+        _enterResume();
+      }
+    });
+
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
     }
@@ -1650,6 +1826,10 @@ class OverlayShellState extends State<OverlayShell> {
         return _buildControlsBar();
       case HudState.chat:
         return _buildChatPanel();
+      case HudState.cockpit:
+        return _buildCockpit();
+      case HudState.resume:
+        return _buildResume();
       case HudState.hidden:
         return const SizedBox.shrink();
     }
@@ -1854,6 +2034,12 @@ class OverlayShellState extends State<OverlayShell> {
                     () => _transitionTo(HudState.eye),
                     small: true,
                     tooltip: 'Collapse to eye',
+                  ),
+                  _plainIcon(
+                    Icons.leaderboard_outlined,
+                    toggleCockpit,
+                    small: true,
+                    tooltip: 'Attention board',
                   ),
                   const SizedBox(width: 2),
                   // Capture toggles

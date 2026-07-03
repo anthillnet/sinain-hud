@@ -34,6 +34,17 @@ Env: SINAIN_KG_SOCK (default /tmp/sinain-kg.sock),
 """
 from __future__ import annotations
 
+# Brand this process as "sinain-kg" (not bare "Python") in Activity Monitor /
+# `ps` — the Python analog of sinain-core's `process.title`. Works regardless of
+# launcher (the symlink trick is defeated by the macOS framework Python's
+# self-re-exec; setproctitle runs in the final process). Graceful no-op if absent.
+try:
+    import setproctitle as _setproctitle
+
+    _setproctitle.setproctitle("sinain-kg")
+except Exception:
+    pass
+
 import json
 import os
 import socket

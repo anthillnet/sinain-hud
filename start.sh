@@ -121,8 +121,12 @@ if [ "$PARANOID_MODE" = true ]; then
 fi
 
 # ── Kill stale processes from previous runs ──────────────────────────────────
-# Wait (bounded) for processes to exit after SIGTERM. kill -9 too early is how
-# core mid-distillation got killed mid-RocksDB-write -> KG corruption -> wipe.
+
+# Wait (bounded) for processes matching a pattern to exit after SIGTERM.
+# Escalating to kill -9 too early is how a sinain-core mid-distillation (or an
+# orphaned knowledge_integrator/reconstruct child) got killed mid-RocksDB-write,
+# corrupting the knowledge graph — the recovery path then wipes the store.
+# Returns as soon as they're gone; the timeout only bites when a process hangs.
 wait_gone() {
   local pattern="$1" timeout="${2:-25}" i=0
   while [ "$i" -lt "$timeout" ]; do
@@ -165,6 +169,17 @@ kill_stale() {
     killed=true
   fi
 
+  # Kill previous core-spawned helpers (warm KG daemon + whisper-server). These
+  # are children of sinain-core; killing core orphans them (PPID=1) so they
+  # survive restarts unless matched explicitly. Scope whisper to our model dir
+  # so a user's own whisper-server isn't touched.
+  if pkill -f "sinain-memory/kg_daemon.py" 2>/dev/null; then
+    killed=true
+  fi
+  if pkill -f "whisper-server.*\.sinain/models" 2>/dev/null; then
+    killed=true
+  fi
+
   # Kill previous sinain-core processes
   if pkill -f "tsx.*src/index.ts" 2>/dev/null; then
     killed=true
@@ -202,7 +217,10 @@ kill_stale() {
   fi
 
   if $killed; then
-    wait_gone "tsx.*src/index.ts" 25 || warn "sinain-core did not exit within 25s — forcing"
+    # Give core (and any distillation children writing the KG) time to exit
+    # cleanly before the -9 sweep. Fast path: they're usually gone in ~2s.
+    wait_gone "tsx.*src/index.ts" 25 \
+      || warn "sinain-core did not exit within 25s — forcing"
     wait_gone "sinain-memory/(knowledge_integrator|reconstruct|session_distiller)" 20 \
       || warn "distillation child did not exit within 20s — forcing"
     pkill -9 -f "sinain_hud.app/Contents/MacOS/sinain_hud" 2>/dev/null || true
@@ -230,6 +248,9 @@ cleanup() {
         kill -TERM "$pid" 2>/dev/null || true
       fi
     done
+    # Poll up to 25s before -9: core's shutdown is fast now (no LLM
+    # distillation at shutdown), but it may still be waiting out an in-flight
+    # incremental distillation child that must not die mid-RocksDB-write.
     local waited=0
     while [ "$waited" -lt 25 ]; do
       local alive=false
@@ -253,6 +274,8 @@ cleanup() {
   pkill -f "Python -m sense_client" 2>/dev/null || true
   pkill -f "sinain-chat-agent/sidecar.py" 2>/dev/null || true
   pkill -f "[Pp]ython3* sidecar.py" 2>/dev/null || true
+  pkill -f "sinain-memory/kg_daemon.py" 2>/dev/null || true
+  pkill -f "whisper-server.*\.sinain/models" 2>/dev/null || true
   pkill -f "tsx.*src/index.ts" 2>/dev/null || true
 
   rm -f "$PID_FILE"

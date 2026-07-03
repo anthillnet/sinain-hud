@@ -8,6 +8,7 @@ import '../models/context_cards.dart';
 import '../models/feed_item.dart';
 import '../models/region_highlight.dart';
 import '../models/thread_status.dart';
+import '../models/work_state.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
 class WebSocketService extends ChangeNotifier {
@@ -79,6 +80,7 @@ class WebSocketService extends ChangeNotifier {
   final _enrichController = StreamController<EnrichCard>.broadcast();
   final _saveReceiptController = StreamController<SaveReceipt>.broadcast();
   final _voiceController = StreamController<VoiceSession>.broadcast();
+  final _workStateController = StreamController<WorkStateView>.broadcast();
 
   /// Latest voice session state (snapshot for late-mounting UI); updates via
   /// [voiceSessionStream] + notifyListeners.
@@ -96,6 +98,11 @@ class WebSocketService extends ChangeNotifier {
   Stream<ThreadStatusUpdate> get spawnTaskStream => _spawnTaskController.stream;
   Stream<String> get copyStream => _copyController.stream;
   Stream<List<RegionHighlight>> get regionStream => _regionController.stream;
+  Stream<WorkStateView> get workStateStream => _workStateController.stream;
+
+  /// Latest work-state cockpit view (WSM/Athium P1). Read on mount; updates via
+  /// [workStateStream].
+  WorkStateView? workState;
 
   /// Latest full region set (Grammarly mode). Read on mount; updates via
   /// [regionStream].
@@ -237,6 +244,13 @@ class WebSocketService extends ChangeNotifier {
     sendCommand('restart_chat_sidecar');
   }
 
+  /// Resume a cooled thread in chat: core composes the thread's re-entry seed,
+  /// marks the resume accepted, and routes a resumption nudge through the
+  /// resident sinain chat lane (overlay "Resume thread" on the §9 resume card).
+  void resumeThreadInChat(String threadId) {
+    sendCommand('resume_thread_chat', {'threadId': threadId});
+  }
+
   void requestCopy(String activeTab) {
     _copyController.add(activeTab);
   }
@@ -317,6 +331,13 @@ class WebSocketService extends ChangeNotifier {
       final json = jsonDecode(data as String) as Map<String, dynamic>;
       final type = json['type'] as String?;
       switch (type) {
+        case 'workstate':
+          final view = WorkStateView.fromJson(
+              json['view'] as Map<String, dynamic>? ?? const {});
+          workState = view;
+          _workStateController.add(view);
+          notifyListeners();
+          break;
         case 'feed':
           final item =
               FeedItem.fromJson(json['data'] as Map<String, dynamic>? ?? json);
@@ -860,6 +881,7 @@ class WebSocketService extends ChangeNotifier {
     _enrichController.close();
     _saveReceiptController.close();
     _voiceController.close();
+    _workStateController.close();
     super.dispose();
   }
 

@@ -10,7 +10,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "eval": "tsx eval/harness.ts --scenarios eval/scenarios/ --runs 3 --report eval/reports/",
-    "eval:quick": "tsx eval/harness.ts --scenarios eval/scenarios/ --runs 1 --fast --report /dev/stdout"
+    "eval:quick": "tsx eval/harness.ts --scenarios eval/scenarios/ --runs 1 --fast --report /dev/stdout",
+    "wsm:calibrate": "tsx src/workstate/calibrate.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1",

@@ -4,6 +4,19 @@ import io
 import sys
 import traceback
 
+# Brand this process as "sinain-sense" (not bare "Python") in Activity Monitor /
+# `ps` so users can recognise + clean up our services. This is the Python analog
+# of sinain-core's `process.title` — it works regardless of how we're launched
+# (the launcher-symlink trick is defeated by the macOS framework Python, which
+# re-execs itself; setproctitle runs inside the final process so it always wins).
+# Graceful no-op if the dep is absent.
+try:
+    import setproctitle as _setproctitle
+
+    _setproctitle.setproctitle("sinain-sense")
+except Exception:
+    pass
+
 # Force UTF-8 stdout/stderr on Windows to prevent UnicodeEncodeError crashes
 # when window titles contain non-cp1251 characters (e.g. Telegram's \u200e).
 if sys.platform == "win32":

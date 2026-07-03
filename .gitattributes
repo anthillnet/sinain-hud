@@ -1,0 +1,13 @@
+# Binary files that editors/tools should never try to open as text
+tools/whisper/whisper-cli binary
+tools/sck-capture/sck-capture binary
+overlay/macos/Podfile.lock binary
+
+# Build artifacts (shouldn't be in git but protect against accidental diff)
+*.dmg binary
+*.app binary
+*.snapshot binary
+
+# SQLite databases — never diff or open as text
+*.db binary
+*.sqlite binary

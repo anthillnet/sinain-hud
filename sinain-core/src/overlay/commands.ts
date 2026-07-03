@@ -67,6 +67,9 @@ export interface CommandDeps {
   /** (Re)start the resident chat sidecar — overlay Run button when the
    *  built-in sinain chat lane is selected but unreachable. */
   onRestartChatSidecar?: () => { ok: boolean; error?: string };
+  /** Resume a cooled thread in chat: build its re-entry seed and route a
+   *  resumption nudge through the resident sidecar (overlay "Resume thread"). */
+  onResumeThreadChat?: (threadId: string) => void;
 }
 
 /**
@@ -380,6 +383,16 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         wsHandler.broadcast("Starting sinain-chat…", "normal");
         log(TAG, "restart_chat_sidecar launched");
       }
+      break;
+    }
+    case "resume_thread_chat": {
+      const threadId = String((msg as any).threadId ?? "").trim();
+      if (!threadId) {
+        log(TAG, "resume_thread_chat: missing threadId");
+        break;
+      }
+      log(TAG, `resume_thread_chat: ${threadId}`);
+      deps.onResumeThreadChat?.(threadId);
       break;
     }
     case "set_handoff_context": {

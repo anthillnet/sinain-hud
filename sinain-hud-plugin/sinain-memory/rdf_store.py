@@ -304,6 +304,18 @@ class RdfStore:
             ))
             if not (corrupt and p.exists()):
                 raise  # lock contention / unknown — don't touch the data
+            # The corruption signatures above overlap CONTENTION: a store that
+            # another process has open can transiently fail a writable open with
+            # missing-file/IO errors while compaction rotates files. Probe with a
+            # read-only open (needs no write lock): if the store reads fine it is
+            # healthy — re-raise instead of quarantining live data.
+            try:
+                ox.Store.read_only(str(p))
+                readable = True
+            except Exception:  # noqa: BLE001
+                readable = False  # unreadable both ways → genuinely broken
+            if readable:
+                raise  # healthy → contention, not corruption — don't touch it
             import shutil
             import time
             bak = p.with_name(f"{p.name}.corrupt-{int(time.time())}")

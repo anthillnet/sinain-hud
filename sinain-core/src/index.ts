@@ -31,6 +31,7 @@ import { SignalCollector } from "./learning/signal-collector.js";
 import { LocalCurationService } from "./learning/local-curation.js";
 import { EmbeddingService } from "./embedding/service.js";
 import { createAppServer } from "./server.js";
+import { WorkStateEngine } from "./workstate/engine.js";
 import { WebDb } from "./web-db/store.js";
 import { Profiler } from "./profiler.js";
 import { CostTracker } from "./cost/tracker.js";
@@ -994,6 +995,20 @@ async function main() {
   embeddingService = new EmbeddingService();
   embeddingService.loadAsync(); // ~9s background load, server starts immediately
 
+  // ── Initialize work-state engine (WSM/Athium P0) ──
+  // Self-paced debounced estimate over the sense/feed buffers, scored against
+  // the KG-pretrained prior (workstate-prior.json). Read-only surfaces: GET
+  // /workstate + console (WSM_LOG=1). See docs/DESIGN-WORK-STATE-MODEL.md.
+  const workStateEngine = new WorkStateEngine({
+    senseBuffer,
+    feedBuffer,
+    embeddingService,
+    memoryDir: resolveLocalMemoryDir(),
+    log: process.env.WSM_LOG === "1",
+    onUpdate: (view) => wsHandler.broadcastRaw({ type: "workstate", view }),
+  });
+  workStateEngine.start();
+
   // ── Initialize web.db (UI metadata: bookmarks, page cache, retraction undo) ──
   const webDb = new WebDb(`${resolveLocalMemoryDir()}/web.db`);
   // Periodic prune of expired retraction undo tokens (10-min TTL).
@@ -1187,6 +1202,10 @@ async function main() {
     // detect after switching back" case) instead of a blank wait. Tunable.
     restoreMaxAgeMs: Number(process.env.REGION_RESTORE_MAX_AGE_MS) || 180_000,
   });
+  // Nest the within-surface region-threads under the active project-thread on
+  // the WSM cockpit board (§9 project → regions). The engine reads this lazily
+  // per board render; constructed here because the engine predates the tracker.
+  workStateEngine.setRegionSource(() => regionTracker.activeRegionThreads());
   // Frontmost app last seen on the sense path — drives instant ROI restore +
   // urgent re-analysis the moment the user switches apps (region snappiness).
   let lastFocusedApp = "";
@@ -1312,6 +1331,25 @@ async function main() {
     feedbackStore: feedbackStore ?? undefined,
     costTracker,
     entityCache,
+  });
+
+  // ── Freeze "last work" per thread at the switch-away breakpoint (P5 resume
+  // card). digest/hud are global-latest; OCR/regions/transcript are the surface
+  // as it was at leave. Read once per switch — cheap. ──
+  workStateEngine.setLastWorkSource(() => {
+    const entry = agentLoop.getDigest();
+    const latest = senseBuffer.latest();
+    const ocrLines = (latest?.ocrLines?.map((l) => l.text) ?? latest?.ocr?.split("\n") ?? [])
+      .map((s) => s.trim()).filter((s) => s.length > 2).slice(0, 6);
+    const transcriptTail = feedBuffer.query(0)
+      .filter((f) => f.source === "audio").slice(-1)[0]?.text ?? null;
+    const regions = regionTracker.current().slice(0, 4).map((r) => ({ issue: r.issue, tip: r.tip }));
+    const errorReasons = latest?.semantic?.visible?.has_error ? ["error visible on screen"] : [];
+    return {
+      digest: entry?.digest ?? null,
+      hud: entry?.hud ?? null,
+      ocrLines, transcriptTail, regions, errorReasons,
+    };
   });
 
   // ── Wire learning signal collector (needs agentLoop) ──
@@ -2182,6 +2220,9 @@ async function main() {
     respondSpawn: (id: string, result: string) => escalator.respondSpawn(id, result),
     embedTexts: (texts: string[]) => embeddingService!.embed(texts),
     isEmbeddingReady: () => embeddingService?.ready ?? false,
+    getWorkState: () => workStateEngine.getView(),
+    getWorkStatePrior: () => workStateEngine.getPriorInfo(),
+    onWorkStateFeedback: (threadId, action) => workStateEngine.recordFeedback(threadId, action),
   });
 
   // ── Wire overlay profiling ──
@@ -2290,14 +2331,16 @@ async function main() {
     return header + tx + buildRegionTaskText(region, digest, undefined, knowledge);
   }
 
-  const routeSinainChat = (text: string, regionId?: string): void => {
+  const routeSinainChat = (text: string, regionId?: string, seedOverride?: string): void => {
     // A user chat/ROI turn must immediately drop ambient escalations: they
     // share this one resident sidecar, and an escalation storm (e.g. while a
     // doc is open) otherwise starves the user's turn → ChatService timeout.
     escalator.noteUserChatting();
-    let seed: string | undefined;
+    // An explicit seed (e.g. the resume-thread re-entry context) wins over the
+    // per-region/fork seed the sidecar would otherwise compose.
+    let seed: string | undefined = seedOverride;
     const kind: "main" | "roi" = regionId ? "roi" : "main";
-    if (regionId) {
+    if (regionId && !seedOverride) {
       const region = regionTracker.get(regionId);
       const forkSeed = forkSeeds.get(regionId);
       if (region) seed = buildRegionTaskText(region, agentLoop.getDigest()?.digest);
@@ -2400,6 +2443,30 @@ async function main() {
       escalator.setUserCommand(text);
       // Trigger agent loop immediately for user commands (bypass debounce + cooldown)
       agentLoop.onNewContext(true);
+    },
+    // Resume thread → open sinain chat with a re-entry nudge. Compose the
+    // thread's frozen context as the seed, mark the resume accepted (disarms the
+    // §9 marker + logs the label), and route a directive through the resident
+    // sidecar so it nudges the user back in with context preloaded.
+    onResumeThreadChat: (threadId) => {
+      const composed = workStateEngine.buildResumeChatSeed(threadId);
+      workStateEngine.recordFeedback(threadId, "accept");
+      const mainAgent = chatAgentFor("main");
+      if (!isSinainProfile(escalatorAgentsCfg, mainAgent)) {
+        // Non-sinain MAIN lane: the conversation lives in the external app /
+        // escalation path — just surface a re-entry note in the thread feed.
+        wsHandler.broadcastRaw({
+          type: "feed",
+          text: composed ? `↩ Resuming “${composed.label}”.` : "↩ Resuming thread.",
+          priority: "normal", ts: Date.now(), channel: "agent", sender: "agent",
+        } as any);
+        return;
+      }
+      if (!composed) {
+        routeSinainChat("I'm resuming a thread but its context wasn't found — help me work out where I left off.");
+        return;
+      }
+      routeSinainChat(composed.directive, undefined, composed.seed);
     },
     onUserBusy: (ms) => escalator.noteUserBusy(ms),
     onSetAutoDetect: (enabled) => {
@@ -2770,11 +2837,13 @@ async function main() {
   log(TAG, `  cost:    display=${config.costDisplayEnabled ? "on" : "off"} (always logged)`);
 
   // ── Distill any leftover pending session from a prior shutdown ──
-  // Deferred 2 minutes past startup: at +5s this pipeline (4-5 Python spawns)
-  // stacked against the memory daemon spawn, the ONNX embedding load and
-  // prior builders, contending for the exclusive RocksDB write lock — the
-  // spin-up crash/corruption window (knowledge-graph.db.corrupt-* quarantines).
-  // distillPendingSession also self-defers if a distillation is in flight.
+  // Deferred 2 minutes past startup. At +5s this pipeline (graph_query →
+  // distiller → integrator → recon → prior_builder, 4-5 Python spawns) stacked
+  // against the kg_daemon spawn (+FTS build), the ONNX embedding load (~9s)
+  // and prior_builder (+20s), all contending for the exclusive RocksDB write
+  // lock — the spin-up crash/corruption window (knowledge-graph.db.corrupt-*
+  // quarantines). By +120s the system is warm and idle; distillPendingSession
+  // also self-defers if an incremental distillation is already in flight.
   setTimeout(() => {
     void localCuration.distillPendingSession().catch((err: any) => {
       warn(TAG, `pending session distillation failed: ${err.message?.slice(0, 100)}`);
@@ -2791,6 +2860,7 @@ async function main() {
     profiler.stop();
     recorder.forceStop(); // Stop any active recording
     agentLoop.stop();
+    workStateEngine.stop(); // snapshot the thread bank + flush session-end history
     systemAudioPipeline.stop();
     if (micPipeline) micPipeline.stop();
     transcription.destroy();
@@ -2807,9 +2877,11 @@ async function main() {
     traceStore?.destroy();
 
     // Save session knowledge — write feed items to disk (instant, redacted)
-    // and let the NEXT startup distill them. No LLM at shutdown: the old path
-    // kept the process alive minutes with Python children mid-RocksDB-write,
-    // exactly where start.sh's kill -9 landed -> corruption -> store wipe.
+    // and let the NEXT startup distill them (distillPendingSession at +120s).
+    // No LLM distillation at shutdown anymore: the old path kept the process
+    // alive up to ~2.5 min with Python children mid-RocksDB-write, exactly the
+    // window where start.sh's kill -9 landed → store corruption → quarantine →
+    // fresh empty store (11 wipes Jun 24 – Jul 1). Shutdown must be fast.
     localCuration.stop();
     const feedItems = feedBuffer.query(0).filter((i) => i.ts > localCuration.lastDistilledTs);
     try {
@@ -2817,6 +2889,8 @@ async function main() {
     } catch (err: any) {
       warn(TAG, `failed to save pending session: ${err.message?.slice(0, 100)}`);
     }
+    // Bounded wait for any in-flight incremental distillation child — exiting
+    // under it orphans a Python process mid-write into the KG.
     if (localCuration.distillRunning) {
       log(TAG, "waiting for in-flight distillation to finish (max 20s)...");
       const idle = await localCuration.waitForIdle(20_000);

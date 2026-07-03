@@ -243,6 +243,24 @@ export class RegionTracker {
     this.restoreMaxAgeMs = opts.restoreMaxAgeMs ?? 45_000;
   }
 
+  /** The currently-tracked regions as lightweight nested entries for the WSM
+   *  cockpit (§9 project → regions nesting). `warmth` decays with missed ticks;
+   *  pending/provisional eyes (not yet ratified) are dimmed. Ordered warmest
+   *  first. The active project-thread renders these under its card. */
+  activeRegionThreads(): { id: string; label: string; warmth: number }[] {
+    const out: { id: string; label: string; warmth: number }[] = [];
+    for (const t of this.tracked.values()) {
+      const missed = Math.max(0, this.tick - t.lastSeenTick);
+      let warmth = 1 - missed / (this.maxMissedTicks + 1); // 1 = seen this tick
+      if (t.region.pending || t.region.provisional) warmth *= 0.5; // not yet ratified
+      warmth = warmth < 0 ? 0 : warmth > 1 ? 1 : warmth;
+      const issue = t.region.issue.trim();
+      const label = issue.length > 32 ? issue.slice(0, 31).trimEnd() + "…" : issue;
+      out.push({ id: t.region.id, label, warmth });
+    }
+    return out.sort((a, b) => b.warmth - a.warmth);
+  }
+
   /**
    * Ingest one tick's raw regions. Call every tick (with undefined when the
    * LLM emitted none) so expiry advances. Returns the new full set if it

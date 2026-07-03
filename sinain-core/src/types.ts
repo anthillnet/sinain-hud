@@ -1,5 +1,7 @@
 // ── Wire protocol types (overlay ↔ sinain-core) ──
 
+import type { WorkStateView } from "./workstate/types.js";
+
 export type Priority = "normal" | "high" | "urgent";
 export type FeedChannel = "stream" | "agent";
 
@@ -345,7 +347,13 @@ export interface SaveReceiptMessage {
   ts: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | VoiceSessionMessage;
+/** sinain-core → Overlay: work-state cockpit view (WSM/Athium P1). */
+export interface WorkStateMessage {
+  type: "workstate";
+  view: WorkStateView;
+}
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | WorkStateMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | VoiceSessionMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */
