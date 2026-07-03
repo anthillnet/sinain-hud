@@ -414,14 +414,18 @@ models one level down.
 
 ## 4. Migration & phasing
 
-**P0 — Stop the bleeding (no schema change).**
+**P0 — Stop the bleeding (no schema change).** ✅ SHIPPED 2026-07-02 (7f13f25).
 Delta-only distillation watermark; remove startup distillation (queue instead, keep
 delete-after-success not before); `SINAIN_KG_READONLY` on every logical reader incl.
 `asr_nec.py`; transcripts via stdin/tempfile not argv; call `gc()`; graceful-shutdown
 ordering in `start.sh` (SIGTERM memoryd children before core, bounded wait).
 *Exit criteria: zero corrupt-quarantines over 2 weeks; distillation LLM calls −80%.*
 
-**P1 — memoryd + episodic tier.**
+**P1 — memoryd + episodic tier.** ◐ IN PROGRESS — shipped 2026-07-03: memoryd
+resident worker on the kg socket, journaled T1 episode capture (windows +
+shutdown + WSM breakpoint/return events), /memory/episodes, chat episodes
+tool (4989592, dc2c947). Remaining: T2 compaction moves in-daemon; retire
+the per-spawn distillation chain.
 Fold kg_daemon + distiller + integrator + reconstruct into one resident worker with a
 journaled ingest queue; memoryd becomes the sole Oxigraph opener; add the T1 episode
 store (segment files + metadata in the graph); ship `get_episodes` to the chat sidecar
@@ -438,7 +442,9 @@ only holds ~1 day of facts, so the real backfill source is the JSONL sidecar fil
 backfilled rows land in `unclassified` and surface for one-time project-level
 classification.
 
-**P3 — WSM unification + context block.**
+**P3 — WSM unification + context block.** ◔ STARTED — breakpoint/return
+events already flow to T1 (dc2c947); side-JSONL migration + get_context_block
+hydration remain.
 Engine goes stateless: breakpoint/return/snapshot events flow into memoryd's ingest
 queue instead of side JSONL files (one-off migration of existing
 workstate-history/returns/threads into T1); engine hydrates from `get_context_block`
