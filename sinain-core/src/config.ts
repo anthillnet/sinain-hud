@@ -174,7 +174,7 @@ export function loadConfig(): CoreConfig {
     chunkDurationMs: intEnv("AUDIO_CHUNK_MS", 5000),
     vadEnabled: boolEnv("AUDIO_VAD_ENABLED", true),
     vadThreshold: floatEnv("AUDIO_VAD_THRESHOLD", 0.001),
-    captureCommand: env("AUDIO_CAPTURE_CMD", "screencapturekit") as "sox" | "ffmpeg" | "screencapturekit",
+    captureCommand: env("AUDIO_CAPTURE_CMD", "screencapturekit") as "sox" | "ffmpeg" | "screencapturekit" | "fifo",
     autoStart: boolEnv("AUDIO_AUTO_START", true),
     gainDb: intEnv("AUDIO_GAIN_DB", 20),
   };

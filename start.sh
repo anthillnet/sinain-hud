@@ -346,6 +346,20 @@ fi
 # Ensure IPC directory for screen frames
 mkdir -p "$HOME/.sinain/capture"
 
+# ── Capture ownership (single-owner model) ────────────────────────────────
+# sense_client owns sck-capture — video AND audio. Core reads audio from the
+# FIFO sense_client feeds (AUDIO_CAPTURE_CMD=fifo). With --no-sense there is
+# NO capture of any kind.
+if [ "$(uname)" = "Darwin" ]; then
+  if $SKIP_SENSE; then
+    export AUDIO_AUTO_START="${AUDIO_AUTO_START:-false}"
+    warn "capture disabled (--no-sense: sense_client owns all capture — audio AND video)"
+  else
+    export SINAIN_CAPTURE_OWNER="${SINAIN_CAPTURE_OWNER:-sense}"
+    export AUDIO_CAPTURE_CMD="${AUDIO_CAPTURE_CMD:-fifo}"
+  fi
+fi
+
 # ── 2. Start sinain-core ──────────────────────────────────────────────────
 log "Starting sinain-core..."
 (cd "$SCRIPT_DIR/sinain-core" && npm run dev 2>&1) | pipe_log "[core]" "$(printf "${CYAN}[core]${RESET}    ")" &

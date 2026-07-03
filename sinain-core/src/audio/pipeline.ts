@@ -202,7 +202,7 @@ export class AudioPipeline extends EventEmitter {
     return this.config.device;
   }
 
-  getCaptureCommand(): "sox" | "ffmpeg" | "screencapturekit" {
+  getCaptureCommand(): "sox" | "ffmpeg" | "screencapturekit" | "fifo" {
     return this.config.captureCommand;
   }
 

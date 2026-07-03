@@ -122,6 +122,16 @@ def main():
 
     config = load_config(args.config)
 
+    # Capture ownership (SINAIN_CAPTURE_OWNER=sense): this process spawns and
+    # supervises sck-capture — video AND audio. Core reads the audio via the
+    # FIFO (AUDIO_CAPTURE_CMD=fifo). See capture_owner.py.
+    from .capture_owner import maybe_start as _start_capture_owner
+    _capture_owner = _start_capture_owner()
+    if _capture_owner:
+        import atexit
+        atexit.register(_capture_owner.stop)
+        log("capture owner: sense_client owns sck-capture (audio -> fifo)")
+
     log("initializing capture...")
     capture = create_capture(
         mode=config["capture"]["mode"],

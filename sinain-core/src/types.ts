@@ -324,7 +324,7 @@ export interface AudioPipelineConfig {
   chunkDurationMs: number;
   vadEnabled: boolean;
   vadThreshold: number;
-  captureCommand: "sox" | "ffmpeg" | "screencapturekit";
+  captureCommand: "sox" | "ffmpeg" | "screencapturekit" | "fifo";
   autoStart: boolean;
   gainDb: number;
 }

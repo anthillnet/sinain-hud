@@ -17,6 +17,19 @@ const TAG = "audio";
  */
 export class MacOSCaptureSpawner implements CaptureSpawner {
   spawn(config: AudioPipelineConfig, source: AudioSourceTag, opts?: { compat?: boolean }): ChildProcess {
+    // Single-owner capture (SINAIN_CAPTURE_OWNER=sense / AUDIO_CAPTURE_CMD=
+    // fifo): sense_client owns sck-capture and forwards PCM through a named
+    // pipe; core just reads it. `cat` blocks until a writer appears, so there
+    // is no restart churn while sense_client is still starting. System source
+    // only (mic keeps its own path).
+    if (source !== "mic" && config.captureCommand === "fifo") {
+      const fifo = resolve(os.homedir(), ".sinain", "capture", "audio.pcm.fifo");
+      log(TAG, `audio source: fifo ${fifo} (capture owned by sense_client)`);
+      return spawn("/bin/sh", ["-c",
+        `mkdir -p "$(dirname '${fifo}')"; [ -p '${fifo}' ] || mkfifo -m 600 '${fifo}'; exec cat '${fifo}'`,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+    }
+
     // Check ~/.sinain/sck-capture/ first (npx install), then dev path
     const homeBinary = resolve(os.homedir(), ".sinain", "sck-capture", "sck-capture");
     const devBinary = resolve(__dirname, "..", "..", "..", "tools", "sck-capture", "sck-capture");
