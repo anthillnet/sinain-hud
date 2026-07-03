@@ -67,6 +67,15 @@ def dispatch(name: str, args: dict) -> str:
         return _get(f"/knowledge/query?q={urllib.parse.quote(args.get('query', ''))}&max={args.get('limit', 8)}")
     if name == "sinain_context":
         return (_get("/agent/digest") + "\n---\n" + _get("/agent/context"))[:_MAX]
+    if name == "sinain_memory_episodes":
+        # T1 episodic tier (memoryd): dated raw windows of what was observed.
+        # THE tool for "what happened / summarize the last meeting" — the feed
+        # ring only holds ~10 min and sinain_memory_query filters episodic out.
+        q = urllib.parse.quote(str(args.get("query", "")))
+        since = urllib.parse.quote(str(args.get("since", "")))
+        text_flag = "1" if args.get("include_text") else "0"
+        return _get(f"/memory/episodes?q={q}&since={since}"
+                    f"&limit={args.get('limit', 20)}&text={text_flag}")
     if name == "sinain_memory_store":
         # /knowledge/import expects the sinain export shape {"facts":[{entity,
         # attribute,value}]} (same as the MCP sinain_memory_store tool) — NOT
@@ -104,6 +113,13 @@ class MemoryQueryAction(Action):
 
 class MemoryStoreAction(Action):
     text: str
+
+
+class EpisodesAction(Action):
+    query: str = ""
+    since: str = ""   # ISO timestamp, e.g. "2026-07-03T10:00"
+    limit: int = 20
+    include_text: bool = False
 
 
 class BashAction(Action):
@@ -163,6 +179,9 @@ def _make(name: str, action_cls: type, desc: str) -> type:
 SPECS = [
     ("sinain_memory_query", MemoryQueryAction, "Query the user's knowledge graph (facts/entities)."),
     ("sinain_context", EmptyAction, "Get the user's current situation: digest + screen OCR/vision, audio, app history."),
+    ("sinain_memory_episodes", EpisodesAction,
+     "Recall past observed activity as dated episodes (conversations, meetings, work sessions). "
+     "Use for 'what happened earlier / summarize that meeting' — set include_text for raw excerpts."),
     ("sinain_memory_store", MemoryStoreAction, "Save a fact/note to the user's long-term memory."),
     ("read_file", ReadFileAction, "Read a UTF-8 text file by absolute path."),
     ("bash", BashAction, "Run a read-only shell command to orient on the machine."),

@@ -12,8 +12,10 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, appendFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, appendFileSync, renameSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // Promisified execFile — the distillation/curation pipelines run heavy Python
@@ -39,6 +41,50 @@ function redactFeedTextForDisk(text: string): string {
 
 const TAG = "local-curation";
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ── T1 episode capture (memoryd, DESIGN-MEMORY-V2 P1) ──
+// Fire-and-forget over the memory daemon's socket. Deterministic + zero-LLM
+// on the daemon side; text is redacted to the on-disk level BEFORE sending
+// (episodes persist to episodes.jsonl). Failure is silent by design: the
+// daemon may be starting up / absent — episode capture is additive during
+// the dual-write transition, never load-bearing for the legacy pipeline.
+const MEMORYD_SOCK = process.env.SINAIN_KG_SOCK || "/tmp/sinain-kg.sock";
+
+/** Send one pre-redacted event episode (WSM breakpoint/return, §3.8) to
+ *  memoryd. Fire-and-forget like sendEpisodes; caller redacts text. */
+export function sendMemorydEpisode(ep: {
+  kind: string; context_id: string; text: string; ts: string;
+  summary?: string; entities?: string[]; meta?: Record<string, unknown>;
+}): void {
+  import("node:net").then(({ connect }) => {
+    const sock = connect(MEMORYD_SOCK);
+    sock.setTimeout(3000, () => sock.destroy());
+    sock.on("error", () => { /* daemon absent — additive */ });
+    sock.on("connect", () => sock.write(JSON.stringify({ op: "ingest", episode: ep }) + "\n"));
+    sock.on("data", () => sock.destroy());
+  }).catch(() => { /* ignore */ });
+}
+
+function sendEpisodes(items: Array<{ text: string; ts: number | string; source: string; channel: string }>): void {
+  if (items.length === 0) return;
+  import("node:net").then(({ connect }) => {
+    const payload = JSON.stringify({
+      op: "ingest",
+      context_id: "live",
+      items: items.map((i) => ({
+        source: i.source,
+        text: redactFeedTextForDisk(String(i.text)),
+        ts: typeof i.ts === "number" ? new Date(i.ts).toISOString() : String(i.ts),
+        channel: i.channel,
+      })),
+    }) + "\n";
+    const sock = connect(MEMORYD_SOCK);
+    sock.setTimeout(3000, () => sock.destroy());
+    sock.on("error", () => { /* daemon absent — additive capture, no-op */ });
+    sock.on("connect", () => sock.write(payload));
+    sock.on("data", () => sock.destroy());
+  }).catch(() => { /* ignore */ });
+}
 
 /** Resolve the sinain-memory Python scripts directory. */
 function resolveScriptsDir(): string {
@@ -83,8 +129,9 @@ export class LocalCurationService {
   private scriptsDir: string;
   private sessionStartTs: number;
   private curationTimer: ReturnType<typeof setInterval> | null = null;
-  private _lastDistilledTs = 0; // timestamp of last incremental distillation
-  private _incrementalRunning = false;
+  private _lastPriorRefreshTs = 0;
+  private _lastDistilledTs = 0; // watermark: max item ts covered by a completed distillation
+  private _distillRunning = false; // serializes ALL distillation runs (incremental + pending)
   private _rearmCb: (() => void) | null = null; // callback to re-arm feed buffer onFull
   private _senseBuffer: SenseBuffer | null = null;
   // Optional HUD broadcast callback — when insight_synthesizer emits a
@@ -108,6 +155,24 @@ export class LocalCurationService {
     log(TAG, `memory: ${this.memoryDir}`);
     log(TAG, `scripts: ${this.scriptsDir}`);
     log(TAG, `scripts available: ${existsSync(resolve(this.scriptsDir, "session_distiller.py"))}`);
+
+    // First-run: ensure a WSM/Athium prior exists. Delayed so prior_builder can
+    // use core /embed rather than loading a local model; later refreshes ride
+    // distillation (KG-changed).
+    if (!existsSync(resolve(this.memoryDir, "workstate-prior.json"))) {
+      setTimeout(() => void this.refreshWorkStatePrior(true), 20_000).unref?.();
+    }
+  }
+
+  /** Rebuild the WSM/Athium per-user prior from the current KG (best-effort,
+   *  throttled to ≤1/10min). The WorkStateEngine hot-reloads
+   *  workstate-prior.json on mtime change, so threads track the KG without a
+   *  manual rebuild. */
+  async refreshWorkStatePrior(force = false): Promise<void> {
+    const now = Date.now();
+    if (!force && now - this._lastPriorRefreshTs < 10 * 60 * 1000) return;
+    this._lastPriorRefreshTs = now;
+    await this.runScript("prior_builder.py", ["--memory-dir", this.memoryDir]);
   }
 
   /** Start periodic curation (30-minute timer). */
@@ -172,29 +237,48 @@ export class LocalCurationService {
     return items;
   }
 
+  /** True while a distillation pipeline (incremental or pending) is in flight. */
+  get distillRunning(): boolean {
+    return this._distillRunning;
+  }
+
+  /** Wait (bounded) for any in-flight distillation to finish. Called during
+   *  shutdown: exiting while a spawned integrator/recon child is mid-write
+   *  risks the child being orphaned and later force-killed mid-RocksDB-write —
+   *  the corruption path behind the knowledge-graph.db.corrupt-* quarantines. */
+  async waitForIdle(timeoutMs = 20_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (this._distillRunning && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return !this._distillRunning;
+  }
+
   /**
    * Incremental distillation — called when the feed buffer reaches capacity.
-   * Distills the current buffer contents before they fall off the ring buffer.
+   * Distills only items NEWER than the last-distilled watermark. The buffer
+   * fires onFull with the whole ring snapshot (up to 100 items) after ~20 new
+   * items; without this filter every run re-distilled the ~80 already-covered
+   * items — ~80% duplicate LLM input per pass, and reinforcement inflation in
+   * the KG ("seen 2259" playbook lines).
    * Runs async so it doesn't block new items from arriving.
    */
   async distillIncremental(feedItems: FeedItem[]): Promise<void> {
-    if (this._incrementalRunning) {
-      log(TAG, "incremental distillation already running — skipping");
+    if (this._distillRunning) {
+      log(TAG, "distillation already running — skipping");
+      this._rearmCb?.();
       return;
     }
-    this._incrementalRunning = true;
+    this._distillRunning = true;
 
     try {
-      const itemCount = feedItems.length;
-      log(TAG, `incremental distillation: ${itemCount} items (buffer full)`);
+      // Delta-only: audio/agent items covered by a previous pass are excluded,
+      // same as getSenseContext() already does for sense events.
+      const newItems = this._lastDistilledTs > 0
+        ? feedItems.filter((i) => i.ts > this._lastDistilledTs)
+        : feedItems;
 
-      const sessionMeta = {
-        ts: new Date().toISOString(),
-        sessionKey: "local-incremental",
-        durationMs: Date.now() - this.sessionStartTs,
-      };
-
-      const audioItems = feedItems.map(item => ({
+      const audioItems = newItems.map(item => ({
         text: item.text,
         ts: item.ts,
         source: item.source || "unknown",
@@ -205,18 +289,32 @@ export class LocalCurationService {
       const senseItems = this.getSenseContext();
       const transcript = [...audioItems, ...senseItems].sort((a, b) => a.ts - b.ts);
 
-      if (senseItems.length > 0) {
-        log(TAG, `including ${senseItems.length} screen context items in distillation`);
+      // T1 episode capture — every new window, regardless of whether the LLM
+      // distillation below runs. Instant on the daemon side.
+      sendEpisodes(transcript as any);
+
+      if (transcript.length < 3) {
+        log(TAG, `incremental distillation skipped — only ${transcript.length} new items since watermark`);
+        return;
       }
+      log(TAG, `incremental distillation: ${audioItems.length} new feed + ${senseItems.length} screen items (${feedItems.length - newItems.length} already distilled)`);
+
+      const sessionMeta = {
+        ts: new Date().toISOString(),
+        sessionKey: "local-incremental",
+        durationMs: Date.now() - this.sessionStartTs,
+      };
 
       if (await this.runDistillation(transcript, sessionMeta)) {
-        this._lastDistilledTs = Date.now();
-        log(TAG, `incremental distillation complete — ${itemCount} audio + ${senseItems.length} screen items processed`);
+        // Watermark = newest item actually distilled — NOT Date.now(): items
+        // arriving during the ~20-40s run must land in the next pass.
+        this._lastDistilledTs = Math.max(...transcript.map((i) => i.ts));
+        log(TAG, `incremental distillation complete — ${audioItems.length} feed + ${senseItems.length} screen items processed`);
       }
     } catch (err: any) {
       warn(TAG, `incremental distillation failed: ${err.message?.slice(0, 100)}`);
     } finally {
-      this._incrementalRunning = false;
+      this._distillRunning = false;
       // Re-arm the buffer callback so next fill triggers another distillation
       this._rearmCb?.();
     }
@@ -249,86 +347,85 @@ export class LocalCurationService {
 
     writeFileSync(pendingPath, JSON.stringify(data), "utf-8");
     log(TAG, `saved ${feedItems.length} feed items to pending-session.json`);
+    // Shutdown episode — items already disk-redacted above.
+    sendEpisodes(data.items as any);
   }
 
   /**
    * Distill a previously saved pending session (from a prior shutdown).
-   * Called on startup — runs LLM distillation when there's no time pressure.
+   *
+   * Scheduled well after startup (see index.ts) — startup-time distillation
+   * stacked 4-5 Python spawns against the kg_daemon FTS build, prior_builder
+   * and the ONNX model load, contending for the exclusive RocksDB write lock.
+   *
+   * Crash-safety: the pending file is renamed to a retry file BEFORE
+   * distilling and deleted only AFTER success — a crash mid-distill no longer
+   * silently loses the session. The retry file gets exactly one more attempt
+   * (deleted before distilling on the second try), so a poison session can
+   * never crash-loop.
    */
   async distillPendingSession(): Promise<void> {
+    if (this._distillRunning) {
+      // An incremental pass is in flight — try again later rather than
+      // running two pipelines (and two Oxigraph writers) concurrently.
+      setTimeout(() => void this.distillPendingSession(), 60_000).unref?.();
+      return;
+    }
+
     const pendingPath = resolve(this.memoryDir, "pending-session.json");
-    if (!existsSync(pendingPath)) return;
+    const retryPath = resolve(this.memoryDir, "pending-session.retry.json");
+
+    let sourcePath: string;
+    let lastChance = false;
+    if (existsSync(pendingPath)) {
+      // Fresh pending session. If a stale retry file exists too, the previous
+      // session already crashed twice — drop it in favor of the newer one.
+      try { renameSync(pendingPath, retryPath); } catch { return; }
+      sourcePath = retryPath;
+    } else if (existsSync(retryPath)) {
+      // Crashed mid-distill last time — one final attempt.
+      sourcePath = retryPath;
+      lastChance = true;
+    } else {
+      return;
+    }
 
     let data: any;
     try {
-      data = JSON.parse(readFileSync(pendingPath, "utf-8"));
+      data = JSON.parse(readFileSync(sourcePath, "utf-8"));
     } catch {
-      warn(TAG, "corrupt pending-session.json — removing");
-      unlinkSync(pendingPath);
+      warn(TAG, "corrupt pending session file — removing");
+      try { unlinkSync(sourcePath); } catch { /* gone */ }
       return;
     }
 
     const items: FeedItem[] = data.items || [];
     if (items.length < 1) {
       log(TAG, `pending session too small (${items.length} items) — removing`);
-      unlinkSync(pendingPath);
+      try { unlinkSync(sourcePath); } catch { /* gone */ }
       return;
     }
 
-    log(TAG, `distilling pending session: ${items.length} items from ${data.ts}`);
-
-    // Remove pending file first so a crash here doesn't loop
-    unlinkSync(pendingPath);
-
-    await this.runDistillation(items, {
-      ts: data.ts,
-      sessionKey: data.sessionKey || "local-session",
-      durationMs: data.durationMs || 0,
-    });
-  }
-
-  /**
-   * Distill the current session on shutdown.
-   * First saves feed items to disk (instant), then attempts LLM distillation.
-   * If tsx kills the process before LLM finishes, the saved file will be
-   * picked up on next startup via distillPendingSession().
-   */
-  async distillSession(feedItems: FeedItem[]): Promise<void> {
-    // Filter to only items not yet covered by incremental distillation
-    const items = this._lastDistilledTs > 0
-      ? feedItems.filter(i => i.ts > this._lastDistilledTs)
-      : feedItems;
-
-    if (items.length < 1) {
-      log(TAG, `skipping shutdown distillation — all ${feedItems.length} items already distilled incrementally`);
-      return;
+    if (lastChance) {
+      // Delete before distilling: max 2 attempts total, never a crash loop.
+      try { unlinkSync(sourcePath); } catch { /* gone */ }
     }
 
-    log(TAG, `shutdown distillation: ${items.length} items (${feedItems.length - items.length} already distilled incrementally)`);
+    log(TAG, `distilling pending session: ${items.length} items from ${data.ts}${lastChance ? " (final retry)" : ""}`);
 
-    // Step 0: Save to disk FIRST — survives force-kill
-    this.savePendingSession(items);
-
-    const sessionMeta = {
-      ts: new Date().toISOString(),
-      sessionKey: "local-session",
-      durationMs: Date.now() - this.sessionStartTs,
-    };
-
-    const transcript = items.map(item => ({
-      text: item.text,
-      ts: item.ts,
-      source: item.source || "unknown",
-      channel: item.channel || "agent",
-    }));
-
-    // Step 1+2: Attempt LLM distillation (may be killed by tsx)
-    if (await this.runDistillation(transcript, sessionMeta)) {
-      // Success — remove the pending file since we distilled in-place
-      const pendingPath = resolve(this.memoryDir, "pending-session.json");
-      try { unlinkSync(pendingPath); } catch { /* already gone */ }
+    this._distillRunning = true;
+    try {
+      const ok = await this.runDistillation(items, {
+        ts: data.ts,
+        sessionKey: data.sessionKey || "local-session",
+        durationMs: data.durationMs || 0,
+      });
+      if (ok && !lastChance) {
+        try { unlinkSync(sourcePath); } catch { /* gone */ }
+      }
+    } finally {
+      this._distillRunning = false;
     }
-    // If killed here, pending-session.json remains for next startup
   }
 
   /**
@@ -343,6 +440,21 @@ export class LocalCurationService {
     }
 
     log(TAG, `distilling session: ${transcript.length} items, ${Math.round(sessionMeta.durationMs / 60000)} min`);
+
+    // Payloads go through temp FILES, not argv: a 100-item transcript + OCR as
+    // a single argument can brush macOS ARG_MAX → sporadic E2BIG spawn failures.
+    // Anything written to disk gets the on-disk privacy level (same policy as
+    // pending-session.json, which is already re-distilled from redacted text),
+    // 0600 perms, and unlink in finally — raw audio text never touches disk.
+    const diskTranscript = transcript.map((i: any) => ({ ...i, text: redactFeedTextForDisk(String(i.text ?? "")) }));
+    const tmpTag = `sinain-distill-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const transcriptFile = join(tmpdir(), `${tmpTag}-transcript.json`);
+    const digestFile = join(tmpdir(), `${tmpTag}-digest.json`);
+    const cleanupTmp = () => {
+      for (const f of [transcriptFile, digestFile]) {
+        try { unlinkSync(f); } catch { /* gone */ }
+      }
+    };
 
     try {
       // Step 0.5: Retrieve existing entities for context (Mem0 retrieve-before-extract pattern)
@@ -366,10 +478,11 @@ export class LocalCurationService {
       }
 
       // Step 1: Distill session into a SessionDigest
+      writeFileSync(transcriptFile, JSON.stringify(diskTranscript), { encoding: "utf-8", mode: 0o600 });
       const distillerArgs = [
         resolve(this.scriptsDir, "session_distiller.py"),
         "--memory-dir", this.memoryDir,
-        "--transcript", JSON.stringify(transcript),
+        "--transcript-file", transcriptFile,
         "--session-meta", JSON.stringify(sessionMeta),
       ];
       if (existingEntities) {
@@ -395,18 +508,21 @@ export class LocalCurationService {
       this.writeDailyNotes(digest, transcript as any);
 
       // Step 2: Integrate into playbook + knowledge graph
-      // Inject raw feed items so integrator stores verbatim quotes + agent analysis
-      digest._rawItems = transcript;
-      digest._feedItemCount = transcript.length;
+      // Inject raw feed items so integrator stores verbatim quotes + agent
+      // analysis — the disk-redacted form: these land in the KG/raw-chunks
+      // (on disk) anyway, so they must carry the on-disk privacy level.
+      digest._rawItems = diskTranscript;
+      digest._feedItemCount = diskTranscript.length;
+      writeFileSync(digestFile, JSON.stringify(digest), { encoding: "utf-8", mode: 0o600 });
       try {
         const { stdout: integratorOutput } = await execFileAsync("python3", [
           resolve(this.scriptsDir, "knowledge_integrator.py"),
           "--memory-dir", this.memoryDir,
-          "--digest", JSON.stringify(digest),
-          // --transcript wires the zero-LLM extractor (gbrain Proposal A
+          "--digest-file", digestFile,
+          // --transcript-file wires the zero-LLM extractor (gbrain Proposal A
           // pattern + user-attribute regex set in link_extraction.py).
           // Topic-robust safety net for weak distillers that drop facts.
-          "--transcript", JSON.stringify(transcript),
+          "--transcript-file", transcriptFile,
         ], {
           timeout: 60_000, // 60s: LLM call (~10s) + embedding dedup (~5s) + graph ops
           encoding: "utf-8",
@@ -429,7 +545,7 @@ export class LocalCurationService {
           const { stdout: reconOut } = await execFileAsync("python3", [
             resolve(this.scriptsDir, "reconstruct.py"),
             "--memory-dir", this.memoryDir,
-            "--transcript", JSON.stringify(transcript),
+            "--transcript-file", transcriptFile,
           ], {
             timeout: 60_000,
             encoding: "utf-8",
@@ -440,11 +556,14 @@ export class LocalCurationService {
           warn(TAG, `recon stage failed (non-fatal): ${err.message?.slice(0, 160)}`);
         }
       }
+      await this.refreshWorkStatePrior(); // KG changed → refresh WSM prior (throttled)
       return true;
     } catch (err: any) {
       warn(TAG, `distillation failed: ${err.message?.slice(0, 200)}`);
       this.writeDailyNotesFallback(transcript as any);
       return false;
+    } finally {
+      cleanupTmp();
     }
   }
 

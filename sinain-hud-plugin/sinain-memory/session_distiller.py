@@ -315,17 +315,26 @@ def _nec_correct_items(items: list[dict], memory_dir: str) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Session Distiller")
     parser.add_argument("--memory-dir", required=True, help="Path to memory/ directory")
-    parser.add_argument("--transcript", required=True, help="JSON array of feed items")
+    parser.add_argument("--transcript", default=None, help="JSON array of feed items (inline)")
+    parser.add_argument("--transcript-file", default=None,
+                        help="Path to a JSON file with feed items. Preferred over --transcript: "
+                             "a 100-item transcript + OCR as a single argv can brush macOS ARG_MAX.")
     parser.add_argument("--session-meta", default="{}", help="JSON session metadata")
     parser.add_argument("--existing-entities", default="", help="Compact summary of existing knowledge graph entities")
     args = parser.parse_args()
 
     # Parse inputs
     try:
-        items = json.loads(args.transcript)
-    except json.JSONDecodeError as e:
-        print(f"Invalid transcript JSON: {e}", file=sys.stderr)
-        output_json({"error": f"Invalid transcript JSON: {e}", "isEmpty": True})
+        if args.transcript_file:
+            with open(args.transcript_file, encoding="utf-8") as f:
+                items = json.load(f)
+        elif args.transcript is not None:
+            items = json.loads(args.transcript)
+        else:
+            raise ValueError("--transcript or --transcript-file is required")
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        print(f"Invalid transcript: {e}", file=sys.stderr)
+        output_json({"error": f"Invalid transcript: {e}", "isEmpty": True})
         return
 
     meta = json.loads(args.session_meta) if args.session_meta else {}
