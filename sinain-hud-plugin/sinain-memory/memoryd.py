@@ -46,7 +46,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kg_daemon as kd  # noqa: E402 — sets SINAIN_KG_READONLY for the process
 from memory_v2 import ingest_sessions
+<<<<<<< HEAD
 from memory_v2.store import Episode, EpisodeStore
+=======
+from memory_v2.store import EpisodeStore
+>>>>>>> 4989592 (feat(memory): memoryd P1 — resident memory worker, T1 episodes live)
 from memory_v2.retrieve import build_context_block, search_episodes
 
 MEMORY_DIR = Path(os.path.expanduser(os.environ.get("SINAIN_MEMORY_DIR", "~/.sinain/memory")))
@@ -65,6 +69,7 @@ def _store() -> EpisodeStore:
 
 
 def op_ingest(req: dict) -> dict:
+<<<<<<< HEAD
     # Single-episode form — WSM breakpoint/return events (§3.8: the engine's
     # frozen snapshots become attested episodes; the engine keeps no durable
     # state of its own). {"op":"ingest","episode":{kind,context_id,text,ts,...}}
@@ -88,6 +93,8 @@ def op_ingest(req: dict) -> dict:
             ))
             return {"ok": True, "episodes": 1, "total": len(st)}
 
+=======
+>>>>>>> 4989592 (feat(memory): memoryd P1 — resident memory worker, T1 episodes live)
     items = req.get("items") or []
     items = [i for i in items if isinstance(i, dict) and str(i.get("text", "")).strip()]
     if not items:

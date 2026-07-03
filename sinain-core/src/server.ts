@@ -2481,8 +2481,9 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /memory/episodes ── T1 episodic tier via memoryd (DESIGN-MEMORY-V2
-      // P1): raw dated episode windows — recent-dialogue recall that is not
-      // distillation-dependent and not capped by the feed ring.
+      // P1). What makes "summarize the dialogue that just happened" possible:
+      // raw dated episode windows, not distillation-dependent, not capped by
+      // the feed ring. Query/time-window filtered on the daemon side.
       if (req.method === "GET" && url.pathname === "/memory/episodes") {
         const payload = JSON.stringify({
           op: "episodes",

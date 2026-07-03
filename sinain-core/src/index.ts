@@ -1103,9 +1103,11 @@ async function main() {
   let chatSidecarProc: ReturnType<typeof spawn> | null = null;
 
   // ── Resident memory worker (memoryd.py — DESIGN-MEMORY-V2 P1) ──
-  // Supersedes kg_daemon on the SAME socket: warm read-only ROI protocol
-  // unchanged, plus the T1 episodic tier (ingest/episodes/context_block).
-  // Falls back to kg_daemon.py, then to one-shot spawns.
+  // Supersedes kg_daemon on the SAME socket: serves the warm read-only ROI
+  // protocol unchanged, plus the T1 episodic tier (ingest/episodes/
+  // context_block). Episode ingest is deterministic and zero-LLM; the legacy
+  // distillation pipeline stays the T2 writer during the dual-write
+  // transition. Falls back to kg_daemon.py, then to one-shot spawns.
   let kgDaemonProc: ReturnType<typeof spawn> | null = null;
   function startKgDaemon(): void {
     if (kgDaemonProc && !kgDaemonProc.killed && kgDaemonProc.exitCode === null) return;
