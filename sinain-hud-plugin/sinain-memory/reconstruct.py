@@ -546,7 +546,12 @@ if __name__ == "__main__":
     ap.add_argument("db", nargs="?", help="store db path (legacy probe mode)")
     ap.add_argument("--memory-dir", help="production: build + integrate recon facts")
     ap.add_argument("--transcript", default="", help="production: session feed-items JSON (raw_text)")
+    ap.add_argument("--transcript-file", default="",
+                    help="path to a JSON file with feed items (preferred — avoids ARG_MAX)")
     a = ap.parse_args()
+    if a.transcript_file:
+        from pathlib import Path as _P
+        a.transcript = _P(a.transcript_file).read_text(encoding="utf-8")
     if a.memory_dir:
         print(json.dumps(_cli_run_and_integrate(a.memory_dir, a.transcript), ensure_ascii=False))
     else:  # legacy: just print the digest for inspection
