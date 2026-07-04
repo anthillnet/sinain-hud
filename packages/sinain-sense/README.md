@@ -1,8 +1,8 @@
 # sinain-sense
 
-Shared perception layer for sinain surfaces — extraction step 3 (L2, video half) of
-[DESIGN-SHARED-MODULES](../../docs/DESIGN-SHARED-MODULES.md). The audio half (VAD,
-transcription router) lands per §5 of that doc.
+Shared perception layer for sinain surfaces — steps 3 (video) and 4 (audio) of
+[DESIGN-SHARED-MODULES](../../docs/DESIGN-SHARED-MODULES.md). One entity owns both
+modalities; capture stays per-surface, everything above the frame/PCM line is shared.
 
 ## What's here
 
@@ -14,14 +14,27 @@ transcription router) lands per §5 of that doc.
 | `gates.ssim` | sense_client | `ChangeDetector` — SSIM keyframe diff with region bboxes (`ssim` extra) |
 | `gates.hash` | ARSinain `scene_gate.py` | `SceneGate` — blur/exposure/dHash with cooldowns (`hash` extra) |
 | `vision` | both `vision.py`s | `VisionProvider` ABC + `VisionResult`; `OpenRouterVisionProvider` transported by sinain-llm (cost extraction included) |
+| `audio` | sinain-core `pipeline.ts` (+ ARSinain `talk.py`) | `Segmenter` (silence-cut VAD endpointing → WAV chunks) with pluggable `EnergyDetector` / `WebrtcDetector` (`webrtcvad` extra) |
 
-Base install is light (requests + Pillow + sinain-llm); the gates' heavy deps are extras:
+Base install is light (requests + Pillow + sinain-llm); heavy deps are extras:
 
 ```
-pip install "sinain-sense[ssim]"   # numpy + scikit-image
-pip install "sinain-sense[hash]"   # opencv-python-headless
+pip install "sinain-sense[ssim]"       # numpy + scikit-image (SSIM gate)
+pip install "sinain-sense[hash]"       # opencv-python-headless (dHash gate)
+pip install "sinain-sense[webrtcvad]"  # py-webrtcvad (alt VAD; EnergyDetector needs nothing)
 pip install "sinain-sense[all]"
 ```
+
+## Audio (step 4, this package)
+
+`Segmenter` turns a raw 16-bit PCM stream into WAV utterance chunks cut on silence — a
+faithful Python port of sinain-core's `AudioPipeline` (adaptive-noise-floor endpointing,
+300 ms pre-roll, 700 ms hangover, min/max segment caps). The per-frame speech decision is a
+pluggable `SpeechDetector`: `EnergyDetector` (zero native deps, the default) or
+`WebrtcDetector` (from ARSinain's `talk.py`). **Next slice (§5):** the transcription router
+(OpenRouter-audio / whisper-server / faster-whisper backends + hallucination & cross-stream
+dedup filters), then surface adoption — ARSinain's `talk.py` internals first, then
+sinain-core retires `src/audio/` behind a transcript `/sense` event + control channel.
 
 ## Consumers
 

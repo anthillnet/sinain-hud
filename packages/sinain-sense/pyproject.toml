@@ -4,15 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sinain-sense"
-version = "0.1.0"
-description = "Shared perception layer for sinain surfaces (video half): scene gates, privacy redaction, vision provider client, /sense sender"
+version = "0.2.0"
+description = "Shared perception layer for sinain surfaces: scene gates, privacy redaction, vision provider, /sense sender, and audio VAD + segmentation"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.28", "Pillow>=10", "sinain-llm>=0.1"]
 
 [project.optional-dependencies]
 ssim = ["numpy>=1.26", "scikit-image>=0.22"]
 hash = ["opencv-python-headless>=4.9"]
-all = ["numpy>=1.26", "scikit-image>=0.22", "opencv-python-headless>=4.9"]
+webrtcvad = ["webrtcvad>=2.0"]
+all = ["numpy>=1.26", "scikit-image>=0.22", "opencv-python-headless>=4.9", "webrtcvad>=2.0"]
 
 [tool.setuptools.packages.find]
 include = ["sinain_sense*"]
