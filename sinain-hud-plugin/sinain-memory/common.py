@@ -1,6 +1,7 @@
-"""Shared utilities for sinain-koog heartbeat scripts.
+"""Shared utilities for sinain-memory scripts.
 
-Centralizes OpenRouter API calls, memory/ file readers, and JSON output.
+Centralizes LLM calls (via the shared sinain-llm package), memory/ file
+readers, and JSON output.
 """
 
 import json
@@ -13,23 +14,53 @@ from functools import lru_cache
 from glob import glob
 from pathlib import Path
 
-import requests
-
 MODEL_FAST = "google/gemini-3-flash-preview"
 MODEL_SMART = "anthropic/claude-sonnet-4.6"
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-# Local Ollama OpenAI-compatible endpoint. Model IDs prefixed with "ollama/"
-# route here instead of OpenRouter (no API key needed). See docs/local-mode.md
-# for the paranoid-mode wiring; this is the bench-side equivalent that lets
-# SINAIN_BENCH_MODEL=ollama/phi4-mini route the distiller + QA locally.
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/v1/chat/completions"
 
 
 class LLMError(Exception):
     """Raised when the LLM API call fails (timeout, network, bad response)."""
     pass
+
+
+# ---------------------------------------------------------------------------
+# sinain-llm (DESIGN-SHARED-MODULES L1) — the LLM transport
+# ---------------------------------------------------------------------------
+# The transport lives in packages/sinain-llm, shared across surfaces. This
+# module contributes only sinain-memory config (llm-config.json per-script
+# model/token resolution) on top of it.
+
+@lru_cache(maxsize=1)
+def _sinain_llm():
+    """Import the shared sinain_llm package.
+
+    Layouts: dev monorepo (<repo>/packages/sinain-llm, common.py two levels
+    down) and npm-flat (<pkg>/packages/sinain-llm, one level down).
+    SINAIN_LLM_DIR overrides both.
+    """
+    try:
+        import sinain_llm
+        return sinain_llm
+    except ImportError:
+        pass
+    here = Path(__file__).resolve()
+    candidates = [os.environ.get("SINAIN_LLM_DIR")]
+    for depth in (2, 1):
+        if len(here.parents) > depth:
+            candidates.append(str(here.parents[depth] / "packages" / "sinain-llm"))
+    for cand in candidates:
+        if cand and (Path(cand) / "sinain_llm" / "__init__.py").exists():
+            if cand not in sys.path:
+                sys.path.insert(0, cand)
+            try:
+                import sinain_llm
+                return sinain_llm
+            except ImportError:
+                continue
+    raise ImportError(
+        "sinain-llm package not found (expected packages/sinain-llm next to the "
+        "repo or npm package root; override with SINAIN_LLM_DIR)"
+    )
 
 
 def load_sentence_transformer(name: str = "all-MiniLM-L6-v2"):
@@ -62,118 +93,32 @@ def load_sentence_transformer(name: str = "all-MiniLM-L6-v2"):
 def extract_json(text: str) -> dict | list:
     """Extract a JSON object or array from potentially messy LLM output.
 
-    Three-stage extraction:
-      1. Direct json.loads (clean case)
-      2. Regex extraction from markdown code fences
-      3. Balanced-brace scanner for JSON embedded in prose
-
+    Canonical implementation lives in sinain_llm.json_utils (three-stage:
+    direct parse, code fences, balanced-brace scan with truncation repair).
     Raises ValueError if no valid JSON can be extracted.
     """
-    text = text.strip()
-
-    # Stage 1: direct parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Stage 2: markdown code fences  ```json ... ```  or  ``` ... ```
-    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if fence_match:
-        try:
-            return json.loads(fence_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Stage 3+4: balanced-brace scanner with truncated JSON repair
-    # Uses a full bracket stack so nested {/[ are tracked together.
-    for open_ch, close_ch in (("{", "}"), ("[", "]")):
-        start = text.find(open_ch)
-        if start == -1:
-            continue
-        stack: list[str] = []
-        in_string = False
-        escape = False
-        string_start = -1
-        for i in range(start, len(text)):
-            ch = text[i]
-            if escape:
-                escape = False
-                continue
-            if ch == "\\":
-                if in_string:
-                    escape = True
-                continue
-            if ch == '"':
-                if not in_string:
-                    string_start = i
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch in ("{", "["):
-                stack.append("}" if ch == "{" else "]")
-            elif ch in ("}", "]"):
-                if stack:
-                    stack.pop()
-                if not stack:
-                    try:
-                        return json.loads(text[start : i + 1])
-                    except json.JSONDecodeError:
-                        break  # malformed — try next bracket type
-        else:
-            # Reached end of text with unclosed brackets — attempt repair
-            if not stack:
-                continue
-            closers = "".join(reversed(stack))
-            fragment = text[start:]
-
-            # Strategy A: if mid-string, close it then close all brackets
-            if in_string:
-                try:
-                    return json.loads(fragment + '"' + closers)
-                except json.JSONDecodeError:
-                    pass
-
-            # Strategy B: strip trailing incomplete tokens, close brackets
-            stripped = re.sub(r'[,:\s]+$', '', fragment)
-            try:
-                return json.loads(stripped + closers)
-            except json.JSONDecodeError:
-                pass
-
-            # Strategy C: if mid-string, cut before the unclosed string,
-            # strip trailing tokens, close brackets
-            if in_string and string_start >= start:
-                before_str = text[start:string_start]
-                before_str = re.sub(r'[,:\s]+$', '', before_str)
-                try:
-                    return json.loads(before_str + closers)
-                except json.JSONDecodeError:
-                    pass
-
-    raise ValueError(f"No valid JSON found in LLM response ({len(text)} chars): {text[:120]}...")
+    return _sinain_llm().extract_json(text)
 
 
 # ---------------------------------------------------------------------------
-# External config (koog-config.json)
+# External config (llm-config.json)
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=1)
 def _load_config() -> dict:
-    """Load koog-config.json from the same directory as this module. Cached."""
-    config_path = Path(__file__).resolve().parent / "koog-config.json"
+    """Load llm-config.json from the same directory as this module. Cached."""
+    config_path = Path(__file__).resolve().parent / "llm-config.json"
     try:
         return json.loads(config_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError) as exc:
-        print(f"[warn] koog-config.json not loaded: {exc}", file=sys.stderr)
+        print(f"[warn] llm-config.json not loaded: {exc}", file=sys.stderr)
         return {}
 
 
 def _resolve_model(logical_name: str) -> str:
     """Map a logical model name ('fast'/'smart') to an actual model ID.
 
-    Env-var overrides take precedence over koog-config.json so the bench
+    Env-var overrides take precedence over llm-config.json so the bench
     harness can route a single script-call site (e.g. session_distiller's
     `script="session_distiller"` → model="fast") to a different model per
     run. Used by ingest.py to thread SINAIN_BENCH_MODEL through to the
@@ -200,10 +145,11 @@ def call_llm(
     temperature: float | None = None,
     seed: int | None = None,
 ) -> str:
-    """Call OpenRouter chat completions API. Returns assistant message text.
+    """Chat-completions call via the shared sinain-llm package. Returns
+    assistant message text.
 
     When *script* is provided, model and max_tokens are overridden from
-    koog-config.json (external config the bot cannot modify).
+    llm-config.json (external config the bot cannot modify).
 
     When *json_schema* is provided, the request uses STRICT structured-output
     mode (``response_format: {"type": "json_schema", ...}``) — model output is
@@ -227,91 +173,20 @@ def call_llm(
         max_tokens = script_cfg.get("maxTokens", max_tokens)
         timeout_s = script_cfg.get("timeout", cfg.get("defaults", {}).get("timeout", 60))
 
-    # Route based on model id. "ollama/<model>" → local Ollama; else OpenRouter.
-    is_ollama = model.startswith("ollama/")
-    if is_ollama:
-        target_url = OLLAMA_CHAT_URL
-        target_model = model[len("ollama/"):]  # strip prefix for Ollama API
-        request_headers = {"Content-Type": "application/json"}
-        # Local Ollama timeouts are longer than cloud — small models can stall.
-        if timeout_s < 120:
-            timeout_s = 120
-    else:
-        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
-        if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
-        target_url = OPENROUTER_URL
-        target_model = model
-        request_headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-    body: dict = {
-        "model": target_model,
-        "max_tokens": max_tokens,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-    if temperature is not None:
-        body["temperature"] = temperature
-    # Reproducibility: a fixed seed + temperature=0 makes greedy decoding
-    # repeatable (OpenRouter passes seed to providers that honor it; Ollama's
-    # OpenAI-compat endpoint maps it to options.seed). Without it, eval QA
-    # answers jitter run-to-run on borderline questions even at temp=0, which
-    # makes n=6 paper_label deltas indistinguishable from noise.
-    if seed is not None:
-        body["seed"] = seed
-    # Structured output. json_schema (strict) takes precedence over json_mode
-    # (loose). OpenAI / Google / Ollama OpenAI-compat all accept the
-    # response_format.json_schema shape. Strict mode bounces the response off
-    # the schema so local models can't drift into narrative output when the
-    # caller asked for a facts[] array — the empirically-observed failure
-    # mode for qwen2.5:7b and gemma4:e2b on LongMemEval-S.
-    if json_schema is not None:
-        body["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": json_schema.get("title", "output"),
-                "schema": json_schema,
-                "strict": True,
-            },
-        }
-        # Ollama-native accepts the schema directly via top-level `format`;
-        # set both so whichever path the runtime takes, the constraint sticks.
-        if is_ollama:
-            body["format"] = json_schema
-    elif json_mode and (model.startswith("openai/") or model.startswith("google/") or is_ollama):
-        body["response_format"] = {"type": "json_object"}
-
+    # Delegate the transport to the shared sinain-llm package. Script config
+    # resolution above stays HERE — it's sinain-memory deployment config, not
+    # provider logic. RuntimeError (missing API key) passes through unchanged;
+    # the package's LLMError is re-raised as ours so existing
+    # `except common.LLMError` sites keep working.
+    lib = _sinain_llm()
     try:
-        resp = requests.post(
-            target_url,
-            headers=request_headers,
-            json=body,
-            timeout=timeout_s,
+        return lib.call_llm(
+            system_prompt, user_prompt, model, max_tokens,
+            json_mode=json_mode, json_schema=json_schema,
+            temperature=temperature, seed=seed, timeout=timeout_s,
         )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException as e:
-        raise LLMError(f"LLM call failed ({type(e).__name__}): {e}") from e
-
-    # Log token usage to stderr for cost tracking
-    usage = data.get("usage", {})
-    if usage:
-        print(
-            f"[tokens] model={model} prompt={usage.get('prompt_tokens', '?')} "
-            f"completion={usage.get('completion_tokens', '?')} "
-            f"total={usage.get('total_tokens', '?')}",
-            file=sys.stderr,
-        )
-
-    content = data["choices"][0]["message"]["content"]
-    if not content:
-        raise LLMError(f"LLM returned empty response (model={model})")
-    return content
+    except lib.LLMError as e:
+        raise LLMError(str(e)) from e
 
 
 def call_llm_with_fallback(
