@@ -277,7 +277,7 @@ lifecycle edges (TCC, restarts, the separate `sck-capture --mic` process moving 
 |---|---|---|---|
 | 1 | `sinain-llm` ✅ **DONE** (2026-07-04) | Smallest; everything depends on it; kills 3+ duplicated provider blocks | One provider layer with Cerebras + fallback chains everywhere |
 | 2 | `sinain-memory` | **Drift is the urgent problem** — diff the forks now, reconcile before it compounds | ARSinain becomes a memoryd client instead of a fork; persona layers land |
-| 3 | `sinain-sense` (video) | Portable trio + `/sense` client is a lift-and-shift | ARSinain gets privacy redaction |
+| 3 | `sinain-sense` (video) ✅ **hud side done** (2026-07-04) | Portable trio + `/sense` client is a lift-and-shift | ARSinain gets privacy redaction |
 | 4 | `sinain-sense` (audio) | The §5 port; after the video half proves the package | One audio stack; talk.py shrinks to TTS/conversation |
 | 5 | `sinain-agents` | Generalize the sidecar (small, self-contained) after memory/llm land, so tool packs sit on memoryd + L1 | ARSinain gets a resident environment agent; escalation/OpenClaw code deleted rather than carried |
 | 0 | `sinain-protocol` | Grows alongside all of the above — each extraction freezes its contract here | — |
@@ -292,6 +292,18 @@ deleted — the package IS the transport; `koog-config.json` renamed `llm-config
 `packages/` symlink + pack-prepare + files list. ⚠️ ARSinain's requirements.txt pins
 `git+https://…sinain-hud@main#subdirectory=packages/sinain-llm` — its Docker builds resolve
 only after the hud packages/ extraction is merged to main.
+
+**Step 3 status (hud side shipped 2026-07-04):** `packages/sinain-sense` (video half) —
+`privacy` (redaction, shared verbatim), `events` (SenseEvent/Meta/Observation — the
+`/sense` payload shapes, L0 seed), `sender` (`/sense` + `/motion` client, image
+packaging), `gates.ssim` (hud ChangeDetector) + `gates.hash` (ARSinain SceneGate), and
+`vision` (VisionProvider ABC + OpenRouter backend transported by sinain-llm — one more
+inline transport gone). Heavy deps are extras (`[ssim]`, `[hash]`). sense_client's
+`privacy/change_detector/sender` are re-export shims; `gate.py` imports the event shapes;
+`vision.py` keeps Ollama + the `create_vision` factory. sinain-llm gained `api_key`
+override + `extra_body` passthrough in support. Remaining for step 3: ARSinain adoption
+(`scene_gate.py` → `gates.hash`, redaction on its OCR/describe path, `/sense` sender for
+the call-bridge).
 
 **Step 2 scoping — memory_v2 fork diff (measured 2026-07-04):**
 

@@ -109,6 +109,16 @@ class TestProviderRouting(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 chat("s", "u", model="cerebras/gemma-4-31b")
 
+    def test_explicit_api_key_overrides_env(self):
+        post = mock.Mock(return_value=_resp())
+        with mock.patch("sinain_llm.client.requests.post", post):
+            chat("s", "u", model="x/y", api_key="explicit-key")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer explicit-key")
+        with mock.patch.dict(os.environ, {}, clear=True):  # works with no env key at all
+            with mock.patch("sinain_llm.client.requests.post", post):
+                chat("s", "u", model="x/y", api_key="k2")
+            self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer k2")
+
     def test_provider_routing_openrouter_only(self):
         post = mock.Mock(return_value=_resp())
         routing = {"order": ["WandB"], "ignore": ["ModelRun"]}
