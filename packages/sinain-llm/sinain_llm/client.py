@@ -30,25 +30,28 @@ def _ollama_chat_url() -> str:
     return f"{base.rstrip('/')}/v1/chat/completions"
 
 
-def _resolve_provider(model: str) -> tuple[str, str, str, dict]:
-    """Return (provider, url, target_model, headers) for a model id."""
+def _resolve_provider(model: str, api_key: str | None = None) -> tuple[str, str, str, dict]:
+    """Return (provider, url, target_model, headers) for a model id.
+
+    *api_key* overrides the provider's env var (callers that carry their own
+    credential, e.g. vision providers constructed with an explicit key)."""
     if model.startswith("ollama/"):
         return "ollama", _ollama_chat_url(), model[len("ollama/"):], {
             "Content-Type": "application/json",
         }
     if model.startswith("cerebras/"):
-        api_key = os.environ.get("CEREBRAS_API_KEY")
-        if not api_key:
+        key = api_key or os.environ.get("CEREBRAS_API_KEY")
+        if not key:
             raise RuntimeError("CEREBRAS_API_KEY env var is not set")
         return "cerebras", CEREBRAS_URL, model[len("cerebras/"):], {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
-    if not api_key:
+    key = api_key or os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY_REFLECTION")
+    if not key:
         raise RuntimeError("OPENROUTER_API_KEY or OPENROUTER_API_KEY_REFLECTION env var is not set")
     return "openrouter", OPENROUTER_URL, model, {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
 
@@ -68,6 +71,7 @@ def chat(
     provider_routing: dict | None = None,
     messages: list[dict] | None = None,
     extra_body: dict | None = None,
+    api_key: str | None = None,
 ) -> dict:
     """One chat-completions call. Returns {"text", "model", "usage"}.
 
@@ -90,7 +94,7 @@ def chat(
     """
     if not model:
         raise ValueError("model is required")
-    provider, url, target_model, headers = _resolve_provider(model)
+    provider, url, target_model, headers = _resolve_provider(model, api_key)
 
     if provider == "ollama" and timeout < OLLAMA_MIN_TIMEOUT_S:
         timeout = OLLAMA_MIN_TIMEOUT_S
