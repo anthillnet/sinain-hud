@@ -105,7 +105,7 @@ Rules:
 
 def _extract_people(session_text: str, session_date: str, model: str) -> list[dict]:
     """Dedicated per-domain pass (Synthius pattern). Fail-open: []."""
-    from common import call_llm
+    from memory_v2.llm import call_llm
     user = f"Session date: {session_date or 'unknown'}\n\n## Session\n{session_text[:24000]}"
     for attempt in range(2):
         try:
@@ -196,7 +196,7 @@ def _jaccard(a: str, b: str) -> float:
 
 def _extract_session(session_text: str, session_date: str, model: str) -> dict:
     """One tier-1+2 LLM call per session. Fail-open: {} on any failure."""
-    from common import call_llm
+    from memory_v2.llm import call_llm
     user = f"Session date: {session_date or 'unknown'}\n\n## Session\n{session_text[:24000]}"
     for attempt in range(2):
         try:
