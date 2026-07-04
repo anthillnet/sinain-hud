@@ -42,6 +42,7 @@ def ingest_sessions(
     layers: list[str] | None = None,
     store: EpisodeStore | None = None,
     segment_turns: int = SEGMENT_TURNS,
+    first_index: int = 0,
 ) -> EpisodeStore:
     """Convert feed-item sessions into segment episodes.
 
@@ -49,11 +50,15 @@ def ingest_sessions(
     segment episodes plus one session-level episode carrying only metadata
     (t_start/t_end/entities) — the summary-tree node that tier-1 compaction
     later fills in.
+
+    first_index offsets meta.session_index so incremental ingest into a
+    long-lived store (one new session per app connection — the live-memory
+    path) keeps indices unique across calls.
     """
     # `store or EpisodeStore()` would DISCARD an empty caller store — an
     # EpisodeStore defines __len__, so a fresh (0-episode) store is falsy.
     st = store if store is not None else EpisodeStore()
-    for si, items in enumerate(sessions):
+    for si, items in enumerate(sessions, start=first_index):
         if not items:
             continue
         sid = hashlib.sha256(
