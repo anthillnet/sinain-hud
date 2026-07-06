@@ -517,7 +517,7 @@ class EnrichCardWidget extends StatelessWidget {
                     child: _cardButton(t, 'Call AI', onCallAi!, primary: true)),
               if (onCallAi != null && onCopy != null)
                 const SizedBox(width: 7),
-              if (onCopy != null) _cardButton(t, 'Copy', onCopy!),
+              if (onCopy != null) _cardButton(t, 'Copy for agent', onCopy!),
             ]),
           ],
         ],

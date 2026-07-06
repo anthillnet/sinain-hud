@@ -738,16 +738,11 @@ class OverlayShellState extends State<OverlayShell> {
   /// or enrichment fails — and we don't pre-clobber it, so an early paste still
   /// lands the user's own content rather than a placeholder.
   Future<void> enrichClipboardHotkey() async {
-    final ws = context.read<WebSocketService>();
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    // Strip any prior Sinain block first — re-running on an already-enriched
-    // clipboard must enrich the ORIGINAL content, not compound context blocks.
-    final original = _stripSinainContext(data?.text ?? '');
-    if (original.trim().isEmpty) return;
-    final seed = await ws.fetchSeedText('clipboard', focus: original);
-    if (seed == null || seed.trim().isEmpty) return;
-    final combined = '$original\n\n$_sinainContextMarker\n$seed';
-    await Clipboard.setData(ClipboardData(text: combined));
+    // Unified with Build Context: the hotkey opens the card (visible, ~1s);
+    // the legacy silent clipboard rewrite lives on as the card's
+    // "Copy for agent" action. No more invisible clipboard mutation.
+    _enterCardMode();
+    await _buildContextFromClipboard();
   }
 
   /// Divider written before any Sinain-generated clipboard context. Both
@@ -769,9 +764,10 @@ class OverlayShellState extends State<OverlayShell> {
       // dedicated HUD buttons (design: reuse existing controls).
       {'id': 'capSave', 'title': 'Save Last Minutes…'},
       {'id': 'capSummon', 'title': 'Call AI on Last Minutes…'},
-      {'id': 'capBuild', 'title': 'Build Context from Clipboard'},
+      // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
+      // "Copy for agent" action produces the same agent-grade seed, visibly.
+      {'id': 'capBuild', 'title': 'Build Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
-      {'id': 'enrich', 'title': 'Enrich Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
@@ -793,8 +789,6 @@ class OverlayShellState extends State<OverlayShell> {
       case 'capBuild':
         _enterCardMode();
         await _buildContextFromClipboard();
-      case 'enrich':
-        await enrichClipboardHotkey();
       case 'region':
         // Same minutes chooser as Call AI — the selected region's thread gets
         // a brief of the last N minutes as its opening context.
@@ -1144,13 +1138,20 @@ class OverlayShellState extends State<OverlayShell> {
     _leaveCardModeFor(HudState.chat); // follow the conversation
   }
 
-  /// Enrich card → "Copy": the FULL original item + built context back onto
-  /// the clipboard, ready to paste anywhere (external chat, notes, ticket).
+  /// Enrich card → "Copy for agent": the FULL original item + the agent-grade
+  /// seed (situation digest + KG facts, built server-side — same /seed the
+  /// legacy Enrich Clipboard used) back onto the clipboard, ready to paste
+  /// into an external agent. Falls back to the card's burst context if the
+  /// seed build fails, so the button always produces a usable paste.
   Future<void> _copyEnrichCard(EnrichCard c) async {
+    final ws = context.read<WebSocketService>();
     final original = _enrichFocusFull ?? c.focus;
-    final text = '$original\n\n$_sinainContextMarker\n'
-        '${c.context}\nNext: ${c.next}';
-    await Clipboard.setData(ClipboardData(text: text));
+    final seed = await ws.fetchSeedText('clipboard', focus: original);
+    final block = (seed != null && seed.trim().isNotEmpty)
+        ? seed
+        : '${c.context}\nNext: ${c.next}';
+    await Clipboard.setData(
+        ClipboardData(text: '$original\n\n$_sinainContextMarker\n$block'));
     if (mounted) {
       setState(() => _activeEnrich = null);
       _maybeExitCardMode();

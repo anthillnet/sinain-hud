@@ -43,10 +43,15 @@ One native context menu, two triggers: **right-click the eye** and
 
     Save Last Minutes…
     Call AI on Last Minutes…
-    Build Context from Clipboard
+    Build Context from Clipboard   ⌃⌥⌘C
     Select Region…            ← now opens the minutes chooser first
     ────────────────
-    (existing items: Enrich Clipboard, Copy Context Seed, …)
+    (existing items: Copy Context Seed, …)
+
+The former "Enrich Clipboard" (silent seed rewrite of the clipboard) is
+UNIFIED into Build Context: its ⌃⌥⌘C hotkey opens the card, and its output —
+the agent-grade seed — is the card's "Copy for agent" action. No feature ever
+mutates the clipboard invisibly anymore.
 
 No dedicated buttons were added to the HUD. Save/Call AI/Region open the
 chooser; Build Context fires immediately on the clipboard.
@@ -91,11 +96,15 @@ default; short-history rows say "only N min so far"; click-outside = ✕ close.
 - Body: CONTEXT (one section — what the item is AND how it ties to current
   activity; the model is instructed to say plainly when it's unrelated) · NEXT.
 - Footer: **[Call AI]** (hands focus + context to the agent lane, opens chat) ·
-  **[Copy]** (writes the FULL original + one `——— Context from Sinain ———`
-  block back to the clipboard).
+  **[Copy for agent]** (writes the FULL original + one
+  `——— Context from Sinain ———` block containing the agent-grade seed —
+  situation digest + KG facts — for pasting into an external agent; falls back
+  to the card's burst context if the seed build fails).
 - Clipboard contract: every enrichment path strips at the marker first — the
   card always enriches the user's original content, never Sinain's own output;
-  Copy produces at most one context block.
+  Copy for agent produces at most one context block. The synthesized CONTEXT
+  itself is deliberately NOT copyable — it is written for the user about their
+  current moment and has no life outside it.
 
 **Save receipt** — 320px, lifecycle:
 `Saving last 30 min · IntelliJ, Chrome, mic…` (pulse) → `Saved to memory` with
@@ -205,9 +214,8 @@ auto-distillation at shutdown/horizon · visual keyframes for text-poor frames
 2. Chooser default N (30 today) and whether region mode defaults differently.
 3. Card widths are uniform-ish (320–340px) — one standard card width?
 4. Destination toggle placement scales to three options? (See §7 Q3.)
-5. The legacy "Enrich Clipboard" menu item overlaps Build Context conceptually
-   — keep both, merge, or rename? (They share the clipboard marker contract
-   now, so they compose safely either way.)
+5. RESOLVED: "Enrich Clipboard" is unified into Build Context (§3) — one menu
+   item, the seed lives behind "Copy for agent", hotkey opens the card.
 
 ## 10. Appendix — ground truth
 
