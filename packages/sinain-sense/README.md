@@ -31,10 +31,35 @@ pip install "sinain-sense[all]"
 faithful Python port of sinain-core's `AudioPipeline` (adaptive-noise-floor endpointing,
 300 ms pre-roll, 700 ms hangover, min/max segment caps). The per-frame speech decision is a
 pluggable `SpeechDetector`: `EnergyDetector` (zero native deps, the default) or
-`WebrtcDetector` (from ARSinain's `talk.py`). **Next slice (§5):** the transcription router
-(OpenRouter-audio / whisper-server / faster-whisper backends + hallucination & cross-stream
-dedup filters), then surface adoption — ARSinain's `talk.py` internals first, then
-sinain-core retires `src/audio/` behind a transcript `/sense` event + control channel.
+`WebrtcDetector` (from ARSinain's `talk.py`).
+
+`TranscriptionRouter` (port of sinain-core's `TranscriptionService`) sits on top: it
+composes the whisper prompt (hotwords + age-gated rolling context, kept per audio source so
+system/mic don't contaminate each other), calls a pluggable backend, and applies the
+min-length + hallucination filters. Backends:
+
+- `OpenRouterAudioBackend` — cloud multimodal transcription via sinain-llm, with the
+  entity-preservation prompt (never substitute similar-sounding names) and cost extraction.
+- `WhisperServerBackend` — HTTP client for a resident whisper.cpp server (`/inference`).
+  Server lifecycle stays surface-side, like capture.
+- `FasterWhisperBackend` — in-process faster-whisper (ARSinain's stack; `whisper` extra).
+
+`TranscriptDeduper` (consumer-side): per-source near-duplicate drop + the cross-stream
+"mic hears the speakers" drop (>70% bigram similarity to recent system transcripts).
+
+```python
+seg = Segmenter(sample_rate=16000)
+router = TranscriptionRouter(FasterWhisperBackend(), hotwords="Sinain")
+dedup = TranscriptDeduper()
+for pcm in stream:
+    for chunk in seg.feed(pcm):
+        r = router.transcribe(chunk)
+        if r and dedup.check(r.text, r.audio_source):
+            handle(r)
+```
+
+**Next (§5):** surface adoption — ARSinain's `talk.py` internals first, then sinain-core
+retires `src/audio/` behind a transcript `/sense` event + control channel.
 
 ## Consumers
 
