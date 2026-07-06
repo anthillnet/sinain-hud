@@ -78,11 +78,17 @@ class WebSocketService extends ChangeNotifier {
   final _briefController = StreamController<ContextBrief>.broadcast();
   final _enrichController = StreamController<EnrichCard>.broadcast();
   final _saveReceiptController = StreamController<SaveReceipt>.broadcast();
+  final _voiceController = StreamController<VoiceSession>.broadcast();
+
+  /// Latest voice session state (snapshot for late-mounting UI); updates via
+  /// [voiceSessionStream] + notifyListeners.
+  VoiceSession? voiceSession;
 
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<ContextBrief> get briefStream => _briefController.stream;
   Stream<EnrichCard> get enrichStream => _enrichController.stream;
   Stream<SaveReceipt> get saveReceiptStream => _saveReceiptController.stream;
+  Stream<VoiceSession> get voiceSessionStream => _voiceController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<bool> get thinkingStream => _thinkingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
@@ -478,6 +484,12 @@ class WebSocketService extends ChangeNotifier {
         case 'save_receipt':
           _saveReceiptController.add(SaveReceipt.fromJson(json));
           break;
+        case 'voice_session':
+          final session = VoiceSession.fromJson(json);
+          voiceSession = session;
+          _voiceController.add(session);
+          notifyListeners();
+          break;
         case 'cost':
           _totalCost = (json['totalCost'] as num?)?.toDouble() ?? 0.0;
           _costCallCount = (json['callCount'] as num?)?.toInt() ?? 0;
@@ -693,6 +705,18 @@ class WebSocketService extends ChangeNotifier {
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
 
+  /// "Talk to Sinain" — start a voice session seeded with the last N minutes
+  /// (0 = unseeded). Lifecycle arrives on [voiceSessionStream].
+  Future<String?> requestVoiceStart(int minutes) async {
+    final data = await _postJson('/voice/start', {'minutes': minutes});
+    if (data == null) return 'core unreachable';
+    return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
+  }
+
+  /// End the running voice session.
+  Future<bool> requestVoiceStop() async =>
+      (await _postJson('/voice/stop', {}))?['stopped'] == true;
+
   void disconnect() {
     _profilingTimer?.cancel();
     _profilingTimer = null;
@@ -718,6 +742,7 @@ class WebSocketService extends ChangeNotifier {
     _briefController.close();
     _enrichController.close();
     _saveReceiptController.close();
+    _voiceController.close();
     super.dispose();
   }
 

@@ -322,6 +322,17 @@ export function loadConfig(): CoreConfig {
     timeoutMs: intEnv("BURST_TIMEOUT_MS", 20000),
   };
 
+  // "Talk to Sinain" voice sessions — the ar-bridge publishes screen + mic to
+  // an ARSinain server over WebRTC, seeded with a window brief. Local dev
+  // default: ARSinain on 127.0.0.1:8089 (its AR_HELP_PORT default).
+  const voiceConfig: import("./types.js").VoiceConfig = {
+    enabled: boolEnv("VOICE_ENABLED", true),
+    serverUrl: env("ARSINAIN_URL", "http://127.0.0.1:8089"),
+    email: env("ARSINAIN_EMAIL", ""),
+    framePath: resolvePath(env("VOICE_FRAME_PATH", resolve(os.homedir(), ".sinain", "capture", "frame.jpg"))),
+    fps: floatEnv("VOICE_FPS", 4),
+  };
+
   // escalation policy: agents.json `escalation` block, fall back to env.
   // Mode is runtime-mutable via the overlay's flash-icon selector; this only
   // sets the boot-time default. (Transport is no longer a setting — per-lane
@@ -418,6 +429,7 @@ export function loadConfig(): CoreConfig {
     agentConfig,
     regionSlmConfig,
     burstConfig,
+    voiceConfig,
     // Rolling window retention (deliberate capture): how far back "save/summon
     // last N minutes" can reach. Default 8h; buffers evict past this horizon.
     windowHorizonMs: intEnv("WINDOW_HORIZON_MINUTES", 480) * 60_000,

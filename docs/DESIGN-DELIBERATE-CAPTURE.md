@@ -173,7 +173,15 @@ enrich ≤ 1s (0.49–1.05s measured) · brief 30 min ≈ 1.5s · brief 60 min �
 · save ack ≤ 0.5s, distill ~10s async · one call covers ≤ ~60 min; ~2h of
 median-density session is the per-gesture quota ceiling.
 
-## 9. Voice destination — "Talk to Sinain" (SPEC, NOT BUILT)
+## 9. Voice destination — "Talk to Sinain" (PLUMBING BUILT · UI PENDING)
+
+Plumbing shipped: `POST /voice/start {minutes}` (0 = unseeded) / `POST
+/voice/stop` / `GET /voice/status` on core; `voice_session` WS lifecycle
+(starting → live → ended | error) with an overlay model + stream + service
+methods ready for UI binding; `tools/ar-bridge` (aiortc peer: screen frames
+from sck-capture IPC + mic → ARSinain, TTS played back, seed + `say` line over
+the meta datachannel); ARSinain branch `feat/hud-seed` accepts the seed. What
+remains is the UI below.
 
 A third destination everywhere AI is invoked on context: a live, spoken,
 full-duplex session with the Sinain AR agent that **sees the screen and hears

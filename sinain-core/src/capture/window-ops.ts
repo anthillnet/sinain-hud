@@ -150,6 +150,17 @@ export async function summonBrief(
   return { brief, result };
 }
 
+/** Flatten a brief into the text form carried into agent/voice seeds —
+ *  mirrors the overlay's _briefText so every destination gets identical
+ *  context. */
+export function flattenBrief(brief: SummonBrief, minutes: number, coverage: string): string {
+  const lines: string[] = [`Situation brief of my last ${minutes} minutes (${coverage}):`];
+  for (const e of brief.timeline) lines.push(`${e.at}: ${e.what}`);
+  lines.push(`Goal: ${brief.goal}`);
+  if (brief.problems.length > 0) lines.push(`Open problems: ${brief.problems.join("; ")}`);
+  return lines.join("\n");
+}
+
 // ── Enrich: context only ──
 // One CONTEXT field, not what/connects: a forced split makes the model pad the
 // second sentence with situation restatement. One field demands the linkage.

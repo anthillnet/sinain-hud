@@ -150,6 +150,39 @@ class SaveReceipt {
       );
 }
 
+enum VoiceStatus { starting, live, ended, error }
+
+/// "Talk to Sinain" voice session state (WS `voice_session`). Plumbing for
+/// the upcoming voice UI — no widgets consume this yet.
+class VoiceSession {
+  final VoiceStatus status;
+  final int minutes;
+  final String coverage;
+  final String? error;
+
+  const VoiceSession({
+    required this.status,
+    required this.minutes,
+    required this.coverage,
+    this.error,
+  });
+
+  factory VoiceSession.fromJson(Map<String, dynamic> json) => VoiceSession(
+        status: switch (json['status'] as String?) {
+          'live' => VoiceStatus.live,
+          'ended' => VoiceStatus.ended,
+          'error' => VoiceStatus.error,
+          _ => VoiceStatus.starting,
+        },
+        minutes: (json['minutes'] as num?)?.toInt() ?? 0,
+        coverage: json['coverage'] as String? ?? '',
+        error: json['error'] as String?,
+      );
+
+  bool get isActive =>
+      status == VoiceStatus.starting || status == VoiceStatus.live;
+}
+
 /// One option of the save/summon range chooser (GET /window/coverage).
 class RangeOption {
   final int minutes;

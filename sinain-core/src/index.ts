@@ -1823,6 +1823,13 @@ async function main() {
   const { assembleWindow, chooserOptions, summonBrief, enrichFocus } = await import("./capture/window-ops.js");
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
+  // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
+  const { VoiceSessionManager } = await import("./capture/voice-session.js");
+  const voiceManager = new VoiceSessionManager(
+    config.voiceConfig, config.burstConfig, feedBuffer, senseBuffer,
+    (msg) => wsHandler.broadcastRaw(msg),
+  );
+
   const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
     // Cerebras free tier reports no cost; tokens still tracked for visibility.
     costTracker.record({
@@ -1904,6 +1911,9 @@ async function main() {
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
+    voiceStart: config.voiceConfig.enabled ? (minutes) => voiceManager.start(minutes) : undefined,
+    voiceStop: () => voiceManager.stop(),
+    voiceStatus: () => voiceManager.status(),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;

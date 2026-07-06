@@ -1703,6 +1703,12 @@ export interface ServerDeps {
   contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
   /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
   windowCoverage?: () => unknown;
+  /** "Talk to Sinain": start a voice session seeded with the last N minutes. */
+  voiceStart?: (minutes: number) => Promise<{ ok: boolean; error?: string }>;
+  /** End the running voice session (true if there was one). */
+  voiceStop?: () => boolean;
+  /** Current voice session state. */
+  voiceStatus?: () => unknown;
 
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
@@ -1928,6 +1934,33 @@ export function createAppServer(deps: ServerDeps) {
 
       if (req.method === "GET" && url.pathname === "/window/coverage") {
         res.end(JSON.stringify({ ok: true, options: deps.windowCoverage?.() ?? [] }));
+        return;
+      }
+
+      // ── Voice sessions ("Talk to Sinain" via the AR bridge) ──
+      if (req.method === "POST" && url.pathname === "/voice/start") {
+        if (!deps.voiceStart) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const raw = (JSON.parse(body || "{}") as { minutes?: number }).minutes;
+        // 0 = unseeded session; otherwise clamp like every range gesture.
+        const minutes = raw === 0 ? 0 : clampMinutes(raw);
+        const result = await deps.voiceStart(minutes);
+        if (!result.ok) res.writeHead(409);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/stop") {
+        res.end(JSON.stringify({ ok: true, stopped: deps.voiceStop?.() ?? false }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/status") {
+        res.end(JSON.stringify({ ok: true, ...(deps.voiceStatus?.() ?? { status: "unavailable" }) }));
         return;
       }
 

@@ -312,6 +312,17 @@ export interface EnrichCardMessage {
   ts: number;
 }
 
+/** Voice session ("Talk to Sinain" via the AR bridge) lifecycle. */
+export interface VoiceSessionMessage {
+  type: "voice_session";
+  status: "starting" | "live" | "ended" | "error";
+  /** Range whose brief seeded the session (0 = unseeded). */
+  minutes: number;
+  coverage: string;
+  error?: string;
+  ts: number;
+}
+
 /** Save-last-N lifecycle: ack → receipt (with undo window) → final. */
 export interface SaveReceiptMessage {
   type: "save_receipt";
@@ -328,7 +339,7 @@ export interface SaveReceiptMessage {
   ts: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage;
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | VoiceSessionMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -511,6 +522,19 @@ export interface BurstConfig {
   apiKey: string;
   maxTokens: number;
   timeoutMs: number;
+}
+
+/** "Talk to Sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
+export interface VoiceConfig {
+  enabled: boolean;
+  /** ARSinain base URL (aiortc signaling). */
+  serverUrl: string;
+  /** X-Auth-Request-Email for entitlement-gated servers ("" locally). */
+  email: string;
+  /** sck-capture frame IPC file the bridge publishes as the video track. */
+  framePath: string;
+  /** Screen publish rate. */
+  fps: number;
 }
 
 export interface RegionSlmConfig {
@@ -771,6 +795,7 @@ export interface CoreConfig {
   agentConfig: AnalysisConfig;
   regionSlmConfig: RegionSlmConfig;
   burstConfig: BurstConfig;
+  voiceConfig: VoiceConfig;
   /** Rolling-window retention horizon for feed/sense buffers (ms). */
   windowHorizonMs: number;
   escalationConfig: EscalationConfig;
