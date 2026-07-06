@@ -165,12 +165,19 @@ export interface EnrichCard {
   next: string;
 }
 
+/** Divider the overlay writes before Sinain-generated clipboard context. */
+const SINAIN_CONTEXT_MARKER = "——— Context from Sinain ———";
+
 export async function enrichFocus(
   config: BurstConfig,
   feedBuffer: FeedBuffer,
   senseBuffer: SenseBuffer,
   focus: string,
 ): Promise<{ card: EnrichCard; result: BurstCallResult }> {
+  // Defense in depth (the overlay strips too): never enrich our own output —
+  // a clipboard that went through Copy/seed-enrich carries the marker block.
+  const markerAt = focus.indexOf(SINAIN_CONTEXT_MARKER);
+  if (markerAt >= 0) focus = focus.slice(0, markerAt).trim();
   const slice = assembleWindow(feedBuffer, senseBuffer, ENRICH_WINDOW_MINUTES);
   const result = await burstCall(config, {
     system: ENRICH_SYSTEM,

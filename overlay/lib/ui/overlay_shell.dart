@@ -87,6 +87,8 @@ class OverlayShellState extends State<OverlayShell> {
   String? _chooserFor; // null | 'save' | 'summon'
   // Compact card mode: cards shown in a slim panel without opening the chat.
   bool _cardMode = false;
+  // Full clipboard text behind the current enrich card (focus is a preview).
+  String? _enrichFocusFull;
   // Where a summon follow-up goes: 'chat' (agent lane) | 'term' (seeded PTY).
   String _summonDest = 'chat';
   List<RangeOption> _rangeOptions = const [];
@@ -702,12 +704,24 @@ class OverlayShellState extends State<OverlayShell> {
   Future<void> enrichClipboardHotkey() async {
     final ws = context.read<WebSocketService>();
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final original = data?.text ?? '';
+    // Strip any prior Sinain block first — re-running on an already-enriched
+    // clipboard must enrich the ORIGINAL content, not compound context blocks.
+    final original = _stripSinainContext(data?.text ?? '');
     if (original.trim().isEmpty) return;
     final seed = await ws.fetchSeedText('clipboard', focus: original);
     if (seed == null || seed.trim().isEmpty) return;
-    final combined = '$original\n\n——— Context from Sinain ———\n$seed';
+    final combined = '$original\n\n$_sinainContextMarker\n$seed';
     await Clipboard.setData(ClipboardData(text: combined));
+  }
+
+  /// Divider written before any Sinain-generated clipboard context. Both
+  /// clipboard features (seed enrich above, Build-context Copy) use it, so a
+  /// single strip at this marker recovers the user's original content.
+  static const _sinainContextMarker = '——— Context from Sinain ———';
+
+  static String _stripSinainContext(String text) {
+    final i = text.indexOf(_sinainContextMarker);
+    return (i < 0 ? text : text.substring(0, i)).trim();
   }
 
   /// Right-click the eye → a native context menu listing every action, so the
@@ -1038,7 +1052,10 @@ class OverlayShellState extends State<OverlayShell> {
   Future<void> _buildContextFromClipboard() async {
     final ws = context.read<WebSocketService>();
     final clip = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = clip?.text?.trim() ?? '';
+    // Strip any previous Sinain context block — otherwise re-invoking after a
+    // Copy (or the seed-enrich hotkey) feeds our own output back in and the
+    // card compounds instead of enriching the user's original content.
+    final text = _stripSinainContext(clip?.text ?? '');
     if (text.isEmpty) {
       setState(() => _activeEnrich = const EnrichCard(
             requestId: 'local',
@@ -1048,6 +1065,9 @@ class OverlayShellState extends State<OverlayShell> {
           ));
       return;
     }
+    // Keep the untruncated original for Copy — the card's `focus` is a display
+    // preview (120 chars) and must never be what lands back on the clipboard.
+    _enrichFocusFull = text;
     final err = await ws.requestEnrich(text);
     if (err != null && mounted) {
       setState(() => _activeEnrich = EnrichCard(
@@ -1064,7 +1084,7 @@ class OverlayShellState extends State<OverlayShell> {
   void _callAiOnEnrich(EnrichCard c) {
     final ws = context.read<WebSocketService>();
     final msg = StringBuffer()
-      ..writeln('I copied this: ${c.focus}')
+      ..writeln('I copied this: ${_enrichFocusFull ?? c.focus}')
       ..writeln('Context: ${c.context}')
       ..write('Help me with the next step: ${c.next}');
     ws.sendUserCommand(msg.toString());
@@ -1072,10 +1092,11 @@ class OverlayShellState extends State<OverlayShell> {
     _leaveCardModeFor(HudState.chat); // follow the conversation
   }
 
-  /// Enrich card → "Copy": focus item + built context back onto the clipboard,
-  /// ready to paste anywhere (external chat, notes, ticket).
+  /// Enrich card → "Copy": the FULL original item + built context back onto
+  /// the clipboard, ready to paste anywhere (external chat, notes, ticket).
   Future<void> _copyEnrichCard(EnrichCard c) async {
-    final text = '${c.focus}\n\n——— Context from Sinain ———\n'
+    final original = _enrichFocusFull ?? c.focus;
+    final text = '$original\n\n$_sinainContextMarker\n'
         '${c.context}\nNext: ${c.next}';
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
