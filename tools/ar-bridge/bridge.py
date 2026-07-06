@@ -168,6 +168,8 @@ async def run(args: argparse.Namespace) -> int:
         auth_headers["Cookie"] = args.cookie
     if args.email:
         auth_headers["X-Auth-Request-Email"] = args.email
+    if args.device_token:
+        auth_headers["X-Sinain-Device"] = args.device_token
 
     # Reachability probe FIRST — before any audio/video hardware is touched.
     # Opening the mic can block on the macOS permission prompt; a down server
@@ -279,6 +281,8 @@ def main() -> None:
     p.add_argument("--email", default="", help="X-Auth-Request-Email for gated servers")
     p.add_argument("--cookie", default="",
                    help="oauth2-proxy session cookie for a deployed server")
+    p.add_argument("--device-token", default="",
+                   help="browser-paired HUD device token (X-Sinain-Device)")
     p.add_argument("--no-audio", action="store_true",
                    help="publish screen only (no mic, no speaker) — smoke tests")
     args = p.parse_args()

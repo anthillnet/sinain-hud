@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
@@ -38,8 +38,44 @@ export class VoiceSessionManager {
     private broadcast: (msg: VoiceSessionMessage) => void,
   ) {}
 
-  status(): { status: string; mode: string; minutes: number; coverage: string } {
-    return { status: this.state, mode: this.mode, minutes: this.minutes, coverage: this.coverage };
+  status(): { status: string; mode: string; minutes: number; coverage: string; paired: boolean } {
+    return {
+      status: this.state, mode: this.mode, minutes: this.minutes,
+      coverage: this.coverage, paired: this.deviceToken() !== "",
+    };
+  }
+
+  // ── Browser pairing (like the gpt bridge): the user logs in at the
+  // deployed server; its /hud/pair page mints a device token and POSTs it
+  // here (/voice/pair → pair()). The bridge then authenticates with it. ──
+
+  private tokenFile(): string {
+    return join(homedir(), ".sinain", "arsinain-device.json");
+  }
+
+  private deviceToken(): string {
+    try {
+      const data = JSON.parse(readFileSync(this.tokenFile(), "utf-8")) as { token?: string };
+      return data.token ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Store a browser-minted device token (POST /voice/pair). */
+  pair(token: string, email: string): void {
+    mkdirSync(join(homedir(), ".sinain"), { recursive: true });
+    writeFileSync(this.tokenFile(),
+      JSON.stringify({ token, email, server: this.voice.serverUrl, ts: Date.now() }),
+      { encoding: "utf-8", mode: 0o600 });
+    log(TAG, `paired as ${email || "(unknown)"} for ${this.voice.serverUrl}`);
+  }
+
+  /** Open the browser login/pair page (user completes it there). */
+  login(): void {
+    const url = `${this.voice.serverUrl.replace(/\/$/, "")}/hud/pair`;
+    log(TAG, `opening pair page: ${url}`);
+    spawn("open", [url], { stdio: "ignore", detached: true }).unref();
   }
 
   /** Compose the seed brief for a range — best-effort, never throws. */
@@ -116,6 +152,17 @@ export class VoiceSessionManager {
     this.mode = "bridge";
     this.minutes = minutes;
     this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
+
+    // Deployed server + no credentials → send the user to the browser login
+    // (same flow as the gpt bridge) instead of dialing into a 302.
+    const token = this.deviceToken();
+    if (this.voice.serverUrl.startsWith("https://") && !token && !this.voice.meetCookie) {
+      this.login();
+      const error = "not paired yet — complete the login in the browser tab that just opened, then call again";
+      this.setState("starting");
+      this.fail(error);
+      return { ok: false, error };
+    }
     this.setState("starting");
 
     const seedText = await this.composeSeed(minutes);
@@ -144,6 +191,7 @@ export class VoiceSessionManager {
       "--seed-file", this.seedFile,
       ...(this.voice.email ? ["--email", this.voice.email] : []),
       ...(this.voice.meetCookie ? ["--cookie", this.voice.meetCookie] : []),
+      ...(token ? ["--device-token", token] : []),
     ], { stdio: ["ignore", "pipe", "pipe"] });
     this.proc = proc;
 
