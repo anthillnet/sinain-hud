@@ -1113,20 +1113,7 @@ class OverlayShellState extends State<OverlayShell> {
             ));
       }
     } else if (action == 'voice') {
-      // "Call sinain": a live call FROM THIS MACHINE — screen + mic over
-      // WebRTC to the sinain server (call mechanics like a meeting, but no
-      // Meet involved). Lifecycle arrives on voiceSessionStream.
-      final err = await ws.requestVoiceStart(minutes);
-      if (err != null && mounted) {
-        setState(() => _voiceSession = VoiceSession(
-              status: VoiceStatus.error,
-              mode: VoiceMode.bridge,
-              minutes: minutes,
-              coverage: '',
-              error: err,
-            ));
-        _enterCardMode();
-      }
+      await _callSinain(minutes);
     } else if (action == 'region') {
       // Region + minutes: kick the brief off NOW so it's usually ready by the
       // time the drag-select lands; the region handler stashes it into the
@@ -1141,6 +1128,40 @@ class OverlayShellState extends State<OverlayShell> {
       });
       await _startManualRoi();
     }
+  }
+
+  /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC
+  /// to the sinain server (mechanics like a meeting, nothing to do with Meet).
+  /// If the server wants a session, we host the login ourselves: a native
+  /// WKWebView window (same as the gpt bridge) — the user signs in with their
+  /// own account, the session cookie lands in OUR cookie store, core keeps it,
+  /// and the call retries automatically. Zero server-side changes.
+  Future<void> _callSinain(int minutes, {bool retried = false}) async {
+    final ws = context.read<WebSocketService>();
+    final resp = await ws.requestVoiceStart(minutes);
+    final error = resp == null
+        ? 'core unreachable'
+        : (resp['ok'] == true ? null : (resp['error'] as String? ?? 'failed'));
+    if (error == null) return; // lifecycle continues on voiceSessionStream
+
+    final loginUrl = resp?['loginUrl'] as String?;
+    if (loginUrl != null && !retried) {
+      final cookie =
+          await _windowService.openAuthWindow(loginUrl, '_oauth2_proxy');
+      if (cookie != null && await ws.requestVoicePair(cookie)) {
+        await _callSinain(minutes, retried: true); // paired — dial again
+        return;
+      }
+    }
+    if (!mounted) return;
+    setState(() => _voiceSession = VoiceSession(
+          status: VoiceStatus.error,
+          mode: VoiceMode.bridge,
+          minutes: minutes,
+          coverage: '',
+          error: loginUrl != null ? 'login cancelled' : error,
+        ));
+    _enterCardMode();
   }
 
   /// "Build context" — enrich whatever is on the clipboard with the last

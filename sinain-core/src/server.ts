@@ -1706,15 +1706,13 @@ export interface ServerDeps {
   /** Live coverage for an arbitrary N (the chooser slider). */
   windowCoverageAt?: (minutes: number) => unknown;
   /** "Call sinain": start a bridge voice session seeded with the last N minutes. */
-  voiceStart?: (minutes: number) => Promise<{ ok: boolean; error?: string }>;
+  voiceStart?: (minutes: number) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
   /** "Call sinain" via the deployed meetbot: bot joins the given Meet/Teams call. */
   voiceMeet?: (url: string, minutes: number) => Promise<{ ok: boolean; error?: string }>;
   /** End the running voice session (true if there was one). */
   voiceStop?: () => boolean;
-  /** Store a browser-minted device token (pair flow). */
-  voicePair?: (token: string, email: string) => void;
-  /** Open the browser login/pair page. */
-  voiceLogin?: () => void;
+  /** Store the session cookie captured by the overlay's login window. */
+  voicePair?: (cookie: string) => void;
   /** Current voice session state. */
   voiceStatus?: () => unknown;
 
@@ -1996,19 +1994,13 @@ export function createAppServer(deps: ServerDeps) {
       // POSTs the freshly-minted device token here after the user logs in.
       if (req.method === "POST" && url.pathname === "/voice/pair") {
         const body = await readBody(req, 4096);
-        const { token, email } = JSON.parse(body || "{}") as { token?: string; email?: string };
-        if (!token || !deps.voicePair) {
+        const { cookie } = JSON.parse(body || "{}") as { cookie?: string };
+        if (!cookie || !deps.voicePair) {
           res.writeHead(400);
-          res.end(JSON.stringify({ ok: false, error: "token required" }));
+          res.end(JSON.stringify({ ok: false, error: "cookie required" }));
           return;
         }
-        deps.voicePair(token, email ?? "");
-        res.end(JSON.stringify({ ok: true }));
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/voice/login") {
-        deps.voiceLogin?.();
+        deps.voicePair(cookie);
         res.end(JSON.stringify({ ok: true }));
         return;
       }

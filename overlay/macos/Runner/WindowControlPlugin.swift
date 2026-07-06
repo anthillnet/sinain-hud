@@ -1,6 +1,7 @@
 import Cocoa
 import CoreGraphics
 import FlutterMacOS
+import WebKit
 
 /// Native NSWindow control via Flutter platform channel.
 class WindowControlPlugin: NSObject, FlutterPlugin {
@@ -35,6 +36,19 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         let args = call.arguments as? [String: Any]
 
         switch call.method {
+        case "openAuthWindow":
+            // Browser-style login owned by the app (like the gpt bridge): a
+            // normal WKWebView window; the user signs in; we watch OUR cookie
+            // store for the named session cookie and return "name=value".
+            // Server-side this is indistinguishable from a browser session.
+            guard let a = args,
+                  let urlStr = a["url"] as? String,
+                  let url = URL(string: urlStr),
+                  let cookieName = a["cookieName"] as? String else {
+                result(FlutterError(code: "args", message: "url + cookieName required", details: nil))
+                return
+            }
+            AuthWindowSession.open(url: url, cookieName: cookieName, result: result)
         case "setPrivacyMode":
             let enabled = args?["enabled"] as? Bool ?? true
             if #available(macOS 12.0, *) {
@@ -870,5 +884,72 @@ private class RegionSelectView: NSView {
         }
         b.setFrameSize(NSSize(width: 28, height: 28))
         return b
+    }
+}
+
+// ── Auth window: browser login owned by the app ─────────────────────────────
+// One session at a time. Opens a plain WKWebView window on the server's login;
+// the user signs in exactly as in a browser; we watch OUR cookie store for the
+// named session cookie and hand "name=value" back to Dart. Closing the window
+// resolves nil (login cancelled).
+final class AuthWindowSession: NSObject {
+    private static var current: AuthWindowSession?
+
+    private let web: WKWebView
+    private let window: NSWindow
+    private var timer: Timer?
+    private var callback: ((String?) -> Void)?
+
+    static func open(url: URL, cookieName: String, result: @escaping FlutterResult) {
+        guard current == nil else {
+            result(FlutterError(code: "busy", message: "auth window already open", details: nil))
+            return
+        }
+        let session = AuthWindowSession(url: url, cookieName: cookieName) { value in
+            current = nil
+            result(value)
+        }
+        current = session
+    }
+
+    private init(url: URL, cookieName: String, done: @escaping (String?) -> Void) {
+        web = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 640))
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
+                          styleMask: [.titled, .closable, .resizable],
+                          backing: .buffered, defer: false)
+        callback = done
+        super.init()
+        window.title = "Sign in to Sinain"
+        window.contentView = web
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        web.load(URLRequest(url: url))
+
+        let host = url.host ?? ""
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            // Window closed by the user → cancelled.
+            if !self.window.isVisible { self.finish(nil); return }
+            self.web.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                let match = cookies.first { c in
+                    c.name == cookieName &&
+                    (host == c.domain ||
+                     host.hasSuffix(c.domain.hasPrefix(".") ? c.domain : "." + c.domain) ||
+                     c.domain.hasSuffix(host))
+                }
+                if let c = match { self.finish("\(c.name)=\(c.value)") }
+            }
+        }
+    }
+
+    private func finish(_ value: String?) {
+        guard let cb = callback else { return }
+        callback = nil
+        timer?.invalidate()
+        timer = nil
+        window.close()
+        cb(value)
     }
 }

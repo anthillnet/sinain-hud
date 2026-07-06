@@ -41,41 +41,35 @@ export class VoiceSessionManager {
   status(): { status: string; mode: string; minutes: number; coverage: string; paired: boolean } {
     return {
       status: this.state, mode: this.mode, minutes: this.minutes,
-      coverage: this.coverage, paired: this.deviceToken() !== "",
+      coverage: this.coverage, paired: this.storedCookie() !== "",
     };
   }
 
-  // ── Browser pairing (like the gpt bridge): the user logs in at the
-  // deployed server; its /hud/pair page mints a device token and POSTs it
-  // here (/voice/pair → pair()). The bridge then authenticates with it. ──
+  // ── Browser login owned by the app: the overlay opens a WKWebView on the
+  // server's own login; the resulting oauth2-proxy session cookie lands in
+  // OUR cookie store and is handed here (/voice/pair). Server-side this is
+  // indistinguishable from a browser session — no server changes needed. ──
 
-  private tokenFile(): string {
-    return join(homedir(), ".sinain", "arsinain-device.json");
+  private cookieFile(): string {
+    return join(homedir(), ".sinain", "arsinain-session.json");
   }
 
-  private deviceToken(): string {
+  private storedCookie(): string {
     try {
-      const data = JSON.parse(readFileSync(this.tokenFile(), "utf-8")) as { token?: string };
-      return data.token ?? "";
+      const data = JSON.parse(readFileSync(this.cookieFile(), "utf-8")) as { cookie?: string };
+      return data.cookie ?? "";
     } catch {
       return "";
     }
   }
 
-  /** Store a browser-minted device token (POST /voice/pair). */
-  pair(token: string, email: string): void {
+  /** Store the session cookie captured by the overlay's login window. */
+  pair(cookie: string): void {
     mkdirSync(join(homedir(), ".sinain"), { recursive: true });
-    writeFileSync(this.tokenFile(),
-      JSON.stringify({ token, email, server: this.voice.serverUrl, ts: Date.now() }),
+    writeFileSync(this.cookieFile(),
+      JSON.stringify({ cookie, server: this.voice.serverUrl, ts: Date.now() }),
       { encoding: "utf-8", mode: 0o600 });
-    log(TAG, `paired as ${email || "(unknown)"} for ${this.voice.serverUrl}`);
-  }
-
-  /** Open the browser login/pair page (user completes it there). */
-  login(): void {
-    const url = `${this.voice.serverUrl.replace(/\/$/, "")}/hud/pair`;
-    log(TAG, `opening pair page: ${url}`);
-    spawn("open", [url], { stdio: "ignore", detached: true }).unref();
+    log(TAG, `session stored for ${this.voice.serverUrl}`);
   }
 
   /** Compose the seed brief for a range — best-effort, never throws. */
@@ -145,7 +139,7 @@ export class VoiceSessionManager {
   }
 
   /** Start a bridge session seeded with the last N minutes (0 = unseeded). */
-  async start(minutes: number): Promise<{ ok: boolean; error?: string }> {
+  async start(minutes: number): Promise<{ ok: boolean; error?: string; loginUrl?: string }> {
     if (!this.voice.enabled) return { ok: false, error: "voice disabled (VOICE_ENABLED=false)" };
     if (this.proc) return { ok: false, error: "a voice session is already running" };
 
@@ -153,15 +147,12 @@ export class VoiceSessionManager {
     this.minutes = minutes;
     this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
 
-    // Deployed server + no credentials → send the user to the browser login
-    // (same flow as the gpt bridge) instead of dialing into a 302.
-    const token = this.deviceToken();
-    if (this.voice.serverUrl.startsWith("https://") && !token && !this.voice.meetCookie) {
-      this.login();
-      const error = "not paired yet — complete the login in the browser tab that just opened, then call again";
-      this.setState("starting");
-      this.fail(error);
-      return { ok: false, error };
+    // Deployed server + no session → the overlay opens its login window and
+    // pairs, then retries; we just say what's needed.
+    const cookie = this.voice.meetCookie || this.storedCookie();
+    if (this.voice.serverUrl.startsWith("https://") && !cookie) {
+      const error = "login required";
+      return { ok: false, error, loginUrl: this.voice.serverUrl };
     }
     this.setState("starting");
 
@@ -190,8 +181,7 @@ export class VoiceSessionManager {
       "--fps", String(this.voice.fps),
       "--seed-file", this.seedFile,
       ...(this.voice.email ? ["--email", this.voice.email] : []),
-      ...(this.voice.meetCookie ? ["--cookie", this.voice.meetCookie] : []),
-      ...(token ? ["--device-token", token] : []),
+      ...(cookie ? ["--cookie", cookie] : []),
     ], { stdio: ["ignore", "pipe", "pipe"] });
     this.proc = proc;
 

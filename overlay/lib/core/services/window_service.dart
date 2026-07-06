@@ -26,6 +26,19 @@ class WindowService {
     }
   }
 
+  /// Browser-style login owned by the app: opens a native WKWebView window on
+  /// [url]; resolves with "name=value" once [cookieName] appears in our cookie
+  /// store (login completed), or null if the user closes the window.
+  Future<String?> openAuthWindow(String url, String cookieName) async {
+    try {
+      return await _channel.invokeMethod<String>(
+          'openAuthWindow', {'url': url, 'cookieName': cookieName});
+    } catch (e) {
+      _log('openAuthWindow failed: $e');
+      return null;
+    }
+  }
+
   Future<void> setPrivacyMode(bool enabled) async {
     try {
       await _channel.invokeMethod('setPrivacyMode', {'enabled': enabled});

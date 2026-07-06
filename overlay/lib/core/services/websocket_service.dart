@@ -705,13 +705,15 @@ class WebSocketService extends ChangeNotifier {
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
 
-  /// "Talk to Sinain" — start a voice session seeded with the last N minutes
-  /// (0 = unseeded). Lifecycle arrives on [voiceSessionStream].
-  Future<String?> requestVoiceStart(int minutes) async {
-    final data = await _postJson('/voice/start', {'minutes': minutes});
-    if (data == null) return 'core unreachable';
-    return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
-  }
+  /// "Call sinain" — start a voice session seeded with the last N minutes
+  /// (0 = unseeded). Lifecycle arrives on [voiceSessionStream]. Returns the
+  /// raw response so callers can react to `loginUrl` ("login required").
+  Future<Map<String, dynamic>?> requestVoiceStart(int minutes) async =>
+      _postJson('/voice/start', {'minutes': minutes});
+
+  /// Hand the login window's captured session cookie to core.
+  Future<bool> requestVoicePair(String cookie) async =>
+      (await _postJson('/voice/pair', {'cookie': cookie}))?['ok'] == true;
 
   /// End the running voice session.
   Future<bool> requestVoiceStop() async =>
