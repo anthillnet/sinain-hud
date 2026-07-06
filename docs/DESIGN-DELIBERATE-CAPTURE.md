@@ -57,16 +57,18 @@ bottom-up in fixed order: save receipt · enrich card · brief card · chooser.
 Design gap: the card-mode panel is an unstyled stack + ✕ today (no header, no
 drag affordance, no branding). This surface needs design.
 
-## 4. The chooser (shared by Save · Call AI · Select Region)
+## 4. The chooser (v2: presets + slider — Save · Call AI · Call Sinain · Region)
 
-264px card. Title varies by action: **"Save last…" / "Call AI on last…" /
-"Region · brief of last…"**. Four rows: `5m · 15m · 30m · 60m`, each with a
-live coverage string computed from window data with no LLM call — distinct
-app names (up to 4) plus `mic` when audio is present, e.g.
-"Google Chrome, Zed, mic"; an empty range reads "quiet range". If the window
-is younger than an option, the row's string is "only N min so far" (the save
-will take what exists). Row `30m` is pre-highlighted and tagged `default`.
-Click a row to confirm; ✕ closes. (Backend clamps any request to 1–480 min.)
+300px card. Header: accent-ringed dot · title ("Save last… / Call AI on… /
+Call sinain on… / Region · brief of last…") · live **N readout** (mono 15,
+colored: accent → amber past 90 min → orange past 100). Preset chips
+`5m 15m 30m 60m` are the fast path; a **slider** (5–120, 5-min steps) is the
+escape hatch. Consent box below: **COVERS** (save/region) / **SINAIN WILL
+KNOW** (voice) / **AGENT WILL KNOW** (handoff) with live coverage (refetched
+free as the slider moves) + extrapolated latency and cost; past 100 min it
+adds "⚠ splits into 2 calls" — information, never a wall. Confirm button
+carries the verb + value: **Save 45 min / Hand off 30 min / Call on 30 min**.
+Save/region accent green; handoff/voice accent blue (#3369D6).
 
 ## 5. The three cards
 
@@ -175,13 +177,19 @@ median-density session is the per-gesture quota ceiling.
 
 ## 9. Voice destination — "Talk to Sinain" (PLUMBING BUILT · UI PENDING)
 
-Plumbing shipped: `POST /voice/start {minutes}` (0 = unseeded) / `POST
-/voice/stop` / `GET /voice/status` on core; `voice_session` WS lifecycle
-(starting → live → ended | error) with an overlay model + stream + service
-methods ready for UI binding; `tools/ar-bridge` (aiortc peer: screen frames
-from sck-capture IPC + mic → ARSinain, TTS played back, seed + `say` line over
-the meta datachannel); ARSinain branch `feat/hud-seed` accepts the seed. What
-remains is the UI below.
+Shipped: menu item **"Call Sinain on…"** → blue chooser → two transports,
+picked automatically: a **Meet/Teams link on the clipboard** routes to the
+deployed server's meetbot (`POST /voice/meet` → ar.sinain.com `/meet`, auth =
+your oauth2-proxy cookie via `ARSINAIN_COOKIE`; the bot joins the call as
+"Sinain (AI)", seeded with the brief via MEET_SEED) — otherwise a **local
+AR-bridge session** (`POST /voice/start`; screen + mic over WebRTC, TTS back,
+seed + spoken ack over the datachannel). A **call chip** renders the
+lifecycle: connecting (pulse + "Calling sinain · N min of context") → live
+(waveform + timer + End for bridge; "admit Sinain (AI)" message for meet) →
+error with reason. Ends auto-dismiss. `voice_session` WS carries
+mode/status/message. ARSinain branch `feat/hud-seed` has both seed paths.
+Remaining from the v2 sketch: the always-visible "Call sinain" button, live
+captions in the chip, Mute, Save-call promotion.
 
 A third destination everywhere AI is invoked on context: a live, spoken,
 full-duplex session with the Sinain AR agent that **sees the screen and hears

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -25,37 +26,108 @@ TextStyle _mono(double size, Color color,
       height: height,
     );
 
-// ── Range chooser ───────────────────────────────────────────────────────────
+// ── Range chooser (v2: presets + slider + live estimates) ──────────────────
 
-class RangeChooser extends StatelessWidget {
-  final String title; // "Save last…" | "Call AI on last…"
+const _blue = Color(0xFF3369D6);
+const _amber = Color(0xFFD9A21B);
+const _endRed = Color(0xFFB3361C);
+
+/// Which gesture the chooser confirms — sets accent, consent label, and verb.
+enum ChooserKind { save, handoff, voice, region }
+
+class RangeChooser extends StatefulWidget {
+  final ChooserKind kind;
   final List<RangeOption> options;
   final int defaultMinutes;
-  final ValueChanged<int> onPick;
+  final ValueChanged<int> onConfirm;
   final VoidCallback onClose;
+
+  /// Live coverage lookup for arbitrary slider positions (free window data).
+  final Future<String?> Function(int minutes)? coverageAt;
 
   const RangeChooser({
     super.key,
-    required this.title,
+    required this.kind,
     required this.options,
-    required this.onPick,
+    required this.onConfirm,
     required this.onClose,
     this.defaultMinutes = 30,
+    this.coverageAt,
   });
+
+  @override
+  State<RangeChooser> createState() => _RangeChooserState();
+}
+
+class _RangeChooserState extends State<RangeChooser> {
+  static const _presets = [5, 15, 30, 60];
+  late int _minutes = widget.defaultMinutes;
+  String? _covers;
+  Timer? _debounce;
+
+  Color get _accent => switch (widget.kind) {
+        ChooserKind.voice || ChooserKind.handoff => _blue,
+        _ => const Color(0xFF1F8039),
+      };
+
+  String get _title => switch (widget.kind) {
+        ChooserKind.save => 'Save last…',
+        ChooserKind.handoff => 'Call AI on…',
+        ChooserKind.voice => 'Call sinain on…',
+        ChooserKind.region => 'Region · brief of last…',
+      };
+
+  String get _consentLabel => switch (widget.kind) {
+        ChooserKind.save || ChooserKind.region => 'COVERS',
+        ChooserKind.voice => 'SINAIN WILL KNOW',
+        ChooserKind.handoff => 'AGENT WILL KNOW',
+      };
+
+  String get _verb => switch (widget.kind) {
+        ChooserKind.save => 'Save $_minutes min',
+        ChooserKind.handoff => 'Hand off $_minutes min',
+        ChooserKind.voice => 'Call on $_minutes min',
+        ChooserKind.region => 'Region · $_minutes min',
+      };
+
+  /// Past ~90 min the readout warns; past 100 the range splits into two burst
+  /// calls (quota edge) — information, never a wall.
+  Color get _readoutColor =>
+      _minutes > 100 ? _orange : (_minutes > 90 ? _amber : _accent);
+
+  String get _coversText {
+    final o = widget.options.where((o) => o.minutes == _minutes).firstOrNull;
+    final base = _covers ?? o?.covers ?? '';
+    final avail = widget.options.firstOrNull?.availableMinutes ?? 0;
+    if (avail > 0 && avail < _minutes) return 'only $avail min so far';
+    return base.isEmpty ? '—' : base;
+  }
+
+  // Extrapolated from the measured benchmark curve — no LLM call to render.
+  String get _latency => '~${(0.75 + _minutes * 0.026).toStringAsFixed(1)}s';
+  String get _cost => '~\$${(0.004 + _minutes * 0.00075).toStringAsFixed(2)}';
+
+  void _setMinutes(int n) {
+    setState(() => _minutes = n);
+    if (widget.coverageAt == null) return;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () async {
+      final covers = await widget.coverageAt!(_minutes);
+      if (mounted && covers != null) setState(() => _covers = covers);
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = HudTheme.of(context);
-    final opts = options.isNotEmpty
-        ? options
-        : const [
-            RangeOption(minutes: 5, covers: '', availableMinutes: 0),
-            RangeOption(minutes: 15, covers: '', availableMinutes: 0),
-            RangeOption(minutes: 30, covers: '', availableMinutes: 0),
-            RangeOption(minutes: 60, covers: '', availableMinutes: 0),
-          ];
     return Container(
-      width: 264,
+      width: 300,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: t.panelBg,
@@ -67,69 +139,346 @@ class RangeChooser extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Header: glyph dot · title · live N readout
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 6, 6, 9),
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 9),
             child: Row(children: [
-              Expanded(
-                  child: Text(title,
-                      style: _mono(12, t.textPrimary,
-                          weight: FontWeight.w600))),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onTap: onClose,
-                  child: Text('✕', style: _mono(11, t.textDim)),
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _accent, width: 2),
                 ),
               ),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text(_title,
+                      style: _mono(12, t.textPrimary, weight: FontWeight.w600))),
+              Text('$_minutes min',
+                  style: _mono(15, _readoutColor, weight: FontWeight.w600)),
             ]),
           ),
-          for (final o in opts) _option(t, o),
+          // Preset chips — the fast path
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            child: Row(children: [
+              for (final n in _presets) ...[
+                Expanded(
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => _setMinutes(n),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: n == _minutes
+                              ? _accent.withValues(alpha: 0.25)
+                              : t.bubbleBgLow,
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(
+                              color: n == _minutes
+                                  ? _accent.withValues(alpha: 0.55)
+                                  : t.hairline),
+                        ),
+                        child: Text('${n}m',
+                            style: _mono(
+                                10, n == _minutes ? Colors.white : t.textMuted)),
+                      ),
+                    ),
+                  ),
+                ),
+                if (n != _presets.last) const SizedBox(width: 5),
+              ],
+            ]),
+          ),
+          // Slider — 5-min steps, escape hatch past the presets
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 4,
+                activeTrackColor: _readoutColor.withValues(alpha: 0.75),
+                inactiveTrackColor: Colors.white.withValues(alpha: 0.09),
+                thumbColor: Colors.white,
+                thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 12),
+                tickMarkShape: SliderTickMarkShape.noTickMark,
+              ),
+              child: Slider(
+                min: 5, max: 120, divisions: 23,
+                value: _minutes.toDouble(),
+                onChanged: (v) => _setMinutes(v.round()),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('5 min', style: _mono(9, t.textDim)),
+                Text('quota edge', style: _mono(9, _orange)),
+              ],
+            ),
+          ),
+          // Consent box: coverage + live estimates
+          Container(
+            margin: const EdgeInsets.fromLTRB(10, 2, 10, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+            decoration: BoxDecoration(
+              color: t.bubbleBgLow,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_consentLabel,
+                    style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(_coversText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: _mono(11, t.textMuted, height: 1.35)),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Text(_latency, style: _mono(10, t.textDim)),
+                  const SizedBox(width: 14),
+                  Text(_cost, style: _mono(10, t.textDim)),
+                  if (_minutes > 100) ...[
+                    const SizedBox(width: 14),
+                    Text('⚠ splits into 2 calls', style: _mono(10, _orange)),
+                  ],
+                ]),
+              ],
+            ),
+          ),
+          // Verb button + cancel
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+            child: Row(children: [
+              Expanded(
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => widget.onConfirm(_minutes),
+                    child: Container(
+                      height: 28,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: _accent,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(_verb,
+                          style: _mono(12, Colors.white,
+                              weight: FontWeight.w500)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
+              _cardButton(t, 'Cancel', widget.onClose),
+            ]),
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _option(HudTheme t, RangeOption o) {
-    final selected = o.minutes == defaultMinutes;
-    final capped =
-        o.availableMinutes > 0 && o.availableMinutes < o.minutes;
-    final covers = capped
-        ? 'only ${o.availableMinutes} min so far'
-        : (o.covers.isEmpty ? '—' : o.covers);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => onPick(o.minutes),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 3),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? t.selectionAccent.withValues(alpha: 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(
-                color: selected
-                    ? t.selectionAccent.withValues(alpha: 0.5)
-                    : Colors.transparent),
-          ),
-          child: Row(children: [
-            SizedBox(
-              width: 34,
-              child: Text('${o.minutes}m',
-                  style: _mono(13, t.textPrimary, weight: FontWeight.w600)),
-            ),
-            Expanded(
-              child: Text(covers,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _mono(10, t.textMuted)),
-            ),
-            if (selected)
-              Text('default', style: _mono(9, t.selectionAccent)),
-          ]),
+// ── Live call chip ("Call sinain") ──────────────────────────────────────────
+
+class VoiceCallChip extends StatefulWidget {
+  final VoiceSession session;
+  final VoidCallback onEnd;
+  final VoidCallback onDismiss;
+
+  const VoiceCallChip({
+    super.key,
+    required this.session,
+    required this.onEnd,
+    required this.onDismiss,
+  });
+
+  @override
+  State<VoiceCallChip> createState() => _VoiceCallChipState();
+}
+
+class _VoiceCallChipState extends State<VoiceCallChip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _wave = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..repeat();
+  DateTime? _liveSince;
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTimer();
+  }
+
+  @override
+  void didUpdateWidget(VoiceCallChip old) {
+    super.didUpdateWidget(old);
+    if (old.session.status != widget.session.status) _syncTimer();
+  }
+
+  void _syncTimer() {
+    if (widget.session.status == VoiceStatus.live &&
+        widget.session.mode == VoiceMode.bridge) {
+      _liveSince ??= DateTime.now();
+      _ticker ??= Timer.periodic(
+          const Duration(seconds: 1), (_) => mounted ? setState(() {}) : null);
+    } else {
+      _ticker?.cancel();
+      _ticker = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _wave.dispose();
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String get _elapsed {
+    final s = DateTime.now().difference(_liveSince ?? DateTime.now()).inSeconds;
+    return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  Widget _waveform() => AnimatedBuilder(
+        animation: _wave,
+        builder: (_, __) => Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            for (var i = 0; i < 4; i++) ...[
+              Transform.scale(
+                scaleY: 0.35 +
+                    0.65 *
+                        (0.5 +
+                            0.5 *
+                                math.sin((_wave.value * 2 * math.pi) -
+                                    i * 0.9)),
+                child: Container(
+                  width: 3, height: 14,
+                  decoration: BoxDecoration(
+                    color: _blue,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+              if (i < 3) const SizedBox(width: 2),
+            ],
+          ],
         ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final t = HudTheme.of(context);
+    final s = widget.session;
+    final live = s.status == VoiceStatus.live;
+    final err = s.status == VoiceStatus.error;
+    return Container(
+      width: 300,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: t.panelBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: err
+                ? _orange.withValues(alpha: 0.4)
+                : _blue.withValues(alpha: 0.45)),
+        boxShadow: t.shadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            if (live && s.mode == VoiceMode.bridge) _waveform(),
+            if (!(live && s.mode == VoiceMode.bridge))
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: err ? _orange : _blue, width: 2),
+                ),
+              ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                switch (s.status) {
+                  VoiceStatus.starting =>
+                    'Calling sinain · ${s.minutes} min of context',
+                  VoiceStatus.live => s.mode == VoiceMode.meet
+                      ? 'Sinain is joining the call'
+                      : 'In call with sinain',
+                  VoiceStatus.ended => 'Call ended',
+                  VoiceStatus.error => 'Call failed',
+                },
+                style: _mono(12, t.textPrimary, weight: FontWeight.w600),
+              ),
+            ),
+            if (live && s.mode == VoiceMode.bridge)
+              Text(_elapsed, style: _mono(10, t.textMuted)),
+            if (!live || s.mode == VoiceMode.meet) ...[
+              const SizedBox(width: 8),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                    onTap: widget.onDismiss,
+                    child: Text('✕', style: _mono(12, t.textDim))),
+              ),
+            ],
+          ]),
+          if (err)
+            Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child:
+                  Text(s.error ?? 'unknown', style: _mono(11, _orange, height: 1.35)),
+            ),
+          if (s.message != null && !err)
+            Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: Text(s.message!,
+                  style: _mono(11, t.textMuted, height: 1.35)),
+            ),
+          if (s.coverage.isNotEmpty && s.status == VoiceStatus.starting)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(s.coverage, style: _mono(10, t.textDim)),
+            ),
+          if (live && s.mode == VoiceMode.bridge) ...[
+            const SizedBox(height: 9),
+            Row(children: [
+              const Spacer(),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: widget.onEnd,
+                  child: Container(
+                    height: 24,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _endRed,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text('End',
+                        style:
+                            _mono(11, Colors.white, weight: FontWeight.w500)),
+                  ),
+                ),
+              ),
+            ]),
+          ],
+        ],
       ),
     );
   }

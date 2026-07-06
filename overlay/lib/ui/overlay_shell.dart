@@ -104,6 +104,8 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<ContextBrief>? _briefSub;
   StreamSubscription<EnrichCard>? _enrichSub;
   StreamSubscription<SaveReceipt>? _receiptSub;
+  StreamSubscription<VoiceSession>? _voiceSub;
+  VoiceSession? _voiceSession;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -279,6 +281,19 @@ class OverlayShellState extends State<OverlayShell> {
         Timer(const Duration(seconds: 4), () {
           if (mounted && _saveReceipt?.saveId == r.saveId) {
             setState(() => _saveReceipt = null);
+            _maybeExitCardMode();
+          }
+        });
+      }
+    });
+    _voiceSub = ws.voiceSessionStream.listen((s) {
+      if (!mounted) return;
+      setState(() => _voiceSession = s);
+      _enterCardMode();
+      if (s.status == VoiceStatus.ended) {
+        Timer(const Duration(seconds: 3), () {
+          if (mounted && _voiceSession?.status == VoiceStatus.ended) {
+            setState(() => _voiceSession = null);
             _maybeExitCardMode();
           }
         });
@@ -745,6 +760,18 @@ class OverlayShellState extends State<OverlayShell> {
     await _buildContextFromClipboard();
   }
 
+  /// Menu title for Build Context with the clipboard's head inline, so the
+  /// target is unambiguous before firing (v2 §2).
+  Future<String> _buildContextMenuTitle() async {
+    final clip = await Clipboard.getData(Clipboard.kTextPlain);
+    final head = _stripSinainContext(clip?.text ?? '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (head.isEmpty) return 'Build Context from Clipboard';
+    final preview = head.length > 18 ? '${head.substring(0, 15)}…' : head;
+    return 'Build Context: "$preview"';
+  }
+
   /// Divider written before any Sinain-generated clipboard context. Both
   /// clipboard features (seed enrich above, Build-context Copy) use it, so a
   /// single strip at this marker recovers the user's original content.
@@ -762,11 +789,15 @@ class OverlayShellState extends State<OverlayShell> {
     final items = <Map<String, dynamic>>[
       // Deliberate capture — the three window gestures live here, not as
       // dedicated HUD buttons (design: reuse existing controls).
-      {'id': 'capSave', 'title': 'Save Last Minutes…'},
-      {'id': 'capSummon', 'title': 'Call AI on Last Minutes…'},
+      {'id': 'capSave', 'title': 'Save Last…'},
+      {'id': 'capSummon', 'title': 'Call AI on…'},
+      // Voice call with the sinain agent (v2): the chooser's range becomes the
+      // call's seeded context ("SINAIN WILL KNOW").
+      {'id': 'capVoice', 'title': 'Call Sinain on…'},
       // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
       // "Copy for agent" action produces the same agent-grade seed, visibly.
-      {'id': 'capBuild', 'title': 'Build Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
+      // Shows the clipboard head inline so the target is unambiguous.
+      {'id': 'capBuild', 'title': await _buildContextMenuTitle(), 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
       if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
@@ -786,6 +817,9 @@ class OverlayShellState extends State<OverlayShell> {
       case 'capSummon':
         _enterCardMode();
         await _openRangeChooser('summon');
+      case 'capVoice':
+        _enterCardMode();
+        await _openRangeChooser('voice');
       case 'capBuild':
         _enterCardMode();
         await _buildContextFromClipboard();
@@ -1038,6 +1072,7 @@ class OverlayShellState extends State<OverlayShell> {
     _briefSub?.cancel();
     _enrichSub?.cancel();
     _receiptSub?.cancel();
+    _voiceSub?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
@@ -1076,6 +1111,29 @@ class OverlayShellState extends State<OverlayShell> {
               coverage: '',
               error: err,
             ));
+      }
+    } else if (action == 'voice') {
+      // "Call sinain": if a Meet/Teams link is on the clipboard, the deployed
+      // meetbot joins THAT call ("from the server, using your account");
+      // otherwise a local AR-bridge session (screen + mic over WebRTC).
+      final clip = await Clipboard.getData(Clipboard.kTextPlain);
+      final clipText = (clip?.text ?? '').trim();
+      final meetLink = RegExp(
+              r'https://(meet\.google\.com|teams\.live\.com|teams\.microsoft\.com)/\S+')
+          .firstMatch(clipText)
+          ?.group(0);
+      final err = meetLink != null
+          ? await ws.requestVoiceMeet(meetLink, minutes)
+          : await ws.requestVoiceStart(minutes);
+      if (err != null && mounted) {
+        setState(() => _voiceSession = VoiceSession(
+              status: VoiceStatus.error,
+              mode: meetLink != null ? VoiceMode.meet : VoiceMode.bridge,
+              minutes: minutes,
+              coverage: '',
+              error: err,
+            ));
+        _enterCardMode();
       }
     } else if (action == 'region') {
       // Region + minutes: kick the brief off NOW so it's usually ready by the
@@ -1236,7 +1294,8 @@ class OverlayShellState extends State<OverlayShell> {
     if (_chooserFor != null ||
         _activeBrief != null ||
         _activeEnrich != null ||
-        _saveReceipt != null) {
+        _saveReceipt != null ||
+        _voiceSession != null) {
       return;
     }
     setState(() => _cardMode = false);
@@ -1312,15 +1371,30 @@ class OverlayShellState extends State<OverlayShell> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: RangeChooser(
-              title: switch (_chooserFor) {
-                'save' => 'Save last…',
-                'region' => 'Region · brief of last…',
-                _ => 'Call AI on last…',
+              kind: switch (_chooserFor) {
+                'save' => ChooserKind.save,
+                'voice' => ChooserKind.voice,
+                'region' => ChooserKind.region,
+                _ => ChooserKind.handoff,
               },
               options: _rangeOptions,
-              onPick: _pickRange,
+              onConfirm: _pickRange,
+              coverageAt: (m) =>
+                  context.read<WebSocketService>().fetchCoverageAt(m),
               onClose: () {
                 setState(() => _chooserFor = null);
+                _maybeExitCardMode();
+              },
+            ),
+          ),
+        if (_voiceSession != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: VoiceCallChip(
+              session: _voiceSession!,
+              onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
+              onDismiss: () {
+                setState(() => _voiceSession = null);
                 _maybeExitCardMode();
               },
             ),
@@ -1354,6 +1428,10 @@ class OverlayShellState extends State<OverlayShell> {
                         _activeBrief = null;
                         _activeEnrich = null;
                         _saveReceipt = null;
+                        // A live call keeps running — ✕ only hides the chip.
+                        if (_voiceSession?.isActive != true) {
+                          _voiceSession = null;
+                        }
                       });
                       _maybeExitCardMode();
                     },

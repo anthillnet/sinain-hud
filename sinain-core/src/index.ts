@@ -1820,7 +1820,7 @@ async function main() {
 
   // ── Deliberate capture: save manager + burst-lane gestures ──
   const { SaveManager } = await import("./capture/save-manager.js");
-  const { assembleWindow, chooserOptions, summonBrief, enrichFocus } = await import("./capture/window-ops.js");
+  const { assembleWindow, chooserOptions, describeCoverage, summonBrief, enrichFocus } = await import("./capture/window-ops.js");
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
@@ -1839,7 +1839,7 @@ async function main() {
   };
 
   const contextSummon = async (minutes: number, requestId: string): Promise<unknown> => {
-    const coverage = (await import("./capture/window-ops.js")).describeCoverage(feedBuffer, senseBuffer, minutes);
+    const coverage = describeCoverage(feedBuffer, senseBuffer, minutes);
     wsHandler.broadcastRaw({ type: "context_brief", requestId, status: "working", minutes, coverage, ts: Date.now() });
     try {
       const slice = assembleWindow(feedBuffer, senseBuffer, minutes);
@@ -1911,7 +1911,13 @@ async function main() {
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
+    windowCoverageAt: (minutes) => ({
+      minutes,
+      covers: describeCoverage(feedBuffer, senseBuffer, minutes),
+      availableMinutes: 0,
+    }),
     voiceStart: config.voiceConfig.enabled ? (minutes) => voiceManager.start(minutes) : undefined,
+    voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
     voiceStop: () => voiceManager.stop(),
     voiceStatus: () => voiceManager.status(),
 

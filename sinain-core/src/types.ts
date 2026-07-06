@@ -312,13 +312,18 @@ export interface EnrichCardMessage {
   ts: number;
 }
 
-/** Voice session ("Talk to Sinain" via the AR bridge) lifecycle. */
+/** Voice session ("Call sinain") lifecycle. */
 export interface VoiceSessionMessage {
   type: "voice_session";
   status: "starting" | "live" | "ended" | "error";
+  /** Transport: local AR bridge (screen+mic WebRTC) or the deployed meetbot
+   *  joining a Google Meet/Teams call from its container. */
+  mode: "bridge" | "meet";
   /** Range whose brief seeded the session (0 = unseeded). */
   minutes: number;
   coverage: string;
+  /** Human line to surface (e.g. "admit Sinain (AI) from the People panel"). */
+  message?: string;
   error?: string;
   ts: number;
 }
@@ -524,10 +529,10 @@ export interface BurstConfig {
   timeoutMs: number;
 }
 
-/** "Talk to Sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
+/** "Call sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
 export interface VoiceConfig {
   enabled: boolean;
-  /** ARSinain base URL (aiortc signaling). */
+  /** ARSinain base URL (aiortc signaling) for the local bridge transport. */
   serverUrl: string;
   /** X-Auth-Request-Email for entitlement-gated servers ("" locally). */
   email: string;
@@ -535,6 +540,11 @@ export interface VoiceConfig {
   framePath: string;
   /** Screen publish rate. */
   fps: number;
+  /** Deployed ARSinain for the meetbot transport (POST /meet). */
+  meetServerUrl: string;
+  /** oauth2-proxy session cookie for the deployed server ("your account").
+   *  Copy the `_oauth2_proxy` cookie from a logged-in browser session. */
+  meetCookie: string;
 }
 
 export interface RegionSlmConfig {

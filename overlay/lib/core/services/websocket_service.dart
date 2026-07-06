@@ -717,6 +717,36 @@ class WebSocketService extends ChangeNotifier {
   Future<bool> requestVoiceStop() async =>
       (await _postJson('/voice/stop', {}))?['stopped'] == true;
 
+  /// "Call sinain" via the deployed meetbot: the bot joins the given
+  /// Meet/Teams call, seeded with the last N minutes.
+  Future<String?> requestVoiceMeet(String url, int minutes) async {
+    final data = await _postJson('/voice/meet', {'url': url, 'minutes': minutes});
+    if (data == null) return 'core unreachable';
+    return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
+  }
+
+  /// Live coverage for an arbitrary slider position (free window data).
+  Future<String?> fetchCoverageAt(int minutes) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse('$base/window/coverage?minutes=$minutes'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      final option =
+          (jsonDecode(body) as Map<String, dynamic>)['option'] as Map?;
+      return option?['covers'] as String?;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
   void disconnect() {
     _profilingTimer?.cancel();
     _profilingTimer = null;

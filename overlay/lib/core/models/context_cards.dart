@@ -152,18 +152,23 @@ class SaveReceipt {
 
 enum VoiceStatus { starting, live, ended, error }
 
-/// "Talk to Sinain" voice session state (WS `voice_session`). Plumbing for
-/// the upcoming voice UI — no widgets consume this yet.
+enum VoiceMode { bridge, meet }
+
+/// "Call sinain" session state (WS `voice_session`).
 class VoiceSession {
   final VoiceStatus status;
+  final VoiceMode mode;
   final int minutes;
   final String coverage;
+  final String? message;
   final String? error;
 
   const VoiceSession({
     required this.status,
+    required this.mode,
     required this.minutes,
     required this.coverage,
+    this.message,
     this.error,
   });
 
@@ -174,8 +179,10 @@ class VoiceSession {
           'error' => VoiceStatus.error,
           _ => VoiceStatus.starting,
         },
+        mode: json['mode'] == 'meet' ? VoiceMode.meet : VoiceMode.bridge,
         minutes: (json['minutes'] as num?)?.toInt() ?? 0,
         coverage: json['coverage'] as String? ?? '',
+        message: json['message'] as String?,
         error: json['error'] as String?,
       );
 

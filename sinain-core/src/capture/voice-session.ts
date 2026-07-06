@@ -25,6 +25,7 @@ const TAG = "voice";
 export class VoiceSessionManager {
   private proc: ChildProcess | null = null;
   private state: VoiceSessionMessage["status"] = "ended";
+  private mode: VoiceSessionMessage["mode"] = "bridge";
   private minutes = 0;
   private coverage = "";
   private seedFile: string | null = null;
@@ -37,32 +38,87 @@ export class VoiceSessionManager {
     private broadcast: (msg: VoiceSessionMessage) => void,
   ) {}
 
-  status(): { status: string; minutes: number; coverage: string } {
-    return { status: this.state, minutes: this.minutes, coverage: this.coverage };
+  status(): { status: string; mode: string; minutes: number; coverage: string } {
+    return { status: this.state, mode: this.mode, minutes: this.minutes, coverage: this.coverage };
   }
 
-  /** Start a session seeded with the last N minutes (0 = unseeded). */
-  async start(minutes: number): Promise<{ ok: boolean; error?: string }> {
-    if (!this.voice.enabled) return { ok: false, error: "voice disabled (VOICE_ENABLED=false)" };
-    if (this.proc) return { ok: false, error: "a voice session is already running" };
+  /** Compose the seed brief for a range — best-effort, never throws. */
+  private async composeSeed(minutes: number): Promise<string> {
+    if (minutes <= 0 || !this.burst.enabled || !this.burst.apiKey) return "";
+    try {
+      const slice = assembleWindow(this.feedBuffer, this.senseBuffer, minutes);
+      if (slice.lineCount === 0) return "";
+      const { brief } = await summonBrief(this.burst, slice, minutes);
+      return flattenBrief(brief, minutes, slice.coverage);
+    } catch (err) {
+      warn(TAG, `seed brief failed (session continues unseeded): ${String(err).slice(0, 160)}`);
+      return "";
+    }
+  }
 
+  /**
+   * Meetbot transport: the deployed ARSinain launches its bot container,
+   * which joins the given Google Meet/Teams call as "Sinain (AI)" — the
+   * existing production call path, driven from the HUD. Auth is the user's
+   * own oauth2-proxy session cookie (ARSINAIN_COOKIE).
+   */
+  async meet(url: string, minutes: number): Promise<{ ok: boolean; error?: string }> {
+    if (!this.voice.enabled) return { ok: false, error: "voice disabled (VOICE_ENABLED=false)" };
+    this.mode = "meet";
     this.minutes = minutes;
     this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
     this.setState("starting");
 
-    // Build the seed — best-effort: a brief failure must not block the call.
-    let seedText = "";
-    if (minutes > 0 && this.burst.enabled && this.burst.apiKey) {
-      try {
-        const slice = assembleWindow(this.feedBuffer, this.senseBuffer, minutes);
-        if (slice.lineCount > 0) {
-          const { brief } = await summonBrief(this.burst, slice, minutes);
-          seedText = flattenBrief(brief, minutes, slice.coverage);
-        }
-      } catch (err) {
-        warn(TAG, `seed brief failed (session continues unseeded): ${String(err).slice(0, 160)}`);
+    const seed = await this.composeSeed(minutes);
+    try {
+      const res = await fetch(`${this.voice.meetServerUrl.replace(/\/$/, "")}/meet`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(this.voice.meetCookie ? { Cookie: this.voice.meetCookie } : {}),
+        },
+        body: JSON.stringify({ url, ...(seed ? { seed } : {}) }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const error = "the server wants a login — set ARSINAIN_COOKIE to your browser's _oauth2_proxy cookie";
+        this.fail(error);
+        return { ok: false, error };
       }
+      const body = (await res.json().catch(() => ({}))) as { status?: string; message?: string; error?: string };
+      if (!res.ok || body.error) {
+        const error = body.error ?? `meet launch failed (${res.status})`;
+        this.fail(error);
+        return { ok: false, error };
+      }
+      log(TAG, `meetbot joining ${url} (${seed ? "seeded" : "unseeded"})`);
+      this.state = "live";
+      this.broadcast({
+        type: "voice_session", status: "live", mode: "meet",
+        minutes: this.minutes, coverage: this.coverage,
+        message: body.message ?? "Sinain is joining — admit \"Sinain (AI)\" from the meeting's People panel.",
+        ts: Date.now(),
+      });
+      return { ok: true };
+    } catch (err) {
+      const error = `cannot reach ${this.voice.meetServerUrl}: ${String((err as Error).message ?? err).slice(0, 160)}`;
+      this.fail(error);
+      return { ok: false, error };
     }
+  }
+
+  /** Start a bridge session seeded with the last N minutes (0 = unseeded). */
+  async start(minutes: number): Promise<{ ok: boolean; error?: string }> {
+    if (!this.voice.enabled) return { ok: false, error: "voice disabled (VOICE_ENABLED=false)" };
+    if (this.proc) return { ok: false, error: "a voice session is already running" };
+
+    this.mode = "bridge";
+    this.minutes = minutes;
+    this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
+    this.setState("starting");
+
+    const seedText = await this.composeSeed(minutes);
     const say = seedText
       ? `I've got your last ${minutes} minutes — ${this.coverage}. Go ahead.`
       : "I can see your screen. Go ahead.";
@@ -136,7 +192,7 @@ export class VoiceSessionManager {
   private setState(status: VoiceSessionMessage["status"]): void {
     this.state = status;
     this.broadcast({
-      type: "voice_session", status,
+      type: "voice_session", status, mode: this.mode,
       minutes: this.minutes, coverage: this.coverage, ts: Date.now(),
     });
   }
@@ -145,7 +201,7 @@ export class VoiceSessionManager {
     warn(TAG, error);
     this.state = "error";
     this.broadcast({
-      type: "voice_session", status: "error",
+      type: "voice_session", status: "error", mode: this.mode,
       minutes: this.minutes, coverage: this.coverage, error, ts: Date.now(),
     });
   }

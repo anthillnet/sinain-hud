@@ -1703,8 +1703,12 @@ export interface ServerDeps {
   contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
   /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
   windowCoverage?: () => unknown;
-  /** "Talk to Sinain": start a voice session seeded with the last N minutes. */
+  /** Live coverage for an arbitrary N (the chooser slider). */
+  windowCoverageAt?: (minutes: number) => unknown;
+  /** "Call sinain": start a bridge voice session seeded with the last N minutes. */
   voiceStart?: (minutes: number) => Promise<{ ok: boolean; error?: string }>;
+  /** "Call sinain" via the deployed meetbot: bot joins the given Meet/Teams call. */
+  voiceMeet?: (url: string, minutes: number) => Promise<{ ok: boolean; error?: string }>;
   /** End the running voice session (true if there was one). */
   voiceStop?: () => boolean;
   /** Current voice session state. */
@@ -1933,6 +1937,15 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       if (req.method === "GET" && url.pathname === "/window/coverage") {
+        // ?minutes=N → single live coverage row for the chooser's slider.
+        const minutesParam = url.searchParams.get("minutes");
+        if (minutesParam !== null) {
+          res.end(JSON.stringify({
+            ok: true,
+            option: deps.windowCoverageAt?.(clampMinutes(Number(minutesParam))) ?? null,
+          }));
+          return;
+        }
         res.end(JSON.stringify({ ok: true, options: deps.windowCoverage?.() ?? [] }));
         return;
       }
@@ -1950,6 +1963,27 @@ export function createAppServer(deps: ServerDeps) {
         const minutes = raw === 0 ? 0 : clampMinutes(raw);
         const result = await deps.voiceStart(minutes);
         if (!result.ok) res.writeHead(409);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/meet") {
+        if (!deps.voiceMeet) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { url?: string; minutes?: number };
+        const meetUrl = String(parsed.url ?? "").trim();
+        if (!/^https:\/\/(meet\.google\.com|teams\.live\.com|teams\.microsoft\.com)\//i.test(meetUrl)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "url must be a Google Meet or Teams link" }));
+          return;
+        }
+        const minutes = parsed.minutes === 0 ? 0 : clampMinutes(parsed.minutes);
+        const result = await deps.voiceMeet(meetUrl, minutes);
+        if (!result.ok) res.writeHead(502);
         res.end(JSON.stringify(result));
         return;
       }

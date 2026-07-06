@@ -331,6 +331,11 @@ export function loadConfig(): CoreConfig {
     email: env("ARSINAIN_EMAIL", ""),
     framePath: resolvePath(env("VOICE_FRAME_PATH", resolve(os.homedir(), ".sinain", "capture", "frame.jpg"))),
     fps: floatEnv("VOICE_FPS", 4),
+    // Meetbot transport: the deployed server whose container joins a Google
+    // Meet/Teams call as "Sinain (AI)". It sits behind oauth2-proxy — supply
+    // your logged-in browser's `_oauth2_proxy` cookie via ARSINAIN_COOKIE.
+    meetServerUrl: env("ARSINAIN_MEET_URL", "https://ar.sinain.com"),
+    meetCookie: env("ARSINAIN_COOKIE", ""),
   };
 
   // escalation policy: agents.json `escalation` block, fall back to env.
