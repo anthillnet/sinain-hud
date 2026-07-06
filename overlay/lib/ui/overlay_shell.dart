@@ -1113,22 +1113,14 @@ class OverlayShellState extends State<OverlayShell> {
             ));
       }
     } else if (action == 'voice') {
-      // "Call sinain": if a Meet/Teams link is on the clipboard, the deployed
-      // meetbot joins THAT call ("from the server, using your account");
-      // otherwise a local AR-bridge session (screen + mic over WebRTC).
-      final clip = await Clipboard.getData(Clipboard.kTextPlain);
-      final clipText = (clip?.text ?? '').trim();
-      final meetLink = RegExp(
-              r'https://(meet\.google\.com|teams\.live\.com|teams\.microsoft\.com)/\S+')
-          .firstMatch(clipText)
-          ?.group(0);
-      final err = meetLink != null
-          ? await ws.requestVoiceMeet(meetLink, minutes)
-          : await ws.requestVoiceStart(minutes);
+      // "Call sinain": a live call FROM THIS MACHINE — screen + mic over
+      // WebRTC to the sinain server (call mechanics like a meeting, but no
+      // Meet involved). Lifecycle arrives on voiceSessionStream.
+      final err = await ws.requestVoiceStart(minutes);
       if (err != null && mounted) {
         setState(() => _voiceSession = VoiceSession(
               status: VoiceStatus.error,
-              mode: meetLink != null ? VoiceMode.meet : VoiceMode.bridge,
+              mode: VoiceMode.bridge,
               minutes: minutes,
               coverage: '',
               error: err,

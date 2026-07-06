@@ -327,7 +327,10 @@ export function loadConfig(): CoreConfig {
   // default: ARSinain on 127.0.0.1:8089 (its AR_HELP_PORT default).
   const voiceConfig: import("./types.js").VoiceConfig = {
     enabled: boolEnv("VOICE_ENABLED", true),
-    serverUrl: env("ARSINAIN_URL", "http://127.0.0.1:8089"),
+    // "Call sinain" dials the DEPLOYED server by default — same session the
+    // browser client uses, authenticated with your account via
+    // ARSINAIN_COOKIE. Point at http://127.0.0.1:8089 for a local ARSinain.
+    serverUrl: env("ARSINAIN_URL", "https://ar.sinain.com"),
     email: env("ARSINAIN_EMAIL", ""),
     framePath: resolvePath(env("VOICE_FRAME_PATH", resolve(os.homedir(), ".sinain", "capture", "frame.jpg"))),
     fps: floatEnv("VOICE_FPS", 4),

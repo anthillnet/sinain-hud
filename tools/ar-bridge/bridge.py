@@ -26,7 +26,10 @@ import signal
 import sys
 from io import BytesIO
 
+import ssl
+
 import aiohttp
+import certifi
 import av
 import numpy as np
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
@@ -158,13 +161,32 @@ async def run(args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001 — session still useful unseeded
             emit(f"error: seed file unreadable ({e}) — continuing unseeded")
 
+    # Auth headers for a deployed (oauth2-proxy-fronted) server: the user's
+    # own browser session cookie. Local dev servers need neither.
+    auth_headers = {}
+    if args.cookie:
+        auth_headers["Cookie"] = args.cookie
+    if args.email:
+        auth_headers["X-Auth-Request-Email"] = args.email
+
     # Reachability probe FIRST — before any audio/video hardware is touched.
     # Opening the mic can block on the macOS permission prompt; a down server
     # must fail fast, not hang behind TCC.
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+
+    def http_session():
+        return aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx))
+
     try:
-        async with aiohttp.ClientSession() as session:
+        async with http_session() as session:
             async with session.get(args.server.rstrip("/") + "/",
-                                   timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                                   headers=auth_headers,
+                                   allow_redirects=False,
+                                   timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status in (301, 302, 303, 307, 308, 401, 403):
+                    emit("error: the server wants a login — set ARSINAIN_COOKIE "
+                         "to your browser's _oauth2_proxy cookie")
+                    return 1
                 await resp.read()
     except Exception as e:  # noqa: BLE001
         emit(f"error: cannot reach ARSinain at {args.server}: {e}")
@@ -215,11 +237,9 @@ async def run(args: argparse.Namespace) -> int:
         emit("error: sounddevice unavailable — publishing screen only")
 
     await pc.setLocalDescription(await pc.createOffer())
-    headers = {}
-    if args.email:
-        headers["X-Auth-Request-Email"] = args.email
+    headers = dict(auth_headers)
     try:
-        async with aiohttp.ClientSession() as session:
+        async with http_session() as session:
             async with session.post(
                 f"{args.server.rstrip('/')}/offer",
                 json={"sdp": pc.localDescription.sdp, "type": pc.localDescription.type},
@@ -257,6 +277,8 @@ def main() -> None:
     p.add_argument("--fps", type=float, default=4.0, help="screen publish rate")
     p.add_argument("--seed-file", default="", help="JSON file: {text, say}")
     p.add_argument("--email", default="", help="X-Auth-Request-Email for gated servers")
+    p.add_argument("--cookie", default="",
+                   help="oauth2-proxy session cookie for a deployed server")
     p.add_argument("--no-audio", action="store_true",
                    help="publish screen only (no mic, no speaker) — smoke tests")
     args = p.parse_args()

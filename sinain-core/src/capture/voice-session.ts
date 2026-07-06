@@ -143,6 +143,7 @@ export class VoiceSessionManager {
       "--fps", String(this.voice.fps),
       "--seed-file", this.seedFile,
       ...(this.voice.email ? ["--email", this.voice.email] : []),
+      ...(this.voice.meetCookie ? ["--cookie", this.voice.meetCookie] : []),
     ], { stdio: ["ignore", "pipe", "pipe"] });
     this.proc = proc;
 
