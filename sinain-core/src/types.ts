@@ -306,7 +306,7 @@ export interface EnrichCardMessage {
   status: "working" | "ready" | "error";
   /** The focus item (clipboard text), truncated for display. */
   focus: string;
-  card?: { context: string; next: string };
+  card?: { context: string };
   latencyMs?: number;
   error?: string;
   ts: number;

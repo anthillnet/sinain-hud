@@ -508,8 +508,6 @@ class EnrichCardWidget extends StatelessWidget {
             const _SectionHead('CONTEXT'),
             Text(card.context,
                 style: _mono(11, t.textPrimary, height: 1.35)),
-            const _SectionHead('NEXT'),
-            Text(card.next, style: _mono(11, t.textMuted, height: 1.35)),
             const SizedBox(height: 12),
             Row(children: [
               if (onCallAi != null)

@@ -81,7 +81,6 @@ class EnrichCard {
   final CardStatus status;
   final String focus;
   final String context;
-  final String next;
   final int? latencyMs;
   final String? error;
 
@@ -90,7 +89,6 @@ class EnrichCard {
     required this.status,
     required this.focus,
     this.context = '',
-    this.next = '',
     this.latencyMs,
     this.error,
   });
@@ -102,7 +100,6 @@ class EnrichCard {
       status: _statusFrom(json['status'] as String?),
       focus: json['focus'] as String? ?? '',
       context: card['context'] as String? ?? '',
-      next: card['next'] as String? ?? '',
       latencyMs: (json['latencyMs'] as num?)?.toInt(),
       error: json['error'] as String?,
     );

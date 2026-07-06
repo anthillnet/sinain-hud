@@ -27,7 +27,9 @@ is a later decision), but all new intelligence is gesture-gated.
 - **Call AI on Last Minutes…** · summon — situation brief of the last N min;
   becomes the agent's working context.
 - **Build Context from Clipboard** · enrich — one card: what the copied item
-  is + how it ties to current activity, and a next step.
+  is + how it ties to current activity. Deliberately NO suggested next step —
+  a prescriptive action would pre-empt the user's intention and misdirect any
+  agent the context is handed to.
 - **Select Region… (+ minutes)** — manual ROI grab whose thread is pre-seeded
   with a brief of the last N minutes.
 - **Chooser** — the shared range picker (5/15/30/60 + live coverage strings).
@@ -93,8 +95,9 @@ default; short-history rows say "only N min so far"; click-outside = ✕ close.
 **Build context** (enrich) — 340px:
 - Header: "Build context", latency badge ("0.64s · last 10 min"), ✕.
 - Focus line: the clipboard item (display preview, 120 chars).
-- Body: CONTEXT (one section — what the item is AND how it ties to current
-  activity; the model is instructed to say plainly when it's unrelated) · NEXT.
+- Body: CONTEXT only (what the item is AND how it ties to current activity;
+  the model is instructed to say plainly when it's unrelated, and to never
+  suggest actions — the user's intention stays theirs).
 - Footer: **[Call AI]** (hands focus + context to the agent lane, opens chat) ·
   **[Copy for agent]** (writes the FULL original + one
   `——— Context from Sinain ———` block carrying BOTH context layers: the card's

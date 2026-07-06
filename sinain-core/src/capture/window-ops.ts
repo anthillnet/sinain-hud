@@ -150,19 +150,19 @@ export async function summonBrief(
   return { brief, result };
 }
 
-// ── Enrich: context / next ──
+// ── Enrich: context only ──
 // One CONTEXT field, not what/connects: a forced split makes the model pad the
 // second sentence with situation restatement. One field demands the linkage.
+// No "next step": a prescriptive step baked into the card pre-empts the user's
+// actual intention and can misdirect any agent the context is handed off to.
 
 const ENRICH_SYSTEM = `You are Sinain, an ambient assistant. You get the user's recent activity window
 (screen OCR, window titles, transcript) plus a focus item they copied.
 Enrich the focus item with context. Return JSON only:
-{"context":"<1-2 sentences: name what the copied item is AND tie it to the user's current activity, e.g. 'This is X — you hit it while doing Y; it matters because Z.' Never restate the situation without linking it to the item. If the item genuinely doesn't relate to recent activity, say that plainly instead of forcing a connection.>",
- "next":"<one concrete next step>"}`;
+{"context":"<1-2 sentences: name what the copied item is AND tie it to the user's current activity, e.g. 'This is X — you hit it while doing Y; it matters because Z.' Never restate the situation without linking it to the item. If the item genuinely doesn't relate to recent activity, say that plainly instead of forcing a connection. Do NOT suggest actions or next steps.>"}`;
 
 export interface EnrichCard {
   context: string;
-  next: string;
 }
 
 /** Divider the overlay writes before Sinain-generated clipboard context. */
@@ -183,15 +183,14 @@ export async function enrichFocus(
     system: ENRICH_SYSTEM,
     // Window first (stable prefix → Cerebras prefix cache), focus last.
     user: `Recent activity window:\n${slice.text}\n\nFocus item (clipboard):\n${focus}\n\nEnrich it.`,
-    maxTokens: 300,
-    cacheKey: "sinain-enrich-v2",
+    maxTokens: 250,
+    cacheKey: "sinain-enrich-v3",
     jsonMode: true,
   });
   const raw = parseBurstJson<Partial<EnrichCard>>(result.content);
   return {
     card: {
       context: String(raw.context ?? "").trim(),
-      next: String(raw.next ?? "").trim(),
     },
     result,
   };

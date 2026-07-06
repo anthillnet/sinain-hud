@@ -1131,8 +1131,7 @@ class OverlayShellState extends State<OverlayShell> {
     final ws = context.read<WebSocketService>();
     final msg = StringBuffer()
       ..writeln('I copied this: ${_enrichFocusFull ?? c.focus}')
-      ..writeln('Context: ${c.context}')
-      ..write('Help me with the next step: ${c.next}');
+      ..write('Context: ${c.context}');
     ws.sendUserCommand(msg.toString());
     setState(() => _activeEnrich = null);
     _leaveCardModeFor(HudState.chat); // follow the conversation
@@ -1152,8 +1151,7 @@ class OverlayShellState extends State<OverlayShell> {
     final original = _enrichFocusFull ?? c.focus;
     final seed = await ws.fetchSeedText('clipboard', focus: original);
     final block = StringBuffer()
-      ..writeln('About this item: ${c.context}')
-      ..write('Suggested next step: ${c.next}');
+      ..write('About this item: ${c.context}');
     if (seed != null && seed.trim().isNotEmpty) {
       block
         ..writeln()
