@@ -89,6 +89,12 @@ class OverlayShellState extends State<OverlayShell> {
   bool _cardMode = false;
   // Full clipboard text behind the current enrich card (focus is a preview).
   String? _enrichFocusFull;
+  // Region + minutes: a summon brief bound to the next manual region. The
+  // brief renders no card — it attaches to the region thread as handoff
+  // context. Pending flag → brief text (once ready) → target thread id.
+  bool _regionBriefPending = false;
+  String? _pendingRegionBrief;
+  String? _regionBriefTarget;
   // Where a summon follow-up goes: 'chat' (agent lane) | 'term' (seeded PTY).
   String _summonDest = 'chat';
   List<RangeOption> _rangeOptions = const [];
@@ -182,6 +188,18 @@ class OverlayShellState extends State<OverlayShell> {
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
+      // Region + minutes (context-menu flow): attach the window brief to this
+      // thread BEFORE the first agent turn — commands are ordered on the same
+      // socket, so a stash sent now lands before run()'s spawn seed is built.
+      // If the brief is still in flight, stash on arrival (follow-ups get it).
+      if (_pendingRegionBrief != null) {
+        ws.sendCommand('set_handoff_context',
+            {'key': picked.id, 'transcript': _pendingRegionBrief!});
+        _pendingRegionBrief = null;
+        _regionBriefPending = false;
+      } else if (_regionBriefPending) {
+        _regionBriefTarget = picked.id;
+      }
       // "Copy" — just put this region's composed seed on the clipboard (for an
       // agent we don't integrate with). No thread, no HUD, no agent turn.
       if (_pendingManualMode == 'copy') {
@@ -225,6 +243,24 @@ class OverlayShellState extends State<OverlayShell> {
     // Outside the chat they surface in compact card mode — no full HUD.
     _briefSub = ws.briefStream.listen((b) {
       if (!mounted) return;
+      // Region-bound brief: no card — it becomes the region thread's handoff
+      // context (stashed here if the region already exists, else on arrival).
+      if (_regionBriefPending) {
+        if (b.status == CardStatus.ready) {
+          final text = _briefText(b);
+          if (_regionBriefTarget != null) {
+            ws.sendCommand('set_handoff_context',
+                {'key': _regionBriefTarget!, 'transcript': text});
+            _regionBriefTarget = null;
+            _regionBriefPending = false;
+          } else {
+            _pendingRegionBrief = text;
+          }
+        } else if (b.status == CardStatus.error) {
+          _regionBriefPending = false; // plain region grab, no window context
+        }
+        return;
+      }
       setState(() => _activeBrief = b);
       _enterCardMode();
     });
@@ -760,7 +796,10 @@ class OverlayShellState extends State<OverlayShell> {
       case 'enrich':
         await enrichClipboardHotkey();
       case 'region':
-        _startManualRoi();
+        // Same minutes chooser as Call AI — the selected region's thread gets
+        // a brief of the last N minutes as its opening context.
+        _enterCardMode();
+        await _openRangeChooser('region');
       case 'copySeed':
         await _copySeedForActiveThread();
       case 'reset':
@@ -1044,6 +1083,19 @@ class OverlayShellState extends State<OverlayShell> {
               error: err,
             ));
       }
+    } else if (action == 'region') {
+      // Region + minutes: kick the brief off NOW so it's usually ready by the
+      // time the drag-select lands; the region handler stashes it into the
+      // thread. Then start the native selector. Brief errors degrade to a
+      // plain region grab — the selection must never be blocked on the LLM.
+      _maybeExitCardMode();
+      _regionBriefPending = true;
+      _pendingRegionBrief = null;
+      _regionBriefTarget = null;
+      ws.requestSummon(minutes).then((err) {
+        if (err != null) _regionBriefPending = false;
+      });
+      await _startManualRoi();
     }
   }
 
@@ -1105,11 +1157,9 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  /// "Ask follow-up" — hand the brief to the chosen destination: the in-HUD
-  /// chat lane, or a terminal whose run.sh seed carries the brief (same
-  /// set_handoff_context mechanic as the ⑂ handoff).
-  void _askFollowUpOnBrief(ContextBrief b) {
-    final ws = context.read<WebSocketService>();
+  /// Flatten a situation brief into the text form carried into agent seeds
+  /// (Ask follow-up, terminal handoff, region + minutes).
+  String _briefText(ContextBrief b) {
     final summary = StringBuffer()
       ..writeln('Situation brief of my last ${b.minutes} minutes '
           '(${b.coverage}):');
@@ -1122,7 +1172,17 @@ class OverlayShellState extends State<OverlayShell> {
     if (b.problems.isNotEmpty) {
       summary.writeln('Open problems: ${b.problems.join('; ')}');
     }
-    summary.write('Pick up from here and help me with the next step.');
+    return summary.toString();
+  }
+
+  /// "Ask follow-up" — hand the brief to the chosen destination: the in-HUD
+  /// chat lane, or a terminal whose run.sh seed carries the brief (same
+  /// set_handoff_context mechanic as the ⑂ handoff).
+  void _askFollowUpOnBrief(ContextBrief b) {
+    final ws = context.read<WebSocketService>();
+    final summary = StringBuffer()
+      ..write(_briefText(b))
+      ..write('Pick up from here and help me with the next step.');
 
     if (_summonDest == 'term') {
       // Stash the brief as MAIN's handoff context BEFORE the terminal spawns —
@@ -1243,7 +1303,11 @@ class OverlayShellState extends State<OverlayShell> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: RangeChooser(
-              title: _chooserFor == 'save' ? 'Save last…' : 'Call AI on last…',
+              title: switch (_chooserFor) {
+                'save' => 'Save last…',
+                'region' => 'Region · brief of last…',
+                _ => 'Call AI on last…',
+              },
               options: _rangeOptions,
               onPick: _pickRange,
               onClose: () {
