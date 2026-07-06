@@ -1132,10 +1132,11 @@ class OverlayShellState extends State<OverlayShell> {
 
   /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC
   /// to the sinain server (mechanics like a meeting, nothing to do with Meet).
-  /// If the server wants a session, we host the login ourselves: a native
-  /// WKWebView window (same as the gpt bridge) — the user signs in with their
-  /// own account, the session cookie lands in OUR cookie store, core keeps it,
-  /// and the call retries automatically. Zero server-side changes.
+  /// If the server wants a session, login happens in the user's DEFAULT
+  /// browser (already signed into Google/Auth0 → usually zero-click): the
+  /// server's /hud/pair page mints a device token and hands it to core; we
+  /// poll until paired and redial. (A WKWebView fallback exists in
+  /// WindowService, but Google blocks OAuth in embedded webviews.)
   Future<void> _callSinain(int minutes, {bool retried = false}) async {
     final ws = context.read<WebSocketService>();
     final resp = await ws.requestVoiceStart(minutes);
@@ -1146,11 +1147,18 @@ class OverlayShellState extends State<OverlayShell> {
 
     final loginUrl = resp?['loginUrl'] as String?;
     if (loginUrl != null && !retried) {
-      final cookie =
-          await _windowService.openAuthWindow(loginUrl, '_oauth2_proxy');
-      if (cookie != null && await ws.requestVoicePair(cookie)) {
-        await _callSinain(minutes, retried: true); // paired — dial again
-        return;
+      // DEFAULT browser — the user is usually already signed in there, so
+      // this is typically zero-click. The pair page hands the credential to
+      // core out-of-band; poll until paired, then redial automatically.
+      await launchUrl(Uri.parse(loginUrl));
+      for (var i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+        final status = await ws.fetchVoiceStatus();
+        if (status?['paired'] == true) {
+          await _callSinain(minutes, retried: true);
+          return;
+        }
       }
     }
     if (!mounted) return;
@@ -1159,7 +1167,9 @@ class OverlayShellState extends State<OverlayShell> {
           mode: VoiceMode.bridge,
           minutes: minutes,
           coverage: '',
-          error: loginUrl != null ? 'login cancelled' : error,
+          error: loginUrl != null
+              ? 'login not completed — finish signing in, then call again'
+              : error,
         ));
     _enterCardMode();
   }

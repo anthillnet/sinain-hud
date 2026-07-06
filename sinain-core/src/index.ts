@@ -1918,7 +1918,7 @@ async function main() {
     }),
     voiceStart: config.voiceConfig.enabled ? (minutes) => voiceManager.start(minutes) : undefined,
     voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
-    voicePair: (cookie) => voiceManager.pair(cookie),
+    voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),
     voiceStop: () => voiceManager.stop(),
     voiceStatus: () => voiceManager.status(),
 

@@ -1711,8 +1711,8 @@ export interface ServerDeps {
   voiceMeet?: (url: string, minutes: number) => Promise<{ ok: boolean; error?: string }>;
   /** End the running voice session (true if there was one). */
   voiceStop?: () => boolean;
-  /** Store the session cookie captured by the overlay's login window. */
-  voicePair?: (cookie: string) => void;
+  /** Store the pair-flow credential (session cookie or device token). */
+  voicePair?: (cookie: string, token: string, email: string) => void;
   /** Current voice session state. */
   voiceStatus?: () => unknown;
 
@@ -1994,13 +1994,14 @@ export function createAppServer(deps: ServerDeps) {
       // POSTs the freshly-minted device token here after the user logs in.
       if (req.method === "POST" && url.pathname === "/voice/pair") {
         const body = await readBody(req, 4096);
-        const { cookie } = JSON.parse(body || "{}") as { cookie?: string };
-        if (!cookie || !deps.voicePair) {
+        const { cookie, token, email } = JSON.parse(body || "{}") as
+          { cookie?: string; token?: string; email?: string };
+        if ((!cookie && !token) || !deps.voicePair) {
           res.writeHead(400);
-          res.end(JSON.stringify({ ok: false, error: "cookie required" }));
+          res.end(JSON.stringify({ ok: false, error: "cookie or token required" }));
           return;
         }
-        deps.voicePair(cookie);
+        deps.voicePair(cookie ?? "", token ?? "", email ?? "");
         res.end(JSON.stringify({ ok: true }));
         return;
       }

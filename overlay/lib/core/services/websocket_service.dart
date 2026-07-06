@@ -715,6 +715,25 @@ class WebSocketService extends ChangeNotifier {
   Future<bool> requestVoicePair(String cookie) async =>
       (await _postJson('/voice/pair', {'cookie': cookie}))?['ok'] == true;
 
+  /// Voice session status snapshot (incl. `paired` — the browser pair flow
+  /// completes out-of-band, so the overlay polls this).
+  Future<Map<String, dynamic>?> fetchVoiceStatus() async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.getUrl(Uri.parse('$base/voice/status'));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
   /// End the running voice session.
   Future<bool> requestVoiceStop() async =>
       (await _postJson('/voice/stop', {}))?['stopped'] == true;

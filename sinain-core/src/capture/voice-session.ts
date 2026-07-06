@@ -41,7 +41,7 @@ export class VoiceSessionManager {
   status(): { status: string; mode: string; minutes: number; coverage: string; paired: boolean } {
     return {
       status: this.state, mode: this.mode, minutes: this.minutes,
-      coverage: this.coverage, paired: this.storedCookie() !== "",
+      coverage: this.coverage, paired: this.storedAuth().cookie !== "" || this.storedAuth().token !== "",
     };
   }
 
@@ -54,22 +54,23 @@ export class VoiceSessionManager {
     return join(homedir(), ".sinain", "arsinain-session.json");
   }
 
-  private storedCookie(): string {
+  private storedAuth(): { cookie: string; token: string } {
     try {
-      const data = JSON.parse(readFileSync(this.cookieFile(), "utf-8")) as { cookie?: string };
-      return data.cookie ?? "";
+      const data = JSON.parse(readFileSync(this.cookieFile(), "utf-8")) as { cookie?: string; token?: string };
+      return { cookie: data.cookie ?? "", token: data.token ?? "" };
     } catch {
-      return "";
+      return { cookie: "", token: "" };
     }
   }
 
-  /** Store the session cookie captured by the overlay's login window. */
-  pair(cookie: string): void {
+  /** Store the credential from the browser pair flow: either a device token
+   *  (default-browser /hud/pair page) or a session cookie (webview login). */
+  pair(cookie: string, token: string, email: string): void {
     mkdirSync(join(homedir(), ".sinain"), { recursive: true });
     writeFileSync(this.cookieFile(),
-      JSON.stringify({ cookie, server: this.voice.serverUrl, ts: Date.now() }),
+      JSON.stringify({ cookie, token, email, server: this.voice.serverUrl, ts: Date.now() }),
       { encoding: "utf-8", mode: 0o600 });
-    log(TAG, `session stored for ${this.voice.serverUrl}`);
+    log(TAG, `paired${email ? ` as ${email}` : ""} for ${this.voice.serverUrl}`);
   }
 
   /** Compose the seed brief for a range — best-effort, never throws. */
@@ -147,12 +148,14 @@ export class VoiceSessionManager {
     this.minutes = minutes;
     this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
 
-    // Deployed server + no session → the overlay opens its login window and
-    // pairs, then retries; we just say what's needed.
-    const cookie = this.voice.meetCookie || this.storedCookie();
-    if (this.voice.serverUrl.startsWith("https://") && !cookie) {
+    // Deployed server + no credential → the overlay opens the DEFAULT browser
+    // on the server's pair page (user is usually already signed in there);
+    // the page hands a device token back to us and the overlay retries.
+    const auth = this.storedAuth();
+    const cookie = this.voice.meetCookie || auth.cookie;
+    if (this.voice.serverUrl.startsWith("https://") && !cookie && !auth.token) {
       const error = "login required";
-      return { ok: false, error, loginUrl: this.voice.serverUrl };
+      return { ok: false, error, loginUrl: `${this.voice.serverUrl.replace(/\/$/, "")}/hud/pair` };
     }
     this.setState("starting");
 
@@ -182,6 +185,7 @@ export class VoiceSessionManager {
       "--seed-file", this.seedFile,
       ...(this.voice.email ? ["--email", this.voice.email] : []),
       ...(cookie ? ["--cookie", cookie] : []),
+      ...(auth.token ? ["--device-token", auth.token] : []),
     ], { stdio: ["ignore", "pipe", "pipe"] });
     this.proc = proc;
 
