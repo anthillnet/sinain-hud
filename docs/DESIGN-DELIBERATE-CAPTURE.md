@@ -1,235 +1,226 @@
-# Deliberate Capture — UX Handoff (as built + voice destination)
+# Deliberate Capture — UI Spec (as built)
 
-Status: IMPLEMENTED on `feat/deliberate-capture` (working prototype, all flows
-verified live against Cerebras + real window data), except §7 (voice / AR agent
-destination), which is DESIGNED, NOT BUILT — it is the next increment.
-Audience: design — this documents the shipped interaction model so UI can be
-drawn properly, and specs the voice destination to be designed alongside.
-Excluded: WSM, automated ROIs.
+Status: everything in §2–§8 IS IMPLEMENTED and running on
+`feat/deliberate-capture`. §9 (voice destination) is specified but not built.
+This document is the single source of truth for design; it describes the
+current behavior only — no history, no future backlog beyond §9.
 
-## 1. Concept
+## 1. Model in one paragraph
 
-> **Capture is passive, free, and ephemeral. Remembering is a deliberate act.
-> Intelligence is summoned, not always-on.**
+Sinain keeps a rolling **window** of the user's context (screen OCR + window
+titles + transcript; time horizon, default 8h; local only). Three user actions
+operate on it — **Save** (persist a range to memory), **Call AI** (situation
+brief of a range), **Build Context** (explain the clipboard item against the
+window) — plus **Select Region**, which grabs a screen area and pre-seeds its
+conversation with a range brief. All intelligence is gesture-gated; latency is
+sub-second to ~2s (measured, §8).
 
-The feed/sense buffers are a rolling window (time horizon, default 8h; item
-caps are memory backstops). Nothing reaches long-term memory except through the
-user's save gesture. No cloud LLM runs until a gesture; the burst lane
-(Cerebras, `gemma-4-31b`) makes gestures feel instant. Existing per-frame cloud
-vision and buffer-full auto-distillation are unchanged on this branch (removal
-is a later decision), but all new intelligence is gesture-gated.
+## 2. Entry points
 
-## 2. Vocabulary (user-facing label · internal name)
-
-- **Window** — rolling record of screen OCR + transcript, last 8h, local only.
-- **Save Last Minutes…** · save — distill a range into the knowledge graph.
-  The only path by which anything persists. Undo-able for 30s.
-- **Call AI on Last Minutes…** · summon — situation brief of the last N min;
-  becomes the agent's working context.
-- **Build Context from Clipboard** · enrich — one card: what the copied item
-  is + how it ties to current activity. Deliberately NO suggested next step —
-  a prescriptive action would pre-empt the user's intention and misdirect any
-  agent the context is handed to.
-- **Select Region… (+ minutes)** — manual ROI grab whose thread is pre-seeded
-  with a brief of the last N minutes.
-- **Chooser** — the shared range picker (5/15/30/60 + live coverage strings).
-- **Card mode** — slim panel showing capture cards without opening the chat.
-- **Destination** — where a follow-up conversation goes: `chat` (in-HUD agent
-  lane) · `⌨ term` (run.sh-seeded PTY) · `🎙 voice` (§7, planned: live spoken
-  session with the AR Sinain agent that sees the screen).
-
-## 3. Entry points (as built)
-
-One native context menu, two triggers: **right-click the eye** and
-**right-click the chat panel header**. Top section:
+One native context menu (macOS NSMenu), opened by **right-click on the eye**
+or **right-click on the chat panel header**:
 
     Save Last Minutes…
     Call AI on Last Minutes…
-    Build Context from Clipboard   ⌃⌥⌘C
-    Select Region…            ← now opens the minutes chooser first
+    Build Context from Clipboard        ⌃⌥⌘C
+    Select Region…
     ────────────────
-    (existing items: Copy Context Seed, …)
+    Copy Context Seed
+    Attention Board
+    ────────────────
+    Reset Window Position ⇧⌘P · Settings… · Quit Sinain
 
-The former "Enrich Clipboard" (silent seed rewrite of the clipboard) is
-UNIFIED into Build Context: its ⌃⌥⌘C hotkey opens the card, and its output —
-the agent-grade seed — is the card's "Copy for agent" action. No feature ever
-mutates the clipboard invisibly anymore.
+- Save / Call AI / Select Region open the **chooser** (§4) first.
+- Build Context fires immediately on the current clipboard text; ⌃⌥⌘C is its
+  global hotkey. (There is no separate "Enrich Clipboard" — that feature is
+  folded into Build Context's "Copy for agent" action.)
+- Eye **double-tap** is a plain region grab (no chooser, no range brief) —
+  unchanged legacy shortcut.
 
-No dedicated buttons were added to the HUD. Save/Call AI/Region open the
-chooser; Build Context fires immediately on the clipboard.
+There are NO dedicated capture buttons on the HUD.
 
-## 4. Card mode (as built)
+## 3. Card mode
 
-Gestures triggered outside the chat do NOT open the full HUD. The window grows
-to a slim card panel (~380×500, top-right anchored — same anchoring as all
-state transitions), showing only: an ✕, then the active cards stacked
-bottom-up (receipt · enrich · brief · chooser). When the last card is
-dismissed, the window shrinks back to the eye. Actions that start a
-conversation (Call AI on an enrich card, Ask follow-up on a brief, term
-handoff) leave card mode into the full chat surface. Inside the chat, the same
-card stack renders bottom-right of the panel instead.
+Any capture gesture (or an arriving card) while the HUD is NOT in chat state
+opens **card mode**: the window resizes to ~380×500 (top-right anchored, like
+all state transitions) and shows only a ✕ plus the active cards, stacked
+bottom-up in fixed order: save receipt · enrich card · brief card · chooser.
 
-Design note: the card panel is currently an unstyled container of cards + ✕ —
-this is the surface most in need of visual design (header? drag? eye glyph?).
+- ✕ dismisses everything and collapses back to the eye.
+- When the last card is individually dismissed, card mode exits automatically
+  (window shrinks back to the eye).
+- Actions that start a conversation (brief "Ask follow-up"/"Open terminal",
+  enrich "Call AI") leave card mode into the full chat surface.
+- In chat state there is no card mode — the same card stack renders inside
+  the chat panel, bottom-right, above the composer area.
 
-## 5. The cards (as built)
+Design gap: the card-mode panel is an unstyled stack + ✕ today (no header, no
+drag affordance, no branding). This surface needs design.
 
-**Chooser** — 264px card: title ("Save last… / Call AI on last… / Region ·
-brief of last…"), rows `5/15/30/60 min` each with a live coverage string
-("Google Chrome, Zed, mic") computed free from window data; 30 highlighted as
-default; short-history rows say "only N min so far"; click-outside = ✕ close.
+## 4. The chooser (shared by Save · Call AI · Select Region)
 
-**Situation brief** (Call AI) — 340px:
-- Header: "Last 30 minutes" (+ "· partial" when the range was truncated),
-  latency badge ("1.46s"), ✕.
-- Metadata line: coverage left, **destination toggle right** (`chat | ⌨ term`,
-  appears once ready; selection persists for the session). Voice (§7) becomes
-  the third option here.
-- Body: TIMELINE (relative times + one-clause rows) · CURRENT GOAL · OPEN
-  PROBLEMS (orange) · ENTITIES (chips).
-- Footer: **[Ask follow-up / Open terminal]** (label follows the toggle) ·
-  **[Save this range]**.
-- Loading: honest shimmer, never a spinner. Errors: orange border + message,
-  incl. quota-partial ("covered 74 of 120 min").
+264px card. Title varies by action: **"Save last…" / "Call AI on last…" /
+"Region · brief of last…"**. Four rows: `5m · 15m · 30m · 60m`, each with a
+live coverage string computed from window data with no LLM call — distinct
+app names (up to 4) plus `mic` when audio is present, e.g.
+"Google Chrome, Zed, mic"; an empty range reads "quiet range". If the window
+is younger than an option, the row's string is "only N min so far" (the save
+will take what exists). Row `30m` is pre-highlighted and tagged `default`.
+Click a row to confirm; ✕ closes. (Backend clamps any request to 1–480 min.)
 
-**Build context** (enrich) — 340px:
-- Header: "Build context", latency badge ("0.64s · last 10 min"), ✕.
-- Focus line: the clipboard item (display preview, 120 chars).
-- Body: CONTEXT only (what the item is AND how it ties to current activity;
-  the model is instructed to say plainly when it's unrelated, and to never
-  suggest actions — the user's intention stays theirs).
-- Footer: **[Call AI]** (hands focus + context to the agent lane, opens chat) ·
-  **[Copy for agent]** (writes the FULL original + one
-  `——— Context from Sinain ———` block carrying BOTH context layers: the card's
-  burst CONTEXT — item-specific, gesture-fresh, the only layer that mentions
-  the copied item — and the agent-grade seed — situation digest + KG facts,
-  the general scene, built at the last analyzer tick. Complementary: an
-  external agent pasted this gets the item, its interpretation, the scene, and
-  the knowledge. Seed failure degrades to the burst layer alone).
-- Clipboard contract: every enrichment path strips at the marker first — the
-  card always enriches the user's original content, never Sinain's own output;
-  Copy for agent produces at most one context block. The synthesized CONTEXT
-  itself is deliberately NOT copyable — it is written for the user about their
-  current moment and has no life outside it.
+## 5. The three cards
 
-**Save receipt** — 320px, lifecycle:
-`Saving last 30 min · IntelliJ, Chrome, mic…` (pulse) → `Saved to memory` with
-chips (`12 facts · 4 entities`) + **Undo** link + a draining 30s countdown bar
-→ `Committed to memory` (auto-dismiss ~4s) | `Save undone — nothing written` |
-error with reason ("nothing to save in that range — it was idle").
-Undo is a true cancel: integration into the graph only runs after the window.
+### 5.1 Situation brief (Call AI)
 
-**Region + minutes** — no new card. Chooser → native drag-select → the brief
-is fetched during the drag and silently attached to the region thread's seed
-(first agent turn already knows the last N minutes). Brief failure degrades to
-a plain region grab; selection never blocks on the LLM.
+340px. States: working → ready | error.
 
-## 6. User stories (as built) — abbreviated ACs
+- Working: header "**Calling AI · last 30 min**", coverage line, shimmer bars
+  (never a spinner).
+- Ready header: "**Last 30 minutes**" (+ "**· partial**" if the range was
+  truncated to fit one call), latency badge ("1.46s"), ✕.
+- Metadata line: coverage left · **destination toggle** right (`chat | ⌨ term`,
+  segmented pills; visible only when ready; the choice persists for the app
+  session). Voice (§9) is planned as a third pill.
+- Body sections, in order: **TIMELINE** (3–5 rows: relative time "−18m" +
+  one-clause event) · **CURRENT GOAL** (one sentence) · **OPEN PROBLEMS**
+  (orange bullets, ≤3) · **ENTITIES** (chips, ≤6).
+- Footer: primary button **"Ask follow-up"** (chat) / **"Open terminal"**
+  (term) — label follows the toggle — and **"Save this range"**.
+- Behaviors: Ask follow-up sends the flattened brief (timeline + goal +
+  problems) into the in-HUD agent lane and opens the chat. Open terminal
+  stashes the same text as MAIN's handoff context and opens the run.sh PTY,
+  whose seed therefore contains it. Save this range dismisses the card and
+  triggers the save flow (§5.3) for the same minutes.
+- Error state: orange border + message in place of the body. Includes the
+  honest cases: idle range ("that range was idle — nothing to brief on") and
+  quota partial.
 
-- **S1 Save**: menu → chooser → ack ≤ 500ms → receipt with real fact/entity
-  counts → 30s undo (cancel-before-write) → committed with `save_id`
-  provenance (`source: user_save`).
-- **S2 Call AI**: menu → chooser → brief ≤ 2s (30 min) with timeline/goal/
-  problems/entities → Ask follow-up seeds the chosen destination with the
-  flattened brief; Save this range promotes the same range to memory.
-- **S3 Build context**: copy → menu → card ≤ 1s; CONTEXT names the item and
-  the link to current work (verified live: "…the branch transplant you're
-  doing"); Call AI / Copy give the card somewhere to go.
-- **S4 Region + minutes**: select a region and its conversation opens already
-  situated in the last N minutes.
-- **S5 Honesty**: idle range → explicit refusal; truncated range → "partial";
-  quota hit → partial + retry framing; empty clipboard → told so.
-- **S6 No HUD tax**: none of the above requires opening the chat.
+### 5.2 Build context (enrich)
 
-Measured budgets (real API, real window data): enrich 0.5–1.0s · brief-30
-≈1.5s · brief-60 ≈2.2s · save ack ≤0.5s (distill async ~10s) · ~2h of median
-session per summon before the token quota bites.
+340px. States: working → ready | error.
 
-## 7. Voice destination — "Talk to Sinain" (DESIGNED, NOT BUILT)
+- Header: "**Build context**", latency badge ("0.64s · last 10 min"), ✕. The
+  context range is fixed at 10 minutes (no chooser for this action).
+- Focus line under the header: the clipboard item, single line, ellipsized
+  (display preview; the full text is retained behind the card).
+- Body when ready: **CONTEXT** — one section, 1–2 sentences naming what the
+  copied item is AND tying it to current activity; the model must say plainly
+  when the item is unrelated (no forced connections) and is forbidden from
+  suggesting actions. There is deliberately NO next-step section: a
+  prescriptive step would pre-empt the user's intention and misdirect any
+  agent the context is handed to.
+- Footer: **"Call AI"** (primary) · **"Copy for agent"**.
+  - Call AI → sends `I copied this: <full item>` + `Context: <CONTEXT>` into
+    the agent lane, opens chat.
+  - Copy for agent → writes to the clipboard: the FULL original item, then one
+    `——— Context from Sinain ———` divider, then two context layers:
+    `About this item: <CONTEXT>` (item-specific, gesture-fresh) and the
+    server-built agent seed (situation digest + knowledge-graph facts — the
+    general scene). If the seed build fails, the first layer alone is written.
+- Clipboard contract (all paths): before enriching, input is stripped at the
+  first `——— Context from Sinain ———` marker, so Sinain never enriches its own
+  output and the clipboard never accumulates more than one context block.
+- Empty clipboard → error card: "clipboard is empty — copy something first".
 
-Everywhere the user can call AI on context, a third destination joins chat and
-term: **🎙 voice** — a live, spoken, full-duplex conversation with the Sinain
-AR agent that **sees the screen and hears the user**. Backed by ARSinain
-(sibling repo), which already ships the entire loop for a phone camera:
+### 5.3 Save receipt
+
+320px. Lifecycle (one card, states replace each other):
+
+1. "**Saving last 30 min · Google Chrome, Zed, mic…**" — pulsing glyph.
+   Appears ≤ 500ms after the chooser click; distillation runs async (~10s).
+2. "**Saved to memory**" — chips `12 facts` `4 entities` (real counts from the
+   distiller), an **Undo** link, and a draining countdown bar (30s). Undo is a
+   TRUE cancel: nothing has been written to the knowledge graph yet;
+   integration only runs when the countdown expires.
+3. "**Committed to memory**" — auto-dismisses after ~4s. Facts carry
+   `save_id` provenance (`source: user_save`).
+   | "**Save undone — nothing written**" (auto-dismisses ~4s)
+   | "**Save failed**" + reason (e.g. "nothing to save in that range — it was
+   idle").
+
+### 5.4 Select Region + minutes (no new card)
+
+Menu → chooser ("Region · brief of last…") → native drag-select starts. The
+range brief is requested the moment the range is picked (it resolves during
+the drag) and renders NO card — it is silently attached to the new region
+thread's context, ordered before the first agent turn, so even the opening
+reply knows the last N minutes. If the brief errors or is late, the region
+grab proceeds unchanged (selection never blocks on the LLM; a late brief still
+reaches follow-up turns).
+
+## 6. Destinations
+
+Where "talk to the AI about this context" goes. Selected on the brief card's
+toggle; enrich's Call AI always targets chat today.
+
+- **chat** — the in-HUD agent lane (MAIN thread). Context arrives as a user
+  message carrying the brief/item+context.
+- **⌨ term** — a PTY running the agent runner; context is stashed server-side
+  (`set_handoff_context`) before the terminal spawns, so the session's seed
+  includes it.
+- **🎙 voice** — §9, not built.
+
+## 7. Honesty rules (implemented, keep in any redesign)
+
+Idle range → explicit refusal, never an empty success. Truncated range →
+"partial" in the header. Quota hit → partial result + retry framing. Empty
+clipboard → told so. Loading is always a skeleton shimmer, never a spinner.
+Save's undo window is real (cancel-before-write), not cosmetic.
+
+## 8. Measured budgets (real API, real window data)
+
+enrich ≤ 1s (0.49–1.05s measured) · brief 30 min ≈ 1.5s · brief 60 min ≈ 2.2s
+· save ack ≤ 0.5s, distill ~10s async · one call covers ≤ ~60 min; ~2h of
+median-density session is the per-gesture quota ceiling.
+
+## 9. Voice destination — "Talk to Sinain" (SPEC, NOT BUILT)
+
+A third destination everywhere AI is invoked on context: a live, spoken,
+full-duplex session with the Sinain AR agent that **sees the screen and hears
+the user**. Backed by the ARSinain repo, which already ships the loop for a
+phone camera:
 
     WebRTC (video+mic) → aiortc server
-      video → scene gate → Cerebras gemma-4-31b → {bbox,label,suggestion} markers
-      audio → VAD → faster-whisper STT → Gemma (streamed) → Piper TTS → spoken reply
+      video → scene gate → gemma-4-31b vision → {bbox,label,suggestion} markers
+      audio → VAD → faster-whisper STT → Gemma (streamed) → Piper TTS → speech
       barge-in: talk over it and it stops mid-sentence
 
-The integration swaps the phone camera for the **screen** (sck-capture already
-produces the frames) and seeds the session with the same flattened brief the
-chat/term destinations get.
+Integration = swap the camera for the screen (sck-capture already produces
+frames) and seed the session with the same flattened brief chat/term get.
 
-**Entry points:**
-- Destination toggle on the brief card: `chat | ⌨ term | 🎙 voice` — Ask
-  follow-up becomes "Start talking".
-- Enrich card: [Call AI] gains a voice variant (design's call on affordance).
-- Region flow: voice as a destination — "talk about this region".
-- Context menu: a direct "Talk to Sinain…" item (chooser → voice session
-  seeded with the brief, no card in between).
+Entry points: third pill on the brief toggle (`chat | ⌨ term | 🎙 voice`;
+primary button becomes "Start talking") · a voice affordance on the enrich
+card · voice as a region destination · a direct "Talk to Sinain…" menu item
+(chooser → session, no card in between).
 
-**User stories:**
-- **V1 Seeded voice session.** Call AI → voice → session opens in ≤ a few
-  seconds; Sinain's first utterance is one short situational acknowledgment
-  drawn from the brief (not a generic greeting), then it listens.
-- **V2 It sees what I see.** During the session Sinain receives live screen
-  frames (scene-gated, one vision call per meaningful change) and can be asked
-  "what am I looking at / what's wrong here"; its proactive markers can render
-  as native region eyes on the real screen.
-- **V3 Real conversation.** Full duplex with barge-in; follow-ups carry the
-  running exchange + the current marker context (ARSinain already does both).
-- **V4 Explicit session boundary.** Voice is a visible, user-started, user-
-  ended session: mic + screen-share indicators while live, one click/word to
-  end, nothing captured for the session outside it. Frames go to the same
-  provider class as today's vision; `<private>`/redaction rules apply to any
-  transcript that lands back in the window.
-- **V5 The session feeds the window.** The spoken exchange lands in the
-  rolling window as transcript (it IS context), so it is save-able like
-  everything else — "save the last 15 minutes" after a voice session captures
-  the conversation too.
+Stories: **V1** session opens in seconds; first utterance is a one-line
+situational acknowledgment drawn from the brief, then it listens. **V2** it
+sees the live screen (scene-gated vision) and can answer "what am I looking
+at"; its markers may render as native region eyes. **V3** full duplex with
+barge-in; follow-ups carry the running exchange. **V4** explicit session
+boundary — visible mic/screen indicators, one action to end, nothing captured
+for the session outside it; redaction rules apply to any transcript. **V5**
+the spoken exchange lands in the rolling window as transcript, so it is
+save-able like everything else.
 
-**Eng notes (for feasibility, not design):** v1 can run ARSinain locally
-(docker) and connect the overlay via a WebRTC session that publishes a screen
-track (from sck-capture's existing frame IPC or `getDisplayMedia`) + mic, and
-plays the TTS track; the eye should animate with speaking state. Deeper
-integration later: markers → RegionEyePool, transcript → `/feed` as a voice-
-session source, brief seeding on session open (same flattened-brief text the
-other destinations use). Cerebras key/quota is shared with the burst lane (one
-more concurrent consumer — fine at current limits).
+Voice design questions: session visual (eye pulsing? slim voice bar with
+waveform/mute/end?) · are replies transcribed on screen at all · does a
+three-way toggle still fit a 340px card or does voice get its own affordance ·
+screen-share consent surface.
 
-**Open design questions (voice):**
-1. What does the session look like? (Eye pulsing + menu-bar timer? A slim
-   voice bar with waveform + mute + end? Nothing but the eye?)
-2. Where do Sinain's spoken replies appear visually, if at all? (Transcript
-   line in Ticker idiom? Nothing?)
-3. Three-way destination toggle on a 340px card — segmented control still, or
-   does voice deserve its own affordance (🎙 icon button beside the footer)?
-4. Screen-share consent surface: rely on the OS indicator or add our own?
+## 10. Open design questions (as-built surfaces)
 
-## 8. Deferred backlog (designed earlier, still out)
+1. Card-mode panel chrome (header, drag, branding) — currently bare.
+2. One standard card width? (264 chooser / 320 receipt / 340 brief+enrich.)
+3. Chooser default N (30 today); different default for region mode?
+4. Destination toggle scaling to three options (see §9).
 
-Timeline window (scrubber: heat strip, segments, strike-to-redact preview,
-panic wipe) · save-this nudges (free signals) · forgetting review replacing
-auto-distillation at shutdown/horizon · visual keyframes for text-poor frames
-· local warm-window mode (Ollama KV-cache; measured 1.33s warm enrich).
+## 11. Ground truth
 
-## 9. Open design questions (as-built surfaces)
-
-1. Card-mode panel chrome: header, drag affordance, eye glyph, stacking order.
-2. Chooser default N (30 today) and whether region mode defaults differently.
-3. Card widths are uniform-ish (320–340px) — one standard card width?
-4. Destination toggle placement scales to three options? (See §7 Q3.)
-5. RESOLVED: "Enrich Clipboard" is unified into Build Context (§3) — one menu
-   item, the seed lives behind "Copy for agent", hotkey opens the card.
-
-## 10. Appendix — ground truth
-
-Branch: `feat/deliberate-capture` (worktree `../sinain-hud-2-capture`), 7
-commits on origin/main. Key files: core `src/capture/{burst-client,window-ops,
-save-manager}.ts`, routes in `server.ts`, wiring in `index.ts`; overlay
-`lib/ui/capture/capture_ui.dart`, `lib/core/models/context_cards.dart`, shell
-integration + card mode in `lib/ui/overlay_shell.dart`. Benchmarks: Cerebras
-`gemma-4-31b`, prefix cache + JSON mode; density from 63h of real episodes
-(median 2,900 chars/min active). ARSinain reference: `../ARSinain` (aiortc,
-scene gate, faster-whisper, Piper TTS, barge-in — README architecture diagram).
+Branch `feat/deliberate-capture`, worktree `../sinain-hud-2-capture`.
+Core: `src/capture/{burst-client,window-ops,save-manager}.ts`, routes in
+`server.ts` (`/capture/save`, `/capture/undo`, `/context/summon`,
+`/context/enrich`, `/window/coverage`), wiring in `index.ts`.
+Overlay: `lib/ui/capture/capture_ui.dart` (all cards),
+`lib/core/models/context_cards.dart` (wire models), card mode + menu + flows
+in `lib/ui/overlay_shell.dart`. Voice reference: `../ARSinain`.
