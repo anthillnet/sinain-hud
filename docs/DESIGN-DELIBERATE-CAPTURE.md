@@ -1,279 +1,221 @@
-# Deliberate Capture — UX Design Handoff
+# Deliberate Capture — UX Handoff (as built + voice destination)
 
-Status: proposal, validated by API benchmarks (2026-07-06)
-Owner: core team → design
-Excluded: WSM (not a committed feature) and automated ROI extraction. Nothing in
-this design depends on either.
+Status: IMPLEMENTED on `feat/deliberate-capture` (working prototype, all flows
+verified live against Cerebras + real window data), except §7 (voice / AR agent
+destination), which is DESIGNED, NOT BUILT — it is the next increment.
+Audience: design — this documents the shipped interaction model so UI can be
+drawn properly, and specs the voice destination to be designed alongside.
+Excluded: WSM, automated ROIs.
 
 ## 1. Concept
 
-Sinain currently decides for the user what gets remembered: buffers fill, an LLM
-distills them, facts land in the knowledge graph automatically — and cloud vision
-runs on every changed frame. This redesign flips the model:
-
-> **Capture is passive, free, and ephemeral. Remembering is a deliberate human act.
+> **Capture is passive, free, and ephemeral. Remembering is a deliberate act.
 > Intelligence is summoned, not always-on.**
 
-| Move | Principle |
-|---|---|
-| The buffers become a rolling window (hours, not item counts); content evaporates at the horizon | Nothing persists without consent |
-| No cloud LLM call until the user asks (enrich / summon / save) | Spend is deliberate and visible |
-| Fast-inference burst (Cerebras) makes "asking" feel instant | Deliberateness must not cost responsiveness |
+The feed/sense buffers are a rolling window (time horizon, default 8h; item
+caps are memory backstops). Nothing reaches long-term memory except through the
+user's save gesture. No cloud LLM runs until a gesture; the burst lane
+(Cerebras, `gemma-4-31b`) makes gestures feel instant. Existing per-frame cloud
+vision and buffer-full auto-distillation are unchanged on this branch (removal
+is a later decision), but all new intelligence is gesture-gated.
 
-The save gesture is the consent boundary — a stronger privacy story than "we
-process everything but strip `<private>` tags first."
+## 2. Vocabulary (user-facing label · internal name)
 
-**UX stance: preserve the current product.** Same HUD, same modes (Feed / Alert /
-Ticker / Hidden). All new interactions are normal on-screen controls — no
-hotkeys. This design adds three actions (save, summon, enrich) that share one
-control pattern, plus one new window (the timeline) for range precision. Where
-the redesign touches existing behavior, it *removes* complexity (per-frame cloud
-vision, buffer-full auto-distillation) rather than adding UI.
+- **Window** — rolling record of screen OCR + transcript, last 8h, local only.
+- **Save Last Minutes…** · save — distill a range into the knowledge graph.
+  The only path by which anything persists. Undo-able for 30s.
+- **Call AI on Last Minutes…** · summon — situation brief of the last N min;
+  becomes the agent's working context.
+- **Build Context from Clipboard** · enrich — one card: what the copied item
+  is + how it ties to current activity, and a next step.
+- **Select Region… (+ minutes)** — manual ROI grab whose thread is pre-seeded
+  with a brief of the last N minutes.
+- **Chooser** — the shared range picker (5/15/30/60 + live coverage strings).
+- **Card mode** — slim panel showing capture cards without opening the chat.
+- **Destination** — where a follow-up conversation goes: `chat` (in-HUD agent
+  lane) · `⌨ term` (run.sh-seeded PTY) · `🎙 voice` (§7, planned: live spoken
+  session with the AR Sinain agent that sees the screen).
 
-## 2. Latency budgets (measured, not estimated)
+## 3. Entry points (as built)
 
-Benchmarked against the Cerebras API (gemma-4-31b) using 63 hours of real episode
-text at measured density (median active session ≈ 2,900 chars/min ≈ 830 tok/min):
+One native context menu, two triggers: **right-click the eye** and
+**right-click the chat panel header**. Top section:
 
-| Interaction | Measured | Notes |
-|---|---|---|
-| Enrich clipboard + last 5 min | 0.59s | single call |
-| Enrich clipboard + last 10 min | 0.64s | single call |
-| Enrich, repeated in same session | 0.49s | prefix cache (9,472/9,497 tok cached) |
-| Enrich + one keyframe (real frame) | 1.05s | multimodal |
-| Summon last 15 min | 1.13s | map+reduce |
-| Summon last 30 min | 1.46s | |
-| Summon last 60 min | 2.22s | |
-| Summon last 120 min | 4.01s | brushes 100K tok/min quota |
+    Save Last Minutes…
+    Call AI on Last Minutes…
+    Build Context from Clipboard
+    Select Region…            ← now opens the minutes chooser first
+    ────────────────
+    (existing items: Enrich Clipboard, Copy Context Seed, …)
 
-Design budgets: **enrich ≤ 1s · summon-30 ≤ 2s · summon-60 ≤ 3s · save ack ≤ 0.5s**
-(the save's distillation is async; latency-irrelevant).
-Hard edge: ~2h of median-density session per summon (quota, not speed).
+No dedicated buttons were added to the HUD. Save/Call AI/Region open the
+chooser; Build Context fires immediately on the clipboard.
 
-Local mode (Ollama, M4 Max, qwen2.5:3b): enrich 7.6s cold / **1.33s warm** via
-KV-cache. Local mode keeps the window warm by appending continuously in the
-background — eager where cloud is deliberate, because locally there is no
-per-token cost and data never leaves the machine.
+## 4. Card mode (as built)
 
-## 3. Vocabulary
+Gestures triggered outside the chat do NOT open the full HUD. The window grows
+to a slim card panel (~380×500, top-right anchored — same anchoring as all
+state transitions), showing only: an ✕, then the active cards stacked
+bottom-up (receipt · enrich · brief · chooser). When the last card is
+dismissed, the window shrinks back to the eye. Actions that start a
+conversation (Call AI on an enrich card, Ask follow-up on a brief, term
+handoff) leave card mode into the full chat surface. Inside the chat, the same
+card stack renders bottom-right of the panel instead.
 
-- **Window** — the rolling, ephemeral record of the last N hours: OCR text, app +
-  window titles, transcript, sparse visual keyframes. This IS the buffer layer —
-  the feed/sense ring buffers are redesigned into it (time-horizon-bounded, not
-  item-count-bounded). In-memory / encrypted temp, never synced, horizon default 8h.
-- **Segment** — a slice of the window bounded by app/window-title changes and idle
-  gaps (signals already captured today — no WSM). Auto-labeled from titles:
-  "IntelliJ — memoryd.py · 42 min". The unit of selection in the timeline.
-- **Enrich** — one-shot context lookup for the clipboard: "what is this, how does
-  it relate to what I've been doing, what next."
-- **Summon** — "act on my last N minutes": burst analysis → situation brief →
-  the agent/HUD works from it.
-- **Save** — "remember this range": memory-grade distillation (existing
-  `session_distiller` → `knowledge_integrator`) into the knowledge graph. The only
-  path by which anything persists.
-- **Keyframe** — a stored frame where pixels matter (major visual change + little
-  OCR text: diagrams, designs, dashboards). Bookmarked in the window, described by
-  a vision model only when a gesture covers its range.
-- **Nudge** — system-suggested save, computed from free signals only.
+Design note: the card panel is currently an unstyled container of cards + ✕ —
+this is the surface most in need of visual design (header? drag? eye glyph?).
 
-## 4. User stories
+## 5. The cards (as built)
 
-### Epic A — the window (passive, free, ephemeral)
+**Chooser** — 264px card: title ("Save last… / Call AI on last… / Region ·
+brief of last…"), rows `5/15/30/60 min` each with a live coverage string
+("Google Chrome, Zed, mic") computed free from window data; 30 highlighted as
+default; short-history rows say "only N min so far"; click-outside = ✕ close.
 
-**A1. Ambient capture without spend or persistence.**
-As a user, while I work, sinain keeps a rolling record of my screen and audio
-context locally, without calling any cloud API and without writing memory.
-- AC: zero cloud calls in steady state — capture → SSIM → local OCR → gate stays
-  as-is; the per-frame cloud vision path is REMOVED.
-- AC: window content older than the horizon (default 8h, config) is unrecoverable;
-  a panic-wipe action clears the window instantly (memory stays intact).
-- AC: the ring buffers' item caps (feed 100 / sense 30) are replaced by the
-  window's time horizon; downstream consumers (agent loop, context assembly) read
-  recent slices of the window instead.
+**Situation brief** (Call AI) — 340px:
+- Header: "Last 30 minutes" (+ "· partial" when the range was truncated),
+  latency badge ("1.46s"), ✕.
+- Metadata line: coverage left, **destination toggle right** (`chat | ⌨ term`,
+  appears once ready; selection persists for the session). Voice (§7) becomes
+  the third option here.
+- Body: TIMELINE (relative times + one-clause rows) · CURRENT GOAL · OPEN
+  PROBLEMS (orange) · ENTITIES (chips).
+- Footer: **[Ask follow-up / Open terminal]** (label follows the toggle) ·
+  **[Save this range]**.
+- Loading: honest shimmer, never a spinner. Errors: orange border + message,
+  incl. quota-partial ("covered 74 of 120 min").
 
-**A2. Diagrams and designs are kept as pixels.**
-As a user, when I look at something OCR can't read, sinain bookmarks that frame
-in the window instead of discarding it, so saves and summons can still "see" it.
-- AC: heuristic = major visual change (SSIM < 0.85) + OCR < 20 chars → keyframe
-  stored in the window, evicted on the same horizon.
-- AC: keyframes are sent to a vision model only during enrich/summon/save on a
-  range containing them (measured: ~1s per frame, parallel with the text burst).
-- AC: volume stays sparse (cooldown-bounded; est. 20–100 keyframes/h ≈ 5–25MB).
+**Build context** (enrich) — 340px:
+- Header: "Build context", latency badge ("0.64s · last 10 min"), ✕.
+- Focus line: the clipboard item (display preview, 120 chars).
+- Body: CONTEXT (one section — what the item is AND how it ties to current
+  activity; the model is instructed to say plainly when it's unrelated) · NEXT.
+- Footer: **[Call AI]** (hands focus + context to the agent lane, opens chat) ·
+  **[Copy]** (writes the FULL original + one `——— Context from Sinain ———`
+  block back to the clipboard).
+- Clipboard contract: every enrichment path strips at the marker first — the
+  card always enriches the user's original content, never Sinain's own output;
+  Copy produces at most one context block.
 
-### Epic B — enrich (the 1-second lookup)
+**Save receipt** — 320px, lifecycle:
+`Saving last 30 min · IntelliJ, Chrome, mic…` (pulse) → `Saved to memory` with
+chips (`12 facts · 4 entities`) + **Undo** link + a draining 30s countdown bar
+→ `Committed to memory` (auto-dismiss ~4s) | `Save undone — nothing written` |
+error with reason ("nothing to save in that range — it was idle").
+Undo is a true cancel: integration into the graph only runs after the window.
 
-**B1. Clipboard enrichment.**
-As a user, when I copy something cryptic (an error, an ID, a quote), I can click
-Enrich and get "what this is in the context of what I'm doing" in ~1s.
-- AC: response ≤ 1s (p90) with last-10-min context.
-- AC: the answer names the connection to recent activity, not a generic
-  definition. (Benchmark bar: copied a rate-limit header → "relates to the
-  Cerebras burst benchmarking you're doing.")
-- AC: rendered as a HUD card in the current mode's idiom; no new surface.
-- Deferred: region-of-screen enrichment (manual or automated ROI) — out for now.
+**Region + minutes** — no new card. Chooser → native drag-select → the brief
+is fetched during the drag and silently attached to the region thread's seed
+(first agent turn already knows the last N minutes). Brief failure degrades to
+a plain region grab; selection never blocks on the LLM.
 
-### Epic C — summon ("act on my last N minutes")
+## 6. User stories (as built) — abbreviated ACs
 
-**C1. Instant situation brief.**
-As a user, I can summon sinain onto the last 15/30/60 minutes and it is up to
-speed — timeline, current goal, open problems, key entities — within seconds.
-- AC: 30 min ≤ 2s, 60 min ≤ 3s, gesture to rendered brief.
-- AC: the brief becomes the agent's working context for follow-up asks.
-- AC: nothing from a summon persists unless followed by a save.
-- AC: quota hit mid-summon → partial brief + honest note, never a spinner.
+- **S1 Save**: menu → chooser → ack ≤ 500ms → receipt with real fact/entity
+  counts → 30s undo (cancel-before-write) → committed with `save_id`
+  provenance (`source: user_save`).
+- **S2 Call AI**: menu → chooser → brief ≤ 2s (30 min) with timeline/goal/
+  problems/entities → Ask follow-up seeds the chosen destination with the
+  flattened brief; Save this range promotes the same range to memory.
+- **S3 Build context**: copy → menu → card ≤ 1s; CONTEXT names the item and
+  the link to current work (verified live: "…the branch transplant you're
+  doing"); Call AI / Copy give the card somewhere to go.
+- **S4 Region + minutes**: select a region and its conversation opens already
+  situated in the last N minutes.
+- **S5 Honesty**: idle range → explicit refusal; truncated range → "partial";
+  quota hit → partial + retry framing; empty clipboard → told so.
+- **S6 No HUD tax**: none of the above requires opening the chat.
 
-**C2. Promote a summon to memory.**
-As a user, one click on the summon brief ("Save this range") saves the same range
-(the burst summaries scaffold the distillation).
+Measured budgets (real API, real window data): enrich 0.5–1.0s · brief-30
+≈1.5s · brief-60 ≈2.2s · save ack ≤0.5s (distill async ~10s) · ~2h of median
+session per summon before the token quota bites.
 
-### Epic D — save (the deliberate act of remembering)
+## 7. Voice destination — "Talk to Sinain" (DESIGNED, NOT BUILT)
 
-**D1. Save last N via quick control (primary flow).**
-As a user, I click Save on the HUD (or the menu-bar item) and pick 5/15/30/60
-minutes from a compact chooser.
-- AC: acknowledgment ≤ 500ms; distillation async.
-- AC: the chooser shows, per option, what it covers from free window data
-  ("30 min · IntelliJ, Chrome, mic") — no LLM call to render it.
-- AC: completion feedback with undo: "Saved: 12 facts, 4 entities · $0.02 ·
-  [Undo]." Every save carries a `save_id`; undo deletes exactly that batch.
-- AC: available in any HUD mode; in Hidden mode via the menu bar.
-- AC: requested N > available history → save what exists and say so.
+Everywhere the user can call AI on context, a third destination joins chat and
+term: **🎙 voice** — a live, spoken, full-duplex conversation with the Sinain
+AR agent that **sees the screen and hears the user**. Backed by ARSinain
+(sibling repo), which already ships the entire loop for a phone camera:
 
-**D2. Timeline (secondary flow, the one new window).**
-As a user, I can open a timeline of my recent hours — segments with title-based
-labels, an activity heat strip, keyframe thumbnails — select a range, preview, and
-save it.
-- AC: selection units = segments and drag-ranges; presets mirror the hotkey Ns.
-- AC: preview-before-save shows the distilled facts with strike-to-redact; struck
-  lines never reach the graph; estimated cost shown pre-save.
-- AC: it is a normal focusable window (opened from the HUD action row or menu
-  bar), NOT part of the capture-invisible overlay; visual language matches the HUD.
-- AC: the quick-save flow (D1) never requires the timeline — the timeline is for
-  reach-back, precision, and redaction.
+    WebRTC (video+mic) → aiortc server
+      video → scene gate → Cerebras gemma-4-31b → {bbox,label,suggestion} markers
+      audio → VAD → faster-whisper STT → Gemma (streamed) → Piper TTS → spoken reply
+      barge-in: talk over it and it stops mid-sentence
 
-**D3. Retroactive capture.**
-As a user, I can save a range that ended before I realized it mattered — up to the
-window horizon, at full fidelity, including keyframes.
+The integration swaps the phone camera for the **screen** (sck-capture already
+produces the frames) and seeds the session with the same flattened brief the
+chat/term destinations get.
 
-### Epic E — nudges & deliberate forgetting
+**Entry points:**
+- Destination toggle on the brief card: `chat | ⌨ term | 🎙 voice` — Ask
+  follow-up becomes "Start talking".
+- Enrich card: [Call AI] gains a voice variant (design's call on affordance).
+- Region flow: voice as a destination — "talk about this region".
+- Context menu: a direct "Talk to Sinain…" item (chooser → voice session
+  seeded with the brief, no card in between).
 
-**E1. Save-this nudges (free signals only).**
-As a user, when a significant stretch just ended — sustained window-title churn
-that stops, dense speech activity, unusual event density — sinain offers a one-tap
-"keep the last 15 min?"
-- AC: nudge generation uses NO cloud LLM.
-- AC: dismissing costs nothing; frequency capped and tunable; queues to menu-bar
-  when the user is typing.
+**User stories:**
+- **V1 Seeded voice session.** Call AI → voice → session opens in ≤ a few
+  seconds; Sinain's first utterance is one short situational acknowledgment
+  drawn from the brief (not a generic greeting), then it listens.
+- **V2 It sees what I see.** During the session Sinain receives live screen
+  frames (scene-gated, one vision call per meaningful change) and can be asked
+  "what am I looking at / what's wrong here"; its proactive markers can render
+  as native region eyes on the real screen.
+- **V3 Real conversation.** Full duplex with barge-in; follow-ups carry the
+  running exchange + the current marker context (ARSinain already does both).
+- **V4 Explicit session boundary.** Voice is a visible, user-started, user-
+  ended session: mic + screen-share indicators while live, one click/word to
+  end, nothing captured for the session outside it. Frames go to the same
+  provider class as today's vision; `<private>`/redaction rules apply to any
+  transcript that lands back in the window.
+- **V5 The session feeds the window.** The spoken exchange lands in the
+  rolling window as transcript (it IS context), so it is save-able like
+  everything else — "save the last 15 minutes" after a voice session captures
+  the conversation too.
 
-**E2. Deliberate forgetting replaces auto-distillation.**
-As a user, nothing is distilled behind my back. Before window content expires and
-at shutdown, I get one quiet digest: "these stretches are about to be forgotten —
-keep any?"
-- AC: buffer-full incremental distillation and pending-session.json shutdown
-  distillation are REMOVED (the window has no "full"; shutdown shows the review).
-- AC: default outcome is forgetting; keeping requires an action.
-- AC: overlapping saves don't duplicate facts (existing embedding-service dedup).
+**Eng notes (for feasibility, not design):** v1 can run ARSinain locally
+(docker) and connect the overlay via a WebRTC session that publishes a screen
+track (from sck-capture's existing frame IPC or `getDisplayMedia`) + mic, and
+plays the TTS track; the eye should animate with speaking state. Deeper
+integration later: markers → RegionEyePool, transcript → `/feed` as a voice-
+session source, brief seeding on session open (same flattened-brief text the
+other destinations use). Cerebras key/quota is shared with the burst lane (one
+more concurrent consumer — fine at current limits).
 
-### Epic F — local mode
+**Open design questions (voice):**
+1. What does the session look like? (Eye pulsing + menu-bar timer? A slim
+   voice bar with waveform + mute + end? Nothing but the eye?)
+2. Where do Sinain's spoken replies appear visually, if at all? (Transcript
+   line in Ticker idiom? Nothing?)
+3. Three-way destination toggle on a 340px card — segmented control still, or
+   does voice deserve its own affordance (🎙 icon button beside the footer)?
+4. Screen-share consent surface: rely on the OS indicator or add our own?
 
-**F1. Same gestures, no cloud.**
-As a privacy-maximal user, I run everything against local models (existing
-`ANALYSIS_PROVIDER` switch) with identical UX.
-- AC: local mode pre-warms the window in the model's KV cache in the background,
-  keeping enrich ≈ 1.3s; cloud mode never processes without a gesture.
-- AC: keyframes described locally (qwen2.5vl-class model) eagerly in background.
-- AC: only visible difference: latency/quality, labeled honestly.
+## 8. Deferred backlog (designed earlier, still out)
 
-## 5. Surfaces & flows
+Timeline window (scrubber: heat strip, segments, strike-to-redact preview,
+panic wipe) · save-this nudges (free signals) · forgetting review replacing
+auto-distillation at shutdown/horizon · visual keyframes for text-poor frames
+· local warm-window mode (Ollama KV-cache; measured 1.33s warm enrich).
 
-**Surfaces (one new, rest preserved):**
-1. **HUD overlay** (existing, capture-invisible) — renders enrich cards, summon
-   briefs, save acknowledgments, nudge toasts in the current modes' idiom. Gains
-   an **action row**: three buttons — Save · Summon · Enrich — visible or
-   revealed on hover, styled per mode (design's call on placement per mode).
-2. **Timeline** (new, normal window) — segments, heat strip, keyframes, range
-   selection, preview/redact/save, window health (horizon, size, panic wipe).
-3. **The chooser** — one control pattern reused by Save and Summon: clicking the
-   button opens a compact card of options (`5 / 15 / 30 / 60 min`), each showing
-   what it covers ("30 min · IntelliJ, Chrome, mic"); click to confirm, click
-   outside to cancel, "More…" opens the timeline. Enrich has no chooser (fixed
-   10-min context).
-4. **Menu bar** — capture on/off, horizon indicator, spend today, "Save last…"
-   (same chooser), open timeline, panic wipe. The fallback surface when the HUD
-   is Hidden.
+## 9. Open design questions (as-built surfaces)
 
-**Flow: save.** Click Save → chooser → "Saving last 30 min · IntelliJ, Chrome,
-mic…" → async → "Saved: 12 facts, 4 entities · $0.02 · [Undo]" (undo ~30s).
+1. Card-mode panel chrome: header, drag affordance, eye glyph, stacking order.
+2. Chooser default N (30 today) and whether region mode defaults differently.
+3. Card widths are uniform-ish (320–340px) — one standard card width?
+4. Destination toggle placement scales to three options? (See §7 Q3.)
+5. The legacy "Enrich Clipboard" menu item overlaps Build Context conceptually
+   — keep both, merge, or rename? (They share the clipboard marker contract
+   now, so they compose safely either way.)
 
-**Flow: summon.** Click Summon → chooser → shimmer ≤ 2s → brief card (timeline ·
-goal · open problems · entities) → [Ask follow-up] [Save this range] [Dismiss].
+## 10. Appendix — ground truth
 
-**Flow: enrich.** Copy something → click Enrich → card ≤ 1s: what it is · how it
-connects · next step.
-
-**Flow: forgetting review.** At shutdown / horizon: one card listing labeled
-stretches with [keep] per row; default action = close = forget.
-
-**Edge states to design:** fresh session shorter than N; empty/idle range; save
-during save (coalesce); quota hit mid-summon (partial + retry ETA); offline in
-cloud mode (fall back to local if present, else queue the save — saves are async
-anyway); Hidden-mode acknowledgments; timeline showing 8h of a single app.
-
-## 6. What exists today vs. what changes
-
-| Piece | Today | This design |
-|---|---|---|
-| Capture → SSIM → local OCR → gate | shipped, free, local | unchanged (the always-on tier) |
-| Cloud vision per changed frame | OpenRouter call per event | **removed** — vision only on gesture, over stored keyframes |
-| Feed/sense ring buffers (100/30 items) | minutes of retention | **redesigned into the window** — time-horizon retention (hours), same event shapes, same producers |
-| Buffer-full + shutdown auto-distillation | automatic | **removed** — replaced by save + forgetting review (E2) |
-| Agent loop / context assembly | reads ring buffers | reads recent window slices (mechanical change) |
-| session_distiller → knowledge_integrator → graph | shipped | unchanged; invoked by save with `save_id` provenance |
-| Embedding dedup, CostTracker, privacy stripping | shipped | unchanged; save path adds API-key (`csk-`-style) redaction patterns |
-| HUD, modes | shipped | unchanged; + action row (Save · Summon · Enrich) |
-| Timeline window | — | new |
-| Cerebras burst path | — | new (`BURST_MODEL`/`BURST_PROVIDER`; OpenRouter fallback route) |
-
-## 7. Privacy & data model (constraints for design)
-
-- The window lives locally (in-memory / encrypted temp), horizon-bounded, never
-  synced; panic wipe destroys it instantly.
-- `<private>` stripping and auto-redaction happen at capture, as today — the
-  window stores post-stripped text. Keyframes: local OCR enables on-device secret
-  detection; detected regions are masked before any frame leaves the machine.
-- Save is the only write path to memory; every fact carries `save_id` provenance.
-- Cost is visible per gesture and per day (existing CostTracker → menu bar).
-- Known gap to close in the same release: `csk-`-style API-key patterns in
-  redaction (a real key was found OCR'd into memory during benchmarking).
-
-## 8. Open questions for design
-
-1. Action row placement per HUD mode: always visible, revealed on hover, or a
-   single expandable button? (The overlay must stay glanceable.)
-2. Default/most-prominent N in the chooser: 15 or 30?
-3. Where do enrich cards and summon briefs anchor in each HUD mode (Feed vs.
-   Ticker vs. Hidden)?
-4. Does clicking the HUD steal focus from the user's app? Eng note: the NSPanel
-   is non-activating, so buttons can accept clicks without focus theft — design
-   should still decide whether hover states imply "this is clickable" everywhere.
-5. Timeline density: heat strip + labels + keyframe thumbnails, or also a
-   screenshot filmstrip per segment (clutter / privacy-noise tradeoff)?
-6. Nudge budget: how many per hour before it reads as nagging?
-7. Forgetting review cadence: shutdown-only, or also a rolling "about to expire"
-   card during the day?
-8. Panic wipe: bare menu-bar action or hold-to-confirm?
-
-## 9. Appendix: benchmark method
-
-Corpus: 2.2M chars of real episode text (63h, smoke tests excluded). Density:
-median 2,900 / p90 9,250 chars per active minute. Cloud: Cerebras `gemma-4-31b`,
-chunked map (≤24K chars/call, 300-tok JSON summaries) + reduce, `prompt_cache_key`
-+ JSON mode; observed quota 100K tok/min, 100 req/min, 6M tok/h. Concurrent calls
-serialize per key — fewer, bigger chunks beat wide fan-out (prefill ≈ 25K tok/s;
-34K tok in one call = 1.38s; ≤ 60 min fits in ONE call, map-reduce only pays off
-above ~90 min). Multimodal: base64 JPEG `image_url`, no `detail` field; OpenRouter
-fallback route order WandB → Novita → SiliconFlow, ignore ModelRun (fp4 quant
-hallucinates on images). Local: Ollama 0.31, M4 Max 48GB; qwen2.5:3b prefill
-1.4–2K tok/s cold, KV-cache repeats ~free; `num_ctx` must be raised from the 4K
-default or windows silently truncate. Scripts: `cerebras_burst_bench.py`,
-`cerebras_enrich_bench.py`, `ollama_enrich_bench.py` (session scratchpad).
+Branch: `feat/deliberate-capture` (worktree `../sinain-hud-2-capture`), 7
+commits on origin/main. Key files: core `src/capture/{burst-client,window-ops,
+save-manager}.ts`, routes in `server.ts`, wiring in `index.ts`; overlay
+`lib/ui/capture/capture_ui.dart`, `lib/core/models/context_cards.dart`, shell
+integration + card mode in `lib/ui/overlay_shell.dart`. Benchmarks: Cerebras
+`gemma-4-31b`, prefix cache + JSON mode; density from 63h of real episodes
+(median 2,900 chars/min active). ARSinain reference: `../ARSinain` (aiortc,
+scene gate, faster-whisper, Piper TTS, barge-in — README architecture diagram).
