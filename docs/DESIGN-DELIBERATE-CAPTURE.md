@@ -97,9 +97,12 @@ default; short-history rows say "only N min so far"; click-outside = ✕ close.
   activity; the model is instructed to say plainly when it's unrelated) · NEXT.
 - Footer: **[Call AI]** (hands focus + context to the agent lane, opens chat) ·
   **[Copy for agent]** (writes the FULL original + one
-  `——— Context from Sinain ———` block containing the agent-grade seed —
-  situation digest + KG facts — for pasting into an external agent; falls back
-  to the card's burst context if the seed build fails).
+  `——— Context from Sinain ———` block carrying BOTH context layers: the card's
+  burst CONTEXT — item-specific, gesture-fresh, the only layer that mentions
+  the copied item — and the agent-grade seed — situation digest + KG facts,
+  the general scene, built at the last analyzer tick. Complementary: an
+  external agent pasted this gets the item, its interpretation, the scene, and
+  the knowledge. Seed failure degrades to the burst layer alone).
 - Clipboard contract: every enrichment path strips at the marker first — the
   card always enriches the user's original content, never Sinain's own output;
   Copy for agent produces at most one context block. The synthesized CONTEXT

@@ -1138,18 +1138,28 @@ class OverlayShellState extends State<OverlayShell> {
     _leaveCardModeFor(HudState.chat); // follow the conversation
   }
 
-  /// Enrich card → "Copy for agent": the FULL original item + the agent-grade
-  /// seed (situation digest + KG facts, built server-side — same /seed the
-  /// legacy Enrich Clipboard used) back onto the clipboard, ready to paste
-  /// into an external agent. Falls back to the card's burst context if the
-  /// seed build fails, so the button always produces a usable paste.
+  /// Enrich card → "Copy for agent": the FULL original item + BOTH context
+  /// layers back onto the clipboard, ready to paste into an external agent:
+  ///   1. the card's burst CONTEXT — item-specific, assembled at gesture time
+  ///      ("this is X, tied to Y") — the seed never mentions the copied item;
+  ///   2. the agent-grade seed (/seed: situation digest + KG facts) — the
+  ///      general scene + knowledge, item-agnostic and built at the last
+  ///      analyzer tick.
+  /// Complementary, not redundant. If the seed build fails, layer 1 still
+  /// makes the paste useful.
   Future<void> _copyEnrichCard(EnrichCard c) async {
     final ws = context.read<WebSocketService>();
     final original = _enrichFocusFull ?? c.focus;
     final seed = await ws.fetchSeedText('clipboard', focus: original);
-    final block = (seed != null && seed.trim().isNotEmpty)
-        ? seed
-        : '${c.context}\nNext: ${c.next}';
+    final block = StringBuffer()
+      ..writeln('About this item: ${c.context}')
+      ..write('Suggested next step: ${c.next}');
+    if (seed != null && seed.trim().isNotEmpty) {
+      block
+        ..writeln()
+        ..writeln()
+        ..write(seed.trim());
+    }
     await Clipboard.setData(
         ClipboardData(text: '$original\n\n$_sinainContextMarker\n$block'));
     if (mounted) {
