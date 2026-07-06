@@ -150,18 +150,18 @@ export async function summonBrief(
   return { brief, result };
 }
 
-// ── Enrich: what / connects / next ──
+// ── Enrich: context / next ──
+// One CONTEXT field, not what/connects: a forced split makes the model pad the
+// second sentence with situation restatement. One field demands the linkage.
 
 const ENRICH_SYSTEM = `You are Sinain, an ambient assistant. You get the user's recent activity window
 (screen OCR, window titles, transcript) plus a focus item they copied.
 Enrich the focus item with context. Return JSON only:
-{"what":"<what the focus item is, one sentence>",
- "connects":"<how it relates to what the user has been doing, one sentence — THIS is the value; a generic definition fails>",
+{"context":"<1-2 sentences: name what the copied item is AND tie it to the user's current activity, e.g. 'This is X — you hit it while doing Y; it matters because Z.' Never restate the situation without linking it to the item. If the item genuinely doesn't relate to recent activity, say that plainly instead of forcing a connection.>",
  "next":"<one concrete next step>"}`;
 
 export interface EnrichCard {
-  what: string;
-  connects: string;
+  context: string;
   next: string;
 }
 
@@ -177,14 +177,13 @@ export async function enrichFocus(
     // Window first (stable prefix → Cerebras prefix cache), focus last.
     user: `Recent activity window:\n${slice.text}\n\nFocus item (clipboard):\n${focus}\n\nEnrich it.`,
     maxTokens: 300,
-    cacheKey: "sinain-enrich-v1",
+    cacheKey: "sinain-enrich-v2",
     jsonMode: true,
   });
   const raw = parseBurstJson<Partial<EnrichCard>>(result.content);
   return {
     card: {
-      what: String(raw.what ?? "").trim(),
-      connects: String(raw.connects ?? "").trim(),
+      context: String(raw.context ?? "").trim(),
       next: String(raw.next ?? "").trim(),
     },
     result,

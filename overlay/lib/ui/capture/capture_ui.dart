@@ -499,10 +499,8 @@ class EnrichCardWidget extends StatelessWidget {
             Text(card.error ?? 'failed',
                 style: _mono(11, _orange, height: 1.4)),
           if (card.status == CardStatus.ready) ...[
-            const _SectionHead('WHAT IT IS'),
-            Text(card.what, style: _mono(11, t.textPrimary, height: 1.35)),
-            const _SectionHead('HOW IT CONNECTS'),
-            Text(card.connects,
+            const _SectionHead('CONTEXT'),
+            Text(card.context,
                 style: _mono(11, t.textPrimary, height: 1.35)),
             const _SectionHead('NEXT'),
             Text(card.next, style: _mono(11, t.textMuted, height: 1.35)),

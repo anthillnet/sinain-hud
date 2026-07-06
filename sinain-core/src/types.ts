@@ -299,14 +299,14 @@ export interface ContextBriefMessage {
   ts: number;
 }
 
-/** "Build context" (clipboard enrich) → what / connects / next card. */
+/** "Build context" (clipboard enrich) → context / next card. */
 export interface EnrichCardMessage {
   type: "enrich_card";
   requestId: string;
   status: "working" | "ready" | "error";
   /** The focus item (clipboard text), truncated for display. */
   focus: string;
-  card?: { what: string; connects: string; next: string };
+  card?: { context: string; next: string };
   latencyMs?: number;
   error?: string;
   ts: number;

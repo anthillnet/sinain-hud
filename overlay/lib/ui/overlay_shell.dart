@@ -85,6 +85,8 @@ class OverlayShellState extends State<OverlayShell> {
 
   // Deliberate capture (Save · Call AI · Build context)
   String? _chooserFor; // null | 'save' | 'summon'
+  // Compact card mode: cards shown in a slim panel without opening the chat.
+  bool _cardMode = false;
   // Where a summon follow-up goes: 'chat' (agent lane) | 'term' (seeded PTY).
   String _summonDest = 'chat';
   List<RangeOption> _rangeOptions = const [];
@@ -218,21 +220,28 @@ class OverlayShellState extends State<OverlayShell> {
       if (mounted) setState(() => _isThinking = active);
     });
     // Deliberate-capture cards (context_brief / enrich_card / save_receipt).
+    // Outside the chat they surface in compact card mode — no full HUD.
     _briefSub = ws.briefStream.listen((b) {
-      if (mounted) setState(() => _activeBrief = b);
+      if (!mounted) return;
+      setState(() => _activeBrief = b);
+      _enterCardMode();
     });
     _enrichSub = ws.enrichStream.listen((c) {
-      if (mounted) setState(() => _activeEnrich = c);
+      if (!mounted) return;
+      setState(() => _activeEnrich = c);
+      _enterCardMode();
     });
     _receiptSub = ws.saveReceiptStream.listen((r) {
       if (!mounted) return;
       // "undone" confirms the user's own action — no card resurrection needed.
       if (r.status == SaveStatus.undone && _saveReceipt == null) return;
       setState(() => _saveReceipt = r);
+      _enterCardMode();
       if (r.status == SaveStatus.committed || r.status == SaveStatus.undone) {
         Timer(const Duration(seconds: 4), () {
           if (mounted && _saveReceipt?.saveId == r.saveId) {
             setState(() => _saveReceipt = null);
+            _maybeExitCardMode();
           }
         });
       }
@@ -726,13 +735,13 @@ class OverlayShellState extends State<OverlayShell> {
     if (!mounted || selected == null) return;
     switch (selected) {
       case 'capSave':
-        _transitionTo(HudState.chat);
+        _enterCardMode();
         await _openRangeChooser('save');
       case 'capSummon':
-        _transitionTo(HudState.chat);
+        _enterCardMode();
         await _openRangeChooser('summon');
       case 'capBuild':
-        _transitionTo(HudState.chat);
+        _enterCardMode();
         await _buildContextFromClipboard();
       case 'enrich':
         await enrichClipboardHotkey();
@@ -1056,19 +1065,23 @@ class OverlayShellState extends State<OverlayShell> {
     final ws = context.read<WebSocketService>();
     final msg = StringBuffer()
       ..writeln('I copied this: ${c.focus}')
-      ..writeln('Context: ${c.what} ${c.connects}')
+      ..writeln('Context: ${c.context}')
       ..write('Help me with the next step: ${c.next}');
     ws.sendUserCommand(msg.toString());
     setState(() => _activeEnrich = null);
+    _leaveCardModeFor(HudState.chat); // follow the conversation
   }
 
   /// Enrich card → "Copy": focus item + built context back onto the clipboard,
   /// ready to paste anywhere (external chat, notes, ticket).
   Future<void> _copyEnrichCard(EnrichCard c) async {
     final text = '${c.focus}\n\n——— Context from Sinain ———\n'
-        'What: ${c.what}\nConnects: ${c.connects}\nNext: ${c.next}';
+        '${c.context}\nNext: ${c.next}';
     await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) setState(() => _activeEnrich = null);
+    if (mounted) {
+      setState(() => _activeEnrich = null);
+      _maybeExitCardMode();
+    }
   }
 
   /// "Ask follow-up" — hand the brief to the chosen destination: the in-HUD
@@ -1099,11 +1112,169 @@ class OverlayShellState extends State<OverlayShell> {
         _activeBrief = null;
         _activeThread = null; // surface the MAIN tab the PTY attaches to
       });
+      _leaveCardModeFor(HudState.chat); // the PTY lives in the chat surface
       _openTerminalForTab('main');
       return;
     }
     ws.sendUserCommand(summary.toString());
     setState(() => _activeBrief = null);
+    _leaveCardModeFor(HudState.chat); // follow the conversation
+  }
+
+  // ── Compact card mode ──
+  // Capture gestures triggered outside the chat show their cards in a small
+  // dedicated panel instead of forcing the full HUD open. The window grows to
+  // card size and shrinks back to the eye when the last card is dismissed.
+
+  void _enterCardMode() {
+    if (_state == HudState.chat || _cardMode) return;
+    setState(() => _cardMode = true);
+    _resizeForCardPanel();
+  }
+
+  Future<void> _resizeForCardPanel() async {
+    final frame = await _windowService.getWindowFrame();
+    if (frame == null) return;
+    final right = frame['x']! + frame['w']!;
+    final top = frame['y']! + frame['h']!;
+    _windowService.setWindowFrame(right - 380, top - 500, 380, 500);
+  }
+
+  /// Leave card mode once nothing is displayed; restore the eye-sized window.
+  void _maybeExitCardMode() {
+    if (!_cardMode) return;
+    if (_chooserFor != null ||
+        _activeBrief != null ||
+        _activeEnrich != null ||
+        _saveReceipt != null) {
+      return;
+    }
+    setState(() => _cardMode = false);
+    _resizeWindowForState(_state);
+  }
+
+  /// Hand off from card mode into a full HUD state (e.g. the conversation the
+  /// card just seeded).
+  void _leaveCardModeFor(HudState target) {
+    if (!_cardMode) {
+      if (_state != target) _transitionTo(target);
+      return;
+    }
+    _cardMode = false;
+    _transitionTo(target);
+  }
+
+  /// The stacked capture cards (receipt · enrich · brief · chooser). Rendered
+  /// bottom-right of the chat panel, and as the body of the card-mode panel.
+  Widget _captureCardsColumn() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (_saveReceipt != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SaveReceiptCard(
+              receipt: _saveReceipt!,
+              onUndo: () {
+                final id = _saveReceipt!.saveId;
+                context.read<WebSocketService>().requestSaveUndo(id);
+              },
+              onDismiss: () {
+                setState(() => _saveReceipt = null);
+                _maybeExitCardMode();
+              },
+            ),
+          ),
+        if (_activeEnrich != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: EnrichCardWidget(
+              card: _activeEnrich!,
+              onDismiss: () {
+                setState(() => _activeEnrich = null);
+                _maybeExitCardMode();
+              },
+              onCallAi: () => _callAiOnEnrich(_activeEnrich!),
+              onCopy: () => _copyEnrichCard(_activeEnrich!),
+            ),
+          ),
+        if (_activeBrief != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: BriefCard(
+              brief: _activeBrief!,
+              dest: _summonDest,
+              onDestChanged: (d) => setState(() => _summonDest = d),
+              onDismiss: () {
+                setState(() => _activeBrief = null);
+                _maybeExitCardMode();
+              },
+              onAskFollowUp: () => _askFollowUpOnBrief(_activeBrief!),
+              onSaveRange: () {
+                final minutes = _activeBrief!.minutes;
+                setState(() => _activeBrief = null);
+                context.read<WebSocketService>().requestSave(minutes);
+              },
+            ),
+          ),
+        if (_chooserFor != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: RangeChooser(
+              title: _chooserFor == 'save' ? 'Save last…' : 'Call AI on last…',
+              options: _rangeOptions,
+              onPick: _pickRange,
+              onClose: () {
+                setState(() => _chooserFor = null);
+                _maybeExitCardMode();
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Card-mode surface: a slim panel with just the capture cards — the whole
+  /// HUD stays closed. Clicking the eye glyph or ✕ collapses back to the eye.
+  Widget _buildCardPanel() {
+    final theme = HudTheme.of(context);
+    return Align(
+      alignment: Alignment.topRight,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(10),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 60),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6, right: 2),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _chooserFor = null;
+                        _activeBrief = null;
+                        _activeEnrich = null;
+                        _saveReceipt = null;
+                      });
+                      _maybeExitCardMode();
+                    },
+                    child: Text('✕',
+                        style: TextStyle(
+                            fontSize: 13, color: theme.textDim)),
+                  ),
+                ),
+              ),
+              _captureCardsColumn(),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _onDragStart(DragStartDetails details) {
@@ -1204,6 +1375,12 @@ class OverlayShellState extends State<OverlayShell> {
         .watch<SettingsService>(); // rebuild on privacy mode change (eye color)
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
+    }
+
+    // Compact card mode: capture cards without the full HUD (any non-chat
+    // state — the chat renders cards in its own Stack).
+    if (_cardMode && _state != HudState.chat) {
+      return _buildCardPanel();
     }
 
     switch (_state) {
@@ -1634,73 +1811,7 @@ class OverlayShellState extends State<OverlayShell> {
                 Positioned(
                   right: 10,
                   bottom: 10,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      if (_saveReceipt != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: SaveReceiptCard(
-                            receipt: _saveReceipt!,
-                            onUndo: () {
-                              final id = _saveReceipt!.saveId;
-                              context
-                                  .read<WebSocketService>()
-                                  .requestSaveUndo(id);
-                            },
-                            onDismiss: () =>
-                                setState(() => _saveReceipt = null),
-                          ),
-                        ),
-                      if (_activeEnrich != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: EnrichCardWidget(
-                            card: _activeEnrich!,
-                            onDismiss: () =>
-                                setState(() => _activeEnrich = null),
-                            onCallAi: () =>
-                                _callAiOnEnrich(_activeEnrich!),
-                            onCopy: () => _copyEnrichCard(_activeEnrich!),
-                          ),
-                        ),
-                      if (_activeBrief != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: BriefCard(
-                            brief: _activeBrief!,
-                            dest: _summonDest,
-                            onDestChanged: (d) =>
-                                setState(() => _summonDest = d),
-                            onDismiss: () =>
-                                setState(() => _activeBrief = null),
-                            onAskFollowUp: () =>
-                                _askFollowUpOnBrief(_activeBrief!),
-                            onSaveRange: () {
-                              final minutes = _activeBrief!.minutes;
-                              setState(() => _activeBrief = null);
-                              context
-                                  .read<WebSocketService>()
-                                  .requestSave(minutes);
-                            },
-                          ),
-                        ),
-                      if (_chooserFor != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: RangeChooser(
-                            title: _chooserFor == 'save'
-                                ? 'Save last…'
-                                : 'Call AI on last…',
-                            options: _rangeOptions,
-                            onPick: _pickRange,
-                            onClose: () =>
-                                setState(() => _chooserFor = null),
-                          ),
-                        ),
-                    ],
-                  ),
+                  child: _captureCardsColumn(),
                 ),
               ],
             ),
