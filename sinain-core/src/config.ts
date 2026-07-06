@@ -308,6 +308,20 @@ export function loadConfig(): CoreConfig {
     cloudApiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
   };
 
+  // Deliberate-capture burst lane: fast inference for summon ("Call AI on my
+  // last N minutes") and enrich ("Build context"). Cerebras by default —
+  // measured ~25K tok/s prefill, so a 30-min window brief lands in ~1.5s.
+  // Falls back to disabled (endpoints return 503) when no API key is present.
+  const burstConfig: import("./types.js").BurstConfig = {
+    enabled: boolEnv("BURST_ENABLED", true),
+    provider: env("BURST_PROVIDER", "cerebras"),
+    model: env("BURST_MODEL", "gemma-4-31b"),
+    endpoint: env("BURST_ENDPOINT", "https://api.cerebras.ai/v1/chat/completions"),
+    apiKey: env("BURST_API_KEY", env("CEREBRAS_API_KEY", "")),
+    maxTokens: intEnv("BURST_MAX_TOKENS", 700),
+    timeoutMs: intEnv("BURST_TIMEOUT_MS", 20000),
+  };
+
   // escalation policy: agents.json `escalation` block, fall back to env.
   // Mode is runtime-mutable via the overlay's flash-icon selector; this only
   // sets the boot-time default. (Transport is no longer a setting — per-lane
@@ -403,6 +417,10 @@ export function loadConfig(): CoreConfig {
     transcriptionConfig,
     agentConfig,
     regionSlmConfig,
+    burstConfig,
+    // Rolling window retention (deliberate capture): how far back "save/summon
+    // last N minutes" can reach. Default 8h; buffers evict past this horizon.
+    windowHorizonMs: intEnv("WINDOW_HORIZON_MINUTES", 480) * 60_000,
     escalationConfig,
     openclawConfig,
     situationMdPath,

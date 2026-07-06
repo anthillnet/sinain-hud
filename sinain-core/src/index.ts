@@ -953,8 +953,12 @@ async function main() {
   log(TAG, `privacy: mode=${config.privacyConfig.mode}`);
 
   // ── Initialize core buffers (single source of truth) ──
-  const feedBuffer = new FeedBuffer(100);
-  const senseBuffer = new SenseBuffer(30);
+  // Deliberate capture: the ring buffers ARE the rolling window. Retention is
+  // time-horizon-driven (default 8h); the item caps become memory backstops.
+  // Text-only at these sizes is trivial (~200KB/h); images are still trimmed
+  // to the most recent few by SenseBuffer regardless of horizon.
+  const feedBuffer = new FeedBuffer(5000, config.windowHorizonMs);
+  const senseBuffer = new SenseBuffer(3000, 5, config.windowHorizonMs);
 
   // ── Initialize overlay WS handler ──
   const wsHandler = new WsHandler();
@@ -1814,6 +1818,65 @@ async function main() {
   // Warm the KG retrieval daemon at boot (no-op if the script is missing).
   startKgDaemon();
 
+  // ── Deliberate capture: save manager + burst-lane gestures ──
+  const { SaveManager } = await import("./capture/save-manager.js");
+  const { assembleWindow, chooserOptions, summonBrief, enrichFocus } = await import("./capture/window-ops.js");
+  const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
+
+  const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
+    // Cerebras free tier reports no cost; tokens still tracked for visibility.
+    costTracker.record({
+      source: "burst", model: config.burstConfig.model,
+      cost: 0, tokensIn: r.tokensIn, tokensOut: r.tokensOut, ts: Date.now(),
+    });
+  };
+
+  const contextSummon = async (minutes: number, requestId: string): Promise<unknown> => {
+    const coverage = (await import("./capture/window-ops.js")).describeCoverage(feedBuffer, senseBuffer, minutes);
+    wsHandler.broadcastRaw({ type: "context_brief", requestId, status: "working", minutes, coverage, ts: Date.now() });
+    try {
+      const slice = assembleWindow(feedBuffer, senseBuffer, minutes);
+      if (slice.lineCount === 0) throw new Error("that range was idle — nothing to brief on");
+      const { brief, result } = await summonBrief(config.burstConfig, slice, minutes);
+      recordBurstUsage(result);
+      const msg = {
+        type: "context_brief" as const, requestId, status: "ready" as const, minutes,
+        coverage: slice.coverage, brief, partial: slice.truncated, latencyMs: result.latencyMs, ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    } catch (err) {
+      const msg = {
+        type: "context_brief" as const, requestId, status: "error" as const, minutes,
+        coverage, error: String((err as Error).message ?? err).slice(0, 200), ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    }
+  };
+
+  const contextEnrich = async (focus: string, requestId: string): Promise<unknown> => {
+    const focusPreview = focus.length > 120 ? `${focus.slice(0, 117)}…` : focus;
+    wsHandler.broadcastRaw({ type: "enrich_card", requestId, status: "working", focus: focusPreview, ts: Date.now() });
+    try {
+      const { card, result } = await enrichFocus(config.burstConfig, feedBuffer, senseBuffer, focus);
+      recordBurstUsage(result);
+      const msg = {
+        type: "enrich_card" as const, requestId, status: "ready" as const,
+        focus: focusPreview, card, latencyMs: result.latencyMs, ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    } catch (err) {
+      const msg = {
+        type: "enrich_card" as const, requestId, status: "error" as const,
+        focus: focusPreview, error: String((err as Error).message ?? err).slice(0, 200), ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    }
+  };
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
@@ -1834,6 +1897,13 @@ async function main() {
     exportConcept: (entity, depth, opts) => exportConceptBundle(entity, depth, opts),
     importConcept: (envelope, conflict) => importConceptBundle(envelope, conflict),
     isScreenActive: () => screenActive,
+
+    // Deliberate capture (save / summon / enrich on the rolling window)
+    captureSave: (minutes) => saveManager.save(minutes),
+    captureUndo: (saveId) => saveManager.undo(saveId),
+    contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
+    contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
+    windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;

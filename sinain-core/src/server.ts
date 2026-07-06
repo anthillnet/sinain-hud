@@ -1692,6 +1692,18 @@ export interface ServerDeps {
   /** Import a concept bundle into the local knowledge graph. */
   importConcept?: (envelope: unknown, conflict: "skip" | "merge" | "overwrite") => Promise<unknown>;
 
+  // ── Deliberate capture (save / summon / enrich on the rolling window) ──
+  /** Kick off "save last N minutes" → returns saveId; receipt flows via WS. */
+  captureSave?: (minutes: number) => string;
+  /** Cancel a save inside its undo window. */
+  captureUndo?: (saveId: string) => boolean;
+  /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
+  contextSummon?: (minutes: number, requestId: string) => Promise<unknown>;
+  /** "Build context" for a focus item (clipboard) → what/connects/next card. */
+  contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
+  /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
+  windowCoverage?: () => unknown;
+
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
   /** Current per-lane agent choice; read by run.sh via the piggyback field
@@ -1700,6 +1712,13 @@ export interface ServerDeps {
    *  chose Off" (registered=true, lanes="") from "core forgot our
    *  registration" (registered=false) so run.sh heals only on the latter. */
   getBareAgentConfig?: () => { escalationAgent: string; terminalAgent: string; registered: boolean };
+}
+
+/** Clamp a save/summon range request to sane bounds (1 min … 8h). */
+function clampMinutes(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 30;
+  return Math.max(1, Math.min(480, Math.round(n)));
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -1843,6 +1862,72 @@ export function createAppServer(deps: ServerDeps) {
         const metaOnly = url.searchParams.get("meta_only") === "true";
         const events = senseBuffer.query(after, metaOnly);
         res.end(JSON.stringify({ events, epoch: serverEpoch }));
+        return;
+      }
+
+      // ── Deliberate capture: save / summon / enrich / coverage ──
+      if (req.method === "POST" && url.pathname === "/capture/save") {
+        if (!deps.captureSave) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "save unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const minutes = clampMinutes(JSON.parse(body || "{}").minutes);
+        const saveId = deps.captureSave(minutes);
+        res.end(JSON.stringify({ ok: true, saveId, minutes }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/capture/undo") {
+        const body = await readBody(req, 4096);
+        const { saveId } = JSON.parse(body || "{}") as { saveId?: string };
+        if (!saveId || !deps.captureUndo) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "saveId required" }));
+          return;
+        }
+        const undone = deps.captureUndo(saveId);
+        res.end(JSON.stringify({ ok: true, undone }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/context/summon") {
+        if (!deps.contextSummon) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "burst lane unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const minutes = clampMinutes(JSON.parse(body || "{}").minutes);
+        const requestId = `summon-${Date.now().toString(36)}`;
+        // Respond immediately; the brief card flows to the overlay via WS.
+        res.end(JSON.stringify({ ok: true, requestId, minutes }));
+        void deps.contextSummon(minutes, requestId);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/context/enrich") {
+        if (!deps.contextEnrich) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "burst lane unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 65536);
+        const focus = String((JSON.parse(body || "{}") as { text?: string }).text ?? "").trim();
+        if (!focus) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "text required (clipboard is empty?)" }));
+          return;
+        }
+        const requestId = `enrich-${Date.now().toString(36)}`;
+        res.end(JSON.stringify({ ok: true, requestId }));
+        void deps.contextEnrich(focus, requestId);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/window/coverage") {
+        res.end(JSON.stringify({ ok: true, options: deps.windowCoverage?.() ?? [] }));
         return;
       }
 

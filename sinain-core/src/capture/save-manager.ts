@@ -1,0 +1,111 @@
+import { randomBytes } from "node:crypto";
+import type { FeedBuffer } from "../buffers/feed-buffer.js";
+import type { SenseBuffer } from "../buffers/sense-buffer.js";
+import type { LocalCurationService } from "../learning/local-curation.js";
+import type { SaveReceiptMessage } from "../types.js";
+import { describeCoverage } from "./window-ops.js";
+import { log, warn } from "../log.js";
+
+const TAG = "save";
+const UNDO_WINDOW_MS = 30_000;
+
+/**
+ * Deliberate-capture save lifecycle: "remember my last N minutes".
+ *
+ *   save(N) → broadcast "saving" → distill (LLM, async, seconds)
+ *           → broadcast "saved" with fact/entity counts + a 30s undo window
+ *           → [undo] broadcast "undone", digest discarded — nothing was written
+ *           → [timeout] integrate digest into the knowledge graph → "committed"
+ *
+ * Integration is deferred, not rolled back: undo is a true cancel. Every save
+ * carries a saveId; sessionMeta marks provenance (source: "user_save").
+ */
+export class SaveManager {
+  private pending = new Map<string, { digest: any; timer: ReturnType<typeof setTimeout> }>();
+
+  constructor(
+    private feedBuffer: FeedBuffer,
+    private senseBuffer: SenseBuffer,
+    private curation: LocalCurationService,
+    private broadcast: (msg: SaveReceiptMessage) => void,
+  ) {}
+
+  /** Kick off a save of the last N minutes. Returns the saveId immediately. */
+  save(minutes: number): string {
+    const saveId = `save-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
+    const coverage = describeCoverage(this.feedBuffer, this.senseBuffer, minutes);
+    this.broadcast({ type: "save_receipt", saveId, status: "saving", minutes, coverage, ts: Date.now() });
+    void this.runSave(saveId, minutes, coverage);
+    return saveId;
+  }
+
+  /** Cancel a save inside its undo window. True if there was one to cancel. */
+  undo(saveId: string): boolean {
+    const entry = this.pending.get(saveId);
+    if (!entry) return false;
+    clearTimeout(entry.timer);
+    this.pending.delete(saveId);
+    log(TAG, `${saveId} undone — digest discarded, nothing written`);
+    this.broadcast({ type: "save_receipt", saveId, status: "undone", minutes: 0, coverage: "", ts: Date.now() });
+    return true;
+  }
+
+  private async runSave(saveId: string, minutes: number, coverage: string): Promise<void> {
+    const fail = (error: string) =>
+      this.broadcast({ type: "save_receipt", saveId, status: "error", minutes, coverage, error, ts: Date.now() });
+
+    try {
+      const since = Date.now() - minutes * 60_000;
+      const items: Array<{ text: string; ts: number; source: string; channel: string }> = [
+        ...this.feedBuffer.queryByTime(since).map((i) => ({
+          text: i.text, ts: i.ts, source: i.source, channel: String(i.channel),
+        })),
+        ...this.curation.senseContextForRange(since),
+      ].sort((a, b) => a.ts - b.ts);
+
+      if (items.length === 0) {
+        fail("nothing to save in that range — it was idle");
+        return;
+      }
+
+      const digest = await this.curation.distillOnly(items, {
+        ts: new Date().toISOString(),
+        sessionKey: `user-save-${saveId}`,
+        durationMs: minutes * 60_000,
+        source: "user_save",
+        saveId,
+      });
+      if (!digest) {
+        fail("distillation produced nothing for that range");
+        return;
+      }
+
+      const facts = Array.isArray(digest.facts) ? digest.facts.length : 0;
+      const entities = Array.isArray(digest.entities) ? digest.entities.length : 0;
+
+      const timer = setTimeout(() => void this.commit(saveId, minutes, coverage), UNDO_WINDOW_MS);
+      timer.unref?.();
+      this.pending.set(saveId, { digest, timer });
+
+      this.broadcast({
+        type: "save_receipt", saveId, status: "saved", minutes, coverage,
+        facts, entities, undoSeconds: UNDO_WINDOW_MS / 1000, ts: Date.now(),
+      });
+      log(TAG, `${saveId}: distilled ${facts} facts / ${entities} entities from ${items.length} items — undo open ${UNDO_WINDOW_MS / 1000}s`);
+    } catch (err) {
+      warn(TAG, `${saveId} failed: ${String(err).slice(0, 200)}`);
+      fail(String(err).slice(0, 200));
+    }
+  }
+
+  private async commit(saveId: string, minutes: number, coverage: string): Promise<void> {
+    const entry = this.pending.get(saveId);
+    if (!entry) return; // undone in the meantime
+    this.pending.delete(saveId);
+    const ok = await this.curation.integrateDigest(entry.digest);
+    this.broadcast({
+      type: "save_receipt", saveId, status: ok ? "committed" : "error", minutes, coverage,
+      error: ok ? undefined : "knowledge integration failed", ts: Date.now(),
+    });
+  }
+}
