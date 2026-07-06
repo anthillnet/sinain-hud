@@ -21,8 +21,10 @@ import 'chat/feedback_prompt.dart';
 import 'regions/region_eye_controller.dart';
 import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
+import '../core/models/context_cards.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
+import 'capture/capture_ui.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -80,6 +82,18 @@ class OverlayShellState extends State<OverlayShell> {
   // SettingsService. _feedbackEvaluated guards against re-arming every reply.
   bool _feedbackVisible = false;
   bool _feedbackEvaluated = false;
+
+  // Deliberate capture (Save · Call AI · Build context)
+  String? _chooserFor; // null | 'save' | 'summon'
+  // Where a summon follow-up goes: 'chat' (agent lane) | 'term' (seeded PTY).
+  String _summonDest = 'chat';
+  List<RangeOption> _rangeOptions = const [];
+  ContextBrief? _activeBrief;
+  EnrichCard? _activeEnrich;
+  SaveReceipt? _saveReceipt;
+  StreamSubscription<ContextBrief>? _briefSub;
+  StreamSubscription<EnrichCard>? _enrichSub;
+  StreamSubscription<SaveReceipt>? _receiptSub;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -202,6 +216,26 @@ class OverlayShellState extends State<OverlayShell> {
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
+    });
+    // Deliberate-capture cards (context_brief / enrich_card / save_receipt).
+    _briefSub = ws.briefStream.listen((b) {
+      if (mounted) setState(() => _activeBrief = b);
+    });
+    _enrichSub = ws.enrichStream.listen((c) {
+      if (mounted) setState(() => _activeEnrich = c);
+    });
+    _receiptSub = ws.saveReceiptStream.listen((r) {
+      if (!mounted) return;
+      // "undone" confirms the user's own action — no card resurrection needed.
+      if (r.status == SaveStatus.undone && _saveReceipt == null) return;
+      setState(() => _saveReceipt = r);
+      if (r.status == SaveStatus.committed || r.status == SaveStatus.undone) {
+        Timer(const Duration(seconds: 4), () {
+          if (mounted && _saveReceipt?.saveId == r.saveId) {
+            setState(() => _saveReceipt = null);
+          }
+        });
+      }
     });
     _contentSub = ws.agentFeedStream.listen((_) {
       if (!mounted) return;
@@ -672,6 +706,12 @@ class OverlayShellState extends State<OverlayShell> {
   /// the existing handlers; the native NSMenu renders outside the tiny eye panel.
   Future<void> _showEyeContextMenu() async {
     final items = <Map<String, dynamic>>[
+      // Deliberate capture — the three window gestures live here, not as
+      // dedicated HUD buttons (design: reuse existing controls).
+      {'id': 'capSave', 'title': 'Save Last Minutes…'},
+      {'id': 'capSummon', 'title': 'Call AI on Last Minutes…'},
+      {'id': 'capBuild', 'title': 'Build Context from Clipboard'},
+      {'separator': true},
       {'id': 'enrich', 'title': 'Enrich Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
@@ -685,6 +725,15 @@ class OverlayShellState extends State<OverlayShell> {
     final selected = await _windowService.showContextMenu(items);
     if (!mounted || selected == null) return;
     switch (selected) {
+      case 'capSave':
+        _transitionTo(HudState.chat);
+        await _openRangeChooser('save');
+      case 'capSummon':
+        _transitionTo(HudState.chat);
+        await _openRangeChooser('summon');
+      case 'capBuild':
+        _transitionTo(HudState.chat);
+        await _buildContextFromClipboard();
       case 'enrich':
         await enrichClipboardHotkey();
       case 'region':
@@ -930,11 +979,131 @@ class OverlayShellState extends State<OverlayShell> {
     _manualRegionSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
+    _briefSub?.cancel();
+    _enrichSub?.cancel();
+    _receiptSub?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
     _commandFocusNode.dispose();
     super.dispose();
+  }
+
+  // ── Deliberate capture handlers ──
+
+  /// Open the range chooser for 'save' or 'summon'; coverage strings are free
+  /// window data (no LLM) so fetching them on open is cheap.
+  Future<void> _openRangeChooser(String action) async {
+    setState(() => _chooserFor = _chooserFor == action ? null : action);
+    if (_chooserFor == null) return;
+    final options =
+        await context.read<WebSocketService>().fetchRangeOptions();
+    if (mounted && _chooserFor != null) {
+      setState(() => _rangeOptions = options);
+    }
+  }
+
+  Future<void> _pickRange(int minutes) async {
+    final action = _chooserFor;
+    setState(() => _chooserFor = null);
+    final ws = context.read<WebSocketService>();
+    if (action == 'save') {
+      await ws.requestSave(minutes);
+      // Receipt lifecycle arrives via saveReceiptStream.
+    } else if (action == 'summon') {
+      final err = await ws.requestSummon(minutes);
+      if (err != null && mounted) {
+        setState(() => _activeBrief = ContextBrief(
+              requestId: 'local',
+              status: CardStatus.error,
+              minutes: minutes,
+              coverage: '',
+              error: err,
+            ));
+      }
+    }
+  }
+
+  /// "Build context" — enrich whatever is on the clipboard with the last
+  /// 10 minutes of window context.
+  Future<void> _buildContextFromClipboard() async {
+    final ws = context.read<WebSocketService>();
+    final clip = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = clip?.text?.trim() ?? '';
+    if (text.isEmpty) {
+      setState(() => _activeEnrich = const EnrichCard(
+            requestId: 'local',
+            status: CardStatus.error,
+            focus: '',
+            error: 'clipboard is empty — copy something first',
+          ));
+      return;
+    }
+    final err = await ws.requestEnrich(text);
+    if (err != null && mounted) {
+      setState(() => _activeEnrich = EnrichCard(
+            requestId: 'local',
+            status: CardStatus.error,
+            focus: text.length > 120 ? '${text.substring(0, 117)}…' : text,
+            error: err,
+          ));
+    }
+  }
+
+  /// Enrich card → "Call AI": hand the focus item + built context to the
+  /// agent lane so there's something to DO with the card.
+  void _callAiOnEnrich(EnrichCard c) {
+    final ws = context.read<WebSocketService>();
+    final msg = StringBuffer()
+      ..writeln('I copied this: ${c.focus}')
+      ..writeln('Context: ${c.what} ${c.connects}')
+      ..write('Help me with the next step: ${c.next}');
+    ws.sendUserCommand(msg.toString());
+    setState(() => _activeEnrich = null);
+  }
+
+  /// Enrich card → "Copy": focus item + built context back onto the clipboard,
+  /// ready to paste anywhere (external chat, notes, ticket).
+  Future<void> _copyEnrichCard(EnrichCard c) async {
+    final text = '${c.focus}\n\n——— Context from Sinain ———\n'
+        'What: ${c.what}\nConnects: ${c.connects}\nNext: ${c.next}';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) setState(() => _activeEnrich = null);
+  }
+
+  /// "Ask follow-up" — hand the brief to the chosen destination: the in-HUD
+  /// chat lane, or a terminal whose run.sh seed carries the brief (same
+  /// set_handoff_context mechanic as the ⑂ handoff).
+  void _askFollowUpOnBrief(ContextBrief b) {
+    final ws = context.read<WebSocketService>();
+    final summary = StringBuffer()
+      ..writeln('Situation brief of my last ${b.minutes} minutes '
+          '(${b.coverage}):');
+    if (b.timeline.isNotEmpty) {
+      for (final e in b.timeline) {
+        summary.writeln('${e.at}: ${e.what}');
+      }
+    }
+    summary.writeln('Goal: ${b.goal}');
+    if (b.problems.isNotEmpty) {
+      summary.writeln('Open problems: ${b.problems.join('; ')}');
+    }
+    summary.write('Pick up from here and help me with the next step.');
+
+    if (_summonDest == 'term') {
+      // Stash the brief as MAIN's handoff context BEFORE the terminal spawns —
+      // run.sh's seed pull happens after this command on the same socket.
+      ws.sendCommand('set_handoff_context',
+          {'key': 'main', 'transcript': summary.toString()});
+      setState(() {
+        _activeBrief = null;
+        _activeThread = null; // surface the MAIN tab the PTY attaches to
+      });
+      _openTerminalForTab('main');
+      return;
+    }
+    ws.sendUserCommand(summary.toString());
+    setState(() => _activeBrief = null);
   }
 
   void _onDragStart(DragStartDetails details) {
@@ -1234,11 +1403,14 @@ class OverlayShellState extends State<OverlayShell> {
       ),
       child: Column(
         children: [
-          // Header — draggable, with controls
+          // Header — draggable, with controls. Right-click opens the same
+          // native context menu as the eye (deliberate-capture gestures live
+          // there), so the commands stay reachable while the chat is open.
           GestureDetector(
             onPanStart: _onDragStart,
             onPanUpdate: _onDragUpdate,
             onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
+            onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
             child: Container(
               height: 40,
               padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -1456,6 +1628,80 @@ class OverlayShellState extends State<OverlayShell> {
                   AgentSelectorPanel(
                     onClose: () => setState(() => _showAgentPicker = false),
                   ),
+                // Deliberate capture — cards + chooser, bottom-right. The
+                // gestures are triggered from the eye's context menu (no
+                // dedicated buttons).
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (_saveReceipt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: SaveReceiptCard(
+                            receipt: _saveReceipt!,
+                            onUndo: () {
+                              final id = _saveReceipt!.saveId;
+                              context
+                                  .read<WebSocketService>()
+                                  .requestSaveUndo(id);
+                            },
+                            onDismiss: () =>
+                                setState(() => _saveReceipt = null),
+                          ),
+                        ),
+                      if (_activeEnrich != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: EnrichCardWidget(
+                            card: _activeEnrich!,
+                            onDismiss: () =>
+                                setState(() => _activeEnrich = null),
+                            onCallAi: () =>
+                                _callAiOnEnrich(_activeEnrich!),
+                            onCopy: () => _copyEnrichCard(_activeEnrich!),
+                          ),
+                        ),
+                      if (_activeBrief != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: BriefCard(
+                            brief: _activeBrief!,
+                            dest: _summonDest,
+                            onDestChanged: (d) =>
+                                setState(() => _summonDest = d),
+                            onDismiss: () =>
+                                setState(() => _activeBrief = null),
+                            onAskFollowUp: () =>
+                                _askFollowUpOnBrief(_activeBrief!),
+                            onSaveRange: () {
+                              final minutes = _activeBrief!.minutes;
+                              setState(() => _activeBrief = null);
+                              context
+                                  .read<WebSocketService>()
+                                  .requestSave(minutes);
+                            },
+                          ),
+                        ),
+                      if (_chooserFor != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: RangeChooser(
+                            title: _chooserFor == 'save'
+                                ? 'Save last…'
+                                : 'Call AI on last…',
+                            options: _rangeOptions,
+                            onPick: _pickRange,
+                            onClose: () =>
+                                setState(() => _chooserFor = null),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
