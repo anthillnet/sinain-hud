@@ -7,10 +7,28 @@ silence; the per-frame speech decision is a pluggable strategy — EnergyDetecto
 (adaptive noise floor, zero native deps, the default) or WebrtcDetector
 (py-webrtcvad, the `webrtcvad` extra), the two strategies the doc names.
 
-The transcription router (backends + hallucination/dedup filters) is the next
-slice per §5; this module is the capture-adjacent, network-free core.
+On top sits the transcription router (port of sinain-core's
+TranscriptionService): three backends — OpenRouter audio via sinain-llm,
+whisper-server HTTP, in-process faster-whisper (the `whisper` extra) — plus
+the hallucination filter, rolling-context prompting, and the per-source /
+cross-stream TranscriptDeduper.
 """
 
+from .filters import (
+    TranscriptDeduper,
+    bigram_similarity,
+    is_duplicate_transcript,
+    is_hallucination,
+)
+from .transcription import (
+    FasterWhisperBackend,
+    OpenRouterAudioBackend,
+    TranscriptResult,
+    TranscriptionBackend,
+    TranscriptionRouter,
+    WhisperServerBackend,
+    compose_whisper_prompt,
+)
 from .vad import (
     EnergyDetector,
     Segmenter,
@@ -29,4 +47,15 @@ __all__ = [
     "WavChunk",
     "wav_header",
     "rms_energy",
+    "TranscriptionRouter",
+    "TranscriptionBackend",
+    "TranscriptResult",
+    "OpenRouterAudioBackend",
+    "WhisperServerBackend",
+    "FasterWhisperBackend",
+    "compose_whisper_prompt",
+    "is_hallucination",
+    "bigram_similarity",
+    "is_duplicate_transcript",
+    "TranscriptDeduper",
 ]
