@@ -348,11 +348,21 @@ class BriefCard extends StatelessWidget {
                   child: Text('✕', style: _mono(12, t.textDim))),
             ),
           ]),
-          if (brief.coverage.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(brief.coverage, style: _mono(10, t.textDim)),
-            ),
+          // Metadata line: coverage left, chat/term destination right — kept
+          // out of the action row, which stays two buttons wide.
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Row(children: [
+              Expanded(
+                child: Text(brief.coverage,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _mono(10, t.textDim)),
+              ),
+              if (onDestChanged != null && brief.status == CardStatus.ready)
+                _destToggle(t),
+            ]),
+          ),
           const SizedBox(height: 8),
           if (working) const _Shimmer(),
           if (brief.status == CardStatus.error)
@@ -423,10 +433,6 @@ class BriefCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             Row(children: [
-              if (onDestChanged != null) ...[
-                _destToggle(t),
-                const SizedBox(width: 7),
-              ],
               Expanded(
                   child: _cardButton(
                       t,
