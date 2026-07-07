@@ -1438,69 +1438,20 @@ class OverlayShellState extends State<OverlayShell> {
   /// Card-mode surface: a slim panel with just the capture cards — the whole
   /// HUD stays closed. Clicking the eye glyph or ✕ collapses back to the eye.
   Widget _buildCardPanel() {
-    final theme = HudTheme.of(context);
     return Align(
       alignment: Alignment.topRight,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(10),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 60),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag strip — grab anywhere on this row to move the panel
-              // (same native drag as the chat header); ✕ dismisses.
-              GestureDetector(
-                onPanStart: _onDragStart,
-                onPanUpdate: _onDragUpdate,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                padding: const EdgeInsets.only(bottom: 6, right: 2),
-                child: Row(children: [
-                  Expanded(
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.grab,
-                      child: Container(
-                        height: 16,
-                        alignment: Alignment.center,
-                        child: Container(
-                          width: 36, height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _chooserFor = null;
-                        _activeBrief = null;
-                        _activeEnrich = null;
-                        _saveReceipt = null;
-                        // A live call keeps running — ✕ only hides the chip.
-                        if (_voiceSession?.isActive != true) {
-                          _voiceSession = null;
-                        }
-                      });
-                      _maybeExitCardMode();
-                    },
-                    child: Text('✕',
-                        style: TextStyle(
-                            fontSize: 13, color: theme.textDim)),
-                  ),
-                ),
-                ]),
-                ),
-              ),
-              _captureCardsColumn(),
-            ],
-          ),
+      child: GestureDetector(
+        // The whole panel is grabbable — a drag on any non-interactive card
+        // area moves the window (buttons/slider win the gesture arena for
+        // their own taps and drags), so no dedicated drag strip is needed.
+        // Each card carries its own ✕; closing the last one exits card mode.
+        onPanStart: _onDragStart,
+        onPanUpdate: _onDragUpdate,
+        behavior: HitTestBehavior.translucent,
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(10),
+          child: _captureCardsColumn(),
         ),
       ),
     );
