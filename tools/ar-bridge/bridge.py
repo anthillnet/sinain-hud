@@ -63,17 +63,28 @@ class ScreenTrack(MediaStreamTrack):
         self._arr = np.zeros((720, 1280, 3), dtype=np.uint8)  # black until first frame
         self._ts = 0
 
+    MAX_WIDTH = 1280  # softens VP8 encode CPU; plenty for the server's VLM
+
+    def _decode(self) -> None:
+        """Blocking JPEG read+decode — runs in a worker thread, never on the
+        event loop (a stalled loop starves BOTH audio directions: mic frames
+        pile up and TTS playback underruns → lag + distortion)."""
+        with open(self.path, "rb") as f:
+            data = f.read()
+        img = Image.open(BytesIO(data)).convert("RGB")
+        if img.width > self.MAX_WIDTH:
+            img = img.resize(
+                (self.MAX_WIDTH, round(img.height * self.MAX_WIDTH / img.width)))
+        arr = np.asarray(img)
+        # Even dimensions required by most encoders.
+        self._arr = arr[: arr.shape[0] // 2 * 2, : arr.shape[1] // 2 * 2]
+
     async def recv(self) -> av.VideoFrame:
         await asyncio.sleep(self.period)
         try:
             mtime = os.path.getmtime(self.path)
             if mtime != self._mtime:
-                with open(self.path, "rb") as f:
-                    data = f.read()
-                img = Image.open(BytesIO(data)).convert("RGB")
-                arr = np.asarray(img)
-                # Even dimensions required by most encoders.
-                self._arr = arr[: arr.shape[0] // 2 * 2, : arr.shape[1] // 2 * 2]
+                await asyncio.get_event_loop().run_in_executor(None, self._decode)
                 self._mtime = mtime
         except Exception:  # noqa: BLE001 — partial write / missing file: keep last frame
             pass
@@ -95,13 +106,23 @@ class MicTrack(MediaStreamTrack):
         self._ts = 0
         loop = asyncio.get_event_loop()
 
+        def _push(data: bytes) -> None:  # event loop
+            # Drop-oldest, never raise: put_nowait on a full queue would throw
+            # INSIDE the loop callback — asyncio logs every one to stderr, and
+            # that flood alone is enough to distort the call.
+            if self._queue.full():
+                try:
+                    self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            self._queue.put_nowait(data)
+
         def _cb(indata, _frames, _time, status):  # sounddevice thread
             if status:
                 pass  # over/underflows are survivable
-            data = bytes(indata)
             try:
-                loop.call_soon_threadsafe(self._queue.put_nowait, data)
-            except Exception:  # noqa: BLE001 — queue full: drop (late > stale)
+                loop.call_soon_threadsafe(_push, bytes(indata))
+            except Exception:  # noqa: BLE001 — loop closing: drop
                 pass
 
         self._stream = sd.RawInputStream(
@@ -137,11 +158,14 @@ async def play_remote_audio(track: MediaStreamTrack) -> None:
     out = sd.RawOutputStream(samplerate=AUDIO_RATE, channels=1, dtype="int16")
     out.start()
     resampler = av.AudioResampler(format="s16", layout="mono", rate=AUDIO_RATE)
+    loop = asyncio.get_event_loop()
     try:
         while True:
             frame = await track.recv()
             for f in resampler.resample(frame):
-                out.write(bytes(f.planes[0]))
+                # out.write blocks until the device buffer has room — do it in
+                # a worker thread so the event loop keeps pumping media.
+                await loop.run_in_executor(None, out.write, bytes(f.planes[0]))
     except MediaStreamError:
         pass
     finally:
