@@ -95,6 +95,10 @@ class OverlayShellState extends State<OverlayShell> {
   bool _regionBriefPending = false;
   String? _pendingRegionBrief;
   String? _regionBriefTarget;
+  // Region selected via the capture menu: unified select→enrich→handoff UX.
+  // The region becomes the enrich card's focus; handoff opens its thread.
+  bool _regionViaMenu = false;
+  RegionHighlight? _pendingRegion;
   // Where a summon follow-up goes: 'chat' (agent lane) | 'term' (seeded PTY).
   String _summonDest = 'chat';
   List<RangeOption> _rangeOptions = const [];
@@ -201,6 +205,20 @@ class OverlayShellState extends State<OverlayShell> {
         _regionBriefPending = false;
       } else if (_regionBriefPending) {
         _regionBriefTarget = picked.id;
+      }
+      // Menu flow (select→enrich→handoff): the region is the enrich card's
+      // focus — same card experience as Build Context / Call AI. No auto-run;
+      // the card's handoff button opens the region thread deliberately.
+      if (_regionViaMenu) {
+        _regionViaMenu = false;
+        _pendingRegion = picked;
+        final focus = picked.issue.isNotEmpty
+            ? picked.issue
+            : 'the selected screen region';
+        _enrichFocusFull = focus;
+        _enterCardMode();
+        ws.requestEnrich(focus);
+        return;
       }
       // "Copy" — just put this region's composed seed on the clipboard (for an
       // agent we don't integrate with). No thread, no HUD, no agent turn.
@@ -1109,6 +1127,7 @@ class OverlayShellState extends State<OverlayShell> {
       // plain region grab — the selection must never be blocked on the LLM.
       _maybeExitCardMode();
       _regionBriefPending = true;
+      _regionViaMenu = true;
       _pendingRegionBrief = null;
       _regionBriefTarget = null;
       ws.requestSummon(minutes).then((err) {
@@ -1198,6 +1217,20 @@ class OverlayShellState extends State<OverlayShell> {
   /// agent lane so there's something to DO with the card.
   void _callAiOnEnrich(EnrichCard c) {
     final ws = context.read<WebSocketService>();
+    // Region focus → hand off to the region's own thread (its seed already
+    // carries the ROI + the window brief), not MAIN.
+    final region = _pendingRegion;
+    if (region != null) {
+      _pendingRegion = null;
+      setState(() {
+        _activeEnrich = null;
+        _startedRegionThreads.add(region.id);
+      });
+      _regionEyes?.run(region);
+      if (!ws.escalationDesktop) _selectThread(region.id);
+      _leaveCardModeFor(HudState.chat);
+      return;
+    }
     final msg = StringBuffer()
       ..writeln('I copied this: ${_enrichFocusFull ?? c.focus}')
       ..write('Context: ${c.context}');
@@ -1370,8 +1403,15 @@ class OverlayShellState extends State<OverlayShell> {
             padding: const EdgeInsets.only(bottom: 8),
             child: EnrichCardWidget(
               card: _activeEnrich!,
+              title:
+                  _pendingRegion != null ? 'Region context' : 'Build context',
+              handoffLabel:
+                  'Handoff to ${_handoffAgentLabel(context.read<WebSocketService>())}',
               onDismiss: () {
-                setState(() => _activeEnrich = null);
+                setState(() {
+                  _activeEnrich = null;
+                  _pendingRegion = null;
+                });
                 _maybeExitCardMode();
               },
               onCallAi: () => _callAiOnEnrich(_activeEnrich!),

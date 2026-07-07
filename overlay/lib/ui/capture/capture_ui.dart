@@ -855,12 +855,22 @@ class EnrichCardWidget extends StatelessWidget {
   final VoidCallback? onCallAi;
   final VoidCallback? onCopy;
 
+  /// Header title — "Build context" for clipboard, "Region context" for a
+  /// selected screen region: one card experience, different selections.
+  final String title;
+
+  /// Handoff button label naming the destination agent
+  /// (e.g. "Handoff to Sinain Chat").
+  final String handoffLabel;
+
   const EnrichCardWidget({
     super.key,
     required this.card,
     required this.onDismiss,
     this.onCallAi,
     this.onCopy,
+    this.title = 'Build context',
+    this.handoffLabel = 'Call AI',
   });
 
   @override
@@ -877,7 +887,7 @@ class EnrichCardWidget extends StatelessWidget {
         children: [
           Row(children: [
             Expanded(
-                child: Text('Build context',
+                child: Text(title,
                     style: _mono(12, t.textPrimary, weight: FontWeight.w600))),
             if (card.latencyMs != null)
               Text('${(card.latencyMs! / 1000).toStringAsFixed(2)}s · last 10 min',
@@ -910,7 +920,8 @@ class EnrichCardWidget extends StatelessWidget {
             Row(children: [
               if (onCallAi != null)
                 Expanded(
-                    child: _cardButton(t, 'Call AI', onCallAi!, primary: true)),
+                    child:
+                        _cardButton(t, handoffLabel, onCallAi!, primary: true)),
               if (onCallAi != null && onCopy != null)
                 const SizedBox(width: 7),
               if (onCopy != null) _cardButton(t, 'Copy for agent', onCopy!),
