@@ -1449,9 +1449,32 @@ class OverlayShellState extends State<OverlayShell> {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Padding(
+              // Drag strip — grab anywhere on this row to move the panel
+              // (same native drag as the chat header); ✕ dismisses.
+              GestureDetector(
+                onPanStart: _onDragStart,
+                onPanUpdate: _onDragUpdate,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
                 padding: const EdgeInsets.only(bottom: 6, right: 2),
-                child: MouseRegion(
+                child: Row(children: [
+                  Expanded(
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.grab,
+                      child: Container(
+                        height: 16,
+                        alignment: Alignment.center,
+                        child: Container(
+                          width: 36, height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
                     onTap: () {
@@ -1471,6 +1494,8 @@ class OverlayShellState extends State<OverlayShell> {
                         style: TextStyle(
                             fontSize: 13, color: theme.textDim)),
                   ),
+                ),
+                ]),
                 ),
               ),
               _captureCardsColumn(),
