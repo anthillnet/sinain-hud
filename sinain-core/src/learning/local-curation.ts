@@ -587,13 +587,16 @@ export class LocalCurationService {
     const transcriptFile = join(tmpdir(), `${tmpTag}-transcript.json`);
     try {
       writeFileSync(transcriptFile, JSON.stringify(diskTranscript), { encoding: "utf-8", mode: 0o600 });
+      // A user-save can span hours of transcript — far bigger than the
+      // incremental batches. 30s here killed every 60-min save mid-distill
+      // ("distillation produced nothing" receipts); the LLM needs real time.
       const { stdout: digestJson } = await execFileAsync("python3", [
         resolve(this.scriptsDir, "session_distiller.py"),
         "--memory-dir", this.memoryDir,
         "--transcript-file", transcriptFile,
         "--session-meta", JSON.stringify(sessionMeta),
       ], {
-        timeout: 30_000,
+        timeout: 120_000,
         encoding: "utf-8",
         env: { ...process.env, PYTHONPATH: this.scriptsDir },
       });
@@ -606,8 +609,13 @@ export class LocalCurationService {
       digest._feedItemCount = diskTranscript.length;
       return digest;
     } catch (err: any) {
-      warn(TAG, `save distillation failed: ${err.message?.slice(0, 200)}`);
-      return null;
+      // Rethrow so the save receipt reports the real failure — a timeout is
+      // not "nothing to save in that range".
+      const reason = err.killed
+        ? "distiller timed out (120s) — range too large?"
+        : `distiller failed: ${err.message?.slice(0, 200)}`;
+      warn(TAG, `save distillation failed: ${reason}`);
+      throw new Error(reason);
     } finally {
       try { unlinkSync(transcriptFile); } catch { /* gone */ }
     }

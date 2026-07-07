@@ -56,7 +56,7 @@ export class SaveManager {
 
     try {
       const since = Date.now() - minutes * 60_000;
-      const items: Array<{ text: string; ts: number; source: string; channel: string }> = [
+      let items: Array<{ text: string; ts: number; source: string; channel: string }> = [
         ...this.feedBuffer.queryByTime(since).map((i) => ({
           text: i.text, ts: i.ts, source: i.source, channel: String(i.channel),
         })),
@@ -66,6 +66,25 @@ export class SaveManager {
       if (items.length === 0) {
         fail("nothing to save in that range — it was idle");
         return;
+      }
+
+      // Bound the distiller's input for multi-hour ranges: keep the most
+      // recent items under the char budget (recency > completeness — the
+      // older tail was likely covered by incremental distillation already).
+      // 120K ≈ the distiller's own 100K LLM cap; anything beyond it would
+      // only feed the coref/NEC preprocessing, whose cost grows with item
+      // count (measured: 437 items → 7+ min; 110 items → 18s end-to-end).
+      const MAX_TRANSCRIPT_CHARS = 120_000;
+      let total = 0;
+      let cut = items.length;
+      for (let i = items.length - 1; i >= 0; i--) {
+        total += items[i].text.length;
+        if (total > MAX_TRANSCRIPT_CHARS) { cut = i + 1; break; }
+        cut = i;
+      }
+      if (cut > 0) {
+        log(TAG, `${saveId}: transcript capped — dropped ${cut} oldest of ${items.length} items (${total} chars)`);
+        items = items.slice(cut);
       }
 
       const digest = await this.curation.distillOnly(items, {
