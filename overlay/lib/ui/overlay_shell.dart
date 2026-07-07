@@ -1235,6 +1235,25 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
+  /// Display name of the agent the current summon destination opens in —
+  /// the handoff button says where the brief will land.
+  String _handoffAgentLabel(WebSocketService ws) {
+    final id = _summonDest == 'term' ? ws.terminalAgent : ws.escalationAgent;
+    return switch (id) {
+      'sinain' => 'Sinain Chat',
+      'claude' => 'Claude Code',
+      'gclaude' => 'Claude',
+      'openclaude' => 'OpenClaude',
+      'codex' => 'Codex',
+      'goose' => 'Goose',
+      'junie' => 'Junie',
+      'aider' => 'Aider',
+      'claude-desktop' => 'Claude Desktop',
+      'chatgpt-desktop' => 'ChatGPT',
+      _ => id,
+    };
+  }
+
   /// Flatten a situation brief into the text form carried into agent seeds
   /// (Ask follow-up, terminal handoff, region + minutes).
   String _briefText(ContextBrief b) {
@@ -1365,6 +1384,7 @@ class OverlayShellState extends State<OverlayShell> {
             child: BriefCard(
               brief: _activeBrief!,
               dest: _summonDest,
+              destLabel: _handoffAgentLabel(context.read<WebSocketService>()),
               onDestChanged: (d) => setState(() => _summonDest = d),
               onDismiss: () {
                 setState(() => _activeBrief = null);

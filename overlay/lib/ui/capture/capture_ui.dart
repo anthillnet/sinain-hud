@@ -660,6 +660,10 @@ class BriefCard extends StatelessWidget {
   final String dest;
   final ValueChanged<String>? onDestChanged;
 
+  /// Display name of the agent the selected destination hands off to
+  /// (e.g. "Sinain Chat", "Claude Code") — we know where it will open.
+  final String destLabel;
+
   const BriefCard({
     super.key,
     required this.brief,
@@ -668,6 +672,7 @@ class BriefCard extends StatelessWidget {
     required this.onAskFollowUp,
     this.dest = 'chat',
     this.onDestChanged,
+    this.destLabel = '',
   });
 
   Widget _destToggle(HudTheme t) {
@@ -827,7 +832,9 @@ class BriefCard extends StatelessWidget {
               Expanded(
                   child: _cardButton(
                       t,
-                      dest == 'term' ? 'Open terminal' : 'Ask follow-up',
+                      destLabel.isNotEmpty
+                          ? 'Handoff to $destLabel'
+                          : (dest == 'term' ? 'Open terminal' : 'Ask follow-up'),
                       onAskFollowUp,
                       primary: true)),
               const SizedBox(width: 7),
