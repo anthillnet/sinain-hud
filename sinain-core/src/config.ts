@@ -334,6 +334,11 @@ export function loadConfig(): CoreConfig {
     email: env("ARSINAIN_EMAIL", ""),
     framePath: resolvePath(env("VOICE_FRAME_PATH", resolve(os.homedir(), ".sinain", "capture", "frame.jpg"))),
     fps: floatEnv("VOICE_FPS", 4),
+    // "webview" = the browser WebRTC stack in a hidden overlay WKWebView
+    // (echo cancellation + jitter buffer — same audio quality as the web
+    // client). "bridge" = the python aiortc fallback (raw mic, no AEC).
+    engine: env("VOICE_ENGINE", "webview") === "bridge" ? "bridge" : "webview",
+    turnUrl: env("TURN_CREDS_URL", "https://turn.sinain.com/turn-credentials"),
     // Meetbot transport: the deployed server whose container joins a Google
     // Meet/Teams call as "Sinain (AI)". It sits behind oauth2-proxy — supply
     // your logged-in browser's `_oauth2_proxy` cookie via ARSINAIN_COOKIE.

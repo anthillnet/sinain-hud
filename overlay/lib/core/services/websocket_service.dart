@@ -602,6 +602,10 @@ class WebSocketService extends ChangeNotifier {
     return null;
   }
 
+  /// Public HTTP base for native surfaces that load core pages directly
+  /// (the hidden-webview call engine).
+  String? get httpBase => _httpBase;
+
   /// Fetch the portable seed text for a thread (key = regionId or "main") so it
   /// can be copied to the clipboard — the same context we feed supported
   /// agents, built server-side. Returns null on any failure.

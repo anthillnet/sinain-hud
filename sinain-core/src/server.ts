@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, resolve as resolvePathJoin } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
 import type { Profiler } from "./profiler.js";
@@ -1717,6 +1720,12 @@ export interface ServerDeps {
   voicePair?: (cookie: string, token: string, email: string) => void;
   /** Current voice session state. */
   voiceStatus?: () => unknown;
+  /** Seed for the webview call engine's meta datachannel. */
+  voiceSeed?: () => { text: string; say: string };
+  /** Proxy the call page's SDP offer to ARSinain with the stored credential. */
+  voiceOffer?: (body: unknown) => Promise<{ status: number; body: string }>;
+  /** Lifecycle events reported by the call page (live/ended/error). */
+  voiceEngineEvent?: (status: string, error?: string) => void;
 
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
@@ -2025,6 +2034,77 @@ export function createAppServer(deps: ServerDeps) {
 
       if (req.method === "GET" && url.pathname === "/voice/status") {
         res.end(JSON.stringify({ ok: true, ...(deps.voiceStatus?.() ?? { status: "unavailable" }) }));
+        return;
+      }
+
+      // ── Hidden-webview call engine (browser WebRTC stack) ──
+      // The overlay's invisible WKWebView loads this page; it talks back to
+      // core only (same origin) — core proxies signaling with the paired
+      // device token so the page never holds a credential.
+      if (req.method === "GET" && url.pathname === "/voice/call.html") {
+        try {
+          const page = readFileSync(
+            resolvePathJoin(dirname(fileURLToPath(import.meta.url)), "..", "static", "voice-call.html"));
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          res.end(page);
+        } catch {
+          res.writeHead(404);
+          res.end(JSON.stringify({ ok: false, error: "call page missing" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/frame") {
+        try {
+          const jpeg = readFileSync(config.voiceConfig.framePath);
+          res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+          res.end(jpeg);
+        } catch {
+          res.writeHead(404);
+          res.end(JSON.stringify({ ok: false, error: "no frame — is sck-capture running?" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/seed") {
+        res.end(JSON.stringify(deps.voiceSeed?.() ?? { text: "", say: "" }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/turn") {
+        try {
+          const r = await fetch(config.voiceConfig.turnUrl, { signal: AbortSignal.timeout(5_000) });
+          res.writeHead(r.status, { "Content-Type": "application/json" });
+          res.end(await r.text());
+        } catch {
+          res.end(JSON.stringify({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }));
+        }
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/offer") {
+        if (!deps.voiceOffer) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 262_144); // SDP offers run large
+        try {
+          const result = await deps.voiceOffer(JSON.parse(body || "{}"));
+          res.writeHead(result.status, { "Content-Type": "application/json" });
+          res.end(result.body);
+        } catch (err) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ ok: false, error: String((err as Error).message ?? err).slice(0, 200) }));
+        }
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/engine") {
+        const body = await readBody(req, 4096);
+        const { status, error } = JSON.parse(body || "{}") as { status?: string; error?: string };
+        if (status) deps.voiceEngineEvent?.(status, error);
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
 

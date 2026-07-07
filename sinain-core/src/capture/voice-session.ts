@@ -139,12 +139,18 @@ export class VoiceSessionManager {
     }
   }
 
-  /** Start a bridge session seeded with the last N minutes (0 = unseeded). */
-  async start(minutes: number): Promise<{ ok: boolean; error?: string; loginUrl?: string }> {
+  /**
+   * Start a session seeded with the last N minutes (0 = unseeded). Returns
+   * `engine: "webview"` when the overlay should host the hidden-webview call
+   * engine (the default — browser WebRTC stack); otherwise the python
+   * ar-bridge is spawned here.
+   */
+  async start(minutes: number): Promise<{ ok: boolean; error?: string; loginUrl?: string; engine?: string }> {
     if (!this.voice.enabled) return { ok: false, error: "voice disabled (VOICE_ENABLED=false)" };
-    if (this.proc) return { ok: false, error: "a voice session is already running" };
+    if (this.proc || this.state === "starting" || this.state === "live") {
+      return { ok: false, error: "a voice session is already running" };
+    }
 
-    this.mode = "bridge";
     this.minutes = minutes;
     this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
 
@@ -157,6 +163,10 @@ export class VoiceSessionManager {
       const error = "login required";
       return { ok: false, error, loginUrl: `${this.voice.serverUrl.replace(/\/$/, "")}/hud/pair` };
     }
+
+    if (this.voice.engine === "webview") return this.startWebview(minutes);
+
+    this.mode = "bridge";
     this.setState("starting");
 
     const seedText = await this.composeSeed(minutes);
@@ -217,11 +227,77 @@ export class VoiceSessionManager {
     return { ok: true };
   }
 
-  /** End the session (SIGTERM → bridge closes the peer connection cleanly). */
+  // ── Hidden-webview engine ─────────────────────────────────────────────
+  // The overlay hosts an invisible WKWebView on /voice/call.html (served by
+  // this core). The page runs the SAME WebRTC mechanics as the proven
+  // ARSinain web client — getUserMedia with echo cancellation (it stops
+  // hearing its own TTS), adaptive playout jitter buffer — and feeds the
+  // screen by drawing /voice/frame onto a captured canvas. Core stays the
+  // session owner: it composes the seed, proxies signaling with the device
+  // token (page never holds a credential), and relays lifecycle events.
+
+  private pendingSeed: { text: string; say: string } = { text: "", say: "" };
+
+  private async startWebview(minutes: number): Promise<{ ok: boolean; engine: string }> {
+    this.mode = "webview";
+    this.setState("starting");
+    const seedText = await this.composeSeed(minutes);
+    this.pendingSeed = {
+      text: seedText,
+      say: seedText
+        ? `I've got your last ${minutes} minutes — ${this.coverage}. Go ahead.`
+        : "I can see your screen. Go ahead.",
+    };
+    log(TAG, `webview engine session: ${minutes} min seed, server=${this.voice.serverUrl}`);
+    return { ok: true, engine: "webview" };
+  }
+
+  /** Seed for the call page's meta datachannel (single use per session). */
+  seed(): { text: string; say: string } {
+    return this.pendingSeed;
+  }
+
+  /** Proxy the call page's SDP offer to ARSinain with our stored credential. */
+  async proxyOffer(body: unknown): Promise<{ status: number; body: string }> {
+    const auth = this.storedAuth();
+    const res = await fetch(`${this.voice.serverUrl.replace(/\/$/, "")}/offer`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(auth.token ? { "X-Sinain-Device": auth.token } : {}),
+        ...(this.voice.meetCookie || auth.cookie ? { Cookie: this.voice.meetCookie || auth.cookie } : {}),
+        ...(this.voice.email ? { "X-Auth-Request-Email": this.voice.email } : {}),
+      },
+      body: JSON.stringify(body),
+      redirect: "manual",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (res.status >= 300 && res.status < 400) {
+      return { status: 401, body: JSON.stringify({ error: "login required — re-pair from the HUD" }) };
+    }
+    return { status: res.status, body: await res.text() };
+  }
+
+  /** Lifecycle events reported by the call page (fetch POST /voice/engine). */
+  engineEvent(status: string, error?: string): void {
+    if (this.mode !== "webview") return;
+    if (status === "live") this.setState("live");
+    else if (status === "ended") this.setState("ended");
+    else if (status === "error") this.fail(error || "call engine failed");
+  }
+
+  /** End the session (SIGTERM → bridge closes the peer connection cleanly;
+   *  webview → broadcast "ended", the overlay tears the webview down). */
   stop(): boolean {
-    if (!this.proc) return false;
-    this.proc.kill("SIGTERM");
-    return true;
+    if (this.proc) {
+      this.proc.kill("SIGTERM");
+      return true;
+    }
+    if (this.mode === "webview" && (this.state === "starting" || this.state === "live")) {
+      this.setState("ended");
+      return true;
+    }
+    return false;
   }
 
   private cleanup(): void {

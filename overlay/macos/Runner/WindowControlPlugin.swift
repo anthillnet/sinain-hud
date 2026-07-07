@@ -49,6 +49,19 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 return
             }
             AuthWindowSession.open(url: url, cookieName: cookieName, result: result)
+        case "openCallEngine":
+            // Hidden-webview voice call engine: an invisible WKWebView runs
+            // the browser WebRTC stack (echo cancellation, jitter buffer) on
+            // core's /voice/call.html. See CallEngineSession below.
+            guard let a = args, let urlStr = a["url"] as? String, let url = URL(string: urlStr) else {
+                result(FlutterError(code: "args", message: "url required", details: nil))
+                return
+            }
+            CallEngineSession.open(url: url)
+            result(nil)
+        case "closeCallEngine":
+            CallEngineSession.close()
+            result(nil)
         case "setPrivacyMode":
             let enabled = args?["enabled"] as? Bool ?? true
             if #available(macOS 12.0, *) {
@@ -951,5 +964,80 @@ final class AuthWindowSession: NSObject {
         timer = nil
         window.close()
         cb(value)
+    }
+}
+
+// ── Hidden call engine (voice) ──────────────────────────────────────────────
+
+/// Invisible WKWebView running core's /voice/call.html — the browser WebRTC
+/// stack (getUserMedia echo cancellation/noise suppression + adaptive playout
+/// jitter buffer) without opening a visible browser. The panel is 2×2 px,
+/// nearly transparent and click-through, but technically on screen so WebKit
+/// keeps painting the canvas the page captures its screen track from.
+/// sharingType .none keeps it invisible to screen capture like every other
+/// HUD surface (it never appears in Sinain's own frames).
+final class CallEngineSession: NSObject, WKUIDelegate {
+    private static var session: CallEngineSession?
+
+    private var window: NSPanel?
+    private var webView: WKWebView?
+
+    static func open(url: URL) {
+        close()
+        let s = CallEngineSession()
+        s.start(url: url)
+        session = s
+    }
+
+    static func close() {
+        session?.teardown()
+        session = nil
+    }
+
+    private func start(url: URL) {
+        let config = WKWebViewConfiguration()
+        config.mediaTypesRequiringUserActionForPlayback = []
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 2, height: 2),
+                            configuration: config)
+        web.uiDelegate = self
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 4, y: 4, width: 2, height: 2),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.alphaValue = 0.01
+        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.sharingType = .none
+        panel.contentView = web
+        panel.orderFrontRegardless()
+
+        webView = web
+        window = panel
+        web.load(URLRequest(url: url))
+    }
+
+    @available(macOS 12.0, *)
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // Only our own local core page runs in this webview — grant without a
+        // per-call prompt (the one-time OS-level TCC mic prompt still applies).
+        decisionHandler(.grant)
+    }
+
+    private func teardown() {
+        // about:blank releases the mic before the window goes away.
+        webView?.load(URLRequest(url: URL(string: "about:blank")!))
+        webView?.uiDelegate = nil
+        window?.close()
+        webView = nil
+        window = nil
     }
 }

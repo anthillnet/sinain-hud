@@ -1953,6 +1953,9 @@ async function main() {
     voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),
     voiceStop: () => voiceManager.stop(),
     voiceStatus: () => voiceManager.status(),
+    voiceSeed: () => voiceManager.seed(),
+    voiceOffer: (body) => voiceManager.proxyOffer(body),
+    voiceEngineEvent: (status, error) => voiceManager.engineEvent(status, error),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;

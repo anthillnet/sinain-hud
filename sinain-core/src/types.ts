@@ -316,9 +316,10 @@ export interface EnrichCardMessage {
 export interface VoiceSessionMessage {
   type: "voice_session";
   status: "starting" | "live" | "ended" | "error";
-  /** Transport: local AR bridge (screen+mic WebRTC) or the deployed meetbot
-   *  joining a Google Meet/Teams call from its container. */
-  mode: "bridge" | "meet";
+  /** Transport: hidden-webview engine (browser WebRTC stack), local AR
+   *  bridge (python aiortc), or the deployed meetbot joining a Google
+   *  Meet/Teams call from its container. */
+  mode: "webview" | "bridge" | "meet";
   /** Range whose brief seeded the session (0 = unseeded). */
   minutes: number;
   coverage: string;
@@ -540,6 +541,13 @@ export interface VoiceConfig {
   framePath: string;
   /** Screen publish rate. */
   fps: number;
+  /** Media engine: "webview" = hidden WKWebView in the overlay running the
+   *  browser WebRTC stack (real AEC/NS/AGC + adaptive jitter buffer —
+   *  call-quality parity with the web client); "bridge" = python aiortc
+   *  fallback (raw mic, no echo cancellation). */
+  engine: "webview" | "bridge";
+  /** TURN credential minter the call page fetches ICE servers from. */
+  turnUrl: string;
   /** Deployed ARSinain for the meetbot transport (POST /meet). */
   meetServerUrl: string;
   /** oauth2-proxy session cookie for the deployed server ("your account").

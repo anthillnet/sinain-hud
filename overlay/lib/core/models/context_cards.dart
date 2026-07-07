@@ -152,7 +152,7 @@ class SaveReceipt {
 
 enum VoiceStatus { starting, live, ended, error }
 
-enum VoiceMode { bridge, meet }
+enum VoiceMode { webview, bridge, meet }
 
 /// "Call sinain" session state (WS `voice_session`).
 class VoiceSession {
@@ -179,7 +179,11 @@ class VoiceSession {
           'error' => VoiceStatus.error,
           _ => VoiceStatus.starting,
         },
-        mode: json['mode'] == 'meet' ? VoiceMode.meet : VoiceMode.bridge,
+        mode: switch (json['mode'] as String?) {
+          'meet' => VoiceMode.meet,
+          'bridge' => VoiceMode.bridge,
+          _ => VoiceMode.webview,
+        },
         minutes: (json['minutes'] as num?)?.toInt() ?? 0,
         coverage: json['coverage'] as String? ?? '',
         message: json['message'] as String?,

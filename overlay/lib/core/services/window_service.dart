@@ -39,6 +39,27 @@ class WindowService {
     }
   }
 
+  /// Hidden-webview voice call engine: an invisible WKWebView runs the
+  /// browser WebRTC stack on core's /voice/call.html (echo cancellation +
+  /// jitter buffer — call-quality parity with the web client).
+  Future<bool> openCallEngine(String url) async {
+    try {
+      await _channel.invokeMethod('openCallEngine', {'url': url});
+      return true;
+    } catch (e) {
+      _log('openCallEngine failed: $e');
+      return false;
+    }
+  }
+
+  Future<void> closeCallEngine() async {
+    try {
+      await _channel.invokeMethod('closeCallEngine');
+    } catch (e) {
+      _log('closeCallEngine failed: $e');
+    }
+  }
+
   Future<void> setPrivacyMode(bool enabled) async {
     try {
       await _channel.invokeMethod('setPrivacyMode', {'enabled': enabled});

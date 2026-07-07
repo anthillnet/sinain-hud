@@ -308,6 +308,11 @@ class OverlayShellState extends State<OverlayShell> {
       if (!mounted) return;
       setState(() => _voiceSession = s);
       _enterCardMode();
+      if (s.status == VoiceStatus.ended || s.status == VoiceStatus.error) {
+        // Webview engine: core broadcast the end (End button, server hangup,
+        // page error) — tear the hidden webview down so the mic releases.
+        _windowService.closeCallEngine();
+      }
       if (s.status == VoiceStatus.ended) {
         Timer(const Duration(seconds: 3), () {
           if (mounted && _voiceSession?.status == VoiceStatus.ended) {
@@ -1149,7 +1154,16 @@ class OverlayShellState extends State<OverlayShell> {
     final error = resp == null
         ? 'core unreachable'
         : (resp['ok'] == true ? null : (resp['error'] as String? ?? 'failed'));
-    if (error == null) return; // lifecycle continues on voiceSessionStream
+    if (error == null) {
+      // Webview engine: core owns the session; we host the invisible
+      // WKWebView that runs the browser WebRTC stack on core's call page.
+      if (resp?['engine'] == 'webview') {
+        final base = ws.httpBase ?? 'http://localhost:9500';
+        final opened = await _windowService.openCallEngine('$base/voice/call.html');
+        if (!opened) ws.requestVoiceStop();
+      }
+      return; // lifecycle continues on voiceSessionStream
+    }
 
     final loginUrl = resp?['loginUrl'] as String?;
     if (loginUrl != null && !retried) {
