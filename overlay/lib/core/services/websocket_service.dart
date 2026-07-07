@@ -746,6 +746,27 @@ class WebSocketService extends ChangeNotifier {
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
 
+  /// Chooser context card: cached range summary + coverage for a duration.
+  Future<Map<String, dynamic>?> fetchWindowPreview(int minutes) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse('$base/window/preview?minutes=$minutes'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      return (jsonDecode(body) as Map<String, dynamic>)['preview']
+          as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
   /// Live coverage for an arbitrary slider position (free window data).
   Future<String?> fetchCoverageAt(int minutes) async {
     final base = _httpBase;

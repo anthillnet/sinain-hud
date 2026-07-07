@@ -1705,6 +1705,8 @@ export interface ServerDeps {
   windowCoverage?: () => unknown;
   /** Live coverage for an arbitrary N (the chooser slider). */
   windowCoverageAt?: (minutes: number) => unknown;
+  /** Chooser context card: cached range summary + coverage. */
+  windowPreview?: (minutes: number) => Promise<unknown>;
   /** "Call sinain": start a bridge voice session seeded with the last N minutes. */
   voiceStart?: (minutes: number) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
   /** "Call sinain" via the deployed meetbot: bot joins the given Meet/Teams call. */
@@ -1935,6 +1937,12 @@ export function createAppServer(deps: ServerDeps) {
         const requestId = `enrich-${Date.now().toString(36)}`;
         res.end(JSON.stringify({ ok: true, requestId }));
         void deps.contextEnrich(focus, requestId);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/window/preview") {
+        const minutes = clampMinutes(Number(url.searchParams.get("minutes") ?? 30));
+        res.end(JSON.stringify({ ok: true, preview: (await deps.windowPreview?.(minutes)) ?? null }));
         return;
       }
 

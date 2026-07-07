@@ -760,18 +760,6 @@ class OverlayShellState extends State<OverlayShell> {
     await _buildContextFromClipboard();
   }
 
-  /// Menu title for Build Context with the clipboard's head inline, so the
-  /// target is unambiguous before firing (v2 §2).
-  Future<String> _buildContextMenuTitle() async {
-    final clip = await Clipboard.getData(Clipboard.kTextPlain);
-    final head = _stripSinainContext(clip?.text ?? '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (head.isEmpty) return 'Build Context from Clipboard';
-    final preview = head.length > 18 ? '${head.substring(0, 15)}…' : head;
-    return 'Build Context: "$preview"';
-  }
-
   /// Divider written before any Sinain-generated clipboard context. Both
   /// clipboard features (seed enrich above, Build-context Copy) use it, so a
   /// single strip at this marker recovers the user's original content.
@@ -797,7 +785,7 @@ class OverlayShellState extends State<OverlayShell> {
       // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
       // "Copy for agent" action produces the same agent-grade seed, visibly.
       // Shows the clipboard head inline so the target is unambiguous.
-      {'id': 'capBuild', 'title': await _buildContextMenuTitle(), 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
+      {'id': 'capBuild', 'title': 'Build Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
       if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
@@ -1402,8 +1390,9 @@ class OverlayShellState extends State<OverlayShell> {
               },
               options: _rangeOptions,
               onConfirm: _pickRange,
-              coverageAt: (m) =>
-                  context.read<WebSocketService>().fetchCoverageAt(m),
+              showRange: _chooserFor != 'region',
+              previewAt: (m) =>
+                  context.read<WebSocketService>().fetchWindowPreview(m),
               onClose: () {
                 setState(() => _chooserFor = null);
                 _maybeExitCardMode();

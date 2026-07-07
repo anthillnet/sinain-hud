@@ -1821,6 +1821,7 @@ async function main() {
   // ── Deliberate capture: save manager + burst-lane gestures ──
   const { SaveManager } = await import("./capture/save-manager.js");
   const { assembleWindow, chooserOptions, describeCoverage, summonBrief, enrichFocus } = await import("./capture/window-ops.js");
+  const { burstCall } = await import("./capture/burst-client.js");
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
@@ -1830,6 +1831,7 @@ async function main() {
     (msg) => wsHandler.broadcastRaw(msg),
   );
 
+  const windowPreviewCache = new Map<number, { ts: number; summary: string }>();
   const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
     // Cerebras free tier reports no cost; tokens still tracked for visibility.
     costTracker.record({
@@ -1916,6 +1918,36 @@ async function main() {
       covers: describeCoverage(feedBuffer, senseBuffer, minutes),
       availableMinutes: 0,
     }),
+    windowPreview: async (minutes) => {
+      // Chooser context card: a one-look summary of what the range holds.
+      // Cached per duration (90s TTL) so scrubbing the slider back and forth
+      // never re-calls the LLM for a duration it already previewed.
+      const covers = describeCoverage(feedBuffer, senseBuffer, minutes);
+      const hit = windowPreviewCache.get(minutes);
+      if (hit && Date.now() - hit.ts < 90_000) {
+        return { minutes, covers, summary: hit.summary };
+      }
+      let summary = "";
+      if (config.burstConfig.enabled && config.burstConfig.apiKey) {
+        try {
+          const slice = assembleWindow(feedBuffer, senseBuffer, minutes);
+          if (slice.lineCount > 0) {
+            const r = await burstCall(config.burstConfig, {
+              system: "Summarize this slice of the user's screen/audio activity in 1-2 short sentences — what they were doing, named specifically. No preamble.",
+              // Tail of the slice is enough for a preview — keeps every slider
+              // stop cheap regardless of range length.
+              user: slice.text.slice(-12_000),
+              maxTokens: 90,
+              cacheKey: "sinain-preview-v1",
+            });
+            summary = r.content.trim();
+            recordBurstUsage(r);
+          }
+        } catch { /* preview is decoration — coverage alone is fine */ }
+      }
+      windowPreviewCache.set(minutes, { ts: Date.now(), summary });
+      return { minutes, covers, summary };
+    },
     voiceStart: config.voiceConfig.enabled ? (minutes) => voiceManager.start(minutes) : undefined,
     voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
     voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),

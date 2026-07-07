@@ -42,8 +42,13 @@ class RangeChooser extends StatefulWidget {
   final ValueChanged<int> onConfirm;
   final VoidCallback onClose;
 
-  /// Live coverage lookup for arbitrary slider positions (free window data).
-  final Future<String?> Function(int minutes)? coverageAt;
+  /// Context-card lookup: {covers, summary} for a duration. Results are
+  /// cached per duration widget-side, so scrubbing the slider never re-asks.
+  final Future<Map<String, dynamic>?> Function(int minutes)? previewAt;
+
+  /// When false, the presets + slider are hidden (region flow: fixed range,
+  /// context card only).
+  final bool showRange;
 
   const RangeChooser({
     super.key,
@@ -52,7 +57,8 @@ class RangeChooser extends StatefulWidget {
     required this.onConfirm,
     required this.onClose,
     this.defaultMinutes = 30,
-    this.coverageAt,
+    this.previewAt,
+    this.showRange = true,
   });
 
   @override
@@ -64,6 +70,32 @@ class _RangeChooserState extends State<RangeChooser> {
   late int _minutes = widget.defaultMinutes;
   String? _covers;
   Timer? _debounce;
+  // Per-duration context-card cache — slider scrubbing hits this, not the LLM.
+  final Map<int, String> _summaryCache = {};
+  final Map<int, String> _coversCache = {};
+  bool _previewLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchPreview(_minutes);
+  }
+
+  void _fetchPreview(int n) {
+    if (widget.previewAt == null) return;
+    if (_summaryCache.containsKey(n)) return; // cached — no call
+    setState(() => _previewLoading = true);
+    widget.previewAt!(n).then((p) {
+      if (!mounted) return;
+      setState(() {
+        _previewLoading = false;
+        if (p != null) {
+          _summaryCache[n] = p['summary'] as String? ?? '';
+          _coversCache[n] = p['covers'] as String? ?? '';
+        }
+      });
+    });
+  }
 
   Color get _accent => switch (widget.kind) {
         ChooserKind.voice || ChooserKind.handoff => _blue,
@@ -87,7 +119,7 @@ class _RangeChooserState extends State<RangeChooser> {
         ChooserKind.save => 'Save $_minutes min',
         ChooserKind.handoff => 'Hand off $_minutes min',
         ChooserKind.voice => 'Call on $_minutes min',
-        ChooserKind.region => 'Region · $_minutes min',
+        ChooserKind.region => 'Select region',
       };
 
   /// Past ~90 min the readout warns; past 100 the range splits into two burst
@@ -97,7 +129,7 @@ class _RangeChooserState extends State<RangeChooser> {
 
   String get _coversText {
     final o = widget.options.where((o) => o.minutes == _minutes).firstOrNull;
-    final base = _covers ?? o?.covers ?? '';
+    final base = _coversCache[_minutes] ?? _covers ?? o?.covers ?? '';
     final avail = widget.options.firstOrNull?.availableMinutes ?? 0;
     if (avail > 0 && avail < _minutes) return 'only $avail min so far';
     return base.isEmpty ? '—' : base;
@@ -109,12 +141,9 @@ class _RangeChooserState extends State<RangeChooser> {
 
   void _setMinutes(int n) {
     setState(() => _minutes = n);
-    if (widget.coverageAt == null) return;
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 250), () async {
-      final covers = await widget.coverageAt!(_minutes);
-      if (mounted && covers != null) setState(() => _covers = covers);
-    });
+    // Cached durations render instantly; only a settled, new duration asks.
+    _debounce = Timer(const Duration(milliseconds: 350), () => _fetchPreview(n));
   }
 
   @override
@@ -159,6 +188,7 @@ class _RangeChooserState extends State<RangeChooser> {
             ]),
           ),
           // Preset chips — the fast path
+          if (widget.showRange)
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
             child: Row(children: [
@@ -193,6 +223,7 @@ class _RangeChooserState extends State<RangeChooser> {
             ]),
           ),
           // Slider — 5-min steps, escape hatch past the presets
+          if (widget.showRange)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: SliderTheme(
@@ -214,6 +245,7 @@ class _RangeChooserState extends State<RangeChooser> {
               ),
             ),
           ),
+          if (widget.showRange)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
             child: Row(
@@ -242,6 +274,16 @@ class _RangeChooserState extends State<RangeChooser> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: _mono(11, t.textMuted, height: 1.35)),
+                if ((_summaryCache[_minutes] ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(_summaryCache[_minutes]!,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: _mono(11, t.textPrimary, height: 1.35)),
+                ] else if (_previewLoading) ...[
+                  const SizedBox(height: 6),
+                  Text('summarizing…', style: _mono(10, t.textDim)),
+                ],
                 const SizedBox(height: 8),
                 Row(children: [
                   Text(_latency, style: _mono(10, t.textDim)),
