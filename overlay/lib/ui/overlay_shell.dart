@@ -84,7 +84,7 @@ class OverlayShellState extends State<OverlayShell> {
   bool _feedbackEvaluated = false;
 
   // Deliberate capture (Save · Call AI · Build context)
-  String? _chooserFor; // null | 'save' | 'summon'
+  String? _chooserFor; // null | 'save' | 'call'
   // Compact card mode: cards shown in a slim panel without opening the chat.
   bool _cardMode = false;
   // Full clipboard text behind the current enrich card (focus is a preview).
@@ -796,10 +796,9 @@ class OverlayShellState extends State<OverlayShell> {
       // Deliberate capture — the three window gestures live here, not as
       // dedicated HUD buttons (design: reuse existing controls).
       {'id': 'capSave', 'title': 'Save Last…'},
-      {'id': 'capSummon', 'title': 'Call AI on…'},
-      // Voice call with the sinain agent (v2): the chooser's range becomes the
-      // call's seeded context ("SINAIN WILL KNOW").
-      {'id': 'capVoice', 'title': 'Call Sinain on…'},
+      // One entry for both call destinations — the chooser card carries a
+      // "Call AI" (text handoff) and a "Call sinain" (live voice) button.
+      {'id': 'capCall', 'title': 'Call on Last…'},
       // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
       // "Copy for agent" action produces the same agent-grade seed, visibly.
       // Shows the clipboard head inline so the target is unambiguous.
@@ -820,20 +819,17 @@ class OverlayShellState extends State<OverlayShell> {
       case 'capSave':
         _enterCardMode();
         await _openRangeChooser('save');
-      case 'capSummon':
+      case 'capCall':
         _enterCardMode();
-        await _openRangeChooser('summon');
-      case 'capVoice':
-        _enterCardMode();
-        await _openRangeChooser('voice');
+        await _openRangeChooser('call');
       case 'capBuild':
         _enterCardMode();
         await _buildContextFromClipboard();
       case 'region':
-        // Same minutes chooser as Call AI — the selected region's thread gets
-        // a brief of the last N minutes as its opening context.
-        _enterCardMode();
-        await _openRangeChooser('region');
+        // Selection FIRST — the drag defines the subject; the enrich card
+        // (card mode) follows with the region as its focus. A default-range
+        // window brief is prefetched for the region thread's opening context.
+        await _startRegionSelect();
       case 'copySeed':
         await _copySeedForActiveThread();
       case 'reset':
@@ -1107,7 +1103,7 @@ class OverlayShellState extends State<OverlayShell> {
     if (action == 'save') {
       await ws.requestSave(minutes);
       // Receipt lifecycle arrives via saveReceiptStream.
-    } else if (action == 'summon') {
+    } else if (action == 'call') {
       final err = await ws.requestSummon(minutes);
       if (err != null && mounted) {
         setState(() => _activeBrief = ContextBrief(
@@ -1118,23 +1114,26 @@ class OverlayShellState extends State<OverlayShell> {
               error: err,
             ));
       }
-    } else if (action == 'voice') {
-      await _callSinain(minutes);
-    } else if (action == 'region') {
-      // Region + minutes: kick the brief off NOW so it's usually ready by the
-      // time the drag-select lands; the region handler stashes it into the
-      // thread. Then start the native selector. Brief errors degrade to a
-      // plain region grab — the selection must never be blocked on the LLM.
-      _maybeExitCardMode();
-      _regionBriefPending = true;
-      _regionViaMenu = true;
-      _pendingRegionBrief = null;
-      _regionBriefTarget = null;
-      ws.requestSummon(minutes).then((err) {
-        if (err != null) _regionBriefPending = false;
-      });
-      await _startManualRoi();
     }
+  }
+
+  /// "Select Region…" (menu): straight into the native drag-select; the
+  /// enrich card follows the drop. A brief of the last N minutes is kicked
+  /// off NOW so it's usually ready when the drag lands — the region handler
+  /// stashes it into the thread. Brief errors degrade to a plain region
+  /// grab; the selection is never blocked on the LLM.
+  static const _regionBriefMinutes = 30;
+
+  Future<void> _startRegionSelect() async {
+    final ws = context.read<WebSocketService>();
+    _regionBriefPending = true;
+    _regionViaMenu = true;
+    _pendingRegionBrief = null;
+    _regionBriefTarget = null;
+    ws.requestSummon(_regionBriefMinutes).then((err) {
+      if (err != null) _regionBriefPending = false;
+    });
+    await _startManualRoi();
   }
 
   /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC
@@ -1442,15 +1441,15 @@ class OverlayShellState extends State<OverlayShell> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: RangeChooser(
-              kind: switch (_chooserFor) {
-                'save' => ChooserKind.save,
-                'voice' => ChooserKind.voice,
-                'region' => ChooserKind.region,
-                _ => ChooserKind.handoff,
-              },
+              kind: _chooserFor == 'save' ? ChooserKind.save : ChooserKind.call,
               options: _rangeOptions,
               onConfirm: _pickRange,
-              showRange: _chooserFor != 'region',
+              onConfirmAlt: _chooserFor == 'call'
+                  ? (minutes) {
+                      setState(() => _chooserFor = null);
+                      _callSinain(minutes);
+                    }
+                  : null,
               previewAt: (m) =>
                   context.read<WebSocketService>().fetchWindowPreview(m),
               onClose: () {

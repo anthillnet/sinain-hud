@@ -1781,6 +1781,10 @@ export function createAppServer(deps: ServerDeps) {
     if (req.method === "OPTIONS") {
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      // Chrome Private Network Access: the ARSinain /hud/pair page (public
+      // https origin) POSTs the device token here (localhost) — the preflight
+      // must opt in or Chrome blocks the request.
+      res.setHeader("Access-Control-Allow-Private-Network", "true");
       res.writeHead(204);
       res.end();
       return;

@@ -33,22 +33,24 @@ const _amber = Color(0xFFD9A21B);
 const _endRed = Color(0xFFB3361C);
 
 /// Which gesture the chooser confirms — sets accent, consent label, and verb.
-enum ChooserKind { save, handoff, voice, region }
+/// `call` carries BOTH destinations (Call AI / Call sinain) as two buttons on
+/// the one card — one menu entry, the choice happens at confirm time.
+enum ChooserKind { save, call }
 
 class RangeChooser extends StatefulWidget {
   final ChooserKind kind;
   final List<RangeOption> options;
   final int defaultMinutes;
   final ValueChanged<int> onConfirm;
+
+  /// Second confirm for [ChooserKind.call]: "Call sinain" (live voice call),
+  /// next to the primary "Call AI" (text handoff). Null hides the button.
+  final ValueChanged<int>? onConfirmAlt;
   final VoidCallback onClose;
 
   /// Context-card lookup: {covers, summary} for a duration. Results are
   /// cached per duration widget-side, so scrubbing the slider never re-asks.
   final Future<Map<String, dynamic>?> Function(int minutes)? previewAt;
-
-  /// When false, the presets + slider are hidden (region flow: fixed range,
-  /// context card only).
-  final bool showRange;
 
   const RangeChooser({
     super.key,
@@ -56,9 +58,9 @@ class RangeChooser extends StatefulWidget {
     required this.options,
     required this.onConfirm,
     required this.onClose,
+    this.onConfirmAlt,
     this.defaultMinutes = 30,
     this.previewAt,
-    this.showRange = true,
   });
 
   @override
@@ -98,28 +100,24 @@ class _RangeChooserState extends State<RangeChooser> {
   }
 
   Color get _accent => switch (widget.kind) {
-        ChooserKind.voice || ChooserKind.handoff => _blue,
-        _ => const Color(0xFF1F8039),
+        ChooserKind.call => _blue,
+        ChooserKind.save => const Color(0xFF1F8039),
       };
 
   String get _title => switch (widget.kind) {
         ChooserKind.save => 'Save last…',
-        ChooserKind.handoff => 'Call AI on…',
-        ChooserKind.voice => 'Call sinain on…',
-        ChooserKind.region => 'Region · brief of last…',
+        ChooserKind.call => 'Call on last…',
       };
 
   String get _consentLabel => switch (widget.kind) {
-        ChooserKind.save || ChooserKind.region => 'COVERS',
-        ChooserKind.voice => 'SINAIN WILL KNOW',
-        ChooserKind.handoff => 'AGENT WILL KNOW',
+        ChooserKind.save => 'COVERS',
+        ChooserKind.call => 'AI WILL KNOW',
       };
 
   String get _verb => switch (widget.kind) {
         ChooserKind.save => 'Save $_minutes min',
-        ChooserKind.handoff => 'Hand off $_minutes min',
-        ChooserKind.voice => 'Call on $_minutes min',
-        ChooserKind.region => 'Select region',
+        // Two destinations on one card — minutes live in the readout above.
+        ChooserKind.call => 'Call AI',
       };
 
   /// Past ~90 min the readout warns; past 100 the range splits into two burst
@@ -188,7 +186,6 @@ class _RangeChooserState extends State<RangeChooser> {
             ]),
           ),
           // Preset chips — the fast path
-          if (widget.showRange)
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
             child: Row(children: [
@@ -223,7 +220,6 @@ class _RangeChooserState extends State<RangeChooser> {
             ]),
           ),
           // Slider — 5-min steps, escape hatch past the presets
-          if (widget.showRange)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: SliderTheme(
@@ -245,7 +241,6 @@ class _RangeChooserState extends State<RangeChooser> {
               ),
             ),
           ),
-          if (widget.showRange)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
             child: Row(
@@ -297,34 +292,47 @@ class _RangeChooserState extends State<RangeChooser> {
               ],
             ),
           ),
-          // Verb button + cancel
+          // Verb button(s) + cancel — `call` puts both destinations side by
+          // side: Call AI (text handoff, blue) / Call sinain (voice, green).
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
             child: Row(children: [
               Expanded(
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: () => widget.onConfirm(_minutes),
-                    child: Container(
-                      height: 28,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: _accent,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(_verb,
-                          style: _mono(12, Colors.white,
-                              weight: FontWeight.w500)),
-                    ),
-                  ),
-                ),
+                child: _verbButton(_verb, _accent,
+                    () => widget.onConfirm(_minutes)),
               ),
+              if (widget.kind == ChooserKind.call &&
+                  widget.onConfirmAlt != null) ...[
+                const SizedBox(width: 7),
+                Expanded(
+                  child: _verbButton('Call sinain', const Color(0xFF1F8039),
+                      () => widget.onConfirmAlt!(_minutes)),
+                ),
+              ],
               const SizedBox(width: 7),
               _cardButton(t, 'Cancel', widget.onClose),
             ]),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _verbButton(String label, Color color, VoidCallback onTap) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(label,
+              style: _mono(12, Colors.white, weight: FontWeight.w500)),
+        ),
       ),
     );
   }
