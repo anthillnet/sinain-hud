@@ -378,7 +378,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
 
   void _syncTimer() {
     if (widget.session.status == VoiceStatus.live &&
-        widget.session.mode == VoiceMode.bridge) {
+        widget.session.mode != VoiceMode.meet) {
       _liveSince ??= DateTime.now();
       _ticker ??= Timer.periodic(
           const Duration(seconds: 1), (_) => mounted ? setState(() {}) : null);
@@ -451,8 +451,8 @@ class _VoiceCallChipState extends State<VoiceCallChip>
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(children: [
-            if (live && s.mode == VoiceMode.bridge) _waveform(),
-            if (!(live && s.mode == VoiceMode.bridge))
+            if (live && s.mode != VoiceMode.meet) _waveform(),
+            if (!(live && s.mode != VoiceMode.meet))
               Container(
                 width: 10, height: 10,
                 decoration: BoxDecoration(
@@ -475,7 +475,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
                 style: _mono(12, t.textPrimary, weight: FontWeight.w600),
               ),
             ),
-            if (live && s.mode == VoiceMode.bridge)
+            if (live && s.mode != VoiceMode.meet)
               Text(_elapsed, style: _mono(10, t.textMuted)),
             if (!live || s.mode == VoiceMode.meet) ...[
               const SizedBox(width: 8),
@@ -504,7 +504,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
               padding: const EdgeInsets.only(top: 4),
               child: Text(s.coverage, style: _mono(10, t.textDim)),
             ),
-          if (live && s.mode == VoiceMode.bridge) ...[
+          if (live && s.mode != VoiceMode.meet) ...[
             const SizedBox(height: 9),
             Row(children: [
               const Spacer(),
