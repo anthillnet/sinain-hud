@@ -72,9 +72,13 @@ export async function execDirective(req: DirectiveRequest, deps: DirectiveDeps):
           getJson(`${deps.coreUrl}/memory/episodes?q=${q}&limit=6`),
         ]);
         const factsText = facts.status === "fulfilled" ? String(facts.value?.facts_text ?? "") : "";
-        const eps = episodes.status === "fulfilled" && episodes.value?.ok !== false
-          ? episodes.value?.episodes ?? episodes.value?.results ?? []
+        const rawEps = episodes.status === "fulfilled" && episodes.value?.ok !== false
+          ? episodes.value?.episodes ?? []
           : [];
+        // Only the speakable fields — the cloud phrases these for TTS.
+        const eps = (Array.isArray(rawEps) ? rawEps : []).map((e: any) => ({
+          when: e?.t_start ?? "", kind: e?.kind ?? "", summary: e?.summary ?? "",
+        }));
         if (!factsText && (!Array.isArray(eps) || eps.length === 0)) {
           return { ok: true, data: { facts: "", episodes: [] } };
         }
