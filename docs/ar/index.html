@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sinain AR — point your phone, ask anything</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+<!-- Cookieless analytics (self-hosted Umami, no cookies/PII) -->
+<script defer src="https://analytics.sinain.com/script.js" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
+<style>
+  /* ─── Design tokens (shared with the main Sinain site) ─── */
+  :root{
+    --bg:#ffffff; --bg-elev:#f8fafc; --bg-hover:#f1f5f9; --bg-deep:#0f172a;
+    --fg:#0f172a; --fg-dim:#475569; --fg-faint:#94a3b8;
+    --accent:#2563eb; --accent-dim:#1d4ed8; --accent-soft:rgba(37,99,235,0.10);
+    --good:#15803d; --good-soft:rgba(21,128,61,0.10);
+    --amber:#f59e0b;   /* AR marker accent, echoes the in-product yellow */
+    --border:#e2e8f0; --border-strong:#cbd5e1; --chip:#f1f5f9;
+    --shadow:0 4px 18px rgba(15,23,42,.08); --shadow-lg:0 10px 40px rgba(15,23,42,.12);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{overflow-x:hidden} html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono);font-size:.92em}
+  .container{max-width:1180px;margin:0 auto;padding:0 24px}
+
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--bg-elev);color:var(--fg);border:1px solid var(--border);padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit;font-weight:500;line-height:1;transition:background .15s,border-color .15s;white-space:nowrap}
+  .btn:hover{background:var(--bg-hover);border-color:var(--border-strong);text-decoration:none}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+  .btn.primary:hover{background:var(--accent-dim);border-color:var(--accent-dim);color:#fff}
+  .btn .arr{transition:transform .15s} .btn:hover .arr{transform:translateX(2px)}
+  .btn-lg{padding:11px 18px;font-size:15px;border-radius:8px}
+
+  header.top{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:saturate(160%) blur(10px);border-bottom:1px solid var(--border)}
+  .top-inner{display:flex;align-items:center;gap:18px;height:60px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--accent);font-size:16px;letter-spacing:.02em}
+  .logo .mark{width:22px;height:22px;display:block;flex-shrink:0}
+  .logo .sub{color:var(--fg-faint);font-weight:500;font-size:12px;margin-left:2px;white-space:nowrap}
+  nav.primary{display:flex;gap:20px;color:var(--fg-dim);font-size:13.5px}
+  nav.primary a{color:var(--fg-dim)} nav.primary a:hover{color:var(--fg);text-decoration:none}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+  .pill-good{background:var(--good-soft);color:var(--good)}
+  .pill-chip{background:var(--chip);color:var(--fg-dim)}
+
+  /* ─── Hero ─── */
+  .hero{padding:88px 0 56px}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:64px;align-items:center}
+  .eyebrow{display:inline-flex;align-items:center;gap:10px;color:var(--accent);font-weight:600;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase}
+  .eyebrow .bar{width:22px;height:2px;background:var(--accent);border-radius:2px}
+  h1.hero-title{margin:18px 0 18px;font-weight:700;font-size:58px;line-height:1.05;letter-spacing:-0.025em;color:var(--fg);text-wrap:balance}
+  h1.hero-title em{font-style:normal;color:var(--accent)}
+  .hero-sub{font-size:17px;color:var(--fg-dim);max-width:52ch;text-wrap:pretty;margin:0}
+  .hero-sub strong{color:var(--fg);font-weight:600}
+  .cta{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap}
+  .fineprint{margin-top:14px;font-size:12.5px;color:var(--fg-dim);max-width:54ch}
+  .meta{margin-top:30px;display:flex;flex-wrap:wrap;gap:18px 28px;color:var(--fg-dim);font-size:13px}
+  .meta .k{color:var(--fg-faint);margin-right:8px;text-transform:uppercase;font-size:11px;letter-spacing:.05em;font-weight:600}
+  .meta b{color:var(--fg);font-weight:600}
+
+  /* ─── Phone mockup (the hero visual) ─── */
+  .phone-col{display:flex;justify-content:center}
+  .phone{position:relative;width:290px;height:590px;border-radius:40px;background:#0b0f1a;border:1px solid var(--border-strong);box-shadow:var(--shadow-lg);padding:12px}
+  .phone .notch{position:absolute;top:16px;left:50%;transform:translateX(-50%);width:96px;height:22px;background:#0b0f1a;border-radius:0 0 14px 14px;z-index:3}
+  .screen{position:relative;width:100%;height:100%;border-radius:30px;overflow:hidden;background:
+      radial-gradient(circle at 30% 20%, #1e293b, #0f172a 70%)}
+  /* faux camera scene */
+  .scene{position:absolute;inset:0;background:
+      linear-gradient(160deg,#334155 0%,#1e293b 55%,#0f172a 100%)}
+  .scene .desk{position:absolute;left:0;right:0;bottom:0;height:38%;background:linear-gradient(#3f2d1e,#241812)}
+  .scene .mug{position:absolute;left:46%;top:44%;width:64px;height:74px;border-radius:8px 8px 26px 26px;background:linear-gradient(#c2410c,#7c2d12);box-shadow:0 8px 20px rgba(0,0,0,.5)}
+  .scene .plant{position:absolute;right:26px;top:30%;width:40px;height:120px;background:radial-gradient(circle at 50% 0,#166534,#052e16);border-radius:50% 50% 8px 8px}
+  /* AR marker */
+  .marker{position:absolute;left:41%;top:40%;width:82px;height:88px;border:2px solid var(--amber);border-radius:6px;box-shadow:0 0 0 2px rgba(245,158,11,.15)}
+  .marker .lab{position:absolute;left:-2px;top:-22px;background:var(--amber);color:#111;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap}
+  .tip{position:absolute;left:14px;right:14px;top:16px;background:rgba(15,23,42,.72);border-left:3px solid var(--amber);border-radius:4px;padding:9px 11px;backdrop-filter:blur(2px)}
+  .tip .h{color:var(--amber);font-size:11px;font-weight:700;letter-spacing:.03em}
+  .tip .b{color:#e2e8f0;font-size:11.5px;margin-top:3px;line-height:1.4}
+  /* voice bar */
+  .voice{position:absolute;left:14px;right:14px;bottom:16px;display:flex;align-items:center;gap:10px;background:rgba(15,23,42,.82);border-radius:22px;padding:9px 14px}
+  .voice .dot{width:9px;height:9px;border-radius:50%;background:#22c55e;flex:none;animation:pulse 1.5s ease-in-out infinite}
+  .voice .wave{flex:1;display:flex;align-items:center;gap:3px;height:20px}
+  .voice .wave i{width:3px;background:#60a5fa;border-radius:2px;animation:eq 1.1s ease-in-out infinite}
+  .voice .wave i:nth-child(2n){animation-delay:.2s}
+  .voice .wave i:nth-child(3n){animation-delay:.4s}
+  .voice .txt{color:#94a3b8;font-size:11px;font-family:var(--mono);flex:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes eq{0%,100%{height:5px}50%{height:18px}}
+
+  /* ─── Section header ─── */
+  section.s{padding:88px 0;border-top:1px solid var(--border)}
+  .sec-head{display:grid;grid-template-columns:.4fr 1.6fr;gap:48px;align-items:start;margin-bottom:40px}
+  .sec-num{font-family:var(--mono);font-size:11.5px;color:var(--accent);letter-spacing:.08em;font-weight:600;text-transform:uppercase;padding-top:8px}
+  h2.sec-title{font-size:36px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;margin:0 0 12px;text-wrap:balance}
+  .sec-lede{font-size:16px;color:var(--fg-dim);max-width:62ch;text-wrap:pretty;margin:0}
+
+  /* ─── Tour cards ─── */
+  .tour-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .tour-card{margin:0;background:#1E1F22;border-radius:12px;overflow:hidden;color:#fff;border:1px solid var(--border);box-shadow:0 4px 24px rgba(0,28,54,.10);transition:transform .15s,box-shadow .15s}
+  .tour-card:hover{transform:translateY(-2px);box-shadow:0 12px 34px rgba(0,28,54,.16)}
+  .tour-vis{height:150px;position:relative;overflow:hidden;background:#171819;display:flex;align-items:center;justify-content:center}
+  .tour-body{padding:20px 22px 22px}
+  .tour-step{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#60a5fa}
+  .tour-body h3{margin:7px 0 7px;font-size:18px;font-weight:600;line-height:1.18;color:#fff}
+  .tour-body p{margin:0;font-size:13px;line-height:1.5;color:#A8ADBD}
+  .glyph{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.35)}
+  .glyph.amber{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+
+  /* ─── Pillars ─── */
+  .pillars{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .pillar{background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:24px 22px;display:flex;flex-direction:column;gap:10px;transition:border-color .15s,transform .15s}
+  .pillar:hover{border-color:var(--border-strong);transform:translateY(-1px)}
+  .pillar .ix{align-self:flex-start;font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent-soft);padding:3px 8px;border-radius:4px;letter-spacing:.04em;font-weight:600}
+  .pillar h3{margin:6px 0 4px;font-size:19px;font-weight:600;letter-spacing:-0.01em}
+  .pillar p{margin:0;color:var(--fg-dim);font-size:14px}
+  .pillar .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .pillar .chips span{font-family:var(--mono);font-size:11px;color:var(--fg-dim);background:var(--chip);padding:3px 8px;border-radius:4px}
+
+  /* ─── Feature rows ─── */
+  .feat{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+  .feat.reverse{grid-template-columns:.95fr 1.05fr}
+  .feat-text h3{font-size:26px;font-weight:600;letter-spacing:-0.01em;line-height:1.15;margin:0 0 12px}
+  .feat-text p{color:var(--fg-dim);margin:0 0 12px;max-width:54ch}
+  .feat-text p strong{color:var(--fg);font-weight:600}
+  .feat-text ul{margin:18px 0 0;padding:0;list-style:none}
+  .feat-text li{position:relative;padding:12px 0 12px 26px;border-top:1px solid var(--border);color:var(--fg-dim);font-size:14px}
+  .feat-text li:last-child{border-bottom:1px solid var(--border)}
+  .feat-text li::before{content:"";position:absolute;left:2px;top:19px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .feat-text li strong{color:var(--fg);font-weight:600}
+  .feat-vis{background:var(--bg-deep);border-radius:10px;box-shadow:var(--shadow);padding:26px;color:#cbd5e1}
+  .feat-vis .row{display:grid;grid-template-columns:8px auto 1fr;align-items:center;gap:6px 12px;padding:12px 0;border-bottom:1px solid #1e293b;font-family:var(--mono);font-size:12.5px}
+  .feat-vis .row:last-child{border-bottom:0}
+  .feat-vis .row .dot{width:8px;height:8px;border-radius:50%;background:#60a5fa}
+  .feat-vis .row b{color:#fff;font-weight:600;white-space:nowrap}
+  .feat-vis .row span{color:#64748b;min-width:0;overflow-wrap:anywhere}
+
+  /* ─── Privacy modes ─── */
+  .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .mode{background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:18px}
+  .mode .ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:12px}
+  .mode .nm{font-family:var(--mono);font-size:13.5px;color:var(--fg);font-weight:600}
+  .mode .desc{margin:8px 0 0;color:var(--fg-dim);font-size:13px}
+
+  /* ─── CTA / request demo ─── */
+  .cta-card{background:var(--bg-deep);color:#e2e8f0;border-radius:14px;padding:52px 48px;display:grid;grid-template-columns:1.4fr .6fr;gap:36px;align-items:center;box-shadow:var(--shadow-lg);
+    background-image:radial-gradient(circle at 8% 0%,rgba(37,99,235,.30),transparent 55%),radial-gradient(circle at 100% 100%,rgba(245,158,11,.14),transparent 50%)}
+  .cta-card h2{margin:12px 0 12px;font-size:34px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;color:#fff}
+  .cta-card p{margin:0;color:#cbd5e1;max-width:52ch;font-size:15px}
+  .cta-card .eyebrow{color:#93c5fd}
+  .cta-card .eyebrow .bar{background:#93c5fd}
+  .cta-card .right{display:flex;flex-direction:column;gap:10px;align-items:stretch}
+  .cta-card .btn{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.18)}
+  .cta-card .btn:hover{background:rgba(255,255,255,.14)}
+  .cta-card .btn.primary{background:var(--accent);border-color:var(--accent)}
+  .cta-card .btn.primary:hover{background:var(--accent-dim)}
+
+  /* ─── Footer ─── */
+  footer{padding:56px 0 40px;border-top:1px solid var(--border);background:var(--bg-elev)}
+  .ft{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:36px;align-items:start}
+  .ft h5{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.06em;margin:0 0 12px;font-weight:700;text-transform:uppercase}
+  .ft ul{margin:0;padding:0;list-style:none} .ft li{padding:5px 0;font-size:14px}
+  .ft li a{color:var(--fg-dim)} .ft li a:hover{color:var(--accent)}
+  .ft .blurb{margin:0;color:var(--fg-dim);max-width:42ch;font-size:14px}
+  .ft-meta{margin-top:40px;padding-top:18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:18px;color:var(--fg-faint);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em}
+
+  /* ─── Tablet ─── */
+  @media (max-width:1000px){
+    .hero-grid,.feat,.feat.reverse,.cta-card{grid-template-columns:1fr;gap:40px}
+    .sec-head{grid-template-columns:1fr;gap:8px}
+    section.s{padding:64px 0}
+    .hero{padding:52px 0 40px}
+    h1.hero-title{font-size:44px}
+    h2.sec-title{font-size:30px}
+    .pillars,.modes{grid-template-columns:1fr 1fr}
+    .tour-grid{grid-template-columns:1fr 1fr}
+    .ft{grid-template-columns:1fr 1fr}
+    nav.primary,.top-inner .spacer{display:none}
+    /* headline leads on mobile; the phone sits below and shrinks */
+    .phone{width:264px;height:536px}
+  }
+  /* ─── Large phone ─── */
+  @media (max-width:640px){
+    header .pill{display:none}
+    .top-inner{gap:12px}
+    .tour-grid{grid-template-columns:1fr}
+    .btn{padding:9px 13px}
+  }
+  /* ─── Phone ─── */
+  @media (max-width:480px){
+    .container{padding:0 18px}
+    section.s{padding:52px 0}
+    .hero{padding:36px 0 28px}
+    h1.hero-title{font-size:34px}
+    h2.sec-title{font-size:26px}
+    .hero-sub{font-size:16px}
+    .pillars,.modes{grid-template-columns:1fr}
+    .cta-card{padding:32px 22px}
+    .cta-card h2{font-size:28px}
+    /* full-width, thumb-friendly primary actions */
+    .cta{gap:8px}
+    .cta .btn{flex:1 1 100%;justify-content:center}
+    .phone{width:236px;height:480px;padding:9px}
+    .phone .screen{border-radius:26px}
+    .meta{gap:12px 20px}
+    .ft-meta{flex-direction:column;gap:8px;align-items:flex-start}
+  }
+</style>
+</head>
+<body>
+
+<!-- ───────────── TOP BAR ───────────── -->
+<header class="top">
+  <div class="container top-inner">
+    <div class="logo">
+      <svg class="mark" viewBox="0 0 32 32" aria-label="Sinain logo">
+        <rect width="32" height="32" rx="8.7" fill="#2563eb"/>
+        <g stroke="#fff" fill="#fff" stroke-linecap="round">
+          <circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/>
+          <path d="M 16 9.5 Q 18 16 16 22.5 Q 14 16 16 9.5 Z" stroke="none"/>
+        </g>
+      </svg>
+      <span>SINAIN</span>
+      <span class="sub mono">/ ar</span>
+    </div>
+    <nav class="primary" aria-label="primary">
+      <a href="#flow">How it works</a>
+      <a href="#capabilities">What you can do</a>
+      <a href="#meetings">Meetings</a>
+      <a href="#privacy">Privacy</a>
+    </nav>
+    <div class="spacer"></div>
+    <span class="pill pill-good">● live · ar.sinain.com</span>
+    <a class="btn primary" href="#demo" data-umami-event="ar-nav-demo">Request a demo <span class="arr">→</span></a>
+  </div>
+</header>
+
+<!-- ───────────── HERO ───────────── -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow"><span class="bar"></span> Point-and-tap AI help</span>
+        <h1 class="hero-title">Point at anything.<br/><em>Just ask.</em></h1>
+        <p class="hero-sub">
+          See something you don't recognize, can't fix, or just wonder about? Aim your phone at it
+          and Sinain tells you <strong>what it is and what to do</strong> — out loud, like a friend
+          who can see what you see.
+        </p>
+
+        <div class="cta">
+          <a class="btn primary btn-lg" href="#demo" data-umami-event="ar-hero-demo">Request a demo <span class="arr">→</span></a>
+          <a class="btn btn-lg" href="https://ar.sinain.com" target="_blank" rel="noopener" data-umami-event="ar-hero-try">Try it now</a>
+        </div>
+        <p class="fineprint">Nothing to download — it opens right in your phone's browser. Free while we're in preview.</p>
+
+        <div class="meta" aria-label="What it's like">
+          <span><span class="k">how</span><b>point &amp; ask</b></span>
+          <span><span class="k">talk to it</span><b>out loud</b></span>
+          <span><span class="k">to start</span><b>one tap</b></span>
+          <span><span class="k">app</span><b>none needed</b></span>
+        </div>
+      </div>
+
+      <!-- Phone mockup -->
+      <div class="phone-col">
+        <div class="phone" aria-label="Sinain AR on a phone">
+          <div class="notch"></div>
+          <div class="screen">
+            <div class="scene">
+              <div class="plant"></div>
+              <div class="desk"></div>
+              <div class="mug"></div>
+            </div>
+            <div class="marker"><span class="lab">red mug</span></div>
+            <div class="tip">
+              <div class="h">SINAIN</div>
+              <div class="b">A ceramic pour-over mug — still about half full, and probably gone cold by now.</div>
+            </div>
+            <div class="voice">
+              <span class="dot"></span>
+              <span class="wave"><i style="height:8px"></i><i style="height:16px"></i><i style="height:11px"></i><i style="height:18px"></i><i style="height:7px"></i><i style="height:14px"></i><i style="height:10px"></i></span>
+              <span class="txt">listening…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── FLOW ───────────── -->
+<section class="s" id="flow">
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-num">§ 01 — How it works</div>
+      <div>
+        <h2 class="sec-title">Three taps and you're talking.</h2>
+        <p class="sec-lede">
+          No setup, nothing to learn. Open your camera, point at something, and ask — Sinain
+          answers out loud and highlights what you're asking about.
+        </p>
+      </div>
+    </div>
+
+    <div class="tour-grid">
+      <article class="tour-card">
+        <div class="tour-vis"><div class="glyph">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.7"><path d="M4 8l2-3h12l2 3v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><circle cx="12" cy="13" r="3.4"/></svg>
+        </div></div>
+        <div class="tour-body"><span class="tour-step">Step 1</span><h3>Open your camera</h3>
+          <p>Tap once to start. It opens right in your phone's browser — no app, no sign-up hoops.</p></div>
+      </article>
+
+      <article class="tour-card">
+        <div class="tour-vis"><div class="glyph amber">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="1.7"><path d="M8 3l11 7-5 1.5L11 17z" stroke-linejoin="round"/></svg>
+        </div></div>
+        <div class="tour-body"><span class="tour-step">Step 2</span><h3>Point or tap</h3>
+          <p>Aim at whatever you're curious about — or tap it on the screen. Sinain highlights it and keeps it in its sights.</p></div>
+      </article>
+
+      <article class="tour-card">
+        <div class="tour-vis"><div class="glyph">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.7"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" stroke-linecap="round"/></svg>
+        </div></div>
+        <div class="tour-body"><span class="tour-step">Step 3</span><h3>Just ask</h3>
+          <p>Talk to it like a person — "what is this?", "how do I fix it?" — and it answers out loud. Cut in any time.</p></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── CAPABILITIES ───────────── -->
+<section class="s" id="capabilities">
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-num">§ 02 — What you can do</div>
+      <div>
+        <h2 class="sec-title">If you can point at it, you can ask about it.</h2>
+        <p class="sec-lede">
+          A few things people use it for. There's no menu to learn — just aim and talk.
+        </p>
+      </div>
+    </div>
+
+    <div class="pillars">
+      <div class="pillar">
+        <h3>“What is this?”</h3>
+        <p>A plant, a gadget, a landmark, a bug on the wall, a bottle of wine — point and find out in seconds.</p>
+      </div>
+      <div class="pillar">
+        <h3>“How do I fix it?”</h3>
+        <p>A blinking light, a leaky tap, an error on a screen, a button you can't figure out. Show it and get walked through it.</p>
+      </div>
+      <div class="pillar">
+        <h3>“What can I make?”</h3>
+        <p>Point at what's in the fridge or on the counter and get ideas for dinner — with what you actually have.</p>
+      </div>
+      <div class="pillar">
+        <h3>“What does this say?”</h3>
+        <p>A menu, a sign, a label in another language. Aim your phone and Sinain reads and explains it.</p>
+      </div>
+      <div class="pillar">
+        <h3>“Walk me through it.”</h3>
+        <p>Setting something up, assembling furniture, using a new device — step by step, hands-free, as you go.</p>
+      </div>
+      <div class="pillar">
+        <h3>“Keep an eye on that.”</h3>
+        <p>Tap or name a thing and the highlight follows it as you move — so you never lose what you're working on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── MEETINGS ───────────── -->
+<section class="s" id="meetings">
+  <div class="container">
+    <div class="feat">
+      <div class="feat-text">
+        <div class="sec-num" style="margin-bottom:14px">§ 03 — It comes to meetings too</div>
+        <h3>Send it to your video calls.</h3>
+        <p>Paste a <strong>Teams</strong> or <strong>Google Meet</strong> link and Sinain joins like a guest. It follows along and takes notes — so afterward you can just ask "what did we decide?"</p>
+        <ul>
+          <li><strong>Joins with a link</strong> — let "Sinain (AI)" in and it's there.</li>
+          <li><strong>Takes the notes</strong> — so you can stay in the conversation.</li>
+          <li><strong>Remembers for you</strong> — ask it anything about the call later.</li>
+        </ul>
+      </div>
+      <div class="feat-vis" aria-hidden="true">
+        <div class="row"><span class="dot"></span><b>Sinain (AI)</b><span>joined the meeting</span></div>
+        <div class="row"><span class="dot" style="background:#f59e0b"></span><b>screen</b><span>Q3 roadmap · slide 4</span></div>
+        <div class="row"><span class="dot" style="background:#22c55e"></span><b>note</b><span>owner: infra · due next sprint</span></div>
+        <div class="row"><span class="dot"></span><b>you</b><span>"what did we decide on caching?"</span></div>
+        <div class="row"><span class="dot" style="background:#a78bfa"></span><b>sinain</b><span>recalls the decision + who owns it</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── PRIVACY ───────────── -->
+<section class="s" id="privacy">
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-num">§ 04 — Privacy</div>
+      <div>
+        <h2 class="sec-title">Your camera stays yours.</h2>
+        <p class="sec-lede">
+          It only looks when there's something worth looking at, your video is encrypted end-to-end,
+          and sensitive details are scrubbed before anything is saved. Only you can get into your Sinain.
+        </p>
+      </div>
+    </div>
+    <div class="modes">
+      <div class="mode">
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <div class="nm">Encrypted</div>
+        <div class="desc">Your video and voice are scrambled end-to-end — no one in between can see them.</div>
+      </div>
+      <div class="mode">
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="nm">Only when needed</div>
+        <div class="desc">It looks when something actually changes — it isn't recording your whole day.</div>
+      </div>
+      <div class="mode">
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7" stroke-linecap="round"/><path d="M15 15l5 5M20 15l-5 5" stroke-linecap="round"/></svg></div>
+        <div class="nm">Nothing private saved</div>
+        <div class="desc">Emails, card numbers and passwords are wiped before anything is remembered.</div>
+      </div>
+      <div class="mode">
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0" stroke-linecap="round"/></svg></div>
+        <div class="nm">Just you</div>
+        <div class="desc">You sign in to get in — no shared logins, no one else in your Sinain.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── REQUEST A DEMO ───────────── -->
+<section class="s" id="demo">
+  <div class="container">
+    <div class="cta-card">
+      <div>
+        <span class="eyebrow"><span class="bar"></span> Preview access</span>
+        <h2>See Sinain AR on your own desk.</h2>
+        <p>We're onboarding early users one at a time. Tell us a little about your use case and we'll
+          send you an invite link — open it on your phone and you're live in seconds.</p>
+      </div>
+      <div class="right">
+        <a class="btn primary btn-lg" href="mailto:support@sinain.com?subject=Sinain%20AR%20demo%20request&body=Hi%20Sinain%20team%2C%0A%0AI%27d%20like%20a%20demo%20of%20Sinain%20AR.%0A%0AWhat%20I%27d%20use%20it%20for%3A%20%0AName%2Fcompany%3A%20" data-umami-event="ar-demo-email">Request a demo <span class="arr">→</span></a>
+        <a class="btn btn-lg" href="https://ar.sinain.com" target="_blank" rel="noopener" data-umami-event="ar-demo-try">Have a link? Open it</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── FOOTER ───────────── -->
+<footer>
+  <div class="container">
+    <div class="ft">
+      <div>
+        <div class="logo" style="margin-bottom:12px"><svg class="mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8.7" fill="#2563eb"/><g stroke="#fff" fill="#fff"><circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/><path d="M 16 9.5 Q 18 16 16 22.5 Q 14 16 16 9.5 Z" stroke="none"/></g></svg><span>SINAIN</span><span class="sub mono">/ ar</span></div>
+        <p class="blurb">A live AR assistant that sees through your phone camera and talks with you in real time — part of the Sinain Context OS family.</p>
+      </div>
+      <div>
+        <h5>Product</h5>
+        <ul>
+          <li><a href="#flow">How it works</a></li>
+          <li><a href="#capabilities">Capabilities</a></li>
+          <li><a href="#meetings">Meetings</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Sinain</h5>
+        <ul>
+          <li><a href="/">Context OS</a></li>
+          <li><a href="https://ar.sinain.com" target="_blank" rel="noopener">Open AR</a></li>
+          <li><a href="https://github.com/anthillnet/sinain-hud" target="_blank" rel="noopener">GitHub</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Get started</h5>
+        <ul>
+          <li><a href="#demo">Request a demo</a></li>
+          <li><a href="mailto:support@sinain.com">support@sinain.com</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="ft-meta">
+      <span>© Sinain — ambient intelligence for builders</span>
+      <span>ar.sinain.com</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
