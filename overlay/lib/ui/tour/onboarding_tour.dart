@@ -331,8 +331,9 @@ class _OnboardingTourState extends State<OnboardingTour> {
         const _Scene(
           title: 'Chat or terminal',
           body:
-              'Every region opens a thread. Reply in built-in chat, or hand it '
-              'to a terminal agent you already use. We listed the ones found on '
+              'Every context — a saved range, a screen region, a clipboard — '
+              'opens a thread. Reply in built-in chat, or hand it to a '
+              'terminal agent you already use. We listed the ones found on '
               'your machine — change them anytime.',
           visual: _AgentsVisual(),
         ),
