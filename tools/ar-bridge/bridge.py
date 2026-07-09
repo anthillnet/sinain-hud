@@ -225,14 +225,45 @@ async def run(args: argparse.Namespace) -> int:
 
     @channel.on("open")
     def on_open():
-        if seed.get("text") or seed.get("say"):
-            channel.send(json.dumps({"type": "seed",
-                                     "text": seed.get("text", ""),
-                                     "say": seed.get("say", "")}))
-            emit("seed sent")
+        # Always announce caps (even unseeded) — the server enables the
+        # desktop directives (MEMORY:/REMEMBER:/HANDOFF:) only when it sees
+        # them, so a phone session never gets desktop instructions.
+        channel.send(json.dumps({"type": "seed",
+                                 "text": seed.get("text", ""),
+                                 "say": seed.get("say", ""),
+                                 "caps": ["directives"]}))
+        emit("seed sent")
+
+    async def run_directive(m):
+        """Relay a desktop directive to core and send the result back up.
+        Core executes (memory lookup / knowledge store / thread handoff);
+        the cloud speaks the outcome."""
+        result = {"ok": False, "error": "core unreachable"}
+        try:
+            async with http_session() as session:
+                async with session.post(
+                        args.core.rstrip("/") + "/voice/directive",
+                        json={k: m.get(k) for k in ("id", "name", "arg", "transcript")},
+                        timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    result = await resp.json()
+        except Exception as e:  # noqa: BLE001 — the call outlives a failed directive
+            result = {"ok": False, "error": str(e)[:200]}
+        try:
+            channel.send(json.dumps({"type": "directive_result",
+                                     "id": m.get("id"), **result}))
+        except Exception as e:  # noqa: BLE001
+            emit(f"error: directive result send failed: {e}")
 
     @channel.on("message")
     def on_message(msg):
+        try:
+            m = json.loads(msg)
+        except (TypeError, ValueError):
+            m = None
+        if isinstance(m, dict) and m.get("type") == "directive":
+            emit(f"directive {m.get('name')}: {str(m.get('arg'))[:80]}")
+            asyncio.ensure_future(run_directive(m))
+            return
         # Proactive markers etc. — plumbing logs them; a future UI may render
         # them as region eyes.
         emit(f"meta {str(msg)[:160]}")
@@ -298,6 +329,8 @@ async def run(args: argparse.Namespace) -> int:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--server", default="http://127.0.0.1:8089", help="ARSinain base URL")
+    p.add_argument("--core", default="http://127.0.0.1:9500",
+                   help="local sinain-core base URL (desktop directive executor)")
     p.add_argument("--frame", default=os.path.expanduser("~/.sinain/capture/frame.jpg"),
                    help="screen frame IPC file (sck-capture)")
     p.add_argument("--fps", type=float, default=4.0, help="screen publish rate")

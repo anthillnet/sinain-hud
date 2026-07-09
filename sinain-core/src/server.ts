@@ -1733,6 +1733,9 @@ export interface ServerDeps {
   voiceMute?: (muted: boolean) => void;
   /** Control state the call page polls: {muted, end}. */
   voiceCtl?: () => { muted: boolean; end: boolean };
+  /** Execute a desktop directive from the live call (memory/remember/handoff). */
+  voiceDirective?: (req: import("./capture/voice-directives.js").DirectiveRequest)
+    => Promise<import("./capture/voice-directives.js").DirectiveResult>;
 
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
@@ -2145,6 +2148,26 @@ export function createAppServer(deps: ServerDeps) {
 
       if (req.method === "GET" && url.pathname === "/voice/ctl") {
         res.end(JSON.stringify(deps.voiceCtl?.() ?? { muted: false, end: false }));
+        return;
+      }
+
+      // Desktop directive from the live call (MEMORY:/REMEMBER:/HANDOFF: —
+      // relayed off the meta datachannel by the call engine). Executes
+      // against the local harness; the result rides back up the channel.
+      if (req.method === "POST" && url.pathname === "/voice/directive") {
+        if (!deps.voiceDirective) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice directives unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 65_536);
+        try {
+          const result = await deps.voiceDirective(JSON.parse(body || "{}"));
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String((err as Error).message ?? err).slice(0, 200) }));
+        }
         return;
       }
 

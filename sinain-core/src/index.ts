@@ -13,7 +13,8 @@ import { ChatService } from "./chat/chat-service.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
-import { setupCommands } from "./overlay/commands.js";
+import { setupCommands, type CommandDeps } from "./overlay/commands.js";
+import { execDirective, type DirectiveRequest, type DirectiveResult } from "./capture/voice-directives.js";
 import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
@@ -1830,6 +1831,9 @@ async function main() {
     config.voiceConfig, config.burstConfig, feedBuffer, senseBuffer,
     (msg) => wsHandler.broadcastRaw(msg),
   );
+  // Desktop-directive executor for live calls (MEMORY:/REMEMBER:/HANDOFF:).
+  // Wired after setupCommands — the handoff rides the command deps.
+  let voiceDirectiveExec: ((r: DirectiveRequest) => Promise<DirectiveResult>) | null = null;
 
   const windowPreviewCache = new Map<number, { ts: number; summary: string }>();
   const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
@@ -1962,6 +1966,11 @@ async function main() {
     voiceEngineEvent: (status, error, caption) => voiceManager.engineEvent(status, error, caption),
     voiceMute: (muted) => voiceManager.setMute(muted),
     voiceCtl: () => voiceManager.ctl(),
+    // Assigned after the command deps exist (the handoff reuses their spawn
+    // routing); a directive can only arrive once a call session is live.
+    voiceDirective: (r) => voiceDirectiveExec
+      ? voiceDirectiveExec(r)
+      : Promise.resolve({ ok: false, error: "voice directives not ready" }),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;
@@ -2365,7 +2374,9 @@ async function main() {
   };
 
   // ── Wire overlay commands ──
-  setupCommands({
+  // Named so the voice-directive handoff can reuse the same spawn routing
+  // (per-thread agent override, fork seeds, sidecar/desktop/bare dispatch).
+  const commandDeps: CommandDeps = {
     wsHandler,
     systemAudioPipeline,
     micPipeline,
@@ -2689,6 +2700,55 @@ async function main() {
     },
     onStartLocalAgent: (agent?: string) => startLocalAgent(agent),
     onRestartChatSidecar: () => restartChatSidecar(),
+  };
+  setupCommands(commandDeps);
+
+  // ── Voice-call handoff: fork a thread seeded with the call transcript and
+  // route the task to the chat lane (same mechanics as fork_main +
+  // spawn_command, but seeded from the phone/desktop call, not MAIN). ──
+  const createVoiceHandoff = (task: string, transcript: string, agentHint?: string):
+    { threadId: string; agentLabel: string } => {
+    const id = `call-${Date.now().toString(36)}`;
+    forkSeeds.set(id, [
+      "You are picking up a task handed off from a live voice call between",
+      "the user and Sinain (the voice assistant). Below is the recent call",
+      "transcript. Complete the task; the user may follow up in this thread.",
+      transcript ? `\n## Call transcript\n${transcript}` : "",
+    ].filter(Boolean).join("\n"));
+    // Spoken agent hint ("hand this to claude") → roster profile, matched
+    // loosely against profile names. No match → the thread keeps the lane
+    // default, same as any fork.
+    let agent = "";
+    if (agentHint) {
+      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const hint = norm(agentHint);
+      agent = Object.keys(escalatorAgentsCfg?.profiles ?? {})
+        .find((p) => norm(p).includes(hint) || hint.includes(norm(p))) ?? "";
+      if (agent) threadChatAgents.set(id, agent);
+    }
+    // Open the thread tab on every client (same broadcast as fork_main).
+    wsHandler.broadcastRaw({
+      type: "spawn_task",
+      taskId: id,
+      label: "📞 call handoff",
+      status: "completed",
+      startedAt: Date.now(),
+      regionId: id,
+    } as any);
+    // Echo the task as the user's message in the thread, then route it
+    // exactly as a spawn_command would (sidecar / desktop app / chat lane).
+    wsHandler.broadcastRaw({
+      type: "feed", text: task, priority: "normal", ts: Date.now(),
+      channel: "agent", sender: "user", regionId: id,
+    } as any);
+    commandDeps.onSpawnCommand?.(task, id);
+    const agentLabel = agent || chatAgentFor(id) || "your desktop agent";
+    log(TAG, `voice handoff → thread ${id} (agent: ${agentLabel})`);
+    return { threadId: id, agentLabel };
+  };
+  voiceDirectiveExec = (r) => execDirective(r, {
+    coreUrl: `http://127.0.0.1:${config.port}`,
+    createHandoff: createVoiceHandoff,
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect

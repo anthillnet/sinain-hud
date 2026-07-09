@@ -190,6 +190,7 @@ export class VoiceSessionManager {
     const proc = spawn(python, [
       script,
       "--server", this.voice.serverUrl,
+      "--core", `http://127.0.0.1:${process.env.PORT || "9500"}`,
       "--frame", this.voice.framePath,
       "--fps", String(this.voice.fps),
       "--seed-file", this.seedFile,
