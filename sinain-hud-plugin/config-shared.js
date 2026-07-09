@@ -298,6 +298,23 @@ export async function stepApiKey(existing, label = "OpenRouter API key") {
   return key || current;
 }
 
+/** Optional Cerebras key — powers the burst lane (Save/Call context cards,
+ *  range previews, voice-call seeds). Empty = skip, those features stay off. */
+export async function stepCerebrasKey(existing, label = "Cerebras API key (optional)") {
+  const current = existing.CEREBRAS_API_KEY || existing.BURST_API_KEY;
+  const message = current
+    ? `${label} ${c.dim(`(current: ${maskKey(current)})`)}`
+    : `${label} ${c.dim("— instant context cards; Enter to skip")}`;
+
+  const key = guard(await p.text({
+    message,
+    placeholder: current ? "Press Enter to keep current" : "csk-... (cloud.cerebras.ai — free tier)",
+    defaultValue: current || "",
+  }));
+
+  return key || current || "";
+}
+
 export async function stepTranscription(existing, label = "Audio transcription") {
   const current = existing.TRANSCRIPTION_BACKEND || "openrouter";
   const hasWhisper = !IS_WINDOWS && cmdExists("whisper-cli");

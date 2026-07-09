@@ -235,23 +235,31 @@ class _OnboardingTourState extends State<OnboardingTour> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        // Progress dots
-        Row(
-          children: [
-            for (var d = 0; d < _scenes.length; d++) ...[
-              if (d > 0) const SizedBox(width: 6),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: d == _i ? 18 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: d == _i ? _green : _dotInactive,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ],
-          ],
+        // Progress dots — scale down when the scene count + a wide primary
+        // button ("Start using Sinain") would otherwise overflow the row.
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                for (var d = 0; d < _scenes.length; d++) ...[
+                  if (d > 0) const SizedBox(width: 6),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: d == _i ? 18 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: d == _i ? _green : _dotInactive,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
+        const SizedBox(width: 10),
         Row(
           children: [
             if (_i > 0)
@@ -277,35 +285,55 @@ class _OnboardingTourState extends State<OnboardingTour> {
               'where you need it — without getting in your way.',
           visual: _WelcomeVisual(),
         ),
-        // 2 · The markers
+        // (markers scene sunset for now — auto-ROI markers aren't the
+        // headline; the four deliberate-capture modes are)
+        // 2 · Save context (deliberate capture mode 1)
         const _Scene(
-          title: 'Spot the markers',
-          body: 'When Sinain sees something it can help with, it drops an eye '
-              'marker on it. Click for a quick tip, double-click to jump '
-              'straight into a thread.',
-          visual: _MarkersVisual(),
+          title: 'Save what just happened',
+          body: 'Right-click the eye → Save Context. Pick how far back — and '
+              'which apps — and Sinain distills those minutes into memory. '
+              '30 seconds to undo; nothing is saved without you asking.',
+          visual: _SaveContextVisual(),
         ),
-        // 3 · Ask about anything (region) — copy resolved from design default
+        // 4 · Call AI on a range (mode 2)
         const _Scene(
-          title: 'Or ask about anything',
-          body: 'Double-tap the eye, then drag a box around any part of your '
-              'screen — like a screenshot. Sinain hides while you drag.',
+          title: 'Call AI on your last minutes',
+          body: 'The same range can go to an AI instead: Call AI hands a '
+              'brief to your agent as text, Call sinain starts a live voice '
+              'call seeded with it. You always see what it will know.',
+          visual: _CallAiVisual(),
+        ),
+        // 5 · Context from screen (mode 3)
+        const _Scene(
+          title: 'Context from your screen',
+          body: 'Pick Context from Screen — or double-tap the eye — then drag '
+              'a box around any part of your screen. Sinain enriches the '
+              'selection with your recent activity and hands it to your AI.',
           visual: _RegionVisual(),
         ),
-        // 4 · Where chat lands
+        // 6 · Context from clipboard (mode 4)
+        const _Scene(
+          title: 'Context from your clipboard',
+          body: 'Copy anything — an error, a link, a paragraph — then Context '
+              'from Clipboard. Sinain wraps it with what you were doing, so '
+              'any AI gets the full picture instead of a bare snippet.',
+          visual: _ClipboardVisual(),
+        ),
+        // · Where chat lands
         const _Scene(
           title: 'Chat, your way',
-          body: 'A thread can stay in the Sinain HUD, or pop out into a '
-              'standalone app you already use — ChatGPT, Claude, anything. '
-              'Either way Sinain seeds it with the context first.',
+          body: 'A thread can stay in the Sinain HUD, pop out into an app you '
+              'already use — ChatGPT, Claude, anything — or become a live '
+              'voice call with sinain. Either way the context rides along.',
           visual: _WhereChatLandsVisual(),
         ),
         // 5 · Pick your agents
         const _Scene(
           title: 'Chat or terminal',
           body:
-              'Every region opens a thread. Reply in built-in chat, or hand it '
-              'to a terminal agent you already use. We listed the ones found on '
+              'Every context — a saved range, a screen region, a clipboard — '
+              'opens a thread. Reply in built-in chat, or hand it to a '
+              'terminal agent you already use. We listed the ones found on '
               'your machine — change them anytime.',
           visual: _AgentsVisual(),
         ),
@@ -374,31 +402,24 @@ class _EyeGlyph extends StatelessWidget {
   const _EyeGlyph({
     required this.size,
     this.strokeWidth = 3,
-    this.circleFill,
   });
   final double size;
   final double strokeWidth;
-  final Color? circleFill;
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-      size: Size.square(size),
-      painter: _EyePainter(_green, strokeWidth, circleFill));
+      size: Size.square(size), painter: _EyePainter(_green, strokeWidth));
 }
 
 class _EyePainter extends CustomPainter {
-  _EyePainter(this.color, this.strokeWidth, this.circleFill);
+  _EyePainter(this.color, this.strokeWidth);
   final Color color;
   final double strokeWidth;
-  final Color? circleFill;
 
   @override
   void paint(Canvas canvas, Size size) {
     final s = size.width / 30.0; // viewBox 30×30
     final c = Offset(15 * s, 15 * s);
-    if (circleFill != null) {
-      canvas.drawCircle(c, 13.5 * s, Paint()..color = circleFill!);
-    }
     canvas.drawCircle(
       c,
       13.5 * s,
@@ -418,9 +439,7 @@ class _EyePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EyePainter old) =>
-      old.color != color ||
-      old.strokeWidth != strokeWidth ||
-      old.circleFill != circleFill;
+      old.color != color || old.strokeWidth != strokeWidth;
 }
 
 class _PrimaryButton extends StatelessWidget {
@@ -579,62 +598,6 @@ class _WelcomeVisual extends StatelessWidget {
       );
 }
 
-class _MarkersVisual extends StatelessWidget {
-  const _MarkersVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _lightBg,
-        child: Stack(
-          children: [
-            const Positioned.fill(child: _MockPage()),
-            const Positioned(
-              left: 46,
-              top: 120,
-              child: _EyeGlyph(size: 26, strokeWidth: 3, circleFill: _cardBg),
-            ),
-            Positioned(
-              left: 84,
-              top: 64,
-              child: Container(
-                width: 280,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _panel,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0x731F8039)),
-                  boxShadow: const [
-                    BoxShadow(
-                        color: Color(0x4D000000),
-                        blurRadius: 16,
-                        offset: Offset(0, 4))
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('Tighten your email opening',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white)),
-                    const SizedBox(height: 3),
-                    const Text(
-                        'Lead with the ask — it’s buried in paragraph two.',
-                        style: TextStyle(
-                            fontSize: 11, height: 1.36, color: _textMuted)),
-                    const SizedBox(height: 8),
-                    _chatTermChips(),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
 class _RegionVisual extends StatelessWidget {
   const _RegionVisual();
   @override
@@ -729,50 +692,125 @@ class _WhereChatLandsVisual extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         color: _visualDark,
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              children: [
+                // Sinain HUD card (selected, green border + check)
+                _appCard(
+                  borderColor: _green,
+                  header: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _EyeGlyph(size: 14, strokeWidth: 3),
+                      SizedBox(width: 6),
+                      Text('Sinain HUD',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white)),
+                    ],
+                  ),
+                  footerColor: Colors.white,
+                  check: true,
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('or',
+                      style: TextStyle(fontSize: 12, color: _textDim)),
+                ),
+                // External app card (ChatGPT)
+                _appCard(
+                  borderColor: const Color(0x1FFFFFFF),
+                  titleBar: true,
+                  header: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.open_in_new, size: 14, color: _textMuted),
+                      SizedBox(width: 6),
+                      Text('Your app',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: _textMuted)),
+                    ],
+                  ),
+                  footerColor: _textMuted,
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('or',
+                      style: TextStyle(fontSize: 12, color: _textDim)),
+                ),
+                _voiceCard(),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  /// Third destination: a live voice call with sinain — the call chip.
+  Widget _voiceCard() => Container(
+        width: 150,
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0x733369D6)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Sinain HUD card (selected, green border + check)
-            _appCard(
-              borderColor: _green,
-              header: const Row(
+            Container(
+              color: _visualDarker,
+              height: 80,
+              alignment: Alignment.center,
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _EyeGlyph(size: 14, strokeWidth: 3),
-                  SizedBox(width: 6),
-                  Text('Sinain HUD',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white)),
+                  for (final h in const [8.0, 18.0, 12.0, 22.0, 10.0]) ...[
+                    Container(
+                        width: 4,
+                        height: h,
+                        decoration: BoxDecoration(
+                            color: _blue,
+                            borderRadius: BorderRadius.circular(2))),
+                    const SizedBox(width: 3),
+                  ],
+                  const SizedBox(width: 7),
+                  Container(
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFB3361C),
+                        borderRadius: BorderRadius.circular(4)),
+                    child: const Text('End',
+                        style: TextStyle(fontSize: 9, color: Colors.white)),
+                  ),
                 ],
               ),
-              footerColor: Colors.white,
-              check: true,
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 14),
-              child:
-                  Text('or', style: TextStyle(fontSize: 12, color: _textDim)),
-            ),
-            // External app card (ChatGPT)
-            _appCard(
-              borderColor: const Color(0x1FFFFFFF),
-              titleBar: true,
-              header: const Row(
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: _hairline))),
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.open_in_new, size: 14, color: _textMuted),
+                  Icon(Icons.graphic_eq, size: 14, color: _blue),
                   SizedBox(width: 6),
-                  Text('Your app',
+                  Text('Sinain voice',
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
                           color: _textMuted)),
                 ],
               ),
-              footerColor: _textMuted,
             ),
           ],
         ),
@@ -1310,6 +1348,305 @@ class _ShareVisual extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ── Deliberate-capture scene visuals (tour modes 1/2/4) ─────────────────────
+
+/// Mini chooser-card mock shared by the Save/Call scenes: header + presets +
+/// source checklist + verb buttons, in the tour palette.
+class _MiniChooser extends StatelessWidget {
+  const _MiniChooser({
+    required this.title,
+    required this.accent,
+    required this.consentLabel,
+    required this.buttons,
+  });
+  final String title;
+  final Color accent;
+  final String consentLabel;
+  final Widget buttons;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 250,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: accent.withValues(alpha: 0.45)),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const _EyeGlyph(size: 13, strokeWidth: 3),
+              const SizedBox(width: 7),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white)),
+              const Spacer(),
+              Text('30 min',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'monospace',
+                      color: accent)),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              for (final n in const ['5m', '15m', '30m', '60m']) ...[
+                Expanded(
+                  child: Container(
+                    height: 18,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: n == '30m'
+                          ? accent.withValues(alpha: 0.25)
+                          : _panel,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                          color: n == '30m'
+                              ? accent.withValues(alpha: 0.55)
+                              : _hairline),
+                    ),
+                    child: Text(n,
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontFamily: 'monospace',
+                            color: n == '30m' ? Colors.white : _textMuted)),
+                  ),
+                ),
+                if (n != '60m') const SizedBox(width: 4),
+              ],
+            ]),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _visualDarker,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    Flexible(
+                      child: Text(consentLabel,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                              color: _textDim)),
+                    ),
+                    const SizedBox(width: 6),
+                    const Spacer(),
+                    const Text('2 of 3 sources',
+                        style: TextStyle(
+                            fontSize: 8,
+                            fontFamily: 'monospace',
+                            color: _textDim)),
+                  ]),
+                  const SizedBox(height: 5),
+                  _srcRow(accent, 'IntelliJ IDEA', '26 min', on: true),
+                  _srcRow(accent, 'Chrome', '12 min', on: true),
+                  _srcRow(accent, 'Slack', '4 min', on: false),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            buttons,
+          ],
+        ),
+      );
+
+  static Widget _srcRow(Color accent, String name, String mins,
+          {required bool on}) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          Container(
+            width: 10,
+            height: 10,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: on ? accent : Colors.transparent,
+              border:
+                  Border.all(color: on ? accent : const Color(0x40FFFFFF)),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: on
+                ? const Text('✓',
+                    style: TextStyle(
+                        fontSize: 7, height: 1, color: Colors.white))
+                : null,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(name,
+                style: TextStyle(
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    color: on ? const Color(0xFFD6DAE3) : _textDim)),
+          ),
+          Text(mins,
+              style: const TextStyle(
+                  fontSize: 8, fontFamily: 'monospace', color: _textDim)),
+        ]),
+      );
+
+  static Widget verb(String label, Color color, {bool outline = false}) =>
+      Expanded(
+        child: Container(
+          height: 24,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: outline ? Colors.transparent : color,
+            border: outline ? Border.all(color: const Color(0x2EFFFFFF)) : null,
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: outline ? _textMuted : Colors.white)),
+        ),
+      );
+}
+
+class _SaveContextVisual extends StatelessWidget {
+  const _SaveContextVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: _MiniChooser(
+              title: 'Save context…',
+              accent: _green,
+              consentLabel: 'COVERS · CLICK TO EXCLUDE',
+              buttons: Row(children: [
+                _MiniChooser.verb('Save 30 min', _green),
+                const SizedBox(width: 6),
+                _MiniChooser.verb('Cancel', _green, outline: true),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+class _CallAiVisual extends StatelessWidget {
+  const _CallAiVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: _MiniChooser(
+              title: 'Call AI on…',
+              accent: _blue,
+              consentLabel: 'AI WILL KNOW · CLICK TO EXCLUDE',
+              buttons: Row(children: [
+                _MiniChooser.verb('Call AI', _blue),
+                const SizedBox(width: 6),
+                _MiniChooser.verb('Call sinain', _green),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Mode 4 — the enrich card: clipboard snippet + composed CONTEXT + handoff.
+class _ClipboardVisual extends StatelessWidget {
+  const _ClipboardVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Container(
+              width: 260,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _cardBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x731F8039)),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x40000000),
+                      blurRadius: 20,
+                      offset: Offset(0, 6)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Row(children: [
+                    _EyeGlyph(size: 13, strokeWidth: 3),
+                    SizedBox(width: 7),
+                    Text('Context from clipboard',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _visualDarker,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: const Text('"x-ratelimit-remaining-tokens"',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            color: Color(0xFFD6DAE3))),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('CONTEXT',
+                      style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.4,
+                          color: _textDim)),
+                  const SizedBox(height: 5),
+                  Container(height: 8, decoration: _bar(_panel)),
+                  const SizedBox(height: 5),
+                  FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: 0.72,
+                      child: Container(height: 8, decoration: _bar(_panel))),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    _MiniChooser.verb('Handoff to Claude Code', _blue),
+                    const SizedBox(width: 6),
+                    _MiniChooser.verb('Copy for agent', _blue, outline: true),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  static BoxDecoration _bar(Color c) =>
+      BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
 }
 
 class _CaptureVisual extends StatelessWidget {

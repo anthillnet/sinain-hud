@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../models/context_cards.dart';
 import '../models/feed_item.dart';
 import '../models/region_highlight.dart';
 import '../models/thread_status.dart';
@@ -74,8 +75,20 @@ class WebSocketService extends ChangeNotifier {
   final _copyController = StreamController<String>.broadcast();
   final _thinkingController = StreamController<bool>.broadcast();
   final _regionController = StreamController<List<RegionHighlight>>.broadcast();
+  final _briefController = StreamController<ContextBrief>.broadcast();
+  final _enrichController = StreamController<EnrichCard>.broadcast();
+  final _saveReceiptController = StreamController<SaveReceipt>.broadcast();
+  final _voiceController = StreamController<VoiceSession>.broadcast();
+
+  /// Latest voice session state (snapshot for late-mounting UI); updates via
+  /// [voiceSessionStream] + notifyListeners.
+  VoiceSession? voiceSession;
 
   Stream<FeedItem> get feedStream => _feedController.stream;
+  Stream<ContextBrief> get briefStream => _briefController.stream;
+  Stream<EnrichCard> get enrichStream => _enrichController.stream;
+  Stream<SaveReceipt> get saveReceiptStream => _saveReceiptController.stream;
+  Stream<VoiceSession> get voiceSessionStream => _voiceController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<bool> get thinkingStream => _thinkingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
@@ -462,6 +475,21 @@ class WebSocketService extends ChangeNotifier {
         case 'thinking':
           _thinkingController.add(json['active'] as bool? ?? false);
           break;
+        case 'context_brief':
+          _briefController.add(ContextBrief.fromJson(json));
+          break;
+        case 'enrich_card':
+          _enrichController.add(EnrichCard.fromJson(json));
+          break;
+        case 'save_receipt':
+          _saveReceiptController.add(SaveReceipt.fromJson(json));
+          break;
+        case 'voice_session':
+          final session = VoiceSession.fromJson(json);
+          voiceSession = session;
+          _voiceController.add(session);
+          notifyListeners();
+          break;
         case 'cost':
           _totalCost = (json['totalCost'] as num?)?.toDouble() ?? 0.0;
           _costCallCount = (json['callCount'] as num?)?.toInt() ?? 0;
@@ -574,6 +602,10 @@ class WebSocketService extends ChangeNotifier {
     return null;
   }
 
+  /// Public HTTP base for native surfaces that load core pages directly
+  /// (the hidden-webview call engine).
+  String? get httpBase => _httpBase;
+
   /// Fetch the portable seed text for a thread (key = regionId or "main") so it
   /// can be copied to the clipboard — the same context we feed supported
   /// agents, built server-side. Returns null on any failure.
@@ -603,6 +635,205 @@ class WebSocketService extends ChangeNotifier {
     }
   }
 
+  // ── Deliberate capture (save / summon / enrich) ──
+
+  Future<Map<String, dynamic>?> _postJson(
+      String path, Map<String, dynamic> body) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.postUrl(Uri.parse('$base$path'));
+      req.headers.contentType = ContentType.json;
+      req.add(utf8.encode(jsonEncode(body)));
+      final resp = await req.close();
+      final text = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(text) as Map<String, dynamic>;
+      if (resp.statusCode != 200) {
+        _log('$path → ${resp.statusCode}: ${data['error']}');
+      }
+      return data;
+    } catch (e) {
+      _log('$path failed: $e');
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// Chooser options (5/15/30/60) with free coverage strings.
+  Future<List<RangeOption>> fetchRangeOptions() async {
+    final base = _httpBase;
+    if (base == null) return const [];
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.getUrl(Uri.parse('$base/window/coverage'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return const [];
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return (data['options'] as List? ?? const [])
+          .whereType<Map>()
+          .map((m) => RangeOption.fromJson(m.cast<String, dynamic>()))
+          .toList();
+    } catch (e) {
+      _log('fetchRangeOptions failed: $e');
+      return const [];
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// "Save last N minutes" — receipt lifecycle arrives on [saveReceiptStream].
+  /// [apps] scopes the range to the selected sources (app names + "mic");
+  /// null means everything in the range.
+  Future<bool> requestSave(int minutes, {List<String>? apps}) async =>
+      (await _postJson('/capture/save', {
+        'minutes': minutes,
+        if (apps != null) 'apps': apps,
+      }))?['ok'] ==
+      true;
+
+  /// Cancel a save inside its undo window.
+  Future<bool> requestSaveUndo(String saveId) async =>
+      (await _postJson('/capture/undo', {'saveId': saveId}))?['undone'] == true;
+
+  /// "Call AI on my last N minutes" — brief arrives on [briefStream].
+  /// Returns an error string, or null on accepted.
+  Future<String?> requestSummon(int minutes, {List<String>? apps}) async {
+    final data = await _postJson('/context/summon', {
+      'minutes': minutes,
+      if (apps != null) 'apps': apps,
+    });
+    if (data == null) return 'core unreachable';
+    return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
+  }
+
+  /// "Build context" for clipboard text — card arrives on [enrichStream].
+  Future<String?> requestEnrich(String text) async {
+    final data = await _postJson('/context/enrich', {'text': text});
+    if (data == null) return 'core unreachable';
+    return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
+  }
+
+  /// "Call sinain" — start a voice session seeded with the last N minutes
+  /// (0 = unseeded). Lifecycle arrives on [voiceSessionStream]. Returns the
+  /// raw response so callers can react to `loginUrl` ("login required").
+  Future<Map<String, dynamic>?> requestVoiceStart(int minutes,
+          {List<String>? apps}) async =>
+      _postJson('/voice/start', {
+        'minutes': minutes,
+        if (apps != null) 'apps': apps,
+      });
+
+  /// Hand the login window's captured session cookie to core.
+  Future<bool> requestVoicePair(String cookie) async =>
+      (await _postJson('/voice/pair', {'cookie': cookie}))?['ok'] == true;
+
+  /// Voice session status snapshot (incl. `paired` — the browser pair flow
+  /// completes out-of-band, so the overlay polls this).
+  Future<Map<String, dynamic>?> fetchVoiceStatus() async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.getUrl(Uri.parse('$base/voice/status'));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// End the running voice session.
+  Future<bool> requestVoiceStop() async =>
+      (await _postJson('/voice/stop', {}))?['stopped'] == true;
+
+  /// Mic mute for the webview call engine (the call page polls core's ctl).
+  Future<void> requestVoiceMute(bool muted) async {
+    await _postJson('/voice/mute', {'muted': muted});
+  }
+
+  /// "Call sinain" via the deployed meetbot: the bot joins the given
+  /// Meet/Teams call, seeded with the last N minutes.
+  Future<String?> requestVoiceMeet(String url, int minutes) async {
+    final data = await _postJson('/voice/meet', {'url': url, 'minutes': minutes});
+    if (data == null) return 'core unreachable';
+    return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
+  }
+
+  /// Chooser context card: cached range summary + coverage for a duration.
+  Future<Map<String, dynamic>?> fetchWindowPreview(int minutes) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse('$base/window/preview?minutes=$minutes'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      return (jsonDecode(body) as Map<String, dynamic>)['preview']
+          as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// Sources present in a range — each {name, kind, minutes} drives one row
+  /// of the chooser's source checklist. Free window metadata, no LLM.
+  Future<List<Map<String, dynamic>>?> fetchWindowSources(int minutes) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse('$base/window/sources?minutes=$minutes'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      final sources =
+          (jsonDecode(body) as Map<String, dynamic>)['sources'] as List?;
+      return sources?.cast<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// Live coverage for an arbitrary slider position (free window data).
+  Future<String?> fetchCoverageAt(int minutes) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse('$base/window/coverage?minutes=$minutes'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      final option =
+          (jsonDecode(body) as Map<String, dynamic>)['option'] as Map?;
+      return option?['covers'] as String?;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
   void disconnect() {
     _profilingTimer?.cancel();
     _profilingTimer = null;
@@ -625,6 +856,10 @@ class WebSocketService extends ChangeNotifier {
     _copyController.close();
     _regionController.close();
     _regionThreadController.close();
+    _briefController.close();
+    _enrichController.close();
+    _saveReceiptController.close();
+    _voiceController.close();
     super.dispose();
   }
 

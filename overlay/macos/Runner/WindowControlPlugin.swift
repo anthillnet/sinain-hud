@@ -1,6 +1,7 @@
 import Cocoa
 import CoreGraphics
 import FlutterMacOS
+import WebKit
 
 /// Native NSWindow control via Flutter platform channel.
 class WindowControlPlugin: NSObject, FlutterPlugin {
@@ -35,6 +36,32 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         let args = call.arguments as? [String: Any]
 
         switch call.method {
+        case "openAuthWindow":
+            // Browser-style login owned by the app (like the gpt bridge): a
+            // normal WKWebView window; the user signs in; we watch OUR cookie
+            // store for the named session cookie and return "name=value".
+            // Server-side this is indistinguishable from a browser session.
+            guard let a = args,
+                  let urlStr = a["url"] as? String,
+                  let url = URL(string: urlStr),
+                  let cookieName = a["cookieName"] as? String else {
+                result(FlutterError(code: "args", message: "url + cookieName required", details: nil))
+                return
+            }
+            AuthWindowSession.open(url: url, cookieName: cookieName, result: result)
+        case "openCallEngine":
+            // Hidden-webview voice call engine: an invisible WKWebView runs
+            // the browser WebRTC stack (echo cancellation, jitter buffer) on
+            // core's /voice/call.html. See CallEngineSession below.
+            guard let a = args, let urlStr = a["url"] as? String, let url = URL(string: urlStr) else {
+                result(FlutterError(code: "args", message: "url required", details: nil))
+                return
+            }
+            CallEngineSession.open(url: url)
+            result(nil)
+        case "closeCallEngine":
+            CallEngineSession.close()
+            result(nil)
         case "setPrivacyMode":
             let enabled = args?["enabled"] as? Bool ?? true
             if #available(macOS 12.0, *) {
@@ -870,5 +897,154 @@ private class RegionSelectView: NSView {
         }
         b.setFrameSize(NSSize(width: 28, height: 28))
         return b
+    }
+}
+
+// ── Auth window: browser login owned by the app ─────────────────────────────
+// One session at a time. Opens a plain WKWebView window on the server's login;
+// the user signs in exactly as in a browser; we watch OUR cookie store for the
+// named session cookie and hand "name=value" back to Dart. Closing the window
+// resolves nil (login cancelled).
+final class AuthWindowSession: NSObject {
+    private static var current: AuthWindowSession?
+
+    private let web: WKWebView
+    private let window: NSWindow
+    private var timer: Timer?
+    private var callback: ((String?) -> Void)?
+
+    static func open(url: URL, cookieName: String, result: @escaping FlutterResult) {
+        guard current == nil else {
+            result(FlutterError(code: "busy", message: "auth window already open", details: nil))
+            return
+        }
+        let session = AuthWindowSession(url: url, cookieName: cookieName) { value in
+            current = nil
+            result(value)
+        }
+        current = session
+    }
+
+    private init(url: URL, cookieName: String, done: @escaping (String?) -> Void) {
+        web = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 640))
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
+                          styleMask: [.titled, .closable, .resizable],
+                          backing: .buffered, defer: false)
+        callback = done
+        super.init()
+        window.title = "Sign in to Sinain"
+        window.contentView = web
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        web.load(URLRequest(url: url))
+
+        let host = url.host ?? ""
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            // Window closed by the user → cancelled.
+            if !self.window.isVisible { self.finish(nil); return }
+            self.web.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                let match = cookies.first { c in
+                    c.name == cookieName &&
+                    (host == c.domain ||
+                     host.hasSuffix(c.domain.hasPrefix(".") ? c.domain : "." + c.domain) ||
+                     c.domain.hasSuffix(host))
+                }
+                if let c = match { self.finish("\(c.name)=\(c.value)") }
+            }
+        }
+    }
+
+    private func finish(_ value: String?) {
+        guard let cb = callback else { return }
+        callback = nil
+        timer?.invalidate()
+        timer = nil
+        window.close()
+        cb(value)
+    }
+}
+
+// ── Hidden call engine (voice) ──────────────────────────────────────────────
+
+/// Invisible WKWebView running core's /voice/call.html — the browser WebRTC
+/// stack (getUserMedia echo cancellation/noise suppression + adaptive playout
+/// jitter buffer) without opening a visible browser. The panel is 2×2 px,
+/// nearly transparent and click-through, but technically on screen so WebKit
+/// keeps painting the canvas the page captures its screen track from.
+/// sharingType .none keeps it invisible to screen capture like every other
+/// HUD surface (it never appears in Sinain's own frames).
+final class CallEngineSession: NSObject, WKUIDelegate {
+    private static var session: CallEngineSession?
+
+    private var window: NSPanel?
+    private var webView: WKWebView?
+
+    static func open(url: URL) {
+        close()
+        let s = CallEngineSession()
+        s.start(url: url)
+        session = s
+    }
+
+    static func close() {
+        session?.teardown()
+        session = nil
+    }
+
+    private func start(url: URL) {
+        let config = WKWebViewConfiguration()
+        config.mediaTypesRequiringUserActionForPlayback = []
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 2, height: 2),
+                            configuration: config)
+        web.uiDelegate = self
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 4, y: 4, width: 2, height: 2),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.alphaValue = 0.01
+        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.sharingType = .none
+        panel.contentView = web
+        panel.orderFrontRegardless()
+
+        webView = web
+        window = panel
+        web.load(URLRequest(url: url))
+    }
+
+    @available(macOS 12.0, *)
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // Auto-grant is for our own local core page ONLY — if the webview ever
+        // navigates elsewhere (bad URL, redirect), deny rather than silently
+        // hand a foreign origin the microphone.
+        let localHosts: Set<String> = ["127.0.0.1", "localhost", "::1"]
+        if localHosts.contains(origin.host) {
+            decisionHandler(.grant)
+        } else {
+            NSLog("[CallEngine] denying media capture for origin %@", origin.host)
+            decisionHandler(.deny)
+        }
+    }
+
+    private func teardown() {
+        // about:blank releases the mic before the window goes away.
+        webView?.load(URLRequest(url: URL(string: "about:blank")!))
+        webView?.uiDelegate = nil
+        window?.close()
+        webView = nil
+        window = nil
     }
 }

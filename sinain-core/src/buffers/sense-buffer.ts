@@ -74,7 +74,11 @@ export class SenseBuffer {
   // Activity tracking
   private _activityCounts: Map<string, number> = new Map();
 
-  constructor(maxSize = 60, maxImagesKept = 5) {
+  /**
+   * @param horizonMs optional time horizon — events older than this are evicted
+   *   on push (rolling window). When set, maxSize is a backstop, not the driver.
+   */
+  constructor(maxSize = 60, maxImagesKept = 5, private horizonMs = 0) {
     this.maxSize = maxSize;
     this.maxImagesKept = maxImagesKept;
     // Very conservative: only dedup when BOTH visual AND text are nearly identical
@@ -164,6 +168,16 @@ export class SenseBuffer {
 
     this.events.push(event);
     if (this.events.length > this._hwm) this._hwm = this.events.length;
+    if (this.horizonMs > 0) {
+      const cutoff = Date.now() - this.horizonMs;
+      // Single splice — a shift() loop is O(n²) when many events age out at once.
+      let firstLive = 0;
+      while (firstLive < this.events.length &&
+             (this.events[firstLive].receivedAt ?? this.events[firstLive].ts) < cutoff) {
+        firstLive++;
+      }
+      if (firstLive > 0) this.events.splice(0, firstLive);
+    }
     if (this.events.length > this.maxSize) {
       this.events.shift();
     }

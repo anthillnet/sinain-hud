@@ -1,4 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, resolve as resolvePathJoin } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
 import type { Profiler } from "./profiler.js";
@@ -1692,6 +1696,45 @@ export interface ServerDeps {
   /** Import a concept bundle into the local knowledge graph. */
   importConcept?: (envelope: unknown, conflict: "skip" | "merge" | "overwrite") => Promise<unknown>;
 
+  // ── Deliberate capture (save / summon / enrich on the rolling window) ──
+  /** Kick off "save last N minutes" → returns saveId; receipt flows via WS. */
+  captureSave?: (minutes: number, apps?: string[]) => string;
+  /** Cancel a save inside its undo window. */
+  captureUndo?: (saveId: string) => boolean;
+  /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
+  contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
+  /** "Build context" for a focus item (clipboard) → what/connects/next card. */
+  contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
+  /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
+  windowCoverage?: () => unknown;
+  /** Live coverage for an arbitrary N (the chooser slider). */
+  windowCoverageAt?: (minutes: number) => unknown;
+  /** Chooser context card: cached range summary + coverage. */
+  windowPreview?: (minutes: number) => Promise<unknown>;
+  /** "Call sinain": start a bridge voice session seeded with the last N minutes. */
+  voiceStart?: (minutes: number, apps?: string[]) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
+  /** Distinct sources (apps + mic) in a range — the chooser's selection chips. */
+  windowSources?: (minutes: number) => unknown;
+  /** "Call sinain" via the deployed meetbot: bot joins the given Meet/Teams call. */
+  voiceMeet?: (url: string, minutes: number) => Promise<{ ok: boolean; error?: string }>;
+  /** End the running voice session (true if there was one). */
+  voiceStop?: () => boolean;
+  /** Store the pair-flow credential (session cookie or device token). */
+  voicePair?: (cookie: string, token: string, email: string) => void;
+  /** Current voice session state. */
+  voiceStatus?: () => unknown;
+  /** Seed for the webview call engine's meta datachannel. */
+  voiceSeed?: () => { text: string; say: string };
+  /** Proxy the call page's SDP offer to ARSinain with the stored credential. */
+  voiceOffer?: (body: unknown) => Promise<{ status: number; body: string }>;
+  /** Lifecycle events reported by the call page (live/ended/error);
+   *  caption = a spoken line for the chip's live captions. */
+  voiceEngineEvent?: (status: string, error?: string, caption?: string) => void;
+  /** Set mic mute for the webview engine. */
+  voiceMute?: (muted: boolean) => void;
+  /** Control state the call page polls: {muted, end}. */
+  voiceCtl?: () => { muted: boolean; end: boolean };
+
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
   /** Current per-lane agent choice; read by run.sh via the piggyback field
@@ -1700,6 +1743,21 @@ export interface ServerDeps {
    *  chose Off" (registered=true, lanes="") from "core forgot our
    *  registration" (registered=false) so run.sh heals only on the latter. */
   getBareAgentConfig?: () => { escalationAgent: string; terminalAgent: string; registered: boolean };
+}
+
+/** Clamp a save/summon range request to sane bounds (1 min … 8h). */
+function clampMinutes(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 30;
+  return Math.max(1, Math.min(480, Math.round(n)));
+}
+
+/** Sanitize an app-selection list from a request body: strings only, capped.
+ *  undefined (absent) means "no scope — everything included". */
+function parseApps(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const apps = raw.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, 32);
+  return apps;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -1741,13 +1799,36 @@ export function createAppServer(deps: ServerDeps) {
   const seenVisionCostIds = new Set<string>();
   const visionCostCleanup = setInterval(() => seenVisionCostIds.clear(), 60_000);
 
+  // Browser origins allowed to call this localhost API cross-origin. A `*`
+  // wildcard here would let ANY website drive /voice/pair, /capture/save,
+  // /voice/start… from a drive-by tab (Chrome PNA opt-in included). Only two
+  // browser contexts are legitimate: pages served by core itself (same-origin,
+  // no CORS needed) and the ARSinain /hud/pair page posting the device token.
+  const trustedOrigins = new Set<string>();
+  try { trustedOrigins.add(new URL(config.voiceConfig.serverUrl).origin); } catch { /* not a URL */ }
+  const corsOrigin = (req: IncomingMessage): string | null => {
+    const origin = req.headers.origin;
+    return origin && trustedOrigins.has(origin) ? origin : null;
+  };
+
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const allowedOrigin = corsOrigin(req);
+    if (allowedOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Vary", "Origin");
+    }
     res.setHeader("Content-Type", "application/json");
 
     if (req.method === "OPTIONS") {
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      if (allowedOrigin) {
+        // Chrome Private Network Access: the ARSinain /hud/pair page (public
+        // https origin) POSTs the device token here (localhost) — the
+        // preflight must opt in or Chrome blocks the request. Scoped to the
+        // trusted origin only.
+        res.setHeader("Access-Control-Allow-Private-Network", "true");
+      }
       res.writeHead(204);
       res.end();
       return;
@@ -1843,6 +1924,256 @@ export function createAppServer(deps: ServerDeps) {
         const metaOnly = url.searchParams.get("meta_only") === "true";
         const events = senseBuffer.query(after, metaOnly);
         res.end(JSON.stringify({ events, epoch: serverEpoch }));
+        return;
+      }
+
+      // ── Deliberate capture: save / summon / enrich / coverage ──
+      if (req.method === "POST" && url.pathname === "/capture/save") {
+        if (!deps.captureSave) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "save unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
+        const minutes = clampMinutes(parsed.minutes);
+        const saveId = deps.captureSave(minutes, parseApps(parsed.apps));
+        res.end(JSON.stringify({ ok: true, saveId, minutes }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/capture/undo") {
+        const body = await readBody(req, 4096);
+        const { saveId } = JSON.parse(body || "{}") as { saveId?: string };
+        if (!saveId || !deps.captureUndo) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "saveId required" }));
+          return;
+        }
+        const undone = deps.captureUndo(saveId);
+        res.end(JSON.stringify({ ok: true, undone }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/context/summon") {
+        if (!deps.contextSummon) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "burst lane unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
+        const minutes = clampMinutes(parsed.minutes);
+        const requestId = `summon-${Date.now().toString(36)}`;
+        // Respond immediately; the brief card flows to the overlay via WS.
+        res.end(JSON.stringify({ ok: true, requestId, minutes }));
+        void deps.contextSummon(minutes, requestId, parseApps(parsed.apps));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/context/enrich") {
+        if (!deps.contextEnrich) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "burst lane unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 65536);
+        const focus = String((JSON.parse(body || "{}") as { text?: string }).text ?? "").trim();
+        if (!focus) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "text required (clipboard is empty?)" }));
+          return;
+        }
+        const requestId = `enrich-${Date.now().toString(36)}`;
+        res.end(JSON.stringify({ ok: true, requestId }));
+        void deps.contextEnrich(focus, requestId);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/window/preview") {
+        const minutes = clampMinutes(Number(url.searchParams.get("minutes") ?? 30));
+        res.end(JSON.stringify({ ok: true, preview: (await deps.windowPreview?.(minutes)) ?? null }));
+        return;
+      }
+
+      // Sources (apps + mic) present in a range — the chooser's app-selection
+      // chips. Free (window titles only), no LLM.
+      if (req.method === "GET" && url.pathname === "/window/sources") {
+        const minutes = clampMinutes(parseInt(url.searchParams.get("minutes") || "30", 10));
+        res.end(JSON.stringify({ ok: true, minutes, sources: deps.windowSources?.(minutes) ?? [] }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/window/coverage") {
+        // ?minutes=N → single live coverage row for the chooser's slider.
+        const minutesParam = url.searchParams.get("minutes");
+        if (minutesParam !== null) {
+          res.end(JSON.stringify({
+            ok: true,
+            option: deps.windowCoverageAt?.(clampMinutes(Number(minutesParam))) ?? null,
+          }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true, options: deps.windowCoverage?.() ?? [] }));
+        return;
+      }
+
+      // ── Voice sessions ("Talk to Sinain" via the AR bridge) ──
+      if (req.method === "POST" && url.pathname === "/voice/start") {
+        if (!deps.voiceStart) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
+        // 0 = unseeded session; otherwise clamp like every range gesture.
+        const minutes = parsed.minutes === 0 ? 0 : clampMinutes(parsed.minutes);
+        const result = await deps.voiceStart(minutes, parseApps(parsed.apps));
+        if (!result.ok) res.writeHead(409);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/meet") {
+        if (!deps.voiceMeet) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { url?: string; minutes?: number };
+        const meetUrl = String(parsed.url ?? "").trim();
+        if (!/^https:\/\/(meet\.google\.com|teams\.live\.com|teams\.microsoft\.com)\//i.test(meetUrl)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "url must be a Google Meet or Teams link" }));
+          return;
+        }
+        const minutes = parsed.minutes === 0 ? 0 : clampMinutes(parsed.minutes);
+        const result = await deps.voiceMeet(meetUrl, minutes);
+        if (!result.ok) res.writeHead(502);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // Browser pairing callback — the /hud/pair page on the deployed server
+      // POSTs the freshly-minted device token here after the user logs in.
+      if (req.method === "POST" && url.pathname === "/voice/pair") {
+        // Credential-bearing endpoint: a browser request must come from the
+        // trusted pairing origin. Non-browser callers send no Origin header.
+        if (req.headers.origin && !corsOrigin(req)) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ ok: false, error: "origin not allowed" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const { cookie, token, email } = JSON.parse(body || "{}") as
+          { cookie?: string; token?: string; email?: string };
+        if ((!cookie && !token) || !deps.voicePair) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "cookie or token required" }));
+          return;
+        }
+        deps.voicePair(cookie ?? "", token ?? "", email ?? "");
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/stop") {
+        res.end(JSON.stringify({ ok: true, stopped: deps.voiceStop?.() ?? false }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/status") {
+        res.end(JSON.stringify({ ok: true, ...(deps.voiceStatus?.() ?? { status: "unavailable" }) }));
+        return;
+      }
+
+      // ── Hidden-webview call engine (browser WebRTC stack) ──
+      // The overlay's invisible WKWebView loads this page; it talks back to
+      // core only (same origin) — core proxies signaling with the paired
+      // device token so the page never holds a credential.
+      if (req.method === "GET" && url.pathname === "/voice/call.html") {
+        try {
+          const page = readFileSync(
+            resolvePathJoin(dirname(fileURLToPath(import.meta.url)), "..", "static", "voice-call.html"));
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          res.end(page);
+        } catch {
+          res.writeHead(404);
+          res.end(JSON.stringify({ ok: false, error: "call page missing" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/frame") {
+        try {
+          // Async read — this is polled 4×/s by the call engine; readFileSync
+          // here would block the event loop on every frame.
+          const jpeg = await readFile(config.voiceConfig.framePath);
+          res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+          res.end(jpeg);
+        } catch {
+          res.writeHead(404);
+          res.end(JSON.stringify({ ok: false, error: "no frame — is sck-capture running?" }));
+        }
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/seed") {
+        res.end(JSON.stringify(deps.voiceSeed?.() ?? { text: "", say: "" }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/turn") {
+        try {
+          const r = await fetch(config.voiceConfig.turnUrl, { signal: AbortSignal.timeout(5_000) });
+          res.writeHead(r.status, { "Content-Type": "application/json" });
+          res.end(await r.text());
+        } catch {
+          res.end(JSON.stringify({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }));
+        }
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/offer") {
+        if (!deps.voiceOffer) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 262_144); // SDP offers run large
+        try {
+          const result = await deps.voiceOffer(JSON.parse(body || "{}"));
+          res.writeHead(result.status, { "Content-Type": "application/json" });
+          res.end(result.body);
+        } catch (err) {
+          res.writeHead(502);
+          res.end(JSON.stringify({ ok: false, error: String((err as Error).message ?? err).slice(0, 200) }));
+        }
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/voice/engine") {
+        const body = await readBody(req, 8192);
+        const { status, error, caption } = JSON.parse(body || "{}") as
+          { status?: string; error?: string; caption?: string };
+        if (status) deps.voiceEngineEvent?.(status, error, caption?.slice(0, 500));
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // Mic mute + hangup control for the webview engine (page polls ctl).
+      if (req.method === "POST" && url.pathname === "/voice/mute") {
+        const body = await readBody(req, 1024);
+        const { muted } = JSON.parse(body || "{}") as { muted?: boolean };
+        deps.voiceMute?.(muted === true);
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/ctl") {
+        res.end(JSON.stringify(deps.voiceCtl?.() ?? { muted: false, end: false }));
         return;
       }
 

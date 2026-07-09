@@ -94,6 +94,17 @@ def extract_json(text: str) -> dict | list:
             except json.JSONDecodeError:
                 pass
 
+            # Strategy B2: text cut right after a key (`..., "facts": `) —
+            # stripping the colon alone leaves a valueless key. Drop the
+            # dangling key too, then close.
+            no_key = re.sub(r'"[^"\n]*"\s*:?\s*$', '', fragment)
+            no_key = re.sub(r'[,:\s]+$', '', no_key)
+            if no_key != stripped:
+                try:
+                    return json.loads(no_key + closers)
+                except json.JSONDecodeError:
+                    pass
+
             # Strategy C: if mid-string, cut before the unclosed string,
             # strip trailing tokens, close brackets
             if in_string and string_start >= start:

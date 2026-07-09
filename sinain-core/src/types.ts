@@ -245,7 +245,7 @@ export interface CostMessage {
 
 /** Entry recorded by CostTracker for each LLM call. */
 export interface CostEntry {
-  source: "analyzer" | "transcription" | "vision" | "chat";
+  source: "analyzer" | "transcription" | "vision" | "chat" | "burst" | "save";
   model: string;
   cost: number;
   tokensIn: number;
@@ -268,7 +268,84 @@ export interface CostSnapshot {
   tokensOutBySource: Record<string, number>;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage;
+// ── Deliberate capture: window cards (sinain-core → Overlay) ──
+
+/** One row of the situation brief's mini-timeline. */
+export interface BriefTimelineEntry {
+  /** Relative label, e.g. "−18m". */
+  at: string;
+  what: string;
+}
+
+/** "Call AI on my last N minutes" → situation brief card. */
+export interface ContextBriefMessage {
+  type: "context_brief";
+  /** Correlates the card with the /context/summon request. */
+  requestId: string;
+  status: "working" | "ready" | "error";
+  minutes: number;
+  /** Free coverage string, e.g. "IntelliJ · Chrome · mic". */
+  coverage: string;
+  brief?: {
+    timeline: BriefTimelineEntry[];
+    goal: string;
+    problems: string[];
+    entities: string[];
+  };
+  /** True when the range was truncated (quota/size) — show honest partial. */
+  partial?: boolean;
+  latencyMs?: number;
+  error?: string;
+  ts: number;
+}
+
+/** "Build context" (clipboard enrich) → context / next card. */
+export interface EnrichCardMessage {
+  type: "enrich_card";
+  requestId: string;
+  status: "working" | "ready" | "error";
+  /** The focus item (clipboard text), truncated for display. */
+  focus: string;
+  card?: { context: string };
+  latencyMs?: number;
+  error?: string;
+  ts: number;
+}
+
+/** Voice session ("Call sinain") lifecycle. */
+export interface VoiceSessionMessage {
+  type: "voice_session";
+  status: "starting" | "live" | "ended" | "error";
+  /** Transport: hidden-webview engine (browser WebRTC stack), local AR
+   *  bridge (python aiortc), or the deployed meetbot joining a Google
+   *  Meet/Teams call from its container. */
+  mode: "webview" | "bridge" | "meet";
+  /** Range whose brief seeded the session (0 = unseeded). */
+  minutes: number;
+  coverage: string;
+  /** Human line to surface (e.g. "admit Sinain (AI) from the People panel"). */
+  message?: string;
+  error?: string;
+  ts: number;
+}
+
+/** Save-last-N lifecycle: ack → receipt (with undo window) → final. */
+export interface SaveReceiptMessage {
+  type: "save_receipt";
+  saveId: string;
+  status: "saving" | "saved" | "committed" | "undone" | "error";
+  minutes: number;
+  coverage: string;
+  facts?: number;
+  entities?: number;
+  cost?: number;
+  /** Seconds remaining in which undo is accepted (present when status=saved). */
+  undoSeconds?: number;
+  error?: string;
+  ts: number;
+}
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | VoiceSessionMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -441,6 +518,43 @@ export type AgentConfig = AnalysisConfig;
  * near-frame rate with no network. The cloud loop keeps writing hud/digest but
  * yields region detection to this lane while it's on (clean A/B).
  */
+/** Fast-inference lane for deliberate-capture gestures (summon/enrich).
+ *  Cerebras by default (OpenAI-compatible); any compatible endpoint works. */
+export interface BurstConfig {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  endpoint: string;
+  apiKey: string;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
+/** "Call sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
+export interface VoiceConfig {
+  enabled: boolean;
+  /** ARSinain base URL (aiortc signaling) for the local bridge transport. */
+  serverUrl: string;
+  /** X-Auth-Request-Email for entitlement-gated servers ("" locally). */
+  email: string;
+  /** sck-capture frame IPC file the bridge publishes as the video track. */
+  framePath: string;
+  /** Screen publish rate. */
+  fps: number;
+  /** Media engine: "webview" = hidden WKWebView in the overlay running the
+   *  browser WebRTC stack (real AEC/NS/AGC + adaptive jitter buffer —
+   *  call-quality parity with the web client); "bridge" = python aiortc
+   *  fallback (raw mic, no echo cancellation). */
+  engine: "webview" | "bridge";
+  /** TURN credential minter the call page fetches ICE servers from. */
+  turnUrl: string;
+  /** Deployed ARSinain for the meetbot transport (POST /meet). */
+  meetServerUrl: string;
+  /** oauth2-proxy session cookie for the deployed server ("your account").
+   *  Copy the `_oauth2_proxy` cookie from a logged-in browser session. */
+  meetCookie: string;
+}
+
 export interface RegionSlmConfig {
   /** Master switch for the local-SLM region detector (default false). */
   enabled: boolean;
@@ -698,6 +812,10 @@ export interface CoreConfig {
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AnalysisConfig;
   regionSlmConfig: RegionSlmConfig;
+  burstConfig: BurstConfig;
+  voiceConfig: VoiceConfig;
+  /** Rolling-window retention horizon for feed/sense buffers (ms). */
+  windowHorizonMs: number;
   escalationConfig: EscalationConfig;
   openclawConfig: OpenClawConfig;
   situationMdPath: string;

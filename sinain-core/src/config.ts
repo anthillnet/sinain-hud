@@ -308,6 +308,44 @@ export function loadConfig(): CoreConfig {
     cloudApiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
   };
 
+  // Deliberate-capture burst lane: fast inference for summon ("Call AI on my
+  // last N minutes") and enrich ("Build context"). Cerebras by default —
+  // measured ~25K tok/s prefill, so a 30-min window brief lands in ~1.5s.
+  // Falls back to disabled (endpoints return 503) when no API key is present.
+  const burstConfig: import("./types.js").BurstConfig = {
+    enabled: boolEnv("BURST_ENABLED", true),
+    provider: env("BURST_PROVIDER", "cerebras"),
+    model: env("BURST_MODEL", "gemma-4-31b"),
+    endpoint: env("BURST_ENDPOINT", "https://api.cerebras.ai/v1/chat/completions"),
+    apiKey: env("BURST_API_KEY", env("CEREBRAS_API_KEY", "")),
+    maxTokens: intEnv("BURST_MAX_TOKENS", 700),
+    timeoutMs: intEnv("BURST_TIMEOUT_MS", 20000),
+  };
+
+  // "Talk to Sinain" voice sessions — the ar-bridge publishes screen + mic to
+  // an ARSinain server over WebRTC, seeded with a window brief. Local dev
+  // default: ARSinain on 127.0.0.1:8089 (its AR_HELP_PORT default).
+  const voiceConfig: import("./types.js").VoiceConfig = {
+    enabled: boolEnv("VOICE_ENABLED", true),
+    // "Call sinain" dials the DEPLOYED server by default — same session the
+    // browser client uses, authenticated with your account via
+    // ARSINAIN_COOKIE. Point at http://127.0.0.1:8089 for a local ARSinain.
+    serverUrl: env("ARSINAIN_URL", "https://ar.sinain.com"),
+    email: env("ARSINAIN_EMAIL", ""),
+    framePath: resolvePath(env("VOICE_FRAME_PATH", resolve(os.homedir(), ".sinain", "capture", "frame.jpg"))),
+    fps: floatEnv("VOICE_FPS", 4),
+    // "webview" = the browser WebRTC stack in a hidden overlay WKWebView
+    // (echo cancellation + jitter buffer — same audio quality as the web
+    // client). "bridge" = the python aiortc fallback (raw mic, no AEC).
+    engine: env("VOICE_ENGINE", "webview") === "bridge" ? "bridge" : "webview",
+    turnUrl: env("TURN_CREDS_URL", "https://turn.sinain.com/turn-credentials"),
+    // Meetbot transport: the deployed server whose container joins a Google
+    // Meet/Teams call as "Sinain (AI)". It sits behind oauth2-proxy — supply
+    // your logged-in browser's `_oauth2_proxy` cookie via ARSINAIN_COOKIE.
+    meetServerUrl: env("ARSINAIN_MEET_URL", "https://ar.sinain.com"),
+    meetCookie: env("ARSINAIN_COOKIE", ""),
+  };
+
   // escalation policy: agents.json `escalation` block, fall back to env.
   // Mode is runtime-mutable via the overlay's flash-icon selector; this only
   // sets the boot-time default. (Transport is no longer a setting — per-lane
@@ -403,6 +441,11 @@ export function loadConfig(): CoreConfig {
     transcriptionConfig,
     agentConfig,
     regionSlmConfig,
+    burstConfig,
+    voiceConfig,
+    // Rolling window retention (deliberate capture): how far back "save/summon
+    // last N minutes" can reach. Default 8h; buffers evict past this horizon.
+    windowHorizonMs: intEnv("WINDOW_HORIZON_MINUTES", 480) * 60_000,
     escalationConfig,
     openclawConfig,
     situationMdPath,

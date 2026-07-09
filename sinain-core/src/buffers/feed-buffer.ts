@@ -14,7 +14,13 @@ export class FeedBuffer {
   private _onFullArmed = true;
   private _onFullVersion = 0; // version at last re-arm
 
-  constructor(maxSize = 100) {
+  /**
+   * @param maxSize hard item cap (backstop against runaway memory)
+   * @param horizonMs optional time horizon — items older than this are evicted
+   *   on push, turning the ring into a rolling window ("deliberate capture").
+   *   When set, maxSize should be raised well above the count-based default.
+   */
+  constructor(maxSize = 100, private horizonMs = 0) {
     this.maxSize = maxSize;
   }
 
@@ -61,6 +67,13 @@ export class FeedBuffer {
       queueMicrotask(() => this._onFullCb!(snapshot));
     }
 
+    if (this.horizonMs > 0) {
+      const cutoff = Date.now() - this.horizonMs;
+      // Single splice — a shift() loop is O(n²) when many items age out at once.
+      let firstLive = 0;
+      while (firstLive < this.items.length && this.items[firstLive].ts < cutoff) firstLive++;
+      if (firstLive > 0) this.items.splice(0, firstLive);
+    }
     if (this.items.length > this.maxSize) {
       this.items.shift();
     }

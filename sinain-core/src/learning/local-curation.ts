@@ -567,6 +567,115 @@ export class LocalCurationService {
     }
   }
 
+  /**
+   * Deliberate-capture save, step 1: distill a user-selected range into a
+   * SessionDigest WITHOUT integrating it. The digest's fact/entity counts feed
+   * the save receipt; integration is deferred until the undo window expires
+   * (integrateDigest below), which is what makes undo a real cancel instead of
+   * a graph delete.
+   */
+  async distillOnly(
+    transcript: Array<{ text: string; ts: number; source: string; channel: string }>,
+    sessionMeta: { ts: string; sessionKey: string; durationMs: number; source?: string; saveId?: string },
+  ): Promise<any | null> {
+    if (!existsSync(resolve(this.scriptsDir, "session_distiller.py"))) {
+      warn(TAG, "session_distiller.py not found — cannot distill save");
+      return null;
+    }
+    const diskTranscript = transcript.map((i) => ({ ...i, text: redactFeedTextForDisk(String(i.text ?? "")) }));
+    const tmpTag = `sinain-save-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const transcriptFile = join(tmpdir(), `${tmpTag}-transcript.json`);
+    try {
+      writeFileSync(transcriptFile, JSON.stringify(diskTranscript), { encoding: "utf-8", mode: 0o600 });
+      // A user-save can span hours of transcript — far bigger than the
+      // incremental batches. 30s here killed every 60-min save mid-distill
+      // ("distillation produced nothing" receipts); the LLM needs real time.
+      const { stdout: digestJson } = await execFileAsync("python3", [
+        resolve(this.scriptsDir, "session_distiller.py"),
+        "--memory-dir", this.memoryDir,
+        "--transcript-file", transcriptFile,
+        "--session-meta", JSON.stringify(sessionMeta),
+      ], {
+        timeout: 120_000,
+        encoding: "utf-8",
+        env: { ...process.env, PYTHONPATH: this.scriptsDir },
+      });
+      const digest = JSON.parse(digestJson);
+      if (digest.isEmpty || digest.error) {
+        log(TAG, `save distillation empty: ${digest.error || "no content"}`);
+        return null;
+      }
+      digest._rawItems = diskTranscript;
+      digest._feedItemCount = diskTranscript.length;
+      return digest;
+    } catch (err: any) {
+      // Rethrow so the save receipt reports the real failure — a timeout is
+      // not "nothing to save in that range".
+      const reason = err.killed
+        ? "distiller timed out (120s) — range too large?"
+        : `distiller failed: ${err.message?.slice(0, 200)}`;
+      warn(TAG, `save distillation failed: ${reason}`);
+      throw new Error(reason);
+    } finally {
+      try { unlinkSync(transcriptFile); } catch { /* gone */ }
+    }
+  }
+
+  /**
+   * Deliberate-capture save, step 2: integrate a previously distilled digest
+   * into the knowledge graph (runs after the undo window closes).
+   */
+  async integrateDigest(digest: any): Promise<boolean> {
+    const tmpTag = `sinain-save-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const digestFile = join(tmpdir(), `${tmpTag}-digest.json`);
+    const transcriptFile = join(tmpdir(), `${tmpTag}-transcript.json`);
+    try {
+      writeFileSync(digestFile, JSON.stringify(digest), { encoding: "utf-8", mode: 0o600 });
+      writeFileSync(transcriptFile, JSON.stringify(digest._rawItems ?? []), { encoding: "utf-8", mode: 0o600 });
+      const { stdout } = await execFileAsync("python3", [
+        resolve(this.scriptsDir, "knowledge_integrator.py"),
+        "--memory-dir", this.memoryDir,
+        "--digest-file", digestFile,
+        "--transcript-file", transcriptFile,
+      ], {
+        timeout: 60_000,
+        encoding: "utf-8",
+        env: { ...process.env, PYTHONPATH: this.scriptsDir },
+      });
+      const result = JSON.parse(stdout);
+      log(TAG, `save integrated: ${JSON.stringify(result.graphStats || result)}`);
+      await this.refreshWorkStatePrior();
+      return true;
+    } catch (err: any) {
+      warn(TAG, `save integration failed: ${err.message?.slice(0, 200)}`);
+      return false;
+    } finally {
+      for (const f of [digestFile, transcriptFile]) {
+        try { unlinkSync(f); } catch { /* gone */ }
+      }
+    }
+  }
+
+  /** Sense-context items for an arbitrary range (deliberate-capture save). */
+  senseContextForRange(sinceTs: number, includeApps?: string[]): Array<{ text: string; ts: number; source: string; channel: string }> {
+    if (!this._senseBuffer) return [];
+    const items: Array<{ text: string; ts: number; source: string; channel: string }> = [];
+    for (const evt of this._senseBuffer.queryByTime(sinceTs)) {
+      const app = evt.semantic?.context?.app || evt.meta.app || "unknown";
+      // App scope (chooser chips): deselected apps' screen content stays out.
+      // Consent-first: unattributable ("unknown") events could be FROM a
+      // deselected app — under any scope only allow-listed apps pass.
+      if (includeApps && !includeApps.includes(app)) continue;
+      if (evt.ocr && evt.ocr.length > 20) {
+        items.push({ text: `[screen: ${app}] ${evt.ocr}`, ts: evt.ts, source: "sense", channel: "screen" });
+      }
+      if (evt.semantic?.visible?.summary) {
+        items.push({ text: `[screen-context] ${evt.semantic.visible.summary}`, ts: evt.ts, source: "sense", channel: "screen" });
+      }
+    }
+    return items;
+  }
+
   /** Run the periodic curation pipeline.
    * Replaces the bare-agent heartbeat entirely:
    *   signal_analyzer + insight_synthesizer (formerly heartbeat-only)

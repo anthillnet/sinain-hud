@@ -953,8 +953,12 @@ async function main() {
   log(TAG, `privacy: mode=${config.privacyConfig.mode}`);
 
   // ── Initialize core buffers (single source of truth) ──
-  const feedBuffer = new FeedBuffer(100);
-  const senseBuffer = new SenseBuffer(30);
+  // Deliberate capture: the ring buffers ARE the rolling window. Retention is
+  // time-horizon-driven (default 8h); the item caps become memory backstops.
+  // Text-only at these sizes is trivial (~200KB/h); images are still trimmed
+  // to the most recent few by SenseBuffer regardless of horizon.
+  const feedBuffer = new FeedBuffer(5000, config.windowHorizonMs);
+  const senseBuffer = new SenseBuffer(3000, 5, config.windowHorizonMs);
 
   // ── Initialize overlay WS handler ──
   const wsHandler = new WsHandler();
@@ -1814,6 +1818,75 @@ async function main() {
   // Warm the KG retrieval daemon at boot (no-op if the script is missing).
   startKgDaemon();
 
+  // ── Deliberate capture: save manager + burst-lane gestures ──
+  const { SaveManager } = await import("./capture/save-manager.js");
+  const { assembleWindow, chooserOptions, describeCoverage, summonBrief, enrichFocus, listWindowSources } = await import("./capture/window-ops.js");
+  const { burstCall } = await import("./capture/burst-client.js");
+  const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
+
+  // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
+  const { VoiceSessionManager } = await import("./capture/voice-session.js");
+  const voiceManager = new VoiceSessionManager(
+    config.voiceConfig, config.burstConfig, feedBuffer, senseBuffer,
+    (msg) => wsHandler.broadcastRaw(msg),
+  );
+
+  const windowPreviewCache = new Map<number, { ts: number; summary: string }>();
+  const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
+    // Cerebras free tier reports no cost; tokens still tracked for visibility.
+    costTracker.record({
+      source: "burst", model: config.burstConfig.model,
+      cost: 0, tokensIn: r.tokensIn, tokensOut: r.tokensOut, ts: Date.now(),
+    });
+  };
+
+  const contextSummon = async (minutes: number, requestId: string, apps?: string[]): Promise<unknown> => {
+    const scope = apps ? { apps } : undefined;
+    const coverage = describeCoverage(feedBuffer, senseBuffer, minutes, scope);
+    wsHandler.broadcastRaw({ type: "context_brief", requestId, status: "working", minutes, coverage, ts: Date.now() });
+    try {
+      const slice = assembleWindow(feedBuffer, senseBuffer, minutes, scope);
+      if (slice.lineCount === 0) throw new Error("that range was idle — nothing to brief on");
+      const { brief, result } = await summonBrief(config.burstConfig, slice, minutes);
+      recordBurstUsage(result);
+      const msg = {
+        type: "context_brief" as const, requestId, status: "ready" as const, minutes,
+        coverage: slice.coverage, brief, partial: slice.truncated, latencyMs: result.latencyMs, ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    } catch (err) {
+      const msg = {
+        type: "context_brief" as const, requestId, status: "error" as const, minutes,
+        coverage, error: String((err as Error).message ?? err).slice(0, 200), ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    }
+  };
+
+  const contextEnrich = async (focus: string, requestId: string): Promise<unknown> => {
+    const focusPreview = focus.length > 120 ? `${focus.slice(0, 117)}…` : focus;
+    wsHandler.broadcastRaw({ type: "enrich_card", requestId, status: "working", focus: focusPreview, ts: Date.now() });
+    try {
+      const { card, result } = await enrichFocus(config.burstConfig, feedBuffer, senseBuffer, focus);
+      recordBurstUsage(result);
+      const msg = {
+        type: "enrich_card" as const, requestId, status: "ready" as const,
+        focus: focusPreview, card, latencyMs: result.latencyMs, ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    } catch (err) {
+      const msg = {
+        type: "enrich_card" as const, requestId, status: "error" as const,
+        focus: focusPreview, error: String((err as Error).message ?? err).slice(0, 200), ts: Date.now(),
+      };
+      wsHandler.broadcastRaw(msg);
+      return msg;
+    }
+  };
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
@@ -1834,6 +1907,66 @@ async function main() {
     exportConcept: (entity, depth, opts) => exportConceptBundle(entity, depth, opts),
     importConcept: (envelope, conflict) => importConceptBundle(envelope, conflict),
     isScreenActive: () => screenActive,
+
+    // Deliberate capture (save / summon / enrich on the rolling window)
+    captureSave: (minutes, apps) => saveManager.save(minutes, apps ? { apps } : undefined),
+    captureUndo: (saveId) => saveManager.undo(saveId),
+    contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
+    contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
+    windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
+    windowSources: (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
+    windowCoverageAt: (minutes) => {
+      const now = Date.now();
+      const oldestFeed = feedBuffer.queryByTime(0)[0]?.ts ?? now;
+      const oldestSense = senseBuffer.queryByTime(0)[0]?.ts ?? now;
+      return {
+        minutes,
+        covers: describeCoverage(feedBuffer, senseBuffer, minutes),
+        availableMinutes: Math.floor((now - Math.min(oldestFeed, oldestSense)) / 60_000),
+      };
+    },
+    windowPreview: async (minutes) => {
+      // Chooser context card: a one-look summary of what the range holds.
+      // Cached per duration (90s TTL) so scrubbing the slider back and forth
+      // never re-calls the LLM for a duration it already previewed.
+      const covers = describeCoverage(feedBuffer, senseBuffer, minutes);
+      const hit = windowPreviewCache.get(minutes);
+      if (hit && Date.now() - hit.ts < 90_000) {
+        return { minutes, covers, summary: hit.summary };
+      }
+      let summary = "";
+      if (config.burstConfig.enabled && config.burstConfig.apiKey) {
+        try {
+          const slice = assembleWindow(feedBuffer, senseBuffer, minutes);
+          if (slice.lineCount > 0) {
+            const r = await burstCall(config.burstConfig, {
+              system: "Summarize this slice of the user's screen/audio activity in 1-2 short sentences — what they were doing, named specifically. No preamble.",
+              // Tail of the slice is enough for a preview — keeps every slider
+              // stop cheap regardless of range length.
+              user: slice.text.slice(-12_000),
+              maxTokens: 90,
+              cacheKey: "sinain-preview-v1",
+            });
+            summary = r.content.trim();
+            recordBurstUsage(r);
+          }
+        } catch { /* preview is decoration — coverage alone is fine */ }
+      }
+      windowPreviewCache.set(minutes, { ts: Date.now(), summary });
+      return { minutes, covers, summary };
+    },
+    voiceStart: config.voiceConfig.enabled
+      ? (minutes, apps) => voiceManager.start(minutes, apps ? { apps } : undefined)
+      : undefined,
+    voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
+    voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),
+    voiceStop: () => voiceManager.stop(),
+    voiceStatus: () => voiceManager.status(),
+    voiceSeed: () => voiceManager.seed(),
+    voiceOffer: (body) => voiceManager.proxyOffer(body),
+    voiceEngineEvent: (status, error, caption) => voiceManager.engineEvent(status, error, caption),
+    voiceMute: (muted) => voiceManager.setMute(muted),
+    voiceCtl: () => voiceManager.ctl(),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;

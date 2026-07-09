@@ -21,8 +21,10 @@ import 'chat/feedback_prompt.dart';
 import 'regions/region_eye_controller.dart';
 import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
+import '../core/models/context_cards.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
+import 'capture/capture_ui.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -80,6 +82,34 @@ class OverlayShellState extends State<OverlayShell> {
   // SettingsService. _feedbackEvaluated guards against re-arming every reply.
   bool _feedbackVisible = false;
   bool _feedbackEvaluated = false;
+
+  // Deliberate capture (Save · Call AI · Build context)
+  String? _chooserFor; // null | 'save' | 'call'
+  // Compact card mode: cards shown in a slim panel without opening the chat.
+  bool _cardMode = false;
+  // Full clipboard text behind the current enrich card (focus is a preview).
+  String? _enrichFocusFull;
+  // Region + minutes: a summon brief bound to the next manual region. The
+  // brief renders no card — it attaches to the region thread as handoff
+  // context. Pending flag → brief text (once ready) → target thread id.
+  bool _regionBriefPending = false;
+  String? _pendingRegionBrief;
+  String? _regionBriefTarget;
+  // Region selected via the capture menu: unified select→enrich→handoff UX.
+  // The region becomes the enrich card's focus; handoff opens its thread.
+  bool _regionViaMenu = false;
+  RegionHighlight? _pendingRegion;
+  // Where a summon follow-up goes: 'chat' (agent lane) | 'term' (seeded PTY).
+  String _summonDest = 'chat';
+  List<RangeOption> _rangeOptions = const [];
+  ContextBrief? _activeBrief;
+  EnrichCard? _activeEnrich;
+  SaveReceipt? _saveReceipt;
+  StreamSubscription<ContextBrief>? _briefSub;
+  StreamSubscription<EnrichCard>? _enrichSub;
+  StreamSubscription<SaveReceipt>? _receiptSub;
+  StreamSubscription<VoiceSession>? _voiceSub;
+  VoiceSession? _voiceSession;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -164,6 +194,32 @@ class OverlayShellState extends State<OverlayShell> {
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
+      // Region + minutes (context-menu flow): attach the window brief to this
+      // thread BEFORE the first agent turn — commands are ordered on the same
+      // socket, so a stash sent now lands before run()'s spawn seed is built.
+      // If the brief is still in flight, stash on arrival (follow-ups get it).
+      if (_pendingRegionBrief != null) {
+        ws.sendCommand('set_handoff_context',
+            {'key': picked.id, 'transcript': _pendingRegionBrief!});
+        _pendingRegionBrief = null;
+        _regionBriefPending = false;
+      } else if (_regionBriefPending) {
+        _regionBriefTarget = picked.id;
+      }
+      // Menu flow (select→enrich→handoff): the region is the enrich card's
+      // focus — same card experience as Build Context / Call AI. No auto-run;
+      // the card's handoff button opens the region thread deliberately.
+      if (_regionViaMenu) {
+        _regionViaMenu = false;
+        _pendingRegion = picked;
+        final focus = picked.issue.isNotEmpty
+            ? picked.issue
+            : 'the selected screen region';
+        _enrichFocusFull = focus;
+        _enterCardMode();
+        ws.requestEnrich(focus);
+        return;
+      }
       // "Copy" — just put this region's composed seed on the clipboard (for an
       // agent we don't integrate with). No thread, no HUD, no agent turn.
       if (_pendingManualMode == 'copy') {
@@ -202,6 +258,69 @@ class OverlayShellState extends State<OverlayShell> {
     });
     _thinkingSub = ws.thinkingStream.listen((active) {
       if (mounted) setState(() => _isThinking = active);
+    });
+    // Deliberate-capture cards (context_brief / enrich_card / save_receipt).
+    // Outside the chat they surface in compact card mode — no full HUD.
+    _briefSub = ws.briefStream.listen((b) {
+      if (!mounted) return;
+      // Region-bound brief: no card — it becomes the region thread's handoff
+      // context (stashed here if the region already exists, else on arrival).
+      if (_regionBriefPending) {
+        if (b.status == CardStatus.ready) {
+          final text = _briefText(b);
+          if (_regionBriefTarget != null) {
+            ws.sendCommand('set_handoff_context',
+                {'key': _regionBriefTarget!, 'transcript': text});
+            _regionBriefTarget = null;
+            _regionBriefPending = false;
+          } else {
+            _pendingRegionBrief = text;
+          }
+        } else if (b.status == CardStatus.error) {
+          _regionBriefPending = false; // plain region grab, no window context
+        }
+        return;
+      }
+      setState(() => _activeBrief = b);
+      _enterCardMode();
+    });
+    _enrichSub = ws.enrichStream.listen((c) {
+      if (!mounted) return;
+      setState(() => _activeEnrich = c);
+      _enterCardMode();
+    });
+    _receiptSub = ws.saveReceiptStream.listen((r) {
+      if (!mounted) return;
+      // "undone" confirms the user's own action — no card resurrection needed.
+      if (r.status == SaveStatus.undone && _saveReceipt == null) return;
+      setState(() => _saveReceipt = r);
+      _enterCardMode();
+      if (r.status == SaveStatus.committed || r.status == SaveStatus.undone) {
+        Timer(const Duration(seconds: 4), () {
+          if (mounted && _saveReceipt?.saveId == r.saveId) {
+            setState(() => _saveReceipt = null);
+            _maybeExitCardMode();
+          }
+        });
+      }
+    });
+    _voiceSub = ws.voiceSessionStream.listen((s) {
+      if (!mounted) return;
+      setState(() => _voiceSession = s);
+      _enterCardMode();
+      if (s.status == VoiceStatus.ended || s.status == VoiceStatus.error) {
+        // Webview engine: core broadcast the end (End button, server hangup,
+        // page error) — tear the hidden webview down so the mic releases.
+        _windowService.closeCallEngine();
+      }
+      if (s.status == VoiceStatus.ended) {
+        Timer(const Duration(seconds: 3), () {
+          if (mounted && _voiceSession?.status == VoiceStatus.ended) {
+            setState(() => _voiceSession = null);
+            _maybeExitCardMode();
+          }
+        });
+      }
     });
     _contentSub = ws.agentFeedStream.listen((_) {
       if (!mounted) return;
@@ -657,14 +776,21 @@ class OverlayShellState extends State<OverlayShell> {
   /// or enrichment fails — and we don't pre-clobber it, so an early paste still
   /// lands the user's own content rather than a placeholder.
   Future<void> enrichClipboardHotkey() async {
-    final ws = context.read<WebSocketService>();
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final original = data?.text ?? '';
-    if (original.trim().isEmpty) return;
-    final seed = await ws.fetchSeedText('clipboard', focus: original);
-    if (seed == null || seed.trim().isEmpty) return;
-    final combined = '$original\n\n——— Context from Sinain ———\n$seed';
-    await Clipboard.setData(ClipboardData(text: combined));
+    // Unified with Build Context: the hotkey opens the card (visible, ~1s);
+    // the legacy silent clipboard rewrite lives on as the card's
+    // "Copy for agent" action. No more invisible clipboard mutation.
+    _enterCardMode();
+    await _buildContextFromClipboard();
+  }
+
+  /// Divider written before any Sinain-generated clipboard context. Both
+  /// clipboard features (seed enrich above, Build-context Copy) use it, so a
+  /// single strip at this marker recovers the user's original content.
+  static const _sinainContextMarker = '——— Context from Sinain ———';
+
+  static String _stripSinainContext(String text) {
+    final i = text.indexOf(_sinainContextMarker);
+    return (i < 0 ? text : text.substring(0, i)).trim();
   }
 
   /// Right-click the eye → a native context menu listing every action, so the
@@ -672,8 +798,19 @@ class OverlayShellState extends State<OverlayShell> {
   /// the existing handlers; the native NSMenu renders outside the tiny eye panel.
   Future<void> _showEyeContextMenu() async {
     final items = <Map<String, dynamic>>[
-      {'id': 'enrich', 'title': 'Enrich Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
-      if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
+      // Deliberate capture — the three window gestures live here, not as
+      // dedicated HUD buttons (design: reuse existing controls).
+      {'id': 'capSave', 'title': 'Save Context…'},
+      // One entry for both call destinations — the chooser card carries a
+      // "Call AI" (text handoff) and a "Call sinain" (live voice) button.
+      {'id': 'capCall', 'title': 'Call AI…'},
+      // The two Context sources sit together: pick a screen region, or take
+      // whatever is on the clipboard — both flow into the same enrich card.
+      if (_isMacOS) {'id': 'region', 'title': 'Context from Screen…'},
+      // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
+      // "Copy for agent" action produces the same agent-grade seed, visibly.
+      {'id': 'capBuild', 'title': 'Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
+      {'separator': true},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
@@ -685,10 +822,20 @@ class OverlayShellState extends State<OverlayShell> {
     final selected = await _windowService.showContextMenu(items);
     if (!mounted || selected == null) return;
     switch (selected) {
-      case 'enrich':
-        await enrichClipboardHotkey();
+      case 'capSave':
+        _enterCardMode();
+        await _openRangeChooser('save');
+      case 'capCall':
+        _enterCardMode();
+        await _openRangeChooser('call');
+      case 'capBuild':
+        _enterCardMode();
+        await _buildContextFromClipboard();
       case 'region':
-        _startManualRoi();
+        // Selection FIRST — the drag defines the subject; the enrich card
+        // (card mode) follows with the region as its focus. A default-range
+        // window brief is prefetched for the region thread's opening context.
+        await _startRegionSelect();
       case 'copySeed':
         await _copySeedForActiveThread();
       case 'reset':
@@ -930,11 +1077,451 @@ class OverlayShellState extends State<OverlayShell> {
     _manualRegionSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
+    _briefSub?.cancel();
+    _enrichSub?.cancel();
+    _receiptSub?.cancel();
+    _voiceSub?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
     _commandFocusNode.dispose();
     super.dispose();
+  }
+
+  // ── Deliberate capture handlers ──
+
+  /// Open the range chooser for 'save' or 'summon'; coverage strings are free
+  /// window data (no LLM) so fetching them on open is cheap.
+  Future<void> _openRangeChooser(String action) async {
+    setState(() => _chooserFor = _chooserFor == action ? null : action);
+    if (_chooserFor == null) return;
+    final options =
+        await context.read<WebSocketService>().fetchRangeOptions();
+    if (mounted && _chooserFor != null) {
+      setState(() => _rangeOptions = options);
+    }
+  }
+
+  Future<void> _pickRange(int minutes, List<String>? apps) async {
+    final action = _chooserFor;
+    setState(() => _chooserFor = null);
+    final ws = context.read<WebSocketService>();
+    if (action == 'save') {
+      await ws.requestSave(minutes, apps: apps);
+      // Receipt lifecycle arrives via saveReceiptStream.
+    } else if (action == 'call') {
+      final err = await ws.requestSummon(minutes, apps: apps);
+      if (err != null && mounted) {
+        setState(() => _activeBrief = ContextBrief(
+              requestId: 'local',
+              status: CardStatus.error,
+              minutes: minutes,
+              coverage: '',
+              error: err,
+            ));
+      }
+    }
+  }
+
+  /// "Select Region…" (menu): straight into the native drag-select; the
+  /// enrich card follows the drop. A brief of the last N minutes is kicked
+  /// off NOW so it's usually ready when the drag lands — the region handler
+  /// stashes it into the thread. Brief errors degrade to a plain region
+  /// grab; the selection is never blocked on the LLM.
+  static const _regionBriefMinutes = 30;
+
+  Future<void> _startRegionSelect() async {
+    final ws = context.read<WebSocketService>();
+    _regionBriefPending = true;
+    _regionViaMenu = true;
+    _pendingRegionBrief = null;
+    _regionBriefTarget = null;
+    ws.requestSummon(_regionBriefMinutes).then((err) {
+      if (err != null) _regionBriefPending = false;
+    });
+    await _startManualRoi();
+  }
+
+  /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC
+  /// to the sinain server (mechanics like a meeting, nothing to do with Meet).
+  /// If the server wants a session, login happens in the user's DEFAULT
+  /// browser (already signed into Google/Auth0 → usually zero-click): the
+  /// server's /hud/pair page mints a device token and hands it to core; we
+  /// poll until paired and redial. (A WKWebView fallback exists in
+  /// WindowService, but Google blocks OAuth in embedded webviews.)
+  Future<void> _callSinain(int minutes,
+      {List<String>? apps, bool retried = false}) async {
+    final ws = context.read<WebSocketService>();
+    final resp = await ws.requestVoiceStart(minutes, apps: apps);
+    final error = resp == null
+        ? 'core unreachable'
+        : (resp['ok'] == true ? null : (resp['error'] as String? ?? 'failed'));
+    if (error == null) {
+      // Webview engine: core owns the session; we host the invisible
+      // WKWebView that runs the browser WebRTC stack on core's call page.
+      if (resp?['engine'] == 'webview') {
+        final base = ws.httpBase ?? 'http://localhost:9500';
+        final opened = await _windowService.openCallEngine('$base/voice/call.html');
+        if (!opened) ws.requestVoiceStop();
+      }
+      return; // lifecycle continues on voiceSessionStream
+    }
+
+    final loginUrl = resp?['loginUrl'] as String?;
+    if (loginUrl != null && !retried) {
+      // DEFAULT browser — the user is usually already signed in there, so
+      // this is typically zero-click. The pair page hands the credential to
+      // core out-of-band; poll until paired, then redial automatically.
+      await launchUrl(Uri.parse(loginUrl));
+      for (var i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+        final status = await ws.fetchVoiceStatus();
+        if (status?['paired'] == true) {
+          await _callSinain(minutes, apps: apps, retried: true);
+          return;
+        }
+      }
+    }
+    if (!mounted) return;
+    setState(() => _voiceSession = VoiceSession(
+          status: VoiceStatus.error,
+          mode: VoiceMode.bridge,
+          minutes: minutes,
+          coverage: '',
+          error: loginUrl != null
+              ? 'login not completed — finish signing in, then call again'
+              : error,
+        ));
+    _enterCardMode();
+  }
+
+  /// "Build context" — enrich whatever is on the clipboard with the last
+  /// 10 minutes of window context.
+  Future<void> _buildContextFromClipboard() async {
+    final ws = context.read<WebSocketService>();
+    final clip = await Clipboard.getData(Clipboard.kTextPlain);
+    // Strip any previous Sinain context block — otherwise re-invoking after a
+    // Copy (or the seed-enrich hotkey) feeds our own output back in and the
+    // card compounds instead of enriching the user's original content.
+    final text = _stripSinainContext(clip?.text ?? '');
+    if (text.isEmpty) {
+      setState(() => _activeEnrich = const EnrichCard(
+            requestId: 'local',
+            status: CardStatus.error,
+            focus: '',
+            error: 'clipboard is empty — copy something first',
+          ));
+      return;
+    }
+    // Keep the untruncated original for Copy — the card's `focus` is a display
+    // preview (120 chars) and must never be what lands back on the clipboard.
+    _enrichFocusFull = text;
+    final err = await ws.requestEnrich(text);
+    if (err != null && mounted) {
+      setState(() => _activeEnrich = EnrichCard(
+            requestId: 'local',
+            status: CardStatus.error,
+            focus: text.length > 120 ? '${text.substring(0, 117)}…' : text,
+            error: err,
+          ));
+    }
+  }
+
+  /// Enrich card → "Call AI": hand the focus item + built context to the
+  /// agent lane so there's something to DO with the card.
+  void _callAiOnEnrich(EnrichCard c) {
+    final ws = context.read<WebSocketService>();
+    // Region focus → hand off to the region's own thread (its seed already
+    // carries the ROI + the window brief), not MAIN.
+    final region = _pendingRegion;
+    if (region != null) {
+      _pendingRegion = null;
+      setState(() {
+        _activeEnrich = null;
+        _startedRegionThreads.add(region.id);
+      });
+      _regionEyes?.run(region);
+      if (!ws.escalationDesktop) _selectThread(region.id);
+      _leaveCardModeFor(HudState.chat);
+      return;
+    }
+    final msg = StringBuffer()
+      ..writeln('I copied this: ${_enrichFocusFull ?? c.focus}')
+      ..write('Context: ${c.context}');
+    ws.sendUserCommand(msg.toString());
+    setState(() => _activeEnrich = null);
+    _leaveCardModeFor(HudState.chat); // follow the conversation
+  }
+
+  /// Enrich card → "Copy for agent": the FULL original item + BOTH context
+  /// layers back onto the clipboard, ready to paste into an external agent:
+  ///   1. the card's burst CONTEXT — item-specific, assembled at gesture time
+  ///      ("this is X, tied to Y") — the seed never mentions the copied item;
+  ///   2. the agent-grade seed (/seed: situation digest + KG facts) — the
+  ///      general scene + knowledge, item-agnostic and built at the last
+  ///      analyzer tick.
+  /// Complementary, not redundant. If the seed build fails, layer 1 still
+  /// makes the paste useful.
+  Future<void> _copyEnrichCard(EnrichCard c) async {
+    final ws = context.read<WebSocketService>();
+    final original = _enrichFocusFull ?? c.focus;
+    final seed = await ws.fetchSeedText('clipboard', focus: original);
+    final block = StringBuffer()
+      ..write('About this item: ${c.context}');
+    if (seed != null && seed.trim().isNotEmpty) {
+      block
+        ..writeln()
+        ..writeln()
+        ..write(seed.trim());
+    }
+    await Clipboard.setData(
+        ClipboardData(text: '$original\n\n$_sinainContextMarker\n$block'));
+    if (mounted) {
+      setState(() => _activeEnrich = null);
+      _maybeExitCardMode();
+    }
+  }
+
+  /// Display name of the agent the current summon destination opens in —
+  /// the handoff button says where the brief will land.
+  String _handoffAgentLabel(WebSocketService ws) {
+    final id = _summonDest == 'term' ? ws.terminalAgent : ws.escalationAgent;
+    return switch (id) {
+      'sinain' => 'Sinain Chat',
+      'claude' => 'Claude Code',
+      'gclaude' => 'Claude',
+      'openclaude' => 'OpenClaude',
+      'codex' => 'Codex',
+      'goose' => 'Goose',
+      'junie' => 'Junie',
+      'aider' => 'Aider',
+      'claude-desktop' => 'Claude Desktop',
+      'chatgpt-desktop' => 'ChatGPT',
+      _ => id,
+    };
+  }
+
+  /// Flatten a situation brief into the text form carried into agent seeds
+  /// (Ask follow-up, terminal handoff, region + minutes).
+  String _briefText(ContextBrief b) {
+    final summary = StringBuffer()
+      ..writeln('Situation brief of my last ${b.minutes} minutes '
+          '(${b.coverage}):');
+    if (b.timeline.isNotEmpty) {
+      for (final e in b.timeline) {
+        summary.writeln('${e.at}: ${e.what}');
+      }
+    }
+    summary.writeln('Goal: ${b.goal}');
+    if (b.problems.isNotEmpty) {
+      summary.writeln('Open problems: ${b.problems.join('; ')}');
+    }
+    return summary.toString();
+  }
+
+  /// "Ask follow-up" — hand the brief to the chosen destination: the in-HUD
+  /// chat lane, or a terminal whose run.sh seed carries the brief (same
+  /// set_handoff_context mechanic as the ⑂ handoff).
+  void _askFollowUpOnBrief(ContextBrief b) {
+    final ws = context.read<WebSocketService>();
+    final summary = StringBuffer()
+      ..write(_briefText(b))
+      ..write('Pick up from here and help me with the next step.');
+
+    if (_summonDest == 'term') {
+      // Stash the brief as MAIN's handoff context BEFORE the terminal spawns —
+      // run.sh's seed pull happens after this command on the same socket.
+      ws.sendCommand('set_handoff_context',
+          {'key': 'main', 'transcript': summary.toString()});
+      setState(() {
+        _activeBrief = null;
+        _activeThread = null; // surface the MAIN tab the PTY attaches to
+      });
+      _leaveCardModeFor(HudState.chat); // the PTY lives in the chat surface
+      _openTerminalForTab('main');
+      return;
+    }
+    ws.sendUserCommand(summary.toString());
+    setState(() => _activeBrief = null);
+    _leaveCardModeFor(HudState.chat); // follow the conversation
+  }
+
+  // ── Compact card mode ──
+  // Capture gestures triggered outside the chat show their cards in a small
+  // dedicated panel instead of forcing the full HUD open. The window grows to
+  // card size and shrinks back to the eye when the last card is dismissed.
+
+  void _enterCardMode() {
+    if (_state == HudState.chat || _cardMode) return;
+    setState(() => _cardMode = true);
+    _resizeForCardPanel();
+  }
+
+  Future<void> _resizeForCardPanel() async {
+    final frame = await _windowService.getWindowFrame();
+    if (frame == null) return;
+    final right = frame['x']! + frame['w']!;
+    final top = frame['y']! + frame['h']!;
+    _windowService.setWindowFrame(right - 380, top - 500, 380, 500);
+  }
+
+  /// Leave card mode once nothing is displayed; restore the eye-sized window.
+  void _maybeExitCardMode() {
+    if (!_cardMode) return;
+    if (_chooserFor != null ||
+        _activeBrief != null ||
+        _activeEnrich != null ||
+        _saveReceipt != null ||
+        _voiceSession != null) {
+      return;
+    }
+    setState(() => _cardMode = false);
+    _resizeWindowForState(_state);
+  }
+
+  /// Hand off from card mode into a full HUD state (e.g. the conversation the
+  /// card just seeded).
+  void _leaveCardModeFor(HudState target) {
+    if (!_cardMode) {
+      if (_state != target) _transitionTo(target);
+      return;
+    }
+    _cardMode = false;
+    _transitionTo(target);
+  }
+
+  /// The stacked capture cards (receipt · enrich · brief · chooser). Rendered
+  /// bottom-right of the chat panel, and as the body of the card-mode panel.
+  Widget _captureCardsColumn() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (_saveReceipt != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SaveReceiptCard(
+              receipt: _saveReceipt!,
+              onUndo: () {
+                final id = _saveReceipt!.saveId;
+                context.read<WebSocketService>().requestSaveUndo(id);
+              },
+              onDismiss: () {
+                setState(() => _saveReceipt = null);
+                _maybeExitCardMode();
+              },
+            ),
+          ),
+        if (_activeEnrich != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: EnrichCardWidget(
+              card: _activeEnrich!,
+              title:
+                  _pendingRegion != null
+                      ? 'Context from screen'
+                      : 'Context from clipboard',
+              handoffLabel:
+                  'Handoff to ${_handoffAgentLabel(context.read<WebSocketService>())}',
+              onDismiss: () {
+                setState(() {
+                  _activeEnrich = null;
+                  _pendingRegion = null;
+                });
+                _maybeExitCardMode();
+              },
+              onCallAi: () => _callAiOnEnrich(_activeEnrich!),
+              onCopy: () => _copyEnrichCard(_activeEnrich!),
+            ),
+          ),
+        if (_activeBrief != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: BriefCard(
+              brief: _activeBrief!,
+              dest: _summonDest,
+              destLabel: _handoffAgentLabel(context.read<WebSocketService>()),
+              onDestChanged: (d) => setState(() => _summonDest = d),
+              onDismiss: () {
+                setState(() => _activeBrief = null);
+                _maybeExitCardMode();
+              },
+              onAskFollowUp: () => _askFollowUpOnBrief(_activeBrief!),
+              onSaveRange: () {
+                final minutes = _activeBrief!.minutes;
+                setState(() => _activeBrief = null);
+                context.read<WebSocketService>().requestSave(minutes);
+              },
+            ),
+          ),
+        if (_chooserFor != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: RangeChooser(
+              kind: _chooserFor == 'save' ? ChooserKind.save : ChooserKind.call,
+              options: _rangeOptions,
+              onConfirm: _pickRange,
+              sourcesAt: (m) =>
+                  context.read<WebSocketService>().fetchWindowSources(m),
+              onConfirmAlt: _chooserFor == 'call'
+                  ? (minutes, apps) {
+                      setState(() => _chooserFor = null);
+                      _callSinain(minutes, apps: apps);
+                    }
+                  : null,
+              previewAt: (m) =>
+                  context.read<WebSocketService>().fetchWindowPreview(m),
+              onClose: () {
+                setState(() => _chooserFor = null);
+                _maybeExitCardMode();
+              },
+            ),
+          ),
+        if (_voiceSession != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: VoiceCallChip(
+              session: _voiceSession!,
+              onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
+              onMute: (muted) =>
+                  context.read<WebSocketService>().requestVoiceMute(muted),
+              // "Save call": the seeded range + the call itself, through the
+              // normal save/undo lifecycle (call audio reaches the feed via
+              // system-audio transcription, so the range covers what was said).
+              onSaveCall: (minutes) => context
+                  .read<WebSocketService>()
+                  .requestSave(minutes.clamp(1, 480)),
+              onDismiss: () {
+                setState(() => _voiceSession = null);
+                _maybeExitCardMode();
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Card-mode surface: a slim panel with just the capture cards — the whole
+  /// HUD stays closed. Clicking the eye glyph or ✕ collapses back to the eye.
+  Widget _buildCardPanel() {
+    return Align(
+      alignment: Alignment.topRight,
+      child: GestureDetector(
+        // The whole panel is grabbable — a drag on any non-interactive card
+        // area moves the window (buttons/slider win the gesture arena for
+        // their own taps and drags), so no dedicated drag strip is needed.
+        // Each card carries its own ✕; closing the last one exits card mode.
+        onPanStart: _onDragStart,
+        onPanUpdate: _onDragUpdate,
+        behavior: HitTestBehavior.translucent,
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(10),
+          child: _captureCardsColumn(),
+        ),
+      ),
+    );
   }
 
   void _onDragStart(DragStartDetails details) {
@@ -1035,6 +1622,12 @@ class OverlayShellState extends State<OverlayShell> {
         .watch<SettingsService>(); // rebuild on privacy mode change (eye color)
     if (_state == HudState.hidden) {
       return const SizedBox.shrink();
+    }
+
+    // Compact card mode: capture cards without the full HUD (any non-chat
+    // state — the chat renders cards in its own Stack).
+    if (_cardMode && _state != HudState.chat) {
+      return _buildCardPanel();
     }
 
     switch (_state) {
@@ -1234,11 +1827,14 @@ class OverlayShellState extends State<OverlayShell> {
       ),
       child: Column(
         children: [
-          // Header — draggable, with controls
+          // Header — draggable, with controls. Right-click opens the same
+          // native context menu as the eye (deliberate-capture gestures live
+          // there), so the commands stay reachable while the chat is open.
           GestureDetector(
             onPanStart: _onDragStart,
             onPanUpdate: _onDragUpdate,
             onPanEnd: _isMacOS ? null : (_) => _persistEyePosition(),
+            onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
             child: Container(
               height: 40,
               padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -1456,6 +2052,14 @@ class OverlayShellState extends State<OverlayShell> {
                   AgentSelectorPanel(
                     onClose: () => setState(() => _showAgentPicker = false),
                   ),
+                // Deliberate capture — cards + chooser, bottom-right. The
+                // gestures are triggered from the eye's context menu (no
+                // dedicated buttons).
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: _captureCardsColumn(),
+                ),
               ],
             ),
           ),
