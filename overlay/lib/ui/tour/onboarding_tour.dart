@@ -285,12 +285,37 @@ class _OnboardingTourState extends State<OnboardingTour> {
               'straight into a thread.',
           visual: _MarkersVisual(),
         ),
-        // 3 · Ask about anything (region) — copy resolved from design default
+        // 3 · Save context (deliberate capture mode 1)
         const _Scene(
-          title: 'Or ask about anything',
-          body: 'Double-tap the eye, then drag a box around any part of your '
-              'screen — like a screenshot. Sinain hides while you drag.',
+          title: 'Save what just happened',
+          body: 'Right-click the eye → Save Context. Pick how far back — and '
+              'which apps — and Sinain distills those minutes into memory. '
+              '30 seconds to undo; nothing is saved without you asking.',
+          visual: _SaveContextVisual(),
+        ),
+        // 4 · Call AI on a range (mode 2)
+        const _Scene(
+          title: 'Call AI on your last minutes',
+          body: 'The same range can go to an AI instead: Call AI hands a '
+              'brief to your agent as text, Call sinain starts a live voice '
+              'call seeded with it. You always see what it will know.',
+          visual: _CallAiVisual(),
+        ),
+        // 5 · Context from screen (mode 3)
+        const _Scene(
+          title: 'Context from your screen',
+          body: 'Pick Context from Screen — or double-tap the eye — then drag '
+              'a box around any part of your screen. Sinain enriches the '
+              'selection with your recent activity and hands it to your AI.',
           visual: _RegionVisual(),
+        ),
+        // 6 · Context from clipboard (mode 4)
+        const _Scene(
+          title: 'Context from your clipboard',
+          body: 'Copy anything — an error, a link, a paragraph — then Context '
+              'from Clipboard. Sinain wraps it with what you were doing, so '
+              'any AI gets the full picture instead of a bare snippet.',
+          visual: _ClipboardVisual(),
         ),
         // 4 · Where chat lands
         const _Scene(
@@ -1310,6 +1335,301 @@ class _ShareVisual extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ── Deliberate-capture scene visuals (tour modes 1/2/4) ─────────────────────
+
+/// Mini chooser-card mock shared by the Save/Call scenes: header + presets +
+/// source checklist + verb buttons, in the tour palette.
+class _MiniChooser extends StatelessWidget {
+  const _MiniChooser({
+    required this.title,
+    required this.accent,
+    required this.consentLabel,
+    required this.buttons,
+  });
+  final String title;
+  final Color accent;
+  final String consentLabel;
+  final Widget buttons;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 250,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: accent.withValues(alpha: 0.45)),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const _EyeGlyph(size: 13, strokeWidth: 3),
+              const SizedBox(width: 7),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white)),
+              const Spacer(),
+              Text('30 min',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'monospace',
+                      color: accent)),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              for (final n in const ['5m', '15m', '30m', '60m']) ...[
+                Expanded(
+                  child: Container(
+                    height: 18,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: n == '30m'
+                          ? accent.withValues(alpha: 0.25)
+                          : _panel,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                          color: n == '30m'
+                              ? accent.withValues(alpha: 0.55)
+                              : _hairline),
+                    ),
+                    child: Text(n,
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontFamily: 'monospace',
+                            color: n == '30m' ? Colors.white : _textMuted)),
+                  ),
+                ),
+                if (n != '60m') const SizedBox(width: 4),
+              ],
+            ]),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _visualDarker,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    Text(consentLabel,
+                        style: const TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.4,
+                            color: _textDim)),
+                    const Spacer(),
+                    const Text('2 of 3 sources',
+                        style: TextStyle(
+                            fontSize: 8,
+                            fontFamily: 'monospace',
+                            color: _textDim)),
+                  ]),
+                  const SizedBox(height: 5),
+                  _srcRow(accent, 'IntelliJ IDEA', '26 min', on: true),
+                  _srcRow(accent, 'Chrome', '12 min', on: true),
+                  _srcRow(accent, 'Slack', '4 min', on: false),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            buttons,
+          ],
+        ),
+      );
+
+  static Widget _srcRow(Color accent, String name, String mins,
+          {required bool on}) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          Container(
+            width: 10,
+            height: 10,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: on ? accent : Colors.transparent,
+              border:
+                  Border.all(color: on ? accent : const Color(0x40FFFFFF)),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: on
+                ? const Text('✓',
+                    style: TextStyle(
+                        fontSize: 7, height: 1, color: Colors.white))
+                : null,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(name,
+                style: TextStyle(
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    color: on ? const Color(0xFFD6DAE3) : _textDim)),
+          ),
+          Text(mins,
+              style: const TextStyle(
+                  fontSize: 8, fontFamily: 'monospace', color: _textDim)),
+        ]),
+      );
+
+  static Widget verb(String label, Color color, {bool outline = false}) =>
+      Expanded(
+        child: Container(
+          height: 24,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: outline ? Colors.transparent : color,
+            border: outline ? Border.all(color: const Color(0x2EFFFFFF)) : null,
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: outline ? _textMuted : Colors.white)),
+        ),
+      );
+}
+
+class _SaveContextVisual extends StatelessWidget {
+  const _SaveContextVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: _MiniChooser(
+              title: 'Save context…',
+              accent: _green,
+              consentLabel: 'COVERS · CLICK TO EXCLUDE',
+              buttons: Row(children: [
+                _MiniChooser.verb('Save 30 min', _green),
+                const SizedBox(width: 6),
+                _MiniChooser.verb('Cancel', _green, outline: true),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+class _CallAiVisual extends StatelessWidget {
+  const _CallAiVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: _MiniChooser(
+              title: 'Call AI on…',
+              accent: _blue,
+              consentLabel: 'AI WILL KNOW · CLICK TO EXCLUDE',
+              buttons: Row(children: [
+                _MiniChooser.verb('Call AI', _blue),
+                const SizedBox(width: 6),
+                _MiniChooser.verb('Call sinain', _green),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Mode 4 — the enrich card: clipboard snippet + composed CONTEXT + handoff.
+class _ClipboardVisual extends StatelessWidget {
+  const _ClipboardVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Container(
+              width: 260,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _cardBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x731F8039)),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Color(0x40000000),
+                      blurRadius: 20,
+                      offset: Offset(0, 6)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Row(children: [
+                    _EyeGlyph(size: 13, strokeWidth: 3),
+                    SizedBox(width: 7),
+                    Text('Context from clipboard',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _visualDarker,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: const Text('"x-ratelimit-remaining-tokens"',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            color: Color(0xFFD6DAE3))),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('CONTEXT',
+                      style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.4,
+                          color: _textDim)),
+                  const SizedBox(height: 5),
+                  Container(height: 8, decoration: _bar(_panel)),
+                  const SizedBox(height: 5),
+                  FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: 0.72,
+                      child: Container(height: 8, decoration: _bar(_panel))),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    _MiniChooser.verb('Handoff to Claude Code', _blue),
+                    const SizedBox(width: 6),
+                    _MiniChooser.verb('Copy for agent', _blue, outline: true),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  static BoxDecoration _bar(Color c) =>
+      BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
 }
 
 class _CaptureVisual extends StatelessWidget {
