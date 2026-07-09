@@ -1820,7 +1820,7 @@ async function main() {
 
   // ── Deliberate capture: save manager + burst-lane gestures ──
   const { SaveManager } = await import("./capture/save-manager.js");
-  const { assembleWindow, chooserOptions, describeCoverage, summonBrief, enrichFocus } = await import("./capture/window-ops.js");
+  const { assembleWindow, chooserOptions, describeCoverage, summonBrief, enrichFocus, listWindowSources } = await import("./capture/window-ops.js");
   const { burstCall } = await import("./capture/burst-client.js");
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
@@ -1840,11 +1840,12 @@ async function main() {
     });
   };
 
-  const contextSummon = async (minutes: number, requestId: string): Promise<unknown> => {
-    const coverage = describeCoverage(feedBuffer, senseBuffer, minutes);
+  const contextSummon = async (minutes: number, requestId: string, apps?: string[]): Promise<unknown> => {
+    const scope = apps ? { apps } : undefined;
+    const coverage = describeCoverage(feedBuffer, senseBuffer, minutes, scope);
     wsHandler.broadcastRaw({ type: "context_brief", requestId, status: "working", minutes, coverage, ts: Date.now() });
     try {
-      const slice = assembleWindow(feedBuffer, senseBuffer, minutes);
+      const slice = assembleWindow(feedBuffer, senseBuffer, minutes, scope);
       if (slice.lineCount === 0) throw new Error("that range was idle — nothing to brief on");
       const { brief, result } = await summonBrief(config.burstConfig, slice, minutes);
       recordBurstUsage(result);
@@ -1908,11 +1909,12 @@ async function main() {
     isScreenActive: () => screenActive,
 
     // Deliberate capture (save / summon / enrich on the rolling window)
-    captureSave: (minutes) => saveManager.save(minutes),
+    captureSave: (minutes, apps) => saveManager.save(minutes, apps ? { apps } : undefined),
     captureUndo: (saveId) => saveManager.undo(saveId),
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
+    windowSources: (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
     windowCoverageAt: (minutes) => ({
       minutes,
       covers: describeCoverage(feedBuffer, senseBuffer, minutes),
@@ -1948,14 +1950,18 @@ async function main() {
       windowPreviewCache.set(minutes, { ts: Date.now(), summary });
       return { minutes, covers, summary };
     },
-    voiceStart: config.voiceConfig.enabled ? (minutes) => voiceManager.start(minutes) : undefined,
+    voiceStart: config.voiceConfig.enabled
+      ? (minutes, apps) => voiceManager.start(minutes, apps ? { apps } : undefined)
+      : undefined,
     voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
     voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),
     voiceStop: () => voiceManager.stop(),
     voiceStatus: () => voiceManager.status(),
     voiceSeed: () => voiceManager.seed(),
     voiceOffer: (body) => voiceManager.proxyOffer(body),
-    voiceEngineEvent: (status, error) => voiceManager.engineEvent(status, error),
+    voiceEngineEvent: (status, error, caption) => voiceManager.engineEvent(status, error, caption),
+    voiceMute: (muted) => voiceManager.setMute(muted),
+    voiceCtl: () => voiceManager.ctl(),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;

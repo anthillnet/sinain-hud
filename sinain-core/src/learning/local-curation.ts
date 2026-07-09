@@ -657,12 +657,15 @@ export class LocalCurationService {
   }
 
   /** Sense-context items for an arbitrary range (deliberate-capture save). */
-  senseContextForRange(sinceTs: number): Array<{ text: string; ts: number; source: string; channel: string }> {
+  senseContextForRange(sinceTs: number, includeApps?: string[]): Array<{ text: string; ts: number; source: string; channel: string }> {
     if (!this._senseBuffer) return [];
     const items: Array<{ text: string; ts: number; source: string; channel: string }> = [];
     for (const evt of this._senseBuffer.queryByTime(sinceTs)) {
+      const app = evt.semantic?.context?.app || evt.meta.app || "unknown";
+      // App scope (chooser chips): deselected apps' screen content stays out.
+      // Unknown-app events aren't the app the user deselected — keep them.
+      if (includeApps && app !== "unknown" && !includeApps.includes(app)) continue;
       if (evt.ocr && evt.ocr.length > 20) {
-        const app = evt.semantic?.context?.app || evt.meta.app || "unknown";
         items.push({ text: `[screen: ${app}] ${evt.ocr}`, ts: evt.ts, source: "sense", channel: "screen" });
       }
       if (evt.semantic?.visible?.summary) {

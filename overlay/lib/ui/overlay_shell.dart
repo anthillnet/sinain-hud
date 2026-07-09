@@ -1101,15 +1101,15 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  Future<void> _pickRange(int minutes) async {
+  Future<void> _pickRange(int minutes, List<String>? apps) async {
     final action = _chooserFor;
     setState(() => _chooserFor = null);
     final ws = context.read<WebSocketService>();
     if (action == 'save') {
-      await ws.requestSave(minutes);
+      await ws.requestSave(minutes, apps: apps);
       // Receipt lifecycle arrives via saveReceiptStream.
     } else if (action == 'call') {
-      final err = await ws.requestSummon(minutes);
+      final err = await ws.requestSummon(minutes, apps: apps);
       if (err != null && mounted) {
         setState(() => _activeBrief = ContextBrief(
               requestId: 'local',
@@ -1148,9 +1148,10 @@ class OverlayShellState extends State<OverlayShell> {
   /// server's /hud/pair page mints a device token and hands it to core; we
   /// poll until paired and redial. (A WKWebView fallback exists in
   /// WindowService, but Google blocks OAuth in embedded webviews.)
-  Future<void> _callSinain(int minutes, {bool retried = false}) async {
+  Future<void> _callSinain(int minutes,
+      {List<String>? apps, bool retried = false}) async {
     final ws = context.read<WebSocketService>();
-    final resp = await ws.requestVoiceStart(minutes);
+    final resp = await ws.requestVoiceStart(minutes, apps: apps);
     final error = resp == null
         ? 'core unreachable'
         : (resp['ok'] == true ? null : (resp['error'] as String? ?? 'failed'));
@@ -1176,7 +1177,7 @@ class OverlayShellState extends State<OverlayShell> {
         if (!mounted) return;
         final status = await ws.fetchVoiceStatus();
         if (status?['paired'] == true) {
-          await _callSinain(minutes, retried: true);
+          await _callSinain(minutes, apps: apps, retried: true);
           return;
         }
       }
@@ -1458,10 +1459,12 @@ class OverlayShellState extends State<OverlayShell> {
               kind: _chooserFor == 'save' ? ChooserKind.save : ChooserKind.call,
               options: _rangeOptions,
               onConfirm: _pickRange,
+              sourcesAt: (m) =>
+                  context.read<WebSocketService>().fetchWindowSources(m),
               onConfirmAlt: _chooserFor == 'call'
-                  ? (minutes) {
+                  ? (minutes, apps) {
                       setState(() => _chooserFor = null);
-                      _callSinain(minutes);
+                      _callSinain(minutes, apps: apps);
                     }
                   : null,
               previewAt: (m) =>
@@ -1478,6 +1481,14 @@ class OverlayShellState extends State<OverlayShell> {
             child: VoiceCallChip(
               session: _voiceSession!,
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
+              onMute: (muted) =>
+                  context.read<WebSocketService>().requestVoiceMute(muted),
+              // "Save call": the seeded range + the call itself, through the
+              // normal save/undo lifecycle (call audio reaches the feed via
+              // system-audio transcription, so the range covers what was said).
+              onSaveCall: (minutes) => context
+                  .read<WebSocketService>()
+                  .requestSave(minutes.clamp(1, 480)),
               onDismiss: () {
                 setState(() => _voiceSession = null);
                 _maybeExitCardMode();

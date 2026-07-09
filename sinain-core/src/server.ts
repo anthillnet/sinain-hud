@@ -1697,11 +1697,11 @@ export interface ServerDeps {
 
   // ── Deliberate capture (save / summon / enrich on the rolling window) ──
   /** Kick off "save last N minutes" → returns saveId; receipt flows via WS. */
-  captureSave?: (minutes: number) => string;
+  captureSave?: (minutes: number, apps?: string[]) => string;
   /** Cancel a save inside its undo window. */
   captureUndo?: (saveId: string) => boolean;
   /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
-  contextSummon?: (minutes: number, requestId: string) => Promise<unknown>;
+  contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
   /** "Build context" for a focus item (clipboard) → what/connects/next card. */
   contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
   /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
@@ -1711,7 +1711,9 @@ export interface ServerDeps {
   /** Chooser context card: cached range summary + coverage. */
   windowPreview?: (minutes: number) => Promise<unknown>;
   /** "Call sinain": start a bridge voice session seeded with the last N minutes. */
-  voiceStart?: (minutes: number) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
+  voiceStart?: (minutes: number, apps?: string[]) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
+  /** Distinct sources (apps + mic) in a range — the chooser's selection chips. */
+  windowSources?: (minutes: number) => unknown;
   /** "Call sinain" via the deployed meetbot: bot joins the given Meet/Teams call. */
   voiceMeet?: (url: string, minutes: number) => Promise<{ ok: boolean; error?: string }>;
   /** End the running voice session (true if there was one). */
@@ -1724,8 +1726,13 @@ export interface ServerDeps {
   voiceSeed?: () => { text: string; say: string };
   /** Proxy the call page's SDP offer to ARSinain with the stored credential. */
   voiceOffer?: (body: unknown) => Promise<{ status: number; body: string }>;
-  /** Lifecycle events reported by the call page (live/ended/error). */
-  voiceEngineEvent?: (status: string, error?: string) => void;
+  /** Lifecycle events reported by the call page (live/ended/error);
+   *  caption = a spoken line for the chip's live captions. */
+  voiceEngineEvent?: (status: string, error?: string, caption?: string) => void;
+  /** Set mic mute for the webview engine. */
+  voiceMute?: (muted: boolean) => void;
+  /** Control state the call page polls: {muted, end}. */
+  voiceCtl?: () => { muted: boolean; end: boolean };
 
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
@@ -1742,6 +1749,14 @@ function clampMinutes(raw: unknown): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return 30;
   return Math.max(1, Math.min(480, Math.round(n)));
+}
+
+/** Sanitize an app-selection list from a request body: strings only, capped.
+ *  undefined (absent) means "no scope — everything included". */
+function parseApps(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const apps = raw.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, 32);
+  return apps;
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -1899,9 +1914,10 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "save unavailable" }));
           return;
         }
-        const body = await readBody(req, 4096);
-        const minutes = clampMinutes(JSON.parse(body || "{}").minutes);
-        const saveId = deps.captureSave(minutes);
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
+        const minutes = clampMinutes(parsed.minutes);
+        const saveId = deps.captureSave(minutes, parseApps(parsed.apps));
         res.end(JSON.stringify({ ok: true, saveId, minutes }));
         return;
       }
@@ -1925,12 +1941,13 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "burst lane unavailable" }));
           return;
         }
-        const body = await readBody(req, 4096);
-        const minutes = clampMinutes(JSON.parse(body || "{}").minutes);
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
+        const minutes = clampMinutes(parsed.minutes);
         const requestId = `summon-${Date.now().toString(36)}`;
         // Respond immediately; the brief card flows to the overlay via WS.
         res.end(JSON.stringify({ ok: true, requestId, minutes }));
-        void deps.contextSummon(minutes, requestId);
+        void deps.contextSummon(minutes, requestId, parseApps(parsed.apps));
         return;
       }
 
@@ -1959,6 +1976,14 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
+      // Sources (apps + mic) present in a range — the chooser's app-selection
+      // chips. Free (window titles only), no LLM.
+      if (req.method === "GET" && url.pathname === "/window/sources") {
+        const minutes = clampMinutes(parseInt(url.searchParams.get("minutes") || "30", 10));
+        res.end(JSON.stringify({ ok: true, minutes, sources: deps.windowSources?.(minutes) ?? [] }));
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/window/coverage") {
         // ?minutes=N → single live coverage row for the chooser's slider.
         const minutesParam = url.searchParams.get("minutes");
@@ -1980,11 +2005,11 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
           return;
         }
-        const body = await readBody(req, 4096);
-        const raw = (JSON.parse(body || "{}") as { minutes?: number }).minutes;
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
         // 0 = unseeded session; otherwise clamp like every range gesture.
-        const minutes = raw === 0 ? 0 : clampMinutes(raw);
-        const result = await deps.voiceStart(minutes);
+        const minutes = parsed.minutes === 0 ? 0 : clampMinutes(parsed.minutes);
+        const result = await deps.voiceStart(minutes, parseApps(parsed.apps));
         if (!result.ok) res.writeHead(409);
         res.end(JSON.stringify(result));
         return;
@@ -2101,10 +2126,25 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       if (req.method === "POST" && url.pathname === "/voice/engine") {
-        const body = await readBody(req, 4096);
-        const { status, error } = JSON.parse(body || "{}") as { status?: string; error?: string };
-        if (status) deps.voiceEngineEvent?.(status, error);
+        const body = await readBody(req, 8192);
+        const { status, error, caption } = JSON.parse(body || "{}") as
+          { status?: string; error?: string; caption?: string };
+        if (status) deps.voiceEngineEvent?.(status, error, caption?.slice(0, 500));
         res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // Mic mute + hangup control for the webview engine (page polls ctl).
+      if (req.method === "POST" && url.pathname === "/voice/mute") {
+        const body = await readBody(req, 1024);
+        const { muted } = JSON.parse(body || "{}") as { muted?: boolean };
+        deps.voiceMute?.(muted === true);
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/voice/ctl") {
+        res.end(JSON.stringify(deps.voiceCtl?.() ?? { muted: false, end: false }));
         return;
       }
 

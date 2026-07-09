@@ -29,19 +29,56 @@ function fmtClock(ts: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/** Free coverage string for a range: distinct apps + mic flag, newest first. */
-export function describeCoverage(
+/** User-selected scope for a range gesture: which sources are INCLUDED.
+ *  `apps` holds app names plus the pseudo-source "mic"; undefined = all. */
+export interface WindowScope {
+  apps?: string[];
+}
+
+function appIncluded(scope: WindowScope | undefined, app: string): boolean {
+  if (!scope?.apps) return true;
+  // Unknown-app events aren't the app the user deselected — keep them.
+  if (!app || app === "unknown") return true;
+  return scope.apps.includes(app);
+}
+
+function micIncluded(scope: WindowScope | undefined): boolean {
+  return !scope?.apps || scope.apps.includes("mic");
+}
+
+/** Distinct sources in a range — drives the chooser's app-selection chips. */
+export function listWindowSources(
   feedBuffer: FeedBuffer,
   senseBuffer: SenseBuffer,
   minutes: number,
-): string {
+): { name: string; kind: "app" | "mic" }[] {
   const since = Date.now() - minutes * 60_000;
   const apps: string[] = [];
   for (const { app } of senseBuffer.appHistory(since)) {
     if (app && app !== "unknown" && !apps.includes(app)) apps.push(app);
   }
+  const sources: { name: string; kind: "app" | "mic" }[] =
+    apps.slice(0, 12).map((name) => ({ name, kind: "app" as const }));
+  if (feedBuffer.queryBySource("audio", since).length > 0) {
+    sources.push({ name: "mic", kind: "mic" });
+  }
+  return sources;
+}
+
+/** Free coverage string for a range: distinct apps + mic flag, newest first. */
+export function describeCoverage(
+  feedBuffer: FeedBuffer,
+  senseBuffer: SenseBuffer,
+  minutes: number,
+  scope?: WindowScope,
+): string {
+  const since = Date.now() - minutes * 60_000;
+  const apps: string[] = [];
+  for (const { app } of senseBuffer.appHistory(since)) {
+    if (app && app !== "unknown" && !apps.includes(app) && appIncluded(scope, app)) apps.push(app);
+  }
   const parts = apps.slice(0, 4);
-  if (feedBuffer.queryBySource("audio", since).length > 0) parts.push("mic");
+  if (micIncluded(scope) && feedBuffer.queryBySource("audio", since).length > 0) parts.push("mic");
   return parts.length > 0 ? parts.join(", ") : "quiet range";
 }
 
@@ -66,11 +103,17 @@ export function assembleWindow(
   feedBuffer: FeedBuffer,
   senseBuffer: SenseBuffer,
   minutes: number,
+  scope?: WindowScope,
 ): WindowSlice {
   const since = Date.now() - minutes * 60_000;
   const lines: { ts: number; line: string }[] = [];
 
-  const feedItems = feedBuffer.queryByTime(since);
+  // Scoped gestures ("apps" present = the user deselected something): audio
+  // follows the "mic" chip; NON-audio feed lines (agent narration, streams)
+  // are dropped entirely — they can't be attributed to one app, and the
+  // agent's own summaries would leak content of a deselected app.
+  const feedItems = feedBuffer.queryByTime(since)
+    .filter((item) => item.source === "audio" ? micIncluded(scope) : !scope?.apps);
   for (const item of feedItems) {
     const tag = item.source === "audio" ? "🔊" : item.source;
     lines.push({ ts: item.ts, line: `[${fmtClock(item.ts)}] [${tag}] ${item.text}` });
@@ -79,6 +122,7 @@ export function assembleWindow(
   let lastOcr = "";
   for (const ev of senseBuffer.queryByTime(since)) {
     const app = ev.semantic?.context?.app || ev.meta.app || "";
+    if (!appIncluded(scope, app)) continue;
     const title = ev.meta.windowTitle ? ` — ${ev.meta.windowTitle}` : "";
     const ocr = (ev.ocr || "").trim();
     if (!ocr) {
@@ -103,7 +147,7 @@ export function assembleWindow(
     text,
     lineCount: lines.length,
     truncated,
-    coverage: describeCoverage(feedBuffer, senseBuffer, minutes),
+    coverage: describeCoverage(feedBuffer, senseBuffer, minutes, scope),
     feedItems,
   };
 }

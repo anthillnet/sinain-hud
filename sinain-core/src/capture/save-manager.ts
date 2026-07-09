@@ -3,7 +3,7 @@ import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { LocalCurationService } from "../learning/local-curation.js";
 import type { SaveReceiptMessage } from "../types.js";
-import { describeCoverage } from "./window-ops.js";
+import { describeCoverage, type WindowScope } from "./window-ops.js";
 import { log, warn } from "../log.js";
 
 const TAG = "save";
@@ -31,11 +31,11 @@ export class SaveManager {
   ) {}
 
   /** Kick off a save of the last N minutes. Returns the saveId immediately. */
-  save(minutes: number): string {
+  save(minutes: number, scope?: WindowScope): string {
     const saveId = `save-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
-    const coverage = describeCoverage(this.feedBuffer, this.senseBuffer, minutes);
+    const coverage = describeCoverage(this.feedBuffer, this.senseBuffer, minutes, scope);
     this.broadcast({ type: "save_receipt", saveId, status: "saving", minutes, coverage, ts: Date.now() });
-    void this.runSave(saveId, minutes, coverage);
+    void this.runSave(saveId, minutes, coverage, scope);
     return saveId;
   }
 
@@ -50,17 +50,25 @@ export class SaveManager {
     return true;
   }
 
-  private async runSave(saveId: string, minutes: number, coverage: string): Promise<void> {
+  private async runSave(saveId: string, minutes: number, coverage: string, scope?: WindowScope): Promise<void> {
     const fail = (error: string) =>
       this.broadcast({ type: "save_receipt", saveId, status: "error", minutes, coverage, error, ts: Date.now() });
 
     try {
       const since = Date.now() - minutes * 60_000;
+      // Scope: the chooser's app-selection chips — deselected apps' screen
+      // content and (for "mic") audio transcription never reach the distiller.
+      const micOk = !scope?.apps || scope.apps.includes("mic");
       let items: Array<{ text: string; ts: number; source: string; channel: string }> = [
-        ...this.feedBuffer.queryByTime(since).map((i) => ({
-          text: i.text, ts: i.ts, source: i.source, channel: String(i.channel),
-        })),
-        ...this.curation.senseContextForRange(since),
+        ...this.feedBuffer.queryByTime(since)
+          // Audio follows the "mic" chip; non-audio feed (agent narration)
+          // is dropped under any scope — it can't be attributed per-app and
+          // would leak a deselected app's content into the save.
+          .filter((i) => i.source === "audio" ? micOk : !scope?.apps)
+          .map((i) => ({
+            text: i.text, ts: i.ts, source: i.source, channel: String(i.channel),
+          })),
+        ...this.curation.senseContextForRange(since, scope?.apps),
       ].sort((a, b) => a.ts - b.ts);
 
       if (items.length === 0) {

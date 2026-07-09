@@ -41,16 +41,24 @@ class RangeChooser extends StatefulWidget {
   final ChooserKind kind;
   final List<RangeOption> options;
   final int defaultMinutes;
-  final ValueChanged<int> onConfirm;
+
+  /// Confirm with the picked range and source scope: `apps` is the selected
+  /// subset of the range's sources (app names + "mic"), or null when nothing
+  /// was deselected (= everything, no scope).
+  final void Function(int minutes, List<String>? apps) onConfirm;
 
   /// Second confirm for [ChooserKind.call]: "Call sinain" (live voice call),
   /// next to the primary "Call AI" (text handoff). Null hides the button.
-  final ValueChanged<int>? onConfirmAlt;
+  final void Function(int minutes, List<String>? apps)? onConfirmAlt;
   final VoidCallback onClose;
 
   /// Context-card lookup: {covers, summary} for a duration. Results are
   /// cached per duration widget-side, so scrubbing the slider never re-asks.
   final Future<Map<String, dynamic>?> Function(int minutes)? previewAt;
+
+  /// Sources (app names + "mic") in a duration — rendered as toggle chips so
+  /// the user picks WHICH apps the gesture covers. Cached per duration.
+  final Future<List<String>?> Function(int minutes)? sourcesAt;
 
   const RangeChooser({
     super.key,
@@ -61,6 +69,7 @@ class RangeChooser extends StatefulWidget {
     this.onConfirmAlt,
     this.defaultMinutes = 30,
     this.previewAt,
+    this.sourcesAt,
   });
 
   @override
@@ -76,11 +85,35 @@ class _RangeChooserState extends State<RangeChooser> {
   final Map<int, String> _summaryCache = {};
   final Map<int, String> _coversCache = {};
   bool _previewLoading = false;
+  // Per-duration source list (apps + mic) + the user's deselections. The
+  // exclusion set survives duration changes: unticking Slack at 30 min keeps
+  // Slack unticked when the slider moves to 60.
+  final Map<int, List<String>> _sourcesCache = {};
+  final Set<String> _excluded = {};
 
   @override
   void initState() {
     super.initState();
     _fetchPreview(_minutes);
+    _fetchSources(_minutes);
+  }
+
+  void _fetchSources(int n) {
+    if (widget.sourcesAt == null) return;
+    if (_sourcesCache.containsKey(n)) return; // cached — no call
+    widget.sourcesAt!(n).then((list) {
+      if (!mounted || list == null) return;
+      setState(() => _sourcesCache[n] = list);
+    });
+  }
+
+  /// Selected sources for the confirmed duration — null when nothing was
+  /// deselected (no scope: the range is used whole).
+  List<String>? get _selectedApps {
+    final sources = _sourcesCache[_minutes];
+    if (sources == null || _excluded.isEmpty) return null;
+    final picked = sources.where((s) => !_excluded.contains(s)).toList();
+    return picked.length == sources.length ? null : picked;
   }
 
   void _fetchPreview(int n) {
@@ -141,7 +174,10 @@ class _RangeChooserState extends State<RangeChooser> {
     setState(() => _minutes = n);
     _debounce?.cancel();
     // Cached durations render instantly; only a settled, new duration asks.
-    _debounce = Timer(const Duration(milliseconds: 350), () => _fetchPreview(n));
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      _fetchPreview(n);
+      _fetchSources(n);
+    });
   }
 
   @override
@@ -265,10 +301,22 @@ class _RangeChooserState extends State<RangeChooser> {
                 Text(_consentLabel,
                     style: _mono(9, t.textDim, weight: FontWeight.w600)),
                 const SizedBox(height: 4),
-                Text(_coversText,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: _mono(11, t.textMuted, height: 1.35)),
+                if ((_sourcesCache[_minutes] ?? const []).isNotEmpty)
+                  // App-selection chips: tap to exclude a source from the
+                  // gesture — what's unticked never reaches the LLM/agent.
+                  Wrap(
+                    spacing: 5,
+                    runSpacing: 5,
+                    children: [
+                      for (final src in _sourcesCache[_minutes]!)
+                        _sourceChip(t, src),
+                    ],
+                  )
+                else
+                  Text(_coversText,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: _mono(11, t.textMuted, height: 1.35)),
                 if ((_summaryCache[_minutes] ?? '').isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(_summaryCache[_minutes]!,
@@ -299,14 +347,14 @@ class _RangeChooserState extends State<RangeChooser> {
             child: Row(children: [
               Expanded(
                 child: _verbButton(_verb, _accent,
-                    () => widget.onConfirm(_minutes)),
+                    () => widget.onConfirm(_minutes, _selectedApps)),
               ),
               if (widget.kind == ChooserKind.call &&
                   widget.onConfirmAlt != null) ...[
                 const SizedBox(width: 7),
                 Expanded(
                   child: _verbButton('Call sinain', const Color(0xFF1F8039),
-                      () => widget.onConfirmAlt!(_minutes)),
+                      () => widget.onConfirmAlt!(_minutes, _selectedApps)),
                 ),
               ],
               const SizedBox(width: 7),
@@ -314,6 +362,34 @@ class _RangeChooserState extends State<RangeChooser> {
             ]),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _sourceChip(HudTheme t, String src) {
+    final off = _excluded.contains(src);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => setState(() => off ? _excluded.remove(src) : _excluded.add(src)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: off ? Colors.transparent : _accent.withValues(alpha: 0.16),
+            border: Border.all(
+                color: off
+                    ? Colors.white.withValues(alpha: 0.14)
+                    : _accent.withValues(alpha: 0.5)),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(off ? '○' : '✓', style: _mono(9, off ? t.textDim : _accent)),
+            const SizedBox(width: 5),
+            Text(src,
+                style: _mono(10, off ? t.textDim : t.textPrimary,
+                    weight: off ? FontWeight.w400 : FontWeight.w500)),
+          ]),
+        ),
       ),
     );
   }
@@ -345,11 +421,20 @@ class VoiceCallChip extends StatefulWidget {
   final VoidCallback onEnd;
   final VoidCallback onDismiss;
 
+  /// Mic mute toggle (webview engine). Null hides the button.
+  final ValueChanged<bool>? onMute;
+
+  /// "Save call" — promote the call's range (seed + elapsed) to memory via
+  /// the normal save/undo lifecycle. Null hides the button.
+  final ValueChanged<int>? onSaveCall;
+
   const VoiceCallChip({
     super.key,
     required this.session,
     required this.onEnd,
     required this.onDismiss,
+    this.onMute,
+    this.onSaveCall,
   });
 
   @override
@@ -363,6 +448,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
     ..repeat();
   DateTime? _liveSince;
   Timer? _ticker;
+  bool _muted = false;
 
   @override
   void initState() {
@@ -398,6 +484,31 @@ class _VoiceCallChipState extends State<VoiceCallChip>
   String get _elapsed {
     final s = DateTime.now().difference(_liveSince ?? DateTime.now()).inSeconds;
     return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  Widget _chipButton(HudTheme t, String label, VoidCallback onTap,
+      {bool active = false}) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 24,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: active ? _blue.withValues(alpha: 0.22) : Colors.transparent,
+            border: Border.all(
+                color: active
+                    ? _blue.withValues(alpha: 0.55)
+                    : Colors.white.withValues(alpha: 0.18)),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(label,
+              style: _mono(11, active ? Colors.white : t.textMuted)),
+        ),
+      ),
+    );
   }
 
   Widget _waveform() => AnimatedBuilder(
@@ -507,6 +618,20 @@ class _VoiceCallChipState extends State<VoiceCallChip>
           if (live && s.mode != VoiceMode.meet) ...[
             const SizedBox(height: 9),
             Row(children: [
+              if (widget.onMute != null) ...[
+                _chipButton(t, _muted ? 'Unmute' : 'Mute', () {
+                  setState(() => _muted = !_muted);
+                  widget.onMute!(_muted);
+                }, active: _muted),
+                const SizedBox(width: 6),
+              ],
+              if (widget.onSaveCall != null)
+                _chipButton(t, 'Save call', () {
+                  final elapsed = DateTime.now()
+                      .difference(_liveSince ?? DateTime.now())
+                      .inMinutes;
+                  widget.onSaveCall!(s.minutes + elapsed + 1);
+                }),
               const Spacer(),
               MouseRegion(
                 cursor: SystemMouseCursors.click,

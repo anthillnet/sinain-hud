@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { BurstConfig, VoiceConfig, VoiceSessionMessage } from "../types.js";
-import { assembleWindow, describeCoverage, flattenBrief, summonBrief } from "./window-ops.js";
+import { assembleWindow, describeCoverage, flattenBrief, summonBrief, type WindowScope } from "./window-ops.js";
 import { log, warn } from "../log.js";
 
 const TAG = "voice";
@@ -74,10 +74,10 @@ export class VoiceSessionManager {
   }
 
   /** Compose the seed brief for a range — best-effort, never throws. */
-  private async composeSeed(minutes: number): Promise<string> {
+  private async composeSeed(minutes: number, scope?: WindowScope): Promise<string> {
     if (minutes <= 0 || !this.burst.enabled || !this.burst.apiKey) return "";
     try {
-      const slice = assembleWindow(this.feedBuffer, this.senseBuffer, minutes);
+      const slice = assembleWindow(this.feedBuffer, this.senseBuffer, minutes, scope);
       if (slice.lineCount === 0) return "";
       const { brief } = await summonBrief(this.burst, slice, minutes);
       return flattenBrief(brief, minutes, slice.coverage);
@@ -145,14 +145,14 @@ export class VoiceSessionManager {
    * engine (the default — browser WebRTC stack); otherwise the python
    * ar-bridge is spawned here.
    */
-  async start(minutes: number): Promise<{ ok: boolean; error?: string; loginUrl?: string; engine?: string }> {
+  async start(minutes: number, scope?: WindowScope): Promise<{ ok: boolean; error?: string; loginUrl?: string; engine?: string }> {
     if (!this.voice.enabled) return { ok: false, error: "voice disabled (VOICE_ENABLED=false)" };
     if (this.proc || this.state === "starting" || this.state === "live") {
       return { ok: false, error: "a voice session is already running" };
     }
 
     this.minutes = minutes;
-    this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes) : "";
+    this.coverage = minutes > 0 ? describeCoverage(this.feedBuffer, this.senseBuffer, minutes, scope) : "";
 
     // Deployed server + no credential → the overlay opens the DEFAULT browser
     // on the server's pair page (user is usually already signed in there);
@@ -164,12 +164,12 @@ export class VoiceSessionManager {
       return { ok: false, error, loginUrl: `${this.voice.serverUrl.replace(/\/$/, "")}/hud/pair` };
     }
 
-    if (this.voice.engine === "webview") return this.startWebview(minutes);
+    if (this.voice.engine === "webview") return this.startWebview(minutes, scope);
 
     this.mode = "bridge";
     this.setState("starting");
 
-    const seedText = await this.composeSeed(minutes);
+    const seedText = await this.composeSeed(minutes, scope);
     const say = seedText
       ? `I've got your last ${minutes} minutes — ${this.coverage}. Go ahead.`
       : "I can see your screen. Go ahead.";
@@ -237,19 +237,39 @@ export class VoiceSessionManager {
   // token (page never holds a credential), and relays lifecycle events.
 
   private pendingSeed: { text: string; say: string } = { text: "", say: "" };
+  private micMuted = false;
 
-  private async startWebview(minutes: number): Promise<{ ok: boolean; engine: string }> {
+  private async startWebview(minutes: number, scope?: WindowScope): Promise<{ ok: boolean; engine: string }> {
     this.mode = "webview";
-    this.setState("starting");
-    const seedText = await this.composeSeed(minutes);
+    this.micMuted = false;
+    // Connecting checklist (design §4): the brief is composed and redacted
+    // BEFORE audio connects — narrate that order on the chip.
+    this.setState("starting", minutes > 0 ? `Composing brief from last ${minutes} min…` : undefined);
+    const seedText = await this.composeSeed(minutes, scope);
     this.pendingSeed = {
       text: seedText,
       say: seedText
         ? `I've got your last ${minutes} minutes — ${this.coverage}. Go ahead.`
         : "I can see your screen. Go ahead.",
     };
+    this.setState("starting", seedText
+      ? "Brief composed · redacted · connecting audio…"
+      : "Connecting audio…");
     log(TAG, `webview engine session: ${minutes} min seed, server=${this.voice.serverUrl}`);
     return { ok: true, engine: "webview" };
+  }
+
+  /** Mic mute control for the webview engine (the call page polls /voice/ctl). */
+  setMute(muted: boolean): void {
+    this.micMuted = muted;
+  }
+
+  /** Control state the call page polls: mic mute + whether to hang up. */
+  ctl(): { muted: boolean; end: boolean } {
+    return {
+      muted: this.micMuted,
+      end: this.mode === "webview" && this.state !== "starting" && this.state !== "live",
+    };
   }
 
   /** Seed for the call page's meta datachannel (single use per session). */
@@ -278,10 +298,12 @@ export class VoiceSessionManager {
     return { status: res.status, body: await res.text() };
   }
 
-  /** Lifecycle events reported by the call page (fetch POST /voice/engine). */
-  engineEvent(status: string, error?: string): void {
+  /** Lifecycle events reported by the call page (fetch POST /voice/engine).
+   *  `caption` (with status "live") is a spoken line relayed from the meta
+   *  datachannel — surfaced on the call chip as a live caption. */
+  engineEvent(status: string, error?: string, caption?: string): void {
     if (this.mode !== "webview") return;
-    if (status === "live") this.setState("live");
+    if (status === "live") this.setState("live", caption);
     else if (status === "ended") this.setState("ended");
     else if (status === "error") this.fail(error || "call engine failed");
   }
@@ -308,11 +330,12 @@ export class VoiceSessionManager {
     }
   }
 
-  private setState(status: VoiceSessionMessage["status"]): void {
+  private setState(status: VoiceSessionMessage["status"], message?: string): void {
     this.state = status;
     this.broadcast({
       type: "voice_session", status, mode: this.mode,
-      minutes: this.minutes, coverage: this.coverage, ts: Date.now(),
+      minutes: this.minutes, coverage: this.coverage,
+      ...(message ? { message } : {}), ts: Date.now(),
     });
   }
 

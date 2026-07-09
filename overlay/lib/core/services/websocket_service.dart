@@ -687,8 +687,14 @@ class WebSocketService extends ChangeNotifier {
   }
 
   /// "Save last N minutes" — receipt lifecycle arrives on [saveReceiptStream].
-  Future<bool> requestSave(int minutes) async =>
-      (await _postJson('/capture/save', {'minutes': minutes}))?['ok'] == true;
+  /// [apps] scopes the range to the selected sources (app names + "mic");
+  /// null means everything in the range.
+  Future<bool> requestSave(int minutes, {List<String>? apps}) async =>
+      (await _postJson('/capture/save', {
+        'minutes': minutes,
+        if (apps != null) 'apps': apps,
+      }))?['ok'] ==
+      true;
 
   /// Cancel a save inside its undo window.
   Future<bool> requestSaveUndo(String saveId) async =>
@@ -696,8 +702,11 @@ class WebSocketService extends ChangeNotifier {
 
   /// "Call AI on my last N minutes" — brief arrives on [briefStream].
   /// Returns an error string, or null on accepted.
-  Future<String?> requestSummon(int minutes) async {
-    final data = await _postJson('/context/summon', {'minutes': minutes});
+  Future<String?> requestSummon(int minutes, {List<String>? apps}) async {
+    final data = await _postJson('/context/summon', {
+      'minutes': minutes,
+      if (apps != null) 'apps': apps,
+    });
     if (data == null) return 'core unreachable';
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
@@ -712,8 +721,12 @@ class WebSocketService extends ChangeNotifier {
   /// "Call sinain" — start a voice session seeded with the last N minutes
   /// (0 = unseeded). Lifecycle arrives on [voiceSessionStream]. Returns the
   /// raw response so callers can react to `loginUrl` ("login required").
-  Future<Map<String, dynamic>?> requestVoiceStart(int minutes) async =>
-      _postJson('/voice/start', {'minutes': minutes});
+  Future<Map<String, dynamic>?> requestVoiceStart(int minutes,
+          {List<String>? apps}) async =>
+      _postJson('/voice/start', {
+        'minutes': minutes,
+        if (apps != null) 'apps': apps,
+      });
 
   /// Hand the login window's captured session cookie to core.
   Future<bool> requestVoicePair(String cookie) async =>
@@ -742,6 +755,11 @@ class WebSocketService extends ChangeNotifier {
   Future<bool> requestVoiceStop() async =>
       (await _postJson('/voice/stop', {}))?['stopped'] == true;
 
+  /// Mic mute for the webview call engine (the call page polls core's ctl).
+  Future<void> requestVoiceMute(bool muted) async {
+    await _postJson('/voice/mute', {'muted': muted});
+  }
+
   /// "Call sinain" via the deployed meetbot: the bot joins the given
   /// Meet/Teams call, seeded with the last N minutes.
   Future<String?> requestVoiceMeet(String url, int minutes) async {
@@ -764,6 +782,31 @@ class WebSocketService extends ChangeNotifier {
       final body = await resp.transform(utf8.decoder).join();
       return (jsonDecode(body) as Map<String, dynamic>)['preview']
           as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// Sources (app names + "mic") present in a range — drives the chooser's
+  /// app-selection chips. Free window metadata, no LLM.
+  Future<List<String>?> fetchWindowSources(int minutes) async {
+    final base = _httpBase;
+    if (base == null) return null;
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client
+          .getUrl(Uri.parse('$base/window/sources?minutes=$minutes'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      final body = await resp.transform(utf8.decoder).join();
+      final sources =
+          (jsonDecode(body) as Map<String, dynamic>)['sources'] as List?;
+      return sources
+          ?.map((s) => (s as Map<String, dynamic>)['name'] as String)
+          .toList();
     } catch (_) {
       return null;
     } finally {
