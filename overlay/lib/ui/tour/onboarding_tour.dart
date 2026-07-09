@@ -235,23 +235,31 @@ class _OnboardingTourState extends State<OnboardingTour> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        // Progress dots
-        Row(
-          children: [
-            for (var d = 0; d < _scenes.length; d++) ...[
-              if (d > 0) const SizedBox(width: 6),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: d == _i ? 18 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: d == _i ? _green : _dotInactive,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ],
-          ],
+        // Progress dots — scale down when the scene count + a wide primary
+        // button ("Start using Sinain") would otherwise overflow the row.
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                for (var d = 0; d < _scenes.length; d++) ...[
+                  if (d > 0) const SizedBox(width: 6),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: d == _i ? 18 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: d == _i ? _green : _dotInactive,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
+        const SizedBox(width: 10),
         Row(
           children: [
             if (_i > 0)
@@ -277,15 +285,9 @@ class _OnboardingTourState extends State<OnboardingTour> {
               'where you need it — without getting in your way.',
           visual: _WelcomeVisual(),
         ),
-        // 2 · The markers
-        const _Scene(
-          title: 'Spot the markers',
-          body: 'When Sinain sees something it can help with, it drops an eye '
-              'marker on it. Click for a quick tip, double-click to jump '
-              'straight into a thread.',
-          visual: _MarkersVisual(),
-        ),
-        // 3 · Save context (deliberate capture mode 1)
+        // (markers scene sunset for now — auto-ROI markers aren't the
+        // headline; the four deliberate-capture modes are)
+        // 2 · Save context (deliberate capture mode 1)
         const _Scene(
           title: 'Save what just happened',
           body: 'Right-click the eye → Save Context. Pick how far back — and '
@@ -317,12 +319,12 @@ class _OnboardingTourState extends State<OnboardingTour> {
               'any AI gets the full picture instead of a bare snippet.',
           visual: _ClipboardVisual(),
         ),
-        // 4 · Where chat lands
+        // · Where chat lands
         const _Scene(
           title: 'Chat, your way',
-          body: 'A thread can stay in the Sinain HUD, or pop out into a '
-              'standalone app you already use — ChatGPT, Claude, anything. '
-              'Either way Sinain seeds it with the context first.',
+          body: 'A thread can stay in the Sinain HUD, pop out into an app you '
+              'already use — ChatGPT, Claude, anything — or become a live '
+              'voice call with sinain. Either way the context rides along.',
           visual: _WhereChatLandsVisual(),
         ),
         // 5 · Pick your agents
@@ -399,31 +401,24 @@ class _EyeGlyph extends StatelessWidget {
   const _EyeGlyph({
     required this.size,
     this.strokeWidth = 3,
-    this.circleFill,
   });
   final double size;
   final double strokeWidth;
-  final Color? circleFill;
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-      size: Size.square(size),
-      painter: _EyePainter(_green, strokeWidth, circleFill));
+      size: Size.square(size), painter: _EyePainter(_green, strokeWidth));
 }
 
 class _EyePainter extends CustomPainter {
-  _EyePainter(this.color, this.strokeWidth, this.circleFill);
+  _EyePainter(this.color, this.strokeWidth);
   final Color color;
   final double strokeWidth;
-  final Color? circleFill;
 
   @override
   void paint(Canvas canvas, Size size) {
     final s = size.width / 30.0; // viewBox 30×30
     final c = Offset(15 * s, 15 * s);
-    if (circleFill != null) {
-      canvas.drawCircle(c, 13.5 * s, Paint()..color = circleFill!);
-    }
     canvas.drawCircle(
       c,
       13.5 * s,
@@ -443,9 +438,7 @@ class _EyePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EyePainter old) =>
-      old.color != color ||
-      old.strokeWidth != strokeWidth ||
-      old.circleFill != circleFill;
+      old.color != color || old.strokeWidth != strokeWidth;
 }
 
 class _PrimaryButton extends StatelessWidget {
@@ -604,62 +597,6 @@ class _WelcomeVisual extends StatelessWidget {
       );
 }
 
-class _MarkersVisual extends StatelessWidget {
-  const _MarkersVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _lightBg,
-        child: Stack(
-          children: [
-            const Positioned.fill(child: _MockPage()),
-            const Positioned(
-              left: 46,
-              top: 120,
-              child: _EyeGlyph(size: 26, strokeWidth: 3, circleFill: _cardBg),
-            ),
-            Positioned(
-              left: 84,
-              top: 64,
-              child: Container(
-                width: 280,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _panel,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0x731F8039)),
-                  boxShadow: const [
-                    BoxShadow(
-                        color: Color(0x4D000000),
-                        blurRadius: 16,
-                        offset: Offset(0, 4))
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('Tighten your email opening',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white)),
-                    const SizedBox(height: 3),
-                    const Text(
-                        'Lead with the ask — it’s buried in paragraph two.',
-                        style: TextStyle(
-                            fontSize: 11, height: 1.36, color: _textMuted)),
-                    const SizedBox(height: 8),
-                    _chatTermChips(),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
 class _RegionVisual extends StatelessWidget {
   const _RegionVisual();
   @override
@@ -754,50 +691,125 @@ class _WhereChatLandsVisual extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         color: _visualDark,
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              children: [
+                // Sinain HUD card (selected, green border + check)
+                _appCard(
+                  borderColor: _green,
+                  header: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _EyeGlyph(size: 14, strokeWidth: 3),
+                      SizedBox(width: 6),
+                      Text('Sinain HUD',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white)),
+                    ],
+                  ),
+                  footerColor: Colors.white,
+                  check: true,
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('or',
+                      style: TextStyle(fontSize: 12, color: _textDim)),
+                ),
+                // External app card (ChatGPT)
+                _appCard(
+                  borderColor: const Color(0x1FFFFFFF),
+                  titleBar: true,
+                  header: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.open_in_new, size: 14, color: _textMuted),
+                      SizedBox(width: 6),
+                      Text('Your app',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: _textMuted)),
+                    ],
+                  ),
+                  footerColor: _textMuted,
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('or',
+                      style: TextStyle(fontSize: 12, color: _textDim)),
+                ),
+                _voiceCard(),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  /// Third destination: a live voice call with sinain — the call chip.
+  Widget _voiceCard() => Container(
+        width: 150,
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0x733369D6)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Sinain HUD card (selected, green border + check)
-            _appCard(
-              borderColor: _green,
-              header: const Row(
+            Container(
+              color: _visualDarker,
+              height: 80,
+              alignment: Alignment.center,
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _EyeGlyph(size: 14, strokeWidth: 3),
-                  SizedBox(width: 6),
-                  Text('Sinain HUD',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white)),
+                  for (final h in const [8.0, 18.0, 12.0, 22.0, 10.0]) ...[
+                    Container(
+                        width: 4,
+                        height: h,
+                        decoration: BoxDecoration(
+                            color: _blue,
+                            borderRadius: BorderRadius.circular(2))),
+                    const SizedBox(width: 3),
+                  ],
+                  const SizedBox(width: 7),
+                  Container(
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFB3361C),
+                        borderRadius: BorderRadius.circular(4)),
+                    child: const Text('End',
+                        style: TextStyle(fontSize: 9, color: Colors.white)),
+                  ),
                 ],
               ),
-              footerColor: Colors.white,
-              check: true,
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 14),
-              child:
-                  Text('or', style: TextStyle(fontSize: 12, color: _textDim)),
-            ),
-            // External app card (ChatGPT)
-            _appCard(
-              borderColor: const Color(0x1FFFFFFF),
-              titleBar: true,
-              header: const Row(
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: _hairline))),
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.open_in_new, size: 14, color: _textMuted),
+                  Icon(Icons.graphic_eq, size: 14, color: _blue),
                   SizedBox(width: 6),
-                  Text('Your app',
+                  Text('Sinain voice',
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
                           color: _textMuted)),
                 ],
               ),
-              footerColor: _textMuted,
             ),
           ],
         ),
@@ -1425,12 +1437,16 @@ class _MiniChooser extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(children: [
-                    Text(consentLabel,
-                        style: const TextStyle(
-                            fontSize: 8,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.4,
-                            color: _textDim)),
+                    Flexible(
+                      child: Text(consentLabel,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                              color: _textDim)),
+                    ),
+                    const SizedBox(width: 6),
                     const Spacer(),
                     const Text('2 of 3 sources',
                         style: TextStyle(
