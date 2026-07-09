@@ -263,6 +263,15 @@ for one npm release series, then retire `sinain-core/src/audio/`.
 **Phasing (lowest risk):**
 1. Extract VAD + transcription into `sinain-sense`; **adopt in ARSinain first** (replaces
    `talk.py` internals — zero HUD disruption, validates the library on a live surface).
+   - 1a ✅ **VAD + segmentation shipped** (PR #240): `sinain_sense.audio.Segmenter` +
+     `EnergyDetector`/`WebrtcDetector`, faithful `pipeline.ts` port, 8 tests, package-only
+     (no surface touched). `sinain-sense` → 0.2.0.
+   - 1b ✅ **transcription router shipped** (PR #241): `TranscriptionRouter` +
+     OpenRouter-audio / whisper-server / faster-whisper backends + hallucination &
+     cross-stream dedup filters. whisper-server LIFECYCLE deliberately stays
+     surface-side (platform seam). `sinain-sense` → 0.3.0. The shared audio module is
+     now complete; what remains is adoption.
+   - 1c — ARSinain `talk.py` adopts the module.
 2. Add transcript event type + control channel to sinain-core.
 3. Flip HUD dev setup (start.sh) to sense-owned audio; TS pipeline behind a flag.
 4. Retire the TS audio directory in a later release series.
@@ -276,9 +285,9 @@ lifecycle edges (TCC, restarts, the separate `sck-capture --mic` process moving 
 | # | Package | Why this order | First consumer win |
 |---|---|---|---|
 | 1 | `sinain-llm` ✅ **DONE** (2026-07-04) | Smallest; everything depends on it; kills 3+ duplicated provider blocks | One provider layer with Cerebras + fallback chains everywhere |
-| 2 | `sinain-memory` | **Drift is the urgent problem** — diff the forks now, reconcile before it compounds | ARSinain becomes a memoryd client instead of a fork; persona layers land |
-| 3 | `sinain-sense` (video) ✅ **hud side done** (2026-07-04) | Portable trio + `/sense` client is a lift-and-shift | ARSinain gets privacy redaction |
-| 4 | `sinain-sense` (audio) | The §5 port; after the video half proves the package | One audio stack; talk.py shrinks to TTS/conversation |
+| 2 | `sinain-memory` 🔶 **convergence done** (2026-07-04, PR #239) | **Drift is the urgent problem** — diff the forks now, reconcile before it compounds | ARSinain becomes a memoryd client instead of a fork; persona layers land |
+| 3 | `sinain-sense` (video) ✅ **hud merged**; ARSinain #2 open | Portable trio + `/sense` client is a lift-and-shift | ARSinain gets privacy redaction |
+| 4 | `sinain-sense` (audio) 🔶 **module complete** (VAD #240 + transcription #241); adoption remains | The §5 port; after the video half proves the package | One audio stack; talk.py shrinks to TTS/conversation |
 | 5 | `sinain-agents` | Generalize the sidecar (small, self-contained) after memory/llm land, so tool packs sit on memoryd + L1 | ARSinain gets a resident environment agent; escalation/OpenClaw code deleted rather than carried |
 | 0 | `sinain-protocol` | Grows alongside all of the above — each extraction freezes its contract here | — |
 
@@ -301,9 +310,11 @@ packaging), `gates.ssim` (hud ChangeDetector) + `gates.hash` (ARSinain SceneGate
 inline transport gone). Heavy deps are extras (`[ssim]`, `[hash]`). sense_client's
 `privacy/change_detector/sender` are re-export shims; `gate.py` imports the event shapes;
 `vision.py` keeps Ollama + the `create_vision` factory. sinain-llm gained `api_key`
-override + `extra_body` passthrough in support. Remaining for step 3: ARSinain adoption
-(`scene_gate.py` → `gates.hash`, redaction on its OCR/describe path, `/sense` sender for
-the call-bridge).
+override + `extra_body` passthrough in support. ARSinain adoption is in
+ARSinain PR #2 (open): `scene_gate.py` becomes a shim over `gates.hash`, and redaction
+lands at both memory-bound boundaries (`describe_screen` → meeting episodes,
+`UserMemory.record` → episodes.jsonl) — the AR surface's first privacy layer. The
+`/sense` sender remains for the call-bridge when that's built.
 
 **Step 2 scoping — memory_v2 fork diff (measured 2026-07-04):**
 
@@ -315,10 +326,21 @@ the call-bridge).
 | `compact.py` | 787/267 L | the real fork: AR = v2-compact-1 baseline; hud = v3 pipeline (speech-act gate, JSON salvage, separate events+people passes, alias resolution, narration gate, bridge detection, `link_facts`, segment summaries) | hud becomes the package version; AR's only unique delta (model `""` → vision-provider fallthrough) is already absorbed by sinain-llm |
 | `llm.py` | AR-only | — | ✅ resolved by step 1 (both surfaces on sinain-llm) |
 
-Verdict: cheaper than feared — the substrate (store/ingest/retrieve core) is convergent;
-review concentrates on `search_facts` strategy unification and adopting hud's v3 compaction
-as the package default. **Sequencing:** hud's `compact.py`/`retrieve.py`/`memoryd.py` carry
-uncommitted WSM-branch work — step 2 starts after that lands.
+Verdict: cheaper than feared — measured, hud's v3 is canonical everywhere (store already
+crash-tolerant; `search_facts` a strict superset of AR's subject-join, plus dossier +
+bridge + `cos_floor`). Only AR-ahead delta: `ingest.first_index`.
+
+**Convergence shipped in-place (PR #239, 2026-07-04)** — no file moves, so WSM's edits to
+these files rebase normally:
+- `ingest_sessions` gained `first_index` (folded from AR).
+- `compact.py` decoupled from sinain-memory's `common` → routes through a new portable
+  `memory_v2/llm.py` that delegates to `sinain-llm`, mirroring ARSinain's `memory_v2/llm.py`.
+  The engine now depends only on `sinain-llm` — **portable, the packaging prerequisite.**
+
+**Remaining step-2 work (mechanical, follow-up):** physical `packages/sinain-memory` move
+(import name stays `memory_v2`) + memoryd path wiring; ARSinain drops its `memory_v2` fork
+(its compact is v2 — behind hud's v3) to consume the shared engine. Best sequenced after the
+WSM branch lands to keep the resident-daemon diff clean.
 
 ## 7. Layer APIs for external agents (ASSESSMENT — not being implemented yet)
 
