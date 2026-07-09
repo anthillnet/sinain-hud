@@ -1732,8 +1732,13 @@ export interface ServerDeps {
   voiceEngineEvent?: (status: string, error?: string, caption?: string) => void;
   /** Set mic mute for the webview engine. */
   voiceMute?: (muted: boolean) => void;
-  /** Control state the call page polls: {muted, end}. */
-  voiceCtl?: () => { muted: boolean; end: boolean };
+  /** Silence Sinain's voice locally (output mute; she keeps listening). */
+  voiceSilence?: (silenced: boolean) => void;
+  /** Control state the call page polls: {muted, silenced, end}. */
+  voiceCtl?: () => { muted: boolean; silenced: boolean; end: boolean };
+  /** Execute a desktop directive from the live call (memory/remember/handoff). */
+  voiceDirective?: (req: import("./capture/voice-directives.js").DirectiveRequest)
+    => Promise<import("./capture/voice-directives.js").DirectiveResult>;
 
   /** Bare-agent announced its roster on startup. */
   registerBareAgent?: (available: string[], current: string) => void;
@@ -2163,17 +2168,39 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
-      // Mic mute + hangup control for the webview engine (page polls ctl).
+      // Mic mute / output mute + hangup control for the webview engine
+      // (page polls ctl). {muted} = your mic; {silenced} = Sinain's voice.
       if (req.method === "POST" && url.pathname === "/voice/mute") {
         const body = await readBody(req, 1024);
-        const { muted } = JSON.parse(body || "{}") as { muted?: boolean };
-        deps.voiceMute?.(muted === true);
+        const { muted, silenced } = JSON.parse(body || "{}") as { muted?: boolean; silenced?: boolean };
+        if (typeof muted === "boolean") deps.voiceMute?.(muted);
+        if (typeof silenced === "boolean") deps.voiceSilence?.(silenced);
         res.end(JSON.stringify({ ok: true }));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/voice/ctl") {
-        res.end(JSON.stringify(deps.voiceCtl?.() ?? { muted: false, end: false }));
+        res.end(JSON.stringify(deps.voiceCtl?.() ?? { muted: false, silenced: false, end: false }));
+        return;
+      }
+
+      // Desktop directive from the live call (MEMORY:/REMEMBER:/HANDOFF: —
+      // relayed off the meta datachannel by the call engine). Executes
+      // against the local harness; the result rides back up the channel.
+      if (req.method === "POST" && url.pathname === "/voice/directive") {
+        if (!deps.voiceDirective) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice directives unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 65_536);
+        try {
+          const result = await deps.voiceDirective(JSON.parse(body || "{}"));
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String((err as Error).message ?? err).slice(0, 200) }));
+        }
         return;
       }
 

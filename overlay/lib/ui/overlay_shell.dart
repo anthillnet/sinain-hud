@@ -109,6 +109,7 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<EnrichCard>? _enrichSub;
   StreamSubscription<SaveReceipt>? _receiptSub;
   StreamSubscription<VoiceSession>? _voiceSub;
+  StreamSubscription<String>? _openTermSub;
   VoiceSession? _voiceSession;
 
   // Command input focus
@@ -321,6 +322,17 @@ class OverlayShellState extends State<OverlayShell> {
           }
         });
       }
+    });
+    _openTermSub = ws.openTerminalStream.listen((key) {
+      if (!mounted) return;
+      // Voice-call handoff: core asks for this thread's terminal PTY — the
+      // "Continue this thread in terminal" wiring, triggered by voice. The
+      // thread tab itself arrived just before as a spawn_task broadcast.
+      setState(() => _activeThread = key == 'main' ? null : key);
+      _openTerminalForTab(key);
+      // Surface the HUD: a voice handoff usually lands while it's collapsed
+      // or hidden — an invisible terminal reads as "nothing happened".
+      if (_state != HudState.chat) _transitionTo(HudState.chat);
     });
     _contentSub = ws.agentFeedStream.listen((_) {
       if (!mounted) return;
@@ -1081,6 +1093,7 @@ class OverlayShellState extends State<OverlayShell> {
     _enrichSub?.cancel();
     _receiptSub?.cancel();
     _voiceSub?.cancel();
+    _openTermSub?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
@@ -1484,8 +1497,8 @@ class OverlayShellState extends State<OverlayShell> {
             child: VoiceCallChip(
               session: _voiceSession!,
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
-              onMute: (muted) =>
-                  context.read<WebSocketService>().requestVoiceMute(muted),
+              onSilence: (silenced) =>
+                  context.read<WebSocketService>().requestVoiceSilence(silenced),
               // "Save call": the seeded range + the call itself, through the
               // normal save/undo lifecycle (call audio reaches the feed via
               // system-audio transcription, so the range covers what was said).

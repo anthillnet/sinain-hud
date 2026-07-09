@@ -467,8 +467,9 @@ class VoiceCallChip extends StatefulWidget {
   final VoidCallback onEnd;
   final VoidCallback onDismiss;
 
-  /// Mic mute toggle (webview engine). Null hides the button.
-  final ValueChanged<bool>? onMute;
+  /// Mute — silences Sinain's voice locally (she keeps listening; your mic
+  /// stays live). Null hides the button.
+  final ValueChanged<bool>? onSilence;
 
   /// "Save call" — promote the call's range (seed + elapsed) to memory via
   /// the normal save/undo lifecycle. Null hides the button.
@@ -479,7 +480,7 @@ class VoiceCallChip extends StatefulWidget {
     required this.session,
     required this.onEnd,
     required this.onDismiss,
-    this.onMute,
+    this.onSilence,
     this.onSaveCall,
   });
 
@@ -494,7 +495,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
     ..repeat();
   DateTime? _liveSince;
   Timer? _ticker;
-  bool _muted = false;
+  bool _silenced = false;
 
   @override
   void initState() {
@@ -664,11 +665,13 @@ class _VoiceCallChipState extends State<VoiceCallChip>
           if (live && s.mode != VoiceMode.meet) ...[
             const SizedBox(height: 9),
             Row(children: [
-              if (widget.onMute != null) ...[
-                _chipButton(t, _muted ? 'Unmute' : 'Mute', () {
-                  setState(() => _muted = !_muted);
-                  widget.onMute!(_muted);
-                }, active: _muted),
+              if (widget.onSilence != null) ...[
+                // "Mute" = shut Sinain up locally. She keeps listening and the
+                // mic stays live — the natural read of muting an assistant.
+                _chipButton(t, _silenced ? 'Unmute' : 'Mute', () {
+                  setState(() => _silenced = !_silenced);
+                  widget.onSilence!(_silenced);
+                }, active: _silenced),
                 const SizedBox(width: 6),
               ],
               if (widget.onSaveCall != null)

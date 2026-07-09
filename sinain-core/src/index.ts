@@ -13,7 +13,8 @@ import { ChatService } from "./chat/chat-service.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
-import { setupCommands } from "./overlay/commands.js";
+import { setupCommands, type CommandDeps } from "./overlay/commands.js";
+import { execDirective, type DirectiveRequest, type DirectiveResult } from "./capture/voice-directives.js";
 import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
 import { TranscriptionService } from "./audio/transcription.js";
@@ -1830,6 +1831,9 @@ async function main() {
     config.voiceConfig, config.burstConfig, feedBuffer, senseBuffer,
     (msg) => wsHandler.broadcastRaw(msg),
   );
+  // Desktop-directive executor for live calls (MEMORY:/REMEMBER:/HANDOFF:).
+  // Wired after setupCommands — the handoff rides the command deps.
+  let voiceDirectiveExec: ((r: DirectiveRequest) => Promise<DirectiveResult>) | null = null;
 
   const windowPreviewCache = new Map<number, { ts: number; summary: string }>();
   const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
@@ -1966,7 +1970,13 @@ async function main() {
     voiceOffer: (body) => voiceManager.proxyOffer(body),
     voiceEngineEvent: (status, error, caption) => voiceManager.engineEvent(status, error, caption),
     voiceMute: (muted) => voiceManager.setMute(muted),
+    voiceSilence: (silenced) => voiceManager.setSilence(silenced),
     voiceCtl: () => voiceManager.ctl(),
+    // Assigned after the command deps exist (the handoff reuses their spawn
+    // routing); a directive can only arrive once a call session is live.
+    voiceDirective: (r) => voiceDirectiveExec
+      ? voiceDirectiveExec(r)
+      : Promise.resolve({ ok: false, error: "voice directives not ready" }),
 
     onMotion: (dx, dy, changedBoxes, app, display) => {
       if (!config.agentConfig.regionsEnabled) return;
@@ -2370,7 +2380,9 @@ async function main() {
   };
 
   // ── Wire overlay commands ──
-  setupCommands({
+  // Named so the voice-directive handoff can reuse the same spawn routing
+  // (per-thread agent override, fork seeds, sidecar/desktop/bare dispatch).
+  const commandDeps: CommandDeps = {
     wsHandler,
     systemAudioPipeline,
     micPipeline,
@@ -2694,6 +2706,83 @@ async function main() {
     },
     onStartLocalAgent: (agent?: string) => startLocalAgent(agent),
     onRestartChatSidecar: () => restartChatSidecar(),
+  };
+  setupCommands(commandDeps);
+
+  // ── Voice-call handoff: EXACTLY the "Continue this thread in…" wiring.
+  // Fork a thread seeded with the call transcript + task, then hand it to an
+  // external destination — a terminal running the CLI agent, or a desktop app
+  // (Claude Desktop / ChatGPT) via routeDesktopChat. Never the HUD chat lane.
+  const createVoiceHandoff = (task: string, transcript: string, agentHint?: string):
+    { threadId: string; say: string } => {
+    const id = `call-${Date.now().toString(36)}`;
+    forkSeeds.set(id, [
+      "You are picking up a task handed off from a live voice call between",
+      "the user and Sinain (the voice assistant). Below is the recent call",
+      "transcript. Complete the task; the user may follow up in this thread.",
+      transcript ? `\n## Call transcript\n${transcript}` : "",
+      `\n## Task\n${task}`,
+    ].filter(Boolean).join("\n"));
+    // Spoken agent hint ("hand this to claude") → roster profile. Desktop
+    // apps are matched FIRST: a spoken "Claude" means Claude Desktop (the
+    // user-facing app), not the claude CLI profile — verified in live use.
+    // CLI profiles still win on their distinct names ("codex", "openclaude")
+    // and on explicit qualifiers ("claude terminal" falls through desktop
+    // matching and prefix-matches the CLI). No hint/match → terminal lane.
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const hint = norm(agentHint ?? "");
+    const names = Object.keys(escalatorAgentsCfg?.profiles ?? {});
+    const matchIn = (pool: string[]): string | undefined =>
+      pool.find((p) => norm(p) === hint)
+      ?? pool.find((p) => norm(p).startsWith(hint) || hint.startsWith(norm(p)))
+      ?? pool.find((p) => norm(p).includes(hint) || hint.includes(norm(p)));
+    const desktopNames = names.filter((p) => isDesktopProfile(escalatorAgentsCfg, p));
+    const cliNames = names.filter((p) => !isDesktopProfile(escalatorAgentsCfg, p));
+    const agent = hint ? (matchIn(desktopNames) ?? matchIn(cliNames) ?? "") : "";
+    // Open the thread tab on every client (same broadcast as fork_main).
+    wsHandler.broadcastRaw({
+      type: "spawn_task",
+      taskId: id,
+      label: "📞 call handoff",
+      status: "completed",
+      startedAt: Date.now(),
+      regionId: id,
+    } as any);
+    if (agent && isDesktopProfile(escalatorAgentsCfg, agent)) {
+      // Desktop app destination: per-thread override + the same seed-pull
+      // launch the manual handoff uses. The forkSeed (call transcript + task)
+      // is what composeAndStoreRoiSeed hands the app.
+      threadChatAgents.set(id, agent);
+      wsHandler.broadcastRaw({
+        type: "feed", text: task, priority: "normal", ts: Date.now(),
+        channel: "agent", sender: "user", regionId: id,
+      } as any);
+      void routeDesktopChat(task, id, agent);
+      const appLabel = desktopProfileType(escalatorAgentsCfg, agent) === "chatgpt_desktop"
+        ? "ChatGPT" : "Claude Desktop";
+      log(TAG, `voice handoff → thread ${id} → ${appLabel}`);
+      return { threadId: id, say: `Opened that in ${appLabel} on your desktop, with the call context.` };
+    }
+    // Terminal destination (default): switch the terminal lane when an agent
+    // was named, then have the overlay open the thread's PTY — run.sh seeds it
+    // with this thread's forkSeed, exactly like a manual "Continue in terminal".
+    const termAgent = (agent && !isSinainProfile(escalatorAgentsCfg, agent)) ? agent
+      : bareAgentState.terminalAgent || "openclaude";
+    if (termAgent !== bareAgentState.terminalAgent) {
+      commandDeps.onSetAgent?.("terminal", termAgent);
+    }
+    wsHandler.broadcastRaw({
+      type: "open_thread_terminal",
+      regionId: id,
+      agent: termAgent,
+      ts: Date.now(),
+    } as any);
+    log(TAG, `voice handoff → thread ${id} → terminal (${termAgent})`);
+    return { threadId: id, say: `Opened a terminal with ${termAgent} on your desktop — it has the call context.` };
+  };
+  voiceDirectiveExec = (r) => execDirective(r, {
+    coreUrl: `http://127.0.0.1:${config.port}`,
+    createHandoff: createVoiceHandoff,
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
