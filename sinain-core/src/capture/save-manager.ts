@@ -90,7 +90,13 @@ export class SaveManager {
         if (total > MAX_TRANSCRIPT_CHARS) { cut = i + 1; break; }
         cut = i;
       }
-      if (cut > 0) {
+      if (cut >= items.length) {
+        // The newest item alone blows the budget (a giant OCR blob) — keep it
+        // truncated rather than turning a non-idle range into an empty save.
+        const last = items[items.length - 1];
+        items = [{ ...last, text: last.text.slice(-MAX_TRANSCRIPT_CHARS) }];
+        log(TAG, `${saveId}: single oversized item truncated to ${MAX_TRANSCRIPT_CHARS} chars`);
+      } else if (cut > 0) {
         log(TAG, `${saveId}: transcript capped — dropped ${cut} oldest of ${items.length} items (${total} chars)`);
         items = items.slice(cut);
       }

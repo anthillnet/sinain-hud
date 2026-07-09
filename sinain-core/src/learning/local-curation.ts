@@ -663,8 +663,9 @@ export class LocalCurationService {
     for (const evt of this._senseBuffer.queryByTime(sinceTs)) {
       const app = evt.semantic?.context?.app || evt.meta.app || "unknown";
       // App scope (chooser chips): deselected apps' screen content stays out.
-      // Unknown-app events aren't the app the user deselected — keep them.
-      if (includeApps && app !== "unknown" && !includeApps.includes(app)) continue;
+      // Consent-first: unattributable ("unknown") events could be FROM a
+      // deselected app — under any scope only allow-listed apps pass.
+      if (includeApps && !includeApps.includes(app)) continue;
       if (evt.ocr && evt.ocr.length > 20) {
         items.push({ text: `[screen: ${app}] ${evt.ocr}`, ts: evt.ts, source: "sense", channel: "screen" });
       }

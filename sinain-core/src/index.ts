@@ -1915,11 +1915,16 @@ async function main() {
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
     windowSources: (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
-    windowCoverageAt: (minutes) => ({
-      minutes,
-      covers: describeCoverage(feedBuffer, senseBuffer, minutes),
-      availableMinutes: 0,
-    }),
+    windowCoverageAt: (minutes) => {
+      const now = Date.now();
+      const oldestFeed = feedBuffer.queryByTime(0)[0]?.ts ?? now;
+      const oldestSense = senseBuffer.queryByTime(0)[0]?.ts ?? now;
+      return {
+        minutes,
+        covers: describeCoverage(feedBuffer, senseBuffer, minutes),
+        availableMinutes: Math.floor((now - Math.min(oldestFeed, oldestSense)) / 60_000),
+      };
+    },
     windowPreview: async (minutes) => {
       // Chooser context card: a one-look summary of what the range holds.
       // Cached per duration (90s TTL) so scrubbing the slider back and forth

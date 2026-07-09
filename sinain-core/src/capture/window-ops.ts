@@ -37,8 +37,9 @@ export interface WindowScope {
 
 function appIncluded(scope: WindowScope | undefined, app: string): boolean {
   if (!scope?.apps) return true;
-  // Unknown-app events aren't the app the user deselected — keep them.
-  if (!app || app === "unknown") return true;
+  // Consent-first: an unattributable event could be FROM the app the user
+  // just deselected — under any scope, only explicitly allowed apps pass.
+  if (!app || app === "unknown") return false;
   return scope.apps.includes(app);
 }
 
@@ -56,11 +57,14 @@ export function listWindowSources(
 ): { name: string; kind: "app" | "mic"; minutes: number }[] {
   const since = Date.now() - minutes * 60_000;
   const appMinutes = new Map<string, Set<number>>();
-  for (const { app, ts } of senseBuffer.appHistory(since)) {
+  // Every event in range, not appHistory() — that records only focus
+  // TRANSITIONS, undercounting an app that stays focused for 20 minutes as 1.
+  for (const ev of senseBuffer.queryByTime(since)) {
+    const app = ev.semantic?.context?.app || ev.meta.app || "";
     if (!app || app === "unknown") continue;
     let buckets = appMinutes.get(app);
     if (!buckets) appMinutes.set(app, (buckets = new Set()));
-    buckets.add(Math.floor(ts / 60_000));
+    buckets.add(Math.floor(ev.ts / 60_000));
   }
   const sources: { name: string; kind: "app" | "mic"; minutes: number }[] =
     [...appMinutes.entries()]
@@ -83,7 +87,10 @@ export function describeCoverage(
 ): string {
   const since = Date.now() - minutes * 60_000;
   const apps: string[] = [];
-  for (const { app } of senseBuffer.appHistory(since)) {
+  // Reverse iteration → newest app first, as the docstring promises.
+  const history = senseBuffer.appHistory(since);
+  for (let i = history.length - 1; i >= 0; i--) {
+    const { app } = history[i];
     if (app && app !== "unknown" && !apps.includes(app) && appIncluded(scope, app)) apps.push(app);
   }
   const parts = apps.slice(0, 4);

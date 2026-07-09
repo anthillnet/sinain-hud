@@ -170,9 +170,13 @@ export class SenseBuffer {
     if (this.events.length > this._hwm) this._hwm = this.events.length;
     if (this.horizonMs > 0) {
       const cutoff = Date.now() - this.horizonMs;
-      while (this.events.length > 0 && (this.events[0].receivedAt ?? this.events[0].ts) < cutoff) {
-        this.events.shift();
+      // Single splice — a shift() loop is O(n²) when many events age out at once.
+      let firstLive = 0;
+      while (firstLive < this.events.length &&
+             (this.events[firstLive].receivedAt ?? this.events[firstLive].ts) < cutoff) {
+        firstLive++;
       }
+      if (firstLive > 0) this.events.splice(0, firstLive);
     }
     if (this.events.length > this.maxSize) {
       this.events.shift();

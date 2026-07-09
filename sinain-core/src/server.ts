@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve as resolvePathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
@@ -1798,17 +1799,36 @@ export function createAppServer(deps: ServerDeps) {
   const seenVisionCostIds = new Set<string>();
   const visionCostCleanup = setInterval(() => seenVisionCostIds.clear(), 60_000);
 
+  // Browser origins allowed to call this localhost API cross-origin. A `*`
+  // wildcard here would let ANY website drive /voice/pair, /capture/save,
+  // /voice/start… from a drive-by tab (Chrome PNA opt-in included). Only two
+  // browser contexts are legitimate: pages served by core itself (same-origin,
+  // no CORS needed) and the ARSinain /hud/pair page posting the device token.
+  const trustedOrigins = new Set<string>();
+  try { trustedOrigins.add(new URL(config.voiceConfig.serverUrl).origin); } catch { /* not a URL */ }
+  const corsOrigin = (req: IncomingMessage): string | null => {
+    const origin = req.headers.origin;
+    return origin && trustedOrigins.has(origin) ? origin : null;
+  };
+
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const allowedOrigin = corsOrigin(req);
+    if (allowedOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Vary", "Origin");
+    }
     res.setHeader("Content-Type", "application/json");
 
     if (req.method === "OPTIONS") {
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-      // Chrome Private Network Access: the ARSinain /hud/pair page (public
-      // https origin) POSTs the device token here (localhost) — the preflight
-      // must opt in or Chrome blocks the request.
-      res.setHeader("Access-Control-Allow-Private-Network", "true");
+      if (allowedOrigin) {
+        // Chrome Private Network Access: the ARSinain /hud/pair page (public
+        // https origin) POSTs the device token here (localhost) — the
+        // preflight must opt in or Chrome blocks the request. Scoped to the
+        // trusted origin only.
+        res.setHeader("Access-Control-Allow-Private-Network", "true");
+      }
       res.writeHead(204);
       res.end();
       return;
@@ -2039,6 +2059,13 @@ export function createAppServer(deps: ServerDeps) {
       // Browser pairing callback — the /hud/pair page on the deployed server
       // POSTs the freshly-minted device token here after the user logs in.
       if (req.method === "POST" && url.pathname === "/voice/pair") {
+        // Credential-bearing endpoint: a browser request must come from the
+        // trusted pairing origin. Non-browser callers send no Origin header.
+        if (req.headers.origin && !corsOrigin(req)) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ ok: false, error: "origin not allowed" }));
+          return;
+        }
         const body = await readBody(req, 4096);
         const { cookie, token, email } = JSON.parse(body || "{}") as
           { cookie?: string; token?: string; email?: string };
@@ -2081,7 +2108,9 @@ export function createAppServer(deps: ServerDeps) {
 
       if (req.method === "GET" && url.pathname === "/voice/frame") {
         try {
-          const jpeg = readFileSync(config.voiceConfig.framePath);
+          // Async read — this is polled 4×/s by the call engine; readFileSync
+          // here would block the event loop on every frame.
+          const jpeg = await readFile(config.voiceConfig.framePath);
           res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
           res.end(jpeg);
         } catch {

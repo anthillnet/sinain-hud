@@ -1027,9 +1027,16 @@ final class CallEngineSession: NSObject, WKUIDelegate {
                  initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        // Only our own local core page runs in this webview — grant without a
-        // per-call prompt (the one-time OS-level TCC mic prompt still applies).
-        decisionHandler(.grant)
+        // Auto-grant is for our own local core page ONLY — if the webview ever
+        // navigates elsewhere (bad URL, redirect), deny rather than silently
+        // hand a foreign origin the microphone.
+        let localHosts: Set<String> = ["127.0.0.1", "localhost", "::1"]
+        if localHosts.contains(origin.host) {
+            decisionHandler(.grant)
+        } else {
+            NSLog("[CallEngine] denying media capture for origin %@", origin.host)
+            decisionHandler(.deny)
+        }
     }
 
     private func teardown() {

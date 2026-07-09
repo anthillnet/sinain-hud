@@ -2,7 +2,8 @@
 ///
 /// Three WS message types back the new HUD gestures:
 ///   `context_brief` — "Call AI on my last N minutes" → situation brief
-///   `enrich_card`   — "Build context" (clipboard) → what / connects / next
+///   `enrich_card`   — "Context from clipboard/screen" → a single `context`
+///                     paragraph (no next-step suggestions by design)
 ///   `save_receipt`  — save lifecycle: saving → saved (+undo) → committed
 library;
 

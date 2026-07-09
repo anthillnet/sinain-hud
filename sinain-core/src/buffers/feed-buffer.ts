@@ -69,7 +69,10 @@ export class FeedBuffer {
 
     if (this.horizonMs > 0) {
       const cutoff = Date.now() - this.horizonMs;
-      while (this.items.length > 0 && this.items[0].ts < cutoff) this.items.shift();
+      // Single splice — a shift() loop is O(n²) when many items age out at once.
+      let firstLive = 0;
+      while (firstLive < this.items.length && this.items[firstLive].ts < cutoff) firstLive++;
+      if (firstLive > 0) this.items.splice(0, firstLive);
     }
     if (this.items.length > this.maxSize) {
       this.items.shift();
