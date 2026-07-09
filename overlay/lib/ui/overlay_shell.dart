@@ -330,6 +330,9 @@ class OverlayShellState extends State<OverlayShell> {
       // thread tab itself arrived just before as a spawn_task broadcast.
       setState(() => _activeThread = key == 'main' ? null : key);
       _openTerminalForTab(key);
+      // Surface the HUD: a voice handoff usually lands while it's collapsed
+      // or hidden — an invisible terminal reads as "nothing happened".
+      if (_state != HudState.chat) _transitionTo(HudState.chat);
     });
     _contentSub = ws.agentFeedStream.listen((_) {
       if (!mounted) return;
