@@ -569,12 +569,11 @@
         <span class="eyebrow"><span class="bar"></span> Context OS · ambient intelligence for builders</span>
         <h1 class="hero-title">Sees what you see.<br/>Hears what you hear.<br/><em>Helps you do stuff.</em></h1>
         <p class="hero-sub">
-          A private Context OS that watches your screen and audio into a <strong>rolling
-          window — nothing persists until you ask</strong>. Then one gesture promotes it:
-          <strong>save a range to memory</strong>, <strong>brief any AI on your last
-          N minutes</strong>, or <strong>start a live voice call with Sinain</strong>
-          seeded with exactly what you approved. You see — and can untick — every app
-          before anything leaves the machine.
+          Sinain quietly understands what you are working on — from your screen, meetings,
+          and audio — and turns it into useful context your AI assistants can use. Through
+          the <strong>MCP bridge</strong>, that context follows you into the tools and agents
+          you already use, so you do not have to copy screenshots, notes, and explanations
+          between them. And <strong>nothing persists or leaves until you ask</strong>.
         </p>
 
         <div class="cta">
@@ -631,15 +630,15 @@
 <section class="s" id="flow">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 01 — From your last hour to a working agent</div>
+      <div class="sec-num">§ 01 — From a glance to a working agent</div>
       <div>
-        <h2 class="sec-title">You decide what the AI sees. Then it's one click.</h2>
+        <h2 class="sec-title">Context that moves with you — across every AI.</h2>
         <p class="sec-lede">
-          Sinain keeps a <strong>rolling window</strong> of your screen and audio — locally, with
-          no LLM touching it. Four gestures promote it deliberately: <strong>save it to
-          memory</strong>, <strong>call an AI on it</strong>, or build context from a
-          <strong>screen region</strong> or your <strong>clipboard</strong>. Every card shows
-          which apps the range covers — <strong>untick one and it never leaves</strong>.
+          Sinain helps your AI understand what you are looking at and what you have been
+          working on. Start from anything — your last hour, a screen region, your clipboard —
+          ask for help, and continue in the assistant you prefer. Through the MCP bridge,
+          the same context moves between your chat, coding agents, and other AI tools.
+          No copy-pasting. No repeating the same background again and again.
         </p>
       </div>
     </div>
@@ -832,9 +831,9 @@
       <div>
         <h2 class="sec-title">Capture. Distill. Access. Share.</h2>
         <p class="sec-lede">
-          One knowledge graph, four uses. Sinain extracts atomic facts, entities,
-          and decisions with an LLM — then integrates them through deterministic graph
-          operations.
+          Sinain captures what matters, turns it into useful memory, makes it available
+          to AI tools through the MCP bridge, and lets you share selected context with
+          others when you choose.
         </p>
       </div>
     </div>
@@ -844,8 +843,9 @@
         <div class="ix">01 / capture</div>
         <h3>Screen + system audio, continuously.</h3>
         <p>
-          <code>&lt;private&gt;</code> tag stripping and auto-redaction of credentials and
-          tokens happen <strong style="color:var(--fg)">before</strong> anything leaves your machine.
+          Sinain can watch your screen and listen to system audio while automatically
+          hiding sensitive things like passwords, API keys, and private blocks
+          <strong style="color:var(--fg)">before</strong> anything is sent out.
         </p>
         <div class="chips">
           <span>macOS native</span><span>screen + audio</span><span>OCR included</span>
@@ -855,10 +855,10 @@
         <div class="ix">02 / distill</div>
         <h3>Facts, entities, decisions.</h3>
         <p>
-          Atomic claims, people / projects / topics, what was chosen and why. An LLM extracts —
-          a non-LLM pipeline integrates. Moving the integration step <em>off</em> the LLM was
-          the single biggest gain: <strong>37.9% → 62.7% recall</strong> on internal Meeting
-          Memory, <strong>82.8% IPR on LongMemEval</strong> (ICLR 2025 public benchmark).
+          Sinain turns messy work activity into clear memory: people, projects, decisions,
+          open questions, and why something was chosen. It remembers useful details so your
+          AI can answer with the right background later — <strong>82.8% IPR on
+          LongMemEval</strong> (public benchmark).
         </p>
         <div class="chips">
           <span>structured graph</span><span>hybrid retrieval</span><span>82.8% IPR</span>
@@ -868,8 +868,9 @@
         <div class="ix">03 / access</div>
         <h3>MCP, web UI, HUD overlay.</h3>
         <p>
-          Agents read it via MCP. You browse it at <code>localhost:9500/knowledge/ui/</code>.
-          You glance at it through a HUD that is <strong>invisible to screen capture</strong>.
+          Agents connect to Sinain through the MCP bridge, so they can use the same live
+          context you see. You can also browse it in the local web UI or use the on-screen
+          HUD, which stays <strong>hidden from screenshots and screen shares</strong>.
         </p>
         <div class="chips">
           <span>15 MCP tools</span><span>live updates</span><span>invisible to capture</span>
@@ -879,9 +880,9 @@
         <div class="ix">04 / share</div>
         <h3>Peer-to-peer. No server in the data path.</h3>
         <p>
-          Send a slice of your graph to another person. Their machine pulls from yours directly
-          over WebRTC; the data itself never touches a server. Their AI agents inherit the
-          context via the same MCP.
+          Share only the context you choose with another person. Their device connects
+          directly to yours, and their AI tools can use the shared context through the
+          same MCP bridge.
         </p>
         <div class="chips">
           <span>WebRTC</span><span>direct transfer</span><span>data stays local</span>
@@ -899,9 +900,10 @@
       <div>
         <h2 class="sec-title">One context. Any agent. No restart.</h2>
         <p class="sec-lede">
-          Sinain feeds the same screen and audio context to any MCP-compatible agent.
-          Switch on the fly — no restart, no context loss.
-          Or open what you're looking at straight in a desktop assistant — ChatGPT or Claude — with your context already loaded.
+          Use the AI assistant you already like. Sinain uses the MCP bridge to pass the
+          same context to different tools and agents, so you can switch between them
+          without starting from zero. Open what you are looking at in ChatGPT, Claude,
+          or a coding agent with the background already included.
         </p>
       </div>
     </div>
@@ -930,8 +932,8 @@
       <div>
         <h2 class="sec-title">Four modes. From cloud-fast to fully offline.</h2>
         <p class="sec-lede">
-          By default, sinain uses cloud APIs (OpenRouter) for transcription and analysis.
-          Need tighter control? Flip the mode.
+          Choose how private you want Sinain to be. You can use cloud models for better
+          speed and quality, or keep everything fully local when privacy matters most.
         </p>
       </div>
     </div>
@@ -953,13 +955,14 @@
       <div class="feat-text">
         <h3>Invisible to screen capture.</h3>
         <p>
-          The HUD overlay never appears in screenshots, recordings, or screen shares.
+          The Sinain overlay is visible to you, but hidden from screenshots, recordings,
+          and screen shares.
         </p>
         <ul>
-          <li><span><strong><code>off</code></strong> — all data flows freely; maximum insight quality.</span></li>
-          <li><span><strong><code>standard</code></strong> — auto-redacts credentials before cloud APIs (wizard default).</span></li>
-          <li><span><strong><code>strict</code></strong> — only summaries leave your machine; no raw text sent to cloud.</span></li>
-          <li><span><strong><code>paranoid</code></strong> — Ollama + whisper.cpp. <strong>Zero network calls at runtime.</strong></span></li>
+          <li><span><strong><code>off</code></strong> — best quality, with no extra privacy filtering.</span></li>
+          <li><span><strong><code>standard</code></strong> — hides passwords, keys, and credentials before using cloud models.</span></li>
+          <li><span><strong><code>strict</code></strong> — sends only short summaries, not raw screen or audio text.</span></li>
+          <li><span><strong><code>paranoid</code></strong> — runs locally with no network calls while Sinain is active.</span></li>
         </ul>
       </div>
     </div>
@@ -967,19 +970,19 @@
     <div class="modes" style="margin-top:32px">
       <div class="mode">
         <div class="nm"><b>off</b></div>
-        <p class="desc">All data flows freely — maximum insight quality.</p>
+        <p class="desc">Best quality, with no extra privacy filtering.</p>
       </div>
       <div class="mode">
         <div class="nm"><b>standard</b> · wizard default</div>
-        <p class="desc">Auto-redacts credentials before cloud APIs.</p>
+        <p class="desc">Hides passwords, keys, and credentials before using cloud models.</p>
       </div>
       <div class="mode">
         <div class="nm"><b>strict</b></div>
-        <p class="desc">Only summaries leave your machine — no raw text sent to cloud.</p>
+        <p class="desc">Sends only short summaries, not raw screen or audio text.</p>
       </div>
       <div class="mode">
         <div class="nm"><b>paranoid</b> · fully local</div>
-        <p class="desc">Ollama + whisper.cpp. Zero network calls at runtime.</p>
+        <p class="desc">Runs locally with no network calls while Sinain is active.</p>
       </div>
     </div>
   </div>
@@ -993,8 +996,9 @@
       <div>
         <h2 class="sec-title">One command. A wizard. Three services up.</h2>
         <p class="sec-lede">
-          On first run, sinain runs an interactive setup wizard, auto-downloads the assets
-          it needs (~112 MB total), and starts every service for you.
+          Install Sinain, answer a few setup questions, and it starts everything for you.
+          The app downloads what it needs and guides you through permissions, privacy,
+          and AI assistant setup.
         </p>
       </div>
     </div>
@@ -1028,25 +1032,25 @@
         <li>
           <div>
             <h4>Run the wizard</h4>
-            <p>Pick transcription backend, paste an API key (or skip for fully local), choose your agent, set privacy mode.</p>
+            <p>Pick transcription backend, paste an API key, choose your agent, and set privacy mode. You can also skip cloud setup and run fully local.</p>
           </div>
         </li>
         <li>
           <div>
             <h4>Auto-download assets</h4>
-            <p>Overlay app (~17 MB), <code>sck-capture</code> binary (~5 MB), embedding model (~90 MB), Python deps — all cached locally.</p>
+            <p>Sinain downloads the overlay app, screen capture helper, embedding model, and Python dependencies — then caches them locally.</p>
           </div>
         </li>
         <li>
           <div>
             <h4>Services start</h4>
-            <p><code>sinain-core</code>, <code>sense_client</code>, overlay, agent — running. HUD appears, screen and audio capture begins.</p>
+            <p>Sinain core, screen capture, audio capture, OCR, overlay, and your selected agent connection start automatically.</p>
           </div>
         </li>
         <li>
           <div>
             <h4>Re-run anytime</h4>
-            <p><code>npx @geravant/sinain@latest start --setup</code>. Stop / status / no-sense / headless flags available.</p>
+            <p>Run setup again whenever you want to change privacy mode, update agents, or adjust configuration.</p>
           </div>
         </li>
       </ol>
@@ -1079,8 +1083,8 @@
       <div class="ic">!</div>
       <div>
         <strong>macOS Permissions.</strong> Add Terminal to <em>System Settings → Privacy &amp; Security → Screen Recording</em>,
-        then <em>quit and reopen Terminal</em> — macOS only applies the permission to apps started after granting.
-        Same for Microphone.
+        then quit and reopen Terminal. macOS only applies the permission to apps started
+        after granting. Do the same for Microphone.
       </div>
     </div>
   </div>
@@ -1092,10 +1096,11 @@
     <div class="sec-head">
       <div class="sec-num">§ 06 — Connect Your Coding Agent</div>
       <div>
-        <h2 class="sec-title">15 <code style="font-family:var(--mono);color:var(--accent);background:var(--accent-soft);padding:0 8px;border-radius:6px;font-size:30px">sinain_*</code> tools, one MCP install.</h2>
+        <h2 class="sec-title">Connect Sinain to your AI agents with the MCP bridge.</h2>
         <p class="sec-lede">
-          The wizard detects which MCP agents you have installed and registers sinain for
-          each one you select.
+          The MCP bridge is how AI agents connect to Sinain's context. The setup wizard
+          detects supported agents on your machine and registers Sinain for each one
+          you choose.
         </p>
       </div>
     </div>
@@ -1106,7 +1111,9 @@
     </div>
 
     <p style="margin-top:18px;font-size:14.5px;color:var(--fg-dim);line-height:1.65;max-width:640px">
-      Re-run any time to update. Registers sinain with Claude Code, Claude Desktop, Cursor, Codex, Goose, and Junie.
+      Re-run any time to update. Sinain can register with Claude Code, Claude Desktop,
+      Cursor, Codex, Goose, and Junie, so each agent can access the same working context
+      through the MCP bridge.
     </p>
   </div>
 </section>
@@ -1119,17 +1126,17 @@
       <div>
         <h2 class="sec-title">Threat models, audits, full configuration.</h2>
         <p class="sec-lede">
-          Everything that didn't fit on this page. Each link goes to the canonical doc
-          in the repo.
+          For developers and security-minded users: deeper explanations, setup guides,
+          privacy details, benchmarks, and configuration options.
         </p>
       </div>
     </div>
 
     <div class="dd">
       <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/knowledge-system.md" target="_blank"><span class="t">Knowledge System</span><span class="p">docs/knowledge-system.md →</span></a>
-      <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/KNOWLEDGE-API.md" target="_blank"><span class="t">Knowledge API (HTTP)</span><span class="p">docs/KNOWLEDGE-API.md →</span></a>
-      <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-INTEGRATION.md" target="_blank"><span class="t">MCP Integration (setup)</span><span class="p">docs/MCP-INTEGRATION.md →</span></a>
-      <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-CAPABILITIES.md" target="_blank"><span class="t">MCP Capabilities (tools + recipes)</span><span class="p">docs/MCP-CAPABILITIES.md →</span></a>
+      <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/KNOWLEDGE-API.md" target="_blank"><span class="t">Knowledge API</span><span class="p">docs/KNOWLEDGE-API.md →</span></a>
+      <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-INTEGRATION.md" target="_blank"><span class="t">MCP Integration</span><span class="p">docs/MCP-INTEGRATION.md →</span></a>
+      <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/MCP-CAPABILITIES.md" target="_blank"><span class="t">MCP Capabilities</span><span class="p">docs/MCP-CAPABILITIES.md →</span></a>
       <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/LONGMEMEVAL-AUDIT.md" target="_blank"><span class="t">LongMemEval Audit · 82.8% IPR</span><span class="p">docs/LONGMEMEVAL-AUDIT.md →</span></a>
       <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/privacy-protection-design.md" target="_blank"><span class="t">Privacy Threat Model</span><span class="p">docs/privacy-protection-design.md →</span></a>
       <a class="d" href="https://github.com/anthillnet/sinain-hud/blob/main/docs/CONFIGURATION.md" target="_blank"><span class="t">Full Configuration</span><span class="p">docs/CONFIGURATION.md →</span></a>
@@ -1145,7 +1152,7 @@
       <div>
         <span class="eyebrow"><span class="bar"></span> Ready?</span>
         <h2>Context that follows you across every agent, every project, every machine.</h2>
-        <p>One install. macOS 12.3+. Source-available (FSL-1.1-ALv2). Private by default.</p>
+        <p>Install once, then let your AI assistants understand your work without constant copy-paste.</p>
       </div>
       <div class="right">
         <a class="btn primary btn-lg" href="#quickstart">npx @geravant/sinain@latest start</a>
@@ -1171,7 +1178,7 @@
           <span>SINAIN</span>
           <span class="sub mono">/ context os</span>
         </div>
-        <p class="blurb">A private Context OS that runs ambient in the background, distilling your screen and audio into a structured knowledge graph.</p>
+        <p class="blurb">Sinain helps your AI assistants understand what you are working on, while keeping you in control of privacy and sharing.</p>
         <p style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-faint);letter-spacing:.04em">FSL-1.1-ALv2 · anthillnet/sinain-hud</p>
       </div>
       <div>
