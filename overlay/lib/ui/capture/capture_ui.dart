@@ -152,7 +152,7 @@ class _RangeChooserState extends State<RangeChooser> {
       };
 
   String get _title => switch (widget.kind) {
-        ChooserKind.save => 'Save last…',
+        ChooserKind.save => 'Save context…',
         ChooserKind.call => 'Call AI on…',
       };
 

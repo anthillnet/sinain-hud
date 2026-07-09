@@ -800,7 +800,7 @@ class OverlayShellState extends State<OverlayShell> {
     final items = <Map<String, dynamic>>[
       // Deliberate capture — the three window gestures live here, not as
       // dedicated HUD buttons (design: reuse existing controls).
-      {'id': 'capSave', 'title': 'Save Last…'},
+      {'id': 'capSave', 'title': 'Save Context…'},
       // One entry for both call destinations — the chooser card carries a
       // "Call AI" (text handoff) and a "Call sinain" (live voice) button.
       {'id': 'capCall', 'title': 'Call AI…'},
