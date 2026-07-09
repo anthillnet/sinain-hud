@@ -569,11 +569,12 @@
         <span class="eyebrow"><span class="bar"></span> Context OS · ambient intelligence for builders</span>
         <h1 class="hero-title">Sees what you see.<br/>Hears what you hear.<br/><em>Helps you do stuff.</em></h1>
         <p class="hero-sub">
-          A private Context OS that runs ambient in the background, distilling your screen and audio
-          into a <strong>structured knowledge graph</strong> of facts, entities, and decisions —
-          then moving that live context <strong>frictionlessly into any AI assistant</strong> you use.
-          Reach it from MCP, a web UI, a screen-recording-invisible HUD overlay, and peer-to-peer
-          sharing between users.
+          A private Context OS that watches your screen and audio into a <strong>rolling
+          window — nothing persists until you ask</strong>. Then one gesture promotes it:
+          <strong>save a range to memory</strong>, <strong>brief any AI on your last
+          N minutes</strong>, or <strong>start a live voice call with Sinain</strong>
+          seeded with exactly what you approved. You see — and can untick — every app
+          before anything leaves the machine.
         </p>
 
         <div class="cta">
@@ -630,48 +631,84 @@
 <section class="s" id="flow">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 01 — From a glance to a working agent</div>
+      <div class="sec-num">§ 01 — From your last hour to a working agent</div>
       <div>
-        <h2 class="sec-title">Context that moves with you — across every AI.</h2>
+        <h2 class="sec-title">You decide what the AI sees. Then it's one click.</h2>
         <p class="sec-lede">
-          Modern, ambient UX with zero context juggling. Sinain grounds every thread in your
-          <strong>current situation on screen</strong> and the facts in your <strong>knowledge graph</strong> —
-          then carries that context wherever the work goes: built-in chat, a CLI agent, or any
-          assistant you hand the thread to. It follows <strong>frictionlessly across all of them</strong>.
-          No copy-paste, no re-explaining.
+          Sinain keeps a <strong>rolling window</strong> of your screen and audio — locally, with
+          no LLM touching it. Four gestures promote it deliberately: <strong>save it to
+          memory</strong>, <strong>call an AI on it</strong>, or build context from a
+          <strong>screen region</strong> or your <strong>clipboard</strong>. Every card shows
+          which apps the range covers — <strong>untick one and it never leaves</strong>.
         </p>
       </div>
     </div>
 
     <div class="tour-grid">
 
-      <!-- 1 · Markers -->
+      <!-- 1 · Save Context -->
       <article class="tour-card">
-        <div class="tour-vis" style="background:#F7F8FA">
-          <div class="tv-skel">
-            <div style="height:10px;width:140px;background:#DFE1E5;border-radius:3px;margin-bottom:14px"></div>
-            <div class="tv-bar" style="height:8px;width:82%;margin-bottom:9px"></div>
-            <div class="tv-bar" style="height:8px;width:64%;margin-bottom:9px"></div>
-            <div class="tv-bar" style="height:8px;width:72%"></div>
-          </div>
-          <svg width="24" height="24" viewBox="0 0 30 30" style="position:absolute;left:38px;top:118px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
-          <div class="tv-pop" style="left:62px;top:50px;width:244px;padding:10px 12px">
-            <div style="font-size:12px;font-weight:600;color:#fff;margin-bottom:3px">High memory usage in Gmail</div>
-            <div style="font-size:11px;line-height:15px;color:#A8ADBD;margin-bottom:8px">Close unused tabs to free up memory.</div>
-            <div style="display:flex;gap:5px">
-              <span class="tv-chip chat" style="height:22px;padding:0 10px">Chat</span>
-              <span class="tv-chip term" style="height:22px;padding:0 10px">Term</span>
+        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
+          <div style="width:238px;background:#1E1F22;border:1px solid rgba(31,128,57,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+              <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
+              <span style="font-size:12px;font-weight:600;color:#fff">Save context…</span>
+              <span style="margin-left:auto;font-size:13px;font-weight:600;font-family:var(--mono);color:#1F8039">30 min</span>
+            </div>
+            <div style="display:flex;gap:4px;margin-bottom:8px">
+              <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#A8ADBD;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:4px">5m</span>
+              <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#A8ADBD;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:4px">15m</span>
+              <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#fff;background:rgba(31,128,57,.25);border:1px solid rgba(31,128,57,.55);border-radius:4px">30m</span>
+              <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#A8ADBD;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:4px">60m</span>
+            </div>
+            <div style="background:#15161A;border-radius:6px;padding:8px;margin-bottom:8px">
+              <div style="display:flex;font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:5px"><span>COVERS · CLICK TO EXCLUDE</span><span style="margin-left:auto;font-family:var(--mono);font-weight:400">2 of 3 sources</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#1F8039;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">IntelliJ IDEA</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">26 min</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#1F8039;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">Chrome</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">12 min</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;border:1px solid rgba(255,255,255,.25);border-radius:2px;box-sizing:border-box"></span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#6C707E">Slack</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">4 min</span></div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#1F8039;border-radius:5px">Save 30 min</span>
+              <span style="height:24px;display:flex;align-items:center;justify-content:center;padding:0 10px;font-size:10px;color:#A8ADBD;border:1px solid rgba(255,255,255,.18);border-radius:5px">Cancel</span>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Step 1</span>
-          <h3>Proactive help</h3>
-          <p>Sinain watches your screen and drops an eye marker where it can help. Click for a quick tip, double-click to open a thread.</p>
+          <span class="tour-step">Save Context</span>
+          <h3>Remember what just happened</h3>
+          <p>Pick how far back — and which apps — and Sinain distills those minutes into searchable memory. 30 seconds to undo; nothing is saved without you asking.</p>
         </div>
       </article>
 
-      <!-- 2 · Aim it yourself (manual region) -->
+      <!-- 2 · Call AI on it -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
+          <div style="width:238px;background:#1E1F22;border:1px solid rgba(51,105,214,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+              <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#3369D6" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#3369D6"/></svg>
+              <span style="font-size:12px;font-weight:600;color:#fff">Call AI on…</span>
+              <span style="margin-left:auto;font-size:13px;font-weight:600;font-family:var(--mono);color:#3369D6">30 min</span>
+            </div>
+            <div style="background:#15161A;border-radius:6px;padding:8px;margin-bottom:6px">
+              <div style="display:flex;font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:5px"><span>AI WILL KNOW · CLICK TO EXCLUDE</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#3369D6;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">IntelliJ IDEA</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">26 min</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#3369D6;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">mic</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">9 min</span></div>
+            </div>
+            <div style="font-size:10px;color:#6C707E;margin-bottom:8px">brief composed &amp; redacted before anything leaves</div>
+            <div style="display:flex;gap:6px">
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#3369D6;border-radius:5px">Call AI</span>
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#1F8039;border-radius:5px">Call sinain</span>
+            </div>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Call AI</span>
+          <h3>Brief an AI on your last minutes</h3>
+          <p>A ~1.5s situation brief of the range — as text to the agent you pick, or as the seed of a <strong>live voice call with Sinain</strong>: it sees your screen, you just talk.</p>
+        </div>
+      </article>
+
+      <!-- 3 · Context from screen (region) -->
       <article class="tour-card">
         <div class="tour-vis" style="background:#F7F8FA;cursor:crosshair">
           <div class="tv-skel" style="opacity:.5">
@@ -685,24 +722,45 @@
             <div style="position:absolute;left:0;top:-22px;height:17px;padding:0 6px;background:#27282E;color:#fff;font-size:10px;font-family:var(--mono);line-height:17px;border-radius:3px">228 × 92</div>
             <div style="position:absolute;left:-3px;top:-3px;width:6px;height:6px;background:#fff;border:1px solid #3369D6"></div>
             <div style="position:absolute;right:-3px;bottom:-3px;width:6px;height:6px;background:#fff;border:1px solid #3369D6"></div>
-            <div style="position:absolute;left:50%;bottom:-34px;transform:translateX(-50%);display:flex;gap:4px;padding:4px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.45);white-space:nowrap">
-              <span class="tv-chip chat" style="height:24px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>Chat</span>
-              <span class="tv-chip term" style="height:24px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>Term</span>
-            </div>
           </div>
           <div style="position:absolute;right:14px;top:14px;display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 9px;background:rgba(43,45,48,.92);border-radius:12px;color:#fff;font-size:11px">
             <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
-            Double-tap the eye
+            Context from Screen
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Step 2</span>
-          <h3>Or aim it yourself</h3>
-          <p>Double-tap the eye and drag a box around anything on screen — like a screenshot. Sinain picks it up with full context.</p>
+          <span class="tour-step">Context from Screen</span>
+          <h3>Point at anything</h3>
+          <p>Drag a box around any part of your screen — like a screenshot. Sinain enriches the selection with your recent activity and hands it to your AI.</p>
         </div>
       </article>
 
-      <!-- 3 · Where chat lands -->
+      <!-- 4 · Context from clipboard -->
+      <article class="tour-card">
+        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
+          <div style="width:246px;background:#1E1F22;border:1px solid rgba(31,128,57,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+              <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
+              <span style="font-size:12px;font-weight:600;color:#fff">Context from clipboard</span>
+            </div>
+            <div style="background:#15161A;border-radius:5px;padding:6px 8px;margin-bottom:8px;font-size:10px;font-family:var(--mono);color:#D6DAE3">"x-ratelimit-remaining-tokens"</div>
+            <div style="font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:5px">CONTEXT</div>
+            <div style="height:8px;background:#2B2D30;border-radius:3px;margin-bottom:5px"></div>
+            <div style="height:8px;width:72%;background:#2B2D30;border-radius:3px;margin-bottom:10px"></div>
+            <div style="display:flex;gap:6px">
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#3369D6;border-radius:5px">Handoff to Claude Code</span>
+              <span style="height:24px;display:flex;align-items:center;justify-content:center;padding:0 9px;font-size:10px;color:#A8ADBD;border:1px solid rgba(255,255,255,.18);border-radius:5px">Copy</span>
+            </div>
+          </div>
+        </div>
+        <div class="tour-body">
+          <span class="tour-step">Context from Clipboard</span>
+          <h3>Copy something, get the full picture</h3>
+          <p>An error, a link, a paragraph — Sinain wraps whatever you copied with what you were doing, so any AI gets the situation instead of a bare snippet.</p>
+        </div>
+      </article>
+
+      <!-- 5 · Where it lands -->
       <article class="tour-card">
         <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center;gap:14px;padding:0 22px;box-sizing:border-box">
           <div style="position:relative;flex:1;max-width:142px;background:#1E1F22;border:1px solid #1F8039;border-radius:8px;overflow:hidden">
@@ -714,34 +772,31 @@
               <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
               <span style="font-size:11px;font-weight:500">Sinain HUD</span>
             </div>
-            <div style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;background:#1F8039;display:flex;align-items:center;justify-content:center"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
           </div>
           <span style="font-size:12px;color:#6C707E">or</span>
-          <div style="flex:1;max-width:142px;background:#1E1F22;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden">
-            <div style="height:22px;background:#2B2D30;display:flex;align-items:center;gap:4px;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.06)">
-              <span style="width:7px;height:7px;border-radius:50%;background:#CC3645"></span>
-              <span style="width:7px;height:7px;border-radius:50%;background:#E56D17"></span>
-              <span style="width:7px;height:7px;border-radius:50%;background:#1F8039"></span>
-              <span style="font-size:10px;color:#A8ADBD;margin-left:6px">ChatGPT</span>
-            </div>
-            <div style="height:52px;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;padding:10px">
-              <div style="align-self:flex-end;width:52px;height:13px;border-radius:7px;background:#3369D6"></div>
-              <div style="align-self:flex-start;width:68px;height:13px;border-radius:7px;background:#2B2D30;border:1px solid rgba(255,255,255,.1)"></div>
+          <div style="flex:1;max-width:142px;background:#1E1F22;border:1px solid rgba(51,105,214,.45);border-radius:8px;overflow:hidden">
+            <div style="height:74px;background:#15161a;display:flex;align-items:center;justify-content:center;gap:3px">
+              <span style="width:4px;height:10px;background:#3369D6;border-radius:2px"></span>
+              <span style="width:4px;height:20px;background:#3369D6;border-radius:2px"></span>
+              <span style="width:4px;height:14px;background:#3369D6;border-radius:2px"></span>
+              <span style="width:4px;height:24px;background:#3369D6;border-radius:2px"></span>
+              <span style="width:4px;height:12px;background:#3369D6;border-radius:2px"></span>
+              <span style="margin-left:10px;height:18px;display:inline-flex;align-items:center;padding:0 8px;background:#B3361C;border-radius:4px;color:#fff;font-size:9px">End</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#A8ADBD" stroke-width="1.6"><path d="M7 17L17 7M9 7h8v8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span style="font-size:11px;font-weight:500;color:#A8ADBD">Your app</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3369D6" stroke-width="1.8"><path d="M4 12h2l2-5 3 10 2-7 2 4h5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span style="font-size:11px;font-weight:500;color:#A8ADBD">Sinain voice</span>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Step 3</span>
-          <h3>Chat, your way</h3>
-          <p>A thread stays in the Sinain HUD or pops out into an app you already use — seeded with the full context first.</p>
+          <span class="tour-step">Talk to it</span>
+          <h3>Chat, terminal — or a live call</h3>
+          <p>Every context opens a thread: built-in chat, a terminal agent, an app you already use — or a hands-free voice call where Sinain watches your screen as you work.</p>
         </div>
       </article>
 
-      <!-- 4 · Move a thread -->
+      <!-- 6 · Move a thread -->
       <article class="tour-card">
         <div class="tour-vis" style="background:#171819;position:relative;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;box-sizing:border-box">
           <div style="align-self:flex-start;max-width:84%;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:10px 10px 10px 2px;padding:8px 11px;font-size:12px;line-height:16px;color:#A8ADBD;margin-bottom:12px">I can't run commands myself — want me to hand this to a terminal agent?</div>
@@ -759,47 +814,9 @@
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Step 4</span>
+          <span class="tour-step">Hand it off</span>
           <h3>Move it to any agent</h3>
-          <p>Hand the whole thread — its context and your messages — to a coding agent like claude code or codex. Nothing is lost.</p>
-        </div>
-      </article>
-
-      <!-- 5 · Pick your agents -->
-      <article class="tour-card">
-        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
-          <div style="width:300px;max-width:86%">
-            <div style="font-size:11px;color:#A8ADBD;margin-bottom:5px">Chat opens with</div>
-            <div style="display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 10px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:6px;margin-bottom:12px">
-              <div style="display:flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:4px;background:#1F8039;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">S</span><span style="font-size:13px;font-weight:500">Sinain</span><span style="font-size:11px;color:#6C707E">Built in</span></div>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <div style="font-size:11px;color:#A8ADBD;margin-bottom:5px">Terminal runs</div>
-            <div style="display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 10px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:6px">
-              <div style="display:flex;align-items:center;gap:8px"><span style="width:18px;height:18px;border-radius:4px;background:#3369D6;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">O</span><span style="font-size:13px;font-weight:500;font-family:var(--mono)">openclaude</span></div>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </div>
-        </div>
-        <div class="tour-body">
-          <span class="tour-step">Step 5</span>
-          <h3>All your setup</h3>
-          <p>Pick which assistant backs chat and which terminal agent runs. Sinain lists the ones found on your machine — change them anytime.</p>
-        </div>
-      </article>
-
-      <!-- 6 · Chat or terminal action -->
-      <article class="tour-card">
-        <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
-          <div style="display:flex;gap:8px;padding:8px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.45)">
-            <span class="tv-chip chat" style="height:30px;padding:0 14px;font-size:13px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>Chat</span>
-            <span class="tv-chip term" style="height:30px;padding:0 14px;font-size:13px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>Term</span>
-          </div>
-        </div>
-        <div class="tour-body">
-          <span class="tour-step">Step 6</span>
-          <h3>Chat or terminal</h3>
-          <p>Every marker opens a thread. Reply in built-in chat, or hand it straight to a terminal agent — your choice, per region.</p>
+          <p>Hand the whole thread — its context and your messages — to a coding agent like claude code or codex. Nothing is lost, nothing re-explained.</p>
         </div>
       </article>
 
