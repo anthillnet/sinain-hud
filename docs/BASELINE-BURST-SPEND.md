@@ -97,3 +97,32 @@ CEREBRAS_API_KEY=... node scripts/burst-baseline.mjs --core http://127.0.0.1:950
 Requires a running core with a populated buffer (`GET /health` shows
 `senseEvents`). Re-run after each optimization on the same frozen buffer window
 and diff the `tokensIn_avg` / `ocrShareOfChars` / `projected` fields.
+
+## Result: compact assembly (shipped, default ON)
+
+Cross-frame line dedup: reconstruct real text lines from the per-word OCR boxes
+(`ocrLines`), then send each distinct line once per window — UI chrome and
+re-read content collapse; every unique line survives in time order.
+`SINAIN_BURST_COMPACT=0` restores the raw path. A/B on one frozen 60-min buffer
+(real Cerebras, identical input):
+
+| Gesture | baseline tokIn | compact tokIn | saved | latency | truncation b→c | quality |
+|---|---:|---:|---:|---:|---:|---|
+| enrich (10m) | 18,127 | 13,883 | **23%** | 924→951 ms | 0→0 | card semantically identical |
+| summon (30m) | 30,271 | 22,974 | **24%** | 1,307→1,354 ms | 6,380→0 ch | baseline returned EMPTY brief (4 out tok); compact returned a full brief |
+| summon (60m) | ~28,620 | ~28,620 | 0% at cap | — | 72,348→17,917 ch | compact delivers 83% of range vs baseline 55% (same tokens) |
+
+Deterministic char reduction (no API): enrich −30%, summon-30 −25%, summon-60
+window 162K→108K (−33%) but both still exceed the 90K cap so tokens are equal.
+
+Takeaways:
+- **enrich + summon-30: 23–24% fewer tokens, latency-neutral, quality equal or
+  better.** The summon-30 baseline drowned in raw OCR and produced nothing;
+  compact produced a correct brief — dilution law on the burst read side.
+- **summon-60 is cap-bound**: compaction converts to *coverage* (55%→83% of the
+  range at the same token budget), not token savings. Turning that into token
+  savings needs L3 (lower the char cap in compact mode, or extractively
+  compress the oldest frames) — a coverage/token tradeoff that wants its own
+  quality eval, deferred.
+- L1 (semantic) still blocked on sense_client; L2 (assembly dedup) subsumed by
+  this line-dedup.

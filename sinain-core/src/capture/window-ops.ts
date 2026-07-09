@@ -81,6 +81,46 @@ function _semanticAlt(ev: { semantic?: { visible?: { summary?: string }; changes
   return "";
 }
 
+/**
+ * Compact assembly (perf/burst-instrumentation): OCR is ~98% of every burst
+ * prefill and it is raw — the same UI chrome (menu bar, tab strip, file tree)
+ * is re-shipped on every frame. Reconstruct real text LINES from the per-word
+ * OCR boxes, then dedup lines ACROSS the whole window: each distinct line is
+ * sent once, so chrome and re-read content collapse while every unique line
+ * (the actual information a brief needs) is preserved in time order.
+ * DEFAULT ON (measured 2026-07-09): enrich −30% tokens (identical card),
+ * summon-30 −24% tokens AND the raw baseline returned an EMPTY brief (4 output
+ * tokens — noise-drowned) where compact produced a full one; latency neutral;
+ * ≤30-min truncation eliminated. Set SINAIN_BURST_COMPACT=0 for the legacy
+ * raw-OCR path.
+ */
+const COMPACT_ASSEMBLY = () => process.env.SINAIN_BURST_COMPACT !== "0";
+
+/** Group per-word OCR boxes into visual text lines (y-cluster, reading order). */
+function _reconstructLines(
+  ocrLines: { text: string; bbox: [number, number, number, number] }[] | undefined,
+): string[] {
+  if (!ocrLines || ocrLines.length === 0) return [];
+  const items = ocrLines
+    .map((l) => ({ t: (l.text || "").trim(), x: l.bbox?.[0] ?? 0, y: l.bbox?.[1] ?? 0, h: l.bbox?.[3] ?? 10 }))
+    .filter((i) => i.t.length > 0);
+  if (items.length === 0) return [];
+  items.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const out: string[] = [];
+  let cur: typeof items = [];
+  let curY = items[0].y, curH = items[0].h;
+  const flush = () => { if (cur.length) out.push(cur.sort((a, b) => a.x - b.x).map((i) => i.t).join(" ")); cur = []; };
+  for (const it of items) {
+    if (cur.length && Math.abs(it.y - curY) > Math.max(4, curH * 0.6)) flush();
+    if (cur.length === 0) { curY = it.y; curH = it.h; }
+    cur.push(it);
+  }
+  flush();
+  return out;
+}
+
+const _normLine = (s: string): string => s.toLowerCase().replace(/\s+/g, " ").trim();
+
 function fmtClock(ts: number): string {
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -201,11 +241,45 @@ export function assembleWindow(
     lines.push({ ts: item.ts, line });
   }
 
+  const compact = COMPACT_ASSEMBLY();
+  const seenLines = new Set<string>();  // window-global line dedup (compact mode)
   let lastOcr = "";
   for (const ev of senseBuffer.queryByTime(since)) {
     const app = ev.semantic?.context?.app || ev.meta.app || "";
     if (!appIncluded(scope, app)) continue;
     const title = ev.meta.windowTitle ? ` — ${ev.meta.windowTitle}` : "";
+
+    if (compact) {
+      // Reconstruct real lines (fall back to flat OCR), then emit only lines
+      // not already seen in this window — chrome and re-reads collapse.
+      const recon = _reconstructLines(ev.ocrLines);
+      const src = recon.length > 0 ? recon : ((ev.ocr || "").trim() ? [(ev.ocr || "").trim()] : []);
+      if (src.length === 0) {
+        if (app) {
+          const line = `[${fmtClock(ev.ts)}] [screen] ${app}${title}`;
+          titleChars += line.length;
+          lines.push({ ts: ev.ts, line });
+        }
+        continue;
+      }
+      const novel: string[] = [];
+      for (const l of src) {
+        const n = _normLine(l);
+        if (n.length < 3) continue;          // drop stray single glyphs
+        if (seenLines.has(n)) continue;
+        seenLines.add(n);
+        novel.push(l);
+      }
+      if (novel.length === 0) { exactDupDropped += 1; continue; }  // fully redundant frame
+      const line = `[${fmtClock(ev.ts)}] [screen ${app}${title}] ${novel.join(" · ")}`;
+      lines.push({ ts: ev.ts, line });
+      ocrEvents += 1;
+      ocrChars += line.length;
+      semanticAltChars += line.length;       // L1 measurement N/A once compacted
+      continue;
+    }
+
+    // ── legacy raw path (byte-identical to pre-instrumentation) ──
     const ocr = (ev.ocr || "").trim();
     if (!ocr) {
       if (app) {
