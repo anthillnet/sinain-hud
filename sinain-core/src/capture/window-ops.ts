@@ -15,6 +15,36 @@ import { burstCall, parseBurstJson, type BurstCallResult } from "./burst-client.
 const MAX_WINDOW_CHARS = 90_000;
 const ENRICH_WINDOW_MINUTES = 10;
 
+/**
+ * Prefill composition + measured lever headroom for a window slice.
+ * Instrumentation only (perf/burst-instrumentation) — computed for free during
+ * the assembly pass, carried on WindowSlice, read by burst-metrics. Nothing
+ * here changes the assembled `text`.
+ */
+export interface WindowStats {
+  minutes: number;
+  lineCount: number;
+  /** length of the assembled text BEFORE the MAX_WINDOW_CHARS cap. */
+  totalChars: number;
+  /** chars the cap removed (0 when not truncated) — truncation headroom. */
+  truncatedChars: number;
+  // composition of the assembled lines
+  ocrChars: number;
+  transcriptChars: number;
+  titleChars: number;
+  ocrEvents: number;
+  // measured lever headroom (deterministic)
+  /** OCR frames skipped by the existing exact-consecutive filter (L2 floor). */
+  exactDupDropped: number;
+  /** surviving OCR frames >=0.9 shingle-similar to a recent one (L2 headroom). */
+  nearDupOcrEvents: number;
+  nearDupOcrChars: number;
+  /** frames carrying a semantic summary/changes/activity (L1 applicability). */
+  semanticEvents: number;
+  /** what those frames would cost as dense semantic text instead of OCR (L1). */
+  semanticAltChars: number;
+}
+
 export interface WindowSlice {
   text: string;
   lineCount: number;
@@ -22,6 +52,33 @@ export interface WindowSlice {
   coverage: string;
   /** Feed items in range — the save pipeline distills these. */
   feedItems: FeedItem[];
+  /** Instrumentation — prefill composition + lever headroom (see WindowStats). */
+  stats: WindowStats;
+}
+
+/** Normalized trigram-shingle set for cheap near-duplicate OCR detection. */
+function _shingles(s: string): Set<string> {
+  const norm = s.toLowerCase().replace(/\s+/g, " ").trim();
+  const out = new Set<string>();
+  for (let i = 0; i + 3 <= norm.length; i += 1) out.add(norm.slice(i, i + 3));
+  return out;
+}
+
+function _jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter += 1;
+  return inter / (a.size + b.size - inter);
+}
+
+/** Dense semantic representation available for a sense event, if any (L1). */
+function _semanticAlt(ev: { semantic?: { visible?: { summary?: string }; changes?: { delta: string }[]; context?: { activity?: string } } }): string {
+  const sem = ev.semantic;
+  if (!sem) return "";
+  if (sem.visible?.summary) return sem.visible.summary;
+  if (sem.changes && sem.changes.length > 0) return sem.changes.map((c) => c.delta).join("; ");
+  if (sem.context?.activity) return sem.context.activity;
+  return "";
 }
 
 function fmtClock(ts: number): string {
@@ -124,6 +181,13 @@ export function assembleWindow(
   const since = Date.now() - minutes * 60_000;
   const lines: { ts: number; line: string }[] = [];
 
+  // Instrumentation accumulators (perf/burst-instrumentation) — filled in the
+  // same pass, no behavioural effect on `lines`/`text`.
+  let ocrChars = 0, transcriptChars = 0, titleChars = 0, ocrEvents = 0;
+  let exactDupDropped = 0, nearDupOcrEvents = 0, nearDupOcrChars = 0;
+  let semanticEvents = 0, semanticAltChars = 0;
+  const recentShingles: Set<string>[] = [];  // ring of last few kept OCR frames
+
   // Scoped gestures ("apps" present = the user deselected something): audio
   // follows the "mic" chip; NON-audio feed lines (agent narration, streams)
   // are dropped entirely — they can't be attributed to one app, and the
@@ -132,7 +196,9 @@ export function assembleWindow(
     .filter((item) => item.source === "audio" ? micIncluded(scope) : !scope?.apps);
   for (const item of feedItems) {
     const tag = item.source === "audio" ? "🔊" : item.source;
-    lines.push({ ts: item.ts, line: `[${fmtClock(item.ts)}] [${tag}] ${item.text}` });
+    const line = `[${fmtClock(item.ts)}] [${tag}] ${item.text}`;
+    if (item.source === "audio") transcriptChars += line.length;
+    lines.push({ ts: item.ts, line });
   }
 
   let lastOcr = "";
@@ -142,29 +208,58 @@ export function assembleWindow(
     const title = ev.meta.windowTitle ? ` — ${ev.meta.windowTitle}` : "";
     const ocr = (ev.ocr || "").trim();
     if (!ocr) {
-      if (app) lines.push({ ts: ev.ts, line: `[${fmtClock(ev.ts)}] [screen] ${app}${title}` });
+      if (app) {
+        const line = `[${fmtClock(ev.ts)}] [screen] ${app}${title}`;
+        titleChars += line.length;
+        lines.push({ ts: ev.ts, line });
+      }
       continue;
     }
     // Skip near-identical consecutive OCR (rolling window keeps the raw stream;
     // the burst call doesn't need every repaint).
-    if (ocr === lastOcr) continue;
+    if (ocr === lastOcr) { exactDupDropped += 1; continue; }
     lastOcr = ocr;
-    lines.push({ ts: ev.ts, line: `[${fmtClock(ev.ts)}] [screen ${app}${title}] ${ocr}` });
+    const line = `[${fmtClock(ev.ts)}] [screen ${app}${title}] ${ocr}`;
+    lines.push({ ts: ev.ts, line });
+
+    // ── measure lever headroom (does NOT alter what we push) ──
+    ocrEvents += 1;
+    ocrChars += line.length;
+    const alt = _semanticAlt(ev);
+    if (alt) { semanticEvents += 1; semanticAltChars += alt.length; }
+    else { semanticAltChars += line.length; }  // no semantic alt → L1 can't shrink it
+    const sh = _shingles(ocr);
+    let maxSim = 0;
+    for (const prev of recentShingles) { const s = _jaccard(sh, prev); if (s > maxSim) maxSim = s; }
+    if (maxSim >= 0.9) { nearDupOcrEvents += 1; nearDupOcrChars += line.length; }
+    recentShingles.push(sh);
+    if (recentShingles.length > 8) recentShingles.shift();
   }
 
   lines.sort((a, b) => a.ts - b.ts);
-  let text = lines.map((l) => l.line).join("\n");
+  const fullText = lines.map((l) => l.line).join("\n");
+  let text = fullText;
   let truncated = false;
   if (text.length > MAX_WINDOW_CHARS) {
     text = text.slice(text.length - MAX_WINDOW_CHARS);
     truncated = true;
   }
+  const stats: WindowStats = {
+    minutes,
+    lineCount: lines.length,
+    totalChars: fullText.length,
+    truncatedChars: fullText.length - text.length,
+    ocrChars, transcriptChars, titleChars, ocrEvents,
+    exactDupDropped, nearDupOcrEvents, nearDupOcrChars,
+    semanticEvents, semanticAltChars,
+  };
   return {
     text,
     lineCount: lines.length,
     truncated,
     coverage: describeCoverage(feedBuffer, senseBuffer, minutes, scope),
     feedItems,
+    stats,
   };
 }
 
@@ -244,7 +339,7 @@ export async function enrichFocus(
   feedBuffer: FeedBuffer,
   senseBuffer: SenseBuffer,
   focus: string,
-): Promise<{ card: EnrichCard; result: BurstCallResult }> {
+): Promise<{ card: EnrichCard; result: BurstCallResult; stats: WindowStats }> {
   // Defense in depth (the overlay strips too): never enrich our own output —
   // a clipboard that went through Copy/seed-enrich carries the marker block.
   const markerAt = focus.indexOf(SINAIN_CONTEXT_MARKER);
@@ -264,5 +359,6 @@ export async function enrichFocus(
       context: String(raw.context ?? "").trim(),
     },
     result,
+    stats: slice.stats,
   };
 }
