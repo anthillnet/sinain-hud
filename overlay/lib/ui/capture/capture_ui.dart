@@ -153,7 +153,7 @@ class _RangeChooserState extends State<RangeChooser> {
 
   String get _title => switch (widget.kind) {
         ChooserKind.save => 'Save last…',
-        ChooserKind.call => 'Call on last…',
+        ChooserKind.call => 'Call AI on…',
       };
 
   String get _consentLabel => switch (widget.kind) {
@@ -319,8 +319,12 @@ class _RangeChooserState extends State<RangeChooser> {
                   // covers is a checkbox — one click excludes it from THIS
                   // save/call only. What's unticked never reaches the LLM.
                   Row(children: [
-                    Text('$_consentLabel · CLICK TO EXCLUDE',
-                        style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                    Flexible(
+                      child: Text('$_consentLabel · CLICK TO EXCLUDE',
+                          overflow: TextOverflow.ellipsis,
+                          style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 8),
                     const Spacer(),
                     Text(_sourceCount, style: _mono(9, t.textDim)),
                   ]),
@@ -353,7 +357,11 @@ class _RangeChooserState extends State<RangeChooser> {
                   Text(_cost, style: _mono(10, t.textDim)),
                   if (_minutes > 100) ...[
                     const SizedBox(width: 14),
-                    Text('⚠ splits into 2 calls', style: _mono(10, _orange)),
+                    Flexible(
+                      child: Text('⚠ splits into 2 calls',
+                          overflow: TextOverflow.ellipsis,
+                          style: _mono(10, _orange)),
+                    ),
                   ],
                 ]),
               ],

@@ -803,7 +803,7 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'capSave', 'title': 'Save Last…'},
       // One entry for both call destinations — the chooser card carries a
       // "Call AI" (text handoff) and a "Call sinain" (live voice) button.
-      {'id': 'capCall', 'title': 'Call on Last…'},
+      {'id': 'capCall', 'title': 'Call AI…'},
       // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
       // "Copy for agent" action produces the same agent-grade seed, visibly.
       // Shows the clipboard head inline so the target is unambiguous.
