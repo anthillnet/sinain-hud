@@ -33,6 +33,7 @@ class FirstRunService extends ChangeNotifier {
   static const _keyResumePermission = 'first_run_resume_permission';
   static const _keyResumeTier = 'first_run_resume_tier';
   static const _keyResumeKey = 'first_run_resume_key';
+  static const _keyResumeCerebras = 'first_run_resume_cerebras';
 
   bool _envExists = false;
   bool _initialized = false;
@@ -41,6 +42,7 @@ class FirstRunService extends ChangeNotifier {
   bool _resumeAtPermission = false;
   InstallTier? _resumeTier;
   String? _resumeKey;
+  String? _resumeCerebrasKey;
 
   /// QA / preview override: `SINAIN_WIZARD_PREVIEW=1` forces the wizard to show
   /// on a machine that already has `~/.sinain/.env`, and makes [completeSetup]
@@ -61,6 +63,7 @@ class FirstRunService extends ChangeNotifier {
   bool get resumeAtPermission => _resumeAtPermission;
   InstallTier? get resumeTier => _resumeTier;
   String? get resumeKey => _resumeKey;
+  String? get resumeCerebrasKey => _resumeCerebrasKey;
 
   String get _envPath {
     final home = Platform.environment['HOME'] ?? '';
@@ -81,6 +84,7 @@ class FirstRunService extends ChangeNotifier {
           _resumeTier = InstallTier.values[tierIdx];
         }
         _resumeKey = prefs.getString(_keyResumeKey);
+        _resumeCerebrasKey = prefs.getString(_keyResumeCerebras);
         // A checkpoint with no tier is unusable — discard it.
         if (_resumeTier == null) _resumeAtPermission = false;
       }
@@ -95,6 +99,7 @@ class FirstRunService extends ChangeNotifier {
   Future<void> savePermissionCheckpoint(
     InstallTier tier, {
     String? openRouterKey,
+    String? cerebrasKey,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyResumePermission, true);
@@ -104,6 +109,11 @@ class FirstRunService extends ChangeNotifier {
     } else {
       await prefs.remove(_keyResumeKey);
     }
+    if (cerebrasKey != null && cerebrasKey.isNotEmpty) {
+      await prefs.setString(_keyResumeCerebras, cerebrasKey);
+    } else {
+      await prefs.remove(_keyResumeCerebras);
+    }
   }
 
   Future<void> _clearCheckpoint() async {
@@ -111,12 +121,14 @@ class FirstRunService extends ChangeNotifier {
     await prefs.remove(_keyResumePermission);
     await prefs.remove(_keyResumeTier);
     await prefs.remove(_keyResumeKey);
+    await prefs.remove(_keyResumeCerebras);
   }
 
   /// Persist the wizard's choices to `~/.sinain/.env`, then relaunch the app so
   /// it boots through the normal startup path with config present. Relaunch is
   /// more robust than an in-place handoff (correct window sizing + key window).
-  Future<void> completeSetup(InstallTier tier, {String? openRouterKey}) async {
+  Future<void> completeSetup(InstallTier tier,
+      {String? openRouterKey, String? cerebrasKey}) async {
     // Preview mode: show the finish screen and dismiss the wizard WITHOUT
     // touching `~/.sinain/.env` or relaunching (which would run stop.sh and
     // tear down a live dev stack). Lets `SINAIN_WIZARD_PREVIEW=1` step the whole
@@ -127,7 +139,8 @@ class FirstRunService extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final vars = _envForTier(tier, openRouterKey: openRouterKey);
+    final vars = _envForTier(tier,
+        openRouterKey: openRouterKey, cerebrasKey: cerebrasKey);
     await _writeEnv(vars);
     // Mark the legacy OnboardingService complete too — this wizard already
     // collected the key, so the old connecting/permissions/orientation flow is
@@ -148,18 +161,25 @@ class FirstRunService extends ChangeNotifier {
 
   /// Map a tier choice to env vars — mirrors sinain-hud-plugin/onboard.js so the
   /// GUI and CLI wizards produce identical config (see docs/dmg-distribution-spec.md §1).
-  Map<String, String> _envForTier(InstallTier tier, {String? openRouterKey}) {
+  Map<String, String> _envForTier(InstallTier tier,
+      {String? openRouterKey, String? cerebrasKey}) {
     final key = (openRouterKey ?? '').trim();
+    // Optional Cerebras key: powers the burst lane (Save/Call context cards,
+    // range previews, call seeds). Cloud tiers only — omitted when blank so
+    // the burst lane simply stays off.
+    final cerebras = (cerebrasKey ?? '').trim();
     switch (tier) {
       case InstallTier.cloudOnly:
         return {
           'OPENROUTER_API_KEY': key,
+          if (cerebras.isNotEmpty) 'CEREBRAS_API_KEY': cerebras,
           'TRANSCRIPTION_BACKEND': 'openrouter',
           'PRIVACY_MODE': 'standard',
         };
       case InstallTier.cloudPlusLocalWhisper:
         return {
           'OPENROUTER_API_KEY': key,
+          if (cerebras.isNotEmpty) 'CEREBRAS_API_KEY': cerebras,
           'TRANSCRIPTION_BACKEND': 'local',
           'LOCAL_WHISPER_MODEL': '~/.sinain/models/whisper/ggml-large-v3-turbo.bin',
           'PRIVACY_MODE': 'standard',

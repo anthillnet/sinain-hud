@@ -9,7 +9,7 @@ import path from "path";
 import { execFileSync } from "child_process";
 import {
   c, guard, cmdExists, maskKey, readEnv, writeEnv, writeAgentsConfig, summarizeConfig, runHealthCheck,
-  stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepLocalMode,
+  stepApiKey, stepCerebrasKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepLocalMode,
   HOME, SINAIN_DIR, ENV_PATH, PKG_DIR, IS_WINDOWS, IS_MAC,
 } from "./config-shared.js";
 import { stepMcpInstall, detectMcpAgents } from "./mcp-register.js";
@@ -162,6 +162,13 @@ export async function runOnboard(args = {}) {
     const apiKey = await stepApiKey(base, `[1/${totalSteps}] OpenRouter API key`);
     vars.OPENROUTER_API_KEY = apiKey;
     p.log.success("API key saved.");
+    // Optional companion key: the burst lane (instant Save/Call context
+    // cards, call briefs). Blank = those features stay off.
+    const cerebrasKey = await stepCerebrasKey(base);
+    if (cerebrasKey) {
+      vars.CEREBRAS_API_KEY = cerebrasKey;
+      p.log.success("Cerebras key saved — context cards enabled.");
+    }
   }
 
   if (flow === "local") {

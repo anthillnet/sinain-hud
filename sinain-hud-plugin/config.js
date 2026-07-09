@@ -6,7 +6,7 @@
 import * as p from "@clack/prompts";
 import {
   c, guard, readEnv, writeEnv, summarizeConfig, runHealthCheck,
-  stepApiKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepAgent, stepLocalMode,
+  stepApiKey, stepCerebrasKey, stepTranscription, stepGateway, stepPrivacy, stepModel, stepAgent, stepLocalMode,
   ENV_PATH, IS_WINDOWS, HOME, PKG_DIR,
 } from "./config-shared.js";
 import fs from "fs";
@@ -16,6 +16,7 @@ import path from "path";
 
 const SECTIONS = [
   { value: "apikey",        label: "API Key",        hint: "OpenRouter API key" },
+  { value: "cerebras",      label: "Cerebras Key",   hint: "Instant context cards (optional)" },
   { value: "localmode",     label: "Local Mode",     hint: "Ollama + Whisper, zero cloud" },
   { value: "transcription", label: "Transcription",  hint: "Cloud or local whisper" },
   { value: "model",         label: "Model",          hint: "AI model for analysis" },
@@ -32,6 +33,10 @@ async function runSection(section, existing) {
     case "apikey": {
       const key = await stepApiKey(existing);
       return { OPENROUTER_API_KEY: key };
+    }
+    case "cerebras": {
+      const key = await stepCerebrasKey(existing);
+      return key ? { CEREBRAS_API_KEY: key } : {};
     }
     case "transcription": {
       const backend = await stepTranscription(existing);

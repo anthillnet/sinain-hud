@@ -464,9 +464,17 @@ class DisplaySettingsPanel extends StatelessWidget {
                         height: 1, color: Colors.white.withValues(alpha: 0.1)),
                     const SizedBox(height: 8),
 
-                    // OpenRouter API key — editable recovery path (was .env-only, so a
-                    // wrong key at setup had no graceful fix).
-                    const _OpenRouterKeyField(),
+                    // API keys — editable recovery path (was .env-only, so a
+                    // wrong key at setup had no graceful fix). Cerebras is the
+                    // burst lane (Save/Call context cards); optional.
+                    const _EnvKeyField(
+                        label: 'OPENROUTER KEY',
+                        envVar: 'OPENROUTER_API_KEY',
+                        hint: 'sk-or-…'),
+                    const _EnvKeyField(
+                        label: 'CEREBRAS KEY · CONTEXT CARDS',
+                        envVar: 'CEREBRAS_API_KEY',
+                        hint: 'csk-…'),
 
                     // Update available (DMG installs — checked daily against the latest
                     // macos-v* release). One-click download + in-place install.
@@ -609,17 +617,22 @@ class DisplaySettingsPanel extends StatelessWidget {
   }
 }
 
-/// Editable OpenRouter API key. Merges `OPENROUTER_API_KEY` into ~/.sinain/.env
-/// (preserving other vars) and restarts the backend so the new key takes effect
-/// — the graceful recovery for a wrong key entered during setup.
-class _OpenRouterKeyField extends StatefulWidget {
-  const _OpenRouterKeyField();
+/// Editable API key backed by one ~/.sinain/.env var. Merges the var into the
+/// file (preserving other vars) and restarts the backend so the new key takes
+/// effect — the graceful recovery for a wrong key entered during setup.
+class _EnvKeyField extends StatefulWidget {
+  final String label;
+  final String envVar;
+  final String hint;
+
+  const _EnvKeyField(
+      {required this.label, required this.envVar, required this.hint});
 
   @override
-  State<_OpenRouterKeyField> createState() => _OpenRouterKeyFieldState();
+  State<_EnvKeyField> createState() => _EnvKeyFieldState();
 }
 
-class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
+class _EnvKeyFieldState extends State<_EnvKeyField> {
   final _ctl = TextEditingController();
   String? _status;
   bool _saving = false;
@@ -635,8 +648,8 @@ class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
     final p = _envPath;
     if (p != null && File(p).existsSync()) {
       for (final l in File(p).readAsLinesSync()) {
-        if (l.startsWith('OPENROUTER_API_KEY=')) {
-          _ctl.text = l.substring('OPENROUTER_API_KEY='.length).trim();
+        if (l.startsWith('${widget.envVar}=')) {
+          _ctl.text = l.substring('${widget.envVar}='.length).trim();
         }
       }
     }
@@ -664,12 +677,12 @@ class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
       final lines = await f.exists() ? await f.readAsLines() : <String>[];
       var found = false;
       for (var i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith('OPENROUTER_API_KEY=')) {
-          lines[i] = 'OPENROUTER_API_KEY=$key';
+        if (lines[i].startsWith('${widget.envVar}=')) {
+          lines[i] = '${widget.envVar}=$key';
           found = true;
         }
       }
-      if (!found) lines.add('OPENROUTER_API_KEY=$key');
+      if (!found) lines.add('${widget.envVar}=$key');
       await f.parent.create(recursive: true);
       await f.writeAsString('${lines.join('\n')}\n');
       await const MethodChannel('sinain_hud/backend').invokeMethod('restart');
@@ -693,7 +706,7 @@ class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('OPENROUTER KEY', style: _mono(0.35, 9)),
+        Text(widget.label, style: _mono(0.35, 9)),
         const SizedBox(height: 4),
         Row(
           children: [
@@ -708,7 +721,7 @@ class _OpenRouterKeyFieldState extends State<_OpenRouterKeyField> {
                     isDense: true,
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    hintText: 'sk-or-…',
+                    hintText: widget.hint,
                     hintStyle: _mono(0.25, 10),
                     filled: true,
                     fillColor: Colors.white.withValues(alpha: 0.06),

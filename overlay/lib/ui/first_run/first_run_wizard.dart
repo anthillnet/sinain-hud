@@ -50,6 +50,7 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
   _PermPhase _permPhase = _PermPhase.prewarn;
   InstallTier? _tier;
   final TextEditingController _keyController = TextEditingController();
+  final TextEditingController _cerebrasController = TextEditingController();
   String? _error;
   Timer? _permPoll;
 
@@ -63,6 +64,7 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     if (widget.service.resumeAtPermission && widget.service.resumeTier != null) {
       _tier = widget.service.resumeTier;
       _keyController.text = widget.service.resumeKey ?? '';
+      _cerebrasController.text = widget.service.resumeCerebrasKey ?? '';
       _step = _Step.permission;
       // After the relaunch the grant is usually live — re-check immediately.
       WidgetsBinding.instance.addPostFrameCallback((_) => _enterPermission());
@@ -73,6 +75,7 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
   void dispose() {
     _permPoll?.cancel();
     _keyController.dispose();
+    _cerebrasController.dispose();
     super.dispose();
   }
 
@@ -126,6 +129,7 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
     await widget.service.savePermissionCheckpoint(
       _tier!,
       openRouterKey: _tierNeedsKey ? _keyController.text.trim() : null,
+      cerebrasKey: _tierNeedsKey ? _cerebrasController.text.trim() : null,
     );
     final granted = await ws.requestScreenRecording();
     if (!mounted) return;
@@ -155,6 +159,7 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
       await widget.service.completeSetup(
         _tier!,
         openRouterKey: _tierNeedsKey ? _keyController.text : null,
+        cerebrasKey: _tierNeedsKey ? _cerebrasController.text : null,
       );
       widget.onComplete();
     } catch (e) {
@@ -428,6 +433,58 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
             ],
           ),
           style: TextStyle(fontSize: 12, color: kWizardTextDim),
+        ),
+        const SizedBox(height: 18),
+        // Optional Cerebras key — powers the burst lane: instant context
+        // cards on Save/Call, range previews, and voice-call seeds. The
+        // wizard works without it; those features simply stay off.
+        const Text(
+          'Cerebras API key · optional',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Powers instant context cards (Save / Call AI) and call briefs. '
+          'Skip it and those cards stay off.',
+          style: TextStyle(fontSize: 11, height: 1.33, color: kWizardTextMuted),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 32,
+          decoration: BoxDecoration(
+            color: kWizardPanel,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: kWizardHairline),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.centerLeft,
+          child: TextField(
+            controller: _cerebrasController,
+            obscureText: true,
+            cursorColor: kWizardGreen,
+            cursorWidth: 1,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              color: Colors.white,
+              letterSpacing: 0.6,
+            ),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.zero,
+              hintText: 'csk-… (cloud.cerebras.ai)',
+              hintStyle: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                color: kWizardTextDim,
+              ),
+            ),
+          ),
         ),
       ],
     );
