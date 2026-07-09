@@ -46,21 +46,30 @@ function micIncluded(scope: WindowScope | undefined): boolean {
   return !scope?.apps || scope.apps.includes("mic");
 }
 
-/** Distinct sources in a range — drives the chooser's app-selection chips. */
+/** Distinct sources in a range — drives the chooser's source checklist.
+ *  `minutes` per source = distinct minute-buckets holding that source's
+ *  events, so the row can say how much of the range it actually covers. */
 export function listWindowSources(
   feedBuffer: FeedBuffer,
   senseBuffer: SenseBuffer,
   minutes: number,
-): { name: string; kind: "app" | "mic" }[] {
+): { name: string; kind: "app" | "mic"; minutes: number }[] {
   const since = Date.now() - minutes * 60_000;
-  const apps: string[] = [];
-  for (const { app } of senseBuffer.appHistory(since)) {
-    if (app && app !== "unknown" && !apps.includes(app)) apps.push(app);
+  const appMinutes = new Map<string, Set<number>>();
+  for (const { app, ts } of senseBuffer.appHistory(since)) {
+    if (!app || app === "unknown") continue;
+    let buckets = appMinutes.get(app);
+    if (!buckets) appMinutes.set(app, (buckets = new Set()));
+    buckets.add(Math.floor(ts / 60_000));
   }
-  const sources: { name: string; kind: "app" | "mic" }[] =
-    apps.slice(0, 12).map((name) => ({ name, kind: "app" as const }));
-  if (feedBuffer.queryBySource("audio", since).length > 0) {
-    sources.push({ name: "mic", kind: "mic" });
+  const sources: { name: string; kind: "app" | "mic"; minutes: number }[] =
+    [...appMinutes.entries()]
+      .slice(0, 12)
+      .map(([name, buckets]) => ({ name, kind: "app" as const, minutes: buckets.size }));
+  const audioBuckets = new Set(
+    feedBuffer.queryBySource("audio", since).map((i) => Math.floor(i.ts / 60_000)));
+  if (audioBuckets.size > 0) {
+    sources.push({ name: "mic", kind: "mic", minutes: audioBuckets.size });
   }
   return sources;
 }

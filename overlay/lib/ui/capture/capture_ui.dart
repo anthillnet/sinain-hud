@@ -56,9 +56,10 @@ class RangeChooser extends StatefulWidget {
   /// cached per duration widget-side, so scrubbing the slider never re-asks.
   final Future<Map<String, dynamic>?> Function(int minutes)? previewAt;
 
-  /// Sources (app names + "mic") in a duration — rendered as toggle chips so
-  /// the user picks WHICH apps the gesture covers. Cached per duration.
-  final Future<List<String>?> Function(int minutes)? sourcesAt;
+  /// Sources in a duration — each {name, kind, minutes} renders as one
+  /// checkbox row so the user picks WHICH apps the gesture covers ("COVERS ·
+  /// CLICK TO EXCLUDE", design v2 §3). Cached per duration.
+  final Future<List<Map<String, dynamic>>?> Function(int minutes)? sourcesAt;
 
   const RangeChooser({
     super.key,
@@ -86,9 +87,10 @@ class _RangeChooserState extends State<RangeChooser> {
   final Map<int, String> _coversCache = {};
   bool _previewLoading = false;
   // Per-duration source list (apps + mic) + the user's deselections. The
-  // exclusion set survives duration changes: unticking Slack at 30 min keeps
-  // Slack unticked when the slider moves to 60.
-  final Map<int, List<String>> _sourcesCache = {};
+  // exclusion set survives duration changes while the card is open —
+  // unticking Slack at 30 min keeps Slack unticked when the slider moves to
+  // 60 — but never outlives the card: the next act starts from everything.
+  final Map<int, List<Map<String, dynamic>>> _sourcesCache = {};
   final Set<String> _excluded = {};
 
   @override
@@ -107,13 +109,25 @@ class _RangeChooserState extends State<RangeChooser> {
     });
   }
 
+  List<String> _sourceNames(int n) =>
+      (_sourcesCache[n] ?? const []).map((s) => s['name'] as String).toList();
+
   /// Selected sources for the confirmed duration — null when nothing was
   /// deselected (no scope: the range is used whole).
   List<String>? get _selectedApps {
-    final sources = _sourcesCache[_minutes];
-    if (sources == null || _excluded.isEmpty) return null;
-    final picked = sources.where((s) => !_excluded.contains(s)).toList();
-    return picked.length == sources.length ? null : picked;
+    final names = _sourceNames(_minutes);
+    if (names.isEmpty || _excluded.isEmpty) return null;
+    final picked = names.where((s) => !_excluded.contains(s)).toList();
+    return picked.length == names.length ? null : picked;
+  }
+
+  /// Fraction of the range's sources still ticked — cost/latency estimates
+  /// follow the selection (design: "Cost follows the selection").
+  double get _selectedFrac {
+    final names = _sourceNames(_minutes);
+    if (names.isEmpty) return 1;
+    final on = names.where((s) => !_excluded.contains(s)).length;
+    return on / names.length;
   }
 
   void _fetchPreview(int n) {
@@ -167,8 +181,10 @@ class _RangeChooserState extends State<RangeChooser> {
   }
 
   // Extrapolated from the measured benchmark curve — no LLM call to render.
-  String get _latency => '~${(0.75 + _minutes * 0.026).toStringAsFixed(1)}s';
-  String get _cost => '~\$${(0.004 + _minutes * 0.00075).toStringAsFixed(2)}';
+  String get _latency =>
+      '~${(0.75 + _minutes * 0.026 * (0.2 + 0.8 * _selectedFrac)).toStringAsFixed(1)}s';
+  String get _cost =>
+      '~\$${((0.004 + _minutes * 0.00075) * _selectedFrac).toStringAsFixed(2)}';
 
   void _setMinutes(int n) {
     setState(() => _minutes = n);
@@ -298,25 +314,28 @@ class _RangeChooserState extends State<RangeChooser> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_consentLabel,
-                    style: _mono(9, t.textDim, weight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                if ((_sourcesCache[_minutes] ?? const []).isNotEmpty)
-                  // App-selection chips: tap to exclude a source from the
-                  // gesture — what's unticked never reaches the LLM/agent.
-                  Wrap(
-                    spacing: 5,
-                    runSpacing: 5,
-                    children: [
-                      for (final src in _sourcesCache[_minutes]!)
-                        _sourceChip(t, src),
-                    ],
-                  )
-                else
+                if ((_sourcesCache[_minutes] ?? const []).isNotEmpty) ...[
+                  // Source checklist (design v2 §3): every app the range
+                  // covers is a checkbox — one click excludes it from THIS
+                  // save/call only. What's unticked never reaches the LLM.
+                  Row(children: [
+                    Text('$_consentLabel · CLICK TO EXCLUDE',
+                        style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                    const Spacer(),
+                    Text(_sourceCount, style: _mono(9, t.textDim)),
+                  ]),
+                  const SizedBox(height: 4),
+                  for (final src in _sourcesCache[_minutes]!)
+                    _sourceRow(t, src),
+                ] else ...[
+                  Text(_consentLabel,
+                      style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                  const SizedBox(height: 4),
                   Text(_coversText,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: _mono(11, t.textMuted, height: 1.35)),
+                ],
                 if ((_summaryCache[_minutes] ?? '').isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(_summaryCache[_minutes]!,
@@ -366,28 +385,47 @@ class _RangeChooserState extends State<RangeChooser> {
     );
   }
 
-  Widget _sourceChip(HudTheme t, String src) {
-    final off = _excluded.contains(src);
+  String get _sourceCount {
+    final names = _sourceNames(_minutes);
+    final on = names.where((s) => !_excluded.contains(s)).length;
+    return '$on of ${names.length} sources';
+  }
+
+  Widget _sourceRow(HudTheme t, Map<String, dynamic> src) {
+    final name = src['name'] as String;
+    final mins = (src['minutes'] as num?)?.toInt() ?? 0;
+    final off = _excluded.contains(name);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        onTap: () => setState(() => off ? _excluded.remove(src) : _excluded.add(src)),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: off ? Colors.transparent : _accent.withValues(alpha: 0.16),
-            border: Border.all(
-                color: off
-                    ? Colors.white.withValues(alpha: 0.14)
-                    : _accent.withValues(alpha: 0.5)),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(off ? '○' : '✓', style: _mono(9, off ? t.textDim : _accent)),
-            const SizedBox(width: 5),
-            Text(src,
-                style: _mono(10, off ? t.textDim : t.textPrimary,
-                    weight: off ? FontWeight.w400 : FontWeight.w500)),
+        behavior: HitTestBehavior.opaque,
+        onTap: () =>
+            setState(() => off ? _excluded.remove(name) : _excluded.add(name)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(children: [
+            Container(
+              width: 12,
+              height: 12,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: off ? Colors.transparent : _accent,
+                border: Border.all(
+                    color: off ? Colors.white.withValues(alpha: 0.25) : _accent),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: off
+                  ? null
+                  : const Text('✓',
+                      style: TextStyle(fontSize: 8, height: 1, color: Colors.white)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(name,
+                  overflow: TextOverflow.ellipsis,
+                  style: _mono(11, off ? t.textDim : const Color(0xFFD6DAE3))),
+            ),
+            if (mins > 0) Text('$mins min', style: _mono(9, t.textDim)),
           ]),
         ),
       ),

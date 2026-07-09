@@ -789,9 +789,9 @@ class WebSocketService extends ChangeNotifier {
     }
   }
 
-  /// Sources (app names + "mic") present in a range — drives the chooser's
-  /// app-selection chips. Free window metadata, no LLM.
-  Future<List<String>?> fetchWindowSources(int minutes) async {
+  /// Sources present in a range — each {name, kind, minutes} drives one row
+  /// of the chooser's source checklist. Free window metadata, no LLM.
+  Future<List<Map<String, dynamic>>?> fetchWindowSources(int minutes) async {
     final base = _httpBase;
     if (base == null) return null;
     HttpClient? client;
@@ -804,9 +804,7 @@ class WebSocketService extends ChangeNotifier {
       final body = await resp.transform(utf8.decoder).join();
       final sources =
           (jsonDecode(body) as Map<String, dynamic>)['sources'] as List?;
-      return sources
-          ?.map((s) => (s as Map<String, dynamic>)['name'] as String)
-          .toList();
+      return sources?.cast<Map<String, dynamic>>().toList();
     } catch (_) {
       return null;
     } finally {
