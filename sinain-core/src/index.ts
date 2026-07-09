@@ -2717,18 +2717,22 @@ async function main() {
       transcript ? `\n## Call transcript\n${transcript}` : "",
       `\n## Task\n${task}`,
     ].filter(Boolean).join("\n"));
-    // Spoken agent hint ("hand this to claude") → roster profile. Exact match
-    // first, then prefix/contains — so "claude" is the CLI profile and
-    // "claude desktop" the app. No hint/match → the terminal lane's agent.
+    // Spoken agent hint ("hand this to claude") → roster profile. Desktop
+    // apps are matched FIRST: a spoken "Claude" means Claude Desktop (the
+    // user-facing app), not the claude CLI profile — verified in live use.
+    // CLI profiles still win on their distinct names ("codex", "openclaude")
+    // and on explicit qualifiers ("claude terminal" falls through desktop
+    // matching and prefix-matches the CLI). No hint/match → terminal lane.
     const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     const hint = norm(agentHint ?? "");
     const names = Object.keys(escalatorAgentsCfg?.profiles ?? {});
-    const agent = hint
-      ? names.find((p) => norm(p) === hint)
-        ?? names.find((p) => norm(p).startsWith(hint) || hint.startsWith(norm(p)))
-        ?? names.find((p) => norm(p).includes(hint) || hint.includes(norm(p)))
-        ?? ""
-      : "";
+    const matchIn = (pool: string[]): string | undefined =>
+      pool.find((p) => norm(p) === hint)
+      ?? pool.find((p) => norm(p).startsWith(hint) || hint.startsWith(norm(p)))
+      ?? pool.find((p) => norm(p).includes(hint) || hint.includes(norm(p)));
+    const desktopNames = names.filter((p) => isDesktopProfile(escalatorAgentsCfg, p));
+    const cliNames = names.filter((p) => !isDesktopProfile(escalatorAgentsCfg, p));
+    const agent = hint ? (matchIn(desktopNames) ?? matchIn(cliNames) ?? "") : "";
     // Open the thread tab on every client (same broadcast as fork_main).
     wsHandler.broadcastRaw({
       type: "spawn_task",
