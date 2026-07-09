@@ -1048,7 +1048,7 @@ class EnrichCardWidget extends StatelessWidget {
     required this.onDismiss,
     this.onCallAi,
     this.onCopy,
-    this.title = 'Build context',
+    this.title = 'Context from clipboard',
     this.handoffLabel = 'Call AI',
   });
 

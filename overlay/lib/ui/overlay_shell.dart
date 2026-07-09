@@ -804,12 +804,13 @@ class OverlayShellState extends State<OverlayShell> {
       // One entry for both call destinations — the chooser card carries a
       // "Call AI" (text handoff) and a "Call sinain" (live voice) button.
       {'id': 'capCall', 'title': 'Call AI…'},
+      // The two Context sources sit together: pick a screen region, or take
+      // whatever is on the clipboard — both flow into the same enrich card.
+      if (_isMacOS) {'id': 'region', 'title': 'Context from Screen…'},
       // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
       // "Copy for agent" action produces the same agent-grade seed, visibly.
-      // Shows the clipboard head inline so the target is unambiguous.
-      {'id': 'capBuild', 'title': 'Build Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
+      {'id': 'capBuild', 'title': 'Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
-      if (_isMacOS) {'id': 'region', 'title': 'Select Region…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
@@ -1418,7 +1419,9 @@ class OverlayShellState extends State<OverlayShell> {
             child: EnrichCardWidget(
               card: _activeEnrich!,
               title:
-                  _pendingRegion != null ? 'Region context' : 'Build context',
+                  _pendingRegion != null
+                      ? 'Context from screen'
+                      : 'Context from clipboard',
               handoffLabel:
                   'Handoff to ${_handoffAgentLabel(context.read<WebSocketService>())}',
               onDismiss: () {
