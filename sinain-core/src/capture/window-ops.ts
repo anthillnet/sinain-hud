@@ -12,7 +12,20 @@ import { burstCall, parseBurstJson, type BurstCallResult } from "./burst-client.
 // One burst call handles ≤ ~60 min at median density (benchmarked: 34K tok
 // prefill = 1.38s on Cerebras). Beyond this we truncate oldest-first and flag
 // the brief as partial — honest coverage beats a stalled gesture.
-const MAX_WINDOW_CHARS = 90_000;
+// Char budget for one burst prefill. Env-overridable (SINAIN_BURST_MAX_CHARS).
+// Lowered 90K → 50K (measured 2026-07-09): a 60-min cap sweep showed the OLD
+// 90K budget DROWNED the model — it returned empty briefs at 90K/120K (30–35K
+// tokens) — while every cap ≤70K produced a rich brief, and 50–55K was the
+// knee: richest brief at ~40% fewer tokens and lower latency. Less context is
+// both cheaper AND better here (dilution law on the burst read side). Compact
+// assembly packs ~2× info/char so 50K still covers ~half a dense 60-min range;
+// summonBrief additionally retries-on-empty to rescue any residual drop. See
+// docs/BASELINE-BURST-SPEND.md for the full cap/quality curve.
+const DEFAULT_MAX_WINDOW_CHARS = 50_000;
+function maxWindowChars(): number {
+  const v = parseInt(process.env.SINAIN_BURST_MAX_CHARS || "", 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_WINDOW_CHARS;
+}
 const ENRICH_WINDOW_MINUTES = 10;
 
 /**
@@ -312,11 +325,23 @@ export function assembleWindow(
 
   lines.sort((a, b) => a.ts - b.ts);
   const fullText = lines.map((l) => l.line).join("\n");
+  const cap = maxWindowChars();
   let text = fullText;
   let truncated = false;
-  if (text.length > MAX_WINDOW_CHARS) {
-    text = text.slice(text.length - MAX_WINDOW_CHARS);
+  if (fullText.length > cap) {
+    // Drop whole OLDEST lines until under budget (keep the newest — most
+    // relevant to "what am I doing now"). Whole-line boundaries beat the old
+    // mid-string slice, which mangled the oldest surviving line.
     truncated = true;
+    const rev: string[] = [];
+    let total = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const add = lines[i].line.length + (rev.length ? 1 : 0);
+      if (total + add > cap && rev.length) break;
+      total += add;
+      rev.push(lines[i].line);
+    }
+    text = rev.reverse().join("\n");
   }
   const stats: WindowStats = {
     minutes,
@@ -356,19 +381,9 @@ export interface SummonBrief {
   entities: string[];
 }
 
-export async function summonBrief(
-  config: BurstConfig,
-  slice: WindowSlice,
-  minutes: number,
-): Promise<{ brief: SummonBrief; result: BurstCallResult }> {
-  const result = await burstCall(config, {
-    system: SUMMON_SYSTEM,
-    user: `Last ${minutes} minutes of activity:\n${slice.text}\n\nProduce the situation brief.`,
-    cacheKey: "sinain-summon-v1",
-    jsonMode: true,
-  });
-  const raw = parseBurstJson<Partial<SummonBrief>>(result.content);
-  const brief: SummonBrief = {
+function _parseBrief(content: string): SummonBrief {
+  const raw = parseBurstJson<Partial<SummonBrief>>(content);
+  return {
     timeline: Array.isArray(raw.timeline)
       ? raw.timeline.filter((t) => t && t.what).slice(0, 5).map((t) => ({ at: String(t.at ?? ""), what: String(t.what) }))
       : [],
@@ -376,6 +391,35 @@ export async function summonBrief(
     problems: Array.isArray(raw.problems) ? raw.problems.map(String).slice(0, 3) : [],
     entities: Array.isArray(raw.entities) ? raw.entities.map(String).slice(0, 6) : [],
   };
+}
+
+const _briefEmpty = (b: SummonBrief): boolean =>
+  b.timeline.length === 0 && b.entities.length === 0 && !b.goal;
+
+export async function summonBrief(
+  config: BurstConfig,
+  slice: WindowSlice,
+  minutes: number,
+  seed?: number,
+): Promise<{ brief: SummonBrief; result: BurstCallResult }> {
+  const call = (s: number | undefined) => burstCall(config, {
+    system: SUMMON_SYSTEM,
+    user: `Last ${minutes} minutes of activity:\n${slice.text}\n\nProduce the situation brief.`,
+    cacheKey: "sinain-summon-v1",
+    jsonMode: true,
+    seed: s,
+  });
+  // Reliability: the model occasionally returns an empty JSON object on a
+  // large/noisy prefill, and with a fixed seed that empty would be permanent.
+  // One retry with a different seed rescues it (measured empty-rate motivates
+  // this — see docs/BASELINE-BURST-SPEND.md). Second attempt only on empty.
+  let result = await call(seed);
+  let brief = _parseBrief(result.content);
+  if (_briefEmpty(brief)) {
+    const alt = await call((seed ?? 42) + 1_000);
+    const altBrief = _parseBrief(alt.content);
+    if (!_briefEmpty(altBrief)) { result = alt; brief = altBrief; }
+  }
   return { brief, result };
 }
 

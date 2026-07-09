@@ -126,3 +126,49 @@ Takeaways:
   quality eval, deferred.
 - L1 (semantic) still blocked on sense_client; L2 (assembly dedup) subsumed by
   this line-dedup.
+
+## Result: L3 — window char cap (shipped: 90K → 50K + seed + retry-on-empty)
+
+Investigating the 60-min "coverage not tokens" case turned up a bigger problem.
+Cap sweep on the compacted 60-min window (real Cerebras, `ocrLines` dedup on):
+
+| cap | coverage | tokIn | tokOut | latency | brief |
+|---:|---:|---:|---:|---:|---|
+| 120K | 100% | 35,505 | 4 | 1777 ms | **EMPTY** |
+| 90K (old default) | 83% | 30,312 | 4 | 1244 ms | **EMPTY** |
+| 70K | 65% | 23,883 | 207 | 1269 ms | rich (6 ent, 4 tl) |
+| 55K | 51% | 18,997 | 273 | 1272 ms | richest (6 ent, 5 tl, 2 problems) |
+| 40K | 37% | 12,925 | 229 | 1002 ms | rich (6 ent, 4 tl) |
+| 28K | 26% | 9,616 | 229 | 814 ms | rich, recent-only |
+
+The **old 90K cap was DROWNING the model** — 60-min summons returned empty briefs
+(4 output tokens) at 30K+ input tokens. Every cap ≤70K produced a rich, accurate
+brief; **50–55K is the knee** (richest brief, ~40% fewer tokens, lower latency).
+Less context is both cheaper *and* better — the dilution law on the burst read
+side. This is not a coverage/token tradeoff; the high-cap end was simply broken.
+
+Caveat found mid-sweep: briefs were **non-deterministic** — an identical window
+flipped rich↔empty across runs because burst calls weren't seeded. Two fixes:
+- **Seed every burst call** (`SINAIN_BURST_SEED`, default 42) — Cerebras honours
+  it; briefs are now reproducible run-to-run.
+- **`summonBrief` retries once on an empty brief** with a different seed — a
+  fixed seed would otherwise make a bad-seed empty permanent. Second call fires
+  only on empty, so the cost is paid only when needed.
+
+Shipped: `DEFAULT_MAX_WINDOW_CHARS` 90K → **50K** (`SINAIN_BURST_MAX_CHARS`
+overrides), whole-line-boundary truncation (drop oldest whole lines, not a
+mid-string slice). Confirmed at the new defaults:
+
+| gesture | old default | new default | tokens | latency | quality |
+|---|---|---|---:|---:|---|
+| summon-60 | 90K → 30,312 tok, **EMPTY** | 50K → **17,066 tok** | **−44%** | 1244→**636 ms** | EMPTY → **rich** |
+
+enrich (43K compacted) is under the cap and unaffected; summon-30 (67K) now
+trims to the newest ~50K and is backstopped by retry-on-empty.
+
+### Net effect (compact + L3 vs original raw baseline)
+
+- enrich: ~19.7K → ~13.9K tok (**−30%**), quality equal
+- summon-30: ~30K → ~19K tok (**~−37%**), quality equal/better
+- summon-60: ~30K (empty) → ~17K tok (**−44%**), **empty → rich**, ~2× faster
+- all burst briefs now seeded (reproducible) and retry-on-empty (reliable)
