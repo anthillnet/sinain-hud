@@ -470,6 +470,10 @@ class VoiceCallChip extends StatefulWidget {
   /// Mic mute toggle (webview engine). Null hides the button.
   final ValueChanged<bool>? onMute;
 
+  /// Output mute — silence Sinain's voice locally (she keeps listening).
+  /// Null hides the button.
+  final ValueChanged<bool>? onSilence;
+
   /// "Save call" — promote the call's range (seed + elapsed) to memory via
   /// the normal save/undo lifecycle. Null hides the button.
   final ValueChanged<int>? onSaveCall;
@@ -480,6 +484,7 @@ class VoiceCallChip extends StatefulWidget {
     required this.onEnd,
     required this.onDismiss,
     this.onMute,
+    this.onSilence,
     this.onSaveCall,
   });
 
@@ -495,6 +500,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
   DateTime? _liveSince;
   Timer? _ticker;
   bool _muted = false;
+  bool _silenced = false;
 
   @override
   void initState() {
@@ -669,6 +675,14 @@ class _VoiceCallChipState extends State<VoiceCallChip>
                   setState(() => _muted = !_muted);
                   widget.onMute!(_muted);
                 }, active: _muted),
+                const SizedBox(width: 6),
+              ],
+              if (widget.onSilence != null) ...[
+                // Output mute: shut Sinain up locally; she keeps listening.
+                _chipButton(t, _silenced ? 'Unquiet' : 'Quiet', () {
+                  setState(() => _silenced = !_silenced);
+                  widget.onSilence!(_silenced);
+                }, active: _silenced),
                 const SizedBox(width: 6),
               ],
               if (widget.onSaveCall != null)

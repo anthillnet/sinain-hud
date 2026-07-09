@@ -239,10 +239,12 @@ export class VoiceSessionManager {
 
   private pendingSeed: { text: string; say: string } = { text: "", say: "" };
   private micMuted = false;
+  private outMuted = false;
 
   private async startWebview(minutes: number, scope?: WindowScope): Promise<{ ok: boolean; engine: string }> {
     this.mode = "webview";
     this.micMuted = false;
+    this.outMuted = false;
     // Connecting checklist (design §4): the brief is composed and redacted
     // BEFORE audio connects — narrate that order on the chip.
     this.setState("starting", minutes > 0 ? `Composing brief from last ${minutes} min…` : undefined);
@@ -266,10 +268,18 @@ export class VoiceSessionManager {
     this.micMuted = muted;
   }
 
-  /** Control state the call page polls: mic mute + whether to hang up. */
-  ctl(): { muted: boolean; end: boolean } {
+  /** Output mute — silence Sinain's voice locally (she keeps listening).
+   *  The chip's "Quiet" button; the page mutes its <audio> element. */
+  setSilence(silenced: boolean): void {
+    log(TAG, `output mute → ${silenced} (state=${this.state}, mode=${this.mode})`);
+    this.outMuted = silenced;
+  }
+
+  /** Control state the call page polls: mic mute, output mute, hang-up. */
+  ctl(): { muted: boolean; silenced: boolean; end: boolean } {
     return {
       muted: this.micMuted,
+      silenced: this.outMuted,
       end: this.mode === "webview" && this.state !== "starting" && this.state !== "live",
     };
   }

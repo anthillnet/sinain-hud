@@ -1499,6 +1499,8 @@ class OverlayShellState extends State<OverlayShell> {
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
               onMute: (muted) =>
                   context.read<WebSocketService>().requestVoiceMute(muted),
+              onSilence: (silenced) =>
+                  context.read<WebSocketService>().requestVoiceSilence(silenced),
               // "Save call": the seeded range + the call itself, through the
               // normal save/undo lifecycle (call audio reaches the feed via
               // system-audio transcription, so the range covers what was said).

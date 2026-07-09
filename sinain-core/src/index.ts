@@ -1965,6 +1965,7 @@ async function main() {
     voiceOffer: (body) => voiceManager.proxyOffer(body),
     voiceEngineEvent: (status, error, caption) => voiceManager.engineEvent(status, error, caption),
     voiceMute: (muted) => voiceManager.setMute(muted),
+    voiceSilence: (silenced) => voiceManager.setSilence(silenced),
     voiceCtl: () => voiceManager.ctl(),
     // Assigned after the command deps exist (the handoff reuses their spawn
     // routing); a directive can only arrive once a call session is live.

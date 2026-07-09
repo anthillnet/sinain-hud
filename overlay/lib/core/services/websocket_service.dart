@@ -771,6 +771,11 @@ class WebSocketService extends ChangeNotifier {
     await _postJson('/voice/mute', {'muted': muted});
   }
 
+  /// Output mute — silence Sinain's voice locally (she keeps listening).
+  Future<void> requestVoiceSilence(bool silenced) async {
+    await _postJson('/voice/mute', {'silenced': silenced});
+  }
+
   /// "Call sinain" via the deployed meetbot: the bot joins the given
   /// Meet/Teams call, seeded with the last N minutes.
   Future<String?> requestVoiceMeet(String url, int minutes) async {

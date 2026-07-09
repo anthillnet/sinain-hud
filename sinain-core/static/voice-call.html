@@ -148,6 +148,8 @@ async function start() {
       try {
         const c = await (await fetch("/voice/ctl", { cache: "no-store" })).json();
         mic.getAudioTracks().forEach((t) => { t.enabled = !c.muted; });
+        // Output mute: silence Sinain's voice locally; she keeps listening.
+        document.getElementById("tts").muted = c.silenced === true;
         if (c.end) { pc.close(); break; }
       } catch (e) { /* core briefly unreachable — keep the call */ }
       await new Promise((res) => setTimeout(res, 800));
