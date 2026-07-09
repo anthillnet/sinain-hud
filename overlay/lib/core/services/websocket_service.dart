@@ -79,6 +79,7 @@ class WebSocketService extends ChangeNotifier {
   final _enrichController = StreamController<EnrichCard>.broadcast();
   final _saveReceiptController = StreamController<SaveReceipt>.broadcast();
   final _voiceController = StreamController<VoiceSession>.broadcast();
+  final _openTerminalController = StreamController<String>.broadcast();
 
   /// Latest voice session state (snapshot for late-mounting UI); updates via
   /// [voiceSessionStream] + notifyListeners.
@@ -89,6 +90,11 @@ class WebSocketService extends ChangeNotifier {
   Stream<EnrichCard> get enrichStream => _enrichController.stream;
   Stream<SaveReceipt> get saveReceiptStream => _saveReceiptController.stream;
   Stream<VoiceSession> get voiceSessionStream => _voiceController.stream;
+
+  /// Core asks us to open a thread's terminal PTY (voice-call handoff — the
+  /// "Continue this thread in terminal" wiring, remote-triggered). Emits the
+  /// thread key (regionId).
+  Stream<String> get openTerminalStream => _openTerminalController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<bool> get thinkingStream => _thinkingController.stream;
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
@@ -461,6 +467,11 @@ class WebSocketService extends ChangeNotifier {
           }
           if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
+          break;
+        case 'open_thread_terminal':
+          final key = json['regionId'] as String? ?? '';
+          _log('OPEN_THREAD_TERMINAL: $key (agent=${json['agent'] ?? '?'})');
+          if (key.isNotEmpty) _openTerminalController.add(key);
           break;
         case 'region_highlight':
           final list = (json['regions'] as List? ?? const [])

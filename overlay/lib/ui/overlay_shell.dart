@@ -109,6 +109,7 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<EnrichCard>? _enrichSub;
   StreamSubscription<SaveReceipt>? _receiptSub;
   StreamSubscription<VoiceSession>? _voiceSub;
+  StreamSubscription<String>? _openTermSub;
   VoiceSession? _voiceSession;
 
   // Command input focus
@@ -321,6 +322,14 @@ class OverlayShellState extends State<OverlayShell> {
           }
         });
       }
+    });
+    _openTermSub = ws.openTerminalStream.listen((key) {
+      if (!mounted) return;
+      // Voice-call handoff: core asks for this thread's terminal PTY — the
+      // "Continue this thread in terminal" wiring, triggered by voice. The
+      // thread tab itself arrived just before as a spawn_task broadcast.
+      setState(() => _activeThread = key == 'main' ? null : key);
+      _openTerminalForTab(key);
     });
     _contentSub = ws.agentFeedStream.listen((_) {
       if (!mounted) return;
@@ -1081,6 +1090,7 @@ class OverlayShellState extends State<OverlayShell> {
     _enrichSub?.cancel();
     _receiptSub?.cancel();
     _voiceSub?.cancel();
+    _openTermSub?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }

@@ -40,10 +40,10 @@ export interface DirectiveDeps {
   /** This core's own HTTP base (loopback self-calls, same surface the
    *  chat-agent tool pack uses). */
   coreUrl: string;
-  /** Fork a call-handoff thread seeded with the call transcript and route
-   *  the task to the chat lane. Returns the display label of the agent that
-   *  got it (for the spoken confirmation). */
-  createHandoff: (task: string, transcript: string, agentHint?: string) => { threadId: string; agentLabel: string };
+  /** Fork a call-handoff thread seeded with the call transcript + task and
+   *  hand it to an external destination — terminal PTY or desktop app (the
+   *  "Continue this thread in…" wiring). Returns the spoken confirmation. */
+  createHandoff: (task: string, transcript: string, agentHint?: string) => { threadId: string; say: string };
 }
 
 const FETCH_TIMEOUT_MS = 8_000;
@@ -109,8 +109,8 @@ export async function execDirective(req: DirectiveRequest, deps: DirectiveDeps):
         const m = AGENT_HINT.exec(arg);
         const task = m ? arg.slice(m[0].length).trim() : arg;
         if (!task) return { ok: false, error: "empty task" };
-        const { agentLabel } = deps.createHandoff(task, req.transcript ?? "", m?.[1]);
-        return { ok: true, say: `Handed off to ${agentLabel} in a new thread on your desktop.` };
+        const { say } = deps.createHandoff(task, req.transcript ?? "", m?.[1]);
+        return { ok: true, say };
       }
       default:
         return { ok: false, error: `unknown directive: ${name}` };

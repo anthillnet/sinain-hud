@@ -2703,29 +2703,32 @@ async function main() {
   };
   setupCommands(commandDeps);
 
-  // ── Voice-call handoff: fork a thread seeded with the call transcript and
-  // route the task to the chat lane (same mechanics as fork_main +
-  // spawn_command, but seeded from the phone/desktop call, not MAIN). ──
+  // ── Voice-call handoff: EXACTLY the "Continue this thread in…" wiring.
+  // Fork a thread seeded with the call transcript + task, then hand it to an
+  // external destination — a terminal running the CLI agent, or a desktop app
+  // (Claude Desktop / ChatGPT) via routeDesktopChat. Never the HUD chat lane.
   const createVoiceHandoff = (task: string, transcript: string, agentHint?: string):
-    { threadId: string; agentLabel: string } => {
+    { threadId: string; say: string } => {
     const id = `call-${Date.now().toString(36)}`;
     forkSeeds.set(id, [
       "You are picking up a task handed off from a live voice call between",
       "the user and Sinain (the voice assistant). Below is the recent call",
       "transcript. Complete the task; the user may follow up in this thread.",
       transcript ? `\n## Call transcript\n${transcript}` : "",
+      `\n## Task\n${task}`,
     ].filter(Boolean).join("\n"));
-    // Spoken agent hint ("hand this to claude") → roster profile, matched
-    // loosely against profile names. No match → the thread keeps the lane
-    // default, same as any fork.
-    let agent = "";
-    if (agentHint) {
-      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const hint = norm(agentHint);
-      agent = Object.keys(escalatorAgentsCfg?.profiles ?? {})
-        .find((p) => norm(p).includes(hint) || hint.includes(norm(p))) ?? "";
-      if (agent) threadChatAgents.set(id, agent);
-    }
+    // Spoken agent hint ("hand this to claude") → roster profile. Exact match
+    // first, then prefix/contains — so "claude" is the CLI profile and
+    // "claude desktop" the app. No hint/match → the terminal lane's agent.
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const hint = norm(agentHint ?? "");
+    const names = Object.keys(escalatorAgentsCfg?.profiles ?? {});
+    const agent = hint
+      ? names.find((p) => norm(p) === hint)
+        ?? names.find((p) => norm(p).startsWith(hint) || hint.startsWith(norm(p)))
+        ?? names.find((p) => norm(p).includes(hint) || hint.includes(norm(p)))
+        ?? ""
+      : "";
     // Open the thread tab on every client (same broadcast as fork_main).
     wsHandler.broadcastRaw({
       type: "spawn_task",
@@ -2735,16 +2738,37 @@ async function main() {
       startedAt: Date.now(),
       regionId: id,
     } as any);
-    // Echo the task as the user's message in the thread, then route it
-    // exactly as a spawn_command would (sidecar / desktop app / chat lane).
+    if (agent && isDesktopProfile(escalatorAgentsCfg, agent)) {
+      // Desktop app destination: per-thread override + the same seed-pull
+      // launch the manual handoff uses. The forkSeed (call transcript + task)
+      // is what composeAndStoreRoiSeed hands the app.
+      threadChatAgents.set(id, agent);
+      wsHandler.broadcastRaw({
+        type: "feed", text: task, priority: "normal", ts: Date.now(),
+        channel: "agent", sender: "user", regionId: id,
+      } as any);
+      void routeDesktopChat(task, id, agent);
+      const appLabel = desktopProfileType(escalatorAgentsCfg, agent) === "chatgpt_desktop"
+        ? "ChatGPT" : "Claude Desktop";
+      log(TAG, `voice handoff → thread ${id} → ${appLabel}`);
+      return { threadId: id, say: `Opened that in ${appLabel} on your desktop, with the call context.` };
+    }
+    // Terminal destination (default): switch the terminal lane when an agent
+    // was named, then have the overlay open the thread's PTY — run.sh seeds it
+    // with this thread's forkSeed, exactly like a manual "Continue in terminal".
+    const termAgent = (agent && !isSinainProfile(escalatorAgentsCfg, agent)) ? agent
+      : bareAgentState.terminalAgent || "openclaude";
+    if (termAgent !== bareAgentState.terminalAgent) {
+      commandDeps.onSetAgent?.("terminal", termAgent);
+    }
     wsHandler.broadcastRaw({
-      type: "feed", text: task, priority: "normal", ts: Date.now(),
-      channel: "agent", sender: "user", regionId: id,
+      type: "open_thread_terminal",
+      regionId: id,
+      agent: termAgent,
+      ts: Date.now(),
     } as any);
-    commandDeps.onSpawnCommand?.(task, id);
-    const agentLabel = agent || chatAgentFor(id) || "your desktop agent";
-    log(TAG, `voice handoff → thread ${id} (agent: ${agentLabel})`);
-    return { threadId: id, agentLabel };
+    log(TAG, `voice handoff → thread ${id} → terminal (${termAgent})`);
+    return { threadId: id, say: `Opened a terminal with ${termAgent} on your desktop — it has the call context.` };
   };
   voiceDirectiveExec = (r) => execDirective(r, {
     coreUrl: `http://127.0.0.1:${config.port}`,
