@@ -262,6 +262,7 @@ export class VoiceSessionManager {
 
   /** Mic mute control for the webview engine (the call page polls /voice/ctl). */
   setMute(muted: boolean): void {
+    log(TAG, `mic mute → ${muted} (state=${this.state}, mode=${this.mode})`);
     this.micMuted = muted;
   }
 
