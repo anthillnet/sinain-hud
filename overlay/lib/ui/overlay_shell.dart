@@ -1497,8 +1497,6 @@ class OverlayShellState extends State<OverlayShell> {
             child: VoiceCallChip(
               session: _voiceSession!,
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
-              onMute: (muted) =>
-                  context.read<WebSocketService>().requestVoiceMute(muted),
               onSilence: (silenced) =>
                   context.read<WebSocketService>().requestVoiceSilence(silenced),
               // "Save call": the seeded range + the call itself, through the
