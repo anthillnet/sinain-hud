@@ -341,10 +341,10 @@ class WindowService {
   /// Each entry: {'id': String, 'x': double, 'y': double, 'state': String}
   /// with x/y in top-left-origin screen points. Panels for ids absent from
   /// the list are closed; existing ones are repositioned/restyled.
-  /// Screenshot-style drag-select. On release the user picks Chat or Term from
-  /// a toolbar under the box. Returns the numeric rect ({x,y,w,h,screenW,
-  /// screenH}, top-left-origin) plus a `mode` of 'chat' | 'term', or null if
-  /// the user cancelled (Esc / ✕). `mode` is the only non-numeric entry.
+  /// Screenshot-style drag-select. Releasing the drag resolves immediately
+  /// as a chat thread. Returns the numeric rect ({x,y,w,h,screenW,screenH},
+  /// top-left-origin) plus `mode` ('chat'), or null if the user cancelled
+  /// (Esc / stray click). `mode` is the only non-numeric entry.
   Future<Map<String, Object>?> selectRegion() async {
     try {
       final raw = await _channel.invokeMethod('selectRegion');

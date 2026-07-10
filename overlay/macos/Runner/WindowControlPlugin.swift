@@ -633,7 +633,8 @@ class RegionSelector {
 }
 
 private class RegionSelectView: NSView {
-    // (rect, mode) on confirm — mode is "chat" | "term"; (nil, nil) on cancel.
+    // (rect, "chat") on release — the selection resolves immediately as a
+    // chat thread; (nil, nil) on cancel (Esc / stray click).
     var onDone: ((NSRect?, String?) -> Void)?
 
     static let blue = NSColor(srgbRed: 0x33 / 255.0, green: 0x69 / 255.0, blue: 0xD6 / 255.0, alpha: 1)
@@ -643,9 +644,7 @@ private class RegionSelectView: NSView {
     private var start: NSPoint?
     private var current: NSPoint?
     private var frozen: NSRect?       // selection locked in on mouseUp
-    private var placed = false        // true once the toolbar is shown
     private var finished = false
-    private var toolbar: NSView?
     private var antTimer: Timer?
     private var antPhase: CGFloat = 0
 
@@ -662,7 +661,7 @@ private class RegionSelectView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override func resetCursorRects() {
-        if !placed { addCursorRect(bounds, cursor: .crosshair) }
+        addCursorRect(bounds, cursor: .crosshair)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -670,33 +669,28 @@ private class RegionSelectView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if placed { return }
         start = convert(event.locationInWindow, from: nil)
         current = start
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if placed { return }
         current = convert(event.locationInWindow, from: nil)
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        if placed { return }
         guard let s = start, let c = current else { finish(nil); return }
         let sel = rect(from: s, to: c)
         if sel.width < 12 || sel.height < 12 {  // a stray click, not a selection
             finish(nil)
             return
         }
-        // Lock the selection and surface the Chat / Term toolbar under the box
-        // instead of resolving immediately — the user picks the destination.
+        // Resolve immediately as a chat thread — the context card appears on
+        // release, no extra click. Terminal and copy-seed stay reachable from
+        // the opened thread (⑂ handoff, copy seed), so no destination toolbar.
         frozen = sel
-        placed = true
-        addToolbar(under: sel)
-        window?.invalidateCursorRects(for: self)
-        needsDisplay = true
+        finish("chat")
     }
 
     private func rect(from a: NSPoint, to b: NSPoint) -> NSRect {
@@ -721,10 +715,6 @@ private class RegionSelectView: NSView {
         }
     }
 
-    @objc private func chatTapped() { finish("chat") }
-    @objc private func termTapped() { finish("term") }
-    @objc private func copyTapped() { finish("copy") }
-    @objc private func closeTapped() { finish(nil) }
 
     // MARK: drawing
 
@@ -762,7 +752,7 @@ private class RegionSelectView: NSView {
         drawHandle(NSPoint(x: box.maxX, y: box.maxY))
 
         drawBadge(box)
-        if !placed { drawHint() }
+        drawHint()
     }
 
     private func drawHandle(_ p: NSPoint) {
@@ -805,99 +795,6 @@ private class RegionSelectView: NSView {
         str.draw(at: NSPoint(x: r.minX + padX, y: r.minY + (h - ts.height) / 2))
     }
 
-    // MARK: toolbar
-
-    private func addToolbar(under box: NSRect) {
-        let pad: CGFloat = 4, h: CGFloat = 28, gap: CGFloat = 4
-
-        // Buttons self-size to their content (icon + label + symmetric padding).
-        let chat = makeTextButton(title: "Chat", symbol: "message", filled: true, action: #selector(chatTapped))
-        let term = makeTextButton(title: "Term", symbol: "terminal", filled: false, action: #selector(termTapped))
-        // Copy the composed seed to the clipboard — for agents we don't
-        // integrate with (paste it into any tool).
-        let copy = makeIconButton(symbol: "doc.on.clipboard", action: #selector(copyTapped))
-        let close = makeIconButton(symbol: "xmark", action: #selector(closeTapped))
-
-        chat.setFrameOrigin(NSPoint(x: pad, y: pad))
-        term.setFrameOrigin(NSPoint(x: chat.frame.maxX + gap, y: pad))
-        copy.setFrameOrigin(NSPoint(x: term.frame.maxX + gap, y: pad))
-        let divX = copy.frame.maxX + gap
-        let divider = NSView(frame: NSRect(x: divX, y: pad + (h - 18) / 2, width: 1, height: 18))
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = NSColor(white: 1, alpha: 0.14).cgColor
-        close.setFrameOrigin(NSPoint(x: divX + 1 + gap, y: pad))
-
-        let barW = close.frame.maxX + pad
-        let barH = h + pad * 2
-        var bx = box.midX - barW / 2
-        bx = max(8, min(bx, bounds.width - barW - 8))
-        var by = box.minY - 10 - barH          // below the box…
-        if by < 8 { by = box.maxY + 10 }        // …or above if there's no room.
-
-        let bar = NSView(frame: NSRect(x: bx, y: by, width: barW, height: barH))
-        bar.wantsLayer = true
-        bar.layer?.backgroundColor = RegionSelectView.toolbarBg.cgColor
-        bar.layer?.cornerRadius = 8
-        bar.layer?.borderWidth = 1
-        bar.layer?.borderColor = NSColor(white: 1, alpha: 0.14).cgColor
-        bar.addSubview(chat)
-        bar.addSubview(term)
-        bar.addSubview(copy)
-        bar.addSubview(divider)
-        bar.addSubview(close)
-        addSubview(bar)
-        toolbar = bar
-    }
-
-    private func makeTextButton(title: String, symbol: String, filled: Bool, action: Selector) -> NSButton {
-        let b = NSButton(title: title, target: self, action: action)
-        b.isBordered = false
-        b.wantsLayer = true
-        b.bezelStyle = .regularSquare
-        b.layer?.cornerRadius = 4
-        b.layer?.masksToBounds = true
-        if filled {
-            b.layer?.backgroundColor = RegionSelectView.blue.cgColor
-        } else {
-            b.layer?.backgroundColor = NSColor.clear.cgColor
-            b.layer?.borderWidth = 1
-            b.layer?.borderColor = NSColor(white: 1, alpha: 0.18).cgColor
-        }
-        b.attributedTitle = NSAttributedString(string: title, attributes: [
-            .foregroundColor: NSColor.white,
-            .font: NSFont.systemFont(ofSize: 13, weight: filled ? .medium : .regular),
-        ])
-        if #available(macOS 11.0, *),
-           let img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
-            b.image = img
-            b.imagePosition = .imageLeading
-            b.imageHugsTitle = true
-            b.alignment = .center
-            b.contentTintColor = .white
-        }
-        // Hug the content, then add symmetric horizontal padding — a fixed
-        // width left the icon+label group visibly off-centre.
-        b.sizeToFit()
-        b.setFrameSize(NSSize(width: ceil(b.frame.width) + 16, height: 28))
-        return b
-    }
-
-    private func makeIconButton(symbol: String, action: Selector) -> NSButton {
-        let b = NSButton(title: "", target: self, action: action)
-        b.isBordered = false
-        b.wantsLayer = true
-        b.contentTintColor = NSColor(srgbRed: 0xA8 / 255.0, green: 0xAD / 255.0, blue: 0xBD / 255.0, alpha: 1)
-        if #available(macOS 11.0, *),
-           let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Cancel") {
-            b.image = img
-        } else {
-            b.attributedTitle = NSAttributedString(string: "✕", attributes: [
-                .foregroundColor: NSColor(white: 1, alpha: 0.66),
-            ])
-        }
-        b.setFrameSize(NSSize(width: 28, height: 28))
-        return b
-    }
 }
 
 // ── Auth window: browser login owned by the app ─────────────────────────────

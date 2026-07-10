@@ -578,16 +578,18 @@ class OverlayShellState extends State<OverlayShell> {
     _syncBusyState();
   }
 
-  /// Manual ROI capture — drag-select a screen region, then the toolbar under
-  /// the box picks Chat/Term. Triggered by the ⊕ tab pill and by double-tapping
-  /// the main eye. The freshly-created r-man-* region is picked up in the
-  /// regionStream listener, which opens it in the chosen mode.
+  /// Manual ROI capture — drag-select a screen region; releasing the drag
+  /// opens it as a chat thread immediately (context card, no extra click).
+  /// Triggered by the ⊕ tab pill and by double-tapping the main eye. The
+  /// freshly-created r-man-* region is picked up in the regionStream
+  /// listener, which opens the thread. Terminal/copy remain reachable from
+  /// the opened thread (⑂ handoff, copy seed).
   Future<void> _startManualRoi() async {
     final ws = context.read<WebSocketService>();
     final res = await _windowService.selectRegion();
-    if (res == null) return; // cancelled (Esc / ✕)
-    // The toolbar under the box returns the destination: 'chat' | 'term' |
-    // 'copy' (copy the seed to the clipboard).
+    if (res == null) return; // cancelled (Esc / stray click)
+    // Native resolves with 'chat' on release; 'term'/'copy' kept for
+    // compatibility should the selector ever grow modifiers.
     final mode = res['mode'] as String?;
     _pendingManualMode = (mode == 'term' || mode == 'copy') ? mode! : 'chat';
     // Remember where to teleport the HUD: the selection's bottom-left corner
