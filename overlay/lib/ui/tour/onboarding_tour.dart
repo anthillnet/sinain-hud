@@ -551,34 +551,6 @@ class _MockPage extends StatelessWidget {
       BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
 }
 
-Widget _chatTermChips() => Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          height: 22,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-              color: _blue, borderRadius: BorderRadius.circular(3)),
-          child: const Text('Chat',
-              style: TextStyle(fontSize: 11, color: Colors.white)),
-        ),
-        const SizedBox(width: 4),
-        Container(
-          height: 22,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: const Color(0x2EFFFFFF)),
-          ),
-          child: const Text('Term',
-              style: TextStyle(
-                  fontSize: 11, color: Colors.white, fontFamily: 'monospace')),
-        ),
-      ],
-    );
-
 // ── Scene visuals ────────────────────────────────────────────────────────────
 
 class _WelcomeVisual extends StatelessWidget {
@@ -640,20 +612,43 @@ class _RegionVisual extends StatelessWidget {
                                 fontFamily: 'monospace')),
                       ),
                     ),
-                    // bottom toolbar (Chat / Term)
+                    // Context card right after the drop — releasing the drag
+                    // is the confirmation, no Chat/Term toolbar in this flow.
                     Positioned(
                       left: 0,
                       right: 0,
-                      bottom: -36,
+                      bottom: -58,
                       child: Center(
                         child: Container(
-                          padding: const EdgeInsets.all(4),
+                          width: 200,
+                          padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: _panel,
+                            color: _cardBg,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: const Color(0x24FFFFFF)),
                           ),
-                          child: _chatTermChips(),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Row(children: [
+                                _EyeGlyph(size: 11, strokeWidth: 3),
+                                SizedBox(width: 6),
+                                Text('Context from screen',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white)),
+                              ]),
+                              const SizedBox(height: 7),
+                              Container(height: 6, decoration: _bar(_panel)),
+                              const SizedBox(height: 5),
+                              FractionallySizedBox(
+                                  widthFactor: 0.7,
+                                  child: Container(
+                                      height: 6, decoration: _bar(_panel))),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -685,6 +680,9 @@ class _RegionVisual extends StatelessWidget {
           ],
         ),
       );
+
+  static BoxDecoration _bar(Color c) =>
+      BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
 }
 
 class _WhereChatLandsVisual extends StatelessWidget {

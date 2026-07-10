@@ -570,9 +570,12 @@ class OverlayShellState extends State<OverlayShell> {
   /// the box picks Chat/Term. Triggered by the ⊕ tab pill and by double-tapping
   /// the main eye. The freshly-created r-man-* region is picked up in the
   /// regionStream listener, which opens it in the chosen mode.
-  Future<void> _startManualRoi() async {
+  ///
+  /// [immediate] (capture-menu flow) skips the toolbar: the selector resolves
+  /// on mouse-up and the context card follows the drop.
+  Future<void> _startManualRoi({bool immediate = false}) async {
     final ws = context.read<WebSocketService>();
-    final res = await _windowService.selectRegion();
+    final res = await _windowService.selectRegion(immediate: immediate);
     if (res == null) return; // cancelled (Esc / ✕)
     // The toolbar under the box returns the destination: 'chat' | 'term' |
     // 'copy' (copy the seed to the clipboard).
@@ -1139,7 +1142,9 @@ class OverlayShellState extends State<OverlayShell> {
     ws.requestSummon(_regionBriefMinutes).then((err) {
       if (err != null) _regionBriefPending = false;
     });
-    await _startManualRoi();
+    // No toolbar under the box: releasing the drag is the confirmation, the
+    // enrich card appears right away.
+    await _startManualRoi(immediate: true);
   }
 
   /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC

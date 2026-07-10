@@ -260,8 +260,11 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         case "selectRegion":
             // Screenshot-style drag-select. Resolves with the rect in
             // top-left-origin screen points, or nil on Esc/cancel.
+            // `immediate` skips the Chat/Term toolbar and resolves on mouse-up
+            // (the capture-menu flow goes straight to the context card).
             // Mirror the main window's demo/privacy state so the selector is
             // visible in screen recordings when demo mode is on.
+            let immediate = args?["immediate"] as? Bool ?? false
             var selectorPrivate = true
             if #available(macOS 12.0, *) {
                 selectorPrivate = window.sharingType == .none
@@ -274,7 +277,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 ctx.duration = 0.15
                 window.animator().alphaValue = 0
             }
-            RegionSelector.begin(privacyEnabled: selectorPrivate) { rect, mode in
+            RegionSelector.begin(privacyEnabled: selectorPrivate, immediate: immediate) { rect, mode in
                 NSAnimationContext.runAnimationGroup { ctx in
                     ctx.duration = 0.15
                     window.animator().alphaValue = prevAlpha
@@ -576,16 +579,20 @@ class RegionSelector {
     private var finished = false
     private let completion: (NSRect?, String?) -> Void
 
-    static func begin(privacyEnabled: Bool, completion: @escaping (NSRect?, String?) -> Void) {
+    static func begin(privacyEnabled: Bool, immediate: Bool = false,
+                      completion: @escaping (NSRect?, String?) -> Void) {
         // One selection at a time — a second request cancels into the new one.
         active?.finish(nil, nil)
-        active = RegionSelector(privacyEnabled: privacyEnabled, completion: completion)
+        active = RegionSelector(privacyEnabled: privacyEnabled, immediate: immediate,
+                                completion: completion)
     }
 
-    private init(privacyEnabled: Bool, completion: @escaping (NSRect?, String?) -> Void) {
+    private init(privacyEnabled: Bool, immediate: Bool,
+                 completion: @escaping (NSRect?, String?) -> Void) {
         self.completion = completion
         let screen = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
         let view = RegionSelectView(frame: NSRect(origin: .zero, size: screen.size))
+        view.immediate = immediate
         view.onDone = { [weak self] rect, mode in self?.finish(rect, mode) }
 
         let p = NSPanel(contentRect: screen,
@@ -635,6 +642,9 @@ class RegionSelector {
 private class RegionSelectView: NSView {
     // (rect, mode) on confirm — mode is "chat" | "term"; (nil, nil) on cancel.
     var onDone: ((NSRect?, String?) -> Void)?
+    // Resolve on mouse-up instead of surfacing the Chat/Term toolbar — the
+    // capture-menu flow shows its context card right after the drop.
+    var immediate = false
 
     static let blue = NSColor(srgbRed: 0x33 / 255.0, green: 0x69 / 255.0, blue: 0xD6 / 255.0, alpha: 1)
     static let toolbarBg = NSColor(srgbRed: 0x2B / 255.0, green: 0x2D / 255.0, blue: 0x30 / 255.0, alpha: 1)
@@ -690,9 +700,14 @@ private class RegionSelectView: NSView {
             finish(nil)
             return
         }
+        frozen = sel
+        if immediate {
+            // No destination to pick — the drop IS the confirmation.
+            finish("chat")
+            return
+        }
         // Lock the selection and surface the Chat / Term toolbar under the box
         // instead of resolving immediately — the user picks the destination.
-        frozen = sel
         placed = true
         addToolbar(under: sel)
         window?.invalidateCursorRects(for: self)
@@ -791,7 +806,9 @@ private class RegionSelectView: NSView {
     }
 
     private func drawHint() {
-        let text = "Esc to cancel · release to open a thread"
+        let text = immediate
+            ? "Esc to cancel · release to build context"
+            : "Esc to cancel · release to open a thread"
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12),
             .foregroundColor: NSColor.white,
