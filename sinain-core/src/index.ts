@@ -405,10 +405,12 @@ async function listKnowledgeEntitiesMulti(max: number): Promise<string> {
     } catch { /* skip */ }
   }
 
-  // Deduplicate by entityId, merge
+  // Deduplicate by entity id. graph_query emits `entity_id` (snake_case);
+  // keying on the old camelCase field collapsed every row onto "" and
+  // returned a single item.
   const seen = new Set<string>();
   const unique = allFacts.filter(f => {
-    const id = f.entityId || "";
+    const id = f.entity_id || f.entityId || JSON.stringify(f);
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
@@ -771,10 +773,10 @@ async function exportKnowledgeMulti(domain: string | null, max: number): Promise
     } catch { /* skip */ }
   }
 
-  // Deduplicate
+  // Deduplicate by entity id (same snake_case fix as listKnowledgeEntitiesMulti).
   const seen = new Set<string>();
   let facts = allFacts.filter(f => {
-    const id = f.entityId || "";
+    const id = f.entity_id || f.entityId || JSON.stringify(f);
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
