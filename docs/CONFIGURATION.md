@@ -164,7 +164,7 @@ The bare agent (`sinain-agent-runner/run.sh`) polls sinain-core for escalations 
 
 | Variable | Default | Description |
 |---|---|---|
-| `MIC_ENABLED` | `false` | Enable microphone capture |
+| `MIC_ENABLED` | `true` | Mic pipeline in standby (captures only when toggled in the HUD). `false` hard-disables the toggle |
 | `MIC_DEVICE` | `default` | Microphone device |
 | `MIC_CAPTURE_CMD` | `sox` | Capture backend |
 
