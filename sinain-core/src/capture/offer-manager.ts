@@ -133,9 +133,12 @@ export class OfferManager {
       (s.minutes >= PROPOSE_MIN_MINUTES || s.minutes >= minutes * PROPOSE_MIN_FRACTION));
     if (proposed.length === 0) return skip("no proposable sources");
 
-    // "Loud": a mostly-idle dwell (top app active in < half the range) never offers.
-    const topMinutes = Math.max(...proposed.map((s) => s.minutes));
-    if (topMinutes < minutes * LOUD_MIN_TOP_FRACTION) return skip(`quiet (top app ${topMinutes}m of ${minutes}m)`);
+    // "Loud": a mostly-idle dwell never offers. Measured over the proposed
+    // scope COMBINED — an episode is a family of apps, so demanding one app
+    // hold half the range mis-skips genuinely busy multi-app work (and sense
+    // events are change-gated: reading time yields few event-minutes).
+    const activeMinutes = proposed.reduce((sum, s) => sum + s.minutes, 0);
+    if (activeMinutes < minutes * LOUD_MIN_TOP_FRACTION) return skip(`quiet (${activeMinutes} active min of ${minutes}m)`);
 
     // Honest idle tail: trailing minutes with no scoped activity get named
     // on the card ("47 min · 12 min idle at the end"), never hidden.
@@ -175,7 +178,7 @@ export class OfferManager {
         scope: { apps },
         drivers: [
           `engaged_${minutes}m`,
-          `top_app_${topMinutes}m`,
+          `active_${activeMinutes}m`,
           ...(idleTail >= 10 ? [`idle_tail_${idleTail}m`] : []),
         ],
       },
