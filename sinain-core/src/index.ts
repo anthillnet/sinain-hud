@@ -2037,7 +2037,8 @@ async function main() {
       recorder.onSenseEvent(event);
 
       // Episode boundaries for the save offer (breakpoint = offer moment).
-      episodeTracker?.observe(event.meta.app, event.ts);
+      // Thread identity comes from app + window title (thread-identity.ts).
+      episodeTracker?.observe(event.meta.app, event.meta.windowTitle, event.ts);
 
       // Tier 1 \u2014 instant ROI restore on app switch: the sense path carries the
       // earliest app signal, well before the analyzer tick. The moment the
