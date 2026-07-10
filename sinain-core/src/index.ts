@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { connect as netConnect } from "node:net";
@@ -1833,7 +1834,13 @@ async function main() {
     (msg) => wsHandler.broadcastRaw(msg),
   );
 
-  const windowPreviewCache = new Map<number, { ts: number; summary: string }>();
+  // Keyed by the HASH OF THE TAIL actually sent, not by duration: every
+  // duration sends slice.text.slice(-12_000), and whenever the newest 12K
+  // chars span less than the selected range those tails are byte-identical
+  // across slider stops — one LLM call serves 5/15/30/60 alike. TTL bounds
+  // staleness; expired entries are pruned on write.
+  const windowPreviewCache = new Map<string, { ts: number; summary: string }>();
+  const PREVIEW_CACHE_TTL_MS = 90_000;
   const recordBurstUsage = (r: { tokensIn: number; tokensOut: number }): void => {
     // Cerebras free tier reports no cost; tokens still tracked for visibility.
     costTracker.record({
@@ -1850,8 +1857,10 @@ async function main() {
       const slice = assembleWindow(feedBuffer, senseBuffer, minutes, scope);
       if (slice.lineCount === 0) throw new Error("that range was idle — nothing to brief on");
       const { brief, result } = await summonBrief(config.burstConfig, slice, minutes);
-      recordBurstUsage(result);
-      burstMetrics.record({ gesture: "summon", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-summon-v1", stats: slice.stats });
+      if (!result.cached) {
+        recordBurstUsage(result);
+        burstMetrics.record({ gesture: "summon", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-summon-v1", stats: slice.stats });
+      }
       const msg = {
         type: "context_brief" as const, requestId, status: "ready" as const, minutes,
         coverage: slice.coverage, brief, partial: slice.truncated, latencyMs: result.latencyMs, ts: Date.now(),
@@ -1931,36 +1940,47 @@ async function main() {
     },
     windowPreview: async (minutes) => {
       // Chooser context card: a one-look summary of what the range holds.
-      // Cached per duration (90s TTL) so scrubbing the slider back and forth
-      // never re-calls the LLM for a duration it already previewed.
+      // Cached by tail-hash (90s TTL) so scrubbing the slider never re-calls
+      // the LLM for a tail it already summarized — durations whose newest 12K
+      // chars coincide share one call (see windowPreviewCache).
       const covers = describeCoverage(feedBuffer, senseBuffer, minutes);
-      const hit = windowPreviewCache.get(minutes);
-      if (hit && Date.now() - hit.ts < 90_000) {
-        return { minutes, covers, summary: hit.summary };
-      }
       let summary = "";
       if (config.burstConfig.enabled && config.burstConfig.apiKey) {
         try {
           const slice = assembleWindow(feedBuffer, senseBuffer, minutes);
           if (slice.lineCount > 0) {
-            const r = await burstCall(config.burstConfig, {
-              system: "Summarize this slice of the user's screen/audio activity in 1-2 short sentences — what they were doing, named specifically. No preamble.",
-              // Tail of the slice is enough for a preview — keeps every slider
-              // stop cheap regardless of range length.
-              user: slice.text.slice(-12_000),
-              maxTokens: 90,
-              cacheKey: "sinain-preview-v1",
-            });
-            summary = r.content.trim();
-            recordBurstUsage(r);
-            // stats:null — preview sends only the 12K tail, so full-slice
-            // composition doesn't map to billed tokens. This is the L4 lever
-            // (eliminate the call); its headroom is its own token/latency cost.
-            burstMetrics.record({ gesture: "preview", tokensIn: r.tokensIn, tokensOut: r.tokensOut, latencyMs: r.latencyMs, cacheKey: "sinain-preview-v1", stats: null });
+            // Tail of the slice is enough for a preview — keeps every slider
+            // stop cheap regardless of range length.
+            const tail = slice.text.slice(-12_000);
+            const key = createHash("sha1").update(tail).digest("hex");
+            const hit = windowPreviewCache.get(key);
+            if (hit && Date.now() - hit.ts < PREVIEW_CACHE_TTL_MS) {
+              return { minutes, covers, summary: hit.summary };
+            }
+            try {
+              const r = await burstCall(config.burstConfig, {
+                system: "Summarize this slice of the user's screen/audio activity in 1-2 short sentences — what they were doing, named specifically. No preamble.",
+                user: tail,
+                maxTokens: 90,
+                cacheKey: "sinain-preview-v1",
+              });
+              summary = r.content.trim();
+              recordBurstUsage(r);
+              // stats:null — preview sends only the 12K tail, so full-slice
+              // composition doesn't map to billed tokens. This is the L4 lever
+              // (eliminate the call); its headroom is its own token/latency cost.
+              burstMetrics.record({ gesture: "preview", tokensIn: r.tokensIn, tokensOut: r.tokensOut, latencyMs: r.latencyMs, cacheKey: "sinain-preview-v1", stats: null });
+            } finally {
+              // Cache failures as "" too — scrubbing against a down endpoint
+              // must not fire a timing-out call per slider stop.
+              for (const [k, v] of windowPreviewCache) {
+                if (Date.now() - v.ts >= PREVIEW_CACHE_TTL_MS) windowPreviewCache.delete(k);
+              }
+              windowPreviewCache.set(key, { ts: Date.now(), summary });
+            }
           }
         } catch { /* preview is decoration — coverage alone is fine */ }
       }
-      windowPreviewCache.set(minutes, { ts: Date.now(), summary });
       return { minutes, covers, summary };
     },
     voiceStart: config.voiceConfig.enabled

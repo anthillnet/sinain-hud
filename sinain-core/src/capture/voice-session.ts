@@ -81,7 +81,9 @@ export class VoiceSessionManager {
       const slice = assembleWindow(this.feedBuffer, this.senseBuffer, minutes, scope);
       if (slice.lineCount === 0) return "";
       const { brief, result } = await summonBrief(this.burst, slice, minutes);
-      burstMetrics.record({ gesture: "voice-seed", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-summon-v1", stats: slice.stats });
+      if (!result.cached) {
+        burstMetrics.record({ gesture: "voice-seed", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-summon-v1", stats: slice.stats });
+      }
       return flattenBrief(brief, minutes, slice.coverage);
     } catch (err) {
       warn(TAG, `seed brief failed (session continues unseeded): ${String(err).slice(0, 160)}`);

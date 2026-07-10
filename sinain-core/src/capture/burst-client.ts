@@ -12,6 +12,10 @@ export interface BurstCallResult {
   tokensIn: number;
   tokensOut: number;
   latencyMs: number;
+  /** True when served from a memo (identical seeded input) — tokens were
+   *  already billed and recorded on the original call; callers must skip
+   *  cost/metrics recording for cached results. */
+  cached?: boolean;
 }
 
 export class BurstError extends Error {

@@ -172,3 +172,47 @@ trims to the newest ~50K and is backstopped by retry-on-empty.
 - summon-30: ~30K → ~19K tok (**~−37%**), quality equal/better
 - summon-60: ~30K (empty) → ~17K tok (**−44%**), **empty → rich**, ~2× faster
 - all burst briefs now seeded (reproducible) and retry-on-empty (reliable)
+
+## Result: deterministic follow-ups (preview tail-cache, volatile dedup, event merge, brief memo)
+
+Four zero-risk levers on top of compact + L3 (`perf/burst-deterministic-wins`).
+All deterministic — none can add latency, three remove whole LLM calls or
+shrink the prefill before it exists:
+
+1. **Preview cache by tail-hash (L4).** `windowPreview` sends
+   `slice.text.slice(-12_000)` for every duration, so whenever the newest 12K
+   chars span less than the selected range, the tails for 5/15/30/60 are
+   byte-identical — but the cache was keyed by DURATION, so scrubbing the
+   slider paid up to 4 identical LLM calls (~3K tok each). Keyed by the sha1
+   of the tail actually sent: one call serves every slider stop with the same
+   tail. Failures cache as empty too, so a down endpoint can't fire a
+   timing-out call per stop.
+2. **Volatile-line suppression.** Exact line dedup re-ships any line with a
+   mutating number every frame: menu-bar clock, progress %, `Ln 42, Col 7`,
+   token counters. A line whose digit-masked key was already seen in a
+   PREVIOUS frame is suppressed (first-seen variant survives). Scoped
+   cross-frame on purpose: digit-differing lines within ONE frame (a table of
+   values, a port list) are distinct content and all survive.
+3. **Same-app event merge.** Each surviving frame paid a
+   `[HH:MM] [screen App — Title]` prefix even when it contributed one novel
+   line. Consecutive frames of the same app+title within a 90s gap now share
+   one entry, bounded to a 3-min span so the brief's timeline keeps its
+   within-app temporal structure.
+4. **Brief memoization.** Burst calls are seeded + temperature 0, so an
+   identical slice yields an identical brief — yet a repeat summon
+   (double-tap, chooser re-open, voice seed after a summon) paid full price.
+   `summonBrief` memoizes non-empty briefs by sha1(model:minutes:seed:text),
+   90s TTL; hits return `cached: true` and callers skip cost/metrics
+   recording (a hit never shows as billed tokens).
+
+Validation: `scripts/burst-synthetic-ab.mjs` — synthetic OCR profile
+(chrome + 3 volatile lines/frame + letter-distinct novel lines + a same-frame
+digit-differing table). Invariants: every novel line survives, all table rows
+survive, the volatile family collapses 120→1, a repeat summon makes 0 fetches.
+On that volatile-dominated profile the assembly shrinks 76–83% vs the shipped
+compact path — an upper bound by construction, NOT a real-session estimate.
+
+**Pending: frozen-buffer measurement.** Re-run `scripts/burst-baseline.mjs`
+against a live core to put a real number on levers 2+3 (expectation from the
+baseline's composition data: 10–20% on OCR-dense sessions). Levers 1 and 4
+don't show up in per-call numbers at all — they eliminate whole calls.
