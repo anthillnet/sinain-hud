@@ -30,7 +30,7 @@ accepts — the normal save distillation.
   sustained context shift to an outside app, or by going idle (the breakpoint
   is emitted when they return, so the offer is seen). Detection is
   deterministic and local: `sinain-core/src/capture/episode-tracker.ts`.
-- **Only after episodes worth saving**: long (≥ ~20 engaged minutes — final
+- **Only after episodes worth saving**: long (≥ ~10 engaged minutes — final
   threshold is tuned, not designed) AND loud (real activity: edits, errors
   worked through, calls — not idle dwell). Most breakpoints produce NO offer.
 - **The user's attention has just moved elsewhere.** This is the design's
@@ -61,7 +61,7 @@ accepts — the normal save distillation.
 - **U5 — undo still real.** He accepts an offer, then regrets it. The receipt's
   Undo (30 s, true cancel — nothing written yet) works identically to a manual
   save.
-- **U6 — no nagging.** After two dismissed offers in a day, offers stop for
+- **U6 — no nagging.** After three dismissed offers in a day, offers stop for
   the rest of the day. Frequency is capped (≤ 3/day) with a cooldown (≥ 45 min
   between offers). The manual menu path is always there.
 
@@ -125,7 +125,7 @@ card as **the instrument that decides whether autosave ever ships**.
 - **Privacy floor**: a source the user has *ever* excluded for a thread is
   never proposed for it. Mic is never proposed unless the user's manual saves
   on that thread consistently include it.
-- **Frequency**: ≤ 3 offers/day · ≥ 45 min between offers · 2 consecutive
+- **Frequency**: ≤ 3 offers/day · ≥ 45 min between offers · 3 consecutive
   dismissals end offers for the day · an episode is offered at most once.
 - **Honesty** (inherits capture's rules): if the range's coverage is partial
   or the tail was idle, the evidence line says so ("47 min · 12 min idle at
