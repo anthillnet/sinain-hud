@@ -8,6 +8,7 @@ import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { BurstConfig, VoiceConfig, VoiceSessionMessage } from "../types.js";
 import { assembleWindow, describeCoverage, flattenBrief, summonBrief, type WindowScope } from "./window-ops.js";
+import { burstMetrics } from "./burst-metrics.js";
 import { log, warn } from "../log.js";
 
 const TAG = "voice";
@@ -79,7 +80,8 @@ export class VoiceSessionManager {
     try {
       const slice = assembleWindow(this.feedBuffer, this.senseBuffer, minutes, scope);
       if (slice.lineCount === 0) return "";
-      const { brief } = await summonBrief(this.burst, slice, minutes);
+      const { brief, result } = await summonBrief(this.burst, slice, minutes);
+      burstMetrics.record({ gesture: "voice-seed", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-summon-v1", stats: slice.stats });
       return flattenBrief(brief, minutes, slice.coverage);
     } catch (err) {
       warn(TAG, `seed brief failed (session continues unseeded): ${String(err).slice(0, 160)}`);

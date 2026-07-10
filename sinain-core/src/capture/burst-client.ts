@@ -28,10 +28,15 @@ export async function burstCall(
     maxTokens?: number;
     cacheKey?: string;
     jsonMode?: boolean;
+    seed?: number;
   },
 ): Promise<BurstCallResult> {
   if (!config.apiKey) throw new BurstError("burst lane has no API key (set CEREBRAS_API_KEY)", 503);
 
+  // Seed every call (env-overridable) — deterministic briefs run-to-run and
+  // reproducible measurements; Cerebras accepts and honours `seed`.
+  const envSeed = parseInt(process.env.SINAIN_BURST_SEED || "", 10);
+  const seed = opts.seed ?? (Number.isFinite(envSeed) ? envSeed : 42);
   const body: Record<string, unknown> = {
     model: config.model,
     messages: [
@@ -40,6 +45,7 @@ export async function burstCall(
     ],
     max_tokens: opts.maxTokens ?? config.maxTokens,
     temperature: 0,
+    seed,
   };
   if (config.provider === "cerebras") {
     if (opts.cacheKey) body.prompt_cache_key = opts.cacheKey;

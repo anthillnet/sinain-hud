@@ -1822,6 +1822,8 @@ async function main() {
   const { SaveManager } = await import("./capture/save-manager.js");
   const { assembleWindow, chooserOptions, describeCoverage, summonBrief, enrichFocus, listWindowSources } = await import("./capture/window-ops.js");
   const { burstCall } = await import("./capture/burst-client.js");
+  const { burstMetrics } = await import("./capture/burst-metrics.js");
+  burstMetrics.startPeriodicLog(60_000);
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
@@ -1849,6 +1851,7 @@ async function main() {
       if (slice.lineCount === 0) throw new Error("that range was idle — nothing to brief on");
       const { brief, result } = await summonBrief(config.burstConfig, slice, minutes);
       recordBurstUsage(result);
+      burstMetrics.record({ gesture: "summon", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-summon-v1", stats: slice.stats });
       const msg = {
         type: "context_brief" as const, requestId, status: "ready" as const, minutes,
         coverage: slice.coverage, brief, partial: slice.truncated, latencyMs: result.latencyMs, ts: Date.now(),
@@ -1869,8 +1872,9 @@ async function main() {
     const focusPreview = focus.length > 120 ? `${focus.slice(0, 117)}…` : focus;
     wsHandler.broadcastRaw({ type: "enrich_card", requestId, status: "working", focus: focusPreview, ts: Date.now() });
     try {
-      const { card, result } = await enrichFocus(config.burstConfig, feedBuffer, senseBuffer, focus);
+      const { card, result, stats } = await enrichFocus(config.burstConfig, feedBuffer, senseBuffer, focus);
       recordBurstUsage(result);
+      burstMetrics.record({ gesture: "enrich", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-enrich-v3", stats });
       const msg = {
         type: "enrich_card" as const, requestId, status: "ready" as const,
         focus: focusPreview, card, latencyMs: result.latencyMs, ts: Date.now(),
@@ -1949,6 +1953,10 @@ async function main() {
             });
             summary = r.content.trim();
             recordBurstUsage(r);
+            // stats:null — preview sends only the 12K tail, so full-slice
+            // composition doesn't map to billed tokens. This is the L4 lever
+            // (eliminate the call); its headroom is its own token/latency cost.
+            burstMetrics.record({ gesture: "preview", tokensIn: r.tokensIn, tokensOut: r.tokensOut, latencyMs: r.latencyMs, cacheKey: "sinain-preview-v1", stats: null });
           }
         } catch { /* preview is decoration — coverage alone is fine */ }
       }
@@ -2785,6 +2793,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
     shuttingDown = true;
+    burstMetrics.stop();
     clearInterval(bufferGaugeTimer);
     if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
     costTracker.stop();
