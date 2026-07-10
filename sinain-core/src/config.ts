@@ -322,6 +322,17 @@ export function loadConfig(): CoreConfig {
     timeoutMs: intEnv("BURST_TIMEOUT_MS", 20000),
   };
 
+  // Breakpoint save offers: "Save these 47 min?" at switch-away after a long,
+  // engaged episode (DESIGN-SAVE-OFFER.md). Composed for free from window
+  // data; the LLM runs only on acceptance (the normal save distillation).
+  const saveOfferConfig: import("./types.js").SaveOfferConfig = {
+    enabled: boolEnv("SAVE_OFFER_ENABLED", true),
+    minMinutes: intEnv("SAVE_OFFER_MIN_MINUTES", 20),
+    maxPerDay: intEnv("SAVE_OFFER_MAX_PER_DAY", 3),
+    cooldownMinutes: intEnv("SAVE_OFFER_COOLDOWN_MINUTES", 45),
+    expirySeconds: intEnv("SAVE_OFFER_EXPIRY_SECONDS", 45),
+  };
+
   // "Talk to Sinain" voice sessions — the ar-bridge publishes screen + mic to
   // an ARSinain server over WebRTC, seeded with a window brief. Local dev
   // default: ARSinain on 127.0.0.1:8089 (its AR_HELP_PORT default).
@@ -442,6 +453,7 @@ export function loadConfig(): CoreConfig {
     agentConfig,
     regionSlmConfig,
     burstConfig,
+    saveOfferConfig,
     voiceConfig,
     // Rolling window retention (deliberate capture): how far back "save/summon
     // last N minutes" can reach. Default 8h; buffers evict past this horizon.

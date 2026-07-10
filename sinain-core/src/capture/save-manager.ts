@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { LocalCurationService } from "../learning/local-curation.js";
-import type { SaveReceiptMessage } from "../types.js";
+import type { SaveProvenance, SaveReceiptMessage } from "../types.js";
 import { describeCoverage, type WindowScope } from "./window-ops.js";
 import { log, warn } from "../log.js";
 
@@ -18,7 +18,9 @@ const UNDO_WINDOW_MS = 30_000;
  *           → [timeout] integrate digest into the knowledge graph → "committed"
  *
  * Integration is deferred, not rolled back: undo is a true cancel. Every save
- * carries a saveId; sessionMeta marks provenance (source: "user_save").
+ * carries a saveId; sessionMeta marks provenance (source: "user_save" for
+ * manual gestures, "offered_save" for accepted breakpoint offers — kept
+ * distinguishable forever, in the KG and in receipts).
  */
 export class SaveManager {
   private pending = new Map<string, { digest: any; timer: ReturnType<typeof setTimeout> }>();
@@ -31,11 +33,11 @@ export class SaveManager {
   ) {}
 
   /** Kick off a save of the last N minutes. Returns the saveId immediately. */
-  save(minutes: number, scope?: WindowScope): string {
+  save(minutes: number, scope?: WindowScope, provenance: SaveProvenance = "user_save"): string {
     const saveId = `save-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
     const coverage = describeCoverage(this.feedBuffer, this.senseBuffer, minutes, scope);
-    this.broadcast({ type: "save_receipt", saveId, status: "saving", minutes, coverage, ts: Date.now() });
-    void this.runSave(saveId, minutes, coverage, scope);
+    this.broadcast({ type: "save_receipt", saveId, status: "saving", minutes, coverage, provenance, ts: Date.now() });
+    void this.runSave(saveId, minutes, coverage, scope, provenance);
     return saveId;
   }
 
@@ -50,9 +52,9 @@ export class SaveManager {
     return true;
   }
 
-  private async runSave(saveId: string, minutes: number, coverage: string, scope?: WindowScope): Promise<void> {
+  private async runSave(saveId: string, minutes: number, coverage: string, scope?: WindowScope, provenance: SaveProvenance = "user_save"): Promise<void> {
     const fail = (error: string) =>
-      this.broadcast({ type: "save_receipt", saveId, status: "error", minutes, coverage, error, ts: Date.now() });
+      this.broadcast({ type: "save_receipt", saveId, status: "error", minutes, coverage, provenance, error, ts: Date.now() });
 
     try {
       const since = Date.now() - minutes * 60_000;
@@ -105,7 +107,7 @@ export class SaveManager {
         ts: new Date().toISOString(),
         sessionKey: `user-save-${saveId}`,
         durationMs: minutes * 60_000,
-        source: "user_save",
+        source: provenance,
         saveId,
       });
       if (!digest) {
@@ -116,13 +118,13 @@ export class SaveManager {
       const facts = Array.isArray(digest.facts) ? digest.facts.length : 0;
       const entities = Array.isArray(digest.entities) ? digest.entities.length : 0;
 
-      const timer = setTimeout(() => void this.commit(saveId, minutes, coverage), UNDO_WINDOW_MS);
+      const timer = setTimeout(() => void this.commit(saveId, minutes, coverage, provenance), UNDO_WINDOW_MS);
       timer.unref?.();
       this.pending.set(saveId, { digest, timer });
 
       this.broadcast({
         type: "save_receipt", saveId, status: "saved", minutes, coverage,
-        facts, entities, undoSeconds: UNDO_WINDOW_MS / 1000, ts: Date.now(),
+        facts, entities, undoSeconds: UNDO_WINDOW_MS / 1000, provenance, ts: Date.now(),
       });
       log(TAG, `${saveId}: distilled ${facts} facts / ${entities} entities from ${items.length} items — undo open ${UNDO_WINDOW_MS / 1000}s`);
     } catch (err) {
@@ -131,13 +133,13 @@ export class SaveManager {
     }
   }
 
-  private async commit(saveId: string, minutes: number, coverage: string): Promise<void> {
+  private async commit(saveId: string, minutes: number, coverage: string, provenance: SaveProvenance = "user_save"): Promise<void> {
     const entry = this.pending.get(saveId);
     if (!entry) return; // undone in the meantime
     this.pending.delete(saveId);
     const ok = await this.curation.integrateDigest(entry.digest);
     this.broadcast({
-      type: "save_receipt", saveId, status: ok ? "committed" : "error", minutes, coverage,
+      type: "save_receipt", saveId, status: ok ? "committed" : "error", minutes, coverage, provenance,
       error: ok ? undefined : "knowledge integration failed", ts: Date.now(),
     });
   }

@@ -229,6 +229,9 @@ export class WorkStateEngine {
   private episodeSink?: (ev: {
     kind: "breakpoint" | "return"; threadId: string; label: string;
     at: number; gapMs?: number; lastWork?: LastWork;
+    /** Breakpoint only: continuous dwell on the thread this session — the
+     *  episode span the save-offer composer proposes (DESIGN-SAVE-OFFER §2). */
+    engagedMs?: number;
   }) => void;
 
   setEpisodeSink(fn: NonNullable<WorkStateEngine["episodeSink"]>): void {
@@ -289,6 +292,7 @@ export class WorkStateEngine {
           this.episodeSink?.({
             kind: "breakpoint", threadId: outgoing.topicId,
             label: outgoing.label, at: now, lastWork: outgoing.lastWork,
+            engagedMs: now - this.activeSince,
           });
           this.leftThisSession.add(outgoing.topicId); // a genuine in-session leave
           // Don't close the open return yet — mark the leave and let the sweep

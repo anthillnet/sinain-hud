@@ -118,6 +118,9 @@ class SaveReceipt {
   final int? entities;
   final double? cost;
   final int? undoSeconds;
+
+  /// "user_save" | "offered_save" — who initiated (absent on old cores).
+  final String? provenance;
   final String? error;
 
   const SaveReceipt({
@@ -129,6 +132,7 @@ class SaveReceipt {
     this.entities,
     this.cost,
     this.undoSeconds,
+    this.provenance,
     this.error,
   });
 
@@ -147,7 +151,50 @@ class SaveReceipt {
         entities: (json['entities'] as num?)?.toInt(),
         cost: (json['cost'] as num?)?.toDouble(),
         undoSeconds: (json['undoSeconds'] as num?)?.toInt(),
+        provenance: json['provenance'] as String?,
         error: json['error'] as String?,
+      );
+}
+
+/// Proactive breakpoint save offer (WS `save_offer`, DESIGN-SAVE-OFFER.md):
+/// "Save these 47 min? IntelliJ, Chrome". Sinain proposes, the user disposes.
+class SaveOffer {
+  final String offerId;
+  final int minutes;
+  final List<String> apps;
+  final String coverage;
+  final String threadId;
+
+  /// "mostly: …" context line — present only when the engine is confident.
+  final String? threadLabel;
+
+  /// Honest idle tail — named on the card, never hidden.
+  final int? idleTailMinutes;
+  final int endedTs;
+  final int expirySeconds;
+
+  const SaveOffer({
+    required this.offerId,
+    required this.minutes,
+    required this.apps,
+    required this.coverage,
+    required this.threadId,
+    this.threadLabel,
+    this.idleTailMinutes,
+    required this.endedTs,
+    required this.expirySeconds,
+  });
+
+  factory SaveOffer.fromJson(Map<String, dynamic> json) => SaveOffer(
+        offerId: json['offerId'] as String? ?? '',
+        minutes: (json['minutes'] as num?)?.toInt() ?? 0,
+        apps: (json['apps'] as List? ?? const []).map((e) => '$e').toList(),
+        coverage: json['coverage'] as String? ?? '',
+        threadId: json['threadId'] as String? ?? '',
+        threadLabel: json['threadLabel'] as String?,
+        idleTailMinutes: (json['idleTailMinutes'] as num?)?.toInt(),
+        endedTs: (json['endedTs'] as num?)?.toInt() ?? 0,
+        expirySeconds: (json['expirySeconds'] as num?)?.toInt() ?? 45,
       );
 }
 

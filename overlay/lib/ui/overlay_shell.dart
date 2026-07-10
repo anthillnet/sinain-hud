@@ -119,6 +119,18 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<SaveReceipt>? _receiptSub;
   StreamSubscription<VoiceSession>? _voiceSub;
   VoiceSession? _voiceSession;
+  // Breakpoint save offer (DESIGN-SAVE-OFFER.md): chip-first arrival, card on
+  // intent, morph into the receipt on accept. Chip mode = eye + one-line pill.
+  SaveOffer? _saveOffer;
+  bool _offerExpanded = false;
+  bool _chipMode = false;
+  Timer? _offerExpiryTimer;
+  StreamSubscription<SaveOffer>? _offerSub;
+  // Adjust…: the offer whose pre-filled chooser is open — confirm posts
+  // "adjusted" (a correction label) instead of a plain save.
+  String? _adjustingOfferId;
+  List<String>? _offerPrefillApps;
+  int? _offerPrefillMinutes;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -312,6 +324,10 @@ class OverlayShellState extends State<OverlayShell> {
           }
         });
       }
+    });
+    _offerSub = ws.saveOfferStream.listen((o) {
+      if (!mounted) return;
+      _showSaveOffer(o);
     });
     _voiceSub = ws.voiceSessionStream.listen((s) {
       if (!mounted) return;
@@ -1242,6 +1258,8 @@ class OverlayShellState extends State<OverlayShell> {
     _enrichSub?.cancel();
     _receiptSub?.cancel();
     _voiceSub?.cancel();
+    _offerSub?.cancel();
+    _offerExpiryTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
@@ -1265,10 +1283,20 @@ class OverlayShellState extends State<OverlayShell> {
 
   Future<void> _pickRange(int minutes, List<String>? apps) async {
     final action = _chooserFor;
+    final adjusting = _adjustingOfferId;
     setState(() => _chooserFor = null);
     final ws = context.read<WebSocketService>();
     if (action == 'save') {
-      await ws.requestSave(minutes, apps: apps);
+      if (adjusting != null) {
+        // Adjusted offer: same save lifecycle, but the response is a
+        // correction label — unticked proposed apps become durable
+        // exclusions for this thread core-side.
+        _clearAdjustState();
+        await ws.respondToOffer(adjusting, 'adjusted',
+            minutes: minutes, apps: apps);
+      } else {
+        await ws.requestSave(minutes, apps: apps);
+      }
       // Receipt lifecycle arrives via saveReceiptStream.
     } else if (action == 'call') {
       final err = await ws.requestSummon(minutes, apps: apps);
@@ -1534,11 +1562,112 @@ class OverlayShellState extends State<OverlayShell> {
         _activeBrief != null ||
         _activeEnrich != null ||
         _saveReceipt != null ||
+        _saveOffer != null ||
         _voiceSession != null) {
       return;
     }
     setState(() => _cardMode = false);
     _resizeWindowForState(_state);
+  }
+
+  // ── Save offer lifecycle (DESIGN-SAVE-OFFER.md) ───────────────────────────
+
+  /// A `save_offer` arrived: chip-first (arrival B). Outside chat/card mode
+  /// the window becomes a slim eye+chip surface; silent expiry after ~45 s.
+  void _showSaveOffer(SaveOffer o) {
+    _offerExpiryTimer?.cancel();
+    setState(() {
+      _saveOffer = o;
+      _offerExpanded = false;
+    });
+    _offerExpiryTimer =
+        Timer(Duration(seconds: o.expirySeconds), _expireOffer);
+    if (_state != HudState.chat &&
+        _state != HudState.hidden &&
+        !_cardMode &&
+        !_chipMode) {
+      setState(() => _chipMode = true);
+      _resizeForChipSurface();
+    }
+  }
+
+  Future<void> _resizeForChipSurface() async {
+    final frame = await _windowService.getWindowFrame();
+    if (frame == null) return;
+    final right = frame['x']! + frame['w']!;
+    final top = frame['y']! + frame['h']!;
+    _windowService.setWindowFrame(right - 240, top - 110, 240, 110);
+  }
+
+  /// Chip clicked — intent shown: stop the expiry fade and show the card.
+  void _expandOffer() {
+    _offerExpiryTimer?.cancel();
+    setState(() {
+      _offerExpanded = true;
+      _chipMode = false;
+    });
+    _enterCardMode();
+  }
+
+  /// Accept: the same save lifecycle as the manual gesture, offered_save
+  /// provenance. The receipt replaces the offer in the same stack slot —
+  /// one card per save (morph, never stack).
+  void _acceptOffer() {
+    final o = _saveOffer;
+    if (o == null) return;
+    context.read<WebSocketService>().respondToOffer(o.offerId, 'accepted');
+    _clearOffer(exitSurfaces: false); // receipt arrives on saveReceiptStream
+  }
+
+  /// Adjust…: the shipped chooser, pre-filled (N = offer minutes, proposed
+  /// sources ticked, everything else — incl. mic — unticked). Confirm posts
+  /// "adjusted"; unticked proposed apps become durable exclusions core-side.
+  void _adjustOffer() {
+    final o = _saveOffer;
+    if (o == null) return;
+    _offerExpiryTimer?.cancel();
+    setState(() {
+      _adjustingOfferId = o.offerId;
+      _offerPrefillApps = o.apps;
+      _offerPrefillMinutes = o.minutes;
+      _saveOffer = null;
+      _offerExpanded = false;
+      _chipMode = false;
+    });
+    _enterCardMode();
+    _openRangeChooser('save');
+  }
+
+  void _dismissOffer() => _resolveOffer('dismissed');
+  void _expireOffer() => _resolveOffer('expired');
+
+  void _resolveOffer(String response) {
+    final o = _saveOffer;
+    if (o == null || !mounted) return;
+    context.read<WebSocketService>().respondToOffer(o.offerId, response);
+    _clearOffer();
+  }
+
+  void _clearOffer({bool exitSurfaces = true}) {
+    _offerExpiryTimer?.cancel();
+    setState(() {
+      _saveOffer = null;
+      _offerExpanded = false;
+    });
+    if (_chipMode) {
+      setState(() => _chipMode = false);
+      if (exitSurfaces) _resizeWindowForState(_state);
+    } else if (exitSurfaces) {
+      _maybeExitCardMode();
+    }
+  }
+
+  void _clearAdjustState() {
+    setState(() {
+      _adjustingOfferId = null;
+      _offerPrefillApps = null;
+      _offerPrefillMinutes = null;
+    });
   }
 
   /// Hand off from card mode into a full HUD state (e.g. the conversation the
@@ -1559,6 +1688,20 @@ class OverlayShellState extends State<OverlayShell> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
+        // Save offer sits above the receipt: accept clears it and the receipt
+        // arrives into the same top slot — one card per save (morph).
+        if (_saveOffer != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _offerExpanded
+                ? SaveOfferCard(
+                    offer: _saveOffer!,
+                    onAccept: _acceptOffer,
+                    onAdjust: _adjustOffer,
+                    onDismiss: _dismissOffer,
+                  )
+                : SaveOfferChip(offer: _saveOffer!, onTap: _expandOffer),
+          ),
         if (_saveReceipt != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -1623,6 +1766,9 @@ class OverlayShellState extends State<OverlayShell> {
               kind: _chooserFor == 'save' ? ChooserKind.save : ChooserKind.call,
               options: _rangeOptions,
               onConfirm: _pickRange,
+              defaultMinutes: _offerPrefillMinutes ?? 30,
+              preselectedApps:
+                  _adjustingOfferId != null ? _offerPrefillApps : null,
               sourcesAt: (m) =>
                   context.read<WebSocketService>().fetchWindowSources(m),
               onConfirmAlt: _chooserFor == 'call'
@@ -1634,7 +1780,15 @@ class OverlayShellState extends State<OverlayShell> {
               previewAt: (m) =>
                   context.read<WebSocketService>().fetchWindowPreview(m),
               onClose: () {
+                final adjusting = _adjustingOfferId;
                 setState(() => _chooserFor = null);
+                if (adjusting != null) {
+                  // Cancelling the pre-filled chooser declines the offer.
+                  context
+                      .read<WebSocketService>()
+                      .respondToOffer(adjusting, 'dismissed');
+                  _clearAdjustState();
+                }
                 _maybeExitCardMode();
               },
             ),
@@ -1800,6 +1954,14 @@ class OverlayShellState extends State<OverlayShell> {
       return const SizedBox.shrink();
     }
 
+    // Save-offer chip surface (arrival B — chip first, card on intent): the
+    // eye plus a one-line pill beneath it. One line of footprint until the
+    // user shows intent; expiry fades the chip, not a panel.
+    if (_chipMode && _saveOffer != null && !_cardMode &&
+        _state != HudState.chat) {
+      return _buildChipSurface();
+    }
+
     // Compact card mode: capture cards without the full HUD (any non-chat
     // state — the chat renders cards in its own Stack).
     if (_cardMode && _state != HudState.chat) {
@@ -1833,6 +1995,41 @@ class OverlayShellState extends State<OverlayShell> {
       case HudState.hidden:
         return const SizedBox.shrink();
     }
+  }
+
+  /// Eye + offer chip, top-right anchored. The eye keeps its normal gestures
+  /// (tap → chat exits chip mode; the offer stays and renders in the column).
+  Widget _buildChipSurface() {
+    return Align(
+      alignment: Alignment.topRight,
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: EyeWidget(
+                onTap: () {
+                  setState(() => _chipMode = false);
+                  _transitionTo(HudState.chat);
+                },
+                onDoubleTap: _isMacOS ? _startManualRoi : null,
+                onLongPress: () => toggleVisibility(false),
+                onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
+                onDragEnd: _persistEyePosition,
+                pupilDilation: _pupilDilation,
+                eyeColor: _eyeColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SaveOfferChip(offer: _saveOffer!, onTap: _expandOffer),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── State 2: Controls Bar ──────────────────────────────────────────────────

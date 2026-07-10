@@ -79,6 +79,7 @@ class WebSocketService extends ChangeNotifier {
   final _briefController = StreamController<ContextBrief>.broadcast();
   final _enrichController = StreamController<EnrichCard>.broadcast();
   final _saveReceiptController = StreamController<SaveReceipt>.broadcast();
+  final _saveOfferController = StreamController<SaveOffer>.broadcast();
   final _voiceController = StreamController<VoiceSession>.broadcast();
   final _workStateController = StreamController<WorkStateView>.broadcast();
 
@@ -90,6 +91,7 @@ class WebSocketService extends ChangeNotifier {
   Stream<ContextBrief> get briefStream => _briefController.stream;
   Stream<EnrichCard> get enrichStream => _enrichController.stream;
   Stream<SaveReceipt> get saveReceiptStream => _saveReceiptController.stream;
+  Stream<SaveOffer> get saveOfferStream => _saveOfferController.stream;
   Stream<VoiceSession> get voiceSessionStream => _voiceController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<bool> get thinkingStream => _thinkingController.stream;
@@ -505,6 +507,9 @@ class WebSocketService extends ChangeNotifier {
         case 'save_receipt':
           _saveReceiptController.add(SaveReceipt.fromJson(json));
           break;
+        case 'save_offer':
+          _saveOfferController.add(SaveOffer.fromJson(json));
+          break;
         case 'voice_session':
           final session = VoiceSession.fromJson(json);
           voiceSession = session;
@@ -721,6 +726,19 @@ class WebSocketService extends ChangeNotifier {
   Future<bool> requestSaveUndo(String saveId) async =>
       (await _postJson('/capture/undo', {'saveId': saveId}))?['undone'] == true;
 
+  /// Respond to a breakpoint save offer. accepted/adjusted trigger the save
+  /// server-side (receipt arrives on [saveReceiptStream]); every response is
+  /// a training label. [minutes]/[apps] carry the Adjust edits.
+  Future<bool> respondToOffer(String offerId, String response,
+          {int? minutes, List<String>? apps}) async =>
+      (await _postJson('/capture/offer/response', {
+        'offerId': offerId,
+        'response': response,
+        if (minutes != null) 'minutes': minutes,
+        if (apps != null) 'apps': apps,
+      }))?['ok'] ==
+      true;
+
   /// "Call AI on my last N minutes" — brief arrives on [briefStream].
   /// Returns an error string, or null on accepted.
   Future<String?> requestSummon(int minutes, {List<String>? apps}) async {
@@ -880,6 +898,7 @@ class WebSocketService extends ChangeNotifier {
     _briefController.close();
     _enrichController.close();
     _saveReceiptController.close();
+    _saveOfferController.close();
     _voiceController.close();
     _workStateController.close();
     super.dispose();

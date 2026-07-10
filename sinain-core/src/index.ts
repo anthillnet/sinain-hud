@@ -1359,7 +1359,15 @@ async function main() {
   // The engine's frozen snapshots become attested T1 episodes ("what
   // happened"), replacing side-JSONL growth over time. Redacted to the
   // on-disk level here — episodes persist to episodes.jsonl.
+  // Breakpoints also feed the save-offer composer; the manager is constructed
+  // later (capture wiring), so the sink holds a late-bound reference.
+  let offerManager: import("./capture/offer-manager.js").OfferManager | null = null;
   workStateEngine.setEpisodeSink((ev) => {
+    if (ev.kind === "breakpoint") {
+      offerManager?.onBreakpoint({
+        threadId: ev.threadId, label: ev.label, at: ev.at, engagedMs: ev.engagedMs ?? 0,
+      });
+    }
     const lw = ev.lastWork;
     const parts: string[] = [];
     if (ev.kind === "return") parts.push(`returned after ${Math.round((ev.gapMs ?? 0) / 60000)} min away`);
@@ -1889,6 +1897,15 @@ async function main() {
   const { burstCall } = await import("./capture/burst-client.js");
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
+  // Breakpoint save offers (DESIGN-SAVE-OFFER.md): the episode sink registered
+  // earlier feeds breakpoints in via this late-bound reference.
+  const { OfferManager } = await import("./capture/offer-manager.js");
+  offerManager = new OfferManager(
+    feedBuffer, senseBuffer, saveManager,
+    (msg) => wsHandler.broadcastRaw(msg),
+    resolveLocalMemoryDir(), config.saveOfferConfig,
+  );
+
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
   const { VoiceSessionManager } = await import("./capture/voice-session.js");
   const voiceManager = new VoiceSessionManager(
@@ -1976,6 +1993,10 @@ async function main() {
     // Deliberate capture (save / summon / enrich on the rolling window)
     captureSave: (minutes, apps) => saveManager.save(minutes, apps ? { apps } : undefined),
     captureUndo: (saveId) => saveManager.undo(saveId),
+    captureOfferResponse: (offerId, response, minutes, apps) =>
+      offerManager
+        ? offerManager.respond(offerId, response as import("./types.js").SaveOfferResponse, minutes, apps)
+        : { ok: false, error: "offers unavailable" },
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
