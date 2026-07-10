@@ -150,6 +150,10 @@ export function buildCatalog(rawItems: any[]): CatalogEntry[] {
     if (!id.startsWith("fact:")) continue;
     const subject = typeof item.entity === "string" ? item.entity : "";
     if (!subject) continue;
+    // Session-timestamp subjects ("2026-06-30T13:48") are ingest artifacts,
+    // not knowledge entities — their pages render empty. Keep them out of
+    // the catalog; direct links still resolve.
+    if (/^\d{4}-\d{2}-\d{2}/.test(subject)) continue;
     const entityId = subject.includes(":") ? subject : `entity:${subject}`;
     const slug = entityToSlug(entityId);
     let entry = bySlug.get(slug);

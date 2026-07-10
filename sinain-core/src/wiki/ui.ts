@@ -706,11 +706,13 @@ function renderRail(doc) {
   });
   rail.appendChild(rootGroup);
 
+  var RAIL_VISIBLE = 10;
   (doc ? doc.sections : []).forEach(function (sec) {
     if (sec.heading === "Bookmarks") return;
     var m = sec.heading.match(/^(.*?)(?:\\s*\\((\\d+)\\))?$/);
     var group = el("div", "railGroup");
     group.appendChild(el("div", "railHdr", m ? m[1] : sec.heading));
+    var nodes = [];
     sec.items.forEach(function (item) {
       if (item.type !== "bullet") return;
       var tk = tokenize(item.text).filter(function (t) { return t.link; })[0];
@@ -718,8 +720,23 @@ function renderRail(doc) {
       var active = r.kind === "entity" && r.slug === tk.link;
       var node = el("div", "railNode" + (active ? " active" : ""), tk.t);
       node.onclick = function () { navigate({ kind: "entity", slug: tk.link }); };
+      // Keep the active entity visible even when it sits past the fold.
+      if (nodes.length >= RAIL_VISIBLE && !active) node.style.display = "none";
+      nodes.push(node);
       group.appendChild(node);
     });
+    if (nodes.length > RAIL_VISIBLE) {
+      var hidden = nodes.length - RAIL_VISIBLE;
+      var toggle = el("div", "railNode", "+ " + hidden + " more");
+      toggle.style.color = "var(--muted)";
+      var expanded = false;
+      toggle.onclick = function () {
+        expanded = !expanded;
+        nodes.forEach(function (n, i) { if (i >= RAIL_VISIBLE) n.style.display = expanded ? "" : "none"; });
+        toggle.textContent = expanded ? "− less" : "+ " + hidden + " more";
+      };
+      group.appendChild(toggle);
+    }
     rail.appendChild(group);
   });
 
@@ -781,7 +798,9 @@ function viewIndex(doc, main) {
       hdr2.appendChild(el("span", "l", m ? m[1] : sec.heading));
       if (m && m[2]) hdr2.appendChild(el("span", "c", m[2] + " pages"));
       wrap.appendChild(hdr2);
+      var CARDS_VISIBLE = 12;
       var grid = el("div", "cards");
+      var cards = [];
       sec.items.forEach(function (item) {
         if (item.type !== "bullet") return;
         var parts = item.text.split(" — ");
@@ -791,9 +810,22 @@ function viewIndex(doc, main) {
         card.appendChild(el("div", "t", tk.t));
         if (parts[1]) card.appendChild(el("div", "m", parts[1]));
         card.onclick = function () { navigate(linkRoute(tk.link)); };
+        if (cards.length >= CARDS_VISIBLE) card.style.display = "none";
+        cards.push(card);
         grid.appendChild(card);
       });
       wrap.appendChild(grid);
+      if (cards.length > CARDS_VISIBLE) {
+        var more = el("button", "btn", "Show all " + cards.length);
+        more.style.marginTop = "10px";
+        var open = false;
+        more.onclick = function () {
+          open = !open;
+          cards.forEach(function (c, i) { if (i >= CARDS_VISIBLE) c.style.display = open ? "" : "none"; });
+          more.textContent = open ? "Show fewer" : "Show all " + cards.length;
+        };
+        wrap.appendChild(more);
+      }
     }
     page.appendChild(wrap);
   });
