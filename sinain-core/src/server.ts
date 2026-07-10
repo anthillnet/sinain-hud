@@ -1701,6 +1701,8 @@ export interface ServerDeps {
   captureSave?: (minutes: number, apps?: string[]) => string;
   /** Cancel a save inside its undo window. */
   captureUndo?: (saveId: string) => boolean;
+  /** Overlay response to a breakpoint save offer (accepted/adjusted/dismissed/expired). */
+  captureOfferResponse?: (offerId: string, response: string, minutes?: number, apps?: string[]) => { ok: boolean; saveId?: string; error?: string };
   /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
   contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
   /** "Build context" for a focus item (clipboard) → what/connects/next card. */
@@ -1939,6 +1941,31 @@ export function createAppServer(deps: ServerDeps) {
         const minutes = clampMinutes(parsed.minutes);
         const saveId = deps.captureSave(minutes, parseApps(parsed.apps));
         res.end(JSON.stringify({ ok: true, saveId, minutes }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/capture/offer/response") {
+        if (!deps.captureOfferResponse) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "offers unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as
+          { offerId?: string; response?: string; minutes?: number; apps?: unknown };
+        const RESPONSES = ["accepted", "adjusted", "dismissed", "expired"];
+        if (!parsed.offerId || !parsed.response || !RESPONSES.includes(parsed.response)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "offerId + response(accepted|adjusted|dismissed|expired) required" }));
+          return;
+        }
+        const result = deps.captureOfferResponse(
+          parsed.offerId, parsed.response,
+          typeof parsed.minutes === "number" ? parsed.minutes : undefined,
+          parseApps(parsed.apps),
+        );
+        if (!result.ok) res.writeHead(410); // gone: unknown/expired offer
+        res.end(JSON.stringify(result));
         return;
       }
 

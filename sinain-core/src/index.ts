@@ -1315,6 +1315,12 @@ async function main() {
     entityCache,
   });
 
+  // Breakpoint save offers (DESIGN-SAVE-OFFER.md): the episode tracker feeds
+  // breakpoints in via these late-bound references; both are constructed
+  // later (capture wiring) while onSenseEvent registers now.
+  let offerManager: import("./capture/offer-manager.js").OfferManager | null = null;
+  let episodeTracker: import("./capture/episode-tracker.js").EpisodeTracker | null = null;
+
   // ── Wire learning signal collector (needs agentLoop) ──
   const signalCollector = feedbackStore
     ? new SignalCollector(feedbackStore, agentLoop, senseBuffer)
@@ -1827,6 +1833,18 @@ async function main() {
   burstMetrics.startPeriodicLog(60_000);
   const saveManager = new SaveManager(feedBuffer, senseBuffer, localCuration, (msg) => wsHandler.broadcastRaw(msg));
 
+  // Breakpoint save offers (DESIGN-SAVE-OFFER.md): the episode tracker draws
+  // episode boundaries from the sense stream (fed in onSenseEvent below);
+  // the manager decides whether a finished episode is worth offering.
+  const { OfferManager } = await import("./capture/offer-manager.js");
+  const { EpisodeTracker } = await import("./capture/episode-tracker.js");
+  offerManager = new OfferManager(
+    feedBuffer, senseBuffer, saveManager,
+    (msg) => wsHandler.broadcastRaw(msg),
+    resolveLocalMemoryDir(), config.saveOfferConfig,
+  );
+  episodeTracker = new EpisodeTracker((bp) => offerManager?.onBreakpoint(bp));
+
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
   const { VoiceSessionManager } = await import("./capture/voice-session.js");
   const voiceManager = new VoiceSessionManager(
@@ -1924,6 +1942,10 @@ async function main() {
     // Deliberate capture (save / summon / enrich on the rolling window)
     captureSave: (minutes, apps) => saveManager.save(minutes, apps ? { apps } : undefined),
     captureUndo: (saveId) => saveManager.undo(saveId),
+    captureOfferResponse: (offerId, response, minutes, apps) =>
+      offerManager
+        ? offerManager.respond(offerId, response as import("./types.js").SaveOfferResponse, minutes, apps)
+        : { ok: false, error: "offers unavailable" },
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
@@ -2013,6 +2035,10 @@ async function main() {
 
       // Track app context for recorder
       recorder.onSenseEvent(event);
+
+      // Episode boundaries for the save offer (breakpoint = offer moment).
+      // Thread identity comes from app + window title (thread-identity.ts).
+      episodeTracker?.observe(event.meta.app, event.meta.windowTitle, event.ts);
 
       // Tier 1 \u2014 instant ROI restore on app switch: the sense path carries the
       // earliest app signal, well before the analyzer tick. The moment the

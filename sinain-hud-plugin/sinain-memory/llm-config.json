@@ -1,14 +1,30 @@
 {
   "models": {
-    "fast": "google/gemini-2.5-flash-lite",
-    "smart": "google/gemini-2.5-flash",
-    "page": "google/gemini-2.5-flash-lite"
+    "fast": "cerebras/gemma-4-31b",
+    "smart": "cerebras/gemma-4-31b",
+    "page": "cerebras/gemma-4-31b"
   },
   "scripts": {
-    "page_renderer":      { "model": "page", "maxTokens": 1500 },
-    "session_distiller": { "model": "fast", "maxTokens": 2000 },
-    "knowledge_integrator": { "model": "fast", "maxTokens": 2000 },
-    "meeting_benchmark": { "model": "smart", "maxTokens": 200 },
-    "query_rewriter":     { "model": "fast", "maxTokens": 400, "timeout": 30 }
+    "page_renderer": {
+      "model": "page",
+      "maxTokens": 1500
+    },
+    "session_distiller": {
+      "model": "fast",
+      "maxTokens": 2000
+    },
+    "knowledge_integrator": {
+      "model": "fast",
+      "maxTokens": 2000
+    },
+    "meeting_benchmark": {
+      "model": "smart",
+      "maxTokens": 200
+    },
+    "query_rewriter": {
+      "model": "fast",
+      "maxTokens": 400,
+      "timeout": 30
+    }
   }
 }

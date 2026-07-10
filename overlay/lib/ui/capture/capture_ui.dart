@@ -61,6 +61,10 @@ class RangeChooser extends StatefulWidget {
   /// CLICK TO EXCLUDE", design v2 §3). Cached per duration.
   final Future<List<Map<String, dynamic>>?> Function(int minutes)? sourcesAt;
 
+  /// Adjust-an-offer prefill (DESIGN-SAVE-OFFER §4): only these sources start
+  /// ticked — everything else (incl. mic) begins excluded. Null = all ticked.
+  final List<String>? preselectedApps;
+
   const RangeChooser({
     super.key,
     required this.kind,
@@ -71,6 +75,7 @@ class RangeChooser extends StatefulWidget {
     this.defaultMinutes = 30,
     this.previewAt,
     this.sourcesAt,
+    this.preselectedApps,
   });
 
   @override
@@ -100,12 +105,25 @@ class _RangeChooserState extends State<RangeChooser> {
     _fetchSources(_minutes);
   }
 
+  bool _preselectionApplied = false;
+
   void _fetchSources(int n) {
     if (widget.sourcesAt == null) return;
     if (_sourcesCache.containsKey(n)) return; // cached — no call
     widget.sourcesAt!(n).then((list) {
       if (!mounted || list == null) return;
-      setState(() => _sourcesCache[n] = list);
+      setState(() {
+        _sourcesCache[n] = list;
+        // Offer prefill: the first source list arriving seeds the exclusion
+        // set — proposed apps ticked, everything else (incl. mic) unticked.
+        final pre = widget.preselectedApps;
+        if (pre != null && !_preselectionApplied) {
+          _preselectionApplied = true;
+          _excluded.addAll(list
+              .map((s) => s['name'] as String? ?? '')
+              .where((name) => name.isNotEmpty && !pre.contains(name)));
+        }
+      });
     });
   }
 
@@ -113,12 +131,17 @@ class _RangeChooserState extends State<RangeChooser> {
       (_sourcesCache[n] ?? const []).map((s) => s['name'] as String).toList();
 
   /// Selected sources for the confirmed duration — null when nothing was
-  /// deselected (no scope: the range is used whole).
+  /// deselected (no scope: the range is used whole). With [preselectedApps]
+  /// (adjusting an offer) the list is always explicit: re-ticking everything
+  /// must not read as "no scope" — core would fall back to the proposal.
   List<String>? get _selectedApps {
     final names = _sourceNames(_minutes);
-    if (names.isEmpty || _excluded.isEmpty) return null;
+    if (names.isEmpty) return widget.preselectedApps;
     final picked = names.where((s) => !_excluded.contains(s)).toList();
-    return picked.length == names.length ? null : picked;
+    if (picked.length == names.length) {
+      return widget.preselectedApps != null ? picked : null;
+    }
+    return picked;
   }
 
   /// Fraction of the range's sources still ticked — cost/latency estimates
@@ -1258,6 +1281,108 @@ class _SaveReceiptCardState extends State<SaveReceiptCard> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Save offer (DESIGN-SAVE-OFFER.md, wireframes: "Save Offer.dc.html") ─────
+//
+// Breakpoint nudge (arrival A — the card just appears): evidence and actions
+// visible at once, zero extra gestures. Accept morphs into the shipped
+// receipt; Adjust opens the chooser pre-filled; ✕ or a silent ~45 s fade
+// dismisses. Every response is a training label.
+
+/// The offer card: evidence-first claim (duration · sources · recency — every
+/// token checkable), optional confident context line, verb-carrying actions.
+/// No "Not now" button: the ✕ and the fade both mean it.
+class SaveOfferCard extends StatelessWidget {
+  final SaveOffer offer;
+  final VoidCallback onAccept;
+  final VoidCallback onAdjust;
+  final VoidCallback onDismiss;
+
+  const SaveOfferCard({
+    super.key,
+    required this.offer,
+    required this.onAccept,
+    required this.onAdjust,
+    required this.onDismiss,
+  });
+
+  String get _recency {
+    final idle = offer.idleTailMinutes;
+    if (idle != null) return '$idle min idle at the end';
+    final ago =
+        (DateTime.now().millisecondsSinceEpoch - offer.endedTs) ~/ 60000;
+    return ago < 2 ? 'ended just now' : 'ended $ago min ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = HudTheme.of(context);
+    // Honest idle tail: the duration turns amber when part of the range was
+    // idle — the claim names it instead of hiding it.
+    final durColor =
+        offer.idleTailMinutes != null ? _amber : t.selectionAccent;
+    return _CardShell(
+      width: 300,
+      borderColor: t.selectionAccent.withValues(alpha: 0.35),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: t.selectionAccent,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                      color: t.selectionAccent.withValues(alpha: 0.3),
+                      spreadRadius: 2),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('Save this session?',
+                style: _mono(12, t.textPrimary, weight: FontWeight.w600)),
+            const Spacer(),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                  onTap: onDismiss,
+                  child: Text('✕', style: _mono(12, t.textDim))),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(
+                  text: '${offer.minutes} min',
+                  style: _mono(11, durColor, weight: FontWeight.w600)),
+              TextSpan(
+                  text: ' · ${offer.coverage} · $_recency',
+                  style: _mono(11, t.textMuted)),
+            ]),
+          ),
+          if (offer.threadLabel != null) ...[
+            const SizedBox(height: 5),
+            Text('mostly: ${offer.threadLabel}',
+                style: _mono(10, t.textDim),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ],
+          const SizedBox(height: 10),
+          Row(children: [
+            _cardButton(t, 'Save ${offer.minutes} min', onAccept,
+                primary: true),
+            const SizedBox(width: 6),
+            _cardButton(t, 'Adjust…', onAdjust),
+          ]),
         ],
       ),
     );

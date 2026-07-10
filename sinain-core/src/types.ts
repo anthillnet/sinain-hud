@@ -341,11 +341,43 @@ export interface SaveReceiptMessage {
   cost?: number;
   /** Seconds remaining in which undo is accepted (present when status=saved). */
   undoSeconds?: number;
+  /** Who initiated the save. Absent = "user_save" (deployed-overlay skew). */
+  provenance?: SaveProvenance;
   error?: string;
   ts: number;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | VoiceSessionMessage;
+/** KG provenance of a save: manual gesture vs an accepted breakpoint offer. */
+export type SaveProvenance = "user_save" | "offered_save";
+
+/** Proactive save offer at a breakpoint (DESIGN-SAVE-OFFER.md): Sinain
+ *  proposes a range + scope, the user disposes. Zero-LLM — composed from
+ *  window data the buffers already hold. */
+export interface SaveOfferMessage {
+  type: "save_offer";
+  offerId: string;
+  /** Proposed range (the episode's engaged span). */
+  minutes: number;
+  /** Proposed app scope — never includes "mic" (privacy floor). */
+  apps: string[];
+  /** Display coverage, e.g. "IntelliJ IDEA, Google Chrome". */
+  coverage: string;
+  threadId: string;
+  /** Context line ("mostly: …") — present only when confidently known. */
+  threadLabel?: string;
+  /** Honest idle tail: trailing minutes of the range with no activity. */
+  idleTailMinutes?: number;
+  /** Breakpoint timestamp the episode ended at. */
+  endedTs: number;
+  /** Client-side silent-fade horizon (~45s). */
+  expirySeconds: number;
+  ts: number;
+}
+
+/** Overlay → core response to a save offer (POST /capture/offer/response). */
+export type SaveOfferResponse = "accepted" | "adjusted" | "dismissed" | "expired";
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | VoiceSessionMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -528,6 +560,21 @@ export interface BurstConfig {
   apiKey: string;
   maxTokens: number;
   timeoutMs: number;
+}
+
+/** Breakpoint save offers (DESIGN-SAVE-OFFER.md): thresholds + caps for the
+ *  proactive "Save these N min?" nudge. Caps are the doc's binding guardrails;
+ *  thresholds are tuned, not designed. */
+export interface SaveOfferConfig {
+  enabled: boolean;
+  /** Minimum engaged minutes for an episode to qualify ("long"). */
+  minMinutes: number;
+  /** ≤ N offers per day. */
+  maxPerDay: number;
+  /** ≥ N minutes between offers. */
+  cooldownMinutes: number;
+  /** Client-side silent-fade horizon for an untouched offer. */
+  expirySeconds: number;
 }
 
 /** "Call sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
@@ -813,6 +860,7 @@ export interface CoreConfig {
   agentConfig: AnalysisConfig;
   regionSlmConfig: RegionSlmConfig;
   burstConfig: BurstConfig;
+  saveOfferConfig: SaveOfferConfig;
   voiceConfig: VoiceConfig;
   /** Rolling-window retention horizon for feed/sense buffers (ms). */
   windowHorizonMs: number;
