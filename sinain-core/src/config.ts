@@ -332,7 +332,7 @@ export function loadConfig(): CoreConfig {
   // data; the LLM runs only on acceptance (the normal save distillation).
   const saveOfferConfig: import("./types.js").SaveOfferConfig = {
     enabled: boolEnv("SAVE_OFFER_ENABLED", true),
-    minMinutes: intEnv("SAVE_OFFER_MIN_MINUTES", 20),
+    minMinutes: intEnv("SAVE_OFFER_MIN_MINUTES", 10),
     maxPerDay: intEnv("SAVE_OFFER_MAX_PER_DAY", 3),
     cooldownMinutes: intEnv("SAVE_OFFER_COOLDOWN_MINUTES", 45),
     expirySeconds: intEnv("SAVE_OFFER_EXPIRY_SECONDS", 45),

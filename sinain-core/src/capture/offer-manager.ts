@@ -19,7 +19,7 @@ const PROPOSE_MIN_MINUTES = 10;
 // minute-buckets — a mostly-idle dwell never offers.
 const LOUD_MIN_TOP_FRACTION = 0.5;
 // Explicit ✕-dismissals that silence offers for the rest of the day.
-const DAY_OFF_AFTER_DISMISSALS = 2;
+const DAY_OFF_AFTER_DISMISSALS = 3;
 // Chooser slider ceiling — offers never propose past what Adjust can express.
 const MAX_OFFER_MINUTES = 120;
 
@@ -118,7 +118,7 @@ export class OfferManager {
 
     // Guardrails: ≤N/day · cooldown · 2 dismissals end the day · once per episode.
     if (this.state.offersToday >= this.cfg.maxPerDay) return skip(`day cap (${this.cfg.maxPerDay})`);
-    if (this.state.consecutiveDismissals >= DAY_OFF_AFTER_DISMISSALS) return skip("2 dismissals — offers off for the day");
+    if (this.state.consecutiveDismissals >= DAY_OFF_AFTER_DISMISSALS) return skip(`${DAY_OFF_AFTER_DISMISSALS} dismissals — offers off for the day`);
     if (Date.now() - this.state.lastOfferTs < this.cfg.cooldownMinutes * 60_000) return skip(`cooldown (${this.cfg.cooldownMinutes}m)`);
     const episodeKey = `${ev.threadId}@${ev.at}`;
     if (this.state.offeredEpisodes.includes(episodeKey)) return skip("already offered");
