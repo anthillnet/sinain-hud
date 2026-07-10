@@ -59,6 +59,9 @@ export class OfferManager {
     private cfg: SaveOfferConfig,
   ) {
     this.state = this.loadState();
+    log(TAG, cfg.enabled
+      ? `armed: ≥${cfg.minMinutes}m episodes · ≤${cfg.maxPerDay}/day · ${cfg.cooldownMinutes}m cooldown · ${cfg.expirySeconds}s expiry`
+      : "disabled (SAVE_OFFER_ENABLED=false)");
   }
 
   private get statePath(): string { return join(this.memoryDir, "save-offer-state.json"); }
@@ -105,15 +108,20 @@ export class OfferManager {
     if (!this.cfg.enabled) return;
     this.rollDay();
 
+    // Skips log their reason — episode boundaries are rare (a few per hour),
+    // and a silent gate is undiagnosable in the field.
+    const skip = (why: string): void =>
+      log(TAG, `${ev.threadId}: episode ended (${Math.round(ev.engagedMs / 60_000)}m) — no offer: ${why}`);
+
     const minutes = Math.min(Math.round(ev.engagedMs / 60_000), MAX_OFFER_MINUTES);
-    if (minutes < this.cfg.minMinutes) return; // not long
+    if (minutes < this.cfg.minMinutes) return skip(`short (< ${this.cfg.minMinutes}m)`);
 
     // Guardrails: ≤N/day · cooldown · 2 dismissals end the day · once per episode.
-    if (this.state.offersToday >= this.cfg.maxPerDay) return;
-    if (this.state.consecutiveDismissals >= DAY_OFF_AFTER_DISMISSALS) return;
-    if (Date.now() - this.state.lastOfferTs < this.cfg.cooldownMinutes * 60_000) return;
+    if (this.state.offersToday >= this.cfg.maxPerDay) return skip(`day cap (${this.cfg.maxPerDay})`);
+    if (this.state.consecutiveDismissals >= DAY_OFF_AFTER_DISMISSALS) return skip("2 dismissals — offers off for the day");
+    if (Date.now() - this.state.lastOfferTs < this.cfg.cooldownMinutes * 60_000) return skip(`cooldown (${this.cfg.cooldownMinutes}m)`);
     const episodeKey = `${ev.threadId}@${ev.at}`;
-    if (this.state.offeredEpisodes.includes(episodeKey)) return;
+    if (this.state.offeredEpisodes.includes(episodeKey)) return skip("already offered");
 
     // Scope: apps with a real share of the episode, minus learned exclusions.
     // Never "mic" (privacy floor — voice is opt-in through Adjust only).
@@ -123,11 +131,11 @@ export class OfferManager {
     const proposed = sources.filter((s) =>
       !excluded.includes(s.name) &&
       (s.minutes >= PROPOSE_MIN_MINUTES || s.minutes >= minutes * PROPOSE_MIN_FRACTION));
-    if (proposed.length === 0) return;
+    if (proposed.length === 0) return skip("no proposable sources");
 
     // "Loud": a mostly-idle dwell (top app active in < half the range) never offers.
     const topMinutes = Math.max(...proposed.map((s) => s.minutes));
-    if (topMinutes < minutes * LOUD_MIN_TOP_FRACTION) return;
+    if (topMinutes < minutes * LOUD_MIN_TOP_FRACTION) return skip(`quiet (top app ${topMinutes}m of ${minutes}m)`);
 
     // Honest idle tail: trailing minutes with no scoped activity get named
     // on the card ("47 min · 12 min idle at the end"), never hidden.
