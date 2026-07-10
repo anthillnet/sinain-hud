@@ -188,7 +188,8 @@ export const KNOWLEDGE_WIKI_UI_HTML = `<!DOCTYPE html>
 <script>
 "use strict";
 var SHARE_BASE_URL = __WIKI_SHARE_BASE_URL__;
-var SHARE_INLINE_MAX_BYTES = __WIKI_SHARE_INLINE_MAX__;
+var SHARE_PEERJS_HOST = __WIKI_SHARE_PEERJS_HOST__;
+var SHARE_TURN_CREDENTIALS_URL = __WIKI_SHARE_TURN_CREDENTIALS_URL__;
 
 var $ = function (s, el) { return (el || document).querySelector(s); };
 function el(tag, cls, text) {
@@ -435,49 +436,246 @@ function styleFactRow(row, anchor, sourceEntity) {
   };
 }
 
-// ── share creation (fragment mode; port of the v2 flow) ──────────────
+// ── sharing (peerjs live transfer — the only bundle transport) ───────
+// Bundles never ride inside links: the link carries only #peer=<token>,
+// the recipient dials the token and the bundle streams peer-to-peer over
+// WebRTC (TURN relay as last resort). Protocol and diagnostics ported
+// verbatim from the Living Confluence ShareManager.
 function b64url(bytes) {
   var bin = "";
   for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
   return btoa(bin).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
-}
-function gzipBase64(text) {
-  if (typeof CompressionStream === "undefined") return Promise.reject(new Error("no CompressionStream"));
-  var stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
-  return new Response(stream).arrayBuffer().then(function (buf) { return b64url(new Uint8Array(buf)); });
 }
 function randomHex(n) {
   var b = new Uint8Array(n);
   crypto.getRandomValues(b);
   return Array.prototype.map.call(b, function (x) { return ("0" + x.toString(16)).slice(-2); }).join("");
 }
-function createShare(entityId) {
-  fetch("/knowledge/concepts/export?entity=" + encodeURIComponent(entityId) + "&depth=1&include_page=1")
-    .then(function (r) { if (!r.ok) throw new Error("export failed: " + r.status); return r.text(); })
-    .then(function (bundle) {
-      var sizeBytes = new TextEncoder().encode(bundle).length;
-      if (sizeBytes > SHARE_INLINE_MAX_BYTES) {
-        showToast("Bundle too large for a link share (" + sizeBytes + " B) — use peer share in the classic UI at /knowledge/ui-v2.");
-        return null;
-      }
-      return gzipBase64(bundle).then(function (compressed) {
-        var token = randomHex(8);
-        var port = location.port || "9500";
-        var entB64 = b64url(new TextEncoder().encode(entityId));
-        var url = SHARE_BASE_URL + "#e=" + entB64 + "&p=" + port + "&bundle=" + compressed;
-        return fetchJson("/knowledge/shares", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entity_id: entityId, mode: "fragment", share_token: token, url: url, bundle_size: sizeBytes }),
-        }).then(function () {
-          return navigator.clipboard.writeText(url).catch(function () {});
-        }).then(function () {
-          showToast("✓ Link copied · self-contained, can't be revoked");
-          refreshShareCount();
+
+var _peerjsLoading = null;
+function ensurePeerJsLoaded() {
+  if (window.Peer) return Promise.resolve();
+  if (_peerjsLoading) return _peerjsLoading;
+  _peerjsLoading = new Promise(function (res, rej) {
+    var s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js";
+    s.crossOrigin = "anonymous";
+    s.onload = function () { res(); };
+    s.onerror = function () { rej(new Error("peerjs failed to load — network or CDN issue")); };
+    document.head.appendChild(s);
+  });
+  return _peerjsLoading;
+}
+
+// Ephemeral TURN credentials from the configured minter; cached until ~1min
+// before TTL. [] on any failure → PeerJS STUN-only defaults (degrade, don't break).
+var _iceCache = null;
+function getIceServers() {
+  if (!SHARE_TURN_CREDENTIALS_URL) return Promise.resolve([]);
+  if (_iceCache && Date.now() < _iceCache.expiresAt) return Promise.resolve(_iceCache.servers);
+  return fetch(SHARE_TURN_CREDENTIALS_URL, { cache: "no-store" })
+    .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function (data) {
+      var servers = Array.isArray(data.iceServers) ? data.iceServers : [];
+      var ttlMs = (Number(data.ttl) || 3600) * 1000;
+      _iceCache = { servers: servers, expiresAt: Date.now() + Math.max(0, ttlMs - 60000) };
+      console.log("[sinain-share] iceServers loaded: " + servers.length + " entries");
+      return servers;
+    })
+    .catch(function (e) {
+      console.warn("[sinain-share] TURN creds fetch failed: " + (e && e.message) + " — falling back to STUN-only");
+      return [];
+    });
+}
+
+function newPeer(idOrUndef, iceServers) {
+  var opts = SHARE_PEERJS_HOST ? { host: SHARE_PEERJS_HOST, debug: 3 } : { debug: 3 };
+  if (iceServers && iceServers.length) opts.config = { iceServers: iceServers };
+  return idOrUndef ? new window.Peer(idOrUndef, opts) : new window.Peer(opts);
+}
+function instrumentPeer(peer, label) {
+  var tag = "[sinain-share:" + label + "]";
+  peer.on("open", function (id) { console.log(tag, "peer.open id=" + id); });
+  peer.on("error", function (e) { console.warn(tag, "peer.error type=" + (e && e.type) + " msg=" + (e && e.message)); });
+  peer.on("disconnected", function () { console.warn(tag, "peer.disconnected (lost broker connection)"); });
+  peer.on("close", function () { console.log(tag, "peer.close (destroyed)"); });
+}
+
+var ShareManager = (function () {
+  var peers = {}; // share_token → live Peer (sender side)
+
+  function buildBundle(entityId) {
+    return fetch("/knowledge/concepts/export?entity=" + encodeURIComponent(entityId) + "&depth=1&include_page=1")
+      .then(function (r) { if (!r.ok) throw new Error("export failed: " + r.status); return r.text(); });
+  }
+
+  // Everything identifying rides in the URL fragment (never sent to the
+  // redirector host): #e=<b64url entity>&p=<port>&peer=<token>.
+  function buildShareUrl(entityId, token) {
+    var port = location.port || (location.protocol === "https:" ? "443" : "80");
+    return SHARE_BASE_URL + "#e=" + b64url(new TextEncoder().encode(entityId)) + "&p=" + port + "&peer=" + token;
+  }
+
+  function patchStatus(token, status, extra) {
+    var body = Object.assign({ status: status }, extra || {});
+    return fetchJson("/knowledge/shares/" + encodeURIComponent(token), {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(refreshShareCount).catch(function () {});
+  }
+
+  function destroyPeer(token) {
+    var peer = peers[token];
+    if (peer) { try { peer.destroy(); } catch (e) {} delete peers[token]; }
+  }
+
+  function attachSenderHandlers(peer, token, entityId) {
+    peer.on("connection", function (conn) {
+      console.log("[sinain-share:sender:" + token.slice(0, 8) + "] inbound connection from", conn.peer);
+      patchStatus(token, "connecting");
+      conn.on("open", function () {
+        buildBundle(entityId).then(function (bundle) {
+          console.log("[sinain-share:sender:" + token.slice(0, 8) + "] sending bundle, " + bundle.length + " bytes");
+          conn.send({ type: "bundle", payload: bundle });
+        }).catch(function (e) {
+          console.warn("[sinain-share:sender] buildBundle/send failed:", e);
+          conn.send({ type: "error", message: String(e).slice(0, 200) });
+          conn.close();
         });
       });
-    })
-    .catch(function (e) { showToast("Share failed: " + e.message); });
-}
+      conn.on("data", function (msg) {
+        if (msg && msg.type === "ack") {
+          patchStatus(token, "delivered", { delivered_at: Date.now() });
+          setTimeout(function () { destroyPeer(token); }, 5000);
+        }
+      });
+    });
+    peer.on("disconnected", function () { patchStatus(token, "disconnected"); });
+    peer.on("close", function () { patchStatus(token, "disconnected"); });
+    peer.on("error", function (err) {
+      console.warn("share peer error", token, err && err.type, err && err.message);
+    });
+  }
+
+  function createShare(entityId) {
+    return ensurePeerJsLoaded()
+      .then(getIceServers)
+      .then(function (ice) {
+        var token = randomHex(8);
+        var peer = newPeer(token, ice);
+        instrumentPeer(peer, "sender:" + token.slice(0, 8));
+        return new Promise(function (res, rej) {
+          peer.on("open", function () { res({ peer: peer, token: token }); });
+          peer.on("error", function (e) { rej(e); });
+          setTimeout(function () { rej(new Error("peerjs broker timeout")); }, 8000);
+        });
+      })
+      .then(function (ctx) {
+        var url = buildShareUrl(entityId, ctx.token);
+        return fetchJson("/knowledge/shares", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity_id: entityId, mode: "peer", share_token: ctx.token, url: url }),
+        }).then(function (r) {
+          if (r.ok === false) throw new Error(r.error || "share registration failed");
+          peers[ctx.token] = ctx.peer;
+          attachSenderHandlers(ctx.peer, ctx.token, entityId);
+          return navigator.clipboard.writeText(url).catch(function () {});
+        }).then(function () {
+          showToast("✓ Link copied · live until you revoke — keep this tab open to serve it");
+          refreshShareCount();
+        });
+      })
+      .catch(function (e) { showToast("Share failed: " + (e && e.message || e)); });
+  }
+
+  // Re-register sender peers for open shares when the UI loads, so links
+  // created in an earlier session keep working while this tab is open.
+  function resumePeerShares() {
+    fetchJson("/knowledge/shares?status=waiting&status=connecting&status=disconnected").then(function (r) {
+      var rows = (r && r.shares || []).filter(function (s) { return s.mode === "peer"; });
+      if (!rows.length) return;
+      ensurePeerJsLoaded().then(getIceServers).then(function (ice) {
+        rows.forEach(function (share) {
+          var peer = newPeer(share.share_token, ice);
+          instrumentPeer(peer, "sender-resume:" + share.share_token.slice(0, 8));
+          var opened = false;
+          peer.on("open", function () {
+            opened = true;
+            peers[share.share_token] = peer;
+            attachSenderHandlers(peer, share.share_token, share.entity_id);
+            if (share.status !== "waiting") patchStatus(share.share_token, "waiting");
+          });
+          peer.on("error", function (e) {
+            // "unavailable-id" = another tab already serves this share; leave it be.
+            if (!opened) console.warn("resume failed for", share.share_token, e && e.type);
+          });
+        });
+      }).catch(function () {});
+    }).catch(function () {});
+  }
+
+  function revoke(token) {
+    destroyPeer(token);
+    return patchStatus(token, "revoked", { revoked_at: Date.now() });
+  }
+  function forget(token) {
+    destroyPeer(token);
+    return fetchJson("/knowledge/shares/" + encodeURIComponent(token), { method: "DELETE" })
+      .then(refreshShareCount).catch(function () {});
+  }
+
+  function connectAsRecipient(token) {
+    showToast("Connecting peer-to-peer…");
+    return ensurePeerJsLoaded()
+      .then(getIceServers)
+      .then(function (ice) {
+        var me = newPeer(undefined, ice);
+        instrumentPeer(me, "recipient:" + token.slice(0, 8));
+        return new Promise(function (res, rej) {
+          me.on("open", function () { res(me); });
+          me.on("error", function (e) { rej(e); });
+          setTimeout(function () { rej(new Error("peerjs broker timeout")); }, 8000);
+        });
+      })
+      .then(function (me) {
+        return new Promise(function (resolve, reject) {
+          var conn = me.connect(token, { reliable: true });
+          var cleanup = function () { try { conn.close(); } catch (e) {} try { me.destroy(); } catch (e) {} };
+          var openTimeout = setTimeout(function () {
+            cleanup();
+            reject(new Error("couldn't reach source over the network (NAT/relay) — try again"));
+          }, 15000);
+          me.on("error", function (e) {
+            if (e && e.type === "peer-unavailable") {
+              clearTimeout(openTimeout);
+              cleanup();
+              reject(new Error("source offline — the sender's Sinain isn't running"));
+            }
+          });
+          conn.on("open", function () { clearTimeout(openTimeout); });
+          conn.on("error", function (e) { cleanup(); reject(e); });
+          conn.on("data", function (msg) {
+            if (!msg) return;
+            if (msg.type === "error") { cleanup(); reject(new Error("source error: " + msg.message)); return; }
+            if (msg.type === "bundle") {
+              fetchJson("/knowledge/concepts/import?conflict=merge", {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: msg.payload,
+              }).then(function (importR) {
+                if (importR && importR.ok === false) { cleanup(); reject(new Error(importR.error || "import failed")); return; }
+                conn.send({ type: "ack" });
+                setTimeout(cleanup, 500);
+                resolve(importR);
+              }).catch(function (e) { cleanup(); reject(e); });
+            }
+          });
+        });
+      });
+  }
+
+  return { createShare: createShare, resumePeerShares: resumePeerShares, revoke: revoke, forget: forget, connectAsRecipient: connectAsRecipient };
+})();
+
+function createShare(entityId) { ShareManager.createShare(entityId); }
 
 // ── rail ─────────────────────────────────────────────────────────────
 var railCache = { at: 0, doc: null };
@@ -849,14 +1047,25 @@ function viewShare(doc, main) {
   }
   var actions = el("div", "");
   actions.style.marginTop = "16px";
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
   var revoke = el("button", "btn", "Revoke");
   revoke.onclick = function () {
-    fetchJson("/knowledge/shares/" + encodeURIComponent(state.route.token), {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "revoked" }),
-    }).then(function () { showToast("Share revoked"); navigate({ kind: "shares" }); refreshShareCount(); });
+    ShareManager.revoke(state.route.token).then(function () {
+      showToast("Share revoked — the peer no longer answers");
+      navigate({ kind: "shares" });
+    });
+  };
+  var forget = el("button", "btn", "Forget");
+  forget.title = "Remove this share record entirely";
+  forget.onclick = function () {
+    ShareManager.forget(state.route.token).then(function () {
+      showToast("Share forgotten");
+      navigate({ kind: "shares" });
+    });
   };
   actions.appendChild(revoke);
+  actions.appendChild(forget);
   page.appendChild(actions);
   main.appendChild(page);
 }
@@ -991,21 +1200,32 @@ function runSearch(q) {
 $("#logo").onclick = function () { navigate({ kind: "index" }); };
 $("#sharesBtn").onclick = function () { navigate({ kind: "shares" }); };
 function refreshShareCount() {
-  fetchJson("/knowledge/shares").then(function (r) {
+  // Live shares only — a delivered share needs no attention.
+  fetchJson("/knowledge/shares?status=waiting&status=connecting").then(function (r) {
     var n = (r.shares || []).length;
     $("#shareCount").textContent = n ? String(n) : "";
   }).catch(function () {});
 }
 // ── incoming share links ─────────────────────────────────────────────
 // share.html redirects here with everything in the fragment:
-// #e=<b64url entity>&p=<port>&bundle=<gzip b64url> | &peer=<token>.
-// Fragment bundles import inline; peer transfers forward to the classic
-// V2 UI (kept at /knowledge/ui-v2), which still speaks peerjs.
+// #e=<b64url entity>&p=<port>&peer=<token> (live peer transfer — the
+// canonical form) | &bundle=<gzip b64url> (legacy inline links, still
+// accepted on receive).
 function b64urlDecode(s) {
   var b = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
   var bytes = new Uint8Array(b.length);
   for (var i = 0; i < b.length; i++) bytes[i] = b.charCodeAt(i);
   return bytes;
+}
+function afterShareImport(entB64) {
+  railCache.at = 0;
+  var entityId = "";
+  try { entityId = new TextDecoder().decode(b64urlDecode(entB64 || "")); } catch (e) {}
+  showToast("✓ Shared concept imported");
+  if (entityId) {
+    var slug = entityId.indexOf("entity:") === 0 ? entityId.slice(7) : entityId.replace(":", "__");
+    navigate({ kind: "entity", slug: slug });
+  } else render();
 }
 function handleIncomingShare() {
   if (!location.hash || location.hash.length < 2) return false;
@@ -1013,9 +1233,14 @@ function handleIncomingShare() {
   var bundle = params.get("bundle");
   var peer = params.get("peer");
   var entB64 = params.get("e");
-  if (peer) { location.replace("/knowledge/ui-v2" + location.hash); return true; }
-  if (!bundle) return false;
+  if (!peer && !bundle) return false;
   history.replaceState({}, "", location.pathname);
+  if (peer) {
+    ShareManager.connectAsRecipient(peer)
+      .then(function () { afterShareImport(entB64); })
+      .catch(function (e) { showToast("Share import failed: " + (e && e.message || e)); });
+    return true;
+  }
   showToast("Importing shared concept…");
   var gunzip = new Blob([b64urlDecode(bundle)]).stream().pipeThrough(new DecompressionStream("gzip"));
   new Response(gunzip).text().then(function (text) {
@@ -1024,30 +1249,34 @@ function handleIncomingShare() {
     });
   }).then(function (r) {
     if (r.ok === false) { showToast("Share import failed: " + (r.error || "unknown")); return; }
-    railCache.at = 0;
-    var entityId = "";
-    try { entityId = new TextDecoder().decode(b64urlDecode(entB64 || "")); } catch (e) {}
-    showToast("✓ Shared concept imported");
-    if (entityId) {
-      var slug = entityId.indexOf("entity:") === 0 ? entityId.slice(7) : entityId.replace(":", "__");
-      navigate({ kind: "entity", slug: slug });
-    } else render();
+    afterShareImport(entB64);
   }).catch(function (e) { showToast("Share import failed: " + e); });
   return true;
 }
 
 refreshShareCount();
 render();
-handleIncomingShare();
+// Incoming link → receive it; otherwise re-arm sender peers for any open
+// shares so links created in earlier sessions answer while this tab lives.
+if (!handleIncomingShare()) ShareManager.resumePeerShares();
 </script>
 </body>
 </html>`;
 
-/** Inject share config (mirrors renderKnowledgeUiV2's replacement idiom). */
+/** Inject share config at serve time (env-driven, like the previous SPA).
+ *
+ *  - SINAIN_SHARE_BASE_URL: public share-redirector (sinain.com carries the
+ *    current docs/share.html; fragments never reach the host).
+ *  - SINAIN_PEERJS_HOST: peerjs broker override; empty = peerjs.com cloud.
+ *  - SINAIN_TURN_CREDENTIALS_URL: ephemeral TURN credential minter for the
+ *    WebRTC relay path; empty = STUN-only. */
 export function renderWikiUi(): string {
-  const inlineMax = parseInt(process.env.SINAIN_SHARE_INLINE_MAX_BYTES || "6000");
   const shareBaseUrl = process.env.SINAIN_SHARE_BASE_URL || "https://sinain.com/share.html";
+  const peerHost = process.env.SINAIN_PEERJS_HOST || "";
+  const turnCredsUrl = process.env.SINAIN_TURN_CREDENTIALS_URL
+    || "https://turn.sinain.com/turn-credentials";
   return KNOWLEDGE_WIKI_UI_HTML
     .replace(/__WIKI_SHARE_BASE_URL__/g, JSON.stringify(shareBaseUrl))
-    .replace(/__WIKI_SHARE_INLINE_MAX__/g, String(inlineMax));
+    .replace(/__WIKI_SHARE_PEERJS_HOST__/g, JSON.stringify(peerHost))
+    .replace(/__WIKI_SHARE_TURN_CREDENTIALS_URL__/g, JSON.stringify(turnCredsUrl));
 }
