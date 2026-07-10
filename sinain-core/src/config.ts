@@ -179,7 +179,12 @@ export function loadConfig(): CoreConfig {
     gainDb: intEnv("AUDIO_GAIN_DB", 20),
   };
 
-  const micEnabled = boolEnv("MIC_ENABLED", false);
+  // Default ON: the pipeline is constructed in STANDBY — nothing is captured
+  // until the user toggles the mic in the HUD (or MIC_AUTO_START=true). With
+  // false the pipeline is never built, which made the HUD's mic toggle a dead
+  // control out of the box ("Mic not enabled" with no way to enable it).
+  // MIC_ENABLED=false remains the hard kill switch.
+  const micEnabled = boolEnv("MIC_ENABLED", true);
   const micConfig: AudioPipelineConfig = {
     device: env("MIC_DEVICE", "default"),
     sampleRate: intEnv("MIC_SAMPLE_RATE", 16000),
