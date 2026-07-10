@@ -28,6 +28,34 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+  npm-pack-smoke:
+    name: npm launcher — pack + run from tarball
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sinain-hud-plugin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The published package is only what `files` allows into the tarball —
+      # a module missing from that list ships as an instant startup crash
+      # (1.32.0/1.33.0 shipped without encrypted-store.js). Run the CLI from
+      # the real tarball, not the repo, so module resolution proves the list.
+      - name: Pack tarball
+        run: npm pack --pack-destination /tmp
+
+      - name: Run CLI from tarball
+        run: |
+          mkdir /tmp/smoke && tar xzf /tmp/geravant-sinain-*.tgz -C /tmp/smoke
+          cd /tmp/smoke/package
+          SINAIN_NO_AUTO_UPDATE=1 node cli.js version
+          SINAIN_NO_AUTO_UPDATE=1 node cli.js help
+
   overlay-analyze:
     name: Overlay — Flutter Analyze
     runs-on: macos-latest
