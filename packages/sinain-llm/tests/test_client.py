@@ -151,6 +151,38 @@ class TestBodyShaping(unittest.TestCase):
             chat("s", "u", model="openai/gpt-4o-mini", json_schema=schema)
         self.assertNotIn("format", self._body(post))
 
+    def test_cerebras_schema_sanitized(self):
+        # Cerebras 400s on bound keywords and oneOf; the shim strips bounds
+        # and rewrites oneOf→anyOf for that provider ONLY. Original untouched.
+        schema = {
+            "title": "digest",
+            "type": "object",
+            "properties": {
+                "what": {"type": "string", "minLength": 1, "maxLength": 400},
+                "facts": {
+                    "type": "array", "maxItems": 30,
+                    "items": {"oneOf": [{"type": "string"}, {"type": "object"}]},
+                },
+            },
+        }
+        post = mock.Mock(return_value=_resp())
+        with mock.patch("sinain_llm.client.requests.post", post):
+            chat("s", "u", model="cerebras/gemma-4-31b", json_schema=schema)
+        sent = self._body(post)["response_format"]["json_schema"]["schema"]
+        self.assertNotIn("minLength", sent["properties"]["what"])
+        self.assertNotIn("maxLength", sent["properties"]["what"])
+        self.assertNotIn("maxItems", sent["properties"]["facts"])
+        self.assertIn("anyOf", sent["properties"]["facts"]["items"])
+        self.assertNotIn("oneOf", sent["properties"]["facts"]["items"])
+        self.assertEqual(  # caller's schema object is not mutated
+            schema["properties"]["what"]["maxLength"], 400)
+        # Other providers get the schema verbatim.
+        with mock.patch("sinain_llm.client.requests.post", post):
+            chat("s", "u", model="openai/gpt-4o-mini", json_schema=schema)
+        sent = self._body(post)["response_format"]["json_schema"]["schema"]
+        self.assertEqual(sent["properties"]["what"]["maxLength"], 400)
+        self.assertIn("oneOf", sent["properties"]["facts"]["items"])
+
     def test_loose_json_mode_provider_gate(self):
         post = mock.Mock(return_value=_resp())
         for model, expected in [

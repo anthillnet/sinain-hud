@@ -56,6 +56,35 @@ def _resolve_provider(model: str, api_key: str | None = None) -> tuple[str, str,
     }
 
 
+# Bound keywords Cerebras structured outputs reject with a 400 ("Invalid
+# fields for schema with types ['string']: {'minLength', 'maxLength'}",
+# "... ['array']: {'maxItems'}"). Dropping bounds only loosens validation —
+# the shape constraint (the part callers rely on) survives.
+_CEREBRAS_UNSUPPORTED = frozenset((
+    "minLength", "maxLength",
+    "minItems", "maxItems",
+    "minimum", "maximum",
+    "minProperties", "maxProperties",
+))
+
+
+def _cerebras_schema(schema: dict) -> dict:
+    """Deep-copy *schema* without the bound keywords Cerebras rejects.
+
+    Also rewrites ``oneOf`` → ``anyOf`` ("Unsupported JSON schema fields ...
+    dict_keys(['oneOf'])"): for constrained generation the two are equivalent
+    — the generator emits one branch either way."""
+    if isinstance(schema, dict):
+        return {
+            ("anyOf" if k == "oneOf" else k): _cerebras_schema(v)
+            for k, v in schema.items()
+            if k not in _CEREBRAS_UNSUPPORTED
+        }
+    if isinstance(schema, list):
+        return [_cerebras_schema(v) for v in schema]
+    return schema
+
+
 def chat(
     system_prompt: str = "",
     user_prompt: str = "",
@@ -118,11 +147,12 @@ def chat(
         body["prompt_cache_key"] = cache_key
 
     if json_schema is not None:
+        sent_schema = _cerebras_schema(json_schema) if provider == "cerebras" else json_schema
         body["response_format"] = {
             "type": "json_schema",
             "json_schema": {
                 "name": json_schema.get("title", "output"),
-                "schema": json_schema,
+                "schema": sent_schema,
                 "strict": True,
             },
         }
