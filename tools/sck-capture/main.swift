@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import CoreGraphics
 import CoreImage
 import CoreMedia
@@ -22,6 +23,11 @@ var pinDisplay: Bool = false
 // copy promises.
 var requestPermission: Bool = false   // exercise the real capture path → prompt
 var checkPermission: Bool = false     // non-prompting status poll
+// Mic mode: AVAudioEngine input tap → s16le PCM to stdout. Audio only — no
+// screen, no ScreenCaptureKit, no Screen Recording permission; it needs the
+// Microphone permission instead (prompted on first run).
+var micMode: Bool = false
+var micDevice: String? = nil          // input device by name; nil = default
 
 var args = CommandLine.arguments.dropFirst()
 while let arg = args.first {
@@ -39,6 +45,10 @@ while let arg = args.first {
         if let next = args.first { scale = Double(next) ?? 0.5; args = args.dropFirst() }
     case "--no-audio":
         audioEnabled = false
+    case "--mic":
+        micMode = true
+    case "--mic-device":
+        if let next = args.first { micDevice = next; args = args.dropFirst() }
     case "--pin-display":
         pinDisplay = true
     case "--request-permission":
@@ -49,11 +59,14 @@ while let arg = args.first {
         fputs("Usage: sck-capture [--sample-rate 16000] [--channels 1]\n", stderr)
         fputs("                 [--screen-dir ~/.sinain/capture] [--fps 1] [--scale 0.5]\n", stderr)
         fputs("                 [--no-audio] [--pin-display]\n", stderr)
+        fputs("                 [--mic] [--mic-device <name>]\n", stderr)
         fputs("                 [--request-permission] [--check-permission]\n", stderr)
         fputs("Captures system audio + screen via ScreenCaptureKit.\n", stderr)
         fputs("Audio: raw s16le PCM to stdout.\n", stderr)
         fputs("Screen: JPEG frames to --screen-dir (atomic write).\n", stderr)
-        fputs("Requires macOS 13+. Grant Screen Recording permission on first run.\n", stderr)
+        fputs("--mic: microphone only via AVAudioEngine (PCM to stdout, no screen).\n", stderr)
+        fputs("Requires macOS 13+. Grant Screen Recording permission on first run\n", stderr)
+        fputs("(Microphone permission for --mic).\n", stderr)
         exit(0)
     default:
         fputs("Unknown arg: \(arg)\n", stderr)
@@ -86,10 +99,148 @@ if requestPermission {
     exit(granted ? 0 : 1)
 }
 
-fputs("[sck-capture] sample_rate=\(sampleRate) channels=\(channels) fps=\(fps) scale=\(scale) audio=\(audioEnabled)\n", stderr)
+fputs("[sck-capture] sample_rate=\(sampleRate) channels=\(channels) fps=\(fps) scale=\(scale) audio=\(audioEnabled) mic=\(micMode)\n", stderr)
 
 // Disable stdout buffering for real-time piping
 setbuf(stdout, nil)
+
+// ── Mic mode: AVAudioEngine input tap → s16le PCM on stdout ─────────────────
+// Audio only: no SCStream, no screen files, no Screen Recording permission.
+// The consumer (sinain-core AudioPipeline) reads the same raw stream the
+// system-audio path produces, so VAD/transcription downstream are identical.
+
+/// CoreAudio lookup: input AudioDeviceID by (case-insensitive) device name.
+func inputDeviceID(named wanted: String) -> AudioDeviceID? {
+    var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return nil }
+    var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &devices) == noErr else { return nil }
+    for dev in devices {
+        // Input-capable? (has input stream configuration)
+        var inAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain)
+        var cfgSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(dev, &inAddr, 0, nil, &cfgSize) == noErr, cfgSize > 0 else { continue }
+        var nameAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var nameRef: Unmanaged<CFString>?
+        var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(dev, &nameAddr, 0, nil, &nameSize, &nameRef) == noErr,
+              let name = nameRef?.takeRetainedValue() as String? else { continue }
+        if name.lowercased() == wanted.lowercased() { return dev }
+    }
+    return nil
+}
+
+func runMic() -> Never {
+    // Microphone permission first — a denied engine yields silent zeros, which
+    // downstream reads as "capturing but idle" forever. Fail loud instead.
+    let sem = DispatchSemaphore(value: 0)
+    var granted = false
+    AVCaptureDevice.requestAccess(for: .audio) { ok in granted = ok; sem.signal() }
+    sem.wait()
+    guard granted else {
+        fputs("[sck-capture] error: Microphone permission not granted\n", stderr)
+        exit(1)
+    }
+
+    let engine = AVAudioEngine()
+    let input = engine.inputNode
+
+    // Optional device selection (System Settings default otherwise).
+    if let wanted = micDevice {
+        if var dev = inputDeviceID(named: wanted) {
+            var status = noErr
+            if let unit = input.audioUnit {
+                status = AudioUnitSetProperty(
+                    unit, kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global, 0, &dev, UInt32(MemoryLayout<AudioDeviceID>.size))
+            }
+            fputs("[sck-capture] mic device \"\(wanted)\" → id \(dev) (set: \(status == noErr))\n", stderr)
+        } else {
+            fputs("[sck-capture] mic device \"\(wanted)\" not found — using default input\n", stderr)
+        }
+    }
+
+    let inFormat = input.inputFormat(forBus: 0)
+    guard inFormat.sampleRate > 0 else {
+        fputs("[sck-capture] error: no usable input device\n", stderr)
+        exit(1)
+    }
+    guard let outFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16, sampleRate: Double(sampleRate),
+        channels: AVAudioChannelCount(channels), interleaved: true),
+          let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
+        fputs("[sck-capture] error: cannot build \(sampleRate)Hz/\(channels)ch converter\n", stderr)
+        exit(1)
+    }
+
+    input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { buffer, _ in
+        let ratio = outFormat.sampleRate / inFormat.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
+        guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+        var fed = false
+        var convErr: NSError?
+        converter.convert(to: out, error: &convErr) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard convErr == nil, out.frameLength > 0, let ch = out.int16ChannelData else { return }
+        let bytes = Int(out.frameLength) * Int(outFormat.streamDescription.pointee.mBytesPerFrame)
+        fwrite(ch[0], 1, bytes, stdout)
+    }
+
+    do {
+        try engine.start()
+    } catch {
+        fputs("[sck-capture] error: mic engine start failed: \(error.localizedDescription)\n", stderr)
+        exit(1)
+    }
+    fputs("[sck-capture] mic capturing (\(inFormat.sampleRate)Hz in → \(sampleRate)Hz s16le out)\n", stderr)
+
+    // Clean shutdown + orphan watchdog (mirror the SCK path).
+    let sigSources = [
+        DispatchSource.makeSignalSource(signal: SIGINT, queue: .main),
+        DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main),
+    ]
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    for src in sigSources {
+        src.setEventHandler {
+            fputs("\n[sck-capture] stopping mic...\n", stderr)
+            engine.stop()
+            exit(0)
+        }
+        src.resume()
+    }
+    let parentPid = getppid()
+    let watchdog = DispatchSource.makeTimerSource(queue: .main)
+    watchdog.schedule(deadline: .now() + 1, repeating: 1)
+    watchdog.setEventHandler {
+        if getppid() != parentPid {
+            fputs("[sck-capture] parent process died — exiting\n", stderr)
+            engine.stop()
+            exit(0)
+        }
+    }
+    watchdog.resume()
+    // Keep sigSources/watchdog alive for the process lifetime.
+    withExtendedLifetime((sigSources, watchdog)) { dispatchMain() }
+}
+
+if micMode {
+    runMic()
+}
 
 // SECURITY: the captured frame is a live screenshot — never world/group
 // readable. Make every file we create owner-only (frame.jpg, meta.json, tmp).
