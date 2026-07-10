@@ -13,6 +13,8 @@ import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer, type SemanticSenseEvent, type TextDelta } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
 import { roiSeeds } from "./chat/roi-seeds.js";
+import { handleWikiRoute } from "./wiki/routes.js";
+import { renderWikiUi } from "./wiki/ui.js";
 import { log, error } from "./log.js";
 
 const TAG = "server";
@@ -2360,6 +2362,11 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /knowledge ──
+      // ── sinain wiki — the virtual vault as markdown (DESIGN-SINAIN-WIKI) ──
+      // File-shaped .md paths + the vault zip export. Handled before the
+      // legacy JSON routes; both generations coexist on /knowledge/*.
+      if (await handleWikiRoute(req, res, url, deps)) return;
+
       if (req.method === "GET" && url.pathname === "/knowledge") {
         // Return portable knowledge document
         const knowledgePath = deps.getKnowledgeDocPath?.();
@@ -2937,26 +2944,31 @@ export function createAppServer(deps: ServerDeps) {
         return;
       }
 
-      // New "living Confluence" SPA — search-driven, LLM-rendered pages,
-      // bookmarks, retraction, concept transfer.
+      // Classic "living Confluence" V2 SPA, remounted at /knowledge/ui-v2.
+      // Kept (for now) because it is the only client that speaks the peerjs
+      // side of large-bundle shares; the wiki UI forwards #peer= links here.
+      // Its internal absolute paths are rewritten to the new mount; the
+      // boundary lookahead spares "/knowledge/ui-legacy".
+      if (req.method === "GET"
+          && (url.pathname === "/knowledge/ui-v2" || url.pathname.startsWith("/knowledge/ui-v2/"))) {
+        res.setHeader("Content-Type", "text/html");
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
+        res.end(renderKnowledgeUiV2().replace(/\/knowledge\/ui(?=[/"'`#?\\ )]|$)/g, "/knowledge/ui-v2"));
+        return;
+      }
+
+      // Sinain Wiki SPA — router + markdown renderer over the virtual vault
+      // (replaces the Living Confluence UI; docs/DESIGN-SINAIN-WIKI.md §6).
       // Cache-Control: no-cache forces browsers to revalidate the SPA HTML
       // on every navigation. Otherwise, after a sinain-core upgrade the
       // browser serves stale SPA from cache (bugfixes don't take effect
       // until the user hard-reloads). With revalidation on, ETag mismatches
       // are detected immediately and the new SPA is loaded.
-      if (req.method === "GET" && url.pathname === "/knowledge/ui") {
+      if (req.method === "GET"
+          && (url.pathname === "/knowledge/ui" || url.pathname.startsWith("/knowledge/ui/"))) {
         res.setHeader("Content-Type", "text/html");
         res.setHeader("Cache-Control", "no-cache, must-revalidate");
-        res.end(renderKnowledgeUiV2());
-        return;
-      }
-
-      // SPA route handling — the SPA uses path-style entity URLs. Server-side
-      // we just serve the same HTML; client-side router parses location.pathname.
-      if (req.method === "GET" && url.pathname.startsWith("/knowledge/ui/")) {
-        res.setHeader("Content-Type", "text/html");
-        res.setHeader("Cache-Control", "no-cache, must-revalidate");
-        res.end(renderKnowledgeUiV2());
+        res.end(renderWikiUi());
         return;
       }
 
