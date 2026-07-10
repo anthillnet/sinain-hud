@@ -177,18 +177,28 @@ def search_facts(
     include_superseded: bool = False,
     score_floor: float = 0.8,
     cos_floor: float = 0.30,
+    exclude_passes: tuple = (),
 ) -> list[tuple[float, object]]:
     """Rank typed facts (memory_v2.compact.Fact) against the query.
 
     Scope filter first (§3.9), validity filter by default (bi-temporal:
     superseded facts exist but don't serve unless asked). Same closed-world
     contract as search_episodes: [] means "no attested facts".
+
+    exclude_passes: serving-surface scoping (store typed, serve per surface —
+    the persona-layer philosophy applied to extraction passes). Measured
+    2026-07-04: bulk experience facts are QA coverage but enrichment poison —
+    with the events pass on, they took 78% of enrichment slots at 15% useful
+    and displaced endeavors (67%) / preferences (50%), 33.8% -> 24.2% overall.
+    Enrichment surfaces pass exclude_passes=("events",); QA passes nothing.
     """
     pool = facts
     if allowed_layers is not None:
         pool = [f for f in pool if set(f.layers) & allowed_layers]
     if not include_superseded:
         pool = [f for f in pool if not f.invalid_at]
+    if exclude_passes:
+        pool = [f for f in pool if (f.meta or {}).get("pass") not in exclude_passes]
     if not pool:
         return []
     texts = [f"{f.subject} {f.fact}" for f in pool]
@@ -259,6 +269,7 @@ def person_profiles(
     *,
     max_persons: int = 2,
     max_lines: int = 14,
+    domains: tuple = ("people",),
     allowed_layers: set[str] | None = None,
 ) -> str:
     """Render identity cards for persons named in the query (scope-filtered)."""
@@ -276,14 +287,10 @@ def person_profiles(
             canonicals.append(c)
     if not canonicals:
         return ""
-    # A persona card is identity + tastes + notable events — not identity
-    # alone. Enumeration questions ("what activities does X do?") need the
-    # person's preference/event facts gathered from ALL sessions in one place;
-    # scattered per-fact retrieval systematically returns subsets.
-    # v3d measured: widening cards to preferences+events at 30 lines DILUTED
-    # (single-hop 9→7, multi-hop unchanged) — third confirmation that context
-    # budget is the binding constraint. Identity-only cards are the keeper.
-    _CARD_DOMAINS = ("people",)
+    # Caller picks card breadth: identity-only by default (v3d measured that
+    # UNGATED wide cards dilute — single-hop 9→7); judgment-intent queries get
+    # the wide card (values/tastes/activities are the inference substrate).
+    _CARD_DOMAINS = domains
     blocks: list[str] = []
     for c in canonicals[:max_persons]:
         rows = [
@@ -358,11 +365,25 @@ def build_context_block(
     # Synthius retrieves, and it is what makes possessive-chain multi-hop
     # ("Caroline's grandma...") a single-lookup question.
     if facts:
+        # Identity-only cards — six composition variants measured at n=200
+        # (seg-summaries, dossier, wide/judgment/enumeration cards, linker):
+        # ALL worse or flat. v3b composition is a measured local optimum.
         cards = person_profiles(facts, query, aliases or {},
                                 allowed_layers=allowed_layers)
         if cards:
             parts.append(cards[: max_chars // 3])
             used += len(parts[-1])
+
+    # Raw-evidence reservation (P2 interaction fix, measured on the internal
+    # bench): once extraction depth grows the fact pool, the fact section can
+    # push a multi-k-char gold episode past max_chars — a ~750-char fact gain
+    # cost a 3,000-char evidence loss (5m-012: the answering episode dropped
+    # from the block entirely). Invariant: when relevant episodes exist they
+    # are guaranteed >= max_chars/3; derived surfaces (facts) yield first.
+    # Env-gated during measurement; the default path is byte-identical.
+    reserve_eps = os.environ.get("SINAIN_V2_EP_RESERVE", "0") == "1"
+    hits = search_episodes(store, query, k=k, allowed_layers=allowed_layers)
+    ep_reserved = max_chars // 3 if (reserve_eps and hits) else 0
 
     # Facts — the compacted index: deduplicated, dated, current-state
     # (superseded rows filtered). Episodes below are raw evidence.
@@ -373,10 +394,12 @@ def build_context_block(
             date = f" [{f.valid_at}]" if f.valid_at else ""
             lines.append(f"- ({f.domain}){date} {f.subject}: {f.fact}")
         block = "\n".join(lines)
-        parts.append(block[:max_chars // 2])
+        fact_cap = max_chars // 2
+        if ep_reserved:
+            fact_cap = min(fact_cap, max(0, max_chars - used - ep_reserved))
+        parts.append(block[:fact_cap])
         used += len(parts[-1])
 
-    hits = search_episodes(store, query, k=k, allowed_layers=allowed_layers)
     if hits:
         ep_parts = ["## Memory Episodes (raw dated excerpts)"]
         for score, ep in hits:
@@ -384,6 +407,12 @@ def build_context_block(
             summary = f" | summary: {ep.summary}" if ep.summary else ""
             block = f"--- episode {ep.id} [{date}]{summary} ---\n{ep.text}"
             if used + len(block) > max_chars and len(parts) > 1:
+                # Reserved mode: a truncated slice of relevant evidence beats
+                # silently absent evidence — fill the remainder, then stop.
+                rem = max_chars - used
+                if reserve_eps and rem >= 800:
+                    ep_parts.append(block[:rem])
+                    used += rem
                 break
             ep_parts.append(block[: max(0, max_chars - used)])
             used += len(ep_parts[-1])

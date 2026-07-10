@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style> body { margin: 0; } </style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <div style="margin-bottom:36px; max-width:780px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · thread handoff</div>
+    <div style="font-size:24px; font-weight:600; line-height:24px; margin-bottom:10px; color:#27282E;">Continue a thread in another agent</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">The old fork button is reborn as "continue elsewhere." Part-way through a Sinain chat, hand the same thread — its ROI context plus the conversation so far — to another chat or a terminal agent like claude code. The thread keeps its identity; only the engine changes.</div>
+  </div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start;">
+
+    <!-- ===================== FRAME 1 — trigger + destination menu ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">1 · Hand off — pick a destination</div>
+      <div style="position:relative; background:#1E1F22; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden; color:#fff; height:560px; display:flex; flex-direction:column;">
+
+        <!-- tab bar -->
+        <div style="display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.08);">
+          <div style="height:26px; padding:0 12px; border-radius:13px; border:1px solid rgba(255,255,255,.14); display:flex; align-items:center; font-size:12px; color:#A8ADBD;">MAIN</div>
+          <div style="height:26px; padding:0 8px 0 10px; border-radius:13px; border:1px solid #1F8039; display:flex; align-items:center; gap:7px; font-size:12px; color:#fff; max-width:200px;">
+            <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">High memory usage …</span>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>
+          </div>
+          <div style="flex:1;"></div>
+          <div style="height:30px; padding:0 12px; border-radius:15px; border:1px solid #1F8039; display:flex; align-items:center; gap:6px; font-size:13px; color:#1F8039;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>chat
+          </div>
+        </div>
+
+        <!-- messages -->
+        <div style="flex:1; padding:16px; overflow:hidden; display:flex; flex-direction:column; gap:12px;">
+          <div style="align-self:flex-end; max-width:78%; background:#1F8039; color:#fff; border-radius:10px 10px 2px 10px; padding:9px 12px; font-size:13px; line-height:18px;">Why is Gmail eating so much memory?</div>
+          <div style="align-self:flex-start; max-width:84%; background:#2B2D30; border:1px solid rgba(255,255,255,.08); border-radius:10px 10px 10px 2px; padding:9px 12px; font-size:13px; line-height:18px; color:#fff;">Your Gmail tab is using ~1,002 MB — roughly 17,000 emails plus the Copilot and GitHub extensions loaded together.</div>
+          <div style="align-self:flex-end; max-width:78%; background:#1F8039; color:#fff; border-radius:10px 10px 2px 10px; padding:9px 12px; font-size:13px; line-height:18px;">Can you actually clear it for me?</div>
+          <div style="align-self:flex-start; max-width:84%; background:#2B2D30; border:1px solid rgba(255,255,255,.08); border-radius:10px 10px 10px 2px; padding:9px 12px; font-size:13px; line-height:18px; color:#A8ADBD;">I can't run commands myself. I can hand this thread to a terminal agent that can — <span style="color:#1F8039; font-weight:500;">continue in terminal →</span></div>
+        </div>
+
+        <!-- input (branch / continue-in button lives here, by the composer) -->
+        <div style="padding:12px 16px; border-top:1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:10px;">
+          <button style="display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:6px; background:rgba(31,128,57,.16); border:1px solid #1F8039; cursor:pointer; flex:none;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="7" r="1.6"/><path d="M4 5.6v4.8M5.6 12h3.2a2.6 2.6 0 0 0 2.6-2.6V8.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <span style="flex:1; font-size:14px; color:#6C707E;">Type a message</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#6C707E"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
+        </div>
+
+        <!-- destination popover (opens above the composer button) -->
+        <div style="position:absolute; left:14px; bottom:64px; width:280px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:8px; box-shadow:0 4px 24px rgba(0,0,0,.5); overflow:hidden;">
+          <div style="padding:11px 14px; border-bottom:1px solid rgba(255,255,255,.08); font-size:13px; font-weight:600;">Continue this thread in</div>
+          <div style="padding:8px 14px 4px; font-size:10px; letter-spacing:0.06em; color:#6C707E; text-transform:uppercase;">Chat</div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 14px;"><span style="width:18px; height:18px; border-radius:4px; background:#1F8039; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">S</span><span style="font-size:13px; flex:1;">Sinain</span><span style="font-size:11px; color:#6C707E;">current</span></div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 14px;"><span style="width:18px; height:18px; border-radius:4px; background:#834DF0; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">C</span><span style="font-size:13px;">claude</span></div>
+          <div style="padding:10px 14px 4px; font-size:10px; letter-spacing:0.06em; color:#6C707E; text-transform:uppercase;">Terminal</div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 14px; background:rgba(31,128,57,.16); border-left:2px solid #1F8039;"><span style="width:18px; height:18px; border-radius:4px; background:#834DF0; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">C</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace; flex:1;">claude code</span><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 14px;"><span style="width:18px; height:18px; border-radius:4px; background:#1F8039; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">X</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace;">codex</span></div>
+          <!-- carry toggle (full transcript by default, opt-out) -->
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-top:1px solid rgba(255,255,255,.08); margin-top:4px;">
+            <span style="font-size:12px; color:#A8ADBD; line-height:15px;">Include full transcript<br><span style="font-size:11px; color:#6C707E;">ROI context always travels</span></span>
+            <div style="flex:none; width:32px; height:18px; border-radius:9px; background:#1F8039; position:relative;"><div style="position:absolute; top:2px; left:16px; width:14px; height:14px; border-radius:50%; background:#fff;"></div></div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Two entry points: the branch button by the message box, or Sinain offering it inline when a task is beyond chat. The menu lists detected agents split into Chat and Terminal. Picking one hands off immediately — the full transcript travels by default (no summarizing step); toggle it off to send ROI context only.</div>
+    </div>
+
+    <!-- ===================== FRAME 2 — continued in claude code ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">2 · Continued in claude code</div>
+      <div style="background:#1E1F22; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden; color:#fff; height:560px; display:flex; flex-direction:column;">
+
+        <!-- tab bar, now terminal -->
+        <div style="display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.08);">
+          <div style="height:26px; padding:0 12px; border-radius:13px; border:1px solid rgba(255,255,255,.14); display:flex; align-items:center; font-size:12px; color:#A8ADBD;">MAIN</div>
+          <div style="height:26px; padding:0 8px 0 10px; border-radius:13px; border:1px solid #1F8039; display:flex; align-items:center; gap:7px; font-size:12px; color:#fff; max-width:200px;">
+            <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">High memory usage …</span>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>
+          </div>
+          <div style="flex:1;"></div>
+          <div style="height:30px; padding:0 12px; border-radius:15px; border:1px solid #1F8039; display:flex; align-items:center; gap:6px; font-size:13px; color:#1F8039; font-family:ui-monospace,Menlo,Consolas,monospace;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>term
+          </div>
+        </div>
+
+        <!-- terminal body -->
+        <div style="flex:1; padding:16px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:18px; overflow:hidden;">
+          <!-- handoff divider -->
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; color:#1F8039;">
+            <div style="flex:1; height:1px; background:rgba(31,128,57,.4);"></div>
+            <span style="font-size:11px;">continued from Sinain chat</span>
+            <div style="flex:1; height:1px; background:rgba(31,128,57,.4);"></div>
+          </div>
+
+          <!-- context block -->
+          <div style="background:#171819; border:1px solid rgba(255,255,255,.08); border-radius:6px; padding:10px 12px; margin-bottom:14px;">
+            <div style="color:#6C707E; margin-bottom:6px;">[handoff] context loaded</div>
+            <div style="color:#A8ADBD;">▸ roi-055f9118 · High memory usage in Gmail</div>
+            <div style="color:#A8ADBD;">▸ goal: free up Gmail tab memory (~1,002 MB)</div>
+            <div style="color:#A8ADBD;">▸ found: 17k emails + Copilot/GitHub extensions</div>
+            <div style="color:#6C707E; margin-top:4px;">+ full transcript · 4 messages · /context to view</div>
+          </div>
+
+          <div style="color:#fff; margin-bottom:10px;"><span style="color:#1F8039;">&gt;</span> Pick up from the chat — diagnose and free the memory.</div>
+          <div style="color:#E56D17; margin-bottom:6px;">⏺ Inspecting Chrome processes…</div>
+          <div style="color:#A8ADBD;">  found 3 tabs over 400 MB · gmail.com is the top consumer</div>
+        </div>
+
+        <!-- input (branch button by the composer) -->
+        <div style="padding:12px 16px; border-top:1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:10px;">
+          <button style="display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:6px; border:1px solid rgba(255,255,255,.14); cursor:pointer; flex:none;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="7" r="1.6"/><path d="M4 5.6v4.8M5.6 12h3.2a2.6 2.6 0 0 0 2.6-2.6V8.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <span style="flex:1; font-size:13px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">Type a message</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#6C707E"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
+        </div>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Same tab, same ROI — now driven by claude code. A divider marks the handoff, the carried context loads as a compact block (expandable), and the agent starts from where chat left off. The branch button still works to hand off again.</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

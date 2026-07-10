@@ -4,49 +4,12 @@ from __future__ import annotations
 import difflib
 import time
 from collections import deque
-from dataclasses import dataclass, field
+
+from . import _pkg_boot  # noqa: F401 — puts sinain_sense on sys.path
+from sinain_sense.events import SenseEvent, SenseMeta, SenseObservation
 
 from .change_detector import ChangeResult
 from .ocr import OCRResult
-
-
-@dataclass
-class SenseMeta:
-    ssim: float = 0.0
-    app: str = ""
-    window_title: str = ""
-    screen: int = 0
-
-
-@dataclass
-class SenseObservation:
-    """Structured observation fields (claude-mem compatible schema).
-
-    Populated by sinain-core's agent layer, not by sense_client.
-    sense_client sets `title` and `facts` from OCR/app context;
-    sinain-core enriches with `narrative` and `concepts`.
-    """
-    title: str = ""
-    subtitle: str = ""
-    facts: list[str] = field(default_factory=list)
-    narrative: str = ""
-    concepts: list[str] = field(default_factory=list)
-    scene: str = ""  # Local vision model scene description (Ollama)
-
-
-@dataclass
-class SenseEvent:
-    type: str  # "text" | "visual" | "context"
-    ts: float = 0.0
-    ocr: str = ""
-    roi: dict | None = None
-    diff: dict | None = None
-    meta: SenseMeta = field(default_factory=SenseMeta)
-    observation: SenseObservation = field(default_factory=SenseObservation)
-    vision_cost: dict | None = None  # {cost, tokens_in, tokens_out, model}
-    # Per-line OCR boxes in FULL-FRAME pixels (top-left origin):
-    # [{"text": str, "bbox": [x, y, w, h]}] — for precise region-eye anchoring.
-    ocr_lines: list | None = None
 
 
 class DecisionGate:

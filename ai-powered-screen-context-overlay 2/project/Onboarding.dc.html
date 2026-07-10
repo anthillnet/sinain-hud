@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @keyframes sinAnts { to { stroke-dashoffset: -16; } }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <div style="margin-bottom:36px; max-width:760px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · onboarding</div>
+    <div style="font-size:24px; font-weight:600; line-height:24px; margin-bottom:10px; color:#27282E;">First-run flow — nine scenes</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">A short centered window shown on install. Concept → two ways to ask → where chat lands → pick agents → move a thread → screen &amp; audio → privacy → done. Each scene is one screen with a visual, a line of copy, and a single primary action.</div>
+  </div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start;">
+
+    <!-- ===================== SCENE 1 — Welcome ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 1 · Welcome</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; display:flex; align-items:center; justify-content:center; position:relative;">
+          <div style="position:absolute; width:140px; height:140px; border-radius:50%; border:1px solid rgba(31,128,57,.18);"></div>
+          <div style="position:absolute; width:200px; height:200px; border-radius:50%; border:1px solid rgba(31,128,57,.1);"></div>
+          <svg width="84" height="84" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="2.4"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Meet Sinain</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">Sinain watches what's on your screen and offers help exactly where you need it — without getting in your way.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d1 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Get started</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 2 — Markers ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 2 · The markers</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#F7F8FA; position:relative; overflow:hidden;">
+          <div style="position:absolute; inset:0; padding:20px; opacity:.55;">
+            <div style="height:10px; width:150px; background:#DFE1E5; border-radius:3px; margin-bottom:14px;"></div>
+            <div style="height:8px; width:80%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div>
+            <div style="height:8px; width:66%; background:#EBECF0; border-radius:3px;"></div>
+          </div>
+          <svg width="26" height="26" viewBox="0 0 30 30" style="position:absolute; left:46px; top:120px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.25));"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          <div style="position:absolute; left:84px; top:70px; width:280px; background:#2B2D30; border:1px solid rgba(31,128,57,.45); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.3); padding:10px 12px;">
+            <div style="font-size:12px; font-weight:600; color:#fff; margin-bottom:3px;">High memory usage in Gmail</div>
+            <div style="font-size:11px; line-height:15px; color:#A8ADBD; margin-bottom:8px;">Close unused tabs to free up memory.</div>
+            <div style="display:flex; gap:4px;">
+              <span style="height:22px; padding:0 10px; background:#3369D6; border-radius:3px; color:#fff; font-size:11px; display:inline-flex; align-items:center;">Chat</span>
+              <span style="height:22px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:3px; color:#fff; font-size:11px; display:inline-flex; align-items:center; font-family:ui-monospace,Menlo,Consolas,monospace;">Term</span>
+            </div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Spot the markers</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">When Sinain sees something it can help with, it drops an eye marker on it. Click for a quick tip, double-click to jump straight into a thread.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d2 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 3 — Region ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 3 · Ask about anything</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#F7F8FA; position:relative; overflow:hidden; cursor:crosshair;">
+          <div style="position:absolute; inset:0; padding:20px; opacity:.5;">
+            <div style="height:10px; width:150px; background:#DFE1E5; border-radius:3px; margin-bottom:14px;"></div>
+            <div style="height:8px; width:80%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div>
+            <div style="height:8px; width:66%; background:#EBECF0; border-radius:3px;"></div>
+          </div>
+          <div style="position:absolute; inset:0; background:rgba(30,31,34,.3);"></div>
+          <div style="position:absolute; left:70px; top:54px; width:240px; height:104px;">
+            <svg width="240" height="104" style="position:absolute; inset:0; overflow:visible;"><rect x="0.5" y="0.5" width="239" height="103" fill="rgba(51,105,214,0.06)" stroke="#3369D6" stroke-width="1.5" stroke-dasharray="6 4" rx="2" style="animation:sinAnts 0.6s linear infinite;"></rect></svg>
+            <div style="position:absolute; left:0; top:-22px; height:17px; padding:0 6px; background:#27282E; color:#fff; font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; line-height:17px; border-radius:3px;">240 × 104</div>
+            <div style="position:absolute; left:-3px; top:-3px; width:6px; height:6px; background:#fff; border:1px solid #3369D6;"></div>
+            <div style="position:absolute; right:-3px; bottom:-3px; width:6px; height:6px; background:#fff; border:1px solid #3369D6;"></div>
+            <div style="position:absolute; left:50%; bottom:-36px; transform:translateX(-50%); display:flex; gap:4px; padding:4px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.45); white-space:nowrap;">
+              <span style="display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 10px; background:#3369D6; border-radius:4px; color:#fff; font-size:12px; font-weight:500;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>Chat</span>
+              <span style="display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.2); border-radius:4px; color:#fff; font-size:12px; font-family:ui-monospace,Menlo,Consolas,monospace;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>Term</span>
+            </div>
+          </div>
+          <div style="position:absolute; right:14px; top:14px; display:inline-flex; align-items:center; gap:7px; height:24px; padding:0 9px; background:rgba(43,45,48,.92); border-radius:12px; color:#fff; font-size:11px;">
+            <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            {{ gestureLabel }}
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Or ask about anything</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">{{ scene3Body }}</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d3 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 4 — Where chat lands ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 4 · Where chat lands</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; display:flex; align-items:center; justify-content:center; gap:14px; padding:0 24px; box-sizing:border-box;">
+          <div style="position:relative; flex:1; max-width:150px; background:#1E1F22; border:1px solid #1F8039; border-radius:8px; overflow:hidden;">
+            <div style="height:80px; background:#15161a; display:flex; flex-direction:column; justify-content:flex-end; gap:5px; padding:10px;">
+              <div style="align-self:flex-end; width:54px; height:13px; border-radius:7px 7px 2px 7px; background:#1F8039;"></div>
+              <div style="align-self:flex-start; width:70px; height:13px; border-radius:7px 7px 7px 2px; background:#2B2D30; border:1px solid rgba(255,255,255,.1);"></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; padding:8px 10px; border-top:1px solid rgba(255,255,255,.08);">
+              <svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+              <span style="font-size:11px; font-weight:500;">Sinain HUD</span>
+            </div>
+            <div style="position:absolute; top:6px; right:6px; width:16px; height:16px; border-radius:50%; background:#1F8039; display:flex; align-items:center; justify-content:center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+
+          <span style="font-size:12px; color:#6C707E;">or</span>
+
+          <div style="flex:1; max-width:150px; background:#1E1F22; border:1px solid rgba(255,255,255,.12); border-radius:8px; overflow:hidden;">
+            <div style="height:22px; background:#2B2D30; display:flex; align-items:center; gap:4px; padding:0 8px; border-bottom:1px solid rgba(255,255,255,.06);">
+              <span style="width:7px; height:7px; border-radius:50%; background:#CC3645;"></span>
+              <span style="width:7px; height:7px; border-radius:50%; background:#E56D17;"></span>
+              <span style="width:7px; height:7px; border-radius:50%; background:#1F8039;"></span>
+              <span style="font-size:10px; color:#A8ADBD; margin-left:6px;">ChatGPT</span>
+            </div>
+            <div style="height:58px; display:flex; flex-direction:column; justify-content:flex-end; gap:5px; padding:10px;">
+              <div style="align-self:flex-end; width:54px; height:13px; border-radius:7px; background:#3369D6;"></div>
+              <div style="align-self:flex-start; width:70px; height:13px; border-radius:7px; background:#2B2D30; border:1px solid rgba(255,255,255,.1);"></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; padding:8px 10px; border-top:1px solid rgba(255,255,255,.08);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A8ADBD" stroke-width="1.6"><path d="M7 17L17 7M9 7h8v8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span style="font-size:11px; font-weight:500; color:#A8ADBD;">Your app</span>
+            </div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Chat, your way</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">A thread can stay in the Sinain HUD, or pop out into a standalone app you already use — ChatGPT, Claude, anything. Either way Sinain seeds it with the context first.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d4 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 5 — Agents ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 5 · Pick your agents</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; display:flex; align-items:center; justify-content:center;">
+          <div style="width:300px;">
+            <div style="font-size:11px; color:#A8ADBD; margin-bottom:5px;">Chat opens with</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; height:34px; padding:0 10px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:6px; margin-bottom:12px;">
+              <div style="display:flex; align-items:center; gap:8px;"><span style="width:18px; height:18px; border-radius:4px; background:#1F8039; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">S</span><span style="font-size:13px; font-weight:500;">Sinain</span><span style="font-size:11px; color:#6C707E;">Built in</span></div>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="font-size:11px; color:#A8ADBD; margin-bottom:5px;">Terminal runs</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; height:34px; padding:0 10px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:6px;">
+              <div style="display:flex; align-items:center; gap:8px;"><span style="width:18px; height:18px; border-radius:4px; background:#3369D6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">O</span><span style="font-size:13px; font-weight:500; font-family:ui-monospace,Menlo,Consolas,monospace;">openclaude</span></div>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Chat or terminal</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">Every region opens a thread. Reply in built-in chat, or hand it to a terminal agent you already use. We listed the ones found on your machine — change them anytime.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d5 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 6 — Handoff ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 6 · Move a thread</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; position:relative; display:flex; flex-direction:column; justify-content:flex-end; padding:16px; box-sizing:border-box;">
+          <div style="align-self:flex-start; max-width:80%; background:#2B2D30; border:1px solid rgba(255,255,255,.08); border-radius:10px 10px 10px 2px; padding:8px 11px; font-size:12px; line-height:16px; color:#A8ADBD; margin-bottom:12px;">I can't run commands myself — want me to hand this to a terminal agent?</div>
+          <div style="position:relative; display:flex; align-items:center; gap:8px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:8px; padding:7px 10px;">
+            <div style="width:28px; height:28px; border-radius:6px; background:rgba(31,128,57,.16); border:1px solid #1F8039; display:flex; align-items:center; justify-content:center; flex:none;">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="7" r="1.6"/><path d="M4 5.6v4.8M5.6 12h3.2a2.6 2.6 0 0 0 2.6-2.6V8.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <span style="flex:1; font-size:12px; color:#6C707E;">Type a message</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#6C707E"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
+            <div style="position:absolute; left:0; bottom:40px; width:180px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.45); overflow:hidden;">
+              <div style="padding:7px 11px; font-size:11px; color:#6C707E; border-bottom:1px solid rgba(255,255,255,.08);">Continue in</div>
+              <div style="display:flex; align-items:center; gap:8px; padding:7px 11px; background:rgba(31,128,57,.16); border-left:2px solid #1F8039;"><span style="width:16px; height:16px; border-radius:4px; background:#834DF0; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center;">C</span><span style="font-size:12px; font-family:ui-monospace,Menlo,Consolas,monospace;">claude code</span></div>
+              <div style="display:flex; align-items:center; gap:8px; padding:7px 11px;"><span style="width:16px; height:16px; border-radius:4px; background:#1F8039; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center;">X</span><span style="font-size:12px; font-family:ui-monospace,Menlo,Consolas,monospace;">codex</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Move it to any agent</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">Start in Sinain chat, then hand the whole thread — its context and your messages — to another agent like claude code. Tap the branch button by the message box. Nothing is lost.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d6 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 7 — Capture (NEW) ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 7 · Screen &amp; audio</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; display:flex; align-items:center; justify-content:center;">
+          <div style="width:300px;">
+            <div style="display:flex; align-items:center; gap:12px; height:42px; padding:0 12px; background:#2B2D30; border:1px solid rgba(255,255,255,.12); border-radius:8px; margin-bottom:10px;">
+              <svg width="22" height="22" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="10.5" ry="6.5" fill="#1F8039"></ellipse><ellipse cx="12" cy="12" rx="2.6" ry="3.4" fill="#1E1F22"></ellipse></svg>
+              <div style="flex:1;"><div style="font-size:13px; font-weight:500;">Screen &amp; video</div><div style="font-size:11px; color:#6C707E;">What's on your display</div></div>
+              <div style="flex:none; width:36px; height:20px; border-radius:10px; background:#1F8039; position:relative;"><div style="position:absolute; top:2px; left:18px; width:16px; height:16px; border-radius:50%; background:#fff;"></div></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; height:42px; padding:0 12px; background:#2B2D30; border:1px solid rgba(255,255,255,.12); border-radius:8px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1F8039" stroke-width="1.8"><path d="M4 9.5h3l4.5-3.5v12L7 14.5H4z" fill="#1F8039" stroke-linejoin="round"></path><path d="M16 9.5a4 4 0 0 1 0 5" stroke-linecap="round"></path></svg>
+              <div style="flex:1;"><div style="font-size:13px; font-weight:500;">Audio</div><div style="font-size:11px; color:#6C707E;">Mic and system sound</div></div>
+              <div style="flex:none; width:36px; height:20px; border-radius:10px; background:#1F8039; position:relative;"><div style="position:absolute; top:2px; left:18px; width:16px; height:16px; border-radius:50%; background:#fff;"></div></div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Screen and audio</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">Sinain reads your screen and can capture video and audio for richer context. Flip either one on or off from the controls whenever you like.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d7 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 8 — Privacy ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 8 · Private by design</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; display:flex; align-items:center; justify-content:center; gap:30px;">
+          <!-- left: green screen, struck = hidden from capture -->
+          <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+            <svg width="70" height="49" viewBox="0 0 70 49" fill="none">
+              <rect x="3" y="3" width="64" height="43" rx="4" stroke="#1F8039" stroke-width="2"/>
+              <circle cx="35" cy="24.5" r="9" stroke="#1F8039" stroke-width="2"/><path d="M35 19.5 C 36.7 22, 36.7 27, 35 29.5 C 33.3 27, 33.3 22, 35 19.5 Z" fill="#1F8039"/>
+              <path d="M7 43 L63 6" stroke="#1F8039" stroke-width="2.6" stroke-linecap="round"/>
+            </svg>
+            <div style="font-size:11px; color:#A8ADBD; text-align:center; width:130px;">Hidden from capture · vision stays clean</div>
+          </div>
+          <div style="width:1px; height:90px; background:rgba(255,255,255,.08);"></div>
+          <!-- right: red screen, clean = visible in demo mode -->
+          <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+            <svg width="70" height="49" viewBox="0 0 70 49" fill="none">
+              <rect x="3" y="3" width="64" height="43" rx="4" stroke="#CC3645" stroke-width="2"/>
+              <circle cx="35" cy="24.5" r="9" stroke="#CC3645" stroke-width="2"/><path d="M35 19.5 C 36.7 22, 36.7 27, 35 29.5 C 33.3 27, 33.3 22, 35 19.5 Z" fill="#CC3645"/>
+            </svg>
+            <div style="font-size:11px; color:#A8ADBD; text-align:center; width:130px;">Demo mode · Sinain is visible</div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">Private by design</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">When you share your screen, others see only your apps — never Sinain. In demo mode the eye turns red and Sinain sees itself, which can cause vision artifacts.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d8 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <sc-if value="{{ showBack }}" hint-placeholder-val="{{ true }}"><button style="height:32px; padding:0 12px; background:transparent; border:none; color:#A8ADBD; font-size:14px; cursor:pointer;">Back</button></sc-if>
+              <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== SCENE 9 — Done ===================== -->
+    <div style="flex:none; width:460px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Scene 9 · You're set</div>
+      <div style="background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18), 0 2px 6px rgba(0,28,54,.1); overflow:hidden; color:#fff;">
+        <div style="height:200px; background:#171819; position:relative; display:flex; align-items:center; justify-content:center;">
+          <div style="position:absolute; top:0; left:0; right:0; height:30px; background:#2B2D30; border-bottom:1px solid rgba(255,255,255,.06); display:flex; align-items:center; justify-content:flex-end; padding:0 12px; gap:10px;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.4"><circle cx="8" cy="8" r="6"/></svg>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.4"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke-linecap="round"/></svg>
+            <div style="width:24px; height:24px; border-radius:50%; background:#1E1F22; border:1px solid rgba(31,128,57,.6); display:flex; align-items:center; justify-content:center;">
+              <svg width="16" height="16" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; align-items:center; gap:8px; margin-top:18px;">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.6"><path d="M8 13V3M8 3L4 7M8 3l4 4" stroke-linecap="round" stroke-linejoin="round" transform="rotate(180 8 8)"/></svg>
+            <div style="font-size:12px; color:#A8ADBD; text-align:center; width:200px;">Sinain lives up here. Tap the eye to pause everything, anytime.</div>
+          </div>
+        </div>
+        <div style="padding:28px 28px 22px;">
+          <div style="font-size:20px; font-weight:600; line-height:24px; margin-bottom:8px;">You're all set</div>
+          <div style="font-size:14px; line-height:20px; color:#A8ADBD; min-height:60px;">Sinain is running and ready. Markers will start appearing as it learns what you're working on.</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <div style="display:flex; gap:6px;"><sc-for list="{{ d9 }}" as="dot" hint-placeholder-count="9"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+            <button style="height:32px; padding:0 18px; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Start using Sinain</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;dragGesture&quot;: {
+    &quot;editor&quot;: &quot;enum&quot;,
+    &quot;default&quot;: &quot;Double-tap the eye&quot;,
+    &quot;options&quot;: [&quot;Double-tap the eye&quot;, &quot;Drag anywhere&quot;, &quot;Hold \u2318 then drag&quot;],
+    &quot;tsType&quot;: &quot;string&quot;
+  },
+  &quot;showBackButton&quot;: {
+    &quot;editor&quot;: &quot;boolean&quot;,
+    &quot;default&quot;: true,
+    &quot;tsType&quot;: &quot;boolean&quot;
+  }
+}">
+class Component extends DCLogic {
+  renderVals() {
+    const g = this.props.dragGesture ?? 'Double-tap the eye';
+    const bodies = {
+      'Double-tap the eye': 'Double-tap the eye, then drag a box around any part of your screen \u2014 like a screenshot. Sinain hides while you drag.',
+      'Drag anywhere': 'Just drag a box around any part of your screen \u2014 like a screenshot \u2014 and Sinain picks it up. Sinain hides while you drag.',
+      'Hold \u2318 then drag': 'Hold \u2318 and drag a box around any part of your screen \u2014 like a screenshot. Sinain hides while you drag.'
+    };
+    const total = 9;
+    const mk = (active) => Array.from({ length: total }, (_, i) => ({
+      w: i === active ? '18px' : '6px',
+      bg: i === active ? '#1F8039' : '#3A3D42'
+    }));
+    return {
+      scene3Body: bodies[g] || bodies['Double-tap the eye'],
+      gestureLabel: g,
+      showBack: this.props.showBackButton !== false,
+      d1: mk(0), d2: mk(1), d3: mk(2), d4: mk(3), d5: mk(4),
+      d6: mk(5), d7: mk(6), d8: mk(7), d9: mk(8)
+    };
+  }
+}
+</script>
+</body>
+</html>

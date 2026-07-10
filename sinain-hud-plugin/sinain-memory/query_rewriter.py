@@ -21,7 +21,7 @@ Motivation — bench evidence:
         }
 
 Model selection:
-    Uses common.call_llm with script="query_rewriter" — koog-config.json's
+    Uses common.call_llm with script="query_rewriter" — llm-config.json's
     scripts.query_rewriter.model resolves to "fast" by default. In cloud mode
     that's gemini-2.5-flash-lite; in local-mode (SINAIN_FAST_MODEL=ollama/X)
     it's whatever local model is configured. The task is small enough that

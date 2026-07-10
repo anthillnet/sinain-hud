@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @keyframes sinHalo { 0% { transform: scale(0.6); opacity: 0.5; } 70% { transform: scale(2.6); opacity: 0; } 100% { opacity: 0; } }
+  @keyframes sinAnts { to { stroke-dashoffset: -16; } }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <div style="margin-bottom:36px; max-width:760px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · overlay UX drafts</div>
+    <div style="font-size:24px; font-weight:600; line-height:24px; margin-bottom:10px; color:#27282E;">Region capture &amp; agent selection</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">Engaging a region — drawn by hand or detected by Sinain — resolves to the same choice: Chat or Terminal, opening the same thread seeded with that region's context.</div>
+  </div>
+
+  <!-- ============ SECTION D: region -> thread ============ -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:14px;">D · Region → thread</div>
+  <div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:48px;">
+
+    <!-- D1: manual region select -->
+    <div style="flex:none; width:620px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Manual region — drag across the screen</div>
+      <div style="position:relative; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); height:420px; overflow:hidden; cursor:crosshair;">
+
+        <div style="position:absolute; inset:0; padding:24px; opacity:.5;">
+          <div style="height:14px; width:180px; background:#DFE1E5; border-radius:3px; margin-bottom:18px;"></div>
+          <div style="height:10px; width:90%; background:#EBECF0; border-radius:3px; margin-bottom:10px;"></div>
+          <div style="height:10px; width:84%; background:#EBECF0; border-radius:3px; margin-bottom:10px;"></div>
+          <div style="height:10px; width:76%; background:#EBECF0; border-radius:3px;"></div>
+        </div>
+
+        <div style="position:absolute; inset:0; background:rgba(30,31,34,.32);"></div>
+
+        <div style="position:absolute; left:120px; top:90px; width:340px; height:200px; border-radius:2px;">
+          <div style="position:absolute; inset:0; background:#F7F8FA; opacity:.001;"></div>
+          <svg width="340" height="200" style="position:absolute; inset:0; overflow:visible;">
+            <rect x="0.5" y="0.5" width="339" height="199" fill="rgba(51,105,214,0.06)" stroke="#3369D6" stroke-width="1.5" stroke-dasharray="6 4" rx="2" style="animation:sinAnts 0.6s linear infinite;"></rect>
+          </svg>
+          <div style="position:absolute; left:-3px; top:-3px; width:6px; height:6px; background:#fff; border:1px solid #3369D6;"></div>
+          <div style="position:absolute; right:-3px; top:-3px; width:6px; height:6px; background:#fff; border:1px solid #3369D6;"></div>
+          <div style="position:absolute; left:-3px; bottom:-3px; width:6px; height:6px; background:#fff; border:1px solid #3369D6;"></div>
+          <div style="position:absolute; right:-3px; bottom:-3px; width:6px; height:6px; background:#fff; border:1px solid #3369D6;"></div>
+          <div style="position:absolute; left:0; top:-24px; height:18px; padding:0 6px; background:#27282E; color:#fff; font-size:11px; font-family:ui-monospace,Menlo,Consolas,monospace; line-height:18px; border-radius:3px;">340 × 200</div>
+
+          <div style="position:absolute; left:50%; bottom:-46px; transform:translateX(-50%); display:flex; align-items:center; gap:4px; padding:4px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:8px; box-shadow:0 4px 24px rgba(0,28,54,.28), 0 2px 6px rgba(0,28,54,.12); white-space:nowrap;">
+            <button style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; background:#3369D6; border:none; border-radius:4px; color:#fff; font-size:13px; font-weight:500; cursor:pointer;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>
+              Chat
+            </button>
+            <button style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:4px; color:#fff; font-size:13px; cursor:pointer; font-family:ui-monospace,Menlo,Consolas,monospace;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Term
+            </button>
+            <div style="width:1px; height:18px; background:rgba(255,255,255,.14); margin:0 2px;"></div>
+            <button style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; background:transparent; border:none; border-radius:4px; color:#A8ADBD; cursor:pointer;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- HUD hidden while dragging -->
+        <div style="position:absolute; right:16px; top:16px; display:flex; flex-direction:column; align-items:center; gap:6px; opacity:.3;">
+          <div style="width:40px; height:40px; border-radius:50%; background:#2B2D30; border:1px dashed rgba(255,255,255,.55); display:flex; align-items:center; justify-content:center;">
+            <svg width="20" height="20" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#A8ADBD" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#A8ADBD"></path></svg>
+          </div>
+          <div style="font-size:10px; color:#fff; font-style:italic;">hidden while selecting</div>
+        </div>
+
+        <div style="position:absolute; left:16px; bottom:16px; display:inline-flex; align-items:center; gap:8px; height:26px; padding:0 10px; background:rgba(43,45,48,.92); border-radius:13px; color:#fff; font-size:12px;">
+          <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; padding:1px 5px; background:rgba(255,255,255,.12); border-radius:3px;">Esc</span>
+          to cancel · release to open a thread
+        </div>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px; max-width:600px;">Crosshair cursor, everything outside the box dims, live dimension readout, marching-ant border in Ring blue (active drag). On release the toolbar appears under the box — Chat or Term opens a thread seeded with the captured pixels. The HUD (and all markers) hide the moment the drag starts so nothing obscures the area, and fade back in on release.</div>
+    </div>
+
+    <!-- D2: generated ROI -->
+    <div style="flex:none; width:620px;">
+      <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Generated ROI — detected by Sinain</div>
+      <div style="position:relative; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); height:420px; overflow:hidden;">
+
+        <div style="position:absolute; inset:0; padding:24px;">
+          <div style="height:14px; width:180px; background:#DFE1E5; border-radius:3px; margin-bottom:18px;"></div>
+          <div style="height:10px; width:90%; background:#EBECF0; border-radius:3px; margin-bottom:10px;"></div>
+          <div style="height:10px; width:84%; background:#EBECF0; border-radius:3px; margin-bottom:28px;"></div>
+        </div>
+
+        <!-- detected content (no outline — the page underneath) -->
+        <div style="position:absolute; left:24px; top:120px; right:24px;">
+          <div style="height:11px; width:200px; background:#DFE1E5; border-radius:3px; margin-bottom:12px;"></div>
+          <div style="height:9px; width:82%; background:#EBECF0; border-radius:3px; margin-bottom:8px;"></div>
+          <div style="height:9px; width:64%; background:#EBECF0; border-radius:3px;"></div>
+        </div>
+
+        <!-- eye indicator anchored to the content (no box, no pulse) -->
+        <div style="position:absolute; left:150px; top:150px; width:30px; height:30px;">
+          <svg width="30" height="30" viewBox="0 0 30 30" style="position:relative; display:block; filter:drop-shadow(0 1px 2px rgba(0,0,0,.3));">
+            <circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle>
+            <path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path>
+          </svg>
+        </div>
+
+        <!-- suggestion card (just indicator text + buttons, no region border) -->
+        <div style="position:absolute; left:120px; top:200px; width:380px; box-sizing:border-box; background:#2B2D30; border:1px solid rgba(31,128,57,.45); border-radius:8px; box-shadow:0 4px 24px rgba(0,28,54,.28), 0 2px 6px rgba(0,28,54,.12); overflow:hidden;">
+          <div style="display:flex; gap:9px; padding:12px 14px;">
+            <svg width="18" height="18" viewBox="0 0 30 30" style="flex:none; margin-top:1px;">
+              <circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle>
+              <path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path>
+            </svg>
+            <div>
+              <div style="font-size:13px; font-weight:600; color:#fff; line-height:18px;">High memory usage alert in Gmail</div>
+              <div style="font-size:12px; line-height:16px; color:#A8ADBD; margin-top:2px;">Close unused tabs or clear cache to free up memory.</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:4px; padding:0 10px 10px;">
+            <button style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; background:#3369D6; border:none; border-radius:4px; color:#fff; font-size:13px; font-weight:500; cursor:pointer;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>
+              Chat
+            </button>
+            <button style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:4px; color:#fff; font-size:13px; cursor:pointer; font-family:ui-monospace,Menlo,Consolas,monospace;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l3 3-3 3M8 11h5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Term
+            </button>
+            <div style="flex:1;"></div>
+            <button style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; background:transparent; border:none; border-radius:4px; color:#A8ADBD; cursor:pointer;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div style="position:absolute; left:16px; bottom:16px; display:inline-flex; align-items:center; gap:8px; height:26px; padding:0 10px; background:rgba(43,45,48,.92); border-radius:13px; color:#fff; font-size:12px;">
+          Click for the tip · double-click to open in your default agent
+        </div>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px; max-width:600px;">Sinain drops an eye marker on the content it detected — no box, no dimension readout. The same Chat / Term choice appears, pre-seeded with the suggestion rather than raw pixels. Identical destination: one thread, one mental model.</div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION F: agent selection (collapsed selects) ============ -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:14px;">F · Agent selection — collapsed selects</div>
+  <div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:24px;">
+    <div style="flex:none; width:440px;">
+      <div style="background:#1E1F22; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden; color:#fff;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid rgba(255,255,255,.08);">
+          <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; color:#A8ADBD;">AGENTS</div>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>
+        </div>
+
+        <div style="padding:16px;">
+          <div style="font-size:12px; color:#A8ADBD; margin-bottom:6px;">Chat opens with</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; height:36px; padding:0 10px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:6px; margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:8px;"><span style="width:18px; height:18px; border-radius:4px; background:#1F8039; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">S</span><span style="font-size:13px; font-weight:500;">Sinain</span><span style="font-size:11px; color:#6C707E;">Built in</span></div>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+
+          <div style="font-size:12px; color:#A8ADBD; margin-bottom:6px;">Terminal runs</div>
+          <div style="position:relative;">
+            <div style="display:flex; align-items:center; justify-content:space-between; height:36px; padding:0 10px; background:#2B2D30; border:1px solid #1F8039; border-radius:6px;">
+              <div style="display:flex; align-items:center; gap:8px;"><span style="width:18px; height:18px; border-radius:4px; background:#3369D6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">O</span><span style="font-size:13px; font-weight:500; font-family:ui-monospace,Menlo,Consolas,monospace;">openclaude</span></div>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><path d="M4 10l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="margin-top:4px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:6px; box-shadow:0 4px 24px rgba(0,0,0,.4); overflow:hidden;">
+              <div style="padding:6px 8px; font-size:10px; letter-spacing:0.06em; color:#6C707E; text-transform:uppercase;">Detected on your machine · 6</div>
+              <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:rgba(31,128,57,.16);"><div style="display:flex; align-items:center; gap:8px;"><span style="width:18px; height:18px; border-radius:4px; background:#3369D6; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">O</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace;">openclaude</span></div><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <div style="display:flex; align-items:center; gap:8px; padding:8px 10px;"><span style="width:18px; height:18px; border-radius:4px; background:#834DF0; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">C</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace;">claude</span></div>
+              <div style="display:flex; align-items:center; gap:8px; padding:8px 10px;"><span style="width:18px; height:18px; border-radius:4px; background:#1F8039; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">X</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace;">codex</span></div>
+              <div style="display:flex; align-items:center; gap:8px; padding:8px 10px;"><span style="width:18px; height:18px; border-radius:4px; background:#E56D17; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">G</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace;">goose</span></div>
+              <div style="display:flex; align-items:center; gap:8px; padding:8px 10px;"><span style="width:18px; height:18px; border-radius:4px; background:#6C707E; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">H</span><span style="font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace;">hermes</span></div>
+              <div style="border-top:1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:8px; padding:8px 10px; color:#A8ADBD;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M5 8h6" stroke-linecap="round"/></svg><span style="font-size:13px;">Off</span></div>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; padding-top:20px; margin-top:8px; border-top:1px solid rgba(255,255,255,.08);">
+            <div><div style="font-size:13px; font-weight:600;">Idle messages</div><div style="font-size:11px; color:#A8ADBD; margin-top:2px;">Comments when you pause</div></div>
+            <div style="flex:none; width:36px; height:20px; border-radius:10px; background:#1F8039; position:relative;"><div style="position:absolute; top:2px; left:18px; width:16px; height:16px; border-radius:50%; background:#fff;"></div></div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Two dropdowns instead of two grids — minimal footprint. Each shows the current pick with its monogram; opening one reveals only the detected installs with a count. Idle messages stays inline.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

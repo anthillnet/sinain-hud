@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 3 Step 5: Insight Synthesizer — produce suggestion + insight for Telegram.
 
-Uses the "smart" model (configured in koog-config.json) for higher quality output.
+Uses the "smart" model (configured in llm-config.json) for higher quality output.
 Reads post-curation playbook + recent logs to generate one Telegram message
 with a practical suggestion and a surprising insight.
 

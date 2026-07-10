@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <div style="margin-bottom:36px; max-width:780px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · macOS install</div>
+    <div style="font-size:24px; font-weight:600; line-height:24px; margin-bottom:10px; color:#27282E;">Setup wizard — install &amp; permissions</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">A 340×420 frameless, drag-anywhere panel shown after first launch. Welcome → choose tier → config → Screen Recording permission → finishing, plus the provisioning banner for local tiers. Same dark card language and Ring UI green as the feature tour.</div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- SECTION A — WIZARD FLOW                                       -->
+  <!-- ============================================================= -->
+  <div style="margin-bottom:44px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#6C707E; margin-bottom:16px;">Setup wizard</div>
+    <div style="display:flex; gap:32px; align-items:flex-start;">
+
+      <!-- 1 · Welcome -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">1 · Welcome</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; position:relative; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin-top:12px;"><sc-for list="{{ dotsWelcome }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; position:relative;">
+            <div style="position:absolute; width:130px; height:130px; border-radius:50%; border:1px solid rgba(31,128,57,.18);"></div>
+            <div style="position:absolute; width:188px; height:188px; border-radius:50%; border:1px solid rgba(31,128,57,.1);"></div>
+            <svg width="64" height="64" viewBox="0 0 30 30" style="margin-bottom:22px;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="2.4"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <div style="font-size:14px; line-height:20px; color:#A8ADBD; max-width:250px;">A private AI overlay that watches your screen and audio — and stays invisible to screen capture.</div>
+          </div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Get started</button>
+          <div style="text-align:center; margin-top:12px;"><span style="font-size:12px; color:#6C707E; cursor:pointer;">Quit</span></div>
+        </div>
+      </div>
+
+      <!-- 2 · Choose tier -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">2 · Choose how Sinain runs</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin:12px 0 16px;"><sc-for list="{{ dotsTier }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="font-size:15px; font-weight:600; margin-bottom:12px;">Choose how Sinain runs</div>
+
+          <!-- Cloud -->
+          <div style="border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:9px 11px; margin-bottom:7px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between;"><span style="font-size:13px; font-weight:600;">Cloud</span><span style="font-size:11px; color:#6C707E;">no download</span></div>
+            <div style="font-size:11px; line-height:15px; color:#A8ADBD; margin-top:2px;">Fastest setup. Uses OpenRouter for everything.</div>
+          </div>
+
+          <!-- Hybrid (selected) -->
+          <div style="border:1px solid #1F8039; background:rgba(31,128,57,.12); border-radius:8px; padding:9px 11px; margin-bottom:7px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between;"><span style="font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px;">Hybrid<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span style="font-size:11px; color:#6C707E;">~1.6 GB</span></div>
+            <div style="font-size:11px; line-height:15px; color:#A8ADBD; margin-top:2px;">Audio transcribed on-device; analysis in the cloud.</div>
+            <div style="font-size:11px; color:#1F8039; margin-top:5px;">Screen context only — audio stays on your Mac</div>
+          </div>
+
+          <!-- Private -->
+          <div style="border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:9px 11px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between;"><span style="font-size:13px; font-weight:600;">Private</span><span style="font-size:11px; color:#6C707E;">~9 GB</span></div>
+            <div style="font-size:11px; line-height:15px; color:#A8ADBD; margin-top:2px;">Fully offline. Needs Ollama + ~9 GB of models.</div>
+          </div>
+
+          <div style="flex:1;"></div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Continue</button>
+          <div style="text-align:center; margin-top:10px;"><span style="font-size:12px; color:#6C707E; cursor:pointer;">Quit</span></div>
+        </div>
+      </div>
+
+      <!-- 3 · Config (Cloud / Hybrid) -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">3 · Config · Cloud / Hybrid</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin:12px 0 16px;"><sc-for list="{{ dotsConfig }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="font-size:15px; font-weight:600; margin-bottom:6px;">Paste your OpenRouter API key</div>
+          <div style="font-size:12px; line-height:16px; color:#A8ADBD; margin-bottom:14px;">Stored locally in <span style="font-family:ui-monospace,Menlo,Consolas,monospace;">~/.sinain/.env</span>. Never sent anywhere but OpenRouter.</div>
+          <div style="height:36px; background:#2B2D30; border:1px solid #1F8039; border-radius:4px; box-shadow:0 0 0 1px rgba(31,128,57,.4); display:flex; align-items:center; padding:0 12px;">
+            <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; color:#fff; letter-spacing:.05em;">sk-or-••••••••••••••••••</span>
+            <span style="width:1px; height:16px; background:#1F8039; margin-left:1px;"></span>
+          </div>
+          <div style="font-size:12px; color:#6C707E; margin-top:8px;">Get a free key at <span style="color:#1F8039;">openrouter.ai</span></div>
+          <div style="flex:1;"></div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Continue</button>
+          <div style="text-align:center; margin-top:12px;"><span style="font-size:12px; color:#6C707E; cursor:pointer;">Quit</span></div>
+        </div>
+      </div>
+
+      <!-- 3b · Config (Private) -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">3 · Config · Private</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin:12px 0 16px;"><sc-for list="{{ dotsConfig }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="font-size:15px; font-weight:600; margin-bottom:6px;">Full local mode</div>
+          <div style="font-size:12px; line-height:16px; color:#A8ADBD; margin-bottom:12px;">No key needed. Make sure Ollama is running with the models pulled, and whisper.cpp installed.</div>
+          <div style="background:#15161A; border:1px solid rgba(255,255,255,.08); border-radius:6px; padding:10px 12px;">
+            <div style="font-size:11px; color:#6C707E; margin-bottom:5px;">Pull the models</div>
+            <div style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:17px; color:#D6DAE3;">ollama pull phi4-mini qwen2.5vl:7b</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:7px; margin-top:12px;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><rect x="3.5" y="7" width="9" height="6" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>
+            <span style="font-size:12px; color:#1F8039;">Zero data leaves your Mac.</span>
+          </div>
+          <div style="flex:1;"></div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Continue</button>
+          <div style="text-align:center; margin-top:12px;"><span style="font-size:12px; color:#6C707E; cursor:pointer;">Quit</span></div>
+        </div>
+      </div>
+
+      <!-- 5 · Finishing -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">5 · Finishing</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin-top:12px;"><sc-for list="{{ dotsFinish }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <div style="width:38px; height:38px; border-radius:50%; border:3px solid rgba(255,255,255,.12); border-top-color:#1F8039; animation:spin 1s linear infinite; margin-bottom:20px;"></div>
+            <div style="font-size:14px; line-height:20px; color:#A8ADBD; max-width:230px;">Writing config and starting the backend…</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- SECTION B — SCREEN RECORDING PERMISSION                       -->
+  <!-- ============================================================= -->
+  <div style="margin-bottom:44px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">Screen Recording permission</div>
+    <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:16px; max-width:680px;">Step 4 of the wizard. A pre-warn screen triggers the macOS prompt, a waiting state survives the relaunch round-trip and auto-detects the grant, then a confirmation.</div>
+    <div style="display:flex; gap:32px; align-items:flex-start;">
+
+      <!-- 9A · Pre-warn -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">4 · Pre-warn</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin:12px 0 18px;"><sc-for list="{{ dotsPerm }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="display:flex; flex-direction:column; align-items:center; text-align:center;">
+            <svg width="46" height="46" viewBox="0 0 30 30" style="margin-bottom:12px;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="2.4"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <div style="font-size:17px; font-weight:600; margin-bottom:8px;">One quick permission</div>
+            <div style="font-size:13px; line-height:18px; color:#A8ADBD;">Sinain reads your screen to offer help in context, and hears system audio the same way. macOS will ask you to allow Screen Recording.</div>
+          </div>
+          <sc-if value="{{ showHelperWarning }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex; gap:8px; align-items:flex-start; background:rgba(229,109,23,.1); border-radius:6px; padding:9px 11px; margin-top:14px;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#E56D17" stroke-width="1.5" style="flex:none; margin-top:1px;"><path d="M8 2l6 11H2L8 2z" stroke-linejoin="round"/><path d="M8 7v3M8 11.6v.05" stroke-linecap="round"/></svg>
+            <span style="font-size:11px; line-height:15px; color:#D6DAE3;">The system prompt will say <span style="font-family:ui-monospace,Menlo,Consolas,monospace;">“sck-capture”</span> — that’s Sinain’s capture helper.</span>
+          </div>
+          </sc-if>
+          <div style="flex:1;"></div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Allow Screen Recording</button>
+          <div style="text-align:center; margin-top:12px;"><span style="font-size:12px; color:#6C707E; cursor:pointer;">Do this later</span></div>
+        </div>
+      </div>
+
+      <!-- 9B · Waiting -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">4 · Waiting for grant</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin:12px 0 18px;"><sc-for list="{{ dotsPerm }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <div style="width:22px; height:22px; border-radius:50%; border:2.5px solid rgba(255,255,255,.12); border-top-color:#1F8039; animation:spin 1s linear infinite; flex:none;"></div>
+            <div style="font-size:16px; font-weight:600;">Waiting for permission</div>
+          </div>
+          <div style="font-size:12px; line-height:17px; color:#A8ADBD; margin-bottom:10px;">In System Settings → Privacy &amp; Security → Screen Recording, turn on Sinain.</div>
+          <!-- faux Settings row -->
+          <div style="background:#2B2D30; border:1px solid rgba(255,255,255,.1); border-radius:6px; padding:9px 11px; display:flex; align-items:center; gap:10px;">
+            <svg width="20" height="20" viewBox="0 0 30 30" style="flex:none;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:12px; font-weight:500;">Sinain</div>
+              <div style="font-size:11px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ settingsHint }}</div>
+            </div>
+            <div style="flex:none; width:34px; height:19px; border-radius:10px; background:#1F8039; position:relative;"><div style="position:absolute; top:2px; left:17px; width:15px; height:15px; border-radius:50%; background:#fff;"></div></div>
+          </div>
+          <div style="flex:1;"></div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Open System Settings</button>
+          <div style="font-size:11px; line-height:15px; color:#6C707E; text-align:center; margin-top:12px;">Sinain continues on its own once it’s enabled. macOS may ask to relaunch.</div>
+        </div>
+      </div>
+
+      <!-- 9C · Granted -->
+      <div style="flex:none; width:340px;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">4 · Granted</div>
+        <div style="width:340px; height:420px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:24px 26px; box-sizing:border-box; overflow:hidden;">
+          <div style="font-size:13px; font-weight:700; letter-spacing:.2em; color:#1F8039; text-align:center;">SINAIN</div>
+          <div style="display:flex; gap:6px; justify-content:center; margin:12px 0 18px;"><sc-for list="{{ dotsPerm }}" as="dot" hint-placeholder-count="5"><span style="width:{{ dot.w }}; height:6px; border-radius:3px; background:{{ dot.bg }};"></span></sc-for></div>
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <div style="width:56px; height:56px; border-radius:50%; background:rgba(31,128,57,.16); display:flex; align-items:center; justify-content:center; margin-bottom:18px;">
+              <svg width="28" height="28" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="font-size:18px; font-weight:600; margin-bottom:8px;">All set</div>
+            <div style="font-size:13px; line-height:18px; color:#A8ADBD; max-width:240px;">Screen Recording is on. Sinain can now see your screen and hear system audio to help in context.</div>
+          </div>
+          <button style="height:36px; width:100%; background:#1F8039; border:none; border-radius:4px; color:#fff; font-size:14px; font-weight:500; cursor:pointer;">Continue</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- SECTION C — PROVISIONING BANNER                               -->
+  <!-- ============================================================= -->
+  <div>
+    <div style="font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">Provisioning · local tiers</div>
+    <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:16px; max-width:680px;">After relaunch, while models download, a 360×230 banner reports per-item progress. Non-blocking — the HUD is already usable.</div>
+    <div style="display:flex; gap:32px; align-items:flex-start;">
+      <div style="flex:none;">
+        <div style="font-size:13px; font-weight:500; color:#27282E; margin-bottom:8px;">Setting up Sinain · {{ provTierLabel }} tier</div>
+        <div style="width:360px; height:230px; background:#1E1F22; border-radius:12px; box-shadow:0 4px 24px rgba(0,28,54,.18),0 2px 6px rgba(0,28,54,.1); color:#fff; display:flex; flex-direction:column; padding:18px 20px; box-sizing:border-box; overflow:hidden;">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:14px;">
+            <svg width="18" height="18" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <span style="font-size:14px; font-weight:600;">Setting up Sinain</span>
+          </div>
+          <div style="flex:1; overflow:hidden;">
+            <sc-for list="{{ provRows }}" as="row" hint-placeholder-count="4">
+              <div style="margin-bottom:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                  <span style="font-size:12px; color:#D6DAE3;">{{ row.label }}</span>
+                  <span style="font-size:11px; color:{{ row.statusColor }};">{{ row.status }}</span>
+                </div>
+                <div style="height:4px; border-radius:2px; background:rgba(255,255,255,.08);"><div style="height:4px; border-radius:2px; background:#1F8039; width:{{ row.barW }};"></div></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:11px; line-height:15px; color:#6C707E; border-top:1px solid rgba(255,255,255,.08); padding-top:10px;">You can keep working — this runs in the background and only happens once.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;showHelperWarning&quot;: {
+    &quot;editor&quot;: &quot;boolean&quot;,
+    &quot;default&quot;: true,
+    &quot;tsType&quot;: &quot;boolean&quot;
+  },
+  &quot;provisioningTier&quot;: {
+    &quot;editor&quot;: &quot;enum&quot;,
+    &quot;default&quot;: &quot;Private&quot;,
+    &quot;options&quot;: [&quot;Hybrid&quot;, &quot;Private&quot;],
+    &quot;tsType&quot;: &quot;string&quot;
+  }
+}">
+class Component extends DCLogic {
+  renderVals() {
+    const total = 5;
+    const mk = (a) => Array.from({ length: total }, (_, i) => ({
+      w: i === a ? '16px' : '6px',
+      bg: i === a ? '#1F8039' : '#3A3D42'
+    }));
+
+    const showHelperWarning = this.props.showHelperWarning !== false;
+    const settingsHint = showHelperWarning ? 'listed as \u201csck-capture\u201d' : 'listed as Sinain';
+
+    const tier = this.props.provisioningTier ?? 'Private';
+    const done = (label) => ({ label, status: 'Done', barW: '100%', statusColor: '#1F8039' });
+    const active = (label, pct) => ({ label, status: pct + '%', barW: pct + '%', statusColor: '#A8ADBD' });
+    const rows = tier === 'Hybrid'
+      ? [done('Python runtime'), active('Whisper model · 1.6 GB', 64)]
+      : [done('Python runtime'), done('Whisper model · 1.6 GB'), done('Ollama runtime'), active('phi4-mini + qwen2.5vl · 9 GB', 38)];
+
+    return {
+      dotsWelcome: mk(0), dotsTier: mk(1), dotsConfig: mk(2), dotsPerm: mk(3), dotsFinish: mk(4),
+      showHelperWarning, settingsHint,
+      provRows: rows, provTierLabel: tier
+    };
+  }
+}
+</script>
+</body>
+</html>

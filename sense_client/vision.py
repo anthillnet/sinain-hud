@@ -1,7 +1,9 @@
-"""Vision Provider — abstract interface for local and cloud image analysis.
+"""Vision Provider — surface wiring over the shared sinain-sense vision layer.
 
-Routes vision requests to either Ollama (local) or OpenRouter (cloud) based
-on configuration, privacy mode, and API key availability.
+The contract (VisionResult, VisionProvider) and the OpenRouter backend live in
+sinain-sense (transported by sinain-llm). This module keeps what is
+sense_client-specific: the local Ollama backend and the create_vision factory
+(privacy mode / env / config policy).
 
 Usage:
     from .vision import create_vision
@@ -12,45 +14,20 @@ Usage:
 
 from __future__ import annotations
 
-import base64
-import io
-import json
 import logging
 import os
-import time
-import uuid
-from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
+
+from . import _pkg_boot  # noqa: F401 — puts sinain_sense on sys.path
+from sinain_sense.vision import OpenRouterVisionProvider, VisionProvider, VisionResult
 
 if TYPE_CHECKING:
     from PIL import Image
 
 logger = logging.getLogger("sinain.vision")
 
-
-class VisionResult:
-    """Result of a vision call: text + optional cost info."""
-    __slots__ = ("text", "cost")
-
-    def __init__(self, text: Optional[str], cost: Optional[dict] = None):
-        self.text = text
-        self.cost = cost  # {cost, tokens_in, tokens_out, model, cost_id}
-
-
-class VisionProvider(ABC):
-    """Abstract base for vision inference backends."""
-
-    name: str = "unknown"
-
-    @abstractmethod
-    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> VisionResult:
-        """Describe image content. Returns VisionResult (text may be None on failure)."""
-        ...
-
-    @abstractmethod
-    def is_available(self) -> bool:
-        """Check if the backend is reachable."""
-        ...
+__all__ = ["VisionResult", "VisionProvider", "OpenRouterVisionProvider",
+           "OllamaVisionProvider", "create_vision"]
 
 
 class OllamaVisionProvider(VisionProvider):
@@ -68,103 +45,6 @@ class OllamaVisionProvider(VisionProvider):
 
     def is_available(self) -> bool:
         return self._client.is_available()
-
-
-class OpenRouterVisionProvider(VisionProvider):
-    """Cloud vision via OpenRouter API."""
-
-    name = "openrouter"
-
-    def __init__(self, api_key: str, model: str = "google/gemini-2.5-flash-lite",
-                 timeout: float = 15.0, max_tokens: int = 200):
-        self._api_key = api_key
-        self._model = model
-        self._timeout = timeout
-        self._max_tokens = max_tokens
-        self.name = f"openrouter ({model})"
-
-    def describe(self, image: "Image.Image", prompt: Optional[str] = None) -> VisionResult:
-        if not self._api_key:
-            return VisionResult(None)
-
-        try:
-            import requests
-
-            # Encode image
-            img_b64 = self._encode(image)
-            if not img_b64:
-                return VisionResult(None)
-
-            prompt_text = prompt or "Describe what's on this screen concisely (2-3 sentences)."
-
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._model,
-                    "max_tokens": self._max_tokens,
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt_text},
-                            {"type": "image_url", "image_url": {
-                                "url": f"data:image/jpeg;base64,{img_b64}",
-                                "detail": "low",
-                            }},
-                        ],
-                    }],
-                },
-                timeout=self._timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            usage = data.get("usage", {})
-            logger.debug("openrouter vision: model=%s tokens=%s cost=%s",
-                         self._model, usage.get("total_tokens", "?"), usage.get("cost", "?"))
-            cost_info = None
-            if usage.get("cost") is not None:
-                cost_info = {
-                    "cost": usage["cost"],
-                    "tokens_in": usage.get("prompt_tokens", 0),
-                    "tokens_out": usage.get("completion_tokens", 0),
-                    "model": self._model,
-                    "cost_id": uuid.uuid4().hex[:16],
-                }
-            return VisionResult(content if content else None, cost_info)
-
-        except Exception as e:
-            logger.debug("openrouter vision failed: %s", e)
-            return VisionResult(None)
-
-    def is_available(self) -> bool:
-        return bool(self._api_key)
-
-    @staticmethod
-    def _encode(image: "Image.Image", max_dim: int = 512, quality: int = 80) -> Optional[str]:
-        try:
-            from PIL import Image as PILImage
-
-            w, h = image.size
-            if max(w, h) > max_dim:
-                scale = max_dim / max(w, h)
-                image = image.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
-
-            if image.mode == "RGBA":
-                bg = PILImage.new("RGB", image.size, (255, 255, 255))
-                bg.paste(image, mask=image.split()[3])
-                image = bg
-            elif image.mode != "RGB":
-                image = image.convert("RGB")
-
-            buf = io.BytesIO()
-            image.save(buf, format="JPEG", quality=quality)
-            return base64.b64encode(buf.getvalue()).decode("ascii")
-        except Exception:
-            return None
 
 
 def create_vision(config: dict) -> Optional[VisionProvider]:
