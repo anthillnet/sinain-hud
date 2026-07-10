@@ -1289,53 +1289,10 @@ class _SaveReceiptCardState extends State<SaveReceiptCard> {
 
 // ── Save offer (DESIGN-SAVE-OFFER.md, wireframes: "Save Offer.dc.html") ─────
 //
-// Breakpoint nudge, chip-first (arrival B): a one-line pill carrying the verb
-// + value ("Save 47 min?"), expanding to the offer card on intent. Accept
-// morphs into the shipped receipt; Adjust opens the chooser pre-filled; ✕ or
-// a silent ~45 s fade dismisses. Every response is a training label.
-
-/// The one-line arrival chip. Ignoring it costs nothing; clicking shows the
-/// card. Expiry fades the chip, not a panel — no countdown bar (that idiom is
-/// reserved for the receipt's undo window).
-class SaveOfferChip extends StatelessWidget {
-  final SaveOffer offer;
-  final VoidCallback onTap;
-
-  const SaveOfferChip({super.key, required this.offer, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = HudTheme.of(context);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(8, 5, 11, 5),
-          decoration: BoxDecoration(
-            color: t.panelBg,
-            borderRadius: BorderRadius.circular(9),
-            border:
-                Border.all(color: t.selectionAccent.withValues(alpha: 0.45)),
-            boxShadow: t.shadow,
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(
-                  color: t.selectionAccent, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 7),
-            Text('Save ${offer.minutes} min?',
-                style: _mono(11, t.textPrimary, weight: FontWeight.w500)),
-          ]),
-        ),
-      ),
-    );
-  }
-}
+// Breakpoint nudge (arrival A — the card just appears): evidence and actions
+// visible at once, zero extra gestures. Accept morphs into the shipped
+// receipt; Adjust opens the chooser pre-filled; ✕ or a silent ~45 s fade
+// dismisses. Every response is a training label.
 
 /// The offer card: evidence-first claim (duration · sources · recency — every
 /// token checkable), optional confident context line, verb-carrying actions.

@@ -153,12 +153,11 @@ the only addition), card mode. Nothing here calls an LLM.
 
 ## 9. Open design questions
 
-1. **The arrival affordance** — the biggest one. Options: (a) the card simply
-   appears in the card corner (precedent: arriving cards open card mode — but
-   a self-opening 380×500 panel may be too loud for a proactive nudge);
-   (b) a one-line chip near the eye ("Save 47 min?") that expands to the card
-   on hover/click; (c) an eye pulse in save-green that opens the card on
-   click. Recommendation to explore: (b) — chip first, card on intent.
+1. **The arrival affordance** — DECIDED (2026-07-10, as built): **(a) the card
+   just appears** in the card corner — evidence and actions visible at once,
+   zero extra gestures. Explored alternatives: (b) chip-first, card on intent
+   (the wireframes' recommendation — built, then dropped by product call);
+   (c) an eye pulse in save-green (mute — no evidence visible).
 2. Where do expired/dismissed offers go? Nowhere (current design), or a
    retrievable "recent episodes" list in the cockpit for the "wait, actually
    yes" case?

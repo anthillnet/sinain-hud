@@ -119,11 +119,10 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<SaveReceipt>? _receiptSub;
   StreamSubscription<VoiceSession>? _voiceSub;
   VoiceSession? _voiceSession;
-  // Breakpoint save offer (DESIGN-SAVE-OFFER.md): chip-first arrival, card on
-  // intent, morph into the receipt on accept. Chip mode = eye + one-line pill.
+  // Breakpoint save offer (DESIGN-SAVE-OFFER.md, arrival A): the card just
+  // appears — evidence and actions visible at once — and morphs into the
+  // receipt on accept. Untouched, it fades silently after ~45 s.
   SaveOffer? _saveOffer;
-  bool _offerExpanded = false;
-  bool _chipMode = false;
   Timer? _offerExpiryTimer;
   StreamSubscription<SaveOffer>? _offerSub;
   // Adjust…: the offer whose pre-filled chooser is open — confirm posts
@@ -1572,41 +1571,15 @@ class OverlayShellState extends State<OverlayShell> {
 
   // ── Save offer lifecycle (DESIGN-SAVE-OFFER.md) ───────────────────────────
 
-  /// A `save_offer` arrived: chip-first (arrival B). Outside chat/card mode
-  /// the window becomes a slim eye+chip surface; silent expiry after ~45 s.
+  /// A `save_offer` arrived (arrival A): the card just appears in the card
+  /// corner — zero extra gestures. Untouched, it fades silently after ~45 s
+  /// (no countdown bar — that idiom is reserved for the receipt's undo).
   void _showSaveOffer(SaveOffer o) {
     _offerExpiryTimer?.cancel();
-    setState(() {
-      _saveOffer = o;
-      _offerExpanded = false;
-    });
+    setState(() => _saveOffer = o);
     _offerExpiryTimer =
         Timer(Duration(seconds: o.expirySeconds), _expireOffer);
-    if (_state != HudState.chat &&
-        _state != HudState.hidden &&
-        !_cardMode &&
-        !_chipMode) {
-      setState(() => _chipMode = true);
-      _resizeForChipSurface();
-    }
-  }
-
-  Future<void> _resizeForChipSurface() async {
-    final frame = await _windowService.getWindowFrame();
-    if (frame == null) return;
-    final right = frame['x']! + frame['w']!;
-    final top = frame['y']! + frame['h']!;
-    _windowService.setWindowFrame(right - 240, top - 110, 240, 110);
-  }
-
-  /// Chip clicked — intent shown: stop the expiry fade and show the card.
-  void _expandOffer() {
-    _offerExpiryTimer?.cancel();
-    setState(() {
-      _offerExpanded = true;
-      _chipMode = false;
-    });
-    _enterCardMode();
+    if (_state != HudState.hidden) _enterCardMode(); // no-op in chat
   }
 
   /// Accept: the same save lifecycle as the manual gesture, offered_save
@@ -1631,8 +1604,6 @@ class OverlayShellState extends State<OverlayShell> {
       _offerPrefillApps = o.apps;
       _offerPrefillMinutes = o.minutes;
       _saveOffer = null;
-      _offerExpanded = false;
-      _chipMode = false;
     });
     _enterCardMode();
     _openRangeChooser('save');
@@ -1650,16 +1621,8 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _clearOffer({bool exitSurfaces = true}) {
     _offerExpiryTimer?.cancel();
-    setState(() {
-      _saveOffer = null;
-      _offerExpanded = false;
-    });
-    if (_chipMode) {
-      setState(() => _chipMode = false);
-      if (exitSurfaces) _resizeWindowForState(_state);
-    } else if (exitSurfaces) {
-      _maybeExitCardMode();
-    }
+    setState(() => _saveOffer = null);
+    if (exitSurfaces) _maybeExitCardMode();
   }
 
   void _clearAdjustState() {
@@ -1693,14 +1656,12 @@ class OverlayShellState extends State<OverlayShell> {
         if (_saveOffer != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: _offerExpanded
-                ? SaveOfferCard(
-                    offer: _saveOffer!,
-                    onAccept: _acceptOffer,
-                    onAdjust: _adjustOffer,
-                    onDismiss: _dismissOffer,
-                  )
-                : SaveOfferChip(offer: _saveOffer!, onTap: _expandOffer),
+            child: SaveOfferCard(
+              offer: _saveOffer!,
+              onAccept: _acceptOffer,
+              onAdjust: _adjustOffer,
+              onDismiss: _dismissOffer,
+            ),
           ),
         if (_saveReceipt != null)
           Padding(
@@ -1954,14 +1915,6 @@ class OverlayShellState extends State<OverlayShell> {
       return const SizedBox.shrink();
     }
 
-    // Save-offer chip surface (arrival B — chip first, card on intent): the
-    // eye plus a one-line pill beneath it. One line of footprint until the
-    // user shows intent; expiry fades the chip, not a panel.
-    if (_chipMode && _saveOffer != null && !_cardMode &&
-        _state != HudState.chat) {
-      return _buildChipSurface();
-    }
-
     // Compact card mode: capture cards without the full HUD (any non-chat
     // state — the chat renders cards in its own Stack).
     if (_cardMode && _state != HudState.chat) {
@@ -1995,41 +1948,6 @@ class OverlayShellState extends State<OverlayShell> {
       case HudState.hidden:
         return const SizedBox.shrink();
     }
-  }
-
-  /// Eye + offer chip, top-right anchored. The eye keeps its normal gestures
-  /// (tap → chat exits chip mode; the offer stays and renders in the column).
-  Widget _buildChipSurface() {
-    return Align(
-      alignment: Alignment.topRight,
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: EyeWidget(
-                onTap: () {
-                  setState(() => _chipMode = false);
-                  _transitionTo(HudState.chat);
-                },
-                onDoubleTap: _isMacOS ? _startManualRoi : null,
-                onLongPress: () => toggleVisibility(false),
-                onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
-                onDragEnd: _persistEyePosition,
-                pupilDilation: _pupilDilation,
-                eyeColor: _eyeColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            SaveOfferChip(offer: _saveOffer!, onTap: _expandOffer),
-          ],
-        ),
-      ),
-    );
   }
 
   // ── State 2: Controls Bar ──────────────────────────────────────────────────
