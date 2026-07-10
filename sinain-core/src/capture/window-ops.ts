@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { BriefTimelineEntry, BurstConfig, FeedItem } from "../types.js";
@@ -108,6 +109,14 @@ function _semanticAlt(ev: { semantic?: { visible?: { summary?: string }; changes
  * raw-OCR path.
  */
 const COMPACT_ASSEMBLY = () => process.env.SINAIN_BURST_COMPACT !== "0";
+
+// Merge-run bounds (compact mode): consecutive frames of the same app+title
+// share one `[HH:MM] [screen App — Title]` entry instead of paying the prefix
+// per frame. Both bounds exist to protect the BRIEF's timeline: an unbounded
+// merge would collapse half an hour of one app into a single timestamp and
+// erase the within-app temporal structure the timeline rows are built from.
+const MERGE_GAP_MS = 90_000;   // frames further apart than this start a new entry
+const MERGE_SPAN_MS = 180_000; // one entry never spans more than 3 minutes
 
 /** Group per-word OCR boxes into visual text lines (y-cluster, reading order). */
 function _reconstructLines(
@@ -256,6 +265,15 @@ export function assembleWindow(
 
   const compact = COMPACT_ASSEMBLY();
   const seenLines = new Set<string>();  // window-global line dedup (compact mode)
+  // Volatile-token suppression (compact): a line whose digit-masked key was
+  // already seen in a PREVIOUS frame is a repaint of a mutating element
+  // (menu-bar clock, progress %, cursor "Ln 42, Col 7", token counters) — the
+  // first-seen variant already told the brief everything. Scoped to
+  // cross-frame on purpose: digit-differing lines WITHIN one frame (a table
+  // of values, a list of ports) are distinct content and all survive.
+  const maskedPrevFrames = new Set<string>();
+  // Merge-run state (compact) — index into `lines` of the open entry.
+  let mergeIdx = -1, mergeKey = "", mergeStartTs = 0, mergeLastTs = 0;
   let lastOcr = "";
   for (const ev of senseBuffer.queryByTime(since)) {
     const app = ev.semantic?.context?.app || ev.meta.app || "";
@@ -276,16 +294,33 @@ export function assembleWindow(
         continue;
       }
       const novel: string[] = [];
+      const frameMasked: string[] = [];
       for (const l of src) {
         const n = _normLine(l);
         if (n.length < 3) continue;          // drop stray single glyphs
         if (seenLines.has(n)) continue;
+        const masked = n.replace(/\d+/g, "0");
+        if (maskedPrevFrames.has(masked)) { seenLines.add(n); continue; }
         seenLines.add(n);
+        frameMasked.push(masked);
         novel.push(l);
       }
+      for (const m of frameMasked) maskedPrevFrames.add(m);
       if (novel.length === 0) { exactDupDropped += 1; continue; }  // fully redundant frame
+      const runKey = `${app} ${ev.meta.windowTitle || ""}`;
+      if (mergeIdx >= 0 && runKey === mergeKey
+          && ev.ts - mergeLastTs <= MERGE_GAP_MS && ev.ts - mergeStartTs <= MERGE_SPAN_MS) {
+        const added = ` · ${novel.join(" · ")}`;
+        lines[mergeIdx].line += added;
+        mergeLastTs = ev.ts;
+        ocrEvents += 1;
+        ocrChars += added.length;
+        semanticAltChars += added.length;
+        continue;
+      }
       const line = `[${fmtClock(ev.ts)}] [screen ${app}${title}] ${novel.join(" · ")}`;
       lines.push({ ts: ev.ts, line });
+      mergeIdx = lines.length - 1; mergeKey = runKey; mergeStartTs = ev.ts; mergeLastTs = ev.ts;
       ocrEvents += 1;
       ocrChars += line.length;
       semanticAltChars += line.length;       // L1 measurement N/A once compacted
@@ -396,12 +431,30 @@ function _parseBrief(content: string): SummonBrief {
 const _briefEmpty = (b: SummonBrief): boolean =>
   b.timeline.length === 0 && b.entities.length === 0 && !b.goal;
 
+// Memo: burst calls are seeded + temperature 0, so an identical window slice
+// yields an identical brief — a repeat summon (double-tap, chooser re-open,
+// voice seed right after a summon) would pay full price for a byte-identical
+// answer. Only non-empty briefs are memoized (an empty is a failure, and the
+// retry seed makes reattempts non-identical anyway). Short TTL + size cap
+// bound the map; `cached: true` on the result tells callers to skip
+// cost/metrics recording so a memo hit never shows up as billed tokens.
+const BRIEF_MEMO_TTL_MS = 90_000;
+const BRIEF_MEMO_MAX = 16;
+const _briefMemo = new Map<string, { at: number; brief: SummonBrief; result: BurstCallResult }>();
+
 export async function summonBrief(
   config: BurstConfig,
   slice: WindowSlice,
   minutes: number,
   seed?: number,
 ): Promise<{ brief: SummonBrief; result: BurstCallResult }> {
+  const memoKey = createHash("sha1")
+    .update(`${config.model}:${minutes}:${seed ?? ""}:${slice.text}`)
+    .digest("hex");
+  const hit = _briefMemo.get(memoKey);
+  if (hit && Date.now() - hit.at < BRIEF_MEMO_TTL_MS) {
+    return { brief: hit.brief, result: { ...hit.result, latencyMs: 0, cached: true } };
+  }
   const call = (s: number | undefined) => burstCall(config, {
     system: SUMMON_SYSTEM,
     user: `Last ${minutes} minutes of activity:\n${slice.text}\n\nProduce the situation brief.`,
@@ -419,6 +472,14 @@ export async function summonBrief(
     const alt = await call((seed ?? 42) + 1_000);
     const altBrief = _parseBrief(alt.content);
     if (!_briefEmpty(altBrief)) { result = alt; brief = altBrief; }
+  }
+  if (!_briefEmpty(brief)) {
+    for (const [k, v] of _briefMemo) if (Date.now() - v.at >= BRIEF_MEMO_TTL_MS) _briefMemo.delete(k);
+    if (_briefMemo.size >= BRIEF_MEMO_MAX) {
+      const oldest = [..._briefMemo.entries()].reduce((a, b) => (a[1].at <= b[1].at ? a : b));
+      _briefMemo.delete(oldest[0]);
+    }
+    _briefMemo.set(memoKey, { at: Date.now(), brief, result });
   }
   return { brief, result };
 }
