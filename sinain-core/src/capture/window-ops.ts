@@ -462,17 +462,26 @@ export async function summonBrief(
     jsonMode: true,
     seed: s,
   });
-  // Reliability: the model occasionally returns an empty JSON object on a
-  // large/noisy prefill, and with a fixed seed that empty would be permanent.
-  // One retry with a different seed rescues it (measured empty-rate motivates
-  // this — see docs/BASELINE-BURST-SPEND.md). Second attempt only on empty.
+  // Reliability: on a large/noisy prefill the model occasionally returns an
+  // empty JSON object — or truncated/unterminated JSON that fails to parse
+  // (measured live 2026-07-10: several seeds on a content-heavy window). With
+  // a fixed seed either failure would be permanent, so BOTH trigger one retry
+  // with a different seed; the second call fires only on failure. Call-level
+  // errors (network, 429) from the FIRST attempt still propagate — they are
+  // not seed-dependent; a failed RETRY falls back to the first attempt's
+  // outcome rather than masking it.
   let result = await call(seed);
-  let brief = _parseBrief(result.content);
-  if (_briefEmpty(brief)) {
-    const alt = await call((seed ?? 42) + 1_000);
-    const altBrief = _parseBrief(alt.content);
-    if (!_briefEmpty(altBrief)) { result = alt; brief = altBrief; }
+  let brief: SummonBrief | null;
+  let firstErr: unknown = null;
+  try { brief = _parseBrief(result.content); } catch (err) { brief = null; firstErr = err; }
+  if (brief === null || _briefEmpty(brief)) {
+    try {
+      const alt = await call((seed ?? 42) + 1_000);
+      const altBrief = _parseBrief(alt.content);
+      if (brief === null || !_briefEmpty(altBrief)) { result = alt; brief = altBrief; }
+    } catch { /* retry failed — fall through to the first attempt's outcome */ }
   }
+  if (brief === null) throw firstErr;
   if (!_briefEmpty(brief)) {
     for (const [k, v] of _briefMemo) if (Date.now() - v.at >= BRIEF_MEMO_TTL_MS) _briefMemo.delete(k);
     if (_briefMemo.size >= BRIEF_MEMO_MAX) {

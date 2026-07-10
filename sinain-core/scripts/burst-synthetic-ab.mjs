@@ -108,3 +108,21 @@ const slice = newOps.assembleWindow(feedBuffer, senseBuffer, 30);
 const r1 = await newOps.summonBrief(cfg, slice, 30);
 const r2 = await newOps.summonBrief(cfg, slice, 30);
 console.log(`memo: fetches=${fetches} (want 1), second cached=${r2.result.cached === true}, briefs identical=${JSON.stringify(r1.brief) === JSON.stringify(r2.brief)}`);
+
+// ── parse-retry: a truncated-JSON first response must trigger ONE retry with
+// a different seed, and the brief must come from the retry ──
+let prCalls = 0;
+globalThis.fetch = async () => {
+  prCalls += 1;
+  const content = prCalls === 1
+    ? '{"timeline":[{"at":"-2m","what":"truncated mid-str'  // unterminated (seen live)
+    : '{"timeline":[{"at":"-2m","what":"rescued by retry"}],"goal":"g","problems":[],"entities":["e"]}';
+  return { ok: true, json: async () => ({ choices: [{ message: { content } }], usage: { prompt_tokens: 4200, completion_tokens: 42 } }) };
+};
+const pr = await newOps.summonBrief(cfg, slice, 30, 7777);  // fresh seed → no memo hit
+console.log(`parse-retry: fetches=${prCalls} (want 2), brief rescued=${pr.brief.timeline[0]?.what === "rescued by retry"}`);
+// Both attempts failing must still throw (callers show the error state).
+globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"broken":"' } }], usage: {} }) });
+let threw = false;
+try { await newOps.summonBrief(cfg, slice, 30, 8888); } catch { threw = true; }
+console.log(`parse-retry both fail: threw=${threw} (want true)`);
