@@ -223,12 +223,17 @@ def _extract_session(session_text: str, session_date: str, model: str) -> dict:
 # the command ..."). That is presence data (T1 episodes), never a fact.
 # Structural REJECT applied to fresh AND cached compaction output — the mem0
 # lesson: gates live in code, not in prompt hopes.
-_NARRATION_RE = re.compile(
-    r"^(?:activity:|the (?:user|agent)\b.*?\b(?:was|is|were|began|continued|ran the command)\b"
-    r".*?\b(?:brows|view|edit|review|read|work|watch|scroll|check|open|navigat|typ|us)"
-    r"|(?:user|the user) (?:browsed|viewed|edited|reviewed|read|watched|scrolled|checked|opened|navigated|ran|executed))",
-    re.IGNORECASE,
-)
+try:  # canonical gate lives in sinain-memory/durability.py (shared with the
+    # legacy integrator); fall back to the local copy when memory_v2 is used
+    # standalone without the parent dir on sys.path.
+    from durability import NARRATION_RE as _NARRATION_RE
+except ImportError:
+    _NARRATION_RE = re.compile(
+        r"^(?:activity:|the (?:user|agent)\b.*?\b(?:was|is|were|began|continued|ran the command)\b"
+        r".*?\b(?:brows|view|edit|review|read|work|watch|scroll|check|open|navigat|typ|us)"
+        r"|(?:user|the user) (?:browsed|viewed|edited|reviewed|read|watched|scrolled|checked|opened|navigated|ran|executed))",
+        re.IGNORECASE,
+    )
 
 
 def narration_gate(facts: list[Fact]) -> tuple[list[Fact], int]:
