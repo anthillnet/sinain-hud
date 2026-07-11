@@ -17,6 +17,8 @@ PIDS=()
 SKIP_SENSE=false
 SKIP_OVERLAY=false
 PARANOID_MODE=false
+SUPERVISED=false
+SUPERVISED_DEV=false
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 CYAN='\033[0;36m'
@@ -34,8 +36,13 @@ for arg in "$@"; do
     --no-sense)   SKIP_SENSE=true ;;
     --no-overlay) SKIP_OVERLAY=true ;;
     --paranoid)   PARANOID_MODE=true ;;
+    --supervised) SUPERVISED=true ;;
+    --dev)        SUPERVISED_DEV=true ;;
     --help|-h)
-      echo "Usage: ./start.sh [--no-sense] [--no-overlay] [--paranoid]"
+      echo "Usage: ./start.sh [--supervised] [--no-sense] [--no-overlay] [--paranoid]"
+      echo "  --supervised  Hand off to sinaind (native supervisor: detached,"
+      echo "                restart-with-backoff, health probes, compiled core)"
+      echo "  --dev         With --supervised: dev toolchain (tsx watch, flutter run)"
       echo "  --no-sense    Skip sense_client (screen capture)"
       echo "  --no-overlay  Skip overlay (Flutter HUD)"
       echo "  --paranoid    Fully offline mode (Ollama + whisper, zero cloud)"
@@ -50,6 +57,29 @@ log()  { echo -e "${BOLD}[start]${RESET} $*"; }
 ok()   { echo -e "${BOLD}[start]${RESET} ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "${BOLD}[start]${RESET} ${YELLOW}⚠${RESET} $*"; }
 fail() { echo -e "${BOLD}[start]${RESET} ${RED}✗${RESET} $*"; exit 1; }
+
+# ── Supervised mode: hand off to sinaind and exit ────────────────────────────
+# sinaind owns everything this script does below (stale-kill, launch, pipe→log,
+# health checks, cleanup) natively: detached from the terminal, children
+# restart with backoff, a live-but-deaf core gets probe-restarted. This bash
+# path remains the dev default until sinaind has soaked.
+if [ "$SUPERVISED" = true ]; then
+  SINAIND_DIR="$SCRIPT_DIR/tools/sinaind"
+  if [ ! -f "$SINAIND_DIR/sinaind" ] || [ "$SINAIND_DIR/main.swift" -nt "$SINAIND_DIR/sinaind" ]; then
+    log "Building sinaind (supervisor)..."
+    (cd "$SINAIND_DIR" && bash build.sh) || fail "sinaind build failed"
+  fi
+  SINAIND_FLAGS=(--daemon)
+  $SUPERVISED_DEV && SINAIND_FLAGS+=(--dev)
+  $SKIP_SENSE     && SINAIND_FLAGS+=(--no-sense)
+  $SKIP_OVERLAY   && SINAIND_FLAGS+=(--no-overlay)
+  $PARANOID_MODE  && SINAIND_FLAGS+=(--paranoid)
+  log "Handing off to sinaind ${SINAIND_FLAGS[*]}"
+  exec "$SINAIND_DIR/sinaind" "${SINAIND_FLAGS[@]}"
+fi
+if [ "$SUPERVISED_DEV" = true ]; then
+  fail "--dev only applies with --supervised"
+fi
 
 # Keep dev/local runs aligned with packaged builds: the overlay's
 # "Open Session Log" button opens this file.
