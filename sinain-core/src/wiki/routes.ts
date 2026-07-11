@@ -14,6 +14,7 @@ import {
   buildEpisodeMd,
   buildIndexMd,
   buildLogMd,
+  buildLintMd,
   buildShareMd,
   buildSharesMd,
   buildTopicMd,
@@ -37,6 +38,8 @@ export interface WikiDeps {
   queryKnowledgeFacts?: (entities: string[], maxFacts: number) => Promise<string>;
   searchEntities?: (q: string, limit: number) => Promise<unknown>;
   exportKnowledge?: (domain: string | null, max: number) => Promise<string>;
+  /** Run the knowledge lint — report or bulk-apply (lint_knowledge.py). */
+  lintKnowledge?: (apply: boolean, aggressive: boolean) => Promise<unknown>;
   webDb?: WebDb;
 }
 
@@ -129,6 +132,19 @@ export async function handleWikiRoute(
     const since = url.searchParams.get("since") || "";
     const episodes = await fetchEpisodes({ since, limit });
     sendMd(res, buildLogMd(episodes, { since, limit }));
+    return true;
+  }
+
+  // ── lint.md ──
+  if (path === "lint.md") {
+    if (!deps.lintKnowledge) { notFoundMd(res, path); return true; }
+    try {
+      const report = await deps.lintKnowledge(false, false) as any;
+      sendMd(res, buildLintMd(report || {}));
+    } catch (e) {
+      res.statusCode = 503;
+      sendMd(res, `# Lint\n\nLint run failed: ${String(e).slice(0, 200)}\n`);
+    }
     return true;
   }
 

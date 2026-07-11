@@ -583,6 +583,28 @@ async function importConceptBundle(
   });
 }
 
+/** Knowledge lint (report / bulk apply) via lint_knowledge.py — classifies
+ *  facts against the durability rules and soft-retracts junk on apply. Local
+ *  DB only: that is the write target where the junk accumulates. */
+async function lintKnowledgeLocal(apply: boolean, aggressive: boolean): Promise<unknown> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const pExecFile = promisify(execFile);
+  const scriptPath = resolveSinainMemoryScript("lint_knowledge.py");
+  const localDir = resolveLocalMemoryDir();
+  const args = [
+    scriptPath,
+    "--db", `${localDir}/knowledge-graph.db`,
+    "--web-db", `${localDir}/web.db`,
+    apply ? "--apply" : "--report",
+  ];
+  if (aggressive) args.push("--aggressive");
+  // Full-graph scan + JSON of every finding — allow a generous buffer.
+  const { stdout } = await pExecFile(PYTHON_BIN, args,
+    { timeout: 120_000, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
+  return JSON.parse(stdout);
+}
+
 /** Retract or restore a fact entity via the Python retract.py subprocess. */
 async function retractOrRestoreFact(
   mode: "retract" | "restore",
@@ -1937,6 +1959,7 @@ async function main() {
       retractOrRestoreFact("retract", factId, { reason, actor, sourceEntity }),
     restoreFact: (factId, undoToken) =>
       retractOrRestoreFact("restore", factId, { undoToken }),
+    lintKnowledge: (apply, aggressive) => lintKnowledgeLocal(apply, aggressive),
     exportConcept: (entity, depth, opts) => exportConceptBundle(entity, depth, opts),
     importConcept: (envelope, conflict) => importConceptBundle(envelope, conflict),
     isScreenActive: () => screenActive,
