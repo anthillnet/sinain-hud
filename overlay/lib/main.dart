@@ -82,9 +82,12 @@ Future<void> _startApp() async {
 
   final wsService = WebSocketService(url: settingsService.settings.wsUrl);
 
-  // In-app update check (DMG installs only — no-op elsewhere). DMG installs
-  // have no auto-update; this surfaces "update available" in display settings.
-  final updateCheckService = UpdateCheckService()..start();
+  // In-app update check + background self-update (DMG installs only — no-op
+  // elsewhere). Checks daily, stages the new DMG silently, applies on restart.
+  // The settings toggle is the opt-out; paranoid/full-local modes imply it.
+  final updateCheckService = UpdateCheckService()
+    ..autoCheckEnabled = (() => settingsService.settings.autoUpdateCheck)
+    ..start();
 
   // Configure native window
   await windowService.setTransparent();

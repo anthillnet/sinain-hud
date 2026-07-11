@@ -52,6 +52,11 @@ class HudSettings {
   /// Panel presentation style (solid cards vs see-through). Defaults to solid.
   HudStyle hudStyle;
 
+  /// Auto-update: check for new releases daily and download them in the
+  /// background (the swap still waits for an explicit restart). Off = never
+  /// phone home for updates; paranoid/full-local modes imply off.
+  bool autoUpdateCheck;
+
   /// One-time feedback prompt state (see [FeedbackPromptStatus]).
   FeedbackPromptStatus feedbackStatus;
 
@@ -76,6 +81,7 @@ class HudSettings {
     this.chatgptHarness = false,
     this.showInDock = true,
     this.hudStyle = HudStyle.solid,
+    this.autoUpdateCheck = true,
     this.feedbackStatus = FeedbackPromptStatus.pending,
     this.feedbackSnoozeUntilMs = 0,
     this.feedbackAskCount = 0,
@@ -117,6 +123,7 @@ class HudSettings {
     bool? chatgptHarness,
     bool? showInDock,
     HudStyle? hudStyle,
+    bool? autoUpdateCheck,
     FeedbackPromptStatus? feedbackStatus,
     int? feedbackSnoozeUntilMs,
     int? feedbackAskCount,
@@ -136,6 +143,7 @@ class HudSettings {
       chatgptHarness: chatgptHarness ?? this.chatgptHarness,
       showInDock: showInDock ?? this.showInDock,
       hudStyle: hudStyle ?? this.hudStyle,
+      autoUpdateCheck: autoUpdateCheck ?? this.autoUpdateCheck,
       feedbackStatus: feedbackStatus ?? this.feedbackStatus,
       feedbackSnoozeUntilMs: feedbackSnoozeUntilMs ?? this.feedbackSnoozeUntilMs,
       feedbackAskCount: feedbackAskCount ?? this.feedbackAskCount,
