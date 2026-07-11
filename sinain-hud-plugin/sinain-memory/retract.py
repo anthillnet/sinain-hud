@@ -87,7 +87,11 @@ def retract_fact(db_path: str, web_db_path: str, fact_id: str,
 
     store.close()
 
-    # Persist undo snapshot
+    # Persist undo snapshot. Since the Oxigraph migration begin_tx returns a
+    # tx CONTEXT dict, not an integer id — binding it to the retracted_tx
+    # column raised "type 'dict' is not supported" and the whole undo persist
+    # failed silently (stderr only). Coerce to an int so snapshots land.
+    tx_row = tx_id if isinstance(tx_id, int) else 0
     token = secrets.token_hex(16)
     now_ms = int(time.time() * 1000)
     expires_at = now_ms + UNDO_TTL_MS
@@ -101,7 +105,7 @@ def retract_fact(db_path: str, web_db_path: str, fact_id: str,
                     reason, actor, created_at, expires_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (token, fact_id, json.dumps(snapshot),
-                 tx_id, reason, actor, now_ms, expires_at),
+                 tx_row, reason, actor, now_ms, expires_at),
             )
             conn.execute(
                 """INSERT INTO retraction_log
