@@ -510,6 +510,25 @@ final class BackendLauncher {
             process = nil
             NSLog("[SinainHUD] BackendLauncher: sent SIGTERM to bundled backend")
         }
+        // Under sinaind (native supervisor) the overlay is a managed child and
+        // must NOT tear down the stack: stop.sh kills by pattern+port, the
+        // supervisor would restart everything, and the two would fight.
+        // Quitting the HUD leaves the stack running; stop it via
+        // `kill $(cat ~/.sinain/supervisor/sinaind.pid)`.
+        if supervisorPid != nil {
+            NSLog("[SinainHUD] BackendLauncher: stack is supervised by sinaind — skipping stop.sh")
+            return
+        }
         runStopScript()
+    }
+
+    /// PID of a live sinaind supervisor, or nil when the stack is unsupervised.
+    private var supervisorPid: pid_t? {
+        let pidFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sinain/supervisor/sinaind.pid")
+        guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              kill(pid, 0) == 0 else { return nil }
+        return pid
     }
 }

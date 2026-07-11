@@ -360,6 +360,11 @@ struct ChildSpec {
     let arguments: [String]
     let cwd: String
     let critical: Bool      // core: gates sibling startup, health-probed
+    // restartOnCleanExit=false: exit 0 is a deliberate stop, leave it down.
+    // The overlay quits cleanly on purpose (user quit, first-run wizard
+    // relaunch, self-update restart — the latter two `open` their own
+    // successor); respawning it produced a second instance every time.
+    var restartOnCleanExit: Bool = true
 }
 
 func which(_ name: String) -> String? {
@@ -420,10 +425,12 @@ func buildSpecs() -> [ChildSpec] {
                        "\(products)/Debug/sinain_hud.app/Contents/MacOS/sinain_hud"]
         if !flagDev, let appBin = appBins.first(where: { fm.isExecutableFile(atPath: $0) }) {
             specs.append(ChildSpec(name: "overlay", tag: "overlay", executable: appBin,
-                                   arguments: [], cwd: "\(root)/overlay", critical: false))
+                                   arguments: [], cwd: "\(root)/overlay", critical: false,
+                                   restartOnCleanExit: false))
         } else if let flutter = which("flutter") {
             specs.append(ChildSpec(name: "overlay", tag: "overlay", executable: flutter,
-                                   arguments: ["run", "-d", "macos"], cwd: "\(root)/overlay", critical: false))
+                                   arguments: ["run", "-d", "macos"], cwd: "\(root)/overlay", critical: false,
+                                   restartOnCleanExit: false))
         } else {
             slog("no built overlay app and flutter not found — overlay skipped")
         }
@@ -570,6 +577,12 @@ func onExit(_ child: Child, status: Int32) {
     child.fastFails = uptime < fastFailUptime ? child.fastFails + 1 : 0
     slog("\(child.spec.name): exited status \(status) after \(Int(uptime))s")
     if child.spec.critical { coreProbeFails = 0 }
+    if status == 0 && !child.spec.restartOnCleanExit {
+        child.state = "stopped"
+        slog("\(child.spec.name): clean exit — not restarting (deliberate quit or self-relaunch; the app owns its successor)")
+        writeState()
+        return
+    }
     if !child.spec.critical && child.fastFails >= giveUpAfterFastFails {
         child.state = "failed"
         slog("\(child.spec.name): FAILED — died instantly \(child.fastFails) times in a row, giving up (fix the cause, then restart sinaind)")
