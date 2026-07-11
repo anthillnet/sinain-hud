@@ -21,6 +21,7 @@ class SettingsService extends ChangeNotifier {
   // activation policy with no Dock-icon flash. Keep the string in sync.
   static const _keyShowInDock = 'show_in_dock';
   static const _keyHudStyle = 'hud_style';
+  static const _keyAutoUpdateCheck = 'auto_update_check';
   static const _keyFeedbackStatus = 'feedback_status';
   static const _keyFeedbackSnoozeUntil = 'feedback_snooze_until';
   static const _keyFeedbackAskCount = 'feedback_ask_count';
@@ -47,6 +48,7 @@ class SettingsService extends ChangeNotifier {
       chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
       showInDock: _prefs.getBool(_keyShowInDock) ?? true,
       hudStyle: _loadHudStyle(),
+      autoUpdateCheck: _prefs.getBool(_keyAutoUpdateCheck) ?? true,
       feedbackStatus: _loadFeedbackStatus(),
       feedbackSnoozeUntilMs: _prefs.getInt(_keyFeedbackSnoozeUntil) ?? 0,
       feedbackAskCount: _prefs.getInt(_keyFeedbackAskCount) ?? 0,
@@ -165,6 +167,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setShowInDock(bool value) async {
     _settings.showInDock = value;
     await _prefs.setBool(_keyShowInDock, value);
+    notifyListeners();
+  }
+
+  Future<void> setAutoUpdateCheck(bool value) async {
+    _settings.autoUpdateCheck = value;
+    await _prefs.setBool(_keyAutoUpdateCheck, value);
     notifyListeners();
   }
 

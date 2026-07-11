@@ -17,6 +17,10 @@ import 'package:url_launcher/url_launcher.dart';
 /// No-op for non-DMG runs (flutter run, npx prebuilt) — they have no
 /// DMG_VERSION file.
 class UpdateCheckService extends ChangeNotifier {
+  /// Settings hook: when it returns false, periodic checks (and background
+  /// downloads) stop — the explicit opt-out. Manual checkNow() still works.
+  bool Function() autoCheckEnabled = () => true;
+
   static const _releasesApi =
       'https://api.github.com/repos/anthillnet/sinain-hud/releases?per_page=20';
   static const downloadUrl = 'https://sinain.com';
@@ -26,6 +30,12 @@ class UpdateCheckService extends ChangeNotifier {
 
   /// Newer DMG version available for download (null = up to date / unknown).
   String? availableVersion;
+
+  /// Update fully downloaded and waiting for a restart to apply. The swap is
+  /// quit-then-replace, so the background flow stops here — the app never
+  /// yanks itself out from under the user.
+  String? stagedVersion;
+  String? _stagedDmgPath;
 
   Timer? _timer;
 
@@ -41,12 +51,6 @@ class UpdateCheckService extends ChangeNotifier {
 
   bool get installing => installStage != null;
 
-  /// Direct DMG asset URL for the available release (notarized `Sinain.dmg`).
-  String? get _dmgUrl => availableVersion == null
-      ? null
-      : 'https://github.com/anthillnet/sinain-hud/releases/download/'
-          'macos-v$availableVersion/Sinain.dmg';
-
   /// Start the periodic check. Safe to call once at app init.
   void start() {
     _check();
@@ -59,11 +63,12 @@ class UpdateCheckService extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<void> _check() async {
+  Future<void> _check({bool manual = false}) async {
     try {
       installedVersion ??= _readInstalledVersion();
       if (installedVersion == null) return; // not a DMG install
       if (_networkOptedOut()) return; // paranoid / full-local: no beacons
+      if (!manual && !autoCheckEnabled()) return; // user opted out
 
       final latest = await _fetchLatestDmgVersion();
       if (latest == null) return;
@@ -74,72 +79,115 @@ class UpdateCheckService extends ChangeNotifier {
         availableVersion = next;
         notifyListeners();
       }
+
+      // Background self-update: stage the DMG now, apply on restart. Manual
+      // checks stage too — the user explicitly asked.
+      if (next != null &&
+          stagedVersion != next &&
+          !installing &&
+          (manual || autoCheckEnabled())) {
+        await _downloadDmg(next, background: true);
+      }
     } catch (e) {
       if (kDebugMode) print('[UpdateCheck] failed: $e');
     }
   }
 
-  /// Download the available release's DMG (with progress) and hand it to the
-  /// native side, which swaps the installed `.app` in place and relaunches. On
-  /// any failure it falls back to opening the GitHub download page in a browser.
-  Future<void> downloadAndInstall() async {
-    final url = _dmgUrl;
-    if (installing || url == null) return;
-    installStage = 'downloading';
-    installProgress = 0;
-    installError = null;
-    notifyListeners();
+  /// Settings-row "check now" — works even when auto-check is off.
+  Future<void> checkNow() => _check(manual: true);
 
+  /// Restart into a staged update (no-op when nothing is staged).
+  Future<void> restartToApply() async {
+    final dmg = _stagedDmgPath;
+    if (dmg == null || installing) return;
+    installStage = 'installing';
+    notifyListeners();
+    try {
+      const channel = MethodChannel('sinain_hud/backend');
+      final ok = await channel
+          .invokeMethod<bool>('installUpdate', {'dmgPath': dmg});
+      if (ok != true) throw const FormatException('native install declined');
+      // App is about to terminate and relaunch as the new version.
+    } catch (e) {
+      installError = '$e';
+      installStage = null;
+      stagedVersion = null;
+      _stagedDmgPath = null;
+      notifyListeners();
+      await launchDownloadPage();
+    }
+  }
+
+  /// Download the DMG to a temp file. In background mode it only stages
+  /// (restart applies it); otherwise the caller continues into the install.
+  Future<File?> _downloadDmg(String version, {required bool background}) async {
+    final url = 'https://github.com/anthillnet/sinain-hud/releases/download/'
+        'macos-v$version/Sinain.dmg';
     final client = HttpClient();
     File? dmg;
     try {
       final dir = Directory.systemTemp.createTempSync('sinain-update');
       dmg = File('${dir.path}/Sinain.dmg');
-
       final req = await client.getUrl(Uri.parse(url));
       req.headers.set(HttpHeaders.userAgentHeader, 'sinain-hud-update');
       final res = await req.close().timeout(const Duration(seconds: 30));
-      if (res.statusCode != 200) {
-        throw HttpException('HTTP ${res.statusCode}');
-      }
-
+      if (res.statusCode != 200) throw HttpException('HTTP ${res.statusCode}');
       final total = res.contentLength; // −1 if unknown
       var received = 0;
       final sink = dmg.openWrite();
       await for (final chunk in res) {
         sink.add(chunk);
         received += chunk.length;
-        installProgress = total > 0 ? received / total : -1;
-        notifyListeners();
+        if (!background) {
+          installProgress = total > 0 ? received / total : -1;
+          notifyListeners();
+        }
       }
       await sink.close();
-
-      installStage = 'installing';
-      installProgress = 1;
-      notifyListeners();
-
-      // Native mounts the DMG, replaces this running bundle, and relaunches —
-      // then quits us. If it returns false it declined (non-macOS/dev build).
-      const channel = MethodChannel('sinain_hud/backend');
-      final ok = await channel.invokeMethod<bool>(
-        'installUpdate',
-        {'dmgPath': dmg.path},
-      );
-      if (ok != true) throw const FormatException('native install declined');
-      // On success the app is about to terminate; nothing more to do.
+      if (background) {
+        stagedVersion = version;
+        _stagedDmgPath = dmg.path;
+        notifyListeners();
+      }
+      return dmg;
     } catch (e) {
-      installError = '$e';
-      installStage = null;
-      installProgress = 0;
       try {
         dmg?.parent.deleteSync(recursive: true);
       } catch (_) {/* best effort */}
-      notifyListeners();
-      // Fallback: open the download page so the user can update manually.
-      await launchDownloadPage();
+      if (kDebugMode) print('[UpdateCheck] download failed: $e');
+      return null;
     } finally {
       client.close();
     }
+  }
+
+  /// Manual "Download & install": uses the staged DMG when the background
+  /// flow already fetched it, else downloads with visible progress — then
+  /// hands the file to the native side (quit → swap bundle → relaunch). On
+  /// any failure it falls back to opening the download page.
+  Future<void> downloadAndInstall() async {
+    final version = availableVersion;
+    if (installing || version == null) return;
+
+    if (_stagedDmgPath != null) return restartToApply();
+
+    installStage = 'downloading';
+    installProgress = 0;
+    installError = null;
+    notifyListeners();
+
+    final dmg = await _downloadDmg(version, background: false);
+    if (dmg == null) {
+      installError = 'download failed';
+      installStage = null;
+      installProgress = 0;
+      notifyListeners();
+      await launchDownloadPage();
+      return;
+    }
+    _stagedDmgPath = dmg.path;
+    stagedVersion = version;
+    await restartToApply();
   }
 
   /// Open the public download page (manual-update fallback).

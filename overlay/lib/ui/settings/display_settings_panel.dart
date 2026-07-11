@@ -783,11 +783,71 @@ class _UpdateRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final update = context.watch<UpdateCheckService>();
     final version = update.availableVersion;
-    if (version == null) return const SizedBox.shrink();
-    final accent = Color(context.watch<SettingsService>().settings.accentColor);
+    final settings = context.watch<SettingsService>();
+    final accent = Color(settings.settings.accentColor);
+
+    // Opt-out toggle renders even when up to date; the action block below
+    // only when there is something to act on.
+    final toggleRow = Row(
+      children: [
+        Expanded(
+            child: Text('Check for updates automatically',
+                style: _mono(0.8, 10))),
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => context
+                .read<SettingsService>()
+                .setAutoUpdateCheck(!settings.settings.autoUpdateCheck),
+            child: Container(
+              width: 30,
+              height: 16,
+              alignment: settings.settings.autoUpdateCheck
+                  ? Alignment.centerRight
+                  : Alignment.centerLeft,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: settings.settings.autoUpdateCheck
+                    ? accent.withValues(alpha: 0.5)
+                    : Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+    if (version == null) {
+      return Padding(
+          padding: const EdgeInsets.only(top: 10), child: toggleRow);
+    }
 
     final Widget action;
-    if (update.installStage == 'downloading') {
+    if (update.stagedVersion == version && update.installStage == null) {
+      // Background flow already staged the DMG — one restart applies it.
+      action = MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () => context.read<UpdateCheckService>().restartToApply(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: accent.withValues(alpha: 0.5)),
+            ),
+            child: Text('RESTART TO UPDATE',
+                style: _mono(1, 9, w: FontWeight.bold, color: accent)),
+          ),
+        ),
+      );
+    } else if (update.installStage == 'downloading') {
       final p = update.installProgress;
       action = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -847,6 +907,8 @@ class _UpdateRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Padding(
+            padding: const EdgeInsets.only(bottom: 8), child: toggleRow),
         Row(
           children: [
             Icon(Icons.system_update_alt, size: 12, color: accent),
