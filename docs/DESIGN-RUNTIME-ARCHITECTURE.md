@@ -92,7 +92,17 @@ process boundary. The brain is never rewritten wholesale.
 ## 7. Sequencing
 
 1. **Supervisor-as-app** (retires the failure class users actually hit) —
-   plus compiled core, release overlay builds.
-2. **Error-state vocabulary + eye health** (§3).
+   plus compiled core, release overlay builds. **SHIPPED (first cut):**
+   `tools/sinaind/` — native Swift supervisor. Detached (`setsid`, SIGHUP
+   ignored), owns child stdout→log pipes, restart-with-backoff, gives up on
+   a child that dies instantly 8× in a row (`failed` state instead of an
+   eternal crash-loop), probes `/health` every 30s and restarts a
+   live-but-deaf core after 3 misses, writes
+   `~/.sinain/supervisor/state.json` for the eye to surface (§3). Prod mode
+   runs compiled core (`node dist`) + built overlay app — no tsx watch
+   (failure 5). Entry: `./start.sh --supervised`. Not yet the menu-bar app;
+   that shell comes with §2 consolidation.
+2. **Error-state vocabulary + eye health** (§3) — `state.json` now exists
+   as the input.
 3. **Config UI** (§4) and **apply-on-quit updates** (§5).
 4. Consolidation (§2), then substrate work only if measured.

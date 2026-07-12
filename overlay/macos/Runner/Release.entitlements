@@ -2,7 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- No app-sandbox: matches ReleaseDMG.entitlements (the shipped app) and
+	     DebugProfile. A sandboxed local Release build gets a container HOME, so
+	     the first-run wizard re-fires on configured machines (it can't see the
+	     real ~/.sinain/.env and writes its output into the container), and
+	     stop.sh / supervisor pidfile checks silently miss. -->
 	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
