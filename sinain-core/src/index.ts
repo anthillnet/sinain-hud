@@ -1046,14 +1046,21 @@ async function main() {
   const { EntityCache } = await import("./learning/entity-cache.js");
   const entityCache = new EntityCache(queryKnowledgeFactsMulti);
   entityCache.loadEntityNames().catch(() => {});
-  localCuration.startPeriodicCuration();
-
-  // Wire incremental distillation: when feed buffer fills, distill before items are lost
   localCuration.setSenseBuffer(senseBuffer);
-  localCuration.setRearmCallback(() => feedBuffer.rearmOnFull());
-  feedBuffer.onFull((items) => {
-    localCuration.distillIncremental(items);
-  });
+  // Autonomous distillation lanes are opt-in (SINAIN_AUTO_DISTILL=1) — the
+  // deliberate-capture contract is LLM-on-Save only. Without the flag the
+  // rolling window prunes by age, un-saved items simply expire (by design),
+  // and the only distillation is the one Save explicitly triggers.
+  if (config.learningConfig.autoDistill) {
+    localCuration.startPeriodicCuration();
+    // Wire incremental distillation: when feed buffer fills, distill before items are lost
+    localCuration.setRearmCallback(() => feedBuffer.rearmOnFull());
+    feedBuffer.onFull((items) => {
+      localCuration.distillIncremental(items);
+    });
+  } else {
+    log(TAG, "auto-distill lanes OFF (gesture-gated; SINAIN_AUTO_DISTILL=1 opts in)");
+  }
 
   // ── Initialize escalation ──
   // getEscalationAgent reads bareAgentState (declared later in this function)
@@ -2854,11 +2861,13 @@ async function main() {
   // prior builders, contending for the exclusive RocksDB write lock — the
   // spin-up crash/corruption window (knowledge-graph.db.corrupt-* quarantines).
   // distillPendingSession also self-defers if a distillation is in flight.
-  setTimeout(() => {
-    void localCuration.distillPendingSession().catch((err: any) => {
-      warn(TAG, `pending session distillation failed: ${err.message?.slice(0, 100)}`);
-    });
-  }, 120_000).unref?.();
+  if (config.learningConfig.autoDistill) {
+    setTimeout(() => {
+      void localCuration.distillPendingSession().catch((err: any) => {
+        warn(TAG, `pending session distillation failed: ${err.message?.slice(0, 100)}`);
+      });
+    }, 120_000).unref?.();
+  }
 
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {

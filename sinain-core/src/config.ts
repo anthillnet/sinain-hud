@@ -259,7 +259,12 @@ export function loadConfig(): CoreConfig {
     : "https://openrouter.ai/api/v1/chat/completions";
 
   const agentConfig: import("./types.js").AnalysisConfig = {
-    enabled: boolEnv("AGENT_ENABLED", true),
+    // Default OFF since the deliberate-capture rework: all cloud intelligence
+    // is gesture-gated (DESIGN-DELIBERATE-CAPTURE §1 — save/summon/enrich).
+    // The ambient analyzer loop predates that contract; left on it burned
+    // ~2.7K unmetered LLM calls/day (measured 2026-07-12, Cerebras reports no
+    // usage.cost so CostTracker showed $0). Opt back in with AGENT_ENABLED=1.
+    enabled: boolEnv("AGENT_ENABLED", false),
     provider: analysisProvider,
     model: env("ANALYSIS_MODEL", "google/gemini-2.5-flash-lite"),
     visionModel: env("ANALYSIS_VISION_MODEL", "google/gemini-2.5-flash"),
@@ -366,7 +371,10 @@ export function loadConfig(): CoreConfig {
   // Mode is runtime-mutable via the overlay's flash-icon selector; this only
   // sets the boot-time default. (Transport is no longer a setting — per-lane
   // agent choice in the overlay determines WS vs HTTP dispatch.)
-  const escalationMode = fromCfgStr(agentsCfg?.escalation?.mode, "ESCALATION_MODE", "rich") as EscalationMode;
+  // Default "off" since the deliberate-capture rework (gesture-gated
+  // intelligence) — and the escalation lane is slated for removal anyway
+  // (DESIGN-SHARED-MODULES §8.5). Opt back in with ESCALATION_MODE=rich.
+  const escalationMode = fromCfgStr(agentsCfg?.escalation?.mode, "ESCALATION_MODE", "off") as EscalationMode;
   const escalationConfig: EscalationConfig = {
     mode: escalationMode,
     cooldownMs: fromCfgInt(agentsCfg?.escalation?.cooldownMs, "ESCALATION_COOLDOWN_MS", 30000),
@@ -420,6 +428,11 @@ export function loadConfig(): CoreConfig {
   const defaultFeedbackDir = resolve(sinainDataDir(), "feedback");
   const learningConfig: LearningConfig = {
     enabled: boolEnv("LEARNING_ENABLED", true),
+    // Gesture-gated contract (DESIGN-DELIBERATE-CAPTURE §1): the LLM runs on
+    // Save, never on its own. The autonomous lanes (buffer-full incremental
+    // distillation, 30-min curation, startup pending-session distill) are
+    // opt-in — measured 115 unmetered distillation runs/night when left on.
+    autoDistill: boolEnv("SINAIN_AUTO_DISTILL", false),
     feedbackDir: resolvePath(env("FEEDBACK_DIR", defaultFeedbackDir)),
     retentionDays: intEnv("FEEDBACK_RETENTION_DAYS", 30),
   };
