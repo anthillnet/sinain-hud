@@ -128,8 +128,11 @@ export class SaveManager {
       });
       log(TAG, `${saveId}: distilled ${facts} facts / ${entities} entities from ${items.length} items — undo open ${UNDO_WINDOW_MS / 1000}s`);
     } catch (err) {
-      warn(TAG, `${saveId} failed: ${String(err).slice(0, 200)}`);
-      fail(String(err).slice(0, 200));
+      warn(TAG, `${saveId} failed: ${String(err).slice(0, 300)}`);
+      // Raw errors never reach a card ("distiller failed: Command failed:
+      // python3 /Users/…" was shown verbatim once) — one human sentence here,
+      // the details live in the session log.
+      fail("saving failed — the memory writer hit an error (details in the session log)");
     }
   }
 

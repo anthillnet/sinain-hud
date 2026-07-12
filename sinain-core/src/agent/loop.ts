@@ -208,6 +208,10 @@ export class AgentLoop extends EventEmitter {
 
     return {
       enabled: this.deps.agentConfig.enabled,
+      // Degraded-state inputs for the service map (§3 error states): a
+      // network/model outage mid-retry, and the terminal auth-rejected stop.
+      outage: this.outage,
+      authError: this.authErrorNotified,
       lastAnalysis: this.stats.lastAnalysisTs || null,
       lastDigest: this.latestDigest?.digest?.slice(0, 200) || null,
       totalCalls: this.stats.totalCalls,

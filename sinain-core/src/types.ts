@@ -51,6 +51,21 @@ export interface StatusMessage {
     chatSidecarUp?: boolean;
     registered: boolean;
   };
+  /** Service guard: per-service liveness/freshness map (see ServiceStatusEntry).
+   *  Broadcast on change and sent on connect; drives the HUD banner and the
+   *  eye's degraded-state dot. */
+  services?: ServiceStatusEntry[];
+}
+
+/** One stack service in the service guard map. States: live (healthy),
+ *  stale (running but data is old), down (expected but unreachable or
+ *  crash-looped), off (not in use — silent). `detail` is the one human
+ *  sentence shown to the user — never a raw error string. */
+export interface ServiceStatusEntry {
+  name: string;
+  label: string;
+  state: "live" | "stale" | "down" | "off" | string;
+  detail?: string;
 }
 
 /** sinain-core → Overlay: heartbeat ping */
@@ -756,6 +771,8 @@ export interface BridgeState {
   idleMessages: "on" | "off";
   connection: "connected" | "disconnected" | "connecting";
   responseSize: ResponseSize;
+  /** Latest service guard map (broadcast on change, replayed on connect). */
+  services?: ServiceStatusEntry[];
   /** Bare-agent roster + per-lane current choice. Populated after the
    *  bare agent's POST /bareagent/register. "" lane value = lane disabled. */
   agents: {

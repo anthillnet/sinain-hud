@@ -1752,6 +1752,26 @@ class OverlayShellState extends State<OverlayShell> {
 
     switch (_state) {
       case HudState.eye:
+        // Degraded-state surface (runtime-architecture §3): the eye wears a
+        // dot when the backend is unreachable (red) or any stack service is
+        // stale/down (amber); the tooltip leads with the human sentence.
+        final ws = context.watch<WebSocketService>();
+        String? degradedHint;
+        var degradedColor = const Color(0xFFFFAA00);
+        if (!ws.connected) {
+          degradedHint = 'Backend unreachable — reconnecting';
+          degradedColor = const Color(0xFFFF3344);
+        } else {
+          final stale = ws.staleServices;
+          if (stale.isNotEmpty) {
+            degradedHint = stale.map((s) {
+              final label = (s['label'] ?? s['name'] ?? 'service').toString();
+              final detail = s['detail']?.toString();
+              final fallback = s['state'] == 'down' ? 'down' : 'stale';
+              return '$label: ${detail ?? fallback}';
+            }).join(' · ');
+          }
+        }
         return EyeWidget(
           // Controls/middle mode disabled — tapping the eye opens chat
           // directly (where any pending permission already auto-switched
@@ -1765,6 +1785,8 @@ class OverlayShellState extends State<OverlayShell> {
           onDragEnd: _persistEyePosition,
           pupilDilation: _pupilDilation,
           eyeColor: _eyeColor,
+          degradedHint: degradedHint,
+          degradedColor: degradedColor,
         );
       case HudState.controls:
         return _buildControlsBar();

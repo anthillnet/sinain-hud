@@ -16,6 +16,13 @@ class EyeWidget extends StatefulWidget {
   final double pupilDilation;
   final Color eyeColor;
 
+  /// Degraded-state surface (runtime-architecture §3): when a stack service
+  /// is stale/down or the backend is unreachable, the eye wears a small
+  /// status dot and its tooltip leads with one human sentence.
+  /// Null = healthy, no dot.
+  final String? degradedHint;
+  final Color degradedColor;
+
   const EyeWidget({
     super.key,
     required this.onTap,
@@ -25,6 +32,8 @@ class EyeWidget extends StatefulWidget {
     this.onDragEnd,
     this.pupilDilation = 0.0,
     this.eyeColor = const Color(0xFF00FF88),
+    this.degradedHint,
+    this.degradedColor = const Color(0xFFFFAA00),
   });
 
   @override
@@ -44,12 +53,15 @@ class _EyeWidgetState extends State<EyeWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final gestures = widget.onSecondaryTap != null
+        ? 'Tap to expand · double-tap to grab a region · right-click for all actions · long-press to hide'
+        : widget.onDoubleTap != null
+            ? 'Tap to expand · double-tap to grab a region · long-press to hide'
+            : 'Tap to expand, long-press to hide';
+    final hint = widget.degradedHint;
     return HudTooltip(
-      message: widget.onSecondaryTap != null
-          ? 'Tap to expand · double-tap to grab a region · right-click for all actions · long-press to hide'
-          : widget.onDoubleTap != null
-              ? 'Tap to expand · double-tap to grab a region · long-press to hide'
-              : 'Tap to expand, long-press to hide',
+      // Degraded state leads: the human sentence first, gestures second.
+      message: hint != null ? '$hint\n$gestures' : gestures,
       child: GestureDetector(
         onTap: _isDragging ? null : widget.onTap,
         onDoubleTap: _isDragging ? null : widget.onDoubleTap,
@@ -58,17 +70,42 @@ class _EyeWidgetState extends State<EyeWidget> {
         onPanStart: _onDragStart,
         onPanUpdate: _onDragUpdate,
         onPanEnd: _onDragEnd,
-        child: Container(
+        child: SizedBox(
           width: 48,
           height: 48,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.black.withValues(alpha: 0.7),
-          ),
-          child: IdleAnimation(
-            size: 40,
-            pupilDilation: widget.pupilDilation,
-            color: widget.eyeColor,
+          child: Stack(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.7),
+                ),
+                child: IdleAnimation(
+                  size: 40,
+                  pupilDilation: widget.pupilDilation,
+                  color: widget.eyeColor,
+                ),
+              ),
+              if (hint != null)
+                Positioned(
+                  right: 2,
+                  bottom: 2,
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: widget.degradedColor,
+                      border: Border.all(
+                        color: Colors.black.withValues(alpha: 0.85),
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

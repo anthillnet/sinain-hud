@@ -102,7 +102,14 @@ process boundary. The brain is never rewritten wholesale.
    runs compiled core (`node dist`) + built overlay app — no tsx watch
    (failure 5). Entry: `./start.sh --supervised`. Not yet the menu-bar app;
    that shell comes with §2 consolidation.
-2. **Error-state vocabulary + eye health** (§3) — `state.json` now exists
-   as the input.
+2. **Error-state vocabulary + eye health** (§3) — **SHIPPED (first cut):**
+   the service map now carries process-level truth from the supervisor
+   (crash-looped children read from `state.json`) plus the analysis lane
+   (auth-rejected / outage-retrying), every `detail` is one human sentence,
+   the eye wears a degraded dot (amber = service stale/down, red = backend
+   unreachable) with the sentence in its tooltip, and save receipts no
+   longer show raw exec errors (failure 4). Also fixed en route: the
+   service map was silently never broadcast (the status message's explicit
+   field list dropped it) and never sent on connect.
 3. **Config UI** (§4) and **apply-on-quit updates** (§5).
 4. Consolidation (§2), then substrate work only if measured.

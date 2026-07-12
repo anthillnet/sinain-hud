@@ -88,6 +88,7 @@ export class WsHandler {
       connection: this.state.connection,
       responseSize: this.state.responseSize,
       agents: this.state.agents,
+      services: this.state.services,
     });
 
     // Replay recent feed messages for late-joining clients
@@ -181,6 +182,9 @@ export class WsHandler {
       connection: this.state.connection,
       responseSize: this.state.responseSize,
       agents: this.state.agents,
+      // Without this line the service map silently never reached the overlay:
+      // updateState() stored it, but this explicit field list dropped it.
+      services: this.state.services,
     };
     if (loadedEnvPath) msg.envPath = loadedEnvPath;
     if (this.tunnelState) msg.tunnel = this.tunnelState;

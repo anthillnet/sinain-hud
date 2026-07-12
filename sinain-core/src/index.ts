@@ -41,6 +41,7 @@ import { hardenLocalDataPermissions } from "./util/harden-permissions.js";
 import { runRetention } from "./util/retention.js";
 import { log, warn, error, debug, preview } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
+import { readSupervisorState, type SupervisedChild } from "./health/supervisor-monitor.js";
 
 // SECURITY: make every file/dir this process (and its children — sense_client,
 // sck-capture, distiller one-shots) creates owner-only (files 0600, dirs 0700).
@@ -1545,25 +1546,59 @@ async function main() {
   //   off   — not in use (no warning) — e.g. screen toggled off, lane not selected
   const SENSE_STALE_MS = 60_000;
   let lastSenseAt = 0;
-  function serviceStatuses(): Array<{ name: string; label: string; state: string; detail?: string }> {
+  type ServiceStatus = { name: string; label: string; state: string; detail?: string };
+  function serviceStatuses(): ServiceStatus[] {
     const now = Date.now();
     const senseAge = lastSenseAt ? now - lastSenseAt : Infinity;
-    const senseState = !screenActive
+    let senseState = !screenActive
       ? "off"
       : lastSenseAt === 0 ? "down" : senseAge > SENSE_STALE_MS ? "stale" : "live";
+    let senseDetail = lastSenseAt ? `${Math.round(senseAge / 1000)}s ago` : "no frames";
     // sinain-chat (resident chat sidecar) only matters when it's the chat lane.
-    const chatState = !bareAgentState.escalationResident
+    let chatState = !bareAgentState.escalationResident
       ? "off" : bareAgentState.chatSidecarUp ? "live" : "down";
+    let chatDetail: string | undefined;
     // The agent runner (run.sh) only matters when a bare-agent lane is selected.
     const usingBare = !!bareAgentState.escalationAgent
       && !bareAgentState.escalationResident && !bareAgentState.escalationDesktop;
     const runnerState = !usingBare ? "off" : bareAgentState.registered ? "live" : "down";
+
+    // Process-level truth from the supervisor (sinaind), when one is running:
+    // a crash-looped ("failed") or bouncing ("backoff") child overrides the
+    // data-freshness view — "no frames for 60s" is a symptom, "sense_client
+    // crashed 8× and was given up on" is the state the user needs to see.
+    const sup = readSupervisorState();
+    const supChild = (name: string): SupervisedChild | undefined => sup?.children?.[name];
+    const processState = (c: SupervisedChild | undefined): { state: string; detail: string } | null => {
+      if (!c) return null;
+      if (c.state === "failed") return { state: "down", detail: "keeps crashing — restart Sinain to retry" };
+      if (c.state === "backoff") return { state: "down", detail: "crashed — restarting" };
+      return null;
+    };
+    const senseProc = processState(supChild("sense"));
+    if (senseProc && senseState !== "off") ({ state: senseState, detail: senseDetail } = senseProc);
+    const chatProc = processState(supChild("chat"));
+    if (chatProc && chatState !== "off") ({ state: chatState, detail: chatDetail } = chatProc);
+
+    // Analysis lane (§3: model-unavailable / reconnecting become states, not
+    // buried log lines). Auth-rejected is terminal until the key is fixed;
+    // an outage is transient (the loop keeps retrying on its own).
+    const agentStats = agentLoop.getStats() as { enabled?: boolean; outage?: boolean; authError?: boolean };
+    const analysisState = agentStats.authError ? "down"
+      : agentStats.outage ? "stale"
+      : agentStats.enabled ? "live" : "off";
+    const analysisDetail = agentStats.authError
+      ? "API key rejected — update it and restart"
+      : agentStats.outage ? "can't reach the model — retrying" : undefined;
+
     return [
       { name: "backend", label: "Backend", state: "live" },
-      { name: "sense", label: "Screen capture", state: senseState,
-        detail: lastSenseAt ? `${Math.round(senseAge / 1000)}s ago` : "no frames" },
-      { name: "sinain-chat", label: "sinain-chat", state: chatState },
+      { name: "sense", label: "Screen capture", state: senseState, detail: senseDetail },
+      { name: "analysis", label: "Analysis", state: analysisState, detail: analysisDetail },
+      { name: "sinain-chat", label: "sinain-chat", state: chatState, detail: chatDetail },
       { name: "agent-runner", label: "Agent Runner", state: runnerState },
+      { name: "supervisor", label: "Supervisor", state: sup ? "live" : "off",
+        detail: sup ? `pid ${sup.pid} (${sup.mode})` : undefined },
     ];
   }
   let shuttingDown = false;
@@ -2774,7 +2809,7 @@ async function main() {
     const key = svc.map((s) => `${s.name}:${s.state}`).join("|");
     if (key !== lastServicesKey) {
       lastServicesKey = key;
-      wsHandler.updateState({ services: svc } as any);
+      wsHandler.updateState({ services: svc });
     }
   }, 10_000);
 
