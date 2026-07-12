@@ -133,11 +133,13 @@ All config via environment variables or `.env` file at project root. Key vars:
 - `ANALYSIS_MODEL` — Context analysis model (default: `google/gemini-2.5-flash-lite`)
 - `ANALYSIS_VISION_MODEL` — Vision model for image ticks (default: `google/gemini-2.5-flash`)
 - `ANALYSIS_ENDPOINT` — Auto-set per provider. Override for custom OpenAI-compatible endpoints.
-- `ESCALATION_MODE` — `off | selective | focus | rich` (default: `rich`)
+- `ESCALATION_MODE` — `off | selective | focus | rich` (default: `off` — gesture-gated contract)
 - `OPENCLAW_WS_URL` / `OPENCLAW_HTTP_URL` — OpenClaw gateway endpoints
 - `AUDIO_DEVICE` — macOS audio device for sox/ffmpeg fallback (default: `BlackHole 2ch`)
 - `SINAIN_MEMORY_DIR` — Knowledge graph directory (default: `~/.sinain/memory`)
 - `LEARNING_ENABLED` — Enable/disable knowledge distillation pipeline (default: `true`)
+- `SINAIN_AUTO_DISTILL` — Autonomous distillation lanes (buffer-full, periodic curation, startup pending-session). Default `false`: LLM runs only on explicit gestures (Save/Call AI/Build Context); Save-triggered distillation is unaffected
+- `AGENT_ENABLED` — Ambient analyzer loop. Default `false` since the deliberate-capture rework
 
 See `.env.example` for the complete list and [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 
