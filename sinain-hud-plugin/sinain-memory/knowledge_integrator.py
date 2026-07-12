@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from durability import is_ephemeral
 from common import (
     LLMError,
     call_llm_with_fallback,
@@ -682,7 +683,13 @@ def _extract_entity_from_fact(fact_text: str, known_entities: list) -> str:
     if words:
         return _normalize_entity(words[0])
 
-    return "general"
+    # No attributable subject. The old "general" fallback built a junk-drawer
+    # entity out of everything the capitalization heuristic couldn't parse
+    # (all Cyrillic speech, lowercase text). Callers now decide: drop the
+    # fact (plain facts — the transcript escrow still holds the source) or
+    # attribute to "user" (decisions/preferences, which are user claims by
+    # construction).
+    return ""
 
 
 _GENERIC_PRED = re.compile(
@@ -1005,7 +1012,9 @@ def _coverage_gapfill_graph(db_path: str, max_fill: int = 15, cover_floor: float
         added = 0
         tx = store.begin_tx("coverage-gapfill")
         for mc, cid, s in gaps[:max_fill]:
-            ent = _extract_entity_from_fact(s, []) or "general"
+            # user-proximity gate above guarantees user relevance — attribute
+            # unparseable subjects to the user, not a junk-drawer entity.
+            ent = _extract_entity_from_fact(s, []) or "user"
             fid = _fact_id(ent, "gapfill", s)
             if store.entity(fid):
                 continue
@@ -1205,7 +1214,18 @@ def _facts_to_graph_ops(
 
         if not fact_text or len(fact_text) < 5:
             continue
+        # Durability gate (two-week test): presence data ("The user is
+        # working in Chrome") and stubs are T1 episode material — the
+        # transcript escrow already holds them; never mint a fact.
+        if is_ephemeral(fact_text):
+            continue
         entity = explicit_subject or _extract_entity_from_fact(fact_text, known_entities)
+        if not entity:
+            if _USER_REF.search(fact_text):
+                entity = "user"
+            else:
+                # No attributable subject → not knowledge-graph material.
+                continue
         per_fact_speakers = [attributed_to] if attributed_to else batch_speakers
         ops.append({
             "op": "assert",
@@ -1228,37 +1248,54 @@ def _facts_to_graph_ops(
                 decision_text = str(decision_text)
         if not decision_text or len(decision_text) < 5:
             continue
-        entity = _extract_entity_from_fact(decision_text, known_entities)
+        if is_ephemeral(decision_text):
+            continue
+        # Decisions are user claims by construction — unattributable subject
+        # falls to "user", never a junk-drawer entity.
+        entity = _extract_entity_from_fact(decision_text, known_entities) or "user"
         ops.append({
             "op": "assert",
             "entity": entity,
             "attribute": "value",
             "value": decision_text,
             "confidence": 0.7,
+            "domain": "decisions",
             "kind": "distilled",
             "session_ref": session_eid,
             "mentioned_by": batch_speakers,
         })
 
-    # Patterns + Preferences (distilled)
-    for text in digest.get("patterns", []) + digest.get("preferences", []):
-        if not text or not isinstance(text, str) or len(text) < 5:
-            continue
-        entity = _extract_entity_from_fact(text, known_entities)
-        ops.append({
-            "op": "assert",
-            "entity": entity,
-            "attribute": "value",
-            "value": text,
-            "confidence": 0.7,
-            "kind": "distilled",
-            "session_ref": session_eid,
-            "mentioned_by": batch_speakers,
-        })
+    # Patterns + Preferences (distilled) — typed domains per DESIGN-MEMORY-V2
+    # (patterns are repeatable procedure knowledge; preferences are durable
+    # user dispositions).
+    for domain, texts in (("procedures", digest.get("patterns", [])),
+                          ("preferences", digest.get("preferences", []))):
+        for text in texts:
+            if not text or not isinstance(text, str) or len(text) < 5:
+                continue
+            if is_ephemeral(text):
+                continue
+            entity = _extract_entity_from_fact(text, known_entities) or "user"
+            ops.append({
+                "op": "assert",
+                "entity": entity,
+                "attribute": "value",
+                "value": text,
+                "confidence": 0.7,
+                "domain": domain,
+                "kind": "distilled",
+                "session_ref": session_eid,
+                "mentioned_by": batch_speakers,
+            })
 
-    # Verbatim audio quotes (top 20 by length, > 30 chars). Per-item speaker
-    # when present; falls back to batch-level when the source raw item has no
-    # speaker field (e.g. live capture before sherpa-onnx is wired in).
+    # Verbatim audio quotes — OFF by default (SINAIN_VERBATIM_FACTS=1 to
+    # re-enable). Storing the top-20 LONGEST transcript lines as facts at
+    # confidence 0.95 is what filled the graph with conversation fragments
+    # outranking real knowledge: escrow belongs in T1 episodes (memoryd) and
+    # the raw sidecar, both of which already hold this text.
+    if os.environ.get("SINAIN_VERBATIM_FACTS", "0") != "1":
+        return ops
+
     audio = [i for i in raw_items
              if i.get("source") == "audio" and len(i.get("text", "")) > 30]
     for item in sorted(audio, key=lambda x: -len(x.get("text", "")))[:20]:

@@ -260,6 +260,7 @@ page bodies.
 - \`episode/<id>.md\` — one T1 episode: immutable escrow, provenance drill-down target
 - \`topic/<q>.md\` — a query filed back as a page
 - \`shares.md\`, \`share/<id>.md\` — scoped slices of this address space
+- \`lint.md\` — health check: facts that fail the durability rules, grouped by verdict
 
 ## Operations (HTTP today, MCP \`sinain-wiki\` planned)
 
@@ -269,6 +270,8 @@ page bodies.
   \`POST /knowledge/facts/<fact-id>/restore\` — bi-temporal, nothing is deleted
 - ingest — \`POST /knowledge/concepts/import\` (concept bundles);
   vault import (markdown folders) lands with P3
+- lint — \`GET /knowledge/lint.md\` (findings: escrow / ephemeral / fragment /
+  unattributed), \`POST /knowledge/lint/apply\` — bulk bi-temporal retraction
 - export_vault — \`GET /knowledge/export?format=vault\` → every page
   materialized once into an Obsidian-openable zip
 
@@ -508,6 +511,70 @@ export function buildTopicMd(
       const slug = entityToSlug(r.entity!);
       const snippet = (r.snippet || "").replace(/\n/g, " ").slice(0, 140);
       parts.push(`- [[${slug}]]${snippet ? ` — ${snippet}` : ""}`);
+    }
+    parts.push("");
+  }
+  return parts.join("\n");
+}
+
+// ── lint.md ──────────────────────────────────────────────────────────
+
+export interface LintFinding {
+  fact_id: string;
+  entity?: string;
+  kind?: string;
+  confidence?: string;
+  value?: string;
+  verdict: string;
+  reason?: string;
+}
+
+export interface LintReport {
+  counts?: Record<string, number>;
+  findings?: LintFinding[];
+}
+
+const LINT_VERDICT_NOTES: Record<string, string> = {
+  escrow: "Raw transcript/agent output stored as facts — T1 episode material. Retracted on apply.",
+  ephemeral: "Presence data and stubs — fail the two-week durability test. Retracted on apply.",
+  fragment: "Bare auto-extracted phrases carrying no claim. Retracted on apply.",
+  unattributed: "Junk-drawer subject 'general', no user reference. Report-only (apply with aggressive).",
+};
+
+export function buildLintMd(report: LintReport): string {
+  const findings = report.findings || [];
+  const counts = report.counts || {};
+  const fm = frontmatter({
+    id: "lint",
+    title: "Lint",
+    total: findings.length,
+    ...counts,
+  });
+  const parts: string[] = [fm, "", "# Lint", ""];
+  parts.push(
+    "Health check over the knowledge graph: what should never have been a fact. "
+    + "Applying retracts bi-temporally — nothing is deleted, every retraction is restorable, "
+    + "and the transcript escrow keeps all source text regardless.",
+    "",
+  );
+  if (!findings.length) {
+    parts.push("*No findings — the graph is clean.*", "");
+    return parts.join("\n");
+  }
+  const byVerdict = new Map<string, LintFinding[]>();
+  for (const f of findings) {
+    if (!byVerdict.has(f.verdict)) byVerdict.set(f.verdict, []);
+    byVerdict.get(f.verdict)!.push(f);
+  }
+  for (const [verdict, group] of byVerdict) {
+    parts.push(`## ${verdict} (${group.length})`, "");
+    const note = LINT_VERDICT_NOTES[verdict];
+    if (note) parts.push(note, "");
+    for (const f of group) {
+      const slug = f.entity ? entityToSlug(f.entity.includes(":") ? f.entity : `entity:${f.entity}`) : "";
+      const value = (f.value || "").replace(/\n/g, " ");
+      const conf = f.confidence ? ` · conf ${f.confidence}` : "";
+      parts.push(`- ${slug ? `[[${slug}]] ` : ""}${value}${conf} ^${factToAnchor(f.fact_id)}`);
     }
     parts.push("");
   }

@@ -213,6 +213,7 @@ function parseLocation() {
   if (rest === "wiki") return { kind: "wiki" };
   if (rest === "log") return { kind: "log" };
   if (rest === "shares") return { kind: "shares" };
+  if (rest === "lint") return { kind: "lint" };
   var m = rest.match(/^(entity|episode|topic|share)\\/(.+)$/);
   if (m) {
     var val = decodeURIComponent(m[2]);
@@ -229,6 +230,7 @@ function routePath(route) {
   if (route.kind === "wiki") return "wiki";
   if (route.kind === "log") return "log";
   if (route.kind === "shares") return "shares";
+  if (route.kind === "lint") return "lint";
   if (route.kind === "entity") return "entity/" + encodeURIComponent(route.slug);
   if (route.kind === "episode") return "episode/" + encodeURIComponent(route.id);
   if (route.kind === "topic") return "topic/" + encodeURIComponent(route.q);
@@ -241,6 +243,7 @@ function mdPath(route) {
   if (route.kind === "wiki") return "WIKI.md";
   if (route.kind === "log") return "log.md";
   if (route.kind === "shares") return "shares.md";
+  if (route.kind === "lint") return "lint.md";
   if (route.kind === "entity") return "entity/" + encodeURIComponent(route.slug) + ".md";
   if (route.kind === "episode") return "episode/" + encodeURIComponent(route.id) + ".md";
   if (route.kind === "topic") return "topic/" + encodeURIComponent(route.q) + ".md";
@@ -271,6 +274,7 @@ function linkRoute(target) {
   if (target === "index.md") return { kind: "index" };
   if (target === "log.md") return { kind: "log" };
   if (target === "shares.md") return { kind: "shares" };
+  if (target === "lint.md") return { kind: "lint" };
   return { kind: "entity", slug: target };
 }
 
@@ -698,6 +702,7 @@ function renderRail(doc) {
     { label: "index.md", kind: "index" },
     { label: "log.md", kind: "log", also: "episode" },
     { label: "shares.md", kind: "shares", also: "share" },
+    { label: "lint.md", kind: "lint" },
   ].forEach(function (n) {
     var active = r.kind === n.kind || r.kind === n.also;
     var node = el("div", "railNode root" + (active ? " active" : ""), n.label);
@@ -1017,6 +1022,81 @@ function viewTopic(doc, main, q) {
   main.appendChild(page);
 }
 
+// Lint view: findings grouped by verdict, each row with its ^f-id anchor so
+// individual retract/restore reuses the entity-page machinery; one apply
+// button bulk-retracts the default verdicts (two-click confirm, no dialogs).
+function viewLint(doc, main) {
+  var page = el("div", "page");
+  page.appendChild(el("div", "pTitle small", "Lint"));
+  page.appendChild(el("div", "pSub", "What should never have been a fact. Retraction is bi-temporal and restorable; the transcript escrow keeps all source text regardless."));
+
+  var stats = el("div", "chips");
+  Object.keys(doc.fm).forEach(function (k) {
+    if (k === "id" || k === "title") return;
+    var chip = el("span", "chip");
+    chip.appendChild(el("strong", "", String(doc.fm[k]) + " "));
+    chip.appendChild(document.createTextNode(k));
+    stats.appendChild(chip);
+  });
+  page.appendChild(stats);
+
+  var applyTotal = 0;
+  doc.sections.forEach(function (sec) {
+    var m = sec.heading.match(/^(\\w+)\\s*\\((\\d+)\\)/);
+    if (m && m[1] !== "unattributed") applyTotal += parseInt(m[2]);
+  });
+
+  if (applyTotal > 0) {
+    var applyBtn = el("button", "btn", "Apply lint — retract " + applyTotal + " facts");
+    applyBtn.style.margin = "14px 0";
+    var armed = false;
+    applyBtn.onclick = function () {
+      if (!armed) {
+        armed = true;
+        applyBtn.textContent = "Confirm: retract " + applyTotal + " facts (restorable)";
+        applyBtn.style.color = "var(--red)";
+        setTimeout(function () {
+          armed = false;
+          applyBtn.textContent = "Apply lint — retract " + applyTotal + " facts";
+          applyBtn.style.color = "";
+        }, 6000);
+        return;
+      }
+      applyBtn.disabled = true;
+      applyBtn.textContent = "Applying…";
+      fetchJson("/knowledge/lint/apply", { method: "POST" }).then(function (r) {
+        if (!r.ok) { showToast("Lint apply failed: " + (r.error || "unknown")); applyBtn.disabled = false; return; }
+        railCache.at = 0;
+        showToast("✓ Lint applied — " + r.applied + " facts retracted (bi-temporal, restorable)");
+        render();
+      }).catch(function (e) { showToast("Lint apply failed: " + e); applyBtn.disabled = false; });
+    };
+    page.appendChild(applyBtn);
+  }
+
+  doc.sections.forEach(function (sec) {
+    var wrap = el("div", "secWrap");
+    wrap.appendChild(el("div", "secHdr", sec.heading));
+    sec.items.forEach(function (item) {
+      if (item.type !== "bullet" || !item.anchor) { appendGeneric(wrap, item); return; }
+      var firstLink = tokenize(item.text).filter(function (t) { return t.link; })[0];
+      var sourceEntity = firstLink ? "entity:" + firstLink.link : null;
+      var row = el("div", "factRow");
+      var txt = el("div", "txt");
+      renderTokens(txt, item.text);
+      row.appendChild(txt);
+      if (item.conf) row.appendChild(el("span", "conf", item.conf));
+      row.appendChild(el("span", "anchor", "^" + item.anchor));
+      var act = el("span", "act", "retract");
+      row.appendChild(act);
+      wrap.appendChild(row);
+      styleFactRow(row, item.anchor, sourceEntity);
+    });
+    page.appendChild(wrap);
+  });
+  main.appendChild(page);
+}
+
 function viewShares(doc, main) {
   var page = el("div", "page");
   page.appendChild(el("div", "pTitle small", "Shares"));
@@ -1174,6 +1254,7 @@ function render(refresh) {
     else if (route.kind === "episode") viewEpisode(doc, main);
     else if (route.kind === "topic") viewTopic(doc, main, route.q);
     else if (route.kind === "shares") viewShares(doc, main);
+    else if (route.kind === "lint") viewLint(doc, main);
     else if (route.kind === "share") viewShare(doc, main);
   }).catch(function (e) {
     if (seq !== renderSeq) return;

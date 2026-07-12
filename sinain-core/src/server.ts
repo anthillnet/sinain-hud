@@ -238,6 +238,8 @@ export interface ServerDeps {
   retractFact?: (factId: string, reason: string | null, actor: string | null, sourceEntity: string | null) => Promise<unknown>;
   /** Restore a previously retracted fact via undo token. */
   restoreFact?: (factId: string, undoToken: string) => Promise<unknown>;
+  /** Knowledge lint — report or bulk-apply retractions (lint_knowledge.py). */
+  lintKnowledge?: (apply: boolean, aggressive: boolean) => Promise<unknown>;
   /** Export a concept bundle (entity + neighborhood) for transfer between machines. */
   exportConcept?: (entity: string, depth: number, opts: { includeRetracted: boolean; includePage: boolean; redactRules: string[] }) => Promise<unknown>;
   /** Import a concept bundle into the local knowledge graph. */
@@ -1284,6 +1286,28 @@ export function createAppServer(deps: ServerDeps) {
         } catch (err) {
           res.writeHead(500);
           res.end(JSON.stringify({ ok: false, error: String(err) }));
+        }
+        return;
+      }
+
+      // ── /knowledge/lint/apply ── bulk-retract lint findings (wiki lint page).
+      // Report side is the wiki page GET /knowledge/lint.md.
+      if (req.method === "POST" && url.pathname === "/knowledge/lint/apply") {
+        if (!deps.lintKnowledge) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "lint not available" }));
+          return;
+        }
+        try {
+          const aggressive = url.searchParams.get("aggressive") === "1";
+          const result = await deps.lintKnowledge(true, aggressive) as any;
+          // Findings list is large and the UI only needs the totals here.
+          res.end(JSON.stringify({
+            ok: true, applied: result?.applied ?? 0, counts: result?.counts ?? {},
+          }));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(err).slice(0, 300) }));
         }
         return;
       }
