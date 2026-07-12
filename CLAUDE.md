@@ -17,7 +17,7 @@ Three main processes communicate over localhost:
 
 Data flow: `sck-capture → stdout PCM → sinain-core AudioPipeline → VAD → transcription → feed buffer → WebSocket → overlay`. Screen: `sck-capture → IPC JPEG → sense_client → OCR → POST /sense → sinain-core`. Cost: `OpenRouter usage.cost → analyzer/transcription/vision → CostTracker → WebSocket → overlay`.
 
-Knowledge: When feed buffer reaches capacity, `LocalCurationService` triggers incremental distillation: `feed items + screen OCR → session_distiller.py (LLM) → {facts, entities, decisions} → knowledge_integrator.py (code) → triplestore + entity graph`. On shutdown, remaining items are saved to `pending-session.json` and distilled on next startup. Memory dir: `SINAIN_MEMORY_DIR` (default `~/.sinain/memory`).
+Knowledge: distillation is gesture-gated — the user's Save runs `feed items + screen OCR → session_distiller.py (LLM) → {facts, entities, decisions} → knowledge_integrator.py (code) → triplestore + entity graph`. Buffer-full and shutdown perform deterministic T1 episode capture to memoryd only (local, no LLM); un-saved window content expires with the rolling window. Memory dir: `SINAIN_MEMORY_DIR` (default `~/.sinain/memory`).
 
 Escalation: Agent loop scores digests against patterns. If score >= threshold (or rich/focus mode), escalates to OpenClaw gateway via HTTP+WebSocket.
 
@@ -138,7 +138,7 @@ All config via environment variables or `.env` file at project root. Key vars:
 - `AUDIO_DEVICE` — macOS audio device for sox/ffmpeg fallback (default: `BlackHole 2ch`)
 - `SINAIN_MEMORY_DIR` — Knowledge graph directory (default: `~/.sinain/memory`)
 - `LEARNING_ENABLED` — Enable/disable knowledge distillation pipeline (default: `true`)
-- `SINAIN_AUTO_DISTILL` — Autonomous distillation lanes (buffer-full, periodic curation, startup pending-session). Default `false`: LLM runs only on explicit gestures (Save/Call AI/Build Context); Save-triggered distillation is unaffected
+- Autonomous distillation lanes were REMOVED (2026-07-12): the LLM distills only on the explicit Save gesture; buffer-full triggers deterministic T1 episode capture to memoryd only
 - `AGENT_ENABLED` — Ambient analyzer loop. Default `false` since the deliberate-capture rework
 
 See `.env.example` for the complete list and [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
