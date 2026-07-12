@@ -1009,14 +1009,7 @@ async function main() {
   // Pass wsHandler.broadcast so the periodic curator (insight_synthesizer)
   // can push suggestions/insights directly to HUD without going through the
   // bare-agent heartbeat. Replaces the old sinain_post_feed MCP roundtrip.
-  const localCuration = new LocalCurationService(
-    (text) => wsHandler.broadcast(text),
-  );
-  // NB: pending-session distillation is triggered later, AFTER the HTTP server
-  // is listening (see end of main()). runDistillation() uses execFileSync (the
-  // f-coref model load alone can take ~8s), which blocks the event loop — doing
-  // it here raced server.start() and could starve /health past start.sh's 15s
-  // gate. It carries no time pressure, so it waits until health is answerable.
+  const localCuration = new LocalCurationService();
 
   // ── Entity subscription cache ���─
   // Detects entity mentions in transcription, prefetches knowledge facts async.
@@ -1025,20 +1018,15 @@ async function main() {
   const entityCache = new EntityCache(queryKnowledgeFactsMulti);
   entityCache.loadEntityNames().catch(() => {});
   localCuration.setSenseBuffer(senseBuffer);
-  // Autonomous distillation lanes are opt-in (SINAIN_AUTO_DISTILL=1) — the
-  // deliberate-capture contract is LLM-on-Save only. Without the flag the
-  // rolling window prunes by age, un-saved items simply expire (by design),
-  // and the only distillation is the one Save explicitly triggers.
-  if (config.learningConfig.autoDistill) {
-    localCuration.startPeriodicCuration();
-    // Wire incremental distillation: when feed buffer fills, distill before items are lost
-    localCuration.setRearmCallback(() => feedBuffer.rearmOnFull());
-    feedBuffer.onFull((items) => {
-      localCuration.distillIncremental(items);
-    });
-  } else {
-    log(TAG, "auto-distill lanes OFF (gesture-gated; SINAIN_AUTO_DISTILL=1 opts in)");
-  }
+  // Buffer-full → deterministic T1 episode capture ONLY (local memoryd write).
+  // The autonomous LLM lanes that used to hang off this service (buffer-full
+  // incremental distillation, 30-min periodic curation, startup
+  // pending-session distillation) were REMOVED 2026-07-12: the
+  // deliberate-capture contract is LLM-on-Save only.
+  localCuration.setRearmCallback(() => feedBuffer.rearmOnFull());
+  feedBuffer.onFull((items) => {
+    localCuration.captureEpisodes(items);
+  });
 
   // ── Initialize escalation ──
   // getEscalationAgent reads bareAgentState (declared later in this function)
@@ -2832,20 +2820,6 @@ async function main() {
   log(TAG, `  escal:   ${config.escalationConfig.mode}`);
   log(TAG, `  cost:    display=${config.costDisplayEnabled ? "on" : "off"} (always logged)`);
 
-  // ── Distill any leftover pending session from a prior shutdown ──
-  // Deferred 2 minutes past startup: at +5s this pipeline (4-5 Python spawns)
-  // stacked against the memory daemon spawn, the ONNX embedding load and
-  // prior builders, contending for the exclusive RocksDB write lock — the
-  // spin-up crash/corruption window (knowledge-graph.db.corrupt-* quarantines).
-  // distillPendingSession also self-defers if a distillation is in flight.
-  if (config.learningConfig.autoDistill) {
-    setTimeout(() => {
-      void localCuration.distillPendingSession().catch((err: any) => {
-        warn(TAG, `pending session distillation failed: ${err.message?.slice(0, 100)}`);
-      });
-    }, 120_000).unref?.();
-  }
-
   // ── Graceful shutdown ──
   const shutdown = async (signal: string) => {
     log(TAG, `${signal} received, shutting down...`);
@@ -2872,16 +2846,13 @@ async function main() {
     feedbackStore?.destroy();
     traceStore?.destroy();
 
-    // Save session knowledge — write feed items to disk (instant, redacted)
-    // and let the NEXT startup distill them. No LLM at shutdown: the old path
-    // kept the process alive minutes with Python children mid-RocksDB-write,
-    // exactly where start.sh's kill -9 landed -> corruption -> store wipe.
-    localCuration.stop();
+    // Shutdown episode capture — deterministic memoryd write, no LLM, no
+    // disk staging (the startup re-distillation lane was removed 2026-07-12).
     const feedItems = feedBuffer.query(0).filter((i) => i.ts > localCuration.lastDistilledTs);
     try {
-      localCuration.savePendingSession(feedItems);
+      localCuration.captureShutdownEpisodes(feedItems);
     } catch (err: any) {
-      warn(TAG, `failed to save pending session: ${err.message?.slice(0, 100)}`);
+      warn(TAG, `failed to capture shutdown episodes: ${err.message?.slice(0, 100)}`);
     }
     if (localCuration.distillRunning) {
       log(TAG, "waiting for in-flight distillation to finish (max 20s)...");
