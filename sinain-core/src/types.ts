@@ -807,11 +807,6 @@ export interface FeedbackRecord {
 
 export interface LearningConfig {
   enabled: boolean;
-  /** Autonomous LLM lanes (buffer-full incremental distillation, periodic
-   *  curation, startup pending-session distillation). Default OFF: since the
-   *  deliberate-capture rework all cloud intelligence is gesture-gated —
-   *  Save-triggered distillation is unaffected by this flag. */
-  autoDistill: boolean;
   feedbackDir: string;
   retentionDays: number;
 }

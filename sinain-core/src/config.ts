@@ -428,11 +428,6 @@ export function loadConfig(): CoreConfig {
   const defaultFeedbackDir = resolve(sinainDataDir(), "feedback");
   const learningConfig: LearningConfig = {
     enabled: boolEnv("LEARNING_ENABLED", true),
-    // Gesture-gated contract (DESIGN-DELIBERATE-CAPTURE §1): the LLM runs on
-    // Save, never on its own. The autonomous lanes (buffer-full incremental
-    // distillation, 30-min curation, startup pending-session distill) are
-    // opt-in — measured 115 unmetered distillation runs/night when left on.
-    autoDistill: boolEnv("SINAIN_AUTO_DISTILL", false),
     feedbackDir: resolvePath(env("FEEDBACK_DIR", defaultFeedbackDir)),
     retentionDays: intEnv("FEEDBACK_RETENTION_DAYS", 30),
   };
