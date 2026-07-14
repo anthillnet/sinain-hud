@@ -30,6 +30,7 @@ export async function burstCall(
     jsonMode?: boolean;
   },
 ): Promise<BurstCallResult> {
+  if (config.provider === "ollama") return burstCallOllama(config, opts);
   if (!config.apiKey) throw new BurstError("burst lane has no API key (set CEREBRAS_API_KEY)", 503);
 
   const body: Record<string, unknown> = {
@@ -76,6 +77,64 @@ export async function burstCall(
       content,
       tokensIn: data.usage?.prompt_tokens ?? 0,
       tokensOut: data.usage?.completion_tokens ?? 0,
+      latencyMs: Date.now() - started,
+    };
+  } catch (err) {
+    if (err instanceof BurstError) throw err;
+    const aborted = (err as Error).name === "AbortError";
+    throw new BurstError(aborted ? `burst timed out after ${config.timeoutMs}ms` : String(err));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Local burst via Ollama's native /api/chat. The OpenAI-compat /v1 endpoint
+ * has no way to disable thinking, so reasoning models (e.g. Bonsai-27B) would
+ * return empty content there; the native API takes `think: false`, which
+ * non-thinking models ignore. No API key needed. */
+async function burstCallOllama(
+  config: BurstConfig,
+  opts: { system: string; user: string; maxTokens?: number; jsonMode?: boolean },
+): Promise<BurstCallResult> {
+  // Tolerate an OpenAI-style endpoint value left over from a cloud profile.
+  const base = config.endpoint.replace(/\/v1\/chat\/completions\/?$/, "").replace(/\/$/, "");
+  const body: Record<string, unknown> = {
+    model: config.model,
+    messages: [
+      { role: "system", content: opts.system },
+      { role: "user", content: opts.user },
+    ],
+    stream: false,
+    think: false,
+    options: { num_predict: opts.maxTokens ?? config.maxTokens, temperature: 0 },
+  };
+  if (opts.jsonMode) body.format = "json";
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  const started = Date.now();
+  try {
+    const res = await fetch(`${base}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new BurstError(`burst ollama ${res.status}: ${text.slice(0, 200)}`, res.status);
+    }
+    const data = (await res.json()) as {
+      message?: { content?: string };
+      prompt_eval_count?: number;
+      eval_count?: number;
+    };
+    const content = data.message?.content?.trim() ?? "";
+    if (!content) throw new BurstError("burst response had no content");
+    return {
+      content,
+      tokensIn: data.prompt_eval_count ?? 0,
+      tokensOut: data.eval_count ?? 0,
       latencyMs: Date.now() - started,
     };
   } catch (err) {

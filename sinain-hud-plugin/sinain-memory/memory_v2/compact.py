@@ -34,7 +34,20 @@ from memory_v2.store import EpisodeStore
 # flag for future local-mode experiments; default OFF restores the v1 prompt
 # and its warm caches.
 SEG_SUMMARIES = os.environ.get("SINAIN_V2_SEG_SUMMARIES", "0") == "1"
-PROMPT_VERSION = "v3-clean-2s" if SEG_SUMMARIES else "v3-clean-1"
+# P2 extraction depth: dedicated experiences pass (enumeration-complete events
+# per person). The measured failure mode it targets: recall questions that ask
+# "what has X done / which places / what activities" fail on COVERAGE — the
+# rubric-driven generic pass drops minor-but-attested experiences, and no
+# read-side change can serve a fact that was never stored. Flag-gated while
+# under measurement; the version suffix keys separate caches.
+EVENTS_PASS = os.environ.get("SINAIN_V2_EVENTS_PASS", "0") == "1"
+# e1 → e2: internal bench (real work meeting) showed e1 transcribing the
+# session's own conduct as "experiences" (138 speech-act facts = 58% of the
+# store → retrieval buried, 3.36 → 2.58). e2 = out-of-session criterion +
+# English output + deterministic speech-act gate below.
+EVENTS_V = os.environ.get("SINAIN_V2_EVENTS_V", "1")
+PROMPT_VERSION = ("v3-clean-2s" if SEG_SUMMARIES else "v3-clean-1") + (
+    f"-e{EVENTS_V}" if EVENTS_PASS else "")
 DEFAULT_MODEL = os.environ.get("SINAIN_V2_MODEL", "google/gemini-2.5-flash")
 
 DOMAINS = ("people", "events", "preferences", "decisions", "endeavors")
@@ -101,6 +114,152 @@ Rules:
 - aliases: nicknames/short forms actually used in the session.
 - Attested only. Skip people mentioned only in passing with zero attributes.
 """
+
+
+_EVENTS_SYSTEM_E1 = """You are the experiences extraction pass of a memory system.
+Input: one dated conversation session observed by an always-on assistant.
+Output STRICT JSON, nothing else:
+{"experiences": [{"who": "...", "what": "...", "date": "YYYY-MM-DD", "companions": ["..."]}]}
+
+Goal: a COMPLETE enumeration of what each named person did, experienced,
+attended, created, bought, read, watched, visited or went through, as the
+session attests. Recall later asks "what has this person done / which places /
+which titles / what activities" — every missed item is an unanswerable
+question, so list EVERY distinct experience, including minor ones.
+
+Rules:
+- who: the person the experience belongs to — never pronouns. One entry per
+  person per distinct experience; if Dana and her brother both attended a
+  pottery class, emit an entry for each of them.
+- what: one self-contained clause, specifics verbatim (titles, places, brands,
+  amounts): "took a pottery class at a community studio", "finished reading
+  The Copper Field", "adopted a beagle named Chip".
+- date: the event date if stated or inferable, else the session date.
+- companions: other NAMED people who shared the experience, if any.
+- Attested only — no inference beyond the session, no world knowledge.
+- EXCLUDE: the conversation itself (telling/asking/chatting is not an
+  experience), the assistant's own actions, hypotheticals, plans not yet
+  carried out, and generic statements with no specific referent.
+"""
+
+_EVENTS_SYSTEM_E2 = """You are the experiences extraction pass of a memory system.
+Input: one dated conversation session observed by an always-on assistant.
+Output STRICT JSON, nothing else:
+{"experiences": [{"who": "...", "what": "...", "date": "YYYY-MM-DD", "companions": ["..."]}]}
+
+Goal: a COMPLETE enumeration of the real-world experiences this session
+REPORTS: what each named person did, attended, created, bought, read,
+watched, visited or went through OUTSIDE this conversation. Recall later asks
+"what has this person done / which places / which titles / what activities" —
+every missed item is an unanswerable question, so list EVERY distinct
+reported experience, including minor ones.
+
+THE TEST: an experience exists independently of this session — the session
+only reports it. If deleting the conversation would erase the event itself,
+it is session conduct, NOT an experience. Never emit entries for what someone
+said, asked, proposed, suggested, joked, thought, opined, agreed, explained,
+demonstrated or decided WITHIN the session — those are the conversation.
+When speech reports an underlying event, extract the event, not the speech:
+"I recorded a demo video back in March while I was in Georgia" → {"who":
+"<speaker>", "what": "recorded a demo video in Georgia", "date": "<March>"} —
+never "recalled recording a video".
+
+Rules:
+- who: the person the experience belongs to — never pronouns. One entry per
+  person per distinct experience; if Dana and her brother both attended a
+  pottery class, emit an entry for each of them.
+- what: one self-contained clause IN ENGLISH regardless of the conversation
+  language; specifics verbatim (titles, places, brands, amounts): "took a
+  pottery class at a community studio", "finished reading The Copper Field",
+  "adopted a beagle named Chip".
+- date: the event date if stated or inferable, else the session date.
+- companions: other NAMED people who shared the experience, if any.
+- Attested only — no inference beyond the session, no world knowledge.
+- EXCLUDE: hypotheticals, plans not yet carried out, the assistant's own
+  actions, and generic statements with no specific referent.
+"""
+
+_EVENTS_SYSTEM = _EVENTS_SYSTEM_E2 if EVENTS_V == "2" else _EVENTS_SYSTEM_E1
+
+# Deterministic backstop for the out-of-session criterion (gates live in
+# code, not in prompt hopes): an English events fact opening with a speech/
+# cognition act is session conduct. Underlying events survive because e2
+# instructs extracting them in event form ("recorded a demo video ...").
+_SPEECH_ACT_RE = re.compile(
+    r"^(?:(?:also |then |later )?(?:said|says|asked|asks|proposed|proposes|"
+    r"suggested|suggests|mentioned|mentions|noted|notes|joked|jokes|thought|"
+    r"thinks|opined|believes|believed|wondered|wonders|agreed|agrees|"
+    r"disagreed|explained|explains|discussed|discusses|recalled|recalls|"
+    r"remembered|remembers|expressed|expresses|stated|states|told|tells|"
+    r"replied|replies|answered|answers|shared (?:that|his|her|their)|"
+    r"talked|talks|spoke|speaks|commented|comments|complained|complains|"
+    r"admitted|admits|confirmed|confirms|denied|denies|argued|argues|"
+    r"pointed out|points out|wrote in (?:the )?chat|sent (?:a )?(?:link|message))\b)",
+    re.IGNORECASE,
+)
+
+
+def _speech_act_gate(recs: list[dict]) -> tuple[list[dict], int]:
+    kept = [r for r in recs
+            if isinstance(r, dict)
+            and not _SPEECH_ACT_RE.search(str(r.get("what", "")).strip())]
+    return kept, len(recs) - len(kept)
+
+
+def _salvage_json_list(raw: str, list_key: str) -> "list[dict] | None":
+    """Recover a complete prefix of a max_tokens-truncated JSON array: cut at
+    the last complete object and close the brackets. Enumeration outputs are
+    order-independent, so a complete prefix is strictly better than nothing."""
+    start = raw.find("{")
+    if start < 0:
+        return None
+    cut = raw.rfind("},")
+    if cut <= start:
+        return None
+    try:
+        data = json.loads(raw[start:cut + 1] + "]}")
+        if isinstance(data, dict) and isinstance(data.get(list_key), list):
+            return data[list_key]
+    except ValueError:
+        pass
+    return None
+
+
+def _extract_events(session_text: str, session_date: str, model: str) -> list[dict]:
+    """Dedicated experiences pass (P2 depth). Fail-open: []."""
+    from common import call_llm
+    user = f"Session date: {session_date or 'unknown'}\n\n## Session\n{session_text[:24000]}"
+    for attempt in range(2):
+        try:
+            # 6000 tokens: enumeration over a long session is the one output
+            # that legitimately runs long — a 3500 cap truncated real meetings.
+            raw = call_llm(system_prompt=_EVENTS_SYSTEM, user_prompt=user, model=model,
+                           max_tokens=6000, temperature=0.0, seed=211 + attempt)
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            recs = None
+            if m:
+                try:
+                    data = json.loads(m.group(0))
+                    if isinstance(data, dict) and isinstance(data.get("experiences"), list):
+                        recs = data["experiences"]
+                except ValueError:
+                    pass  # truncated at max_tokens — salvage the complete prefix
+            if recs is None:
+                recs = _salvage_json_list(raw, "experiences")
+                if recs is not None:
+                    print(f"[v2-compact] events pass: salvaged {len(recs)} entries "
+                          "from truncated output", file=sys.stderr)
+            if recs is not None:
+                kept, rej = _speech_act_gate(recs)
+                if rej:
+                    print(f"[v2-compact] events pass: speech-act gate rejected "
+                          f"{rej}/{len(recs)}", file=sys.stderr)
+                return kept
+        except Exception as e:
+            if attempt == 1:
+                print(f"[v2-compact] events pass failed (fail-open): {str(e)[:120]}",
+                      file=sys.stderr)
+    return []
 
 
 def _extract_people(session_text: str, session_date: str, model: str) -> list[dict]:
@@ -272,7 +431,166 @@ def consolidate(facts: list[Fact]) -> list[Fact]:
                     older.invalid_at = newer.valid_at
                     older.superseded_by = newer.id
                     break
-    return list(by_id.values())
+
+    # 3. Same-date near-duplicate merge (only needed once multiple extraction
+    #    passes can word one claim two ways): keep the more detailed text,
+    #    union provenance. Deterministic; keeps depth passes from double-
+    #    storing a claim and diluting retrieval with its own echo. Test is
+    #    CONTAINMENT, not Jaccard — the duplication signature is one wording
+    #    nearly containing the other ("went hiking at Blue Ridge" ⊂ "... with
+    #    her brother"); two distinct same-day events share far fewer tokens.
+    def _containment(x: str, y: str) -> float:
+        tx, ty = set(_norm(x).split()), set(_norm(y).split())
+        if len(tx) < 3 or len(ty) < 3:
+            return 0.0
+        return len(tx & ty) / min(len(tx), len(ty))
+
+    drop: set[str] = set()
+    if EVENTS_PASS:
+        for group in groups.values():
+            for i, a in enumerate(group):
+                if a.id in drop:
+                    continue
+                for b in group[i + 1:]:
+                    if b.id in drop or a.valid_at != b.valid_at:
+                        continue
+                    if _containment(a.fact, b.fact) > 0.85:
+                        keep, lose = (a, b) if len(a.fact) >= len(b.fact) else (b, a)
+                        keep.episode_ids = sorted(set(keep.episode_ids) | set(lose.episode_ids))
+                        drop.add(lose.id)
+                        if lose is a:
+                            break
+    return [f for f in by_id.values() if f.id not in drop]
+
+
+LINK_VERSION = "link-1"  # cache key for raw LLM rows; validation is post-cache
+
+
+def _content_tokens(text: str) -> set:
+    from memory_v2.retrieve import _tokens
+    return {t for t in _tokens(text) if len(t) >= 3}
+
+
+def _is_bridge(out_text: str, src_texts: list) -> bool:
+    """Composition-validity gate (the v1-linker lesson, measured at n=200):
+    a REAL resolution (a) bridges tokens from two different sources that no
+    single source contains together — 'moved' from S1 + 'Sweden' from S2 —
+    and (b) is not materially longer than its longest source (a resolution
+    substitutes a referent; a concatenated list is the union of its sources
+    and fails this). Both deterministic."""
+    ot = _content_tokens(out_text)
+    sts = [_content_tokens(t) for t in src_texts if t]
+    if len(sts) < 2 or not ot:
+        return False
+    if len(ot) > max(len(st) for st in sts) + 1:
+        return False  # concatenation, not composition
+    for i in range(len(sts)):
+        for j in range(len(sts)):
+            if i == j:
+                continue
+            uniq_i = (ot & sts[i]) - sts[j]
+            uniq_j = (ot & sts[j]) - sts[i]
+            if not uniq_i or not uniq_j:
+                continue
+            # novel pairing: no single source holds a token from each side
+            for a in uniq_i:
+                for b in uniq_j:
+                    if not any(a in st and b in st for st in sts):
+                        return True
+    return False
+
+
+def link_facts(facts: list[Fact], *, model: str = DEFAULT_MODEL,
+               cache_dir: "str | Path | None" = None) -> list[Fact]:
+    """Reference-chain resolution WITHIN one subject's fact sheet (multi-hop
+    at write time — Synthius: do the inference once at compaction, not per
+    question). "Moved from her home country 4 years ago" + "home country:
+    Sweden" -> "moved from Sweden 4 years ago", provenance = both source
+    facts. HARD guards (the adversarial win must not regress): one subject
+    per call — cross-person joins are impossible by construction; >=2 cited
+    sources; no outside knowledge; deterministic subject check on output.
+    Own cache stage — does not invalidate the extraction cache."""
+    # DEFAULT OFF (measured 2026-07-03, n=200): the linker emitted keyword-
+    # dense RESTATEMENTS rather than true chain resolutions; they outranked
+    # and displaced the atomic facts multi-hop needed (20/40 -> 14/40,
+    # overall 68 -> 65). Before re-enabling, add a composition-validity gate:
+    # the output must contain content tokens from BOTH sources that never
+    # co-occur in either source alone (a real bridge test, not source-count).
+    if os.environ.get("SINAIN_V2_LINK", "0") == "0":
+        return []
+    from collections import defaultdict
+    groups: dict[str, list[Fact]] = defaultdict(list)
+    for f in facts:
+        if not f.invalid_at:
+            groups[_norm(f.subject)].append(f)
+    # Largest sheets first — reference chains live where facts accumulate.
+    cand = sorted((g for g in groups.values() if len(g) >= 4),
+                  key=len, reverse=True)[:6]
+    out: list[Fact] = []
+    for group in cand:
+        subject = group[0].subject
+        lines = [f"{i+1}. [{f.valid_at}] ({f.domain}) {f.fact}"
+                 for i, f in enumerate(group[:40])]
+        key = hashlib.sha256(("\n".join(lines) + f"|{LINK_VERSION}|{model}")
+                             .encode()).hexdigest()[:16]
+        cpath = Path(cache_dir) / f"link-{key}.json" if cache_dir else None
+        if cpath and cpath.exists():
+            rows = json.loads(cpath.read_text(encoding="utf-8"))
+        else:
+            from common import call_llm
+            try:
+                raw = call_llm(
+                    system_prompt=(
+                        "You resolve reference chains within ONE person's fact "
+                        "sheet. Emit facts that COMBINE two or more listed facts "
+                        "to state something no single fact states alone — e.g. "
+                        "'moved from her home country 4 years ago' + 'home "
+                        "country: Sweden' -> 'moved from Sweden 4 years ago'.\n"
+                        'STRICT JSON: {"facts": [{"fact": "...", "domain": '
+                        '"people|events|preferences|decisions|endeavors", '
+                        '"date": "YYYY-MM-DD", "sources": [1, 4]}]}\n'
+                        "Rules: the missing piece MUST be explicit in another "
+                        "listed fact; cite >=2 sources; NEVER use outside "
+                        "knowledge; NEVER attribute another person's fact to "
+                        "this person; empty list when nothing resolves."),
+                    user_prompt=f"Person: {subject}\n\n" + "\n".join(lines),
+                    model=model, max_tokens=1200, temperature=0.0, seed=42)
+                m = re.search(r"\{.*\}", raw, re.DOTALL)
+                rows = (json.loads(m.group(0)).get("facts") if m else []) or []
+            except Exception as e:
+                print(f"[v2-link] {subject}: failed (fail-open): {str(e)[:80]}",
+                      file=sys.stderr)
+                rows = []
+            if cpath:
+                cpath.parent.mkdir(parents=True, exist_ok=True)
+                cpath.write_text(json.dumps(rows, ensure_ascii=False),
+                                 encoding="utf-8")
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            text = str(r.get("fact", "")).strip()
+            srcs = [i for i in (r.get("sources") or []) if isinstance(i, int)
+                    and 1 <= i <= len(group)]
+            dom = str(r.get("domain", "")).strip().lower()
+            if len(text) < 8 or len(srcs) < 2:
+                continue  # structural gate: composition requires >=2 sources
+            if not _is_bridge(text, [group[i - 1].fact for i in srcs]):
+                continue  # bridge-token gate: restatement/list-merge, not a resolution
+            if dom not in DOMAINS:
+                dom = "events"
+            src_facts = [group[i - 1] for i in srcs]
+            out.append(Fact(
+                id=_fact_id(dom, subject, text),
+                domain=dom, subject=subject, fact=text,
+                valid_at=str(r.get("date", "") or src_facts[0].valid_at)[:10],
+                layers=sorted({l for sf in src_facts for l in sf.layers}),
+                episode_ids=sorted({e for sf in src_facts for e in sf.episode_ids}),
+                meta={"pass": "link", "sources": [sf.id for sf in src_facts]},
+            ))
+    if out:
+        print(f"[v2-link] resolved {len(out)} chained facts "
+              f"across {len(cand)} subjects")
+    return out
 
 
 def compact_store(
@@ -316,6 +634,8 @@ def compact_store(
             )
             print(f"[v2-compact] cache hit: {len(res.facts)} facts "
                   f"({cache_path.name})")
+            res.facts = res.facts + link_facts(res.facts, model=model,
+                                               cache_dir=cache_dir)
             _apply_summaries(store, res.summaries, res.seg_summaries)
             return res
 
@@ -375,6 +695,26 @@ def compact_store(
                     valid_at=date, layers=layers, episode_ids=ep_ids,
                     meta={"session_index": si, "pass": "people"},
                 ))
+        # Pass 3 (P2 depth): enumeration-complete experiences. Same schema
+        # gates as everything else — code decides admission, not the model.
+        if EVENTS_PASS:
+            for rec in _extract_events(text, date, model):
+                if not isinstance(rec, dict):
+                    continue
+                who = str(rec.get("who", "")).strip()
+                what = str(rec.get("what", "")).strip()
+                if not who or len(what) < 8:
+                    continue
+                comps = [str(c).strip() for c in (rec.get("companions") or [])
+                         if str(c).strip() and str(c).strip().lower() != who.lower()]
+                ftext = what + (f" (with {', '.join(comps)})" if comps else "")
+                raw_facts.append(Fact(
+                    id=_fact_id("events", who, ftext),
+                    domain="events", subject=who, fact=ftext,
+                    valid_at=str(rec.get("date", "") or date)[:10],
+                    layers=layers, episode_ids=ep_ids,
+                    meta={"session_index": si, "pass": "events"},
+                ))
         for rf in data.get("facts", []):
             if not isinstance(rf, dict):
                 continue
@@ -405,7 +745,8 @@ def compact_store(
     res = CompactionResult(
         facts=facts, summaries=summaries, seg_summaries=seg_summaries,
         aliases=aliases,
-        stats={"sessions": len(sessions), "llm_calls": n_calls * 2,  # generic + people pass per session
+        stats={"sessions": len(sessions),
+               "llm_calls": n_calls * (3 if EVENTS_PASS else 2),  # generic + people (+ events) per session
                "raw_facts": len(raw_facts), "facts": len(facts),
                "superseded": sum(1 for f in facts if f.invalid_at),
                "narration_rejected": _narr_rejected},
@@ -423,6 +764,7 @@ def compact_store(
         }, ensure_ascii=False), encoding="utf-8")
 
     _apply_summaries(store, res.summaries, res.seg_summaries)
+    res.facts = res.facts + link_facts(res.facts, model=model, cache_dir=cache_dir)
     return res
 
 

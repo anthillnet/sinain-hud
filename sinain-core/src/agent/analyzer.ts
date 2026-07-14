@@ -498,6 +498,11 @@ async function callOllama(
           { role: "user", content: userPrompt, images: imageB64List },
         ],
         stream: false,
+        // Reasoning models (e.g. Bonsai-27B) stream tokens into `thinking` and
+        // leave `content` empty until the reasoning budget is spent — this lane
+        // needs strict JSON in `content`, so thinking is disabled. Non-thinking
+        // models ignore the flag.
+        think: false,
         options: { num_predict: config.maxTokens },
       }),
       signal: controller.signal,
