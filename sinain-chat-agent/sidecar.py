@@ -27,6 +27,43 @@ import asyncio
 import json
 import logging
 import os
+import sys
+
+
+def _ensure_venv() -> None:
+    """Self-bootstrap: if openhands isn't importable, we're running outside
+    our venv (fresh checkout — the venv is gitignored and nothing else
+    provisions it; sinaind falls back to system python3, which used to mean
+    a silent crash loop). Create .venv, install requirements, and re-exec
+    under the venv python. --prefer-binary: litellm's sdist builds a Rust
+    component that fails on stock cargo — wheels sidestep it.
+    """
+    import importlib.util
+    if importlib.util.find_spec("openhands") is not None:
+        return
+    if os.environ.get("SINAIN_CHAT_BOOTSTRAPPED"):
+        sys.exit("[sinain-chat] openhands still missing after venv bootstrap — "
+                 "install failed; check pip output above")
+    from pathlib import Path
+    import subprocess
+    here = Path(__file__).resolve().parent
+    venv_py = here / ".venv" / "bin" / "python"
+    if not venv_py.exists():
+        print("[sinain-chat] venv missing — bootstrapping (one-time, ~2 min)…",
+              flush=True)
+        subprocess.run([sys.executable, "-m", "venv", str(here / ".venv")],
+                       check=True)
+        subprocess.run(
+            [str(venv_py), "-m", "pip", "install", "--quiet",
+             "--disable-pip-version-check", "--prefer-binary",
+             "-r", str(here / "requirements.txt")],
+            check=True)
+        print("[sinain-chat] venv ready", flush=True)
+    os.environ["SINAIN_CHAT_BOOTSTRAPPED"] = "1"
+    os.execv(str(venv_py), [str(venv_py), str(here / "sidecar.py")])
+
+
+_ensure_venv()
 
 import websockets
 from pydantic import SecretStr
