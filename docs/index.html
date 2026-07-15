@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Sinain — Context OS for builders</title>
+<title>Sinain — AI that understands what you’re working on</title>
+<meta name="description" content="Sinain helps your AI understand your screen, meetings, and recent work—so you can ask for help without explaining everything again." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <!-- Cookieless analytics (self-hosted Umami, no cookies/PII) — captures UTM + referrers -->
 <script defer src="https://analytics.sinain.com/script.js" data-domains="sinain.com" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
@@ -44,7 +45,7 @@
   html,body{margin:0}
   body{
     background:var(--bg);color:var(--fg);
-    font-family:var(--sans);font-size:14px;line-height:1.5;
+    font-family:var(--sans);font-size:16px;line-height:1.6;
     -webkit-font-smoothing:antialiased;
     text-rendering:optimizeLegibility;
   }
@@ -113,7 +114,7 @@
   }
   h1.hero-title em{font-style:normal;color:var(--accent)}
   .hero-sub{
-    font-size:17px;color:var(--fg-dim);max-width:50ch;text-wrap:pretty;margin:0;
+    font-size:19px;color:var(--fg-dim);max-width:56ch;text-wrap:pretty;margin:0;
   }
   .hero-sub strong{color:var(--fg);font-weight:600}
 
@@ -323,7 +324,7 @@
   .roster-row .id{font-family:var(--mono);font-size:11.5px;color:var(--fg-dim);word-break:break-all}
 
   /* ─── Privacy modes ─── */
-  .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .modes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .mode{
     background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:18px;
   }
@@ -545,15 +546,12 @@
         </g>
       </svg>
       <span>SINAIN</span>
-      <span class="sub mono">/ context os</span>
+      <span class="sub">/ AI work assistant</span>
     </div>
     <nav class="primary" aria-label="primary">
       <a href="#flow">How it works</a>
-      <a href="#augmented">Product</a>
       <a href="#privacy">Privacy</a>
-      <a href="#quickstart">Quick Start</a>
-      <a href="#mcp">MCP</a>
-      <a href="#docs">Docs</a>
+      <a href="#quickstart">Get started</a>
       <a href="/ar/" style="color:var(--accent);font-weight:600" data-umami-event="nav-ar">Sinain AR ↗</a>
     </nav>
     <div class="spacer"></div>
@@ -567,19 +565,17 @@
   <div class="container">
     <div class="hero-grid">
       <div>
-        <span class="eyebrow"><span class="bar"></span> Context OS · ambient intelligence for builders</span>
-        <h1 class="hero-title">Sees what you see.<br/>Hears what you hear.<br/><em>Helps you do stuff.</em></h1>
+        <span class="eyebrow"><span class="bar"></span> An AI assistant that knows what you’re doing</span>
+        <h1 class="hero-title">Stop explaining your work.<br/><em>Just ask for help.</em></h1>
         <p class="hero-sub">
-          Sinain quietly understands what you are working on — from your screen, meetings,
-          and audio — and turns it into useful context your AI assistants can use. Through
-          the <strong>MCP bridge</strong>, that context follows you into the tools and agents
-          you already use, so you do not have to copy screenshots, notes, and explanations
-          between them. And <strong>nothing persists or leaves until you ask</strong>.
+          Sinain understands what’s on your screen and what was said in your meetings.
+          Ask a question and your AI already has the background — no screenshots, pasted notes,
+          or long explanations. <strong>You choose what it remembers and what gets shared.</strong>
         </p>
 
         <div class="cta">
           <a class="btn primary btn-lg" href="https://github.com/anthillnet/sinain-hud/releases/download/macos-v0.3.0/Sinain.dmg" data-umami-event="download-macos">⬇ Download for macOS <span class="arr">→</span></a>
-          <a class="btn btn-lg" href="#docs">Read the docs</a>
+          <a class="btn btn-lg" href="#flow">See how it works</a>
         </div>
 
         <p style="margin-top:14px;font-size:12.5px;color:var(--fg-dim);max-width:54ch">
@@ -587,18 +583,6 @@
           no Node or Python required.
         </p>
 
-        <div class="install" role="group" aria-label="Developer install" style="margin-top:18px">
-          <div class="label">▸ FOR DEVELOPERS</div>
-          <code id="install-cmd">npx @geravant/sinain@latest start</code>
-          <button class="copy" id="copy-btn" type="button">COPY</button>
-        </div>
-
-        <div class="meta" aria-label="Project facts">
-          <span><span class="k">license</span><b>FSL-1.1-ALv2</b></span>
-          <span><span class="k">CI</span><b style="color:var(--good)">passing</b></span>
-          <span><span class="k">npm</span><b>@geravant/sinain</b></span>
-          <span><span class="k">LongMemEval</span><b>82.8% IPR</b></span>
-        </div>
       </div>
 
       <!-- Demo preview — just the GIF, minimal chrome -->
@@ -633,13 +617,11 @@
     <div class="sec-head">
       <div class="sec-num">§ 01 — From a glance to a working agent</div>
       <div>
-        <h2 class="sec-title">Context that moves with you — across every AI.</h2>
+        <h2 class="sec-title">Your AI sees the situation, not just your question.</h2>
         <p class="sec-lede">
-          Sinain helps your AI understand what you are looking at and what you have been
-          working on. Start from anything — your last hour, a screen region, your clipboard —
-          ask for help, and continue in the assistant you prefer. Through the MCP bridge,
-          the same context moves between your chat, coding agents, and other AI tools.
-          No copy-pasting. No repeating the same background again and again.
+          Start with what you’re looking at, something you copied, or the last few minutes
+          of work. Sinain gives your chosen AI the useful background, so you can get straight
+          to the question. Continue in chat, a voice call, or another AI tool without starting over.
         </p>
       </div>
     </div>
@@ -825,16 +807,15 @@
 </section>
 
 <!-- ───────────── PILLARS ───────────── -->
-<section class="s" id="augmented">
+<section class="s" id="augmented" hidden>
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 02 — You, Augmented</div>
+      <div class="sec-num">§ 02 — What Sinain does</div>
       <div>
-        <h2 class="sec-title">Capture. Distill. Access. Share.</h2>
+        <h2 class="sec-title">It turns your recent work into useful help.</h2>
         <p class="sec-lede">
-          Sinain captures what matters, turns it into useful memory, makes it available
-          to AI tools through the MCP bridge, and lets you share selected context with
-          others when you choose.
+          Sinain notices what matters, organizes it into a clear summary, and gives it
+          to the AI you choose. You stay in control of what is remembered or shared.
         </p>
       </div>
     </div>
@@ -842,7 +823,7 @@
     <div class="pillars">
       <div class="pillar">
         <div class="ix">01 / capture</div>
-        <h3>Screen + system audio, continuously.</h3>
+        <h3>Understands your screen and meetings.</h3>
         <p>
           Sinain can watch your screen and listen to system audio while automatically
           hiding sensitive things like passwords, API keys, and private blocks
@@ -854,7 +835,7 @@
       </div>
       <div class="pillar">
         <div class="ix">02 / distill</div>
-        <h3>Facts, entities, decisions.</h3>
+        <h3>Remembers decisions and loose ends.</h3>
         <p>
           Sinain turns messy work activity into clear memory: people, projects, decisions,
           open questions, and why something was chosen. It remembers useful details so your
@@ -867,11 +848,11 @@
       </div>
       <div class="pillar">
         <div class="ix">03 / access</div>
-        <h3>MCP, web UI, HUD overlay.</h3>
+        <h3>Gives you help where you work.</h3>
         <p>
-          Agents connect to Sinain through the MCP bridge, so they can use the same live
-          context you see. You can also browse it in the local web UI or use the on-screen
-          HUD, which stays <strong>hidden from screenshots and screen shares</strong>.
+          Your connected AI tools can use the same live background you see. You can also
+          browse it in Sinain or use the small on-screen helper, which stays
+          <strong>hidden from screenshots and screen shares</strong>.
         </p>
         <div class="chips">
           <span>15 MCP tools</span><span>live updates</span><span>invisible to capture</span>
@@ -879,11 +860,10 @@
       </div>
       <div class="pillar">
         <div class="ix">04 / share</div>
-        <h3>Peer-to-peer. No server in the data path.</h3>
+        <h3>Shares only what you choose.</h3>
         <p>
           Share only the context you choose with another person. Their device connects
-          directly to yours, and their AI tools can use the shared context through the
-          same MCP bridge.
+          directly to yours, and their AI tools can use only the background you shared.
         </p>
         <div class="chips">
           <span>WebRTC</span><span>direct transfer</span><span>data stays local</span>
@@ -894,17 +874,16 @@
 </section>
 
 <!-- ───────────── AGENT-AGNOSTIC ───────────── -->
-<section class="s" id="agents">
+<section class="s" id="agents" hidden>
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 03 — Agent-Agnostic</div>
+      <div class="sec-num">§ 03 — Use your preferred AI</div>
       <div>
-        <h2 class="sec-title">One context. Any agent. No restart.</h2>
+        <h2 class="sec-title">Switch AI tools without starting over.</h2>
         <p class="sec-lede">
-          Use the AI assistant you already like. Sinain uses the MCP bridge to pass the
-          same context to different tools and agents, so you can switch between them
-          without starting from zero. Open what you are looking at in ChatGPT, Claude,
-          or a coding agent with the background already included.
+          Use the AI assistant you already like. Sinain can carry the same working
+          background between supported tools, so you don’t have to repeat yourself.
+          For technical users, this connection uses the open MCP standard.
         </p>
       </div>
     </div>
@@ -929,32 +908,29 @@
 <section class="s" id="privacy">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 04 — Privacy Controls</div>
+      <div class="sec-num">§ 02 — Privacy</div>
       <div>
-        <h2 class="sec-title">Four modes. From cloud-fast to fully offline.</h2>
+        <h2 class="sec-title">You decide what Sinain remembers.</h2>
         <p class="sec-lede">
-          Choose how private you want Sinain to be. You can use cloud models for better
-          speed and quality, or keep everything fully local when privacy matters most.
+          Sinain keeps recent activity temporary until you choose to save or share it.
+          It can hide passwords and other sensitive details before using online AI,
+          and you can also run it fully offline.
         </p>
       </div>
     </div>
 
     <div class="modes">
       <div class="mode">
-        <div class="nm"><b>off</b></div>
-        <p class="desc">Best quality, with no extra privacy filtering.</p>
+        <div class="nm"><b>Nothing saved by default</b></div>
+        <p class="desc">Recent activity disappears unless you choose to remember it.</p>
       </div>
       <div class="mode">
-        <div class="nm"><b>standard</b> · wizard default</div>
-        <p class="desc">Hides passwords, keys, and credentials before using cloud models.</p>
+        <div class="nm"><b>Sensitive details hidden</b></div>
+        <p class="desc">Passwords, keys, and payment details can be removed before online AI sees anything.</p>
       </div>
       <div class="mode">
-        <div class="nm"><b>strict</b></div>
-        <p class="desc">Sends only short summaries, not raw screen or audio text.</p>
-      </div>
-      <div class="mode">
-        <div class="nm"><b>paranoid</b> · fully local</div>
-        <p class="desc">Runs locally with no network calls while Sinain is active.</p>
+        <div class="nm"><b>Offline when you need it</b></div>
+        <p class="desc">Keep processing on your Mac when work should not leave your computer.</p>
       </div>
     </div>
   </div>
@@ -964,13 +940,12 @@
 <section class="s" id="quickstart">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 05 — Quick Start</div>
+      <div class="sec-num">§ 03 — Get started</div>
       <div>
         <h2 class="sec-title">Download the app. It sets itself up.</h2>
         <p class="sec-lede">
-          Install Sinain, answer a few setup questions, and it starts everything for you.
-          The app downloads what it needs and guides you through permissions, privacy,
-          and AI assistant setup — then a short tour shows the four ways to use it.
+          Download Sinain, follow the short setup guide, and choose which AI tools to connect.
+          A quick tour shows you how to ask for help from anything on your screen.
         </p>
       </div>
     </div>
@@ -991,8 +966,8 @@
         <div style="background:#1E1F22;border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:14px 18px">
           <div style="font-size:12px;font-weight:600;color:#fff;margin-bottom:8px">First-run wizard</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <span style="height:22px;display:inline-flex;align-items:center;padding:0 9px;background:#2B2D30;border:1px solid rgba(255,255,255,.1);border-radius:11px;font-size:11px;color:#A8ADBD">privacy tier</span>
-            <span style="height:22px;display:inline-flex;align-items:center;padding:0 9px;background:#2B2D30;border:1px solid rgba(255,255,255,.1);border-radius:11px;font-size:11px;color:#A8ADBD">API keys</span>
+            <span style="height:22px;display:inline-flex;align-items:center;padding:0 9px;background:#2B2D30;border:1px solid rgba(255,255,255,.1);border-radius:11px;font-size:11px;color:#A8ADBD">privacy choice</span>
+            <span style="height:22px;display:inline-flex;align-items:center;padding:0 9px;background:#2B2D30;border:1px solid rgba(255,255,255,.1);border-radius:11px;font-size:11px;color:#A8ADBD">AI connection</span>
             <span style="height:22px;display:inline-flex;align-items:center;padding:0 9px;background:#2B2D30;border:1px solid rgba(255,255,255,.1);border-radius:11px;font-size:11px;color:#A8ADBD">permissions</span>
           </div>
         </div>
@@ -1017,70 +992,31 @@
         </li>
         <li>
           <div>
-            <h4>Answer the wizard</h4>
-            <p>Choose your privacy tier, paste an API key — or skip cloud setup and run fully local — and grant Screen Recording and Microphone when macOS asks.</p>
+            <h4>Follow the setup guide</h4>
+            <p>Choose your privacy preference and allow screen and microphone access when macOS asks.</p>
           </div>
         </li>
         <li>
           <div>
-            <h4>Complete the onboarding tour</h4>
-            <p>A short walkthrough of the four gestures — Save Context, Call AI, Context from Screen, Context from Clipboard — and you're working.</p>
-          </div>
-        </li>
-        <li>
-          <div>
-            <h4>Developers: one command</h4>
-            <p><code>npx @geravant/sinain@latest start</code> runs the same stack from the terminal. Re-run setup anytime to change privacy mode or agents.</p>
+            <h4>Ask your first question</h4>
+            <p>Select something on screen or use your recent work, then ask Sinain for help.</p>
           </div>
         </li>
       </ol>
-    </div>
-
-    <div class="prereq" aria-label="Prerequisites">
-      <div class="c">
-        <div class="k">macOS</div>
-        <div class="v">12.3+</div>
-        <div class="n">Apple Silicon &amp; Intel.</div>
-      </div>
-      <div class="c">
-        <div class="k">Node</div>
-        <div class="v">18+</div>
-        <div class="n">Developer install only — the app needs none.</div>
-      </div>
-      <div class="c">
-        <div class="k">Python</div>
-        <div class="v">3.10+</div>
-        <div class="n">Developer install only — the app needs none.</div>
-      </div>
-      <div class="c">
-        <div class="k">OpenRouter</div>
-        <div class="v">optional</div>
-        <div class="n">Not needed for paranoid / fully-local mode.</div>
-      </div>
-    </div>
-
-    <div class="callout">
-      <div class="ic">!</div>
-      <div>
-        <strong>macOS Permissions.</strong> Add Terminal to <em>System Settings → Privacy &amp; Security → Screen Recording</em>,
-        then quit and reopen Terminal. macOS only applies the permission to apps started
-        after granting. Do the same for Microphone.
-      </div>
     </div>
   </div>
 </section>
 
 <!-- ───────────── MCP ───────────── -->
-<section class="s" id="mcp">
+<section class="s" id="mcp" hidden>
   <div class="container">
     <div class="sec-head">
       <div class="sec-num">§ 06 — Connect Your Coding Agent</div>
       <div>
-        <h2 class="sec-title">Connect Sinain to your AI agents with the MCP bridge.</h2>
+        <h2 class="sec-title">Connect the AI tools you already use.</h2>
         <p class="sec-lede">
-          The MCP bridge is how AI agents connect to Sinain's context. The setup wizard
-          detects supported agents on your machine and registers Sinain for each one
-          you choose.
+          The setup guide finds supported AI tools on your Mac and connects the ones you
+          choose. Behind the scenes, Sinain uses the open MCP standard.
         </p>
       </div>
     </div>
@@ -1093,13 +1029,13 @@
     <p style="margin-top:18px;font-size:14.5px;color:var(--fg-dim);line-height:1.65;max-width:640px">
       Re-run any time to update. Sinain can register with Claude Code, Claude Desktop,
       Cursor, Codex, Goose, and Junie, so each agent can access the same working context
-      through the MCP bridge.
+      with the same working background.
     </p>
   </div>
 </section>
 
 <!-- ───────────── DEEP DIVES ───────────── -->
-<section class="s" id="docs">
+<section class="s" id="docs" hidden>
   <div class="container">
     <div class="sec-head">
       <div class="sec-num">§ 07 — Deep Dives</div>
@@ -1131,8 +1067,8 @@
     <div class="cta-card">
       <div>
         <span class="eyebrow"><span class="bar"></span> Ready?</span>
-        <h2>Context that follows you across every agent, every project, every machine.</h2>
-        <p>Install once, then let your AI assistants understand your work without constant copy-paste.</p>
+        <h2>Ask for help without explaining everything first.</h2>
+        <p>Install Sinain and let your AI understand the work already in front of you.</p>
       </div>
       <div class="right">
         <a class="btn primary btn-lg" href="https://github.com/anthillnet/sinain-hud/releases/download/macos-v0.3.0/Sinain.dmg" data-umami-event="download-macos-cta">⬇ Download for macOS</a>
@@ -1165,18 +1101,14 @@
         <h5>Product</h5>
         <ul>
           <li><a href="#flow">How it works</a></li>
-          <li><a href="#augmented">You, Augmented</a></li>
-          <li><a href="#agents">Agent-Agnostic</a></li>
           <li><a href="#privacy">Privacy</a></li>
-          <li><a href="#quickstart">Quick Start</a></li>
+          <li><a href="#quickstart">Get started</a></li>
         </ul>
       </div>
       <div>
         <h5>Get Started</h5>
         <ul>
-          <li><a href="#quickstart">Quick Start</a></li>
-          <li><a href="#mcp">MCP Setup</a></li>
-          <li><a href="https://github.com/anthillnet/sinain-hud/blob/main/docs/AGENT-ROSTER.md" target="_blank">Agent Roster</a></li>
+          <li><a href="https://github.com/anthillnet/sinain-hud/releases/download/macos-v0.3.0/Sinain.dmg">Download for macOS</a></li>
           <li><a href="https://github.com/anthillnet/sinain-hud" target="_blank">GitHub Repo</a></li>
         </ul>
       </div>
@@ -1191,12 +1123,12 @@
       </div>
     </div>
     <div class="ft-meta">
-      <span>SINAIN · CONTEXT OS · © 2026 ANTHILLNET</span>
+      <span>SINAIN · © 2026 ANTHILLNET</span>
       <a href="mailto:contact@sinain.com" class="ft-mail">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
         contact@sinain.com
       </a>
-      <span>BUILT FOR BUILDERS · FSL-1.1-ALv2</span>
+      <span>AI HELP THAT UNDERSTANDS YOUR WORK</span>
     </div>
   </div>
 </footer>
@@ -1211,23 +1143,6 @@
     if (img.complete && img.naturalWidth > 0) show();
   })();
 
-  // ─── Copy install command ───
-  (function(){
-    const btn = document.getElementById('copy-btn');
-    const cmd = document.getElementById('install-cmd');
-    if(!btn || !cmd) return;
-    btn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(cmd.textContent.trim());
-        const old = btn.textContent;
-        btn.textContent = '✓ COPIED';
-        btn.style.color = 'var(--good)';
-        setTimeout(() => { btn.textContent = old; btn.style.color = ''; }, 1400);
-      } catch(e) {
-        btn.textContent = 'SELECT ABOVE';
-      }
-    });
-  })();
 
   // ─── Smooth in-page anchor scroll ───
   document.querySelectorAll('a[href^="#"]').forEach(a => {
