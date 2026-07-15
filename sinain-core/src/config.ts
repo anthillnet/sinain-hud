@@ -11,6 +11,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 /** The .env file path that was actually loaded (if any). */
 export let loadedEnvPath: string | undefined;
 
+/** Keys that were populated from the .env file (not the real environment).
+ * Local mode treats these as cloud-profile defaults it may override; a var
+ * set in the actual process environment always wins. */
+const dotenvKeys = new Set<string>();
+
 function loadDotEnv(): void {
   // Try sinain-core/.env first, then project root .env, then the wizard's
   // ~/.sinain/.env. The npx launcher normally injects ~/.sinain/.env via the
@@ -43,6 +48,7 @@ function loadDotEnv(): void {
         }
         if (!process.env[key]) {
           process.env[key] = val;
+          dotenvKeys.add(key);
         }
       }
       loadedEnvPath = envPath;
@@ -199,25 +205,43 @@ export function loadConfig(): CoreConfig {
 
   // ── Local mode: unified config ──────────────────────────────────────────
   // SINAIN_LOCAL_MODE=true auto-derives all component config from two vars:
-  //   SINAIN_LOCAL_LLM=phi4-mini       → analyzer + distiller
+  //   SINAIN_LOCAL_LLM=phi4-mini       → burst + distiller (+ analyzer if opted in)
   //   SINAIN_LOCAL_VISION=qwen2.5vl:7b → sense_client (propagated via start.sh)
   // Must run BEFORE transcriptionConfig / analysisConfig are read.
+  // Precedence: a var set in the real process environment wins over the
+  // derivation, but a var that only came from .env does NOT — .env typically
+  // holds the cloud profile (Cerebras/OpenRouter endpoints), and letting it
+  // beat SINAIN_LOCAL_MODE left lanes silently on cloud (observed 2026-07-14:
+  // .env's ANALYSIS_ENDPOINT kept analysis pointed at Cerebras in local mode).
   const localMode = boolEnv("SINAIN_LOCAL_MODE", false);
   if (localMode) {
+    const setLocal = (key: string, val: string): void => {
+      if (!process.env[key] || dotenvKeys.has(key)) process.env[key] = val;
+    };
     const localLlm = env("SINAIN_LOCAL_LLM", "qwen2.5:3b");
     const localVision = env("SINAIN_LOCAL_VISION", "qwen2.5vl:7b");
-    if (!process.env.ANALYSIS_PROVIDER) process.env.ANALYSIS_PROVIDER = "ollama";
-    if (!process.env.ANALYSIS_MODEL) process.env.ANALYSIS_MODEL = localLlm;
+    setLocal("ANALYSIS_PROVIDER", "ollama");
+    setLocal("ANALYSIS_MODEL", localLlm);
     // ANALYSIS_VISION_MODEL must point at a VISION-capable model (qwen2.5vl,
     // gemma4 vision variants, llava). Previously misconfigured to localLlm
     // (text-only phi4-mini), which made the analyzer's image-tick path fail
     // silently in local-mode.
-    if (!process.env.ANALYSIS_VISION_MODEL) process.env.ANALYSIS_VISION_MODEL = localVision;
-    if (!process.env.TRANSCRIPTION_BACKEND) process.env.TRANSCRIPTION_BACKEND = "local";
-    if (!process.env.LOCAL_VISION_ENABLED) process.env.LOCAL_VISION_ENABLED = "true";
-    if (!process.env.LOCAL_VISION_MODEL) process.env.LOCAL_VISION_MODEL = localVision;
-    if (!process.env.SINAIN_FAST_MODEL) process.env.SINAIN_FAST_MODEL = `ollama/${localLlm}`;
-    if (!process.env.SINAIN_SMART_MODEL) process.env.SINAIN_SMART_MODEL = `ollama/${localLlm}`;
+    setLocal("ANALYSIS_VISION_MODEL", localVision);
+    setLocal("ANALYSIS_ENDPOINT", "http://localhost:11434");
+    setLocal("TRANSCRIPTION_BACKEND", "local");
+    setLocal("LOCAL_VISION_ENABLED", "true");
+    setLocal("LOCAL_VISION_MODEL", localVision);
+    setLocal("SINAIN_FAST_MODEL", `ollama/${localLlm}`);
+    setLocal("SINAIN_SMART_MODEL", `ollama/${localLlm}`);
+    // llm-config.json's third logical model (page_renderer lane).
+    setLocal("SINAIN_PAGE_MODEL", `ollama/${localLlm}`);
+    // Deliberate-capture burst lane (summon/enrich window briefs): route to
+    // local Ollama instead of Cerebras. burstCall's ollama branch uses the
+    // native /api/chat; the API key is unused but must be non-empty.
+    setLocal("BURST_PROVIDER", "ollama");
+    setLocal("BURST_ENDPOINT", "http://localhost:11434");
+    setLocal("BURST_MODEL", localLlm);
+    setLocal("BURST_API_KEY", "ollama");
   }
 
   const transcriptionInitialPrompt = env("TRANSCRIPTION_INITIAL_PROMPT", "");
