@@ -49,7 +49,9 @@ mv "$TMP/python" "$PYROOT"
 
 pstatus active 40 "Installing vision packages"
 echo "[provision-python] installing deps (numpy, scikit-image, pyobjc, …, ~150MB)…"
-if ! "$PYBIN" -m pip install --quiet --disable-pip-version-check $DEPS; then
+# --prefer-binary: never build sdists on user machines (litellm-class Rust
+# builds fail on stock toolchains; wheels always exist for what we ship).
+if ! "$PYBIN" -m pip install --quiet --disable-pip-version-check --prefer-binary $DEPS; then
   echo "[provision-python] ✗ pip install failed"; fail_status "Package install failed"; exit 1
 fi
 
