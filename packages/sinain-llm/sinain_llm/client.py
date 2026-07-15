@@ -55,6 +55,19 @@ def _resolve_provider(model: str, api_key: str | None = None) -> tuple[str, str,
         return "llamacpp", _llamacpp_chat_url(), model[len("llamacpp/"):], {
             "Content-Type": "application/json",
         }
+    # Ollama ids without the explicit prefix: "hf.co/org/repo:tag" (Ollama's
+    # HF pull convention) and bare "name:tag" / "name" (no org slash —
+    # OpenRouter ids are always "org/model"). Routes local models local even
+    # when the env var forgot the "ollama/" prefix.
+    if model.startswith("hf.co/") or "/" not in model:
+        return "ollama", _ollama_chat_url(), model, {
+            "Content-Type": "application/json",
+        }
+    if os.environ.get("SINAIN_LOCAL_MODE", "").lower() == "true":
+        raise RuntimeError(
+            f"local mode: refusing cloud provider for model '{model}' — "
+            "use an ollama/ or llamacpp/ id (gesture-gated contract)"
+        )
     if model.startswith("cerebras/"):
         key = api_key or os.environ.get("CEREBRAS_API_KEY")
         if not key:

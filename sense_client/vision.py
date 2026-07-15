@@ -87,7 +87,10 @@ def create_vision(config: dict) -> Optional[VisionProvider]:
         or vision_cfg.get("timeout", 10.0)
     )
 
-    cloud_blocked = privacy in ("paranoid", "strict") or not api_key
+    # Local mode never falls back to cloud vision — if Ollama/the sidecar is
+    # down, vision goes dark rather than shipping frames to OpenRouter.
+    local_mode = os.environ.get("SINAIN_LOCAL_MODE", "").lower() == "true"
+    cloud_blocked = privacy in ("paranoid", "strict") or not api_key or local_mode
 
     # Local vision preferred when enabled or when cloud is blocked
     if local_enabled:

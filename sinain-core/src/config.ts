@@ -255,11 +255,14 @@ export function loadConfig(): CoreConfig {
   // cloud, no surprise download. A restart picks up local once the model lands.
   let transcriptionBackend = env("TRANSCRIPTION_BACKEND", "local") as TranscriptionConfig["backend"];
   if (transcriptionBackend === "local" && !existsSync(whisperModelPath)) {
-    if (transcriptionApiKey) {
+    // Local mode never falls back to cloud — audio leaving the device would
+    // break the gesture-gated/offline contract. Outside local mode a present
+    // key bridges the gap until the whisper model finishes downloading.
+    if (transcriptionApiKey && !localMode) {
       console.warn(`[config] whisper model not present yet (${whisperModelPath}) — using cloud transcription until it finishes downloading (restart to switch to local)`);
       transcriptionBackend = "openrouter";
     } else {
-      console.warn(`[config] whisper model not present (${whisperModelPath}) and no OPENROUTER_API_KEY — transcription unavailable until the model downloads`);
+      console.warn(`[config] whisper model not present (${whisperModelPath}) — transcription unavailable until the model downloads${localMode ? " (local mode: no cloud fallback)" : ""}`);
     }
   }
   const transcriptionConfig: TranscriptionConfig = {
@@ -337,9 +340,11 @@ export function loadConfig(): CoreConfig {
     timeoutMs: intEnv("REGION_SLM_TIMEOUT_MS", 6000),
     // Cloud fallback: a cheap/fast model runs the SAME focused region prompt when
     // local Ollama is absent — keeps tier-0 eyes working for no-Ollama cloud users.
+    // Local mode blanks the key: region eyes degrade to the main analyzer lane
+    // rather than silently shipping ROI text to a cloud endpoint.
     cloudModel: env("REGION_SLM_CLOUD_MODEL", "google/gemini-2.5-flash-lite"),
     cloudEndpoint: env("REGION_SLM_CLOUD_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"),
-    cloudApiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
+    cloudApiKey: localMode ? "" : env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
   };
 
   // Deliberate-capture burst lane: fast inference for summon ("Call AI on my
