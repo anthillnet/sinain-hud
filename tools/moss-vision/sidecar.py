@@ -72,6 +72,19 @@ def _load():
     log.info("warmup generate done in %.0fs", time.time() - t0)
 
 
+def _text_generate(messages, max_tokens):
+    import torch
+
+    tok = _proc.tokenizer
+    ids = tok.apply_chat_template(
+        [{"role": m["role"], "content": m["content"]} for m in messages],
+        add_generation_prompt=True, return_tensors="pt",
+    ).to("mps")
+    with torch.no_grad():
+        out = _model.generate(ids, max_new_tokens=max_tokens, do_sample=False)
+    return tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True).strip()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quiet default access log
         pass
@@ -102,22 +115,27 @@ class Handler(BaseHTTPRequestHandler):
             msg = payload["messages"][-1]
             prompt = msg.get("content") or "Describe this screen."
             images = msg.get("images") or []
-            if not images:
-                self._json(400, {"error": "no image"})
-                return
-            img = Image.open(io.BytesIO(base64.b64decode(images[0]))).convert("RGB")
             max_tokens = (payload.get("options") or {}).get("num_predict", DEFAULT_MAX_TOKENS)
 
             t0 = time.time()
-            with _lock:
-                text = _model.offline_image_generate(
-                    _proc, prompt, img,
-                    longest_edge=PIXEL_BUDGET,
-                    max_new_tokens=max_tokens,
-                )
+            if images:
+                img = Image.open(io.BytesIO(base64.b64decode(images[0]))).convert("RGB")
+                with _lock:
+                    text = _model.offline_image_generate(
+                        _proc, prompt, img,
+                        longest_edge=PIXEL_BUDGET,
+                        max_new_tokens=max_tokens,
+                    )
+            else:
+                # Text-only turn — lets MOSS serve as the single model for
+                # both vision and text lanes.
+                img = None
+                with _lock:
+                    text = _text_generate(payload["messages"], max_tokens)
             dt = time.time() - t0
-            log.info("tick: %.1fs img=%dx%d out=%d chars → %s",
-                     dt, img.width, img.height, len(text), text[:100].replace("\n", " "))
+            src = f"img={img.width}x{img.height}" if img else "text"
+            log.info("tick: %.1fs %s out=%d chars → %s",
+                     dt, src, len(text), text[:100].replace("\n", " "))
             self._json(200, {
                 "model": MODEL_NAME,
                 "message": {"role": "assistant", "content": text},
