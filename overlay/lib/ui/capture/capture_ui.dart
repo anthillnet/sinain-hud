@@ -246,7 +246,8 @@ class _RangeChooserState extends State<RangeChooser> {
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 9),
             child: Row(children: [
               Container(
-                width: 10, height: 10,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: _accent, width: 2),
@@ -255,7 +256,8 @@ class _RangeChooserState extends State<RangeChooser> {
               const SizedBox(width: 8),
               Expanded(
                   child: Text(_title,
-                      style: _mono(12, t.textPrimary, weight: FontWeight.w600))),
+                      style:
+                          _mono(12, t.textPrimary, weight: FontWeight.w600))),
               Text('$_minutes min',
                   style: _mono(15, _readoutColor, weight: FontWeight.w600)),
             ]),
@@ -284,8 +286,8 @@ class _RangeChooserState extends State<RangeChooser> {
                                   : t.hairline),
                         ),
                         child: Text('${n}m',
-                            style: _mono(
-                                10, n == _minutes ? Colors.white : t.textMuted)),
+                            style: _mono(10,
+                                n == _minutes ? Colors.white : t.textMuted)),
                       ),
                     ),
                   ),
@@ -303,14 +305,14 @@ class _RangeChooserState extends State<RangeChooser> {
                 activeTrackColor: _readoutColor.withValues(alpha: 0.75),
                 inactiveTrackColor: Colors.white.withValues(alpha: 0.09),
                 thumbColor: Colors.white,
-                thumbShape:
-                    const RoundSliderThumbShape(enabledThumbRadius: 7),
-                overlayShape:
-                    const RoundSliderOverlayShape(overlayRadius: 12),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                 tickMarkShape: SliderTickMarkShape.noTickMark,
               ),
               child: Slider(
-                min: 5, max: 120, divisions: 23,
+                min: 5,
+                max: 120,
+                divisions: 23,
                 value: _minutes.toDouble(),
                 onChanged: (v) => _setMinutes(v.round()),
               ),
@@ -442,13 +444,15 @@ class _RangeChooserState extends State<RangeChooser> {
               decoration: BoxDecoration(
                 color: off ? Colors.transparent : _accent,
                 border: Border.all(
-                    color: off ? Colors.white.withValues(alpha: 0.25) : _accent),
+                    color:
+                        off ? Colors.white.withValues(alpha: 0.25) : _accent),
                 borderRadius: BorderRadius.circular(3),
               ),
               child: off
                   ? null
                   : const Text('✓',
-                      style: TextStyle(fontSize: 8, height: 1, color: Colors.white)),
+                      style: TextStyle(
+                          fontSize: 8, height: 1, color: Colors.white)),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -592,10 +596,11 @@ class _VoiceCallChipState extends State<VoiceCallChip>
                     0.65 *
                         (0.5 +
                             0.5 *
-                                math.sin((_wave.value * 2 * math.pi) -
-                                    i * 0.9)),
+                                math.sin(
+                                    (_wave.value * 2 * math.pi) - i * 0.9)),
                 child: Container(
-                  width: 3, height: 14,
+                  width: 3,
+                  height: 14,
                   decoration: BoxDecoration(
                     color: _blue,
                     borderRadius: BorderRadius.circular(1),
@@ -634,7 +639,8 @@ class _VoiceCallChipState extends State<VoiceCallChip>
             if (live && s.mode != VoiceMode.meet) _waveform(),
             if (!(live && s.mode != VoiceMode.meet))
               Container(
-                width: 10, height: 10,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: err ? _orange : _blue, width: 2),
@@ -670,14 +676,14 @@ class _VoiceCallChipState extends State<VoiceCallChip>
           if (err)
             Padding(
               padding: const EdgeInsets.only(top: 7),
-              child:
-                  Text(s.error ?? 'unknown', style: _mono(11, _orange, height: 1.35)),
+              child: Text(s.error ?? 'unknown',
+                  style: _mono(11, _orange, height: 1.35)),
             ),
           if (s.message != null && !err)
             Padding(
               padding: const EdgeInsets.only(top: 7),
-              child: Text(s.message!,
-                  style: _mono(11, t.textMuted, height: 1.35)),
+              child:
+                  Text(s.message!, style: _mono(11, t.textMuted, height: 1.35)),
             ),
           if (s.coverage.isNotEmpty && s.status == VoiceStatus.starting)
             Padding(
@@ -734,8 +740,7 @@ class _CardShell extends StatelessWidget {
   final Widget child;
   final Color? borderColor;
   final double width;
-  const _CardShell(
-      {required this.child, this.borderColor, this.width = 340});
+  const _CardShell({required this.child, this.borderColor, this.width = 340});
 
   @override
   Widget build(BuildContext context) {
@@ -922,128 +927,151 @@ class BriefCard extends StatelessWidget {
       borderColor: brief.status == CardStatus.error
           ? _orange.withValues(alpha: 0.4)
           : t.selectionAccent.withValues(alpha: 0.35),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(children: [
-            Expanded(
-              child: Text(
-                  working
-                      ? 'Calling AI · last ${brief.minutes} min'
-                      : 'Last ${brief.minutes} minutes${brief.partial ? " · partial" : ""}',
-                  style:
-                      _mono(13, t.textPrimary, weight: FontWeight.w600)),
-            ),
-            if (brief.latencyMs != null)
-              Text('${(brief.latencyMs! / 1000).toStringAsFixed(2)}s',
-                  style: _mono(10, t.textDim)),
-            const SizedBox(width: 8),
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                  onTap: onDismiss,
-                  child: Text('✕', style: _mono(12, t.textDim))),
-            ),
-          ]),
-          // Metadata line: coverage left, chat/term destination right — kept
-          // out of the action row, which stays two buttons wide.
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Row(children: [
-              Expanded(
-                child: Text(brief.coverage,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _mono(10, t.textDim)),
-              ),
-              if (onDestChanged != null && brief.status == CardStatus.ready)
-                _destToggle(t),
-            ]),
-          ),
-          const SizedBox(height: 8),
-          if (working) const _Shimmer(),
-          if (brief.status == CardStatus.error)
-            Text(brief.error ?? 'failed',
-                style: _mono(11, _orange, height: 1.4)),
-          if (brief.status == CardStatus.ready) ...[
-            if (brief.timeline.isNotEmpty) ...[
-              const _SectionHead('TIMELINE'),
-              for (final e in brief.timeline)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                          width: 40,
-                          child: Text(e.at,
-                              textAlign: TextAlign.right,
-                              style: _mono(10, t.textDim))),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: Text(e.what,
-                              style: _mono(11, t.textMuted, height: 1.3))),
-                    ],
-                  ),
-                ),
-            ],
-            if (brief.goal.isNotEmpty) ...[
-              const _SectionHead('CURRENT GOAL'),
-              Text(brief.goal,
-                  style: _mono(12, t.textPrimary, height: 1.35)),
-            ],
-            if (brief.problems.isNotEmpty) ...[
-              const _SectionHead('OPEN PROBLEMS', color: _orange),
-              for (final p in brief.problems)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('• ',
-                          style: TextStyle(color: _orange, fontSize: 11)),
-                      Expanded(
-                          child: Text(p,
-                              style: _mono(11, t.textMuted, height: 1.3))),
-                    ],
-                  ),
-                ),
-            ],
-            if (brief.entities.isNotEmpty) ...[
-              const _SectionHead('ENTITIES'),
-              Wrap(
-                spacing: 6,
-                runSpacing: 5,
-                children: [
-                  for (final e in brief.entities)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: t.bubbleBg,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(e, style: _mono(10, t.textMuted)),
-                    ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 12),
+      // Cap the card and scroll the brief body: a long timeline/problems
+      // list otherwise grows past the window edge, clipping the bottom
+      // sections AND the action buttons. Header + buttons stay pinned;
+      // MediaQuery bounds are needed because the capture-cards Column lays
+      // its children out with unbounded height.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.72),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Row(children: [
               Expanded(
-                  child: _cardButton(
-                      t,
-                      destLabel.isNotEmpty
-                          ? 'Handoff to $destLabel'
-                          : (dest == 'term' ? 'Open terminal' : 'Ask follow-up'),
-                      onAskFollowUp,
-                      primary: true)),
-              const SizedBox(width: 7),
-              _cardButton(t, 'Save this range', onSaveRange),
+                child: Text(
+                    working
+                        ? 'Calling AI · last ${brief.minutes} min'
+                        : 'Last ${brief.minutes} minutes${brief.partial ? " · partial" : ""}',
+                    style: _mono(13, t.textPrimary, weight: FontWeight.w600)),
+              ),
+              if (brief.latencyMs != null)
+                Text('${(brief.latencyMs! / 1000).toStringAsFixed(2)}s',
+                    style: _mono(10, t.textDim)),
+              const SizedBox(width: 8),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                    onTap: onDismiss,
+                    child: Text('✕', style: _mono(12, t.textDim))),
+              ),
             ]),
+            // Metadata line: coverage left, chat/term destination right — kept
+            // out of the action row, which stays two buttons wide.
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(children: [
+                Expanded(
+                  child: Text(brief.coverage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _mono(10, t.textDim)),
+                ),
+                if (onDestChanged != null && brief.status == CardStatus.ready)
+                  _destToggle(t),
+              ]),
+            ),
+            const SizedBox(height: 8),
+            if (working) const _Shimmer(),
+            if (brief.status == CardStatus.error)
+              Text(brief.error ?? 'failed',
+                  style: _mono(11, _orange, height: 1.4)),
+            if (brief.status == CardStatus.ready) ...[
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (brief.timeline.isNotEmpty) ...[
+                        const _SectionHead('TIMELINE'),
+                        for (final e in brief.timeline)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(
+                                    width: 40,
+                                    child: Text(e.at,
+                                        textAlign: TextAlign.right,
+                                        style: _mono(10, t.textDim))),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                    child: Text(e.what,
+                                        style: _mono(11, t.textMuted,
+                                            height: 1.3))),
+                              ],
+                            ),
+                          ),
+                      ],
+                      if (brief.goal.isNotEmpty) ...[
+                        const _SectionHead('CURRENT GOAL'),
+                        Text(brief.goal,
+                            style: _mono(12, t.textPrimary, height: 1.35)),
+                      ],
+                      if (brief.problems.isNotEmpty) ...[
+                        const _SectionHead('OPEN PROBLEMS', color: _orange),
+                        for (final p in brief.problems)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('• ',
+                                    style: TextStyle(
+                                        color: _orange, fontSize: 11)),
+                                Expanded(
+                                    child: Text(p,
+                                        style: _mono(11, t.textMuted,
+                                            height: 1.3))),
+                              ],
+                            ),
+                          ),
+                      ],
+                      if (brief.entities.isNotEmpty) ...[
+                        const _SectionHead('ENTITIES'),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 5,
+                          children: [
+                            for (final e in brief.entities)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: t.bubbleBg,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(e, style: _mono(10, t.textMuted)),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                    child: _cardButton(
+                        t,
+                        destLabel.isNotEmpty
+                            ? 'Handoff to $destLabel'
+                            : (dest == 'term'
+                                ? 'Open terminal'
+                                : 'Ask follow-up'),
+                        onAskFollowUp,
+                        primary: true)),
+                const SizedBox(width: 7),
+                _cardButton(t, 'Save this range', onSaveRange),
+              ]),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1092,7 +1120,8 @@ class EnrichCardWidget extends StatelessWidget {
                 child: Text(title,
                     style: _mono(12, t.textPrimary, weight: FontWeight.w600))),
             if (card.latencyMs != null)
-              Text('${(card.latencyMs! / 1000).toStringAsFixed(2)}s · last 10 min',
+              Text(
+                  '${(card.latencyMs! / 1000).toStringAsFixed(2)}s · last 10 min',
                   style: _mono(10, t.textDim)),
             const SizedBox(width: 8),
             MouseRegion(
@@ -1116,16 +1145,14 @@ class EnrichCardWidget extends StatelessWidget {
                 style: _mono(11, _orange, height: 1.4)),
           if (card.status == CardStatus.ready) ...[
             const _SectionHead('CONTEXT'),
-            Text(card.context,
-                style: _mono(11, t.textPrimary, height: 1.35)),
+            Text(card.context, style: _mono(11, t.textPrimary, height: 1.35)),
             const SizedBox(height: 12),
             Row(children: [
               if (onCallAi != null)
                 Expanded(
                     child:
                         _cardButton(t, handoffLabel, onCallAi!, primary: true)),
-              if (onCallAi != null && onCopy != null)
-                const SizedBox(width: 7),
+              if (onCallAi != null && onCopy != null) const SizedBox(width: 7),
               if (onCopy != null) _cardButton(t, 'Copy for agent', onCopy!),
             ]),
           ],
@@ -1264,8 +1291,7 @@ class _SaveReceiptCardState extends State<SaveReceiptCard> {
             Wrap(spacing: 6, runSpacing: 5, children: [
               if (r.facts != null) _chip(t, '${r.facts} facts'),
               if (r.entities != null) _chip(t, '${r.entities} entities'),
-              if (r.cost != null)
-                _chip(t, '\$${r.cost!.toStringAsFixed(2)}'),
+              if (r.cost != null) _chip(t, '\$${r.cost!.toStringAsFixed(2)}'),
             ]),
           ],
           if (r.status == SaveStatus.saved && _remaining > 0) ...[
@@ -1324,8 +1350,7 @@ class SaveOfferCard extends StatelessWidget {
     final t = HudTheme.of(context);
     // Honest idle tail: the duration turns amber when part of the range was
     // idle — the claim names it instead of hiding it.
-    final durColor =
-        offer.idleTailMinutes != null ? _amber : t.selectionAccent;
+    final durColor = offer.idleTailMinutes != null ? _amber : t.selectionAccent;
     return _CardShell(
       width: 300,
       borderColor: t.selectionAccent.withValues(alpha: 0.35),
