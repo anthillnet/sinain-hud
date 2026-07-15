@@ -33,6 +33,19 @@ def _resp(content="hello", usage=None, status=200):
     return r
 
 
+def _ollama_resp(content="hello", status=200):
+    """Native /api/chat response shape (the ollama provider no longer uses /v1)."""
+    r = mock.Mock()
+    r.status_code = status
+    r.raise_for_status = mock.Mock()
+    r.json.return_value = {
+        "message": {"role": "assistant", "content": content},
+        "prompt_eval_count": 10,
+        "eval_count": 5,
+    }
+    return r
+
+
 ENV = {
     "OPENROUTER_API_KEY": "or-key",
     "CEREBRAS_API_KEY": "cb-key",
@@ -76,17 +89,37 @@ class TestProviderRouting(unittest.TestCase):
                 chat("s", "u", model="x/y")
 
     def test_ollama_prefix_strips_and_is_keyless(self):
-        post = mock.Mock(return_value=_resp())
-        self._call(post, model="ollama/phi4-mini")
+        post = mock.Mock(return_value=_ollama_resp())
+        res = self._call(post, model="ollama/phi4-mini")
         url = post.call_args.args[0]
         body = post.call_args.kwargs["json"]
         headers = post.call_args.kwargs["headers"]
         self.assertIn("localhost:11434", url)
+        self.assertTrue(url.endswith("/api/chat"))  # native API, not /v1
         self.assertEqual(body["model"], "phi4-mini")
+        self.assertIs(body["think"], False)  # reasoning models must answer in content
+        self.assertEqual(body["options"]["num_predict"], 1500)
         self.assertNotIn("Authorization", headers)
+        self.assertEqual(res["text"], "hello")
+        self.assertEqual(res["usage"]["total_tokens"], 15)
+
+    def test_llamacpp_prefix_openai_shape_and_keyless(self):
+        post = mock.Mock(return_value=_resp())
+        res = self._call(post, model="llamacpp/ternary-bonsai-8b", json_mode=True)
+        url = post.call_args.args[0]
+        body = post.call_args.kwargs["json"]
+        headers = post.call_args.kwargs["headers"]
+        self.assertTrue(url.endswith("/v1/chat/completions"))
+        self.assertIn("127.0.0.1:8912", url)
+        self.assertEqual(body["model"], "ternary-bonsai-8b")
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        self.assertNotIn("Authorization", headers)
+        # local server gets the same generous timeout floor as ollama
+        self.assertEqual(post.call_args.kwargs["timeout"], 120.0)
+        self.assertEqual(res["text"], "hello")
 
     def test_ollama_timeout_floor(self):
-        post = mock.Mock(return_value=_resp())
+        post = mock.Mock(return_value=_ollama_resp())
         self._call(post, model="ollama/phi4-mini", timeout=60)
         self.assertEqual(post.call_args.kwargs["timeout"], 120.0)
         self._call(post, model="ollama/phi4-mini", timeout=300)
@@ -139,17 +172,21 @@ class TestBodyShaping(unittest.TestCase):
 
     def test_json_schema_strict_and_ollama_format(self):
         schema = {"title": "facts", "type": "object"}
-        post = mock.Mock(return_value=_resp())
+        post = mock.Mock(return_value=_ollama_resp())
         with mock.patch("sinain_llm.client.requests.post", post):
             chat("s", "u", model="ollama/qwen2.5:7b", json_schema=schema)
+        body = self._body(post)
+        # Native API: schema goes in top-level `format`, no response_format.
+        self.assertEqual(body["format"], schema)
+        self.assertNotIn("response_format", body)
+        post = mock.Mock(return_value=_resp())
+        with mock.patch("sinain_llm.client.requests.post", post):
+            chat("s", "u", model="openai/gpt-4o-mini", json_schema=schema)
         body = self._body(post)
         self.assertEqual(body["response_format"]["type"], "json_schema")
         self.assertEqual(body["response_format"]["json_schema"]["name"], "facts")
         self.assertTrue(body["response_format"]["json_schema"]["strict"])
-        self.assertEqual(body["format"], schema)  # Ollama-native constraint
-        with mock.patch("sinain_llm.client.requests.post", post):
-            chat("s", "u", model="openai/gpt-4o-mini", json_schema=schema)
-        self.assertNotIn("format", self._body(post))
+        self.assertNotIn("format", body)
 
     def test_cerebras_schema_sanitized(self):
         # Cerebras 400s on bound keywords and oneOf; the shim strips bounds
@@ -188,13 +225,18 @@ class TestBodyShaping(unittest.TestCase):
         for model, expected in [
             ("openai/gpt-4o-mini", True),
             ("google/gemini-3-flash-preview", True),
-            ("ollama/phi4-mini", True),
             ("cerebras/gemma-4-31b", True),
             ("anthropic/claude-sonnet-4.6", False),
         ]:
             with mock.patch("sinain_llm.client.requests.post", post):
                 chat("s", "u", model=model, json_mode=True)
             self.assertEqual("response_format" in self._body(post), expected, model)
+        # Ollama loose json_mode maps to native format="json".
+        post = mock.Mock(return_value=_ollama_resp())
+        with mock.patch("sinain_llm.client.requests.post", post):
+            chat("s", "u", model="ollama/phi4-mini", json_mode=True)
+        self.assertEqual(self._body(post)["format"], "json")
+        self.assertNotIn("response_format", self._body(post))
 
     def test_temperature_seed_and_messages_override(self):
         post = mock.Mock(return_value=_resp())

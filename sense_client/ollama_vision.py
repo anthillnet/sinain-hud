@@ -101,6 +101,9 @@ class OllamaVision:
                     }
                 ],
                 "stream": False,
+                # Reasoning models (e.g. Bonsai-27B) put output in `thinking`
+                # and leave content empty; non-thinking models ignore the flag.
+                "think": False,
                 "options": {
                     "num_predict": self.max_tokens,
                 },
