@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve as resolvePathJoin } from "node:path";
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { dirname, join, resolve as resolvePathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { CoreConfig, SenseEvent } from "./types.js";
@@ -1660,6 +1662,86 @@ export function createAppServer(deps: ServerDeps) {
             escalationMode: config.escalationConfig.mode,
           },
         }));
+        return;
+      }
+
+      // ── /setup/providers ── (settings panel: active stack + local readiness)
+      // The provider TOGGLE itself lives overlay-side (it rewrites
+      // ~/.sinain/.env like the first-run wizard and relaunches); this
+      // endpoint supplies everything the panel needs to render.
+      if (req.method === "GET" && url.pathname === "/setup/providers") {
+        const localMode = (process.env.SINAIN_LOCAL_MODE ?? "").toLowerCase() === "true";
+        const analysisEndpoint = config.agentConfig.endpoint ?? "";
+        const burstEndpoint = config.burstConfig.endpoint ?? "";
+        const activeStack = localMode ? "local"
+          : (analysisEndpoint.includes("cerebras") || burstEndpoint.includes("cerebras")) ? "cerebras"
+          : "openrouter";
+        const whisperReady = existsSync(config.transcriptionConfig.local.modelPath);
+        // Ollama readiness: server reachable + the configured local models pulled.
+        const localLlm = (process.env.SINAIN_LOCAL_LLM ?? "qwen2.5vl:7b").replace(/^ollama\//, "");
+        const localVision = process.env.SINAIN_LOCAL_VISION ?? "qwen2.5vl:7b";
+        let ollamaUp = false;
+        let modelsPresent: string[] = [];
+        try {
+          const r = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(1500) });
+          ollamaUp = r.ok;
+          const tags = await r.json() as { models?: { name: string }[] };
+          modelsPresent = (tags.models ?? []).map(m => m.name);
+        } catch { /* ollama down or absent */ }
+        const modelReady = (want: string): boolean =>
+          modelsPresent.some(n => n === want || n.startsWith(want.split(":")[0]));
+        // Provisioning progress (written by tools/dmg/provision-*.sh).
+        const provisioning: Record<string, string> = {};
+        for (const f of ["ollama", "whisper"]) {
+          try {
+            provisioning[f] = readFileSync(join(homedir(), ".sinain", "provisioning", `${f}.status`), "utf8").trim();
+          } catch { /* no status yet */ }
+        }
+        res.end(JSON.stringify({
+          ok: true,
+          activeStack,
+          keys: {
+            openrouter: !!process.env.OPENROUTER_API_KEY,
+            cerebras: !!process.env.CEREBRAS_API_KEY || !!process.env.ANALYSIS_API_KEY,
+          },
+          local: {
+            ollamaInstalled: ollamaUp || existsSync("/usr/local/bin/ollama") || existsSync("/opt/homebrew/bin/ollama")
+              || existsSync("/Applications/Ollama.app"),
+            ollamaUp,
+            llm: localLlm, llmReady: modelReady(localLlm),
+            vision: localVision, visionReady: modelReady(localVision),
+            whisperReady,
+          },
+          provisioning,
+        }));
+        return;
+      }
+
+      // ── /setup/provision ── (settings panel: "Download local models" button)
+      // Spawns the same background provisioning the DMG launcher runs on a
+      // local-mode boot; progress lands in ~/.sinain/provisioning/*.status
+      // and is surfaced by GET /setup/providers.
+      if (req.method === "POST" && url.pathname === "/setup/provision") {
+        const scriptDir = process.env.SINAIN_PROVISION_DIR
+          || resolvePathJoin(dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "dmg");
+        const started: string[] = [];
+        for (const script of ["provision-ollama.sh", "provision-whisper.sh"]) {
+          const path = resolvePathJoin(scriptDir, script);
+          if (!existsSync(path)) continue;
+          const child = spawn("bash", [path], {
+            detached: true, stdio: "ignore",
+            env: { ...process.env },
+          });
+          child.unref();
+          started.push(script);
+        }
+        if (!started.length) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: `no provisioning scripts at ${scriptDir}` }));
+          return;
+        }
+        log("server", `provisioning started: ${started.join(", ")}`);
+        res.end(JSON.stringify({ ok: true, started }));
         return;
       }
 

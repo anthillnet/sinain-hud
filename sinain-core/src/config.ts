@@ -218,7 +218,9 @@ export function loadConfig(): CoreConfig {
     const setLocal = (key: string, val: string): void => {
       if (!process.env[key] || dotenvKeys.has(key)) process.env[key] = val;
     };
-    const localLlm = env("SINAIN_LOCAL_LLM", "qwen2.5:3b");
+    // Default matches the tier wizard: qwen2.5vl:7b serves text AND vision
+    // (2026-07-15 bench — best local distill quality, single 7.3GB residency).
+    const localLlm = env("SINAIN_LOCAL_LLM", "qwen2.5vl:7b");
     const localVision = env("SINAIN_LOCAL_VISION", "qwen2.5vl:7b");
     setLocal("ANALYSIS_PROVIDER", "ollama");
     setLocal("ANALYSIS_MODEL", localLlm);
