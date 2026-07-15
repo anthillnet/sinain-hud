@@ -42,7 +42,9 @@ from typing import Any
 # standards (1.8GB disk, ~700ms inference) and parallelizable with phi4-mini.
 PROBE_MODEL = os.environ.get("SINAIN_PROBE_MODEL", "smollm2:latest")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-_CHAT_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/v1/chat/completions"
+# Native /api/chat, not the OpenAI-compat /v1: only the native API accepts
+# `think: false`, which reasoning models need to emit content at all.
+_CHAT_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat"
 
 
 PROBE_SYSTEM_PROMPT = """\
@@ -108,13 +110,14 @@ def generate_probes_and_hypothesis(
             {"role": "system", "content": PROBE_SYSTEM_PROMPT},
             {"role": "user", "content": f"Question: {question.strip()}"},
         ],
-        "temperature": 0.2,
-        "max_tokens": 250,
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0.2, "num_predict": 250},
     }
     try:
         r = requests.post(_CHAT_URL, json=payload, timeout=timeout)
         r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"]
+        text = r.json()["message"]["content"]
     except Exception as e:
         if not fallback:
             raise

@@ -111,7 +111,8 @@ def _gate(sources, model="phi4-mini:latest", sz=6):
         p = ("For each line answer the number then yes or no: did the user obtain, change, fix, give "
              "away, or attend a specific thing?\n" + "\n".join(f"{i+1}. {f}" for i, f in enumerate(ch)))
         body = json.dumps({"model": model, "messages": [{"role": "user", "content": p}],
-                           "stream": False, "options": {"temperature": 0, "num_predict": 120}}).encode()
+                           "stream": False, "think": False,
+                           "options": {"temperature": 0, "num_predict": 120}}).encode()
         try:
             out = json.load(urllib.request.urlopen(urllib.request.Request(
                 _OLLAMA, data=body, headers={"Content-Type": "application/json"}), timeout=60))["message"]["content"]
@@ -214,7 +215,8 @@ def _member_gate(objects: list[str], category_phrase: str,
              f"Example for category 'fruit': '1. apple' -> '1. yes'; '2. spoon' -> '2. no'.\n\n"
              + "\n".join(f"{i+1}. {o}" for i, o in enumerate(ch)))
         body = json.dumps({"model": model, "messages": [{"role": "user", "content": p}],
-                           "stream": False, "options": {"temperature": 0, "num_predict": 160}}).encode()
+                           "stream": False, "think": False,
+                           "options": {"temperature": 0, "num_predict": 160}}).encode()
         try:
             out = json.load(urllib.request.urlopen(urllib.request.Request(
                 _OLLAMA, data=body, headers={"Content-Type": "application/json"}),

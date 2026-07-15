@@ -213,6 +213,9 @@ export class RegionDetector {
       body: JSON.stringify({
         model: cfg.model, messages, stream: false,
         format: "json", // Ollama structured output — keeps small models valid
+        // Reasoning models (e.g. Bonsai) put output in `thinking` and leave
+        // content empty; non-thinking models ignore the flag.
+        think: false,
         options: { num_predict: cfg.maxTokens, temperature: 0.2 },
       }),
       signal,
