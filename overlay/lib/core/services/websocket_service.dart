@@ -79,6 +79,9 @@ class WebSocketService extends ChangeNotifier {
   final _enrichController = StreamController<EnrichCard>.broadcast();
   final _saveReceiptController = StreamController<SaveReceipt>.broadcast();
   final _saveOfferController = StreamController<SaveOffer>.broadcast();
+  final _sessionNudgeController = StreamController<SessionNudge>.broadcast();
+  final _sessionChipController = StreamController<SessionChipState>.broadcast();
+  final _sessionWrapController = StreamController<SessionWrap>.broadcast();
   final _voiceController = StreamController<VoiceSession>.broadcast();
 
   /// Latest voice session state (snapshot for late-mounting UI); updates via
@@ -90,6 +93,10 @@ class WebSocketService extends ChangeNotifier {
   Stream<EnrichCard> get enrichStream => _enrichController.stream;
   Stream<SaveReceipt> get saveReceiptStream => _saveReceiptController.stream;
   Stream<SaveOffer> get saveOfferStream => _saveOfferController.stream;
+  Stream<SessionNudge> get sessionNudgeStream => _sessionNudgeController.stream;
+  Stream<SessionChipState> get sessionChipStream =>
+      _sessionChipController.stream;
+  Stream<SessionWrap> get sessionWrapStream => _sessionWrapController.stream;
   Stream<VoiceSession> get voiceSessionStream => _voiceController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<bool> get thinkingStream => _thinkingController.stream;
@@ -489,6 +496,15 @@ class WebSocketService extends ChangeNotifier {
         case 'save_offer':
           _saveOfferController.add(SaveOffer.fromJson(json));
           break;
+        case 'session_nudge':
+          _sessionNudgeController.add(SessionNudge.fromJson(json));
+          break;
+        case 'session_chip':
+          _sessionChipController.add(SessionChipState.fromJson(json));
+          break;
+        case 'session_wrap':
+          _sessionWrapController.add(SessionWrap.fromJson(json));
+          break;
         case 'voice_session':
           final session = VoiceSession.fromJson(json);
           voiceSession = session;
@@ -718,6 +734,29 @@ class WebSocketService extends ChangeNotifier {
       }))?['ok'] ==
       true;
 
+  /// Respond to a Session Sense nudge. `tracked`/`corrected` start the
+  /// session server-side (chip arrives on [sessionChipStream]); every
+  /// response is a training label. [label] carries the "Wrong?" pick
+  /// ("" = just work — shape confirmed, label abstained).
+  Future<bool> respondToSessionNudge(String nudgeId, String response,
+          {String? label}) async =>
+      (await _postJson('/capture/session/response', {
+        'nudgeId': nudgeId,
+        'response': response,
+        if (label != null) 'label': label,
+      }))?['ok'] ==
+      true;
+
+  /// Session actions: `wrapped` (wrap card confirm), `keep_going` (corrects a
+  /// too-eager decay model), `ended` (chip tap — a boundary correction).
+  /// Wrapping saves over the credited span; receipt on [saveReceiptStream].
+  Future<bool> sessionAction(String sessionId, String action) async =>
+      (await _postJson('/capture/session/action', {
+        'sessionId': sessionId,
+        'action': action,
+      }))?['ok'] ==
+      true;
+
   /// "Call AI on my last N minutes" — brief arrives on [briefStream].
   /// Returns an error string, or null on accepted.
   Future<String?> requestSummon(int minutes, {List<String>? apps}) async {
@@ -878,6 +917,9 @@ class WebSocketService extends ChangeNotifier {
     _enrichController.close();
     _saveReceiptController.close();
     _saveOfferController.close();
+    _sessionNudgeController.close();
+    _sessionChipController.close();
+    _sessionWrapController.close();
     _voiceController.close();
     super.dispose();
   }

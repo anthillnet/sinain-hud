@@ -198,6 +198,111 @@ class SaveOffer {
       );
 }
 
+/// Session Sense (WS `session_nudge`, DESIGN-SESSION-SENSE.md): the live
+/// workflow nudge — "Looks like: applying for a job — track from 11:02?".
+/// Credit-led card: the retroactive-credit sliver is visible before the tap.
+class SessionNudge {
+  final String nudgeId;
+
+  /// Confidence grade: `personal` ("Back on: …"), `stock` ("Looks like: …"),
+  /// `unlabeled` ("Session in progress" — a statement, never a hedge).
+  final String grade;
+
+  /// Absent when unlabeled (medium confidence or category floor).
+  final String? label;
+  final String threadId;
+
+  /// Retroactive credit start — "11:02 — credited from here".
+  final int candidateStartTs;
+  final int elapsedMinutes;
+  final List<String> apps;
+
+  /// "Wrong?" picker rows (classifier's next candidates; may be empty).
+  final List<String> alternates;
+  final int expirySeconds;
+
+  const SessionNudge({
+    required this.nudgeId,
+    required this.grade,
+    this.label,
+    required this.threadId,
+    required this.candidateStartTs,
+    required this.elapsedMinutes,
+    required this.apps,
+    required this.alternates,
+    required this.expirySeconds,
+  });
+
+  factory SessionNudge.fromJson(Map<String, dynamic> json) => SessionNudge(
+        nudgeId: json['nudgeId'] as String? ?? '',
+        grade: json['grade'] as String? ?? 'unlabeled',
+        label: json['label'] as String?,
+        threadId: json['threadId'] as String? ?? '',
+        candidateStartTs: (json['candidateStartTs'] as num?)?.toInt() ?? 0,
+        elapsedMinutes: (json['elapsedMinutes'] as num?)?.toInt() ?? 0,
+        apps: (json['apps'] as List? ?? const []).map((e) => '$e').toList(),
+        alternates:
+            (json['alternates'] as List? ?? const []).map((e) => '$e').toList(),
+        expirySeconds: (json['expirySeconds'] as num?)?.toInt() ?? 45,
+      );
+}
+
+/// Running-session chip state (WS `session_chip`): label · elapsed · paused.
+/// `ended` clears the chip.
+class SessionChipState {
+  final String sessionId;
+  final String status; // running | paused | ended
+  final String label;
+  final int startedTs;
+  final int activeMs;
+
+  const SessionChipState({
+    required this.sessionId,
+    required this.status,
+    required this.label,
+    required this.startedTs,
+    required this.activeMs,
+  });
+
+  bool get ended => status == 'ended';
+  bool get paused => status == 'paused';
+
+  factory SessionChipState.fromJson(Map<String, dynamic> json) =>
+      SessionChipState(
+        sessionId: json['sessionId'] as String? ?? '',
+        status: json['status'] as String? ?? 'ended',
+        label: json['label'] as String? ?? 'session',
+        startedTs: (json['startedTs'] as num?)?.toInt() ?? 0,
+        activeMs: (json['activeMs'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// The symmetric "End workout?" prompt (WS `session_wrap`): ignorable; the
+/// grace period auto-wraps server-side, and the countdown line says so.
+class SessionWrap {
+  final String sessionId;
+  final String label;
+  final int activeMinutes;
+  final int quietMinutes;
+  final int graceMinutes;
+
+  const SessionWrap({
+    required this.sessionId,
+    required this.label,
+    required this.activeMinutes,
+    required this.quietMinutes,
+    required this.graceMinutes,
+  });
+
+  factory SessionWrap.fromJson(Map<String, dynamic> json) => SessionWrap(
+        sessionId: json['sessionId'] as String? ?? '',
+        label: json['label'] as String? ?? 'session',
+        activeMinutes: (json['activeMinutes'] as num?)?.toInt() ?? 0,
+        quietMinutes: (json['quietMinutes'] as num?)?.toInt() ?? 0,
+        graceMinutes: (json['graceMinutes'] as num?)?.toInt() ?? 10,
+      );
+}
+
 enum VoiceStatus { starting, live, ended, error }
 
 enum VoiceMode { webview, bridge, meet }

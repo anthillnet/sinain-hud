@@ -123,6 +123,15 @@ class OverlayShellState extends State<OverlayShell> {
   String? _adjustingOfferId;
   List<String>? _offerPrefillApps;
   int? _offerPrefillMinutes;
+  // Session Sense (DESIGN-SESSION-SENSE.md, ladder rung 2): the live workflow
+  // nudge, the running-session chip, and the symmetric wrap prompt.
+  SessionNudge? _sessionNudge;
+  Timer? _nudgeExpiryTimer;
+  SessionChipState? _sessionChip;
+  SessionWrap? _sessionWrap;
+  StreamSubscription<SessionNudge>? _nudgeSub;
+  StreamSubscription<SessionChipState>? _chipSub;
+  StreamSubscription<SessionWrap>? _wrapSub;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -320,6 +329,26 @@ class OverlayShellState extends State<OverlayShell> {
     _offerSub = ws.saveOfferStream.listen((o) {
       if (!mounted) return;
       _showSaveOffer(o);
+    });
+    _nudgeSub = ws.sessionNudgeStream.listen((n) {
+      if (!mounted) return;
+      _showSessionNudge(n);
+    });
+    _chipSub = ws.sessionChipStream.listen((c) {
+      if (!mounted) return;
+      setState(() => _sessionChip = c.ended ? null : c);
+      if (c.ended) {
+        // The wrap card's job is done — the receipt takes the slot.
+        setState(() => _sessionWrap = null);
+        _maybeExitCardMode();
+      } else {
+        _enterCardMode();
+      }
+    });
+    _wrapSub = ws.sessionWrapStream.listen((w) {
+      if (!mounted) return;
+      setState(() => _sessionWrap = w);
+      _enterCardMode();
     });
     _voiceSub = ws.voiceSessionStream.listen((s) {
       if (!mounted) return;
@@ -1103,6 +1132,10 @@ class OverlayShellState extends State<OverlayShell> {
     _voiceSub?.cancel();
     _offerSub?.cancel();
     _offerExpiryTimer?.cancel();
+    _nudgeSub?.cancel();
+    _chipSub?.cancel();
+    _wrapSub?.cancel();
+    _nudgeExpiryTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
@@ -1408,6 +1441,9 @@ class OverlayShellState extends State<OverlayShell> {
         _activeEnrich != null ||
         _saveReceipt != null ||
         _saveOffer != null ||
+        _sessionNudge != null ||
+        _sessionChip != null ||
+        _sessionWrap != null ||
         _voiceSession != null) {
       return;
     }
@@ -1479,6 +1515,88 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
+  // ── Session Sense lifecycle (DESIGN-SESSION-SENSE.md) ────────────────────
+
+  /// A `session_nudge` arrived: the credit-led card appears in the card
+  /// corner. Untouched, it fades silently after ~45 s (expiry consumes the
+  /// episode's one ask — policy A).
+  void _showSessionNudge(SessionNudge n) {
+    _nudgeExpiryTimer?.cancel();
+    setState(() => _sessionNudge = n);
+    _nudgeExpiryTimer =
+        Timer(Duration(seconds: n.expirySeconds), _expireSessionNudge);
+    if (_state != HudState.hidden) _enterCardMode();
+  }
+
+  /// Track: one tap, retroactive credit pinned — the chip arrives on
+  /// [sessionChipStream] and takes over the ambient state.
+  void _trackSession() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
+    _clearSessionNudge(exitSurfaces: false); // chip arrives next
+  }
+
+  /// "Wrong?" pick: tracks under the corrected label in the same tap —
+  /// correction ≠ dismissal (§3). [label] == '' means "just work — no label".
+  void _correctSession(String label) {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context
+        .read<WebSocketService>()
+        .respondToSessionNudge(n.nudgeId, 'corrected', label: label);
+    _clearSessionNudge(exitSurfaces: false);
+  }
+
+  void _dismissSessionNudge() => _resolveSessionNudge('dismissed');
+  void _expireSessionNudge() => _resolveSessionNudge('expired');
+
+  void _resolveSessionNudge(String response) {
+    final n = _sessionNudge;
+    if (n == null || !mounted) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, response);
+    _clearSessionNudge();
+  }
+
+  void _clearSessionNudge({bool exitSurfaces = true}) {
+    _nudgeExpiryTimer?.cancel();
+    setState(() => _sessionNudge = null);
+    if (exitSurfaces) _maybeExitCardMode();
+  }
+
+  /// Wrap confirm — teaches the boundary; the receipt arrives into the same
+  /// stack slot via [saveReceiptStream] (standard save lifecycle).
+  void _wrapSession() {
+    final w = _sessionWrap;
+    if (w == null) return;
+    context.read<WebSocketService>().sessionAction(w.sessionId, 'wrapped');
+    setState(() => _sessionWrap = null);
+  }
+
+  /// "Keep going" — corrects a too-eager decay model; the quiet clock resets.
+  void _keepGoingSession() {
+    final w = _sessionWrap;
+    if (w == null) return;
+    context.read<WebSocketService>().sessionAction(w.sessionId, 'keep_going');
+    setState(() => _sessionWrap = null);
+    _maybeExitCardMode();
+  }
+
+  /// ✕ on the wrap card: just hides it — the server's grace period auto-wraps
+  /// regardless (a session never runs forever because the user walked away).
+  void _dismissWrapCard() {
+    setState(() => _sessionWrap = null);
+    _maybeExitCardMode();
+  }
+
+  /// Chip tap: ends the session early — a boundary correction the decay
+  /// model learns from. Same receipt as every wrap.
+  void _endSessionFromChip() {
+    final c = _sessionChip;
+    if (c == null) return;
+    context.read<WebSocketService>().sessionAction(c.sessionId, 'ended');
+  }
+
   /// Hand off from card mode into a full HUD state (e.g. the conversation the
   /// card just seeded).
   void _leaveCardModeFor(HudState target) {
@@ -1497,6 +1615,36 @@ class OverlayShellState extends State<OverlayShell> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
+        // Session Sense: the running chip is the ambient state; nudge and
+        // wrap cards stack above the save cards (violet = session-scoped).
+        if (_sessionChip != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionChip(
+              session: _sessionChip!,
+              onEnd: _endSessionFromChip,
+            ),
+          ),
+        if (_sessionNudge != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionNudgeCard(
+              nudge: _sessionNudge!,
+              onTrack: _trackSession,
+              onCorrect: _correctSession,
+              onDismiss: _dismissSessionNudge,
+            ),
+          ),
+        if (_sessionWrap != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionWrapCard(
+              wrap: _sessionWrap!,
+              onWrapUp: _wrapSession,
+              onKeepGoing: _keepGoingSession,
+              onDismiss: _dismissWrapCard,
+            ),
+          ),
         // Save offer sits above the receipt: accept clears it and the receipt
         // arrives into the same top slot — one card per save (morph).
         if (_saveOffer != null)

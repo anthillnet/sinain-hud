@@ -831,7 +831,7 @@ class _ShimmerState extends State<_Shimmer>
 }
 
 Widget _cardButton(HudTheme t, String label, VoidCallback onTap,
-    {bool primary = false}) {
+    {bool primary = false, Color? accent}) {
   return MouseRegion(
     cursor: SystemMouseCursors.click,
     child: GestureDetector(
@@ -842,7 +842,7 @@ Widget _cardButton(HudTheme t, String label, VoidCallback onTap,
         padding: const EdgeInsets.symmetric(horizontal: 11),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: primary ? t.selectionAccent : Colors.transparent,
+          color: primary ? (accent ?? t.selectionAccent) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           border: primary ? null : Border.all(color: t.border),
         ),
@@ -1409,6 +1409,421 @@ class SaveOfferCard extends StatelessWidget {
             _cardButton(t, 'Adjust…', onAdjust),
           ]),
         ],
+      ),
+    );
+  }
+}
+
+// ── Session Sense (DESIGN-SESSION-SENSE.md, "Session Sense.dc.html") ────────
+//
+// The track accent (violet) marks everything session-scoped — distinct from
+// Save green and Call blue, because tracking is a state, not an act.
+
+const _track = Color(0xFF7A56D6);
+
+String _clock(int ts) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ts);
+  return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+}
+
+/// The credit-led nudge card (wireframes §1, chosen variant): claim ·
+/// retroactive-credit sliver · Track · Wrong? · ✕. The backfill is visible
+/// before the tap, and the verb states the span ("Track from 11:02").
+class SessionNudgeCard extends StatefulWidget {
+  final SessionNudge nudge;
+  final VoidCallback onTrack;
+
+  /// "Wrong?" pick: a corrected label, or "" for "Just work — no label".
+  final ValueChanged<String> onCorrect;
+  final VoidCallback onDismiss;
+
+  const SessionNudgeCard({
+    super.key,
+    required this.nudge,
+    required this.onTrack,
+    required this.onCorrect,
+    required this.onDismiss,
+  });
+
+  @override
+  State<SessionNudgeCard> createState() => _SessionNudgeCardState();
+}
+
+class _SessionNudgeCardState extends State<SessionNudgeCard> {
+  bool _wrongOpen = false;
+
+  String get _header {
+    final n = widget.nudge;
+    return switch (n.grade) {
+      'personal' => 'Back on: ${n.label ?? ''}',
+      'stock' => 'Looks like: ${n.label ?? ''}',
+      // Medium confidence / category floor: a statement, never a hedge (§2).
+      _ => 'Session in progress',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = HudTheme.of(context);
+    final n = widget.nudge;
+    final from = _clock(n.candidateStartTs);
+    return _CardShell(
+      width: 300,
+      borderColor: _track.withValues(alpha: 0.35),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: _track,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                      color: _track.withValues(alpha: 0.3), spreadRadius: 2),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(_header,
+                  style: _mono(12, t.textPrimary, weight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                  onTap: widget.onDismiss,
+                  child: Text('✕', style: _mono(12, t.textDim))),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          // Evidence: elapsed + source chips — every token checkable.
+          Row(children: [
+            Text('${n.elapsedMinutes} min in', style: _mono(10, t.textMuted)),
+            const SizedBox(width: 6),
+            for (final app in n.apps.take(3)) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  border: Border.all(color: t.border),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(app,
+                    style: _mono(10, t.textMuted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ]),
+          const SizedBox(height: 8),
+          // The retroactive-credit sliver — the feature's whole magic, visible
+          // before the tap. Not scrubbable (no thumb, no hover cursor).
+          _CreditSliver(from: from),
+          const SizedBox(height: 10),
+          if (_wrongOpen) ...[
+            Text('WHAT IS IT?', style: _mono(9, t.textDim, weight: FontWeight.w600)),
+            const SizedBox(height: 5),
+            for (final alt in widget.nudge.alternates)
+              _altRow(t, alt, () => widget.onCorrect(alt)),
+            _altRow(t, 'Just work — no label', () => widget.onCorrect('')),
+            const SizedBox(height: 8),
+          ],
+          Row(children: [
+            _cardButton(t, 'Track from $from', widget.onTrack,
+                primary: true, accent: _track),
+            const Spacer(),
+            if (n.alternates.isNotEmpty && !_wrongOpen)
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () => setState(() => _wrongOpen = true),
+                  child: Text('Wrong?',
+                      style: _mono(11, t.textDim).copyWith(
+                        decoration: TextDecoration.underline,
+                        decorationColor: t.textDim.withValues(alpha: 0.4),
+                      )),
+                ),
+              ),
+            if (_wrongOpen)
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () => setState(() => _wrongOpen = false),
+                  child: Text('Never mind', style: _mono(11, t.textDim)),
+                ),
+              ),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _altRow(HudTheme t, String label, VoidCallback onTap) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+          decoration: BoxDecoration(
+            color: t.textPrimary.withValues(alpha: 0.04),
+            border: Border.all(color: t.border),
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Text(label, style: _mono(11, t.textPrimary)),
+        ),
+      ),
+    );
+  }
+}
+
+/// "11:02 — credited from here ▸ now": the span bar with the credit portion
+/// filled in track violet.
+class _CreditSliver extends StatelessWidget {
+  final String from;
+  const _CreditSliver({required this.from});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = HudTheme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 10,
+          child: LayoutBuilder(builder: (context, box) {
+            final w = box.maxWidth;
+            return Stack(children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 4,
+                child: Container(height: 2, color: t.border),
+              ),
+              Positioned(
+                left: w * 0.32,
+                right: 0,
+                top: 3,
+                child: Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: _track.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: w * 0.32,
+                top: 0,
+                child: Container(width: 2, height: 10, color: _track),
+              ),
+            ]);
+          }),
+        ),
+        const SizedBox(height: 4),
+        Row(children: [
+          Text('$from — credited from here', style: _mono(9, HudTheme.of(context).textDim)),
+          const Spacer(),
+          Text('now', style: _mono(9, HudTheme.of(context).textMuted)),
+        ]),
+      ],
+    );
+  }
+}
+
+/// The symmetric "End workout?" prompt (§6): confirm teaches the boundary,
+/// "Keep going" corrects a too-eager decay model, ignoring costs nothing —
+/// the grace-period auto-wrap produces the same receipt.
+class SessionWrapCard extends StatelessWidget {
+  final SessionWrap wrap;
+  final VoidCallback onWrapUp;
+  final VoidCallback onKeepGoing;
+  final VoidCallback onDismiss;
+
+  const SessionWrapCard({
+    super.key,
+    required this.wrap,
+    required this.onWrapUp,
+    required this.onKeepGoing,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = HudTheme.of(context);
+    return _CardShell(
+      width: 300,
+      borderColor: _track.withValues(alpha: 0.35),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: _track,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                      color: _track.withValues(alpha: 0.3), spreadRadius: 2),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('Wrap up this session?',
+                style: _mono(12, t.textPrimary, weight: FontWeight.w600)),
+            const Spacer(),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                  onTap: onDismiss,
+                  child: Text('✕', style: _mono(12, t.textDim))),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text('${wrap.label} · ${wrap.activeMinutes} min',
+              style: _mono(12, t.textPrimary, weight: FontWeight.w500),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 4),
+          Text(
+              'quiet for ${wrap.quietMinutes} min · auto-wraps in ${wrap.graceMinutes}',
+              style: _mono(10, t.textMuted)),
+          const SizedBox(height: 10),
+          Row(children: [
+            _cardButton(t, 'Wrap up', onWrapUp, primary: true, accent: _track),
+            const SizedBox(width: 10),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                  onTap: onKeepGoing,
+                  child: Text('Keep going', style: _mono(11, t.textDim))),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// The running-session chip (§5 option A): label · elapsed · pause state.
+/// Warmth decay pauses it automatically; return resumes. Tapping the body
+/// ends the session early — a boundary correction the decay model learns
+/// from. Elapsed ticks locally between chip broadcasts: it's the retroactive
+/// credit growing in real time, not a stopwatch.
+class SessionChip extends StatefulWidget {
+  final SessionChipState session;
+  final VoidCallback onEnd;
+
+  const SessionChip({super.key, required this.session, required this.onEnd});
+
+  @override
+  State<SessionChip> createState() => _SessionChipState();
+}
+
+class _SessionChipState extends State<SessionChip> {
+  Timer? _ticker;
+  late DateTime _receivedAt = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTicker();
+  }
+
+  @override
+  void didUpdateWidget(SessionChip old) {
+    super.didUpdateWidget(old);
+    if (old.session != widget.session) {
+      _receivedAt = DateTime.now();
+      _syncTicker();
+    }
+  }
+
+  void _syncTicker() {
+    _ticker?.cancel();
+    if (!widget.session.paused) {
+      _ticker = Timer.periodic(
+          const Duration(seconds: 1), (_) => setState(() {}));
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String get _elapsed {
+    var ms = widget.session.activeMs;
+    if (!widget.session.paused) {
+      ms += DateTime.now().difference(_receivedAt).inMilliseconds;
+    }
+    final s = ms ~/ 1000;
+    final mm = s ~/ 60, ss = s % 60;
+    return '$mm:${ss.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = HudTheme.of(context);
+    final paused = widget.session.paused;
+    final dot = paused ? _amber : _track;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onEnd,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 6, 10, 6),
+          decoration: BoxDecoration(
+            color: t.panelBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: paused
+                    ? _amber.withValues(alpha: 0.4)
+                    : _track.withValues(alpha: 0.5)),
+            boxShadow: t.shadow,
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: dot,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: dot.withValues(alpha: 0.3), spreadRadius: 2),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 140),
+              child: Text(widget.session.label,
+                  style: _mono(11, t.textPrimary, weight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(width: 8),
+            Text(_elapsed, style: _mono(10, paused ? _amber : t.textMuted)),
+            if (paused) ...[
+              const SizedBox(width: 6),
+              Text('paused', style: _mono(9, _amber)),
+            ],
+          ]),
+        ),
       ),
     );
   }

@@ -254,6 +254,10 @@ export interface ServerDeps {
   captureUndo?: (saveId: string) => boolean;
   /** Overlay response to a breakpoint save offer (accepted/adjusted/dismissed/expired). */
   captureOfferResponse?: (offerId: string, response: string, minutes?: number, apps?: string[]) => { ok: boolean; saveId?: string; error?: string };
+  /** Overlay response to a Session Sense nudge (tracked/corrected/dismissed/expired). */
+  sessionNudgeResponse?: (nudgeId: string, response: string, label?: string) => { ok: boolean; sessionId?: string; error?: string };
+  /** Session actions from the wrap card / chip (wrapped/keep_going/ended). */
+  sessionAction?: (sessionId: string, action: string) => { ok: boolean; saveId?: string; error?: string };
   /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
   contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
   /** "Build context" for a focus item (clipboard) → what/connects/next card. */
@@ -516,6 +520,52 @@ export function createAppServer(deps: ServerDeps) {
           parseApps(parsed.apps),
         );
         if (!result.ok) res.writeHead(410); // gone: unknown/expired offer
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // Session Sense (DESIGN-SESSION-SENSE.md): nudge responses + session
+      // actions. Both are consent gestures — every one becomes a label.
+      if (req.method === "POST" && url.pathname === "/capture/session/response") {
+        if (!deps.sessionNudgeResponse) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "session sense unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 8192);
+        const parsed = JSON.parse(body || "{}") as
+          { nudgeId?: string; response?: string; label?: string };
+        const RESPONSES = ["tracked", "corrected", "dismissed", "expired"];
+        if (!parsed.nudgeId || !parsed.response || !RESPONSES.includes(parsed.response)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "nudgeId + response(tracked|corrected|dismissed|expired) required" }));
+          return;
+        }
+        const result = deps.sessionNudgeResponse(
+          parsed.nudgeId, parsed.response,
+          typeof parsed.label === "string" ? parsed.label.slice(0, 120) : undefined,
+        );
+        if (!result.ok) res.writeHead(410); // gone: unknown/expired nudge
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/capture/session/action") {
+        if (!deps.sessionAction) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "session sense unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const parsed = JSON.parse(body || "{}") as { sessionId?: string; action?: string };
+        const ACTIONS = ["wrapped", "keep_going", "ended"];
+        if (!parsed.sessionId || !parsed.action || !ACTIONS.includes(parsed.action)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "sessionId + action(wrapped|keep_going|ended) required" }));
+          return;
+        }
+        const result = deps.sessionAction(parsed.sessionId, parsed.action);
+        if (!result.ok) res.writeHead(410);
         res.end(JSON.stringify(result));
         return;
       }

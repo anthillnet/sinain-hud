@@ -1864,6 +1864,19 @@ async function main() {
   );
   episodeTracker = new EpisodeTracker((bp) => offerManager?.onBreakpoint(bp));
 
+  // Session Sense (DESIGN-SESSION-SENSE.md, ladder rung 2): live workflow
+  // detection over the sense stream — local embeddings + deterministic
+  // features, zero LLM until the tap. Shares the rung-1 attention budget;
+  // a nudge shown consumes the episode's one ask (policy A).
+  const { SessionSenseManager } = await import("./capture/session-sense.js");
+  const sessionSense = new SessionSenseManager(
+    embeddingService!, saveManager, offerManager,
+    (msg) => wsHandler.broadcastRaw(msg),
+    resolveLocalMemoryDir(), config.sessionSenseConfig,
+  );
+  offerManager.setEpisodeConsumedCheck((threadId, startTs, endTs) =>
+    sessionSense.wasAskedDuring(threadId, startTs, endTs));
+
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
   const { VoiceSessionManager } = await import("./capture/voice-session.js");
   const voiceManager = new VoiceSessionManager(
@@ -1966,6 +1979,10 @@ async function main() {
       offerManager
         ? offerManager.respond(offerId, response as import("./types.js").SaveOfferResponse, minutes, apps)
         : { ok: false, error: "offers unavailable" },
+    sessionNudgeResponse: (nudgeId, response, label) =>
+      sessionSense.respond(nudgeId, response as import("./types.js").SessionNudgeResponse, label),
+    sessionAction: (sessionId, action) =>
+      sessionSense.sessionAction(sessionId, action as import("./types.js").SessionAction),
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
@@ -2059,6 +2076,10 @@ async function main() {
       // Episode boundaries for the save offer (breakpoint = offer moment).
       // Thread identity comes from app + window title (thread-identity.ts).
       episodeTracker?.observe(event.meta.app, event.meta.windowTitle, event.ts);
+
+      // Session Sense: candidate detection + session warmth over the same
+      // stream (rate-limited embedding ticks inside; cheap on every call).
+      sessionSense.observe(event);
 
       // Tier 1 \u2014 instant ROI restore on app switch: the sense path carries the
       // earliest app signal, well before the analyzer tick. The moment the
