@@ -76,8 +76,16 @@ def create_vision(config: dict) -> Optional[VisionProvider]:
         or os.environ.get("LOCAL_VISION_MODEL")
         or vision_cfg.get("model", "qwen2.5vl:7b")
     )
-    local_url = vision_cfg.get("ollamaUrl", "http://localhost:11434")
-    local_timeout = vision_cfg.get("timeout", 10.0)
+    # SINAIN_LOCAL_VISION_URL lets a non-Ollama sidecar (e.g. moss-vision)
+    # serve the same /api/chat contract on another port.
+    local_url = (
+        os.environ.get("SINAIN_LOCAL_VISION_URL")
+        or vision_cfg.get("ollamaUrl", "http://localhost:11434")
+    )
+    local_timeout = float(
+        os.environ.get("SINAIN_LOCAL_VISION_TIMEOUT")
+        or vision_cfg.get("timeout", 10.0)
+    )
 
     cloud_blocked = privacy in ("paranoid", "strict") or not api_key
 

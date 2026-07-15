@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -46,6 +47,9 @@ class OllamaVision:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_tokens = max_tokens
+        # Frame downscale cap before base64 encoding. 512 keeps Ollama payloads
+        # small; high-res readers (MOSS-VL) need ~1280 to read on-screen text.
+        self.max_dim = int(os.environ.get("SINAIN_LOCAL_VISION_MAX_DIM", "512"))
         self._available: Optional[bool] = None
         self._last_check: float = 0
         self._check_interval = 30.0  # re-check availability every 30s
@@ -140,9 +144,11 @@ class OllamaVision:
                 self._last_check = time.time()
             return None
 
-    def _encode_image(self, image: "Image.Image", max_dim: int = 512, quality: int = 80) -> Optional[str]:
+    def _encode_image(self, image: "Image.Image", max_dim: int | None = None, quality: int = 80) -> Optional[str]:
         """Encode PIL Image to base64 JPEG string for Ollama."""
         try:
+            if max_dim is None:
+                max_dim = self.max_dim
             # Resize if too large
             w, h = image.size
             if max(w, h) > max_dim:
