@@ -187,7 +187,9 @@ class FirstRunService extends ChangeNotifier {
       case InstallTier.fullLocal:
         return {
           'SINAIN_LOCAL_MODE': 'true',
-          'SINAIN_LOCAL_LLM': 'phi4-mini',
+          // qwen2.5vl:7b serves BOTH text and vision lanes — best local
+          // distill quality of the models benched 2026-07-15, one residency.
+          'SINAIN_LOCAL_LLM': 'qwen2.5vl:7b',
           'SINAIN_LOCAL_VISION': 'qwen2.5vl:7b',
           'TRANSCRIPTION_BACKEND': 'local',
           'LOCAL_WHISPER_MODEL': '~/.sinain/models/whisper/ggml-large-v3-turbo.bin',

@@ -15,6 +15,7 @@ import 'eye/eye_widget.dart';
 import 'feed/idle_animation.dart';
 import 'settings/display_settings_panel.dart';
 import 'settings/agent_selector_panel.dart';
+import 'settings/provider_settings_panel.dart';
 import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
 import 'chat/feedback_prompt.dart';
@@ -76,6 +77,7 @@ class OverlayShellState extends State<OverlayShell> {
   // Display settings panel
   bool _showDisplaySettings = false;
   bool _showAgentPicker = false;
+  bool _showProviderSettings = false;
 
   // One-time "Was that helpful?" feedback prompt. Armed once per app run at the
   // first value-proof moment (first agent reply); lifecycle persisted in
@@ -2067,6 +2069,29 @@ class OverlayShellState extends State<OverlayShell> {
                       ),
                     ),
                   ),
+                  // AI provider — Cerebras / OpenRouter / Local stack switch
+                  HudTooltip(
+                    message: 'AI provider',
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => setState(
+                          () => _showProviderSettings = !_showProviderSettings,
+                        ),
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.cloud_sync_outlined,
+                            size: 12,
+                            color: _showProviderSettings
+                                ? _accentColor
+                                : Colors.white.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                   // Settings — tap toggles display panel, long-press opens .env
                   HudTooltip(
                     message: 'Display settings',
@@ -2171,6 +2196,10 @@ class OverlayShellState extends State<OverlayShell> {
                 if (_showAgentPicker)
                   AgentSelectorPanel(
                     onClose: () => setState(() => _showAgentPicker = false),
+                  ),
+                if (_showProviderSettings)
+                  ProviderSettingsPanel(
+                    onClose: () => setState(() => _showProviderSettings = false),
                   ),
                 // Deliberate capture — cards + chooser, bottom-right. The
                 // gestures are triggered from the eye's context menu (no

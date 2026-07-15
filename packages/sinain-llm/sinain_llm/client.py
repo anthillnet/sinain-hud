@@ -26,7 +26,19 @@ class LLMError(Exception):
 
 
 def _ollama_chat_url() -> str:
+    # Native /api/chat, NOT the OpenAI-compat /v1: reasoning models (e.g.
+    # Bonsai-27B) stream their output into a `reasoning` field on /v1 and
+    # leave `content` empty, with no way to disable thinking there. The
+    # native API takes `think: false`, which non-thinking models ignore.
     base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    return f"{base.rstrip('/')}/api/chat"
+
+
+def _llamacpp_chat_url() -> str:
+    # llama-server (e.g. the PrismML fork for ternary Bonsai quants). Plain
+    # OpenAI /v1 endpoint; thinking must be disabled SERVER-side via
+    # `--chat-template-kwargs '{"enable_thinking":false}'`.
+    base = os.environ.get("LLAMACPP_BASE_URL", "http://127.0.0.1:8912")
     return f"{base.rstrip('/')}/v1/chat/completions"
 
 
@@ -39,6 +51,23 @@ def _resolve_provider(model: str, api_key: str | None = None) -> tuple[str, str,
         return "ollama", _ollama_chat_url(), model[len("ollama/"):], {
             "Content-Type": "application/json",
         }
+    if model.startswith("llamacpp/"):
+        return "llamacpp", _llamacpp_chat_url(), model[len("llamacpp/"):], {
+            "Content-Type": "application/json",
+        }
+    # Ollama ids without the explicit prefix: "hf.co/org/repo:tag" (Ollama's
+    # HF pull convention) and bare "name:tag" / "name" (no org slash —
+    # OpenRouter ids are always "org/model"). Routes local models local even
+    # when the env var forgot the "ollama/" prefix.
+    if model.startswith("hf.co/") or "/" not in model:
+        return "ollama", _ollama_chat_url(), model, {
+            "Content-Type": "application/json",
+        }
+    if os.environ.get("SINAIN_LOCAL_MODE", "").lower() == "true":
+        raise RuntimeError(
+            f"local mode: refusing cloud provider for model '{model}' — "
+            "use an ollama/ or llamacpp/ id (gesture-gated contract)"
+        )
     if model.startswith("cerebras/"):
         key = api_key or os.environ.get("CEREBRAS_API_KEY")
         if not key:
@@ -125,45 +154,64 @@ def chat(
         raise ValueError("model is required")
     provider, url, target_model, headers = _resolve_provider(model, api_key)
 
-    if provider == "ollama" and timeout < OLLAMA_MIN_TIMEOUT_S:
+    if provider in ("ollama", "llamacpp") and timeout < OLLAMA_MIN_TIMEOUT_S:
         timeout = OLLAMA_MIN_TIMEOUT_S
 
-    body: dict = {
-        "model": target_model,
-        "max_tokens": max_tokens,
-        "messages": messages if messages is not None else [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-    if temperature is not None:
-        body["temperature"] = temperature
-    if seed is not None:
-        body["seed"] = seed
+    resolved_messages = messages if messages is not None else [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
-    if provider == "openrouter" and provider_routing:
-        body["provider"] = provider_routing
-    if provider == "cerebras" and cache_key:
-        body["prompt_cache_key"] = cache_key
-
-    if json_schema is not None:
-        sent_schema = _cerebras_schema(json_schema) if provider == "cerebras" else json_schema
-        body["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": json_schema.get("title", "output"),
-                "schema": sent_schema,
-                "strict": True,
-            },
+    if provider == "ollama":
+        # Native /api/chat request shape (see _ollama_chat_url for why).
+        options: dict = {"num_predict": max_tokens}
+        if temperature is not None:
+            options["temperature"] = temperature
+        if seed is not None:
+            options["seed"] = seed
+        body: dict = {
+            "model": target_model,
+            "stream": False,
+            "think": False,
+            "messages": resolved_messages,
+            "options": options,
         }
-        if provider == "ollama":
+        if json_schema is not None:
             body["format"] = json_schema
-    elif json_mode and (
-        provider in ("ollama", "cerebras")
-        or model.startswith("openai/")
-        or model.startswith("google/")
-    ):
-        body["response_format"] = {"type": "json_object"}
+        elif json_mode:
+            body["format"] = "json"
+    else:
+        body = {
+            "model": target_model,
+            "max_tokens": max_tokens,
+            "messages": resolved_messages,
+        }
+        if temperature is not None:
+            body["temperature"] = temperature
+        if seed is not None:
+            body["seed"] = seed
+
+        if provider == "openrouter" and provider_routing:
+            body["provider"] = provider_routing
+        if provider == "cerebras" and cache_key:
+            body["prompt_cache_key"] = cache_key
+
+        if json_schema is not None:
+            sent_schema = _cerebras_schema(json_schema) if provider == "cerebras" else json_schema
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": json_schema.get("title", "output"),
+                    "schema": sent_schema,
+                    "strict": True,
+                },
+            }
+        elif json_mode and (
+            provider in ("cerebras", "llamacpp")
+            or model.startswith("openai/")
+            or model.startswith("google/")
+        ):
+            body["response_format"] = {"type": "json_object"}
 
     if extra_body:
         body.update(extra_body)
@@ -176,6 +224,19 @@ def chat(
         raise LLMError(f"LLM call failed ({type(e).__name__}): {e}") from e
     except json.JSONDecodeError as e:
         raise LLMError(f"LLM returned non-JSON response body: {e}") from e
+
+    if provider == "ollama":
+        content = (data.get("message") or {}).get("content")
+        if not content:
+            raise LLMError(f"LLM returned empty response (model={model})")
+        pt, ct = data.get("prompt_eval_count"), data.get("eval_count")
+        usage = {
+            "prompt_tokens": pt,
+            "completion_tokens": ct,
+            "total_tokens": (pt + ct) if pt is not None and ct is not None else None,
+            "cost": None,
+        }
+        return {"text": content, "model": model, "usage": usage}
 
     try:
         content = data["choices"][0]["message"]["content"]

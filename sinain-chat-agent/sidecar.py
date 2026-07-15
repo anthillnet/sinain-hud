@@ -73,11 +73,19 @@ class ChatAgent:
     async def setup(self) -> None:
         tools.register_all()
         model = os.environ.get("SINAIN_CHAT_MODEL", "qwen/qwen3.5-flash-02-23")
-        # Provider: openrouter (cloud, default) or ollama (local). Auto-detect
-        # local from SINAIN_LOCAL_MODE if SINAIN_CHAT_PROVIDER is unset.
+        # Provider: openrouter (cloud, default) or ollama (local). Local mode
+        # FORCES ollama — a .env cloud pin must not win (observed 2026-07-15:
+        # this lane analyzed an arc.dev assessment via OpenRouter despite
+        # SINAIN_LOCAL_MODE=true). A file-vs-real-env precedence rule (like
+        # core's de8b37d) is not implementable here: litellm/openhands
+        # auto-load .env at import time, before our _load_env runs, so pin
+        # origin is indistinguishable. The contract is absolute anyway — in
+        # local mode the chat lane never talks to a cloud endpoint.
         provider = os.environ.get("SINAIN_CHAT_PROVIDER", "").lower()
+        if os.environ.get("SINAIN_LOCAL_MODE") == "true":
+            provider = "ollama"
         if not provider:
-            provider = "ollama" if os.environ.get("SINAIN_LOCAL_MODE") == "true" else "openrouter"
+            provider = "openrouter"
         if provider in ("ollama", "local"):
             base = (os.environ.get("SINAIN_CHAT_BASE_URL")
                     or os.environ.get("OLLAMA_BASE_URL")
@@ -93,7 +101,9 @@ class ChatAgent:
             elif lm and "/" not in lm:
                 model_id = f"ollama_chat/{lm}"     # bare ollama tag, e.g. qwen2.5:7b
             else:
-                model_id = "ollama_chat/qwen2.5:7b"  # unset / openrouter slug → local default
+                # unset / openrouter slug → local default. qwen2.5vl:7b is the
+                # local-mode standard (serves vision + text lanes already).
+                model_id = "ollama_chat/qwen2.5vl:7b"
             # ollama is keyless; litellm wants a non-empty key + api_base.
             # think:false — non-reasoning local models (qwen2.5, phi4-mini)
             # reject Ollama's `think` flag ("does not support thinking").

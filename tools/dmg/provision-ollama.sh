@@ -9,7 +9,7 @@ set -uo pipefail
 # Exit codes: 0 = models ready, 2 = Ollama not installed (caller surfaces a
 # prompt to install), 1 = a pull failed.
 
-LLM="${SINAIN_LOCAL_LLM:-phi4-mini}"
+LLM="${SINAIN_LOCAL_LLM:-qwen2.5vl:7b}"
 VISION="${SINAIN_LOCAL_VISION:-qwen2.5vl:7b}"
 HOST="${OLLAMA_HOST:-http://localhost:11434}"
 
@@ -38,8 +38,8 @@ if ! curl -sf "$HOST/api/tags" >/dev/null 2>&1; then
   exit 1
 fi
 
-MODELS="$LLM $VISION"
-TOTAL=2
+# One model can serve both lanes (qwen2.5vl:7b default) — pull it once.
+if [ "$LLM" = "$VISION" ]; then MODELS="$LLM"; TOTAL=1; else MODELS="$LLM $VISION"; TOTAL=2; fi
 idx=0
 rc=0
 for model in $MODELS; do
