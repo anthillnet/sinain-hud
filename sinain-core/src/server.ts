@@ -256,8 +256,12 @@ export interface ServerDeps {
   captureOfferResponse?: (offerId: string, response: string, minutes?: number, apps?: string[]) => { ok: boolean; saveId?: string; error?: string };
   /** Overlay response to a Session Sense nudge (tracked/corrected/dismissed/expired). */
   sessionNudgeResponse?: (nudgeId: string, response: string, label?: string) => { ok: boolean; sessionId?: string; error?: string };
-  /** Session actions from the wrap card / chip (wrapped/keep_going/ended). */
+  /** Session actions from the wrap card / chip (wrapped/keep_going/ended/later). */
   sessionAction?: (sessionId: string, action: string) => { ok: boolean; saveId?: string; error?: string };
+  /** Bookmarked-session shelf rows (§9), without kgPath. */
+  sessionBookmarks?: () => import("./types.js").SessionBookmarkRow[];
+  /** Shelf actions: ▶ resume (fresh session, no detection wait) / ✕ remove. */
+  sessionBookmarkAction?: (threadId: string, action: string) => { ok: boolean; sessionId?: string; error?: string };
   /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
   contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
   /** "Build context" for a focus item (clipboard) → what/connects/next card. */
@@ -558,13 +562,58 @@ export function createAppServer(deps: ServerDeps) {
         }
         const body = await readBody(req, 4096);
         const parsed = JSON.parse(body || "{}") as { sessionId?: string; action?: string };
-        const ACTIONS = ["wrapped", "keep_going", "ended"];
+        const ACTIONS = ["wrapped", "keep_going", "ended", "later"];
         if (!parsed.sessionId || !parsed.action || !ACTIONS.includes(parsed.action)) {
           res.writeHead(400);
-          res.end(JSON.stringify({ ok: false, error: "sessionId + action(wrapped|keep_going|ended) required" }));
+          res.end(JSON.stringify({ ok: false, error: "sessionId + action(wrapped|keep_going|ended|later) required" }));
           return;
         }
         const result = deps.sessionAction(parsed.sessionId, parsed.action);
+        if (!result.ok) res.writeHead(410);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // The bookmarked-session shelf (§9). ↗ share reuses the KG share
+      // mechanic: each row resolves to its entity's wiki page when the KG
+      // knows the thread by name — the share affordances live there.
+      if (req.method === "GET" && url.pathname === "/capture/session/bookmarks") {
+        if (!deps.sessionBookmarks) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "session sense unavailable" }));
+          return;
+        }
+        const rows = deps.sessionBookmarks();
+        if (deps.searchEntities) {
+          await Promise.all(rows.map(async (row) => {
+            try {
+              const found = await deps.searchEntities!(row.label, 1) as { results?: { entity?: string }[] };
+              const entity = found?.results?.[0]?.entity;
+              if (entity) {
+                const slug = entity.replace(/^entity:/, "");
+                row.kgPath = `/knowledge/ui/entity/${encodeURIComponent(slug)}`;
+              }
+            } catch { /* unresolved — the row ships without a kgPath */ }
+          }));
+        }
+        res.end(JSON.stringify({ ok: true, bookmarks: rows }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/capture/session/bookmark") {
+        if (!deps.sessionBookmarkAction) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "session sense unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const parsed = JSON.parse(body || "{}") as { threadId?: string; action?: string };
+        if (!parsed.threadId || !parsed.action || !["resume", "remove"].includes(parsed.action)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "threadId + action(resume|remove) required" }));
+          return;
+        }
+        const result = deps.sessionBookmarkAction(parsed.threadId, parsed.action);
         if (!result.ok) res.writeHead(410);
         res.end(JSON.stringify(result));
         return;

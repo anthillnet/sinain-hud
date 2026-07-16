@@ -82,6 +82,7 @@ class WebSocketService extends ChangeNotifier {
   final _sessionNudgeController = StreamController<SessionNudge>.broadcast();
   final _sessionChipController = StreamController<SessionChipState>.broadcast();
   final _sessionWrapController = StreamController<SessionWrap>.broadcast();
+  final _sessionAssistController = StreamController<SessionAssist>.broadcast();
   final _voiceController = StreamController<VoiceSession>.broadcast();
 
   /// Latest voice session state (snapshot for late-mounting UI); updates via
@@ -97,6 +98,8 @@ class WebSocketService extends ChangeNotifier {
   Stream<SessionChipState> get sessionChipStream =>
       _sessionChipController.stream;
   Stream<SessionWrap> get sessionWrapStream => _sessionWrapController.stream;
+  Stream<SessionAssist> get sessionAssistStream =>
+      _sessionAssistController.stream;
   Stream<VoiceSession> get voiceSessionStream => _voiceController.stream;
   Stream<FeedItem> get agentFeedStream => _agentFeedController.stream;
   Stream<bool> get thinkingStream => _thinkingController.stream;
@@ -505,6 +508,9 @@ class WebSocketService extends ChangeNotifier {
         case 'session_wrap':
           _sessionWrapController.add(SessionWrap.fromJson(json));
           break;
+        case 'session_assist':
+          _sessionAssistController.add(SessionAssist.fromJson(json));
+          break;
         case 'voice_session':
           final session = VoiceSession.fromJson(json);
           voiceSession = session;
@@ -748,11 +754,46 @@ class WebSocketService extends ChangeNotifier {
       true;
 
   /// Session actions: `wrapped` (wrap card confirm), `keep_going` (corrects a
-  /// too-eager decay model), `ended` (chip tap — a boundary correction).
+  /// too-eager decay model), `ended` (chip tap — a boundary correction), or
+  /// `later` (⚑ — wrap + a bookmark on the thread).
   /// Wrapping saves over the credited span; receipt on [saveReceiptStream].
   Future<bool> sessionAction(String sessionId, String action) async =>
       (await _postJson('/capture/session/action', {
         'sessionId': sessionId,
+        'action': action,
+      }))?['ok'] ==
+      true;
+
+  /// The bookmarked-session shelf (§9), most recent first.
+  Future<List<SessionBookmark>> fetchSessionBookmarks() async {
+    final base = _httpBase;
+    if (base == null) return const [];
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req =
+          await client.getUrl(Uri.parse('$base/capture/session/bookmarks'));
+      final resp = await req.close();
+      if (resp.statusCode != 200) return const [];
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return (data['bookmarks'] as List? ?? const [])
+          .whereType<Map>()
+          .map((m) => SessionBookmark.fromJson(m.cast<String, dynamic>()))
+          .toList();
+    } catch (e) {
+      _log('fetchSessionBookmarks failed: $e');
+      return const [];
+    } finally {
+      client?.close();
+    }
+  }
+
+  /// Shelf actions: ▶ `resume` starts a fresh session on the thread now
+  /// (chip arrives on [sessionChipStream]); ✕ `remove` releases the promise.
+  Future<bool> sessionBookmarkAction(String threadId, String action) async =>
+      (await _postJson('/capture/session/bookmark', {
+        'threadId': threadId,
         'action': action,
       }))?['ok'] ==
       true;
@@ -920,6 +961,7 @@ class WebSocketService extends ChangeNotifier {
     _sessionNudgeController.close();
     _sessionChipController.close();
     _sessionWrapController.close();
+    _sessionAssistController.close();
     _voiceController.close();
     super.dispose();
   }

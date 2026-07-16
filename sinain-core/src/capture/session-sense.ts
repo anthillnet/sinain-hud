@@ -5,6 +5,8 @@ import { EmbeddingService } from "../embedding/service.js";
 import type {
   SenseEvent,
   SessionAction,
+  SessionAssistMessage,
+  SessionBookmarkRow,
   SessionChipMessage,
   SessionNudgeGrade,
   SessionNudgeMessage,
@@ -12,7 +14,9 @@ import type {
   SessionSenseConfig,
   SessionWrapMessage,
 } from "../types.js";
+import type { SessionAssist } from "./window-ops.js";
 import type { OfferManager } from "./offer-manager.js";
+import { PriorStore } from "./prior-store.js";
 import type { SaveManager } from "./save-manager.js";
 import { deriveProject } from "./thread-identity.js";
 import { log, warn } from "../log.js";
@@ -133,8 +137,17 @@ const SETTLE_MAX_MS = 60_000;
 // candidate must not silently rot because the screen never went quiet.
 const SETTLE_FORCE_MS = 90_000;
 
+/** A classifier hit — either a stock prototype or a personal prior topic
+ *  (the two tiers of §5; personal wins when its signal is stronger). */
+interface WorkflowMatch {
+  kind: "stock" | "personal";
+  id: string;
+  label: string;
+  floor: CategoryFloor;
+}
+
 interface Candidate {
-  protoId: string;
+  match: WorkflowMatch;
   threadId: string;
   /** Retroactive credit start — pinned the moment the FIRST tick matched. */
   startTs: number;
@@ -148,7 +161,7 @@ interface Candidate {
 interface Session {
   id: string;
   threadId: string;
-  protoId: string | null;
+  match: WorkflowMatch | null;
   /** Display label — "" when tracking unlabeled ("just work"). */
   label: string;
   grade: SessionNudgeGrade;
@@ -165,16 +178,28 @@ interface Session {
   wrapPromptTs: number;
 }
 
+/** A bookmarked thread (§9): a flag + cumulative history, not an open
+ *  session. Nothing runs overnight; what persists is the promise. */
+interface Bookmark {
+  label: string;
+  sessions: number;
+  totalMs: number;
+  lastTs: number;
+  createdTs: number;
+}
+
 interface PersistedState {
   day: string;
   /** Once per thread per day (§7): threadId → last nudge ts. */
   nudgedThreads: Record<string, number>;
+  /** ⚑ bookmarks by threadId (§9). */
+  bookmarks: Record<string, Bookmark>;
 }
 
 interface PendingNudge {
   msg: SessionNudgeMessage;
   labelId: string;
-  protoId: string | null;
+  match: WorkflowMatch | null;
   apps: Set<string>;
 }
 
@@ -200,6 +225,10 @@ export class SessionSenseManager {
   /** Prototype centroids — embedded lazily once the model is ready. */
   private centroids: { proto: StockPrototype; vec: Float32Array }[] | null = null;
   private embeddingBusy = false;
+  /** Personal tier (§5): KG-pretrained topic priors (prior_builder.py) —
+   *  "Back on: <label>". Hot-reloads when the file changes; absent until the
+   *  builder has run at least once. */
+  private prior: PriorStore;
 
   /** Rolling OCR of the attended thread (per-tick classifier input). */
   private recentText: { text: string; ts: number }[] = [];
@@ -207,8 +236,8 @@ export class SessionSenseManager {
   private activeThreadLabel = "";
   private lastTickTs = 0;
   private lastSenseTs = 0;
-  /** Last tick's full ranking — the "Wrong?" picker's rows come from here. */
-  private lastScores: { id: string; label: string; sim: number; floor: CategoryFloor }[] = [];
+  /** Last tick's full ranking (both tiers) — the "Wrong?" picker's rows. */
+  private lastScores: { id: string; label: string; sim: number; floor: CategoryFloor; kind: "stock" | "personal" }[] = [];
   /** Policy A (§7): nudges shown, so a rung-1 offer never re-asks the episode. */
   private askedEpisodes: { threadId: string; ts: number }[] = [];
 
@@ -219,11 +248,16 @@ export class SessionSenseManager {
     private saveManager: SaveManager,
     /** Shared attention budget — offers and nudges are ONE allowance (§7). */
     private offers: OfferManager | null,
-    private broadcast: (msg: SessionNudgeMessage | SessionChipMessage | SessionWrapMessage) => void,
+    private broadcast: (msg: SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | SessionAssistMessage) => void,
     private memoryDir: string,
     private cfg: SessionSenseConfig,
+    /** Help-forward (§8 C): composes goal + next steps over the credited span
+     *  via the burst lane. Null when the burst lane is unavailable. Runs only
+     *  AFTER the tap — zero contract spent. */
+    private composeAssist: ((minutes: number, apps: string[], label: string) => Promise<SessionAssist | null>) | null = null,
   ) {
     this.state = this.loadState();
+    this.prior = new PriorStore(join(memoryDir, "workstate-prior.json"));
     this.housekeeping = setInterval(() => this.tick(), HOUSEKEEPING_MS);
     this.housekeeping.unref?.();
     log(TAG, cfg.enabled
@@ -239,7 +273,7 @@ export class SessionSenseManager {
   private get labelsPath(): string { return join(this.memoryDir, "capture-labels.jsonl"); }
 
   private loadState(): PersistedState {
-    const empty: PersistedState = { day: today(), nudgedThreads: {} };
+    const empty: PersistedState = { day: today(), nudgedThreads: {}, bookmarks: {} };
     try {
       if (!existsSync(this.statePath)) return empty;
       return { ...empty, ...JSON.parse(readFileSync(this.statePath, "utf-8")) };
@@ -364,12 +398,35 @@ export class SessionSenseManager {
     const scored = this.centroids
       .map((c) => ({ proto: c.proto, sim: EmbeddingService.cosine(vec, c.vec) }))
       .sort((a, b) => b.sim - a.sim);
-    const best = scored[0];
-    this.lastScores = scored.map((s) => ({
-      id: s.proto.id, label: s.proto.label, sim: s.sim, floor: s.proto.floor,
-    }));
 
-    if (best.sim < this.cfg.similarityThreshold) {
+    // Two-tier ranking (§5): personal prior topics compete with the stock
+    // library on the same cosine scale; the personal tier wins ties — the KG
+    // already knows this thread by name, with recurrence behind it.
+    this.prior.reload();
+    const personal = this.prior.ready
+      ? this.prior.topMatches(vec, 3, this.cfg.similarityThreshold)
+      : [];
+    this.lastScores = [
+      ...personal.map((m) => ({
+        id: `personal:${m.topic.id}`, label: m.topic.label,
+        sim: m.similarity, floor: "none" as CategoryFloor, kind: "personal" as const,
+      })),
+      ...scored.map((s) => ({
+        id: s.proto.id, label: s.proto.label, sim: s.sim,
+        floor: s.proto.floor, kind: "stock" as const,
+      })),
+    ].sort((a, b) => b.sim - a.sim);
+
+    const stockBest = scored[0];
+    const personalBest = personal[0];
+    const usePersonal =
+      personalBest !== undefined && personalBest.similarity >= stockBest.sim;
+    const bestSim = usePersonal ? personalBest.similarity : stockBest.sim;
+    const bestMatch: WorkflowMatch = usePersonal
+      ? { kind: "personal", id: personalBest.topic.id, label: personalBest.topic.label, floor: "none" }
+      : { kind: "stock", id: stockBest.proto.id, label: stockBest.proto.label, floor: stockBest.proto.floor };
+
+    if (bestSim < this.cfg.similarityThreshold) {
       // Below the floor: a matching run is broken; a confirmed candidate
       // decays silently (most candidates are never prompted — §4).
       if (this.candidate && !this.candidate.confirmedAt) this.candidate = null;
@@ -377,23 +434,24 @@ export class SessionSenseManager {
     }
 
     const c = this.candidate;
-    if (c && c.threadId === this.activeThreadId && c.protoId === best.proto.id) {
+    if (c && c.threadId === this.activeThreadId &&
+        c.match.kind === bestMatch.kind && c.match.id === bestMatch.id) {
       c.ticks++;
-      c.bestSim = Math.max(c.bestSim, best.sim);
+      c.bestSim = Math.max(c.bestSim, bestSim);
       c.apps.add(app);
       if (!c.confirmedAt && c.ticks >= this.cfg.dwellTicks) {
         c.confirmedAt = ts;
-        log(TAG, `candidate confirmed: ${best.proto.id} on ${c.threadId} (sim ${best.sim.toFixed(2)}, credited from ${new Date(c.startTs).toISOString()})`);
+        log(TAG, `candidate confirmed: ${bestMatch.kind}/${bestMatch.id} on ${c.threadId} (sim ${bestSim.toFixed(2)}, credited from ${new Date(c.startTs).toISOString()})`);
       }
     } else if (!c || !c.confirmedAt) {
       // New matching run — the credit is pinned HERE (§4): accepting later
       // credits everything from this moment.
       this.candidate = {
-        protoId: best.proto.id,
+        match: bestMatch,
         threadId: this.activeThreadId,
         startTs: this.recentText[0]?.ts ?? ts,
         ticks: 1,
-        bestSim: best.sim,
+        bestSim,
         confirmedAt: null,
         apps: new Set([app]),
       };
@@ -457,35 +515,47 @@ export class SessionSenseManager {
 
   private maybePrompt(c: Candidate, now: number): void {
     this.rollDay();
-    const proto = STOCK_PROTOTYPES.find((p) => p.id === c.protoId);
-    if (!proto) { this.candidate = null; return; }
+    const match = c.match;
 
     const skip = (why: string): void => {
-      log(TAG, `${c.threadId}: candidate ${c.protoId} not prompted — ${why}`);
+      log(TAG, `${c.threadId}: candidate ${match.kind}/${match.id} not prompted — ${why}`);
       this.candidate = null;
     };
 
     // Category floor (§7): medical/dating never nudge, at any confidence.
-    if (proto.floor === "silent") return skip("category floor (silent)");
-    // Once per thread per day (§7).
+    if (match.floor === "silent") return skip("category floor (silent)");
+    // Once per thread per day (§7) — applies to resume nudges too.
     if (this.state.nudgedThreads[c.threadId]) return skip("thread already nudged today");
-    // One attention budget, shared with rung 1 (§7).
-    const budget = this.offers?.budgetAllows() ?? { ok: true };
-    if (!budget.ok) return skip(budget.why ?? "budget");
+
+    // Bookmark return (§9): the ⚑ marks the user's own promise, not the
+    // classifier's guess — so it rides OUTSIDE the daily nudge cap (they
+    // asked to be reminded), though still breakpoint-gated and once per day.
+    const bookmark = this.state.bookmarks[c.threadId];
+    if (!bookmark) {
+      // One attention budget, shared with rung 1 (§7).
+      const budget = this.offers?.budgetAllows() ?? { ok: true };
+      if (!budget.ok) return skip(budget.why ?? "budget");
+    }
 
     // Confidence buys the label, never the card (§2): high similarity earns
     // the claim; medium drops it entirely — never hedged. Floored categories
-    // are always unlabeled regardless of confidence.
+    // are always unlabeled regardless of confidence. A bookmark's own label
+    // always renders — it is the user's, not a claim.
     const high = c.bestSim >= this.cfg.similarityThreshold + this.cfg.labelMargin;
-    const labeled = high && proto.floor === "none";
-    const grade: SessionNudgeGrade = labeled ? "stock" : "unlabeled";
+    const labeled = bookmark !== undefined || (high && match.floor === "none");
+    const grade: SessionNudgeGrade = labeled
+      ? (bookmark || match.kind === "personal" ? "personal" : "stock")
+      : "unlabeled";
 
-    // "Wrong?" rows: the classifier's own next candidates by similarity (§3).
-    // Silent-floor prototypes never appear — self-labeling may reveal a
-    // category, the card may not propose one.
-    const alternates = labeled
+    // "Wrong?" rows: the classifier's own next candidates by similarity (§3),
+    // both tiers mixed. Silent-floor prototypes never appear — self-labeling
+    // may reveal a category, the card may not propose one. Resume nudges get
+    // "Not this" instead of a picker — the correction is about the match.
+    const seen = new Set<string>();
+    const alternates = labeled && !bookmark
       ? this.lastScores
-          .filter((p) => p.id !== proto.id && p.floor !== "silent")
+          .filter((p) => p.label !== match.label && p.floor !== "silent")
+          .filter((p) => !seen.has(p.label) && seen.add(p.label))
           .slice(0, 3)
           .map((p) => p.label)
       : [];
@@ -495,17 +565,23 @@ export class SessionSenseManager {
       type: "session_nudge",
       nudgeId,
       grade,
-      label: labeled ? proto.label : undefined,
+      label: bookmark ? bookmark.label : labeled ? match.label : undefined,
       threadId: c.threadId,
       candidateStartTs: c.startTs,
       elapsedMinutes: Math.max(1, Math.round((now - c.startTs) / 60_000)),
       apps: [...c.apps],
       alternates,
+      ...(bookmark ? {
+        resume: true,
+        resumeMeta: describeBookmark(bookmark, now),
+      } : {}),
       expirySeconds: this.cfg.expirySeconds,
       ts: now,
     };
 
-    this.offers?.consumeAsk();
+    // A resume nudge is the user's own reminder — it never spends the shared
+    // attention budget.
+    if (!bookmark) this.offers?.consumeAsk();
     this.state.nudgedThreads[c.threadId] = now;
     this.saveState();
     this.askedEpisodes.push({ threadId: c.threadId, ts: now });
@@ -514,12 +590,12 @@ export class SessionSenseManager {
     const labelId = `ss-${nudgeId}`;
     this.appendLabel({
       id: labelId, ts: now, kind: "session_sense", stage: 2,
-      threadId: c.threadId, protoId: proto.id, grade,
+      threadId: c.threadId, tier: match.kind, protoId: match.id, grade,
       similarity: Number(c.bestSim.toFixed(3)),
       candidateStartTs: c.startTs, elapsedMinutes: msg.elapsedMinutes,
       decision: "nudged",
     });
-    this.pendingNudge = { msg, labelId, protoId: proto.id, apps: c.apps };
+    this.pendingNudge = { msg, labelId, match, apps: c.apps };
     this.candidate = null;
     setTimeout(() => {
       // Server-side TTL well past client expiry — abandoned asks don't linger.
@@ -555,7 +631,9 @@ export class SessionSenseManager {
         break;
       }
       case "dismissed":
-        this.offers?.noteDismissal();
+        // "Not this" on a resume nudge is a match correction, not a rejection
+        // of asking — it keeps the bookmark and never feeds the day-off streak.
+        if (!pending.msg.resume) this.offers?.noteDismissal();
         break;
       case "expired":
         break; // weak negative — counted lighter than ✕ (§3)
@@ -577,7 +655,7 @@ export class SessionSenseManager {
     this.session = {
       id,
       threadId: pending.msg.threadId,
-      protoId: pending.protoId,
+      match: pending.match,
       label,
       grade,
       startTs: pending.msg.candidateStartTs,
@@ -590,7 +668,41 @@ export class SessionSenseManager {
     };
     this.candidate = null;
     this.broadcastChip(this.session, "running");
+    this.fireAssist(this.session);
     return id;
+  }
+
+  /** Help-forward (§8 C): compose goal + next steps over the credited span,
+   *  on the tap. Floored workflows never get an assist card, at any
+   *  confidence, in any variant (§8 rules). */
+  private fireAssist(s: Session): void {
+    if (!this.composeAssist) return;
+    if (s.match && s.match.floor !== "none") return;
+    const minutes = Math.min(
+      this.cfg.maxSessionMinutes,
+      Math.max(1, Math.ceil((Date.now() - s.startTs) / 60_000)),
+    );
+    const sessionId = s.id;
+    this.broadcast({ type: "session_assist", sessionId, status: "working", ts: Date.now() });
+    void this.composeAssist(minutes, [...s.apps], s.label)
+      .then((assist) => {
+        if (this.session?.id !== sessionId) return; // session already gone
+        if (!assist || (!assist.goal && assist.steps.length === 0)) {
+          this.broadcast({ type: "session_assist", sessionId, status: "error", error: "nothing composed", ts: Date.now() });
+          return;
+        }
+        this.broadcast({
+          type: "session_assist", sessionId, status: "ready",
+          goal: assist.goal, steps: assist.steps, ts: Date.now(),
+        });
+        log(TAG, `${sessionId}: assist ready (${assist.steps.length} steps)`);
+      })
+      .catch((err) => {
+        this.broadcast({
+          type: "session_assist", sessionId, status: "error",
+          error: String(err).slice(0, 160), ts: Date.now(),
+        });
+      });
   }
 
   // ── Session actions (chip / wrap card) ──────────────────────────────────────
@@ -607,10 +719,81 @@ export class SessionSenseManager {
         return { ok: true, saveId: this.wrapSession(s, "wrap_confirmed") };
       case "ended":
         return { ok: true, saveId: this.wrapSession(s, "chip_ended") };
+      case "later": {
+        // ⚑ Later = Wrap up + a promise (§9). Same receipt, same undo; the
+        // thread gains a bookmark. Always an explicit act — auto-wrap never
+        // bookmarks.
+        this.bookmarkThread(s.threadId, s.label || "session");
+        return { ok: true, saveId: this.wrapSession(s, "wrap_later") };
+      }
       case "keep_going":
         this.keepGoing(s, "user said keep going");
         return { ok: true };
     }
+  }
+
+  // ── Bookmarks (§9): the shelf, ⚑, resume, release ───────────────────────────
+
+  private bookmarkThread(threadId: string, label: string): void {
+    const existing = this.state.bookmarks[threadId];
+    this.state.bookmarks[threadId] = existing
+      ? { ...existing, label: existing.label || label }
+      : { label, sessions: 0, totalMs: 0, lastTs: Date.now(), createdTs: Date.now() };
+    this.saveState();
+    log(TAG, `⚑ bookmarked ${threadId} ("${label}")`);
+  }
+
+  /** Shelf rows, most recent first. kgPath resolution is the server's job. */
+  listBookmarks(): SessionBookmarkRow[] {
+    return Object.entries(this.state.bookmarks)
+      .map(([threadId, b]) => ({
+        threadId, label: b.label, sessions: b.sessions,
+        totalMs: b.totalMs, lastTs: b.lastTs,
+      }))
+      .sort((a, b) => b.lastTs - a.lastTs);
+  }
+
+  /** Shelf actions: ▶ resume starts a fresh session on the thread NOW (no
+   *  detection wait, no nudge — §9); ✕ releases the promise. */
+  bookmarkAction(threadId: string, action: "resume" | "remove"):
+      { ok: boolean; sessionId?: string; error?: string } {
+    const bookmark = this.state.bookmarks[threadId];
+    if (!bookmark) return { ok: false, error: "no such bookmark" };
+
+    if (action === "remove") {
+      delete this.state.bookmarks[threadId];
+      this.saveState();
+      this.appendLabel({
+        id: `ss-bm-${Date.now().toString(36)}`, ts: Date.now(),
+        kind: "session_sense", event: "bookmark_released", threadId,
+      });
+      return { ok: true };
+    }
+
+    if (this.session) return { ok: false, error: "a session is already running" };
+    const now = Date.now();
+    const id = `sess-${now.toString(36)}-${randomBytes(3).toString("hex")}`;
+    this.session = {
+      id,
+      threadId,
+      match: null,
+      label: bookmark.label,
+      grade: "personal",
+      startTs: now, // a fresh session — no retroactive credit on manual resume
+      activeMs: 0,
+      runningSince: now,
+      lastActiveTs: now,
+      paused: false,
+      apps: new Set(),
+      wrapPromptTs: 0,
+    };
+    this.broadcastChip(this.session, "running");
+    this.appendLabel({
+      id: `ss-bm-${now.toString(36)}`, ts: now, kind: "session_sense",
+      event: "bookmark_resumed", threadId, sessionId: id,
+    });
+    log(TAG, `⚑ resumed ${threadId} → ${id}`);
+    return { ok: true, sessionId: id };
   }
 
   private keepGoing(s: Session, why: string): void {
@@ -648,7 +831,7 @@ export class SessionSenseManager {
   /** tracking/ending → summary: the standard save lifecycle over the credited
    *  span — candidateStart → end, honestly, pauses included in the receipt's
    *  span math. Undo remains a true cancel. */
-  private wrapSession(s: Session, how: "wrap_confirmed" | "auto_wrap" | "chip_ended"): string {
+  private wrapSession(s: Session, how: "wrap_confirmed" | "auto_wrap" | "chip_ended" | "wrap_later"): string {
     const now = Date.now();
     const minutes = Math.min(
       this.cfg.maxSessionMinutes,
@@ -657,6 +840,17 @@ export class SessionSenseManager {
     const apps = [...s.apps];
     // Scope to the session's own apps — never "mic" (privacy floor, §7).
     const saveId = this.saveManager.save(minutes, apps.length ? { apps } : undefined, "session_sense");
+
+    // Cumulative bookmark history (§9): sessions link by thread id — three
+    // workouts, one habit. Any wrap on a bookmarked thread counts.
+    const bookmark = this.state.bookmarks[s.threadId];
+    if (bookmark) {
+      bookmark.sessions++;
+      bookmark.totalMs += this.activeMsOf(s, now);
+      bookmark.lastTs = now;
+      if (s.label) bookmark.label = s.label;
+      this.saveState();
+    }
 
     this.appendLabel({
       id: `ss-wrap-${s.id}`, ts: now, kind: "session_sense", event: "wrap_response",
@@ -695,6 +889,24 @@ export class SessionSenseManager {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** "bookmarked yesterday · 2 sessions · 1h 19m so far" — the resume card's
+ *  history line, composed core-side so every token is checkable. */
+function describeBookmark(b: { createdTs: number; sessions: number; totalMs: number }, now: number): string {
+  const days = Math.floor((now - b.createdTs) / 86_400_000);
+  const when = days <= 0 ? "today" : days === 1 ? "yesterday" : `${days}d ago`;
+  const parts = [`bookmarked ${when}`];
+  if (b.sessions > 0) {
+    parts.push(`${b.sessions} session${b.sessions === 1 ? "" : "s"}`);
+    parts.push(`${fmtDuration(b.totalMs)} so far`);
+  }
+  return parts.join(" · ");
+}
+
+function fmtDuration(ms: number): string {
+  const m = Math.round(ms / 60_000);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${(m % 60).toString().padStart(2, "0")}m` : `${m}m`;
 }
 
 /** Mean of unit vectors, re-normalized — one centroid per prototype. */

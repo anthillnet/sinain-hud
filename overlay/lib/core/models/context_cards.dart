@@ -219,6 +219,13 @@ class SessionNudge {
 
   /// "Wrong?" picker rows (classifier's next candidates; may be empty).
   final List<String> alternates;
+
+  /// Bookmark return (§9): "Resume this session?" — the ⚑ marks the user's
+  /// own promise, not the classifier's guess.
+  final bool resume;
+
+  /// "bookmarked yesterday · 2 sessions · 1h 19m so far" (resume only).
+  final String? resumeMeta;
   final int expirySeconds;
 
   const SessionNudge({
@@ -230,6 +237,8 @@ class SessionNudge {
     required this.elapsedMinutes,
     required this.apps,
     required this.alternates,
+    this.resume = false,
+    this.resumeMeta,
     required this.expirySeconds,
   });
 
@@ -243,7 +252,78 @@ class SessionNudge {
         apps: (json['apps'] as List? ?? const []).map((e) => '$e').toList(),
         alternates:
             (json['alternates'] as List? ?? const []).map((e) => '$e').toList(),
+        resume: json['resume'] as bool? ?? false,
+        resumeMeta: json['resumeMeta'] as String?,
         expirySeconds: (json['expirySeconds'] as num?)?.toInt() ?? 45,
+      );
+}
+
+/// Help-forward assist (WS `session_assist`, §8 C): goal + next steps
+/// composed on the track tap — help offered on a fact, not a guess.
+class SessionAssist {
+  final String sessionId;
+  final String status; // working | ready | error
+  final String goal;
+  final List<String> steps;
+  final String? error;
+
+  const SessionAssist({
+    required this.sessionId,
+    required this.status,
+    required this.goal,
+    required this.steps,
+    this.error,
+  });
+
+  bool get ready => status == 'ready';
+
+  factory SessionAssist.fromJson(Map<String, dynamic> json) => SessionAssist(
+        sessionId: json['sessionId'] as String? ?? '',
+        status: json['status'] as String? ?? 'error',
+        goal: json['goal'] as String? ?? '',
+        steps: (json['steps'] as List? ?? const []).map((e) => '$e').toList(),
+        error: json['error'] as String?,
+      );
+}
+
+/// A bookmarked session thread (§9) — one shelf row.
+class SessionBookmark {
+  final String threadId;
+  final String label;
+  final int sessions;
+  final int totalMs;
+  final int lastTs;
+
+  /// Wiki path for ↗ share (existing KG share mechanic lives on the entity
+  /// page); null when the KG doesn't know the thread by name yet.
+  final String? kgPath;
+
+  const SessionBookmark({
+    required this.threadId,
+    required this.label,
+    required this.sessions,
+    required this.totalMs,
+    required this.lastTs,
+    this.kgPath,
+  });
+
+  String get meta {
+    final m = (totalMs / 60000).round();
+    final dur = m >= 60 ? '${m ~/ 60}h ${(m % 60).toString().padLeft(2, '0')}m' : '${m}m';
+    final ago = DateTime.now().millisecondsSinceEpoch - lastTs;
+    final days = ago ~/ 86400000;
+    final when = days <= 0 ? 'today' : days == 1 ? 'yesterday' : '${days}d ago';
+    return sessions > 0 ? '$sessions session${sessions == 1 ? '' : 's'} · $dur · $when' : when;
+  }
+
+  factory SessionBookmark.fromJson(Map<String, dynamic> json) =>
+      SessionBookmark(
+        threadId: json['threadId'] as String? ?? '',
+        label: json['label'] as String? ?? 'session',
+        sessions: (json['sessions'] as num?)?.toInt() ?? 0,
+        totalMs: (json['totalMs'] as num?)?.toInt() ?? 0,
+        lastTs: (json['lastTs'] as num?)?.toInt() ?? 0,
+        kgPath: json['kgPath'] as String?,
       );
 }
 

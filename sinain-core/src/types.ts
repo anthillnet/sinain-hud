@@ -404,6 +404,12 @@ export interface SessionNudgeMessage {
   /** "Wrong?" picker rows: the classifier's own next candidates (top-3).
    *  The overlay appends "Just work — no label" itself. */
   alternates: string[];
+  /** Bookmark return (§9): the ⚑ marks the user's own promise, not the
+   *  classifier's guess — the card renders "Resume this session?" with ▶. */
+  resume?: boolean;
+  /** Pre-composed history line for resume nudges, e.g.
+   *  "bookmarked yesterday · 2 sessions · 1h 19m so far". */
+  resumeMeta?: string;
   /** Client-side silent-fade horizon (~45s). */
   expirySeconds: number;
   ts: number;
@@ -442,10 +448,37 @@ export interface SessionWrapMessage {
 }
 
 /** Overlay → core session actions: wrap now, keep going (corrects a too-eager
- *  decay model), or end from the chip (boundary correction). */
-export type SessionAction = "wrapped" | "keep_going" | "ended";
+ *  decay model), end from the chip (boundary correction), or "⚑ Later" —
+ *  wrap + a bookmark on the thread (§9: a flag, not an open session). */
+export type SessionAction = "wrapped" | "keep_going" | "ended" | "later";
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | VoiceSessionMessage;
+/** Help-forward (§8, variant C): goal + next steps composed ON the track tap
+ *  via the burst lane — consent already given, zero contract spent. */
+export interface SessionAssistMessage {
+  type: "session_assist";
+  sessionId: string;
+  status: "working" | "ready" | "error";
+  goal?: string;
+  steps?: string[];
+  error?: string;
+  ts: number;
+}
+
+/** A bookmarked thread (§9): the persisted promise. Meta is cumulative —
+ *  sessions so far · total time · last touched. */
+export interface SessionBookmarkRow {
+  threadId: string;
+  label: string;
+  sessions: number;
+  totalMs: number;
+  lastTs: number;
+  /** Wiki path for ↗ share — resolved against the KG when an entity matches
+   *  (e.g. "/knowledge/ui/entity/oxigraph-migration"); the existing share
+   *  mechanic (opt-out entity list, share links) lives on that page. */
+  kgPath?: string;
+}
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | SessionAssistMessage | VoiceSessionMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */

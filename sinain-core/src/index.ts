@@ -1869,10 +1869,29 @@ async function main() {
   // features, zero LLM until the tap. Shares the rung-1 attention budget;
   // a nudge shown consumes the episode's one ask (policy A).
   const { SessionSenseManager } = await import("./capture/session-sense.js");
+  const { assistNextSteps } = await import("./capture/window-ops.js");
+  // Help-forward (§8 C): goal + next steps composed ON the track tap via the
+  // burst lane — consent already given. Null when the lane is unavailable.
+  const composeSessionAssist = config.burstConfig.enabled && config.burstConfig.apiKey
+    ? async (minutes: number, apps: string[], label: string) => {
+        const slice = assembleWindow(feedBuffer, senseBuffer, minutes, apps.length ? { apps } : undefined);
+        if (slice.lineCount === 0) return null;
+        const { assist, result } = await assistNextSteps(config.burstConfig, slice, label);
+        if (!result.cached) {
+          costTracker.record({
+            source: "burst", model: config.burstConfig.model,
+            cost: 0, tokensIn: result.tokensIn, tokensOut: result.tokensOut, ts: Date.now(),
+          });
+          burstMetrics.record({ gesture: "assist", tokensIn: result.tokensIn, tokensOut: result.tokensOut, latencyMs: result.latencyMs, cacheKey: "sinain-assist-v1", stats: slice.stats });
+        }
+        return assist;
+      }
+    : null;
   const sessionSense = new SessionSenseManager(
     embeddingService!, saveManager, offerManager,
     (msg) => wsHandler.broadcastRaw(msg),
     resolveLocalMemoryDir(), config.sessionSenseConfig,
+    composeSessionAssist,
   );
   offerManager.setEpisodeConsumedCheck((threadId, startTs, endTs) =>
     sessionSense.wasAskedDuring(threadId, startTs, endTs));
@@ -1983,6 +2002,9 @@ async function main() {
       sessionSense.respond(nudgeId, response as import("./types.js").SessionNudgeResponse, label),
     sessionAction: (sessionId, action) =>
       sessionSense.sessionAction(sessionId, action as import("./types.js").SessionAction),
+    sessionBookmarks: () => sessionSense.listBookmarks(),
+    sessionBookmarkAction: (threadId, action) =>
+      sessionSense.bookmarkAction(threadId, action as "resume" | "remove"),
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),

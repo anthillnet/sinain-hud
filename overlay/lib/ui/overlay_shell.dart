@@ -129,9 +129,16 @@ class OverlayShellState extends State<OverlayShell> {
   Timer? _nudgeExpiryTimer;
   SessionChipState? _sessionChip;
   SessionWrap? _sessionWrap;
+  // Help-forward (§8 C): composed on the tap; the chip's "✦ next steps"
+  // affordance reveals it. Never auto-opens.
+  SessionAssist? _sessionAssist;
+  bool _assistVisible = false;
+  // The bookmarked-sessions shelf (§9), opened from the eye menu.
+  List<SessionBookmark>? _sessionShelf;
   StreamSubscription<SessionNudge>? _nudgeSub;
   StreamSubscription<SessionChipState>? _chipSub;
   StreamSubscription<SessionWrap>? _wrapSub;
+  StreamSubscription<SessionAssist>? _assistSub;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -338,12 +345,23 @@ class OverlayShellState extends State<OverlayShell> {
       if (!mounted) return;
       setState(() => _sessionChip = c.ended ? null : c);
       if (c.ended) {
-        // The wrap card's job is done — the receipt takes the slot.
-        setState(() => _sessionWrap = null);
+        // The wrap card's job is done — the receipt takes the slot. The
+        // assist dies with its session.
+        setState(() {
+          _sessionWrap = null;
+          _sessionAssist = null;
+          _assistVisible = false;
+        });
         _maybeExitCardMode();
       } else {
         _enterCardMode();
       }
+    });
+    _assistSub = ws.sessionAssistStream.listen((a) {
+      if (!mounted) return;
+      // Only ready assists surface; working/error stay silent — the ✦
+      // affordance simply doesn't appear (never a spinner, never an apology).
+      if (a.ready) setState(() => _sessionAssist = a);
     });
     _wrapSub = ws.sessionWrapStream.listen((w) {
       if (!mounted) return;
@@ -860,6 +878,9 @@ class OverlayShellState extends State<OverlayShell> {
       // "Copy for agent" action produces the same agent-grade seed, visibly.
       {'id': 'capBuild', 'title': 'Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
+      // The bookmarked-session shelf (§9) — in the eye's menu, not a new
+      // surface.
+      {'id': 'sessions', 'title': 'Bookmarked Sessions…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
@@ -885,6 +906,8 @@ class OverlayShellState extends State<OverlayShell> {
         // (card mode) follows with the region as its focus. A default-range
         // window brief is prefetched for the region thread's opening context.
         await _startRegionSelect();
+      case 'sessions':
+        await _showSessionShelf();
       case 'copySeed':
         await _copySeedForActiveThread();
       case 'reset':
@@ -1135,6 +1158,7 @@ class OverlayShellState extends State<OverlayShell> {
     _nudgeSub?.cancel();
     _chipSub?.cancel();
     _wrapSub?.cancel();
+    _assistSub?.cancel();
     _nudgeExpiryTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
@@ -1444,6 +1468,7 @@ class OverlayShellState extends State<OverlayShell> {
         _sessionNudge != null ||
         _sessionChip != null ||
         _sessionWrap != null ||
+        _sessionShelf != null ||
         _voiceSession != null) {
       return;
     }
@@ -1597,6 +1622,58 @@ class OverlayShellState extends State<OverlayShell> {
     context.read<WebSocketService>().sessionAction(c.sessionId, 'ended');
   }
 
+  /// "⚑ Later" (§9): Wrap up + a promise — the thread gains a bookmark.
+  void _wrapSessionLater() {
+    final w = _sessionWrap;
+    if (w == null) return;
+    context.read<WebSocketService>().sessionAction(w.sessionId, 'later');
+    setState(() => _sessionWrap = null);
+  }
+
+  // ── Bookmarked-sessions shelf (§9) ────────────────────────────────────────
+
+  Future<void> _showSessionShelf() async {
+    final ws = context.read<WebSocketService>();
+    final rows = await ws.fetchSessionBookmarks();
+    if (!mounted) return;
+    setState(() => _sessionShelf = rows);
+    _enterCardMode();
+  }
+
+  void _dismissSessionShelf() {
+    setState(() => _sessionShelf = null);
+    _maybeExitCardMode();
+  }
+
+  /// ▶ on a shelf row: a fresh session on the same thread, immediately —
+  /// no detection wait, no nudge. The chip arrives on [sessionChipStream].
+  Future<void> _resumeBookmark(SessionBookmark b) async {
+    final ws = context.read<WebSocketService>();
+    await ws.sessionBookmarkAction(b.threadId, 'resume');
+    if (mounted) _dismissSessionShelf();
+  }
+
+  /// ↗ share: open the session's KG view in the browser — the existing
+  /// knowledge-share mechanic (opt-out entity list, share links) lives on
+  /// the wiki entity page.
+  Future<void> _shareBookmark(SessionBookmark b) async {
+    final base = context.read<WebSocketService>().httpBase;
+    if (base == null) return;
+    final uri = Uri.parse('$base${b.kgPath ?? '/knowledge/ui'}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// ✕ releases the promise; the shelf re-renders without the row.
+  Future<void> _removeBookmark(SessionBookmark b) async {
+    final ws = context.read<WebSocketService>();
+    await ws.sessionBookmarkAction(b.threadId, 'remove');
+    if (!mounted) return;
+    setState(() => _sessionShelf =
+        _sessionShelf?.where((r) => r.threadId != b.threadId).toList());
+  }
+
   /// Hand off from card mode into a full HUD state (e.g. the conversation the
   /// card just seeded).
   void _leaveCardModeFor(HudState target) {
@@ -1623,6 +1700,29 @@ class OverlayShellState extends State<OverlayShell> {
             child: SessionChip(
               session: _sessionChip!,
               onEnd: _endSessionFromChip,
+              onAssist: _sessionAssist?.ready == true &&
+                      _sessionAssist!.sessionId == _sessionChip!.sessionId
+                  ? () => setState(() => _assistVisible = !_assistVisible)
+                  : null,
+            ),
+          ),
+        if (_assistVisible && _sessionAssist != null && _sessionChip != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionAssistCard(
+              assist: _sessionAssist!,
+              onDismiss: () => setState(() => _assistVisible = false),
+            ),
+          ),
+        if (_sessionShelf != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionShelfCard(
+              bookmarks: _sessionShelf!,
+              onResume: _resumeBookmark,
+              onShare: _shareBookmark,
+              onRemove: _removeBookmark,
+              onDismiss: _dismissSessionShelf,
             ),
           ),
         if (_sessionNudge != null)
@@ -1641,6 +1741,7 @@ class OverlayShellState extends State<OverlayShell> {
             child: SessionWrapCard(
               wrap: _sessionWrap!,
               onWrapUp: _wrapSession,
+              onLater: _wrapSessionLater,
               onKeepGoing: _keepGoingSession,
               onDismiss: _dismissWrapCard,
             ),
