@@ -53,6 +53,23 @@ def _model():
     return _embed_model
 
 
+def _encode(texts: list[str]) -> list[list[float]]:
+    """Embed via sinain-core's warm /embed endpoint when available (embed_client),
+    falling back to the in-process model. Same all-MiniLM-L6-v2 either way, so
+    vectors are interchangeable; retrieval normalizes both sides, so embed_client's
+    pre-normalized output is fine. The point: when core is up (production saves),
+    the integrator subprocess never pays the ~5s torch import + weight load just
+    to embed a handful of windows."""
+    try:
+        from embed_client import embed
+        vecs = embed(texts)
+        if vecs is not None and len(vecs) == len(texts):
+            return vecs
+    except Exception:
+        pass
+    return [list(map(float, v)) for v in _model().encode(texts, show_progress_bar=False)]
+
+
 def _window_split(text: str) -> list[str]:
     """Split one raw text into embedding-sized windows.
 
@@ -114,25 +131,55 @@ def _window_chunks(chunks: list[str], session_offset: int = 0) -> list[tuple[str
     return out
 
 
+def _meta_path(sidecar: Path) -> Path:
+    return sidecar.with_suffix(sidecar.suffix + ".meta.json")
+
+
 def _scan_sidecar(sidecar: Path) -> tuple[int, int]:
-    """Single pass over an existing sidecar: returns (chunk_count, max_session_id).
-    Used by append_chunks to continue both the global chunk id and the session id
-    without colliding across batches. (-1 session id => no prior records.)"""
+    """Return (chunk_count, max_session_id) for an existing sidecar. Used by
+    append_chunks to continue both the global chunk id and the session id
+    without colliding across batches. (-1 session id => no prior records.)
+
+    O(1) via a meta sidecar: a full JSONL parse of the whole file per append
+    cost ~4s at 73K records and grew with history. The meta file records
+    {count, max_session_id, size}; `size` (the sidecar's byte length when the
+    meta was written) detects any out-of-band change — mismatch falls back to
+    one full rescan, after which _write_meta repairs it."""
+    if not sidecar.exists():
+        return 0, -1
+    meta = _meta_path(sidecar)
+    try:
+        m = json.loads(meta.read_text())
+        if int(m["size"]) == sidecar.stat().st_size:
+            return int(m["count"]), int(m["max_session_id"])
+    except Exception:
+        pass  # missing/corrupt/stale meta → full scan below
     count = 0
     max_sid = -1
-    if sidecar.exists():
-        with sidecar.open() as fh:
-            for ln in fh:
-                if not ln.strip():
-                    continue
-                count += 1
-                try:
-                    sid = json.loads(ln).get("session_id")
-                    if sid is not None:
-                        max_sid = max(max_sid, int(sid))
-                except Exception:
-                    pass
+    with sidecar.open() as fh:
+        for ln in fh:
+            if not ln.strip():
+                continue
+            count += 1
+            try:
+                sid = json.loads(ln).get("session_id")
+                if sid is not None:
+                    max_sid = max(max_sid, int(sid))
+            except Exception:
+                pass
     return count, max_sid
+
+
+def _write_meta(sidecar: Path, count: int, max_sid: int) -> None:
+    """Persist append bookkeeping (atomic tmp→rename). Best-effort: on any
+    failure the next _scan_sidecar just falls back to a full scan."""
+    try:
+        tmp = _meta_path(sidecar).with_suffix(".tmp")
+        tmp.write_text(json.dumps(
+            {"count": count, "max_session_id": max_sid, "size": sidecar.stat().st_size}))
+        tmp.rename(_meta_path(sidecar))
+    except Exception as e:
+        print(f"[raw_store] meta write failed (non-fatal): {e}", file=sys.stderr)
 
 
 def write_chunks(store_path: str, chunks: list[str]) -> int:
@@ -147,15 +194,18 @@ def write_chunks(store_path: str, chunks: list[str]) -> int:
         return 0
     texts = [w[0] for w in windowed]
     try:
-        embs = _model().encode(texts, show_progress_bar=False)
+        embs = _encode(texts)
     except Exception as e:
         print(f"[raw_store] embed failed (non-fatal): {e}", file=sys.stderr)
         return 0
     sidecar.parent.mkdir(parents=True, exist_ok=True)
+    max_sid = -1
     with open(sidecar, "w") as f:
         for i, ((text, sid, wi), emb) in enumerate(zip(windowed, embs)):
+            max_sid = max(max_sid, sid)
             f.write(json.dumps({"id": i, "session_id": sid, "window_idx": wi,
                                 "text": text, "emb": [float(x) for x in emb]}) + "\n")
+    _write_meta(sidecar, len(windowed), max_sid)
     return len(windowed)
 
 
@@ -171,15 +221,18 @@ def append_chunks(store_path: str, chunks: list[str]) -> int:
         return 0
     texts = [w[0] for w in windowed]
     try:
-        embs = _model().encode(texts, show_progress_bar=False)
+        embs = _encode(texts)
     except Exception as e:
         print(f"[raw_store] append embed failed (non-fatal): {e}", file=sys.stderr)
         return 0
     sidecar.parent.mkdir(parents=True, exist_ok=True)
+    max_sid = -1
     with open(sidecar, "a") as f:
         for j, ((text, sid, wi), emb) in enumerate(zip(windowed, embs)):
+            max_sid = max(max_sid, sid)
             f.write(json.dumps({"id": start + j, "session_id": sid, "window_idx": wi,
                                 "text": text, "emb": [float(x) for x in emb]}) + "\n")
+    _write_meta(sidecar, start + len(windowed), max_sid)
     return len(windowed)
 
 
@@ -267,7 +320,7 @@ def retrieve_chunks(store_path: str, query: str, k: int = 3, max_chars: int = 12
             return []
         # --- semantic ranking ---
         mat = np.array([r["emb"] for r in recs], dtype=float)
-        q = np.array(_model().encode([query], show_progress_bar=False)[0], dtype=float)
+        q = np.array(_encode([query])[0], dtype=float)
         sims = mat @ q / (np.linalg.norm(mat, axis=1) * (np.linalg.norm(q) + 1e-9) + 1e-9)
         sem_order = list(sims.argsort()[::-1])
 
