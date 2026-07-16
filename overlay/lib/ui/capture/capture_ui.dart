@@ -1550,6 +1550,53 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
             _CreditSliver(from: from),
             const SizedBox(height: 10),
           ],
+          // Help-forward variant A (§8): the nudge arrives with goal + next
+          // steps already composed. Absent sections simply don't render —
+          // the card degrades to the bare claim, never apologizes.
+          if (n.goal.isNotEmpty || n.steps.isNotEmpty) ...[
+            Container(height: 1, color: t.border),
+            const SizedBox(height: 8),
+            if (n.goal.isNotEmpty) ...[
+              Text('GOAL · AS READ',
+                  style: _mono(9, t.textDim, weight: FontWeight.w600)),
+              const SizedBox(height: 3),
+              Text(n.goal,
+                  style: _mono(11, t.textPrimary, height: 1.35),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 7),
+            ],
+            if (n.steps.isNotEmpty) ...[
+              Text('NEXT STEPS',
+                  style: _mono(9, t.textDim, weight: FontWeight.w600)),
+              const SizedBox(height: 3),
+              for (final step in n.steps)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 5),
+                        child: Container(
+                          width: 5,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: _track.withValues(alpha: 0.7),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                          child: Text(step,
+                              style: _mono(11, t.textPrimary, height: 1.35))),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ],
           if (_wrongOpen) ...[
             Text('WHAT IS IT?', style: _mono(9, t.textDim, weight: FontWeight.w600)),
             const SizedBox(height: 5),

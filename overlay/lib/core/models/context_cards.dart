@@ -220,6 +220,12 @@ class SessionNudge {
   /// "Wrong?" picker rows (classifier's next candidates; may be empty).
   final List<String> alternates;
 
+  /// Help-forward variant A (§8): goal + next steps composed before consent
+  /// on the burst lane. Empty when the lane was unavailable or slow — the
+  /// card renders bare, never waits.
+  final String goal;
+  final List<String> steps;
+
   /// Bookmark return (§9): "Resume this session?" — the ⚑ marks the user's
   /// own promise, not the classifier's guess.
   final bool resume;
@@ -237,6 +243,8 @@ class SessionNudge {
     required this.elapsedMinutes,
     required this.apps,
     required this.alternates,
+    this.goal = '',
+    this.steps = const [],
     this.resume = false,
     this.resumeMeta,
     required this.expirySeconds,
@@ -252,6 +260,8 @@ class SessionNudge {
         apps: (json['apps'] as List? ?? const []).map((e) => '$e').toList(),
         alternates:
             (json['alternates'] as List? ?? const []).map((e) => '$e').toList(),
+        goal: json['goal'] as String? ?? '',
+        steps: (json['steps'] as List? ?? const []).map((e) => '$e').toList(),
         resume: json['resume'] as bool? ?? false,
         resumeMeta: json['resumeMeta'] as String?,
         expirySeconds: (json['expirySeconds'] as num?)?.toInt() ?? 45,

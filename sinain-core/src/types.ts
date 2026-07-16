@@ -404,6 +404,13 @@ export interface SessionNudgeMessage {
   /** "Wrong?" picker rows: the classifier's own next candidates (top-3).
    *  The overlay appends "Just work — no label" itself. */
   alternates: string[];
+  /** Help-forward variant A (§8 — explicit product call 2026-07-16, an
+   *  amendment of the gesture-gated contract for this one surface): goal +
+   *  next steps composed on the burst lane BEFORE consent, over the
+   *  already-redacted stream. Absent when the lane is unavailable or slow —
+   *  the card degrades to the bare claim, never waits. */
+  goal?: string;
+  steps?: string[];
   /** Bookmark return (§9): the ⚑ marks the user's own promise, not the
    *  classifier's guess — the card renders "Resume this session?" with ▶. */
   resume?: boolean;

@@ -74,7 +74,14 @@ interface PendingNudge {
   msg: SessionNudgeMessage;
   labelId: string;
   apps: string[];
+  /** Assist composed for the nudge (variant A) — reused on track, so the
+   *  chip's "✦ next steps" never pays for a second composition. */
+  assist: SessionAssist | null;
 }
+
+/** How long the nudge waits for its assist before going out bare (variant
+ *  A degrades, never delays — the moment matters more than the details). */
+const ASSIST_WAIT_MS = 4_000;
 
 /**
  * Session Sense (DESIGN-SESSION-SENSE.md, wireframes "Session Sense.dc.html"):
@@ -248,20 +255,57 @@ export class SessionSenseManager {
     if (this.askedEpisodes.length > 50) this.askedEpisodes.shift();
 
     const labelId = `ss-${nudgeId}`;
-    this.appendLabel({
-      id: labelId, ts: ep.at, kind: "session_sense", stage: 2,
-      threadId: ep.threadId, threadLabel: ep.label,
-      candidateStartTs: ep.startTs, elapsedMinutes: minutes,
-      ...(bookmark ? { resume: true } : {}),
-      decision: "nudged",
-    });
-    this.pendingNudge = { msg, labelId, apps };
+    const pending: PendingNudge = { msg, labelId, apps, assist: null };
+    this.pendingNudge = pending;
     setTimeout(() => {
       // Server-side TTL well past client expiry — abandoned asks don't linger.
       if (this.pendingNudge?.msg.nudgeId === nudgeId) this.pendingNudge = null;
     }, (this.cfg.expirySeconds + 300) * 1000).unref?.();
 
-    log(TAG, `${nudgeId}: nudging "${msg.label ?? "(unlabeled)"}" on ${ep.threadId} — credited from ${new Date(ep.startTs).toISOString()}`);
+    void this.composeAndSend(pending, ep, minutes);
+  }
+
+  /** Variant A (§8 — explicit contract amendment 2026-07-16): compose goal +
+   *  next steps on the burst lane BEFORE consent, bounded by ASSIST_WAIT_MS —
+   *  the card degrades to the bare claim rather than arriving late. The
+   *  composition is reused on track (chip ✦), never paid twice. */
+  private async composeAndSend(pending: PendingNudge, ep: EpisodeQualified, minutes: number): Promise<void> {
+    const msg = pending.msg;
+    if (this.composeAssist) {
+      try {
+        const compose = this.composeAssist(minutes, pending.apps, msg.label ?? ep.label);
+        const assist = await Promise.race([
+          compose,
+          new Promise<null>((res) => {
+            const t = setTimeout(() => res(null), ASSIST_WAIT_MS);
+            t.unref?.();
+          }),
+        ]);
+        if (assist && (assist.goal || assist.steps.length > 0)) {
+          pending.assist = assist;
+          msg.goal = assist.goal || undefined;
+          msg.steps = assist.steps.length ? assist.steps : undefined;
+        } else {
+          // Late composition still lands on the pending nudge — a track after
+          // the race window reuses it for the chip's ✦ instead of recomposing.
+          void compose.then((late) => {
+            if (late && this.pendingNudge === pending) pending.assist = late;
+          }).catch(() => { /* already degraded */ });
+        }
+      } catch { /* bare card — the moment matters more than the details */ }
+    }
+
+    if (this.pendingNudge !== pending) return; // expired during composition
+
+    this.appendLabel({
+      id: pending.labelId, ts: msg.ts, kind: "session_sense", stage: 2,
+      threadId: msg.threadId, threadLabel: ep.label,
+      candidateStartTs: msg.candidateStartTs, elapsedMinutes: minutes,
+      assist: pending.assist !== null,
+      ...(msg.resume ? { resume: true } : {}),
+      decision: "nudged",
+    });
+    log(TAG, `${msg.nudgeId}: nudging "${msg.label ?? "(unlabeled)"}" on ${msg.threadId} — credited from ${new Date(msg.candidateStartTs).toISOString()}${pending.assist ? " · assist attached" : ""}`);
     this.broadcast(msg);
   }
 
@@ -331,7 +375,15 @@ export class SessionSenseManager {
       wrapPromptTs: 0,
     };
     this.broadcastChip(this.session, "running");
-    this.fireAssist(this.session);
+    if (pending.assist) {
+      // The nudge already paid for the composition — the chip's ✦ reuses it.
+      this.broadcast({
+        type: "session_assist", sessionId: id, status: "ready",
+        goal: pending.assist.goal, steps: pending.assist.steps, ts: now,
+      });
+    } else {
+      this.fireAssist(this.session);
+    }
     return id;
   }
 
