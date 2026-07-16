@@ -139,6 +139,8 @@ class OverlayShellState extends State<OverlayShell> {
   // The sessions list is the HUD's primary uncollapsed view (product call
   // 2026-07-16): SESSIONS tab, selected by default on every uncollapse.
   bool _sessionsTab = true;
+  // Session-verb summons skip the brief preview and hand off on arrival.
+  bool _autoHandoffBrief = false;
   StreamSubscription<SessionNudge>? _nudgeSub;
   StreamSubscription<SessionChipState>? _chipSub;
   StreamSubscription<SessionWrap>? _wrapSub;
@@ -313,6 +315,17 @@ class OverlayShellState extends State<OverlayShell> {
           _regionBriefPending = false; // plain region grab, no window context
         }
         return;
+      }
+      // Call-AI-immediately (product call 2026-07-16): a summon fired from a
+      // session verb skips the brief preview — the ready brief hands off to
+      // the chosen lane directly. Errors still surface as the normal card.
+      if (_autoHandoffBrief) {
+        if (b.status == CardStatus.working) return; // silent — no card flash
+        _autoHandoffBrief = false;
+        if (b.status == CardStatus.ready) {
+          _askFollowUpOnBrief(b);
+          return;
+        }
       }
       setState(() => _activeBrief = b);
       _enterCardMode();
@@ -550,10 +563,15 @@ class OverlayShellState extends State<OverlayShell> {
     if (_state == target) return;
     HudTooltip.dismissAll();
     setState(() {
+      // A user uncollapse (eye/controls → chat) lands on the sessions list
+      // (product call 2026-07-16); programmatic handoffs into the chat go
+      // through _leaveCardModeFor, which selects the conversation instead.
+      if (target == HudState.chat &&
+          (_state == HudState.eye || _state == HudState.hidden ||
+              _state == HudState.controls)) {
+        _sessionsTab = true;
+      }
       _state = target;
-      // Uncollapsing lands on the sessions list, not the chat (product call
-      // 2026-07-16) — the chat stays one tab away.
-      if (target == HudState.chat) _sessionsTab = true;
     });
     _settingsService.setHudState(target);
     _resizeWindowForState(target);
@@ -1582,15 +1600,17 @@ class OverlayShellState extends State<OverlayShell> {
           .clamp(1, 120);
 
   /// ▶ on the nudge (product call 2026-07-16): play = track + Call AI over
-  /// the credited span (the brief card arrives with the usual handoff lanes).
+  /// the credited span — immediately: the brief hands off to the lane on
+  /// arrival, no preview card in between.
   void _playSessionNudge() {
     final n = _sessionNudge;
     if (n == null) return;
     final ws = context.read<WebSocketService>();
     ws.respondToSessionNudge(n.nudgeId, 'tracked');
+    _autoHandoffBrief = true;
     ws.requestSummon(_nudgeSpanMinutes(n),
         apps: n.apps.isEmpty ? null : n.apps);
-    _clearSessionNudge(exitSurfaces: false); // chip + brief arrive next
+    _clearSessionNudge(exitSurfaces: false); // chip arrives next
   }
 
   /// "Call Sinain" on the nudge: track + a live voice call on the span.
@@ -1699,15 +1719,17 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  /// Call AI over the live session's credited span (sessions list ✦).
+  /// Call AI over the live session's credited span (sessions list ✦ /
+  /// detail-card ▶) — immediately: no brief preview, the handoff fires on
+  /// arrival (preview lives on hover instead).
   void _callAiOnActiveSession(SessionChipState s) {
     final ws = context.read<WebSocketService>();
     final minutes =
         ((DateTime.now().millisecondsSinceEpoch - s.startedTs) / 60000)
             .ceil()
             .clamp(1, 120);
+    _autoHandoffBrief = true;
     ws.requestSummon(minutes);
-    _enterCardMode();
   }
 
   /// ✕ releases the promise; the shelf re-renders without the row.
@@ -1720,14 +1742,21 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   /// Hand off from card mode into a full HUD state (e.g. the conversation the
-  /// card just seeded).
+  /// card just seeded). Always lands on the conversation itself — never the
+  /// SESSIONS tab (a handoff means "follow the chat", so the tab follows).
   void _leaveCardModeFor(HudState target) {
     if (!_cardMode) {
       if (_state != target) _transitionTo(target);
-      return;
+    } else {
+      _cardMode = false;
+      _transitionTo(target);
     }
-    _cardMode = false;
-    _transitionTo(target);
+    // AFTER the transition: a handoff means "follow the conversation" — the
+    // tab must land on the chat even though a plain uncollapse defaults to
+    // the SESSIONS view.
+    if (target == HudState.chat) {
+      setState(() => _sessionsTab = false);
+    }
   }
 
   /// The stacked capture cards (receipt · enrich · brief · chooser). Rendered

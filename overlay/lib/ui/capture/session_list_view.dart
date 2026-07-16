@@ -43,6 +43,9 @@ class SessionListView extends StatefulWidget {
     required this.onCallAi,
   });
 
+  /// Hover-preview span cap (matches the summon clamp).
+  static const int maxPreviewMinutes = 120;
+
   @override
   State<SessionListView> createState() => _SessionListViewState();
 }
@@ -53,6 +56,9 @@ class _SessionListViewState extends State<SessionListView> {
   Timer? _ticker;
   DateTime _activeReceivedAt = DateTime.now();
   bool _loaded = false;
+  // Hover preview of the context the ✦ call would carry (cached core-side).
+  String? _preview;
+  bool _previewLoading = false;
 
   @override
   void initState() {
@@ -130,8 +136,18 @@ class _SessionListViewState extends State<SessionListView> {
                       : ' ',
                   style: _mono(10, t.textDim)),
             )
-          else
+          else ...[
             _activeRow(t, active),
+            // The context preview the ✦ call would carry — on hover only.
+            if (_preview != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Text(_preview!,
+                    style: _mono(9, t.textDim, height: 1.35),
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis),
+              ),
+          ],
           const SizedBox(height: 14),
           Row(children: [
             Text('BOOKMARKED',
@@ -193,7 +209,12 @@ class _SessionListViewState extends State<SessionListView> {
           Text('paused', style: _mono(9, _amber)),
         ],
         const SizedBox(width: 8),
-        _action(t, '✦', 'Call AI on this session', () => widget.onCallAi(s)),
+        MouseRegion(
+          onEnter: (_) => _loadPreview(s),
+          onExit: (_) => setState(() => _preview = null),
+          child:
+              _action(t, '✦', 'Call AI on this session', () => widget.onCallAi(s)),
+        ),
         const SizedBox(width: 5),
         _action(t, '⚑', 'Come back later (bookmark)', () async {
           await widget.ws.sessionAction(s.sessionId, 'flag');
@@ -205,6 +226,27 @@ class _SessionListViewState extends State<SessionListView> {
         }),
       ]),
     );
+  }
+
+  /// Fetch the (core-cached) window preview for the session's span — shown
+  /// under the row while hovering ✦, so the call is one click but never blind.
+  Future<void> _loadPreview(SessionChipState s) async {
+    if (_previewLoading) return;
+    _previewLoading = true;
+    try {
+      final minutes =
+          ((DateTime.now().millisecondsSinceEpoch - s.startedTs) / 60000)
+              .ceil()
+              .clamp(1, SessionListView.maxPreviewMinutes);
+      final data = await widget.ws.fetchWindowPreview(minutes);
+      if (!mounted) return;
+      final summary = data?['summary'] as String?;
+      if (summary != null && summary.isNotEmpty) {
+        setState(() => _preview = summary);
+      }
+    } finally {
+      _previewLoading = false;
+    }
   }
 
   Widget _bookmarkRow(HudTheme t, SessionBookmark b) {
