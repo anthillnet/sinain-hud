@@ -550,3 +550,43 @@ export async function enrichFocus(
     stats: slice.stats,
   };
 }
+
+// ── Session Sense assist: goal + next steps (DESIGN-SESSION-SENSE wireframes §8, variant C) ──
+//
+// Composed ON the track tap — the consent is already given, so this spends
+// zero contract. Instant inference (the burst lane) means next steps are
+// ready by the time the chip renders; help offered on a label the user just
+// confirmed — a fact, not a guess.
+
+const ASSIST_SYSTEM = `You are Sinain, an ambient assistant. The user just confirmed they are working on a session; you get a chronological slice of their screen OCR, window titles, and transcript.
+Return JSON only:
+{"goal":"<what they are trying to accomplish, one specific sentence>",
+ "steps":["<concrete next step, short imperative>"]}
+Rules: exactly 2-3 steps, each grounded in what is visibly unfinished in THIS activity — never generic advice.`;
+
+export interface SessionAssist {
+  goal: string;
+  steps: string[];
+}
+
+export async function assistNextSteps(
+  config: BurstConfig,
+  slice: WindowSlice,
+  label: string,
+): Promise<{ assist: SessionAssist; result: BurstCallResult }> {
+  const result = await burstCall(config, {
+    system: ASSIST_SYSTEM,
+    user: `Session label (user-confirmed): ${label || "(unlabeled work session)"}\n\nActivity so far:\n${slice.text}\n\nProduce goal + next steps.`,
+    maxTokens: 220,
+    cacheKey: "sinain-assist-v1",
+    jsonMode: true,
+  });
+  const raw = parseBurstJson<Partial<SessionAssist>>(result.content);
+  return {
+    assist: {
+      goal: String(raw.goal ?? "").trim(),
+      steps: Array.isArray(raw.steps) ? raw.steps.map(String).filter(Boolean).slice(0, 3) : [],
+    },
+    result,
+  };
+}

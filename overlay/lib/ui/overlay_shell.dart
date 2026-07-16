@@ -26,6 +26,7 @@ import '../core/models/context_cards.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 import 'capture/capture_ui.dart';
+import 'capture/session_list_view.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -123,6 +124,29 @@ class OverlayShellState extends State<OverlayShell> {
   String? _adjustingOfferId;
   List<String>? _offerPrefillApps;
   int? _offerPrefillMinutes;
+  // Session Sense (DESIGN-SESSION-SENSE.md, ladder rung 2): the live workflow
+  // nudge, the running-session chip, and the symmetric wrap prompt.
+  SessionNudge? _sessionNudge;
+  Timer? _nudgeExpiryTimer;
+  // Parallel sessions (§5): one warm, the rest paused. The chip shows the
+  // warm one (with a "+N" affix when others exist); the SESSIONS view and
+  // detail card cover the stack.
+  final Map<String, SessionChipState> _sessionChips = {};
+  SessionWrap? _sessionWrap;
+  // Help-forward: composed per session; the detail card reveals it.
+  final Map<String, SessionAssist> _sessionAssists = {};
+  bool _assistVisible = false;
+  // The bookmarked-sessions shelf (§9), opened from the eye menu.
+  List<SessionBookmark>? _sessionShelf;
+  // The sessions list is the HUD's primary uncollapsed view (product call
+  // 2026-07-16): SESSIONS tab, selected by default on every uncollapse.
+  bool _sessionsTab = true;
+  // Session-verb summons skip the brief preview and hand off on arrival.
+  bool _autoHandoffBrief = false;
+  StreamSubscription<SessionNudge>? _nudgeSub;
+  StreamSubscription<SessionChipState>? _chipSub;
+  StreamSubscription<SessionWrap>? _wrapSub;
+  StreamSubscription<SessionAssist>? _assistSub;
 
   // Command input focus
   final _commandFocusNode = FocusNode();
@@ -294,6 +318,17 @@ class OverlayShellState extends State<OverlayShell> {
         }
         return;
       }
+      // Call-AI-immediately (product call 2026-07-16): a summon fired from a
+      // session verb skips the brief preview — the ready brief hands off to
+      // the chosen lane directly. Errors still surface as the normal card.
+      if (_autoHandoffBrief) {
+        if (b.status == CardStatus.working) return; // silent — no card flash
+        _autoHandoffBrief = false;
+        if (b.status == CardStatus.ready) {
+          _askFollowUpOnBrief(b);
+          return;
+        }
+      }
       setState(() => _activeBrief = b);
       _enterCardMode();
     });
@@ -320,6 +355,39 @@ class OverlayShellState extends State<OverlayShell> {
     _offerSub = ws.saveOfferStream.listen((o) {
       if (!mounted) return;
       _showSaveOffer(o);
+    });
+    _nudgeSub = ws.sessionNudgeStream.listen((n) {
+      if (!mounted) return;
+      _showSessionNudge(n);
+    });
+    _chipSub = ws.sessionChipStream.listen((c) {
+      if (!mounted) return;
+      setState(() {
+        if (c.ended) {
+          _sessionChips.remove(c.sessionId);
+          _sessionAssists.remove(c.sessionId);
+          if (_sessionWrap?.sessionId == c.sessionId) _sessionWrap = null;
+          if (_sessionChips.isEmpty) _assistVisible = false;
+        } else {
+          _sessionChips[c.sessionId] = c;
+        }
+      });
+      if (c.ended) {
+        _maybeExitCardMode();
+      } else {
+        _enterCardMode();
+      }
+    });
+    _assistSub = ws.sessionAssistStream.listen((a) {
+      if (!mounted) return;
+      // Only ready assists surface; working/error stay silent — the detail
+      // card simply shows the verbs without the details.
+      if (a.ready) setState(() => _sessionAssists[a.sessionId] = a);
+    });
+    _wrapSub = ws.sessionWrapStream.listen((w) {
+      if (!mounted) return;
+      setState(() => _sessionWrap = w);
+      _enterCardMode();
     });
     _voiceSub = ws.voiceSessionStream.listen((s) {
       if (!mounted) return;
@@ -498,7 +566,17 @@ class OverlayShellState extends State<OverlayShell> {
   void _transitionTo(HudState target) {
     if (_state == target) return;
     HudTooltip.dismissAll();
-    setState(() => _state = target);
+    setState(() {
+      // A user uncollapse (eye/controls → chat) lands on the sessions list
+      // (product call 2026-07-16); programmatic handoffs into the chat go
+      // through _leaveCardModeFor, which selects the conversation instead.
+      if (target == HudState.chat &&
+          (_state == HudState.eye || _state == HudState.hidden ||
+              _state == HudState.controls)) {
+        _sessionsTab = true;
+      }
+      _state = target;
+    });
     _settingsService.setHudState(target);
     _resizeWindowForState(target);
 
@@ -552,6 +630,7 @@ class OverlayShellState extends State<OverlayShell> {
   void _selectThread(String? id) {
     final ws = context.read<WebSocketService>();
     setState(() {
+      _sessionsTab = false; // any thread tab leaves the sessions view
       _activeThread = id;
       if (id == null) {
         _activeRegion = null;
@@ -831,6 +910,9 @@ class OverlayShellState extends State<OverlayShell> {
       // "Copy for agent" action produces the same agent-grade seed, visibly.
       {'id': 'capBuild', 'title': 'Context from Clipboard', 'key': 'c', 'mods': ['ctrl', 'opt', 'cmd']},
       {'separator': true},
+      // The bookmarked-session shelf (§9) — in the eye's menu, not a new
+      // surface.
+      {'id': 'sessions', 'title': 'Bookmarked Sessions…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
       {'id': 'reset', 'title': 'Reset Window Position', 'key': 'p', 'mods': ['shift', 'cmd']},
@@ -856,6 +938,8 @@ class OverlayShellState extends State<OverlayShell> {
         // (card mode) follows with the region as its focus. A default-range
         // window brief is prefetched for the region thread's opening context.
         await _startRegionSelect();
+      case 'sessions':
+        await _showSessionShelf();
       case 'copySeed':
         await _copySeedForActiveThread();
       case 'reset':
@@ -908,9 +992,8 @@ class OverlayShellState extends State<OverlayShell> {
       ...ws.regionThreads.keys,
       ..._startedRegionThreads,
     }.toList();
-    // SPIKE: with the terminal enabled the row is always shown so the ⌨
-    // toggle is reachable from MAIN even before any region thread exists.
-    if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
+    // The strip is always shown: SESSIONS and MAIN are two permanent tabs
+    // (the sessions list is the default uncollapsed view).
 
     String labelFor(String id) {
       final label = _threadTitleFor(ws, id);
@@ -991,8 +1074,13 @@ class OverlayShellState extends State<OverlayShell> {
         child: Row(
           children: [
             pill(
+              text: 'SESSIONS',
+              selected: _sessionsTab,
+              onTap: () => setState(() => _sessionsTab = true),
+            ),
+            pill(
               text: 'MAIN',
-              selected: _activeThread == null,
+              selected: !_sessionsTab && _activeThread == null,
               onTap: () => _selectThread(null),
             ),
             for (final id in ids)
@@ -1002,7 +1090,7 @@ class OverlayShellState extends State<OverlayShell> {
                 // alone names the tab.
                 text:
                     '${_regionWorking(ws, id) ? "⟳ " : ""}${labelFor(id)}',
-                selected: _activeThread == id,
+                selected: !_sessionsTab && _activeThread == id,
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
               ),
@@ -1103,6 +1191,11 @@ class OverlayShellState extends State<OverlayShell> {
     _voiceSub?.cancel();
     _offerSub?.cancel();
     _offerExpiryTimer?.cancel();
+    _nudgeSub?.cancel();
+    _chipSub?.cancel();
+    _wrapSub?.cancel();
+    _assistSub?.cancel();
+    _nudgeExpiryTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
@@ -1408,6 +1501,10 @@ class OverlayShellState extends State<OverlayShell> {
         _activeEnrich != null ||
         _saveReceipt != null ||
         _saveOffer != null ||
+        _sessionNudge != null ||
+        _sessionChips.isNotEmpty ||
+        _sessionWrap != null ||
+        _sessionShelf != null ||
         _voiceSession != null) {
       return;
     }
@@ -1479,15 +1576,205 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
+  // ── Session Sense lifecycle (DESIGN-SESSION-SENSE.md) ────────────────────
+
+  /// A `session_nudge` arrived: the credit-led card appears in the card
+  /// corner. Untouched, it fades silently after ~45 s (expiry consumes the
+  /// episode's one ask — policy A).
+  void _showSessionNudge(SessionNudge n) {
+    _nudgeExpiryTimer?.cancel();
+    setState(() => _sessionNudge = n);
+    _nudgeExpiryTimer =
+        Timer(Duration(seconds: n.expirySeconds), _expireSessionNudge);
+    if (_state != HudState.hidden) _enterCardMode();
+  }
+
+  /// Track: one tap, retroactive credit pinned — the chip arrives on
+  /// [sessionChipStream] and takes over the ambient state.
+  void _trackSession() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
+    _clearSessionNudge(exitSurfaces: false); // chip arrives next
+  }
+
+  /// The warm session (running beats paused; most recently started wins) —
+  /// the one the corner chip and detail card represent.
+  SessionChipState? get _warmChip {
+    SessionChipState? best;
+    for (final c in _sessionChips.values) {
+      if (best == null ||
+          (!c.paused && best.paused) ||
+          (c.paused == best.paused && c.startedTs > best.startedTs)) {
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  int _nudgeSpanMinutes(SessionNudge n) =>
+      ((DateTime.now().millisecondsSinceEpoch - n.candidateStartTs) / 60000)
+          .ceil()
+          .clamp(1, 120);
+
+  /// ▶ on the nudge (product call 2026-07-16): play = track + Call AI over
+  /// the credited span — immediately: the brief hands off to the lane on
+  /// arrival, no preview card in between.
+  void _playSessionNudge() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    final ws = context.read<WebSocketService>();
+    ws.respondToSessionNudge(n.nudgeId, 'tracked');
+    _autoHandoffBrief = true;
+    ws.requestSummon(_nudgeSpanMinutes(n),
+        apps: n.apps.isEmpty ? null : n.apps);
+    _clearSessionNudge(exitSurfaces: false); // chip arrives next
+  }
+
+  /// "Call Sinain" on the nudge: track + a live voice call on the span.
+  void _callSinainOnSessionNudge() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
+    final minutes = _nudgeSpanMinutes(n);
+    final apps = n.apps.isEmpty ? null : n.apps;
+    _clearSessionNudge(exitSurfaces: false);
+    unawaited(_callSinain(minutes, apps: apps));
+  }
+
+  /// "Wrong?" pick: tracks under the corrected label in the same tap —
+  /// correction ≠ dismissal (§3). [label] == '' means "just work — no label".
+  void _correctSession(String label) {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context
+        .read<WebSocketService>()
+        .respondToSessionNudge(n.nudgeId, 'corrected', label: label);
+    _clearSessionNudge(exitSurfaces: false);
+  }
+
+  void _dismissSessionNudge() => _resolveSessionNudge('dismissed');
+  void _expireSessionNudge() => _resolveSessionNudge('expired');
+
+  void _resolveSessionNudge(String response) {
+    final n = _sessionNudge;
+    if (n == null || !mounted) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, response);
+    _clearSessionNudge();
+  }
+
+  void _clearSessionNudge({bool exitSurfaces = true}) {
+    _nudgeExpiryTimer?.cancel();
+    setState(() => _sessionNudge = null);
+    if (exitSurfaces) _maybeExitCardMode();
+  }
+
+  /// Wrap confirm — teaches the boundary; the receipt arrives into the same
+  /// stack slot via [saveReceiptStream] (standard save lifecycle).
+  void _wrapSession() {
+    final w = _sessionWrap;
+    if (w == null) return;
+    context.read<WebSocketService>().sessionAction(w.sessionId, 'wrapped');
+    setState(() => _sessionWrap = null);
+  }
+
+  /// "Keep going" — corrects a too-eager decay model; the quiet clock resets.
+  void _keepGoingSession() {
+    final w = _sessionWrap;
+    if (w == null) return;
+    context.read<WebSocketService>().sessionAction(w.sessionId, 'keep_going');
+    setState(() => _sessionWrap = null);
+    _maybeExitCardMode();
+  }
+
+  /// ✕ on the wrap card: just hides it — the server's grace period auto-wraps
+  /// regardless (a session never runs forever because the user walked away).
+  void _dismissWrapCard() {
+    setState(() => _sessionWrap = null);
+    _maybeExitCardMode();
+  }
+
+  /// "⚑ Later" (§9): Wrap up + a promise — the thread gains a bookmark.
+  void _wrapSessionLater() {
+    final w = _sessionWrap;
+    if (w == null) return;
+    context.read<WebSocketService>().sessionAction(w.sessionId, 'later');
+    setState(() => _sessionWrap = null);
+  }
+
+  // ── Bookmarked-sessions shelf (§9) ────────────────────────────────────────
+
+  Future<void> _showSessionShelf() async {
+    final ws = context.read<WebSocketService>();
+    final rows = await ws.fetchSessionBookmarks();
+    if (!mounted) return;
+    setState(() => _sessionShelf = rows);
+    _enterCardMode();
+  }
+
+  void _dismissSessionShelf() {
+    setState(() => _sessionShelf = null);
+    _maybeExitCardMode();
+  }
+
+  /// ▶ on a shelf row: a fresh session on the same thread, immediately —
+  /// no detection wait, no nudge. The chip arrives on [sessionChipStream].
+  Future<void> _resumeBookmark(SessionBookmark b) async {
+    final ws = context.read<WebSocketService>();
+    await ws.sessionBookmarkAction(b.threadId, 'resume');
+    if (mounted) _dismissSessionShelf();
+  }
+
+  /// ↗ share: open the session's KG view in the browser — the existing
+  /// knowledge-share mechanic (opt-out entity list, share links) lives on
+  /// the wiki entity page.
+  Future<void> _shareBookmark(SessionBookmark b) async {
+    final base = context.read<WebSocketService>().httpBase;
+    if (base == null) return;
+    final uri = Uri.parse('$base${b.kgPath ?? '/knowledge/ui'}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// Call AI over the live session's credited span (sessions list ✦ /
+  /// detail-card ▶) — immediately: no brief preview, the handoff fires on
+  /// arrival (preview lives on hover instead).
+  void _callAiOnActiveSession(SessionChipState s) {
+    final ws = context.read<WebSocketService>();
+    final minutes =
+        ((DateTime.now().millisecondsSinceEpoch - s.startedTs) / 60000)
+            .ceil()
+            .clamp(1, 120);
+    _autoHandoffBrief = true;
+    ws.requestSummon(minutes);
+  }
+
+  /// ✕ releases the promise; the shelf re-renders without the row.
+  Future<void> _removeBookmark(SessionBookmark b) async {
+    final ws = context.read<WebSocketService>();
+    await ws.sessionBookmarkAction(b.threadId, 'remove');
+    if (!mounted) return;
+    setState(() => _sessionShelf =
+        _sessionShelf?.where((r) => r.threadId != b.threadId).toList());
+  }
+
   /// Hand off from card mode into a full HUD state (e.g. the conversation the
-  /// card just seeded).
+  /// card just seeded). Always lands on the conversation itself — never the
+  /// SESSIONS tab (a handoff means "follow the chat", so the tab follows).
   void _leaveCardModeFor(HudState target) {
     if (!_cardMode) {
       if (_state != target) _transitionTo(target);
-      return;
+    } else {
+      _cardMode = false;
+      _transitionTo(target);
     }
-    _cardMode = false;
-    _transitionTo(target);
+    // AFTER the transition: a handoff means "follow the conversation" — the
+    // tab must land on the chat even though a plain uncollapse defaults to
+    // the SESSIONS view.
+    if (target == HudState.chat) {
+      setState(() => _sessionsTab = false);
+    }
   }
 
   /// The stacked capture cards (receipt · enrich · brief · chooser). Rendered
@@ -1497,6 +1784,81 @@ class OverlayShellState extends State<OverlayShell> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
+        // Session Sense: the running chip is the ambient state; nudge and
+        // wrap cards stack above the save cards (violet = session-scoped).
+        if (_warmChip != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionChip(
+              session: _warmChip!,
+              others: _sessionChips.length - 1,
+              // A click asks for MORE, never ends: expand the detail card.
+              onDetails: () =>
+                  setState(() => _assistVisible = !_assistVisible),
+            ),
+          ),
+        if (_assistVisible && _warmChip != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionDetailCard(
+              session: _warmChip!,
+              assist: _sessionAssists[_warmChip!.sessionId],
+              onCallAi: () => _callAiOnActiveSession(_warmChip!),
+              onCallSinain: () {
+                final s = _warmChip!;
+                final minutes = ((DateTime.now().millisecondsSinceEpoch -
+                            s.startedTs) /
+                        60000)
+                    .ceil()
+                    .clamp(1, 120);
+                unawaited(_callSinain(minutes));
+              },
+              onSave: () {
+                // Save = wrap now: the receipt (with undo) takes the slot;
+                // the session stays in the bookmarks list.
+                context
+                    .read<WebSocketService>()
+                    .sessionAction(_warmChip!.sessionId, 'wrapped');
+                setState(() => _assistVisible = false);
+              },
+              onDismiss: () => setState(() => _assistVisible = false),
+            ),
+          ),
+        if (_sessionShelf != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionShelfCard(
+              bookmarks: _sessionShelf!,
+              onResume: _resumeBookmark,
+              onShare: _shareBookmark,
+              onRemove: _removeBookmark,
+              onDismiss: _dismissSessionShelf,
+            ),
+          ),
+        if (_sessionNudge != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionNudgeCard(
+              nudge: _sessionNudge!,
+              // ▶: resume nudges just resume; fresh nudges track + Call AI.
+              onTrack:
+                  _sessionNudge!.resume ? _trackSession : _playSessionNudge,
+              onCallSinain: _callSinainOnSessionNudge,
+              onCorrect: _correctSession,
+              onDismiss: _dismissSessionNudge,
+            ),
+          ),
+        if (_sessionWrap != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SessionWrapCard(
+              wrap: _sessionWrap!,
+              onWrapUp: _wrapSession,
+              onLater: _wrapSessionLater,
+              onKeepGoing: _keepGoingSession,
+              onDismiss: _dismissWrapCard,
+            ),
+          ),
         // Save offer sits above the receipt: accept clears it and the receipt
         // arrives into the same top slot — one card per save (morph).
         if (_saveOffer != null)
@@ -2151,7 +2513,14 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                _terminalThreads.contains(_activeTabKey)
+                _sessionsTab
+                    ? SessionListView(
+                        key: const ValueKey('sessions'),
+                        ws: ws,
+                        onShare: _shareBookmark,
+                        onCallAi: _callAiOnActiveSession,
+                      )
+                    : _terminalThreads.contains(_activeTabKey)
                     ? ThreadTerminalView(
                         key: ValueKey('term-$_activeTabKey'),
                         threadId: _activeTabKey,

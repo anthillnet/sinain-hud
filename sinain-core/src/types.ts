@@ -347,8 +347,9 @@ export interface SaveReceiptMessage {
   ts: number;
 }
 
-/** KG provenance of a save: manual gesture vs an accepted breakpoint offer. */
-export type SaveProvenance = "user_save" | "offered_save";
+/** KG provenance of a save: manual gesture, an accepted breakpoint offer, or
+ *  a wrapped Session Sense session — kept distinguishable forever. */
+export type SaveProvenance = "user_save" | "offered_save" | "session_sense";
 
 /** Proactive save offer at a breakpoint (DESIGN-SAVE-OFFER.md): Sinain
  *  proposes a range + scope, the user disposes. Zero-LLM — composed from
@@ -377,7 +378,114 @@ export interface SaveOfferMessage {
 /** Overlay → core response to a save offer (POST /capture/offer/response). */
 export type SaveOfferResponse = "accepted" | "adjusted" | "dismissed" | "expired";
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | VoiceSessionMessage;
+// ── Session Sense (DESIGN-SESSION-SENSE.md, wireframes "Session Sense.dc.html") ──
+
+/** How much confidence bought on the nudge card (§2 of the wireframes):
+ *  the label is the first thing to go — never hedged. */
+export type SessionNudgeGrade = "personal" | "stock" | "unlabeled";
+
+/** Live workflow nudge: "Looks like: applying for a job — track from 11:02?"
+ *  Credit-led card (§1): the retroactive-credit sliver is visible before the
+ *  tap. Zero-LLM — composed from local embeddings + window data only. */
+export interface SessionNudgeMessage {
+  type: "session_nudge";
+  nudgeId: string;
+  grade: SessionNudgeGrade;
+  /** Workflow label. Absent when grade="unlabeled" (medium confidence or
+   *  category floor) — a statement, never a hedge. */
+  label?: string;
+  threadId: string;
+  /** Retroactive credit start — "11:02 — credited from here". */
+  candidateStartTs: number;
+  /** "12 min in". */
+  elapsedMinutes: number;
+  /** Source chips (never "mic" — privacy floor). */
+  apps: string[];
+  /** "Wrong?" picker rows: the classifier's own next candidates (top-3).
+   *  The overlay appends "Just work — no label" itself. */
+  alternates: string[];
+  /** Help-forward variant A (§8 — explicit product call 2026-07-16, an
+   *  amendment of the gesture-gated contract for this one surface): goal +
+   *  next steps composed on the burst lane BEFORE consent, over the
+   *  already-redacted stream. Absent when the lane is unavailable or slow —
+   *  the card degrades to the bare claim, never waits. */
+  goal?: string;
+  steps?: string[];
+  /** Bookmark return (§9): the ⚑ marks the user's own promise, not the
+   *  classifier's guess — the card renders "Resume this session?" with ▶. */
+  resume?: boolean;
+  /** Pre-composed history line for resume nudges, e.g.
+   *  "bookmarked yesterday · 2 sessions · 1h 19m so far". */
+  resumeMeta?: string;
+  /** Client-side silent-fade horizon (~45s). */
+  expirySeconds: number;
+  ts: number;
+}
+
+/** Overlay → core response to a session nudge. `corrected` carries the picked
+ *  label ("" = "just work" — shape confirmed, label abstained). */
+export type SessionNudgeResponse = "tracked" | "corrected" | "dismissed" | "expired";
+
+/** Running-session chip state (§5): label · elapsed · paused. Broadcast on
+ *  every transition; `ended` clears the chip. */
+export interface SessionChipMessage {
+  type: "session_chip";
+  sessionId: string;
+  status: "running" | "paused" | "ended";
+  label: string;
+  /** Credited-from timestamp (candidateStartTs). */
+  startedTs: number;
+  /** Accumulated active (non-paused) milliseconds. */
+  activeMs: number;
+  ts: number;
+}
+
+/** The symmetric "End workout?" prompt (§6): ignorable; a grace period
+ *  auto-wraps so a session never runs forever because the user walked away. */
+export interface SessionWrapMessage {
+  type: "session_wrap";
+  sessionId: string;
+  label: string;
+  activeMinutes: number;
+  /** "quiet for 6 min". */
+  quietMinutes: number;
+  /** "auto-wraps in 10". */
+  graceMinutes: number;
+  ts: number;
+}
+
+/** Overlay → core session actions: wrap now, keep going (corrects a too-eager
+ *  decay model), end from the chip (boundary correction), or "⚑ Later" —
+ *  wrap + a bookmark on the thread (§9: a flag, not an open session). */
+export type SessionAction = "wrapped" | "keep_going" | "ended" | "later" | "flag";
+
+/** Help-forward (§8, variant C): goal + next steps composed ON the track tap
+ *  via the burst lane — consent already given, zero contract spent. */
+export interface SessionAssistMessage {
+  type: "session_assist";
+  sessionId: string;
+  status: "working" | "ready" | "error";
+  goal?: string;
+  steps?: string[];
+  error?: string;
+  ts: number;
+}
+
+/** A bookmarked thread (§9): the persisted promise. Meta is cumulative —
+ *  sessions so far · total time · last touched. */
+export interface SessionBookmarkRow {
+  threadId: string;
+  label: string;
+  sessions: number;
+  totalMs: number;
+  lastTs: number;
+  /** Wiki path for ↗ share — resolved against the KG when an entity matches
+   *  (e.g. "/knowledge/ui/entity/oxigraph-migration"); the existing share
+   *  mechanic (opt-out entity list, share links) lives on that page. */
+  kgPath?: string;
+}
+
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | SessionAssistMessage | VoiceSessionMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
 
 /** Abstraction for user commands (text now, voice later). */
@@ -575,6 +683,31 @@ export interface SaveOfferConfig {
   cooldownMinutes: number;
   /** Client-side silent-fade horizon for an untouched offer. */
   expirySeconds: number;
+}
+
+/** Session Sense (DESIGN-SESSION-SENSE.md): live workflow detection — the
+ *  Watch's workout nudge for knowledge work. Detection is local and LLM-free;
+ *  the tap is the gesture. Caps are shared with the save offer (one attention
+ *  budget); thresholds are tuned, not designed. */
+export interface SessionSenseConfig {
+  /** Default false — an autonomous lane, opt-in by convention. */
+  enabled: boolean;
+  /** Engaged minutes before a live episode qualifies for the nudge — the
+   *  same "long" notion as the save offer, surfaced mid-episode. */
+  qualifyMinutes: number;
+  /** How long an IGNORED (expired) nudge snoozes its thread — "not now",
+   *  not "no"; an explicit ✕ silences for the day instead. */
+  snoozeMinutes: number;
+  /** Attention away from the session's apps this long → paused. */
+  pauseGraceSeconds: number;
+  /** Paused this long → the wrap prompt (§6 "quiet for N min"). */
+  endQuietMinutes: number;
+  /** Wrap prompt ignored this long → auto-wrap (same receipt). */
+  wrapGraceMinutes: number;
+  /** Client-side silent-fade horizon for an untouched nudge. */
+  expirySeconds: number;
+  /** Hard ceiling on the credited span (matches the chooser's ceiling). */
+  maxSessionMinutes: number;
 }
 
 /** "Call sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
@@ -861,6 +994,7 @@ export interface CoreConfig {
   regionSlmConfig: RegionSlmConfig;
   burstConfig: BurstConfig;
   saveOfferConfig: SaveOfferConfig;
+  sessionSenseConfig: SessionSenseConfig;
   voiceConfig: VoiceConfig;
   /** Rolling-window retention horizon for feed/sense buffers (ms). */
   windowHorizonMs: number;

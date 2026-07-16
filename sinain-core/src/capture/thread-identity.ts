@@ -43,8 +43,13 @@ export function deriveProject(app: string, title: string): { key: string; label:
     if (proj) return { key: `proj:${proj.toLowerCase()}`, label: proj };
   }
   if (/claude|chatgpt|gemini|copilot|perplexity/.test(a)) {
-    const conv = cleanTitle(title) || app;
-    return { key: `chat:${conv.toLowerCase()}`, label: conv };
+    // Chat-app window titles churn with UI state — Claude Desktop cycles
+    // "Progress" / "Enter Password" / page headers, none of which is a
+    // stable conversation identity. Title-keying starved episodes (the
+    // engaged clock froze on every flip, so neither save offers nor session
+    // nudges ever qualified inside a chat app). Key by APP; the app name is
+    // also the label — the honest granularity we actually have.
+    return { key: `chat:${a}`, label: app };
   }
   if (/chrome|safari|firefox|arc|brave|edge|opera/.test(a)) {
     const page = browserPage(title);
