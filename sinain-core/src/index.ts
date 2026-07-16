@@ -1888,13 +1888,20 @@ async function main() {
       }
     : null;
   const sessionSense = new SessionSenseManager(
-    embeddingService!, saveManager,
+    saveManager,
     (msg) => wsHandler.broadcastRaw(msg),
     resolveLocalMemoryDir(), config.sessionSenseConfig,
     composeSessionAssist,
+    (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
   );
   offerManager.setEpisodeConsumedCheck((threadId, startTs, endTs) =>
     sessionSense.wasAskedDuring(threadId, startTs, endTs));
+  // The nudge trigger IS the autosave detector: a live episode that crosses
+  // the engaged threshold qualifies, once, mid-episode.
+  episodeTracker.setQualifiedHook(
+    config.sessionSenseConfig.qualifyMinutes * 60_000,
+    (ep) => sessionSense.onEpisodeQualified(ep),
+  );
 
   // "Talk to Sinain" voice sessions — screen + mic to ARSinain via ar-bridge.
   const { VoiceSessionManager } = await import("./capture/voice-session.js");

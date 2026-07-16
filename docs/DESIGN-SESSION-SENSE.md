@@ -89,31 +89,31 @@ idle ──sustained match──▶ candidate ──breakpoint+gate──▶ pro
   decisions, undo. This quietly fixes the long-session failure where early
   context expires before the user ever saves.
 
-## 5. Classification: two prototype tiers
+## 5. Detection: the autosave detector, surfaced mid-episode
 
-- **Personal priors** (built by `prior_builder.py` from the KG): topic
-  centroids with recurrence, distinct-days, friction. High precision, uses the
-  topic's own label — *"back on the Oxigraph migration?"* — and improves with
-  every save. This tier exists on the WSM branch.
-- **Stock workflow prototypes** (new, ships with the app): a small curated
-  library of embedding centroids for canonical workflows — *job application,
-  travel booking, purchase research, apartment hunt, incident debugging,
-  meeting prep, tax/admin paperwork*. This is what makes "looks like you're
-  applying for a job" possible on day one, before the KG knows anything.
-  Stored as a versioned JSON asset (same shape as `PriorModel.topics`), built
-  offline from a handful of canonical descriptions per workflow — no runtime
-  LLM.
+REWRITTEN 2026-07-16 (product call): no classifier, no prototype taxonomy, no
+priors. Guessing which workflows a user has is unanswerable — users have
+unbounded, idiosyncratic workflows, and a curated centroid library is WSM's
+idea re-derived. The shipped autosave detection already knows the only thing
+the nudge needs: *"the user has been engaged on this thread family for N
+minutes"*.
 
-Matching is embeddings-only trigger. Deterministic cues (e.g. recognizable
-job-board or booking-site URL shapes in OCR) may **boost** a candidate's
-confidence, never **create** one — the WSM domain-blind rule (design §2)
-stands: hardcoded semantics silently scope the product and are banned as
-triggers.
+- **Trigger**: `episode-tracker.ts` (shipped, deterministic — thread identity
+  + engaged dwell) gains a mid-episode `qualified` hook: fired once when a
+  live episode crosses `SESSION_SENSE_QUALIFY_MINUTES` (default 8). The same
+  "long, engaged" signal the save offer waits for at the breakpoint, asked
+  while the user is still in it.
+- **Label**: the thread's own label — the exact source of the save offer's
+  "mostly: …" line. The card never claims more than the window title shows.
+- **Fingerprints (the learning loop)**: accepting a nudge (or correcting its
+  label) records `thread → confirmed label`. The next qualification on that
+  thread greets with the user's own answer — *"Back on: websocket
+  reconnect"* — not the raw title. The future guess is the user's past
+  answer; a lookup table their accepts build, not a model.
 
-The learning loop closes itself: every accepted session hands the distiller a
-labeled workflow → new/updated personal prototypes → detection personalizes.
-"Wrong?" corrections (§6) append to the same `capture-labels.jsonl` stream and
-feed `workstate/calibrate.ts`.
+Cold start is honest: day one, the card says "Looks like you're working on:
+<window title>" — true by construction. It personalizes only through consent
+moments.
 
 ## 6. The nudge card
 

@@ -374,19 +374,14 @@ export function loadConfig(): CoreConfig {
     expirySeconds: intEnv("SAVE_OFFER_EXPIRY_SECONDS", 45),
   };
 
-  // Session Sense (DESIGN-SESSION-SENSE.md): live workflow detection — the
-  // nudge that says "Looks like: applying for a job — track from 11:02?".
-  // Detection is local embeddings + deterministic features, zero LLM; the
-  // distillation LLM runs only after the tap. Default OFF — autonomous lane.
+  // Session Sense (DESIGN-SESSION-SENSE.md): the shipped autosave detection
+  // (episode tracker), reskinned to ask DURING the episode — "Looks like
+  // you're working on: <thread> — track from 11:02?". No classifier; thread
+  // identity + engaged dwell are the whole detector. The distillation LLM
+  // runs only after the tap. Default OFF — autonomous lane.
   const sessionSenseConfig: import("./types.js").SessionSenseConfig = {
     enabled: boolEnv("SESSION_SENSE_ENABLED", false),
-    // Calibrated against live OCR 2026-07-16: unrelated screen soup tops out
-    // ~0.29; the dwell hysteresis (3 consecutive agreeing ticks) is the real
-    // noise filter, so the floor sits just above the noise ceiling.
-    similarityThreshold: floatEnv("SESSION_SENSE_SIMILARITY", 0.34),
-    labelMargin: floatEnv("SESSION_SENSE_LABEL_MARGIN", 0.08),
-    dwellTicks: intEnv("SESSION_SENSE_DWELL_TICKS", 3),
-    tickSeconds: intEnv("SESSION_SENSE_TICK_SECONDS", 45),
+    qualifyMinutes: intEnv("SESSION_SENSE_QUALIFY_MINUTES", 8),
     pauseGraceSeconds: intEnv("SESSION_SENSE_PAUSE_GRACE_SECONDS", 90),
     endQuietMinutes: intEnv("SESSION_SENSE_END_QUIET_MINUTES", 6),
     wrapGraceMinutes: intEnv("SESSION_SENSE_WRAP_GRACE_MINUTES", 10),

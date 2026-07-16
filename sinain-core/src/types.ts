@@ -685,15 +685,10 @@ export interface SaveOfferConfig {
 export interface SessionSenseConfig {
   /** Default false — an autonomous lane, opt-in by convention. */
   enabled: boolean;
-  /** Cosine floor for a prototype match to count as a candidate tick. */
-  similarityThreshold: number;
-  /** Margin above the floor that buys the label (high vs medium confidence). */
-  labelMargin: number;
-  /** Consecutive matching ticks before a candidate is confirmed (~2–3 min). */
-  dwellTicks: number;
-  /** Minimum spacing between classification ticks (embedding calls). */
-  tickSeconds: number;
-  /** Attention away from the session thread this long → paused. */
+  /** Engaged minutes before a live episode qualifies for the nudge — the
+   *  same "long" notion as the save offer, surfaced mid-episode. */
+  qualifyMinutes: number;
+  /** Attention away from the session's apps this long → paused. */
   pauseGraceSeconds: number;
   /** Paused this long → the wrap prompt (§6 "quiet for N min"). */
   endQuietMinutes: number;

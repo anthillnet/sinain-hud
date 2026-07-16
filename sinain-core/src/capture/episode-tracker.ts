@@ -33,6 +33,18 @@ export interface EpisodeBreakpoint {
   engagedMs: number;
 }
 
+/** A live episode that just crossed the engagement threshold — the
+ *  mid-episode signal Session Sense nudges on (same detection the save
+ *  offer uses, fired while the user is still in it). */
+export interface EpisodeQualified {
+  threadId: string;
+  label: string;
+  /** Episode start — the retroactive-credit anchor. */
+  startTs: number;
+  engagedMs: number;
+  at: number;
+}
+
 export class EpisodeTracker {
   private readonly idleGapMs =
     (Number(process.env.SAVE_OFFER_IDLE_GAP_MINUTES) || 5) * MINUTE;
@@ -46,7 +58,18 @@ export class EpisodeTracker {
   /** A candidate departure: a different thread seen since `sinceTs`. */
   private pending: { key: string; label: string; sinceTs: number } | null = null;
 
+  /** Mid-episode hook: fired ONCE per episode when engaged dwell crosses
+   *  `qualifyMs`. 0 disables. */
+  private qualified: ((ep: EpisodeQualified) => void) | null = null;
+  private qualifyMs = 0;
+  private qualifiedFired = false;
+
   constructor(private emit: (bp: EpisodeBreakpoint) => void) {}
+
+  setQualifiedHook(qualifyMs: number, fn: (ep: EpisodeQualified) => void): void {
+    this.qualifyMs = qualifyMs;
+    this.qualified = fn;
+  }
 
   /** Feed one sense event. Cheap — a title parse and a couple of compares. */
   observe(app: string | undefined, windowTitle: string | undefined, ts: number): void {
@@ -68,6 +91,19 @@ export class EpisodeTracker {
     if (key === this.activeKey) {
       this.pending = null; // bounce-back: the glance didn't end the episode
       this.lastTs = ts;
+      // Mid-episode qualification: the same "long, engaged" signal the save
+      // offer waits for at the breakpoint, surfaced while the user is in it.
+      if (!this.qualifiedFired && this.qualified && this.qualifyMs > 0 &&
+          ts - this.startTs >= this.qualifyMs) {
+        this.qualifiedFired = true;
+        this.qualified({
+          threadId: this.activeKey,
+          label: this.activeLabel,
+          startTs: this.startTs,
+          engagedMs: ts - this.startTs,
+          at: ts,
+        });
+      }
       return;
     }
 
@@ -90,6 +126,7 @@ export class EpisodeTracker {
     this.startTs = ts;
     this.lastTs = ts;
     this.pending = null;
+    this.qualifiedFired = false;
   }
 
   private close(endTs: number): void {
