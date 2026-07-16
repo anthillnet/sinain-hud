@@ -318,17 +318,17 @@ export class SessionSenseManager {
     if (key !== this.activeThreadId) {
       this.activeThreadId = key;
       this.activeThreadLabel = label;
-      this.recentText = []; // classifier input never mixes threads
-      // A thread switch away from a still-unconfirmed candidate kills it.
-      if (this.candidate && this.candidate.threadId !== key && !this.candidate.confirmedAt) {
-        this.candidate = null;
-      }
+      // NOTE: the text window and any candidate survive thread switches — a
+      // workflow spans apps and pages (the design's flagship case is "CV
+      // across Chrome and Pages"). The candidate is keyed by WORKFLOW match,
+      // not by thread; sustained classifier agreement is the identity.
     }
 
-    // Session warmth: attention back on the session thread resumes it.
+    // Session warmth: attention on any of the session's apps (or its thread)
+    // keeps it running — a workflow is a family of apps, like an episode.
     const s = this.session;
     if (s) {
-      if (key === s.threadId) {
+      if (s.apps.has(app) || key === s.threadId) {
         s.lastActiveTs = ts;
         s.apps.add(app);
         if (s.paused) this.resumeSession(s);
@@ -394,11 +394,10 @@ export class SessionSenseManager {
 
     // Two-tier ranking (§5): personal prior topics compete with the stock
     // library on the same cosine scale; the personal tier wins ties — the KG
-    // already knows this thread by name, with recurrence behind it.
+    // already knows this thread by name, with recurrence behind it. The low
+    // min is for tick-log visibility; the real floor applies below.
     this.prior.reload();
-    const personal = this.prior.ready
-      ? this.prior.topMatches(vec, 3, this.cfg.similarityThreshold)
-      : [];
+    const personal = this.prior.ready ? this.prior.topMatches(vec, 3, 0.15) : [];
     this.lastScores = [
       ...personal.map((m) => ({
         id: `personal:${m.topic.id}`, label: m.topic.label,
@@ -409,6 +408,13 @@ export class SessionSenseManager {
         floor: s.proto.floor, kind: "stock" as const,
       })),
     ].sort((a, b) => b.sim - a.sim);
+
+    // Every tick logs its verdict — a quiet classifier must be diagnosable
+    // in the field (the skip-logging lesson from the offer manager).
+    const top = this.lastScores.slice(0, 3)
+      .map((s) => `${s.kind === "personal" ? "p:" : ""}${s.id.replace(/^personal:/, "")}=${s.sim.toFixed(2)}`)
+      .join(" ");
+    log(TAG, `tick: ${text.length}ch on ${this.activeThreadId} → ${top} (floor ${this.cfg.similarityThreshold})`);
 
     const stockBest = scored[0];
     const personalBest = personal[0];
@@ -426,9 +432,10 @@ export class SessionSenseManager {
       return;
     }
 
+    // Workflow identity, not thread identity: the same top match across
+    // consecutive ticks IS the candidate, however many apps/pages it spans.
     const c = this.candidate;
-    if (c && c.threadId === this.activeThreadId &&
-        c.match.kind === bestMatch.kind && c.match.id === bestMatch.id) {
+    if (c && c.match.kind === bestMatch.kind && c.match.id === bestMatch.id) {
       c.ticks++;
       c.bestSim = Math.max(c.bestSim, bestSim);
       c.apps.add(app);
@@ -516,8 +523,9 @@ export class SessionSenseManager {
     // never nag about the same thing again. The only guards are visible ones:
     // Category floor (§7): medical/dating never nudge, at any confidence.
     if (match.floor === "silent") return skip("category floor (silent)");
-    // Once per thread per day (§7) — applies to resume nudges too.
-    if (this.state.nudgedThreads[c.threadId]) return skip("thread already nudged today");
+    // Once per workflow per day (§7) — applies to resume nudges too.
+    const guardKey = `${match.kind}:${match.id}`;
+    if (this.state.nudgedThreads[guardKey]) return skip("workflow already nudged today");
 
     // Bookmark return (§9): the ⚑ marks the user's own promise, not the
     // classifier's guess.
@@ -565,7 +573,7 @@ export class SessionSenseManager {
       ts: now,
     };
 
-    this.state.nudgedThreads[c.threadId] = now;
+    this.state.nudgedThreads[guardKey] = now;
     this.saveState();
     this.askedEpisodes.push({ threadId: c.threadId, ts: now });
     if (this.askedEpisodes.length > 50) this.askedEpisodes.shift();

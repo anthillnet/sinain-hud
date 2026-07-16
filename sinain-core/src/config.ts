@@ -380,7 +380,10 @@ export function loadConfig(): CoreConfig {
   // distillation LLM runs only after the tap. Default OFF — autonomous lane.
   const sessionSenseConfig: import("./types.js").SessionSenseConfig = {
     enabled: boolEnv("SESSION_SENSE_ENABLED", false),
-    similarityThreshold: floatEnv("SESSION_SENSE_SIMILARITY", 0.42),
+    // Calibrated against live OCR 2026-07-16: unrelated screen soup tops out
+    // ~0.29; the dwell hysteresis (3 consecutive agreeing ticks) is the real
+    // noise filter, so the floor sits just above the noise ceiling.
+    similarityThreshold: floatEnv("SESSION_SENSE_SIMILARITY", 0.34),
     labelMargin: floatEnv("SESSION_SENSE_LABEL_MARGIN", 0.08),
     dwellTicks: intEnv("SESSION_SENSE_DWELL_TICKS", 3),
     tickSeconds: intEnv("SESSION_SENSE_TICK_SECONDS", 45),
