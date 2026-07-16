@@ -15,7 +15,6 @@ import type {
   SessionWrapMessage,
 } from "../types.js";
 import type { SessionAssist } from "./window-ops.js";
-import type { OfferManager } from "./offer-manager.js";
 import { PriorStore } from "./prior-store.js";
 import type { SaveManager } from "./save-manager.js";
 import { deriveProject } from "./thread-identity.js";
@@ -125,17 +124,8 @@ const STOCK_PROTOTYPES: StockPrototype[] = [
 const MIN_TICK_CHARS = 80;
 // Recent-OCR window fed to the embedder per tick.
 const MAX_TICK_CHARS = 1500;
-// Housekeeping cadence (prompt gate, pause/end/grace checks).
+// Housekeeping cadence (prompt, pause/end/grace checks).
 const HOUSEKEEPING_MS = 5_000;
-// The prompt gate's micro-breakpoint: the screen has been visually quiet this
-// long (sense events are change-gated, so no events = nothing changing) while
-// the user was active moments before. Stand-in for the Athium
-// offer-at-breakpoint gate until the WSM lands on main.
-const SETTLE_MIN_MS = 4_000;
-const SETTLE_MAX_MS = 60_000;
-// If no settle window shows up, prompt anyway after this long — a confirmed
-// candidate must not silently rot because the screen never went quiet.
-const SETTLE_FORCE_MS = 90_000;
 
 /** A classifier hit — either a stock prototype or a personal prior topic
  *  (the two tiers of §5; personal wins when its signal is stronger). */
@@ -208,9 +198,14 @@ interface PendingNudge {
  * live workflow detection — the Watch's workout nudge for knowledge work.
  *
  *   idle → candidate (embedding match, dwell hysteresis, credit pinned)
- *        → prompted (micro-breakpoint, shared attention budget, category floor)
+ *        → prompted (once per thread per day, category floor — nothing else)
  *        → tracking (warmth pause/resume, chip) → ending (wrap prompt, grace)
  *        → summary (standard save lifecycle, provenance "session_sense").
+ *
+ * Deliberately Watch-simple: the dwell wait IS the etiquette. No attention
+ * budgets, no breakpoint model, no dismissal streaks — the only cross-feature
+ * coupling is policy A (a nudge consumes the episode's one ask, so the rung-1
+ * save offer never re-asks about the same minutes).
  *
  * Detection and prompting are LLM-free by construction — in-process embeddings
  * plus deterministic features. The tap is the gesture; the distillation LLM
@@ -246,8 +241,6 @@ export class SessionSenseManager {
   constructor(
     private embedding: EmbeddingService,
     private saveManager: SaveManager,
-    /** Shared attention budget — offers and nudges are ONE allowance (§7). */
-    private offers: OfferManager | null,
     private broadcast: (msg: SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | SessionAssistMessage) => void,
     private memoryDir: string,
     private cfg: SessionSenseConfig,
@@ -465,15 +458,12 @@ export class SessionSenseManager {
     const now = Date.now();
 
     // Prompted → expired is client-driven; everything else advances here.
+    // A confirmed candidate prompts on the next tick — the dwell hysteresis
+    // already waited 2-3 minutes, which is the Watch's whole etiquette. No
+    // breakpoint model, no budget: the card is quiet and ignorable by design.
     const c = this.candidate;
     if (c?.confirmedAt && !this.session && !this.pendingNudge) {
-      // Micro-breakpoint stand-in for Athium offer-at-breakpoint: the screen
-      // has settled (change-gated sense stream went quiet) but the user was
-      // just here — or the settle never comes and we force after a while.
-      const quiet = now - this.lastSenseTs;
-      const sinceConfirm = now - c.confirmedAt;
-      const settled = quiet >= SETTLE_MIN_MS && quiet <= SETTLE_MAX_MS;
-      if (settled || sinceConfirm >= SETTLE_FORCE_MS) this.maybePrompt(c, now);
+      this.maybePrompt(c, now);
     }
 
     const s = this.session;
@@ -522,20 +512,16 @@ export class SessionSenseManager {
       this.candidate = null;
     };
 
+    // The Watch model, deliberately simple: sustained signal → ask once →
+    // never nag about the same thing again. The only guards are visible ones:
     // Category floor (§7): medical/dating never nudge, at any confidence.
     if (match.floor === "silent") return skip("category floor (silent)");
     // Once per thread per day (§7) — applies to resume nudges too.
     if (this.state.nudgedThreads[c.threadId]) return skip("thread already nudged today");
 
     // Bookmark return (§9): the ⚑ marks the user's own promise, not the
-    // classifier's guess — so it rides OUTSIDE the daily nudge cap (they
-    // asked to be reminded), though still breakpoint-gated and once per day.
+    // classifier's guess.
     const bookmark = this.state.bookmarks[c.threadId];
-    if (!bookmark) {
-      // One attention budget, shared with rung 1 (§7).
-      const budget = this.offers?.budgetAllows() ?? { ok: true };
-      if (!budget.ok) return skip(budget.why ?? "budget");
-    }
 
     // Confidence buys the label, never the card (§2): high similarity earns
     // the claim; medium drops it entirely — never hedged. Floored categories
@@ -579,9 +565,6 @@ export class SessionSenseManager {
       ts: now,
     };
 
-    // A resume nudge is the user's own reminder — it never spends the shared
-    // attention budget.
-    if (!bookmark) this.offers?.consumeAsk();
     this.state.nudgedThreads[c.threadId] = now;
     this.saveState();
     this.askedEpisodes.push({ threadId: c.threadId, ts: now });
@@ -622,21 +605,16 @@ export class SessionSenseManager {
     switch (response) {
       case "tracked":
         sessionId = this.startSession(pending, pending.msg.label ?? "", pending.msg.grade);
-        this.offers?.noteAccepted();
         break;
       case "corrected": {
         const picked = (label ?? "").trim();
         sessionId = this.startSession(pending, picked, picked ? "stock" : "unlabeled");
-        this.offers?.noteAccepted();
         break;
       }
       case "dismissed":
-        // "Not this" on a resume nudge is a match correction, not a rejection
-        // of asking — it keeps the bookmark and never feeds the day-off streak.
-        if (!pending.msg.resume) this.offers?.noteDismissal();
-        break;
       case "expired":
-        break; // weak negative — counted lighter than ✕ (§3)
+        break; // labels record the negative; no suppression machinery beyond
+               // once-per-thread-per-day — dismissing costs the user nothing.
     }
 
     this.appendLabel({

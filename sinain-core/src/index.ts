@@ -1888,7 +1888,7 @@ async function main() {
       }
     : null;
   const sessionSense = new SessionSenseManager(
-    embeddingService!, saveManager, offerManager,
+    embeddingService!, saveManager,
     (msg) => wsHandler.broadcastRaw(msg),
     resolveLocalMemoryDir(), config.sessionSenseConfig,
     composeSessionAssist,

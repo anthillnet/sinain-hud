@@ -109,42 +109,6 @@ export class OfferManager {
     this.episodeConsumed = fn;
   }
 
-  // ── Shared attention budget (DESIGN-SESSION-SENSE §7) ──────────────────────
-  // Save Offers and Session Sense nudges are ONE allowance: same day cap, same
-  // cooldown, same dismissals-end-the-day rule. Session Sense consults and
-  // consumes through these instead of keeping a second ledger.
-
-  /** Does the shared budget allow an ask right now? */
-  budgetAllows(): { ok: boolean; why?: string } {
-    this.rollDay();
-    if (this.state.offersToday >= this.cfg.maxPerDay) return { ok: false, why: `day cap (${this.cfg.maxPerDay})` };
-    if (this.state.consecutiveDismissals >= DAY_OFF_AFTER_DISMISSALS) return { ok: false, why: `${DAY_OFF_AFTER_DISMISSALS} dismissals — asks off for the day` };
-    if (Date.now() - this.state.lastOfferTs < this.cfg.cooldownMinutes * 60_000) return { ok: false, why: `cooldown (${this.cfg.cooldownMinutes}m)` };
-    return { ok: true };
-  }
-
-  /** Consume one ask from the shared budget (a nudge was shown). */
-  consumeAsk(): void {
-    this.rollDay();
-    this.state.offersToday++;
-    this.state.lastOfferTs = Date.now();
-    this.saveState();
-  }
-
-  /** An explicit ✕ anywhere counts toward the day-off threshold. */
-  noteDismissal(): void {
-    this.rollDay();
-    this.state.consecutiveDismissals++;
-    this.saveState();
-  }
-
-  /** An accepted ask anywhere resets the dismissal streak. */
-  noteAccepted(): void {
-    this.rollDay();
-    this.state.consecutiveDismissals = 0;
-    this.saveState();
-  }
-
   /** Episode-tracker breakpoint hook: decide skip-or-offer. Free — no LLM, no I/O beyond
    *  the ring buffers; every skip path returns before composing anything. */
   onBreakpoint(ev: { threadId: string; label: string; at: number; engagedMs: number }): void {

@@ -148,9 +148,12 @@ same corner, same ✕). Anatomy, top to bottom:
 
 ## 7. Guardrails (binding)
 
-- **Frequency**: shares the rung-1 budget — the ≤ 3 offers/day cap, ≥ 45 min
-  spacing, and 3-dismissals-ends-the-day rule cover Save Offers and Session
-  Sense nudges *combined*. A thread is nudged at most once per day.
+- **Frequency** (simplified 2026-07-16 — product call: Watch-simple, no
+  budget machinery): a thread is nudged **at most once per day**, one card on
+  screen at a time, and the 2–3 min dwell hysteresis is the whole prompting
+  etiquette. No shared day caps, no cooldowns, no dismissal streaks — those
+  suppressors made the nudge undebuggably quiet in practice. Rung 1 keeps its
+  own budget for its own offers.
 - **Category floor**: detected medical, dating, personal-finance, and
   job-search-adjacent-HR (e.g. filing a grievance) workflows are **never
   nudged with a label**, regardless of confidence — at most the unlabeled
