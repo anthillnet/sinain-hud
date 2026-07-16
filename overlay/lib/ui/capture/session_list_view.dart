@@ -51,13 +51,14 @@ class SessionListView extends StatefulWidget {
 }
 
 class _SessionListViewState extends State<SessionListView> {
-  SessionList _list = const SessionList(active: null, bookmarks: []);
+  SessionList _list = const SessionList(sessions: [], bookmarks: []);
   StreamSubscription<SessionChipState>? _chipSub;
   Timer? _ticker;
-  DateTime _activeReceivedAt = DateTime.now();
+  final Map<String, DateTime> _receivedAt = {};
   bool _loaded = false;
   // Hover preview of the context the ✦ call would carry (cached core-side).
   String? _preview;
+  String? _previewFor; // sessionId the preview belongs under
   bool _previewLoading = false;
 
   @override
@@ -67,11 +68,15 @@ class _SessionListViewState extends State<SessionListView> {
     _chipSub = widget.ws.sessionChipStream.listen((c) {
       if (!mounted) return;
       setState(() {
-        _activeReceivedAt = DateTime.now();
-        _list = SessionList(
-          active: c.ended ? null : c,
-          bookmarks: _list.bookmarks,
-        );
+        final sessions = [..._list.sessions];
+        sessions.removeWhere((s) => s.sessionId == c.sessionId);
+        if (!c.ended) {
+          sessions.insert(0, c);
+          _receivedAt[c.sessionId] = DateTime.now();
+        } else {
+          _receivedAt.remove(c.sessionId);
+        }
+        _list = SessionList(sessions: sessions, bookmarks: _list.bookmarks);
       });
       // A wrap may have updated bookmark history — refetch quietly.
       if (c.ended) _refresh();
@@ -85,7 +90,10 @@ class _SessionListViewState extends State<SessionListView> {
     if (!mounted) return;
     setState(() {
       _list = list;
-      _activeReceivedAt = DateTime.now();
+      final now = DateTime.now();
+      for (final s in list.sessions) {
+        _receivedAt[s.sessionId] = now;
+      }
       _loaded = true;
     });
     _syncTicker();
@@ -93,7 +101,7 @@ class _SessionListViewState extends State<SessionListView> {
 
   void _syncTicker() {
     _ticker?.cancel();
-    if (_list.active != null && !_list.active!.paused) {
+    if (_list.sessions.any((s) => !s.paused)) {
       _ticker =
           Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
     }
@@ -109,7 +117,8 @@ class _SessionListViewState extends State<SessionListView> {
   String _elapsed(SessionChipState s) {
     var ms = s.activeMs;
     if (!s.paused) {
-      ms += DateTime.now().difference(_activeReceivedAt).inMilliseconds;
+      final at = _receivedAt[s.sessionId];
+      if (at != null) ms += DateTime.now().difference(at).inMilliseconds;
     }
     final sec = ms ~/ 1000;
     return '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')}';
@@ -118,16 +127,22 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   Widget build(BuildContext context) {
     final t = HudTheme.of(context);
-    final active = _list.active;
+    final sessions = _list.sessions;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('TRACKING NOW',
-              style: _mono(9, t.textDim, weight: FontWeight.w600)),
+          Row(children: [
+            Text('TRACKING NOW',
+                style: _mono(9, t.textDim, weight: FontWeight.w600)),
+            if (sessions.length > 1) ...[
+              const SizedBox(width: 8),
+              Text('${sessions.length}', style: _mono(9, t.textDim)),
+            ],
+          ]),
           const SizedBox(height: 6),
-          if (active == null)
+          if (sessions.isEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
@@ -136,18 +151,22 @@ class _SessionListViewState extends State<SessionListView> {
                       : ' ',
                   style: _mono(10, t.textDim)),
             )
-          else ...[
-            _activeRow(t, active),
-            // The context preview the ✦ call would carry — on hover only.
-            if (_preview != null)
+          else
+            for (final s in sessions) ...[
               Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: Text(_preview!,
-                    style: _mono(9, t.textDim, height: 1.35),
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis),
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _activeRow(t, s),
               ),
-          ],
+              // The context preview the ✦ call would carry — on hover only.
+              if (_preview != null && _previewFor == s.sessionId)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(_preview!,
+                      style: _mono(9, t.textDim, height: 1.35),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis),
+                ),
+            ],
           const SizedBox(height: 14),
           Row(children: [
             Text('BOOKMARKED',
@@ -211,7 +230,10 @@ class _SessionListViewState extends State<SessionListView> {
         const SizedBox(width: 8),
         MouseRegion(
           onEnter: (_) => _loadPreview(s),
-          onExit: (_) => setState(() => _preview = null),
+          onExit: (_) => setState(() {
+            _preview = null;
+            _previewFor = null;
+          }),
           child:
               _action(t, '✦', 'Call AI on this session', () => widget.onCallAi(s)),
         ),
@@ -242,7 +264,10 @@ class _SessionListViewState extends State<SessionListView> {
       if (!mounted) return;
       final summary = data?['summary'] as String?;
       if (summary != null && summary.isNotEmpty) {
-        setState(() => _preview = summary);
+        setState(() {
+          _preview = summary;
+          _previewFor = s.sessionId;
+        });
       }
     } finally {
       _previewLoading = false;

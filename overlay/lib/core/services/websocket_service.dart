@@ -764,11 +764,11 @@ class WebSocketService extends ChangeNotifier {
       }))?['ok'] ==
       true;
 
-  /// The sessions list: the live tracked session (if any) + bookmarked
-  /// threads, most recent first.
+  /// The sessions list: live tracked sessions (warm first — parallel
+  /// sessions are the normal workflow) + bookmarked threads.
   Future<SessionList> fetchSessionList() async {
     final base = _httpBase;
-    if (base == null) return const SessionList(active: null, bookmarks: []);
+    if (base == null) return const SessionList(sessions: [], bookmarks: []);
     HttpClient? client;
     try {
       client = HttpClient();
@@ -776,15 +776,15 @@ class WebSocketService extends ChangeNotifier {
           await client.getUrl(Uri.parse('$base/capture/session/bookmarks'));
       final resp = await req.close();
       if (resp.statusCode != 200) {
-        return const SessionList(active: null, bookmarks: []);
+        return const SessionList(sessions: [], bookmarks: []);
       }
       final body = await resp.transform(utf8.decoder).join();
       final data = jsonDecode(body) as Map<String, dynamic>;
       return SessionList(
-        active: data['active'] is Map
-            ? SessionChipState.fromJson(
-                (data['active'] as Map).cast<String, dynamic>())
-            : null,
+        sessions: (data['sessions'] as List? ?? const [])
+            .whereType<Map>()
+            .map((m) => SessionChipState.fromJson(m.cast<String, dynamic>()))
+            .toList(),
         bookmarks: (data['bookmarks'] as List? ?? const [])
             .whereType<Map>()
             .map((m) => SessionBookmark.fromJson(m.cast<String, dynamic>()))
@@ -792,7 +792,7 @@ class WebSocketService extends ChangeNotifier {
       );
     } catch (e) {
       _log('fetchSessionList failed: $e');
-      return const SessionList(active: null, bookmarks: []);
+      return const SessionList(sessions: [], bookmarks: []);
     } finally {
       client?.close();
     }

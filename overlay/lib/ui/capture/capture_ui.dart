@@ -1849,10 +1849,17 @@ class SessionWrapCard extends StatelessWidget {
 class SessionChip extends StatefulWidget {
   final SessionChipState session;
 
+  /// Other live sessions beyond the shown (warm) one — renders as "+N".
+  final int others;
+
   /// Toggle the session detail card.
   final VoidCallback onDetails;
 
-  const SessionChip({super.key, required this.session, required this.onDetails});
+  const SessionChip(
+      {super.key,
+      required this.session,
+      this.others = 0,
+      required this.onDetails});
 
   @override
   State<SessionChip> createState() => _SessionChipState();
@@ -1947,6 +1954,10 @@ class _SessionChipState extends State<SessionChip> {
             if (paused) ...[
               const SizedBox(width: 6),
               Text('paused', style: _mono(9, _amber)),
+            ],
+            if (widget.others > 0) ...[
+              const SizedBox(width: 6),
+              Text('+${widget.others}', style: _mono(9, t.textDim)),
             ],
           ]),
         ),

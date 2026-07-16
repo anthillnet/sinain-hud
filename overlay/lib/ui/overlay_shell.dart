@@ -128,11 +128,13 @@ class OverlayShellState extends State<OverlayShell> {
   // nudge, the running-session chip, and the symmetric wrap prompt.
   SessionNudge? _sessionNudge;
   Timer? _nudgeExpiryTimer;
-  SessionChipState? _sessionChip;
+  // Parallel sessions (§5): one warm, the rest paused. The chip shows the
+  // warm one (with a "+N" affix when others exist); the SESSIONS view and
+  // detail card cover the stack.
+  final Map<String, SessionChipState> _sessionChips = {};
   SessionWrap? _sessionWrap;
-  // Help-forward (§8 C): composed on the tap; the chip's "✦ next steps"
-  // affordance reveals it. Never auto-opens.
-  SessionAssist? _sessionAssist;
+  // Help-forward: composed per session; the detail card reveals it.
+  final Map<String, SessionAssist> _sessionAssists = {};
   bool _assistVisible = false;
   // The bookmarked-sessions shelf (§9), opened from the eye menu.
   List<SessionBookmark>? _sessionShelf;
@@ -360,15 +362,17 @@ class OverlayShellState extends State<OverlayShell> {
     });
     _chipSub = ws.sessionChipStream.listen((c) {
       if (!mounted) return;
-      setState(() => _sessionChip = c.ended ? null : c);
+      setState(() {
+        if (c.ended) {
+          _sessionChips.remove(c.sessionId);
+          _sessionAssists.remove(c.sessionId);
+          if (_sessionWrap?.sessionId == c.sessionId) _sessionWrap = null;
+          if (_sessionChips.isEmpty) _assistVisible = false;
+        } else {
+          _sessionChips[c.sessionId] = c;
+        }
+      });
       if (c.ended) {
-        // The wrap card's job is done — the receipt takes the slot. The
-        // assist dies with its session.
-        setState(() {
-          _sessionWrap = null;
-          _sessionAssist = null;
-          _assistVisible = false;
-        });
         _maybeExitCardMode();
       } else {
         _enterCardMode();
@@ -376,9 +380,9 @@ class OverlayShellState extends State<OverlayShell> {
     });
     _assistSub = ws.sessionAssistStream.listen((a) {
       if (!mounted) return;
-      // Only ready assists surface; working/error stay silent — the ✦
-      // affordance simply doesn't appear (never a spinner, never an apology).
-      if (a.ready) setState(() => _sessionAssist = a);
+      // Only ready assists surface; working/error stay silent — the detail
+      // card simply shows the verbs without the details.
+      if (a.ready) setState(() => _sessionAssists[a.sessionId] = a);
     });
     _wrapSub = ws.sessionWrapStream.listen((w) {
       if (!mounted) return;
@@ -1498,7 +1502,7 @@ class OverlayShellState extends State<OverlayShell> {
         _saveReceipt != null ||
         _saveOffer != null ||
         _sessionNudge != null ||
-        _sessionChip != null ||
+        _sessionChips.isNotEmpty ||
         _sessionWrap != null ||
         _sessionShelf != null ||
         _voiceSession != null) {
@@ -1592,6 +1596,20 @@ class OverlayShellState extends State<OverlayShell> {
     if (n == null) return;
     context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
     _clearSessionNudge(exitSurfaces: false); // chip arrives next
+  }
+
+  /// The warm session (running beats paused; most recently started wins) —
+  /// the one the corner chip and detail card represent.
+  SessionChipState? get _warmChip {
+    SessionChipState? best;
+    for (final c in _sessionChips.values) {
+      if (best == null ||
+          (!c.paused && best.paused) ||
+          (c.paused == best.paused && c.startedTs > best.startedTs)) {
+        best = c;
+      }
+    }
+    return best;
   }
 
   int _nudgeSpanMinutes(SessionNudge n) =>
@@ -1768,27 +1786,26 @@ class OverlayShellState extends State<OverlayShell> {
       children: [
         // Session Sense: the running chip is the ambient state; nudge and
         // wrap cards stack above the save cards (violet = session-scoped).
-        if (_sessionChip != null)
+        if (_warmChip != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: SessionChip(
-              session: _sessionChip!,
+              session: _warmChip!,
+              others: _sessionChips.length - 1,
               // A click asks for MORE, never ends: expand the detail card.
               onDetails: () =>
                   setState(() => _assistVisible = !_assistVisible),
             ),
           ),
-        if (_assistVisible && _sessionChip != null)
+        if (_assistVisible && _warmChip != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: SessionDetailCard(
-              session: _sessionChip!,
-              assist: _sessionAssist?.sessionId == _sessionChip!.sessionId
-                  ? _sessionAssist
-                  : null,
-              onCallAi: () => _callAiOnActiveSession(_sessionChip!),
+              session: _warmChip!,
+              assist: _sessionAssists[_warmChip!.sessionId],
+              onCallAi: () => _callAiOnActiveSession(_warmChip!),
               onCallSinain: () {
-                final s = _sessionChip!;
+                final s = _warmChip!;
                 final minutes = ((DateTime.now().millisecondsSinceEpoch -
                             s.startedTs) /
                         60000)
@@ -1801,7 +1818,7 @@ class OverlayShellState extends State<OverlayShell> {
                 // the session stays in the bookmarks list.
                 context
                     .read<WebSocketService>()
-                    .sessionAction(_sessionChip!.sessionId, 'wrapped');
+                    .sessionAction(_warmChip!.sessionId, 'wrapped');
                 setState(() => _assistVisible = false);
               },
               onDismiss: () => setState(() => _assistVisible = false),

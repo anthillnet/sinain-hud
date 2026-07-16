@@ -109,7 +109,10 @@ const ASSIST_WAIT_MS = 4_000;
 export class SessionSenseManager {
   private state: PersistedState;
   private pendingNudge: PendingNudge | null = null;
-  private session: Session | null = null;
+  /** Parallel sessions (§5): warmth is attention and attention is singular —
+   *  one session is ever warm; the rest sit paused, each heading toward its
+   *  own wrap flow independently. Keyed by session id. */
+  private sessions = new Map<string, Session>();
 
   /** Policy A (§7): nudges shown, so a rung-1 offer never re-asks the episode. */
   private askedEpisodes: { threadId: string; ts: number }[] = [];
@@ -184,23 +187,30 @@ export class SessionSenseManager {
   // ── Sense intake: session warmth only ───────────────────────────────────────
 
   /** Feed one sense event. Detection lives in the episode tracker; this only
-   *  keeps a running session's warmth honest (auto-pause / auto-resume). */
+   *  keeps session warmth honest (auto-pause / auto-resume). Attention is
+   *  singular: each event warms AT MOST ONE session — a thread-identity
+   *  match beats an app-family match, and ties go to the most recently
+   *  active session (shared apps like a browser must not warm every
+   *  session that ever touched them). */
   observe(event: SenseEvent): void {
     if (!this.cfg.enabled) return;
     const app = event.meta.app;
     if (!app || app === "unknown") return;
-    const s = this.session;
-    if (!s) return;
+    if (this.sessions.size === 0) return;
 
     const { key } = deriveProject(app, event.meta.windowTitle ?? "");
-    // A workflow is a family of apps, like an episode: attention on any of
-    // the session's apps (or its thread) keeps it running.
-    if (s.apps.has(app) || key === s.threadId) {
-      s.lastActiveTs = event.ts;
-      s.apps.add(app);
-      if (s.paused) this.resumeSession(s);
-      if (s.wrapPromptTs) this.keepGoing(s, "activity resumed");
+    let match: Session | null = null;
+    for (const s of this.sessions.values()) {
+      if (key === s.threadId) { match = s; break; } // exact thread wins
+      if (s.apps.has(app) && (!match || s.lastActiveTs > match.lastActiveTs)) {
+        match = s;
+      }
     }
+    if (!match) return;
+    match.lastActiveTs = event.ts;
+    match.apps.add(app);
+    if (match.paused) this.resumeSession(match);
+    if (match.wrapPromptTs) this.keepGoing(match, "activity resumed");
   }
 
   // ── The nudge (episode qualified → prompted) ────────────────────────────────
@@ -214,7 +224,11 @@ export class SessionSenseManager {
     const skip = (why: string): void =>
       log(TAG, `${ep.threadId}: episode qualified (${Math.round(ep.engagedMs / 60_000)}m) — no nudge: ${why}`);
 
-    if (this.session) return skip("a session is already running");
+    // Parallel sessions are the normal workflow — only a session ALREADY ON
+    // THIS THREAD blocks a new ask (you can't track the same work twice).
+    for (const s of this.sessions.values()) {
+      if (s.threadId === ep.threadId) return skip("this thread is already being tracked");
+    }
     if (this.pendingNudge) return skip("a nudge is already on screen");
     // Frequency rules, by reaction: an explicit ✕ silences the thread for
     // the day; merely ignoring it (expiry) only snoozes it for a while —
@@ -388,7 +402,7 @@ export class SessionSenseManager {
     // before and after it wraps — release (✕) is the user's own act.
     this.bookmarkThread(
       pending.msg.threadId, label || pending.msg.label || "session");
-    this.session = {
+    const session: Session = {
       id,
       threadId: pending.msg.threadId,
       label,
@@ -400,7 +414,8 @@ export class SessionSenseManager {
       apps: new Set(pending.apps),
       wrapPromptTs: 0,
     };
-    this.broadcastChip(this.session, "running");
+    this.sessions.set(id, session);
+    this.broadcastChip(session, "running");
     if (pending.assist) {
       // The nudge already paid for the composition — the chip's ✦ reuses it.
       this.broadcast({
@@ -408,7 +423,7 @@ export class SessionSenseManager {
         goal: pending.assist.goal, steps: pending.assist.steps, ts: now,
       });
     } else {
-      this.fireAssist(this.session);
+      this.fireAssist(session);
     }
     return id;
   }
@@ -425,7 +440,7 @@ export class SessionSenseManager {
     this.broadcast({ type: "session_assist", sessionId, status: "working", ts: Date.now() });
     void this.composeAssist(minutes, [...s.apps], s.label)
       .then((assist) => {
-        if (this.session?.id !== sessionId) return; // session already gone
+        if (!this.sessions.has(sessionId)) return; // session already gone
         if (!assist || (!assist.goal && assist.steps.length === 0)) {
           this.broadcast({ type: "session_assist", sessionId, status: "error", error: "nothing composed", ts: Date.now() });
           return;
@@ -449,38 +464,40 @@ export class SessionSenseManager {
   private tick(): void {
     if (!this.cfg.enabled) return;
     const now = Date.now();
-    const s = this.session;
-    if (!s) return;
 
-    // Warmth decay: attention has been elsewhere → pause (auto-pause, §5).
-    if (!s.paused && now - s.lastActiveTs >= this.cfg.pauseGraceSeconds * 1000) {
-      this.pauseSession(s);
-    }
+    // Every session advances independently (§5): a paused session that stays
+    // cold hits its own ending flow while another runs warm.
+    for (const s of [...this.sessions.values()]) {
+      // Warmth decay: attention has been elsewhere → pause (auto-pause, §5).
+      if (!s.paused && now - s.lastActiveTs >= this.cfg.pauseGraceSeconds * 1000) {
+        this.pauseSession(s);
+      }
 
-    // Sustained quiet → the wrap prompt (§6), once.
-    if (s.paused && !s.wrapPromptTs &&
-        now - s.lastActiveTs >= this.cfg.endQuietMinutes * 60_000) {
-      s.wrapPromptTs = now;
-      const msg: SessionWrapMessage = {
-        type: "session_wrap",
-        sessionId: s.id,
-        label: s.label || "session",
-        activeMinutes: Math.round(this.activeMsOf(s, now) / 60_000),
-        quietMinutes: Math.round((now - s.lastActiveTs) / 60_000),
-        graceMinutes: this.cfg.wrapGraceMinutes,
-        ts: now,
-      };
-      this.broadcast(msg);
-      this.appendLabel({
-        id: `ss-wrap-${s.id}`, ts: now, kind: "session_sense", event: "wrap_prompted",
-        sessionId: s.id, threadId: s.threadId, quietMinutes: msg.quietMinutes,
-      });
-      log(TAG, `${s.id}: wrap prompt (quiet ${msg.quietMinutes}m, auto-wraps in ${this.cfg.wrapGraceMinutes}m)`);
-    }
+      // Sustained quiet → the wrap prompt (§6), once.
+      if (s.paused && !s.wrapPromptTs &&
+          now - s.lastActiveTs >= this.cfg.endQuietMinutes * 60_000) {
+        s.wrapPromptTs = now;
+        const msg: SessionWrapMessage = {
+          type: "session_wrap",
+          sessionId: s.id,
+          label: s.label || "session",
+          activeMinutes: Math.round(this.activeMsOf(s, now) / 60_000),
+          quietMinutes: Math.round((now - s.lastActiveTs) / 60_000),
+          graceMinutes: this.cfg.wrapGraceMinutes,
+          ts: now,
+        };
+        this.broadcast(msg);
+        this.appendLabel({
+          id: `ss-wrap-${s.id}`, ts: now, kind: "session_sense", event: "wrap_prompted",
+          sessionId: s.id, threadId: s.threadId, quietMinutes: msg.quietMinutes,
+        });
+        log(TAG, `${s.id}: wrap prompt (quiet ${msg.quietMinutes}m, auto-wraps in ${this.cfg.wrapGraceMinutes}m)`);
+      }
 
-    // Grace expiry → auto-wrap: same receipt, zero taps (§10 "walk away").
-    if (s.wrapPromptTs && now - s.wrapPromptTs >= this.cfg.wrapGraceMinutes * 60_000) {
-      this.wrapSession(s, "auto_wrap");
+      // Grace expiry → auto-wrap: same receipt, zero taps (§10 "walk away").
+      if (s.wrapPromptTs && now - s.wrapPromptTs >= this.cfg.wrapGraceMinutes * 60_000) {
+        this.wrapSession(s, "auto_wrap");
+      }
     }
   }
 
@@ -490,8 +507,8 @@ export class SessionSenseManager {
    *  end from the chip (a boundary correction), or "⚑ Later" (§9). */
   sessionAction(sessionId: string, action: SessionAction):
       { ok: boolean; saveId?: string; error?: string } {
-    const s = this.session;
-    if (!s || s.id !== sessionId) return { ok: false, error: "no such session" };
+    const s = this.sessions.get(sessionId);
+    if (!s) return { ok: false, error: "no such session" };
 
     switch (action) {
       case "wrapped":
@@ -528,19 +545,21 @@ export class SessionSenseManager {
     log(TAG, `⚑ bookmarked ${threadId} ("${label}")`);
   }
 
-  /** Live-session snapshot for the sessions list (chip-shaped: the overlay
-   *  hydrates from this, then rides the chip stream). Null when idle. */
-  activeSnapshot(): { sessionId: string; status: "running" | "paused"; label: string; startedTs: number; activeMs: number; threadId: string } | null {
-    const s = this.session;
-    if (!s) return null;
-    return {
-      sessionId: s.id,
-      status: s.paused ? "paused" : "running",
-      label: s.label || "session",
-      startedTs: s.startTs,
-      activeMs: this.activeMsOf(s, Date.now()),
-      threadId: s.threadId,
-    };
+  /** Live-session snapshots for the sessions list (chip-shaped: the overlay
+   *  hydrates from these, then rides the chip stream). Warm first. */
+  activeSnapshots(): { sessionId: string; status: "running" | "paused"; label: string; startedTs: number; activeMs: number; threadId: string }[] {
+    const now = Date.now();
+    return [...this.sessions.values()]
+      .map((s) => ({
+        sessionId: s.id,
+        status: s.paused ? ("paused" as const) : ("running" as const),
+        label: s.label || "session",
+        startedTs: s.startTs,
+        activeMs: this.activeMsOf(s, now),
+        threadId: s.threadId,
+      }))
+      .sort((a, b) =>
+        a.status === b.status ? b.activeMs - a.activeMs : a.status === "running" ? -1 : 1);
   }
 
   /** Shelf rows, most recent first. kgPath resolution is the server's job. */
@@ -570,10 +589,14 @@ export class SessionSenseManager {
       return { ok: true };
     }
 
-    if (this.session) return { ok: false, error: "a session is already running" };
+    for (const s of this.sessions.values()) {
+      if (s.threadId === threadId) {
+        return { ok: false, error: "this thread is already being tracked" };
+      }
+    }
     const now = Date.now();
     const id = `sess-${now.toString(36)}-${randomBytes(3).toString("hex")}`;
-    this.session = {
+    const session: Session = {
       id,
       threadId,
       label: bookmark.label,
@@ -585,7 +608,8 @@ export class SessionSenseManager {
       apps: new Set(),
       wrapPromptTs: 0,
     };
-    this.broadcastChip(this.session, "running");
+    this.sessions.set(id, session);
+    this.broadcastChip(session, "running");
     this.appendLabel({
       id: `ss-bm-${now.toString(36)}`, ts: now, kind: "session_sense",
       event: "bookmark_resumed", threadId, sessionId: id,
@@ -660,7 +684,7 @@ export class SessionSenseManager {
     });
     this.broadcastChip(s, "ended");
     log(TAG, `${s.id}: wrapped (${how}) — saving ${minutes}m over ${apps.join(", ")} → ${saveId}`);
-    this.session = null;
+    this.sessions.delete(s.id);
     return saveId;
   }
 

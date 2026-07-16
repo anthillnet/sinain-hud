@@ -260,8 +260,8 @@ export interface ServerDeps {
   sessionAction?: (sessionId: string, action: string) => { ok: boolean; saveId?: string; error?: string };
   /** Bookmarked-session shelf rows (§9), without kgPath. */
   sessionBookmarks?: () => import("./types.js").SessionBookmarkRow[];
-  /** Live-session snapshot for the sessions list (null when idle). */
-  sessionActive?: () => unknown | null;
+  /** Live-session snapshots for the sessions list (warm first; [] when idle). */
+  sessionActive?: () => unknown[];
   /** Shelf actions: ▶ resume (fresh session, no detection wait) / ✕ remove. */
   sessionBookmarkAction?: (threadId: string, action: string) => { ok: boolean; sessionId?: string; error?: string };
   /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
@@ -601,8 +601,9 @@ export function createAppServer(deps: ServerDeps) {
         res.end(JSON.stringify({
           ok: true,
           bookmarks: rows,
-          // The sessions list leads with what's being tracked right now.
-          active: deps.sessionActive?.() ?? null,
+          // The sessions list leads with what's being tracked right now —
+          // possibly several in parallel (§5: one warm, the rest paused).
+          sessions: deps.sessionActive?.() ?? [],
         }));
         return;
       }
