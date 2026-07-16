@@ -62,8 +62,10 @@ interface Fingerprint {
 
 interface PersistedState {
   day: string;
-  /** Once per thread per day (§7): threadId → last nudge ts. */
-  nudgedThreads: Record<string, number>;
+  /** Threads whose nudge was DECLINED today (✕ or expiry) → don't re-ask.
+   *  An accepted nudge never silences a thread — multiple sessions of the
+   *  same workflow per day are the normal case (§7). */
+  declinedThreads: Record<string, number>;
   /** ⚑ bookmarks by threadId (§9). */
   bookmarks: Record<string, Bookmark>;
   /** Accepted-nudge fingerprints by threadId. */
@@ -140,7 +142,7 @@ export class SessionSenseManager {
   private get labelsPath(): string { return join(this.memoryDir, "capture-labels.jsonl"); }
 
   private loadState(): PersistedState {
-    const empty: PersistedState = { day: today(), nudgedThreads: {}, bookmarks: {}, fingerprints: {} };
+    const empty: PersistedState = { day: today(), declinedThreads: {}, bookmarks: {}, fingerprints: {} };
     try {
       if (!existsSync(this.statePath)) return empty;
       return { ...empty, ...JSON.parse(readFileSync(this.statePath, "utf-8")) };
@@ -164,7 +166,7 @@ export class SessionSenseManager {
     const d = today();
     if (this.state.day !== d) {
       this.state.day = d;
-      this.state.nudgedThreads = {};
+      this.state.declinedThreads = {};
     }
   }
 
@@ -211,8 +213,12 @@ export class SessionSenseManager {
 
     if (this.session) return skip("a session is already running");
     if (this.pendingNudge) return skip("a nudge is already on screen");
-    // Once per thread per day — the only frequency rule.
-    if (this.state.nudgedThreads[ep.threadId]) return skip("thread already nudged today");
+    // The only frequency rule: a no silences the thread for the day. A yes
+    // never does — a second job-search session this afternoon asks again
+    // (and greets with the fingerprint label). Episodes provide the natural
+    // spacing: the hook fires once per episode, so only a genuinely new
+    // episode can re-ask.
+    if (this.state.declinedThreads[ep.threadId]) return skip("declined earlier today");
 
     // Source chips from the same window data the save offer proposes from.
     const minutes = Math.max(1, Math.round(ep.engagedMs / 60_000));
@@ -249,8 +255,6 @@ export class SessionSenseManager {
       ts: ep.at,
     };
 
-    this.state.nudgedThreads[ep.threadId] = ep.at;
-    this.saveState();
     this.askedEpisodes.push({ threadId: ep.threadId, ts: ep.at });
     if (this.askedEpisodes.length > 50) this.askedEpisodes.shift();
 
@@ -333,7 +337,11 @@ export class SessionSenseManager {
         break;
       case "dismissed":
       case "expired":
-        break; // labels record the negative; dismissing costs the user nothing.
+        // The no is respected for the rest of the day — the only cost of
+        // dismissing is not being asked again until tomorrow.
+        this.state.declinedThreads[pending.msg.threadId] = Date.now();
+        this.saveState();
+        break;
     }
 
     this.appendLabel({

@@ -149,11 +149,14 @@ same corner, same ✕). Anatomy, top to bottom:
 ## 7. Guardrails (binding)
 
 - **Frequency** (simplified 2026-07-16 — product call: Watch-simple, no
-  budget machinery): a thread is nudged **at most once per day**, one card on
-  screen at a time, and the 2–3 min dwell hysteresis is the whole prompting
-  etiquette. No shared day caps, no cooldowns, no dismissal streaks — those
-  suppressors made the nudge undebuggably quiet in practice. Rung 1 keeps its
-  own budget for its own offers.
+  budget machinery): **a no silences the thread for the day; a yes never
+  silences anything** — multiple sessions of the same workflow per day are
+  the normal case, and each new qualifying episode may ask again (greeting
+  with the fingerprint label). One card on screen at a time. Episodes give
+  the natural spacing: the qualified hook fires once per episode, so a
+  continuous work block never re-asks. No shared day caps, no cooldowns, no
+  dismissal streaks — those suppressors made the nudge undebuggably quiet in
+  practice. Rung 1 keeps its own budget for its own offers.
 - **Category floor**: detected medical, dating, personal-finance, and
   job-search-adjacent-HR (e.g. filing a grievance) workflows are **never
   nudged with a label**, regardless of confidence — at most the unlabeled
