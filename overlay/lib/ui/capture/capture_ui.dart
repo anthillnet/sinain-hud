@@ -1416,10 +1416,10 @@ class SaveOfferCard extends StatelessWidget {
 
 // ── Session Sense (DESIGN-SESSION-SENSE.md, "Session Sense.dc.html") ────────
 //
-// The track accent (violet) marks everything session-scoped — distinct from
-// Save green and Call blue, because tracking is a state, not an act.
+// Session accent: Save green (product call 2026-07-16 — one visual family
+// with the save cards; the wireframes' violet was dropped).
 
-const _track = Color(0xFF7A56D6);
+const _track = Color(0xFF1F8039);
 
 String _clock(int ts) {
   final d = DateTime.fromMillisecondsSinceEpoch(ts);

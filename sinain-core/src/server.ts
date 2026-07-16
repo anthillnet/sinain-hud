@@ -260,6 +260,8 @@ export interface ServerDeps {
   sessionAction?: (sessionId: string, action: string) => { ok: boolean; saveId?: string; error?: string };
   /** Bookmarked-session shelf rows (§9), without kgPath. */
   sessionBookmarks?: () => import("./types.js").SessionBookmarkRow[];
+  /** Live-session snapshot for the sessions list (null when idle). */
+  sessionActive?: () => unknown | null;
   /** Shelf actions: ▶ resume (fresh session, no detection wait) / ✕ remove. */
   sessionBookmarkAction?: (threadId: string, action: string) => { ok: boolean; sessionId?: string; error?: string };
   /** "Call AI on my last N minutes" → situation brief (also broadcast via WS). */
@@ -562,10 +564,10 @@ export function createAppServer(deps: ServerDeps) {
         }
         const body = await readBody(req, 4096);
         const parsed = JSON.parse(body || "{}") as { sessionId?: string; action?: string };
-        const ACTIONS = ["wrapped", "keep_going", "ended", "later"];
+        const ACTIONS = ["wrapped", "keep_going", "ended", "later", "flag"];
         if (!parsed.sessionId || !parsed.action || !ACTIONS.includes(parsed.action)) {
           res.writeHead(400);
-          res.end(JSON.stringify({ ok: false, error: "sessionId + action(wrapped|keep_going|ended|later) required" }));
+          res.end(JSON.stringify({ ok: false, error: "sessionId + action(wrapped|keep_going|ended|later|flag) required" }));
           return;
         }
         const result = deps.sessionAction(parsed.sessionId, parsed.action);
@@ -596,7 +598,12 @@ export function createAppServer(deps: ServerDeps) {
             } catch { /* unresolved — the row ships without a kgPath */ }
           }));
         }
-        res.end(JSON.stringify({ ok: true, bookmarks: rows }));
+        res.end(JSON.stringify({
+          ok: true,
+          bookmarks: rows,
+          // The sessions list leads with what's being tracked right now.
+          active: deps.sessionActive?.() ?? null,
+        }));
         return;
       }
 

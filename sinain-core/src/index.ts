@@ -2010,6 +2010,7 @@ async function main() {
     sessionAction: (sessionId, action) =>
       sessionSense.sessionAction(sessionId, action as import("./types.js").SessionAction),
     sessionBookmarks: () => sessionSense.listBookmarks(),
+    sessionActive: () => sessionSense.activeSnapshot(),
     sessionBookmarkAction: (threadId, action) =>
       sessionSense.bookmarkAction(threadId, action as "resume" | "remove"),
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,

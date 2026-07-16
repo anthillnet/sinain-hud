@@ -500,6 +500,12 @@ export class SessionSenseManager {
         this.bookmarkThread(s.threadId, s.label || "session");
         return { ok: true, saveId: this.wrapSession(s, "wrap_later") };
       }
+      case "flag":
+        // Mid-session ⚑ (§9 "come back later" from the chip): flag the
+        // thread for return WITHOUT ending the session — for the case where
+        // you're being pulled away and know it.
+        this.bookmarkThread(s.threadId, s.label || "session");
+        return { ok: true };
       case "keep_going":
         this.keepGoing(s, "user said keep going");
         return { ok: true };
@@ -515,6 +521,21 @@ export class SessionSenseManager {
       : { label, sessions: 0, totalMs: 0, lastTs: Date.now(), createdTs: Date.now() };
     this.saveState();
     log(TAG, `⚑ bookmarked ${threadId} ("${label}")`);
+  }
+
+  /** Live-session snapshot for the sessions list (chip-shaped: the overlay
+   *  hydrates from this, then rides the chip stream). Null when idle. */
+  activeSnapshot(): { sessionId: string; status: "running" | "paused"; label: string; startedTs: number; activeMs: number; threadId: string } | null {
+    const s = this.session;
+    if (!s) return null;
+    return {
+      sessionId: s.id,
+      status: s.paused ? "paused" : "running",
+      label: s.label || "session",
+      startedTs: s.startTs,
+      activeMs: this.activeMsOf(s, Date.now()),
+      threadId: s.threadId,
+    };
   }
 
   /** Shelf rows, most recent first. kgPath resolution is the server's job. */

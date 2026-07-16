@@ -26,6 +26,7 @@ import '../core/models/context_cards.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 import 'capture/capture_ui.dart';
+import 'capture/session_list_view.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -135,6 +136,9 @@ class OverlayShellState extends State<OverlayShell> {
   bool _assistVisible = false;
   // The bookmarked-sessions shelf (§9), opened from the eye menu.
   List<SessionBookmark>? _sessionShelf;
+  // The sessions list is the HUD's primary uncollapsed view (product call
+  // 2026-07-16): SESSIONS tab, selected by default on every uncollapse.
+  bool _sessionsTab = true;
   StreamSubscription<SessionNudge>? _nudgeSub;
   StreamSubscription<SessionChipState>? _chipSub;
   StreamSubscription<SessionWrap>? _wrapSub;
@@ -545,7 +549,12 @@ class OverlayShellState extends State<OverlayShell> {
   void _transitionTo(HudState target) {
     if (_state == target) return;
     HudTooltip.dismissAll();
-    setState(() => _state = target);
+    setState(() {
+      _state = target;
+      // Uncollapsing lands on the sessions list, not the chat (product call
+      // 2026-07-16) — the chat stays one tab away.
+      if (target == HudState.chat) _sessionsTab = true;
+    });
     _settingsService.setHudState(target);
     _resizeWindowForState(target);
 
@@ -599,6 +608,7 @@ class OverlayShellState extends State<OverlayShell> {
   void _selectThread(String? id) {
     final ws = context.read<WebSocketService>();
     setState(() {
+      _sessionsTab = false; // any thread tab leaves the sessions view
       _activeThread = id;
       if (id == null) {
         _activeRegion = null;
@@ -960,9 +970,8 @@ class OverlayShellState extends State<OverlayShell> {
       ...ws.regionThreads.keys,
       ..._startedRegionThreads,
     }.toList();
-    // SPIKE: with the terminal enabled the row is always shown so the ⌨
-    // toggle is reachable from MAIN even before any region thread exists.
-    if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
+    // The strip is always shown: SESSIONS and MAIN are two permanent tabs
+    // (the sessions list is the default uncollapsed view).
 
     String labelFor(String id) {
       final label = _threadTitleFor(ws, id);
@@ -1043,8 +1052,13 @@ class OverlayShellState extends State<OverlayShell> {
         child: Row(
           children: [
             pill(
+              text: 'SESSIONS',
+              selected: _sessionsTab,
+              onTap: () => setState(() => _sessionsTab = true),
+            ),
+            pill(
               text: 'MAIN',
-              selected: _activeThread == null,
+              selected: !_sessionsTab && _activeThread == null,
               onTap: () => _selectThread(null),
             ),
             for (final id in ids)
@@ -1054,7 +1068,7 @@ class OverlayShellState extends State<OverlayShell> {
                 // alone names the tab.
                 text:
                     '${_regionWorking(ws, id) ? "⟳ " : ""}${labelFor(id)}',
-                selected: _activeThread == id,
+                selected: !_sessionsTab && _activeThread == id,
                 onTap: () => _selectThread(id),
                 onClose: () => _closeThread(id),
               ),
@@ -1680,6 +1694,17 @@ class OverlayShellState extends State<OverlayShell> {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+
+  /// Call AI over the live session's credited span (sessions list ✦).
+  void _callAiOnActiveSession(SessionChipState s) {
+    final ws = context.read<WebSocketService>();
+    final minutes =
+        ((DateTime.now().millisecondsSinceEpoch - s.startedTs) / 60000)
+            .ceil()
+            .clamp(1, 120);
+    ws.requestSummon(minutes);
+    _enterCardMode();
   }
 
   /// ✕ releases the promise; the shelf re-renders without the row.
@@ -2418,7 +2443,14 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                _terminalThreads.contains(_activeTabKey)
+                _sessionsTab
+                    ? SessionListView(
+                        key: const ValueKey('sessions'),
+                        ws: ws,
+                        onShare: _shareBookmark,
+                        onCallAi: _callAiOnActiveSession,
+                      )
+                    : _terminalThreads.contains(_activeTabKey)
                     ? ThreadTerminalView(
                         key: ValueKey('term-$_activeTabKey'),
                         threadId: _activeTabKey,

@@ -296,6 +296,13 @@ class SessionAssist {
       );
 }
 
+/// The sessions list: what's being tracked right now + the ⚑ shelf.
+class SessionList {
+  final SessionChipState? active;
+  final List<SessionBookmark> bookmarks;
+  const SessionList({required this.active, required this.bookmarks});
+}
+
 /// A bookmarked session thread (§9) — one shelf row.
 class SessionBookmark {
   final String threadId;

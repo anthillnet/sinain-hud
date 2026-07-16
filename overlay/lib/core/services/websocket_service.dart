@@ -764,30 +764,43 @@ class WebSocketService extends ChangeNotifier {
       }))?['ok'] ==
       true;
 
-  /// The bookmarked-session shelf (§9), most recent first.
-  Future<List<SessionBookmark>> fetchSessionBookmarks() async {
+  /// The sessions list: the live tracked session (if any) + bookmarked
+  /// threads, most recent first.
+  Future<SessionList> fetchSessionList() async {
     final base = _httpBase;
-    if (base == null) return const [];
+    if (base == null) return const SessionList(active: null, bookmarks: []);
     HttpClient? client;
     try {
       client = HttpClient();
       final req =
           await client.getUrl(Uri.parse('$base/capture/session/bookmarks'));
       final resp = await req.close();
-      if (resp.statusCode != 200) return const [];
+      if (resp.statusCode != 200) {
+        return const SessionList(active: null, bookmarks: []);
+      }
       final body = await resp.transform(utf8.decoder).join();
       final data = jsonDecode(body) as Map<String, dynamic>;
-      return (data['bookmarks'] as List? ?? const [])
-          .whereType<Map>()
-          .map((m) => SessionBookmark.fromJson(m.cast<String, dynamic>()))
-          .toList();
+      return SessionList(
+        active: data['active'] is Map
+            ? SessionChipState.fromJson(
+                (data['active'] as Map).cast<String, dynamic>())
+            : null,
+        bookmarks: (data['bookmarks'] as List? ?? const [])
+            .whereType<Map>()
+            .map((m) => SessionBookmark.fromJson(m.cast<String, dynamic>()))
+            .toList(),
+      );
     } catch (e) {
-      _log('fetchSessionBookmarks failed: $e');
-      return const [];
+      _log('fetchSessionList failed: $e');
+      return const SessionList(active: null, bookmarks: []);
     } finally {
       client?.close();
     }
   }
+
+  /// The bookmarked-session shelf (§9), most recent first.
+  Future<List<SessionBookmark>> fetchSessionBookmarks() async =>
+      (await fetchSessionList()).bookmarks;
 
   /// Shelf actions: ▶ `resume` starts a fresh session on the thread now
   /// (chip arrives on [sessionChipStream]); ✕ `remove` releases the promise.

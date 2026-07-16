@@ -457,7 +457,7 @@ export interface SessionWrapMessage {
 /** Overlay → core session actions: wrap now, keep going (corrects a too-eager
  *  decay model), end from the chip (boundary correction), or "⚑ Later" —
  *  wrap + a bookmark on the thread (§9: a flag, not an open session). */
-export type SessionAction = "wrapped" | "keep_going" | "ended" | "later";
+export type SessionAction = "wrapped" | "keep_going" | "ended" | "later" | "flag";
 
 /** Help-forward (§8, variant C): goal + next steps composed ON the track tap
  *  via the burst lane — consent already given, zero contract spent. */
