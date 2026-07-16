@@ -1480,17 +1480,37 @@ class OverlayShellState extends State<OverlayShell> {
   // card size and shrinks back to the eye when the last card is dismissed.
 
   void _enterCardMode() {
-    if (_state == HudState.chat || _cardMode) return;
-    setState(() => _cardMode = true);
+    if (_state == HudState.chat) return;
+    if (!_cardMode) setState(() => _cardMode = true);
+    // Always resync: a card arriving while chip-only card mode is open must
+    // grow the window back to card height.
     _resizeForCardPanel();
   }
+
+  /// Anything taller than the session chip on the card surface?
+  bool get _hasCards =>
+      _chooserFor != null ||
+      _activeBrief != null ||
+      _activeEnrich != null ||
+      _saveReceipt != null ||
+      _saveOffer != null ||
+      _sessionNudge != null ||
+      _sessionWrap != null ||
+      _sessionShelf != null ||
+      _assistVisible ||
+      _voiceSession != null;
 
   Future<void> _resizeForCardPanel() async {
     final frame = await _windowService.getWindowFrame();
     if (frame == null) return;
     final right = frame['x']! + frame['w']!;
     final top = frame['y']! + frame['h']!;
-    _windowService.setWindowFrame(right - 380, top - 500, 380, 500);
+    // The window IS the clickable area — an invisible 380×500 shield blocked
+    // clicks to other apps whenever a session chip held card mode open
+    // (field 2026-07-16). Chip-only card mode gets a chip-sized window; full
+    // height only while actual cards are showing.
+    final h = _hasCards ? 500.0 : 120.0;
+    _windowService.setWindowFrame(right - 380, top - h, 380, h);
   }
 
   /// Leave card mode once nothing is displayed; restore the eye-sized window.
@@ -1506,6 +1526,10 @@ class OverlayShellState extends State<OverlayShell> {
         _sessionWrap != null ||
         _sessionShelf != null ||
         _voiceSession != null) {
+      // Still showing something — but the content class may have shrunk
+      // (last card closed, chip remains): resync the window size so the
+      // invisible area never outgrows the visible panel.
+      _resizeForCardPanel();
       return;
     }
     setState(() => _cardMode = false);
@@ -1793,8 +1817,10 @@ class OverlayShellState extends State<OverlayShell> {
               session: _warmChip!,
               others: _sessionChips.length - 1,
               // A click asks for MORE, never ends: expand the detail card.
-              onDetails: () =>
-                  setState(() => _assistVisible = !_assistVisible),
+              onDetails: () {
+                setState(() => _assistVisible = !_assistVisible);
+                _resizeForCardPanel();
+              },
             ),
           ),
         if (_assistVisible && _warmChip != null)
@@ -1820,8 +1846,12 @@ class OverlayShellState extends State<OverlayShell> {
                     .read<WebSocketService>()
                     .sessionAction(_warmChip!.sessionId, 'wrapped');
                 setState(() => _assistVisible = false);
+                _resizeForCardPanel();
               },
-              onDismiss: () => setState(() => _assistVisible = false),
+              onDismiss: () {
+                setState(() => _assistVisible = false);
+                _resizeForCardPanel();
+              },
             ),
           ),
         if (_sessionShelf != null)
