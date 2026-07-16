@@ -1433,6 +1433,11 @@ class SessionNudgeCard extends StatefulWidget {
   final SessionNudge nudge;
   final VoidCallback onTrack;
 
+  /// "Call AI rides the nudge" (§1/§10): calling is a consent superset of
+  /// tracking — one tap tracks the session AND opens the AI lane on its
+  /// span. Null hides the button.
+  final VoidCallback? onCallAi;
+
   /// "Wrong?" pick: a corrected label, or "" for "Just work — no label".
   final ValueChanged<String> onCorrect;
   final VoidCallback onDismiss;
@@ -1441,6 +1446,7 @@ class SessionNudgeCard extends StatefulWidget {
     super.key,
     required this.nudge,
     required this.onTrack,
+    this.onCallAi,
     required this.onCorrect,
     required this.onDismiss,
   });
@@ -1606,9 +1612,39 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
             const SizedBox(height: 8),
           ],
           Row(children: [
-            _cardButton(t, n.resume ? '▶ Resume' : 'Track from $from',
+            // With assist details on the card (§8A), the verb compacts to ▶ —
+            // the details carry the meaning; the play glyph carries the act.
+            _cardButton(
+                t,
+                n.resume
+                    ? '▶ Resume'
+                    : (n.goal.isNotEmpty || n.steps.isNotEmpty)
+                        ? '▶'
+                        : 'Track from $from',
                 widget.onTrack,
-                primary: true, accent: _track),
+                primary: true,
+                accent: _track),
+            if (!n.resume && widget.onCallAi != null) ...[
+              const SizedBox(width: 6),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.onCallAi,
+                  child: Container(
+                    height: 28,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border:
+                          Border.all(color: _blue.withValues(alpha: 0.5)),
+                    ),
+                    child: Text('Call AI', style: _mono(11, t.textPrimary)),
+                  ),
+                ),
+              ),
+            ],
             if (n.resume) ...[
               const SizedBox(width: 10),
               MouseRegion(

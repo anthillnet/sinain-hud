@@ -1562,6 +1562,23 @@ class OverlayShellState extends State<OverlayShell> {
     _clearSessionNudge(exitSurfaces: false); // chip arrives next
   }
 
+  /// Call AI on the nudge (§1/§10): calling implies tracking — one gesture
+  /// accepts the session AND fires the Call-AI flow over the credited span
+  /// (the brief card arrives with the usual handoff lanes).
+  void _callAiOnSessionNudge() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    final ws = context.read<WebSocketService>();
+    ws.respondToSessionNudge(n.nudgeId, 'tracked');
+    final minutes = ((DateTime.now().millisecondsSinceEpoch -
+                n.candidateStartTs) /
+            60000)
+        .ceil()
+        .clamp(1, 120);
+    ws.requestSummon(minutes, apps: n.apps.isEmpty ? null : n.apps);
+    _clearSessionNudge(exitSurfaces: false); // chip + brief arrive next
+  }
+
   /// "Wrong?" pick: tracks under the corrected label in the same tap —
   /// correction ≠ dismissal (§3). [label] == '' means "just work — no label".
   void _correctSession(String label) {
@@ -1731,6 +1748,7 @@ class OverlayShellState extends State<OverlayShell> {
             child: SessionNudgeCard(
               nudge: _sessionNudge!,
               onTrack: _trackSession,
+              onCallAi: _callAiOnSessionNudge,
               onCorrect: _correctSession,
               onDismiss: _dismissSessionNudge,
             ),
