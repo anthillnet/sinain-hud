@@ -1576,21 +1576,32 @@ class OverlayShellState extends State<OverlayShell> {
     _clearSessionNudge(exitSurfaces: false); // chip arrives next
   }
 
-  /// Call AI on the nudge (§1/§10): calling implies tracking — one gesture
-  /// accepts the session AND fires the Call-AI flow over the credited span
-  /// (the brief card arrives with the usual handoff lanes).
-  void _callAiOnSessionNudge() {
+  int _nudgeSpanMinutes(SessionNudge n) =>
+      ((DateTime.now().millisecondsSinceEpoch - n.candidateStartTs) / 60000)
+          .ceil()
+          .clamp(1, 120);
+
+  /// ▶ on the nudge (product call 2026-07-16): play = track + Call AI over
+  /// the credited span (the brief card arrives with the usual handoff lanes).
+  void _playSessionNudge() {
     final n = _sessionNudge;
     if (n == null) return;
     final ws = context.read<WebSocketService>();
     ws.respondToSessionNudge(n.nudgeId, 'tracked');
-    final minutes = ((DateTime.now().millisecondsSinceEpoch -
-                n.candidateStartTs) /
-            60000)
-        .ceil()
-        .clamp(1, 120);
-    ws.requestSummon(minutes, apps: n.apps.isEmpty ? null : n.apps);
+    ws.requestSummon(_nudgeSpanMinutes(n),
+        apps: n.apps.isEmpty ? null : n.apps);
     _clearSessionNudge(exitSurfaces: false); // chip + brief arrive next
+  }
+
+  /// "Call Sinain" on the nudge: track + a live voice call on the span.
+  void _callSinainOnSessionNudge() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
+    final minutes = _nudgeSpanMinutes(n);
+    final apps = n.apps.isEmpty ? null : n.apps;
+    _clearSessionNudge(exitSurfaces: false);
+    unawaited(_callSinain(minutes, apps: apps));
   }
 
   /// "Wrong?" pick: tracks under the corrected label in the same tap —
@@ -1643,14 +1654,6 @@ class OverlayShellState extends State<OverlayShell> {
   void _dismissWrapCard() {
     setState(() => _sessionWrap = null);
     _maybeExitCardMode();
-  }
-
-  /// Chip tap: ends the session early — a boundary correction the decay
-  /// model learns from. Same receipt as every wrap.
-  void _endSessionFromChip() {
-    final c = _sessionChip;
-    if (c == null) return;
-    context.read<WebSocketService>().sessionAction(c.sessionId, 'ended');
   }
 
   /// "⚑ Later" (§9): Wrap up + a promise — the thread gains a bookmark.
@@ -1741,18 +1744,37 @@ class OverlayShellState extends State<OverlayShell> {
             padding: const EdgeInsets.only(bottom: 8),
             child: SessionChip(
               session: _sessionChip!,
-              onEnd: _endSessionFromChip,
-              onAssist: _sessionAssist?.ready == true &&
-                      _sessionAssist!.sessionId == _sessionChip!.sessionId
-                  ? () => setState(() => _assistVisible = !_assistVisible)
-                  : null,
+              // A click asks for MORE, never ends: expand the detail card.
+              onDetails: () =>
+                  setState(() => _assistVisible = !_assistVisible),
             ),
           ),
-        if (_assistVisible && _sessionAssist != null && _sessionChip != null)
+        if (_assistVisible && _sessionChip != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: SessionAssistCard(
-              assist: _sessionAssist!,
+            child: SessionDetailCard(
+              session: _sessionChip!,
+              assist: _sessionAssist?.sessionId == _sessionChip!.sessionId
+                  ? _sessionAssist
+                  : null,
+              onCallAi: () => _callAiOnActiveSession(_sessionChip!),
+              onCallSinain: () {
+                final s = _sessionChip!;
+                final minutes = ((DateTime.now().millisecondsSinceEpoch -
+                            s.startedTs) /
+                        60000)
+                    .ceil()
+                    .clamp(1, 120);
+                unawaited(_callSinain(minutes));
+              },
+              onSave: () {
+                // Save = wrap now: the receipt (with undo) takes the slot;
+                // the session stays in the bookmarks list.
+                context
+                    .read<WebSocketService>()
+                    .sessionAction(_sessionChip!.sessionId, 'wrapped');
+                setState(() => _assistVisible = false);
+              },
               onDismiss: () => setState(() => _assistVisible = false),
             ),
           ),
@@ -1772,8 +1794,10 @@ class OverlayShellState extends State<OverlayShell> {
             padding: const EdgeInsets.only(bottom: 8),
             child: SessionNudgeCard(
               nudge: _sessionNudge!,
-              onTrack: _trackSession,
-              onCallAi: _callAiOnSessionNudge,
+              // ▶: resume nudges just resume; fresh nudges track + Call AI.
+              onTrack:
+                  _sessionNudge!.resume ? _trackSession : _playSessionNudge,
+              onCallSinain: _callSinainOnSessionNudge,
               onCorrect: _correctSession,
               onDismiss: _dismissSessionNudge,
             ),

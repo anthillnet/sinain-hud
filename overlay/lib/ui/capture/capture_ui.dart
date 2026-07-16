@@ -1433,10 +1433,10 @@ class SessionNudgeCard extends StatefulWidget {
   final SessionNudge nudge;
   final VoidCallback onTrack;
 
-  /// "Call AI rides the nudge" (§1/§10): calling is a consent superset of
-  /// tracking — one tap tracks the session AND opens the AI lane on its
-  /// span. Null hides the button.
-  final VoidCallback? onCallAi;
+  /// "Call Sinain" — a live voice call on the session's span. Calling is a
+  /// consent superset of tracking (§1/§10): one tap tracks AND dials.
+  /// Null hides the button.
+  final VoidCallback? onCallSinain;
 
   /// "Wrong?" pick: a corrected label, or "" for "Just work — no label".
   final ValueChanged<String> onCorrect;
@@ -1446,7 +1446,7 @@ class SessionNudgeCard extends StatefulWidget {
     super.key,
     required this.nudge,
     required this.onTrack,
-    this.onCallAi,
+    this.onCallSinain,
     required this.onCorrect,
     required this.onDismiss,
   });
@@ -1612,25 +1612,22 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
             const SizedBox(height: 8),
           ],
           Row(children: [
-            // With assist details on the card (§8A), the verb compacts to ▶ —
-            // the details carry the meaning; the play glyph carries the act.
-            _cardButton(
-                t,
-                n.resume
-                    ? '▶ Resume'
-                    : (n.goal.isNotEmpty || n.steps.isNotEmpty)
-                        ? '▶'
-                        : 'Track from $from',
-                widget.onTrack,
-                primary: true,
-                accent: _track),
-            if (!n.resume && widget.onCallAi != null) ...[
+            // ▶ tracks AND calls the AI on the credited span (product call
+            // 2026-07-16: play = Call AI; voice is the second verb).
+            Tooltip(
+              message: n.resume
+                  ? 'Resume this session'
+                  : 'Track from $from + Call AI',
+              child: _cardButton(t, n.resume ? '▶ Resume' : '▶', widget.onTrack,
+                  primary: true, accent: _track),
+            ),
+            if (!n.resume && widget.onCallSinain != null) ...[
               const SizedBox(width: 6),
               MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: widget.onCallAi,
+                  onTap: widget.onCallSinain,
                   child: Container(
                     height: 28,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1640,7 +1637,8 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
                       border:
                           Border.all(color: _blue.withValues(alpha: 0.5)),
                     ),
-                    child: Text('Call AI', style: _mono(11, t.textPrimary)),
+                    child:
+                        Text('Call Sinain', style: _mono(11, t.textPrimary)),
                   ),
                 ),
               ),
@@ -1844,19 +1842,17 @@ class SessionWrapCard extends StatelessWidget {
 
 /// The running-session chip (§5 option A): label · elapsed · pause state.
 /// Warmth decay pauses it automatically; return resumes. Tapping the body
-/// ends the session early — a boundary correction the decay model learns
-/// from. Elapsed ticks locally between chip broadcasts: it's the retroactive
-/// credit growing in real time, not a stopwatch.
+/// EXPANDS the detail card (goal · next steps · actions) — a click is a
+/// request for more, never destruction (product call 2026-07-16; ending
+/// lives behind explicit Save/✕ actions). Elapsed ticks locally between
+/// chip broadcasts: the retroactive credit growing in real time.
 class SessionChip extends StatefulWidget {
   final SessionChipState session;
-  final VoidCallback onEnd;
 
-  /// "✦ next steps" (§8 C): present once the assist is composed — help
-  /// offered on a label the user just confirmed. Null hides the affordance.
-  final VoidCallback? onAssist;
+  /// Toggle the session detail card.
+  final VoidCallback onDetails;
 
-  const SessionChip(
-      {super.key, required this.session, required this.onEnd, this.onAssist});
+  const SessionChip({super.key, required this.session, required this.onDetails});
 
   @override
   State<SessionChip> createState() => _SessionChipState();
@@ -1914,7 +1910,7 @@ class _SessionChipState extends State<SessionChip> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.onEnd,
+        onTap: widget.onDetails,
         child: Container(
           padding: const EdgeInsets.fromLTRB(8, 6, 10, 6),
           decoration: BoxDecoration(
@@ -1952,15 +1948,6 @@ class _SessionChipState extends State<SessionChip> {
               const SizedBox(width: 6),
               Text('paused', style: _mono(9, _amber)),
             ],
-            if (widget.onAssist != null) ...[
-              const SizedBox(width: 8),
-              Container(width: 1, height: 12, color: t.border),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: widget.onAssist,
-                child: Text('✦ next steps', style: _mono(10, _track)),
-              ),
-            ],
           ]),
         ),
       ),
@@ -1968,18 +1955,34 @@ class _SessionChipState extends State<SessionChip> {
   }
 }
 
-/// Help-forward assist card (§8 variant C): goal + next steps, composed on
-/// the tap — zero contract spent, help offered on a fact, not a guess.
-class SessionAssistCard extends StatelessWidget {
-  final SessionAssist assist;
+/// The session detail card — chip tap expands to this (product call
+/// 2026-07-16): goal + next steps plus the session's verbs — ▶ Call AI,
+/// Call Sinain, Save (wrap now → receipt). ✕ just collapses.
+class SessionDetailCard extends StatelessWidget {
+  final SessionChipState session;
+
+  /// Null while the assist is still composing — the card shows the verbs
+  /// without the details, never a spinner.
+  final SessionAssist? assist;
+  final VoidCallback onCallAi;
+  final VoidCallback onCallSinain;
+  final VoidCallback onSave;
   final VoidCallback onDismiss;
 
-  const SessionAssistCard(
-      {super.key, required this.assist, required this.onDismiss});
+  const SessionDetailCard({
+    super.key,
+    required this.session,
+    required this.assist,
+    required this.onCallAi,
+    required this.onCallSinain,
+    required this.onSave,
+    required this.onDismiss,
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = HudTheme.of(context);
+    final a = assist;
     return _CardShell(
       width: 300,
       borderColor: _track.withValues(alpha: 0.35),
@@ -1988,9 +1991,15 @@ class SessionAssistCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(children: [
-            Text('THIS SESSION · COMPOSED ON TAP',
-                style: _mono(9, t.textDim, weight: FontWeight.w600)),
-            const Spacer(),
+            Expanded(
+              child: Text(session.label,
+                  style: _mono(12, t.textPrimary, weight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            Text('since ${_clock(session.startedTs)}',
+                style: _mono(9, t.textDim)),
+            const SizedBox(width: 10),
             MouseRegion(
               cursor: SystemMouseCursors.click,
               child: GestureDetector(
@@ -1999,18 +2008,21 @@ class SessionAssistCard extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 7),
-          if (assist.goal.isNotEmpty) ...[
-            Text(assist.goal,
+          if (a != null && a.goal.isNotEmpty) ...[
+            Text('GOAL · AS READ',
+                style: _mono(9, t.textDim, weight: FontWeight.w600)),
+            const SizedBox(height: 3),
+            Text(a.goal,
                 style: _mono(11, t.textPrimary, height: 1.35),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis),
             const SizedBox(height: 7),
           ],
-          if (assist.steps.isNotEmpty) ...[
+          if (a != null && a.steps.isNotEmpty) ...[
             Text('NEXT STEPS',
                 style: _mono(9, t.textDim, weight: FontWeight.w600)),
             const SizedBox(height: 4),
-            for (final step in assist.steps)
+            for (final step in a.steps)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Row(
@@ -2034,7 +2046,35 @@ class SessionAssistCard extends StatelessWidget {
                   ],
                 ),
               ),
+            const SizedBox(height: 8),
           ],
+          Row(children: [
+            Tooltip(
+              message: 'Call AI on this session',
+              child:
+                  _cardButton(t, '▶', onCallAi, primary: true, accent: _track),
+            ),
+            const SizedBox(width: 6),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onCallSinain,
+                child: Container(
+                  height: 28,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: _blue.withValues(alpha: 0.5)),
+                  ),
+                  child: Text('Call Sinain', style: _mono(11, t.textPrimary)),
+                ),
+              ),
+            ),
+            const Spacer(),
+            _cardButton(t, 'Save', onSave),
+          ]),
         ],
       ),
     );

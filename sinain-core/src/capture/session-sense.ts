@@ -383,6 +383,11 @@ export class SessionSenseManager {
   private startSession(pending: PendingNudge, label: string): string {
     const now = Date.now();
     const id = `sess-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
+    // Tracked sessions persist in the bookmarks list from the moment of
+    // consent (product call 2026-07-16): the list is the session's home,
+    // before and after it wraps — release (✕) is the user's own act.
+    this.bookmarkThread(
+      pending.msg.threadId, label || pending.msg.label || "session");
     this.session = {
       id,
       threadId: pending.msg.threadId,
