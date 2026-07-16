@@ -149,14 +149,17 @@ same corner, same ✕). Anatomy, top to bottom:
 ## 7. Guardrails (binding)
 
 - **Frequency** (simplified 2026-07-16 — product call: Watch-simple, no
-  budget machinery): **a no silences the thread for the day; a yes never
-  silences anything** — multiple sessions of the same workflow per day are
-  the normal case, and each new qualifying episode may ask again (greeting
-  with the fingerprint label). One card on screen at a time. Episodes give
-  the natural spacing: the qualified hook fires once per episode, so a
-  continuous work block never re-asks. No shared day caps, no cooldowns, no
-  dismissal streaks — those suppressors made the nudge undebuggably quiet in
-  practice. Rung 1 keeps its own budget for its own offers.
+  budget machinery), keyed by the user's reaction: **an explicit ✕ silences
+  the thread for the day; ignoring the card (expiry) only snoozes it**
+  (`SESSION_SENSE_SNOOZE_MINUTES`, default 60 — "not now" is not "no");
+  **a yes never silences anything** — multiple sessions of the same workflow
+  per day are the normal case, and each new qualifying episode may ask again
+  (greeting with the fingerprint label). One card on screen at a time.
+  Episodes give the natural spacing: the qualified hook fires once per
+  episode, so a continuous work block never re-asks. No shared day caps, no
+  cooldowns, no dismissal streaks — those suppressors made the nudge
+  undebuggably quiet in practice. Rung 1 keeps its own budget for its own
+  offers.
 - **Category floor**: detected medical, dating, personal-finance, and
   job-search-adjacent-HR (e.g. filing a grievance) workflows are **never
   nudged with a label**, regardless of confidence — at most the unlabeled

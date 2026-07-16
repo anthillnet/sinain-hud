@@ -382,6 +382,7 @@ export function loadConfig(): CoreConfig {
   const sessionSenseConfig: import("./types.js").SessionSenseConfig = {
     enabled: boolEnv("SESSION_SENSE_ENABLED", false),
     qualifyMinutes: intEnv("SESSION_SENSE_QUALIFY_MINUTES", 2),
+    snoozeMinutes: intEnv("SESSION_SENSE_SNOOZE_MINUTES", 60),
     pauseGraceSeconds: intEnv("SESSION_SENSE_PAUSE_GRACE_SECONDS", 90),
     endQuietMinutes: intEnv("SESSION_SENSE_END_QUIET_MINUTES", 6),
     wrapGraceMinutes: intEnv("SESSION_SENSE_WRAP_GRACE_MINUTES", 10),

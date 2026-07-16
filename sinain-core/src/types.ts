@@ -695,6 +695,9 @@ export interface SessionSenseConfig {
   /** Engaged minutes before a live episode qualifies for the nudge — the
    *  same "long" notion as the save offer, surfaced mid-episode. */
   qualifyMinutes: number;
+  /** How long an IGNORED (expired) nudge snoozes its thread — "not now",
+   *  not "no"; an explicit ✕ silences for the day instead. */
+  snoozeMinutes: number;
   /** Attention away from the session's apps this long → paused. */
   pauseGraceSeconds: number;
   /** Paused this long → the wrap prompt (§6 "quiet for N min"). */

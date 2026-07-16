@@ -62,10 +62,13 @@ interface Fingerprint {
 
 interface PersistedState {
   day: string;
-  /** Threads whose nudge was DECLINED today (✕ or expiry) → don't re-ask.
+  /** Threads whose nudge was explicitly ✕-DECLINED today → don't re-ask.
    *  An accepted nudge never silences a thread — multiple sessions of the
    *  same workflow per day are the normal case (§7). */
   declinedThreads: Record<string, number>;
+  /** Threads whose nudge merely EXPIRED (ignored — "not now", not "no"):
+   *  snoozed until this ts, then a new episode may ask again. */
+  snoozedUntil: Record<string, number>;
   /** ⚑ bookmarks by threadId (§9). */
   bookmarks: Record<string, Bookmark>;
   /** Accepted-nudge fingerprints by threadId. */
@@ -142,7 +145,7 @@ export class SessionSenseManager {
   private get labelsPath(): string { return join(this.memoryDir, "capture-labels.jsonl"); }
 
   private loadState(): PersistedState {
-    const empty: PersistedState = { day: today(), declinedThreads: {}, bookmarks: {}, fingerprints: {} };
+    const empty: PersistedState = { day: today(), declinedThreads: {}, snoozedUntil: {}, bookmarks: {}, fingerprints: {} };
     try {
       if (!existsSync(this.statePath)) return empty;
       return { ...empty, ...JSON.parse(readFileSync(this.statePath, "utf-8")) };
@@ -213,12 +216,17 @@ export class SessionSenseManager {
 
     if (this.session) return skip("a session is already running");
     if (this.pendingNudge) return skip("a nudge is already on screen");
-    // The only frequency rule: a no silences the thread for the day. A yes
-    // never does — a second job-search session this afternoon asks again
-    // (and greets with the fingerprint label). Episodes provide the natural
-    // spacing: the hook fires once per episode, so only a genuinely new
-    // episode can re-ask.
-    if (this.state.declinedThreads[ep.threadId]) return skip("declined earlier today");
+    // Frequency rules, by reaction: an explicit ✕ silences the thread for
+    // the day; merely ignoring it (expiry) only snoozes it for a while —
+    // "not now" is not "no". A yes never silences anything: a second
+    // job-search session this afternoon asks again (greeting with the
+    // fingerprint label). Episodes provide the natural spacing: the hook
+    // fires once per episode, so only a genuinely new episode can re-ask.
+    if (this.state.declinedThreads[ep.threadId]) return skip("declined (✕) earlier today");
+    const snoozed = this.state.snoozedUntil[ep.threadId];
+    if (snoozed && ep.at < snoozed) {
+      return skip(`ignored recently — snoozed for ${Math.ceil((snoozed - ep.at) / 60_000)}m more`);
+    }
 
     // Source chips from the same window data the save offer proposes from.
     const minutes = Math.max(1, Math.round(ep.engagedMs / 60_000));
@@ -336,10 +344,15 @@ export class SessionSenseManager {
         this.recordFingerprint(pending.msg.threadId, (label ?? "").trim());
         break;
       case "dismissed":
-      case "expired":
-        // The no is respected for the rest of the day — the only cost of
-        // dismissing is not being asked again until tomorrow.
+        // An explicit no is respected for the rest of the day.
         this.state.declinedThreads[pending.msg.threadId] = Date.now();
+        this.saveState();
+        break;
+      case "expired":
+        // Ignored is "not now", not "no" — snooze, then ask again on a
+        // fresh episode.
+        this.state.snoozedUntil[pending.msg.threadId] =
+          Date.now() + this.cfg.snoozeMinutes * 60_000;
         this.saveState();
         break;
     }
