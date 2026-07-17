@@ -224,6 +224,78 @@ export interface SpawnPermissionReplyMessage {
   decision: "allow" | "deny";
 }
 
+// ── Agent CLI sessions ──
+
+export interface AgentEventFrame {
+  session_id: string;
+  hook_event_name: string;
+  source: string;
+  ts?: number;
+  cwd?: string;
+  tool_name?: string;
+  tool_input?: unknown;
+  tool_response?: unknown;
+  tool_use_id?: string;
+  message?: string;
+  permission_mode?: string;
+  prompt?: string;
+  model?: string;
+  branch?: string;
+  term?: Record<string, string>;
+}
+
+export interface AgentSession {
+  sessionId: string;
+  source: string;
+  name: string;
+  cwd?: string;
+  model?: string;
+  branch?: string;
+  state: "working" | "waiting" | "done";
+  toolLine: string;
+  startedAt: number;
+  lastEventAt: number;
+  endedAt?: number;
+  summary?: string;
+  term?: Record<string, string>;
+}
+
+export type ApprovalDecision = { behavior: "allow" | "deny" | "always" | "ask" };
+
+export interface AgentApprovalRequest {
+  id: string;
+  sessionId: string;
+  source: string;
+  title: string;
+  command: string;
+  cwd?: string;
+  createdAt: number;
+}
+
+export interface AgentSessionsMessage {
+  type: "agent_sessions";
+  sessions: AgentSession[];
+  working: number;
+  waiting: number;
+}
+
+export interface AgentApprovalMessage {
+  type: "agent_approval";
+  request: AgentApprovalRequest;
+}
+
+export interface AgentApprovalResolvedMessage {
+  type: "agent_approval_resolved";
+  id: string;
+  behavior: "allow" | "deny" | "always" | "ask";
+}
+
+export interface AgentApprovalReplyMessage {
+  type: "agent_approval_reply";
+  id: string;
+  behavior: "allow" | "deny" | "always";
+}
+
 /** Overlay → sinain-core: frontmost application changed. A fast OS-level
  *  signal (NSWorkspace) that lands ahead of the sense pipeline — drives the
  *  instant ROI restore on app switch. `app` is the localizedName (matched
@@ -241,6 +313,12 @@ export interface CostMessage {
   callCount: number;
   startedAt: number;
   displayEnabled: boolean;
+}
+
+export interface UsageMessage {
+  type: "usage";
+  fiveHour?: { utilization: number; resetsAt?: number };
+  sevenDay?: { utilization: number; resetsAt?: number };
 }
 
 /** Entry recorded by CostTracker for each LLM call. */
@@ -377,8 +455,8 @@ export interface SaveOfferMessage {
 /** Overlay → core response to a save offer (POST /capture/offer/response). */
 export type SaveOfferResponse = "accepted" | "adjusted" | "dismissed" | "expired";
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | VoiceSessionMessage;
-export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage;
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | UsageMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | VoiceSessionMessage | AgentSessionsMessage | AgentApprovalMessage | AgentApprovalResolvedMessage;
+export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage | AgentApprovalReplyMessage;
 
 /** Abstraction for user commands (text now, voice later). */
 export interface UserCommand {
@@ -858,6 +936,9 @@ export interface CoreConfig {
   micEnabled: boolean;
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AnalysisConfig;
+  agentApproveTimeoutMs: number;
+  claudeUsageEnabled: boolean;
+  claudeUsagePollMs: number;
   regionSlmConfig: RegionSlmConfig;
   burstConfig: BurstConfig;
   saveOfferConfig: SaveOfferConfig;

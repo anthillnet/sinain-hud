@@ -14,6 +14,9 @@ import { ChatService } from "./chat/chat-service.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
+import { AgentSessionRegistry } from "./agent-sessions/registry.js";
+import { ApprovalManager } from "./agent-sessions/approvals.js";
+import { ClaudeUsageTracker } from "./agent-sessions/usage.js";
 import { setupCommands } from "./overlay/commands.js";
 import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
@@ -987,6 +990,28 @@ async function main() {
 
   // ── Initialize overlay WS handler ──
   const wsHandler = new WsHandler();
+  const agentSessionRegistry = new AgentSessionRegistry();
+  const approvalManager = new ApprovalManager((request) => {
+    agentSessionRegistry.finishApproval(request.sessionId, "ask", request.command);
+  });
+  wsHandler.setAgentApprovalSupplier(() => approvalManager.pending());
+  const claudeUsageTracker = new ClaudeUsageTracker((snapshot) => wsHandler.broadcastUsage({ type: "usage", ...snapshot }));
+  let agentSessionsFlushScheduled = false;
+  agentSessionRegistry.onChange(() => {
+    if (config.claudeUsageEnabled && agentSessionRegistry.snapshot().length > 0) claudeUsageTracker.start(config.claudeUsagePollMs);
+    else claudeUsageTracker.stop();
+    if (agentSessionsFlushScheduled) return;
+    agentSessionsFlushScheduled = true;
+    queueMicrotask(() => {
+      agentSessionsFlushScheduled = false;
+      const sessions = agentSessionRegistry.snapshot();
+      wsHandler.broadcastAgentSessions({
+        type: "agent_sessions",
+        sessions,
+        ...agentSessionRegistry.counts(),
+      });
+    });
+  });
 
   // ── Initialize cost tracker ──
   const costTracker = new CostTracker((snapshot) => wsHandler.broadcastCost(snapshot, config.costDisplayEnabled));
@@ -1943,6 +1968,7 @@ async function main() {
     feedBuffer,
     senseBuffer,
     wsHandler,
+    agentSessions: { registry: agentSessionRegistry, approvals: approvalManager },
     profiler,
     costTracker,
     feedbackStore: feedbackStore ?? undefined,
@@ -2449,6 +2475,12 @@ async function main() {
     systemAudioPipeline,
     micPipeline,
     config,
+    onAgentApprovalReply: (id, behavior) => {
+      const request = approvalManager.get(id);
+      if (!request || !approvalManager.resolve(id, behavior)) return;
+      agentSessionRegistry.finishApproval(request.sessionId, behavior, request.command);
+      wsHandler.broadcastRaw({ type: "agent_approval_resolved", id, behavior });
+    },
     onUserMessage: async (text) => {
       await escalator.sendDirect(text);
     },

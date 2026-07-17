@@ -26,6 +26,7 @@ import '../core/models/context_cards.dart';
 import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 import 'capture/capture_ui.dart';
+import 'agents/agent_sessions_view.dart';
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -37,6 +38,9 @@ class OverlayShell extends StatefulWidget {
 
 class OverlayShellState extends State<OverlayShell> {
   static final bool _isMacOS = Platform.isMacOS;
+  // UI-only sentinel tab key for the Agent Sessions surface (not a server
+  // conversation id — never sent over the WS).
+  static const String _agentsThread = '__agents__';
 
   late HudState _state;
   late HudState _lastVisibleState;
@@ -359,8 +363,16 @@ class OverlayShellState extends State<OverlayShell> {
     _wsListener = () {
       if (!mounted) return;
       final n = ws.pendingAttentionCount;
-      if (n == _pendingAttention) return;
-      setState(() => _pendingAttention = n);
+      // Kick the user off the AGT tab when the last agent session/approval
+      // disappears — the pill hides with it, so the tab would be unreachable.
+      final agentsGone = _activeThread == _agentsThread &&
+          ws.agentSessions.isEmpty &&
+          ws.agentApprovals.isEmpty;
+      if (n == _pendingAttention && !agentsGone) return;
+      setState(() {
+        _pendingAttention = n;
+        if (agentsGone) _activeThread = null;
+      });
     };
     ws.addListener(_wsListener!);
 
@@ -555,6 +567,8 @@ class OverlayShellState extends State<OverlayShell> {
       _activeThread = id;
       if (id == null) {
         _activeRegion = null;
+      } else if (id == _agentsThread) {
+        _activeRegion = null;
       } else if (_activeRegion?.id != id) {
         // Re-resolve the live region for the banner (null if expired)
         RegionHighlight? live;
@@ -568,6 +582,7 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   void _closeThread(String id) {
+    if (id == _agentsThread) return; // AGT pill has no close affordance
     context.read<WebSocketService>().closeRegionThread(id);
     ThreadTerminalSession.close(id); // kill the thread's PTY, if any
     setState(() {
@@ -778,7 +793,9 @@ class OverlayShellState extends State<OverlayShell> {
   /// transcript. Wired to the global "copy seed" hotkey and the handoff popover.
   Future<void> _copySeedForActiveThread() async {
     final ws = context.read<WebSocketService>();
-    final thread = _activeThread;
+    // AGT is a UI-only sentinel, not a server conversation id — copy from
+    // that tab behaves like MAIN.
+    final thread = _activeThread == _agentsThread ? null : _activeThread;
     final items = thread != null
         ? (ws.regionThreads[thread] ?? const <FeedItem>[])
         : ws.agentFeedItems;
@@ -910,7 +927,11 @@ class OverlayShellState extends State<OverlayShell> {
     }.toList();
     // SPIKE: with the terminal enabled the row is always shown so the ⌨
     // toggle is reachable from MAIN even before any region thread exists.
-    if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
+    final showAgents =
+        ws.agentSessions.isNotEmpty || ws.agentApprovals.isNotEmpty;
+    if (ids.isEmpty && !terminalSpikeEnabled && !showAgents) {
+      return const SizedBox.shrink();
+    }
 
     String labelFor(String id) {
       final label = _threadTitleFor(ws, id);
@@ -922,6 +943,8 @@ class OverlayShellState extends State<OverlayShell> {
       required bool selected,
       required VoidCallback onTap,
       VoidCallback? onClose,
+      Widget? label, // rich override for the default Text(text) body
+      bool attention = false, // amber border — approval waiting
     }) {
       final accent = _accentColor;
       return Padding(
@@ -942,28 +965,31 @@ class OverlayShellState extends State<OverlayShell> {
                         : Colors.white.withValues(alpha: 0.04)),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: selected
-                      ? (theme.isSolid
-                          ? theme.selectionAccent.withValues(alpha: 0.6)
-                          : accent.withValues(alpha: 0.5))
-                      : theme.border,
+                  color: attention
+                      ? const Color(0xFFD9A21B).withValues(alpha: 0.75)
+                      : selected
+                          ? (theme.isSolid
+                              ? theme.selectionAccent.withValues(alpha: 0.6)
+                              : accent.withValues(alpha: 0.5))
+                          : theme.border,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    text,
-                    style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 9,
-                      color: selected
-                          ? (theme.isSolid ? theme.selectionAccent : accent)
-                          : theme.textMuted,
-                      fontWeight:
-                          selected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
+                  label ??
+                      Text(
+                        text,
+                        style: TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 9,
+                          color: selected
+                              ? (theme.isSolid ? theme.selectionAccent : accent)
+                              : theme.textMuted,
+                          fontWeight:
+                              selected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
                   if (onClose != null) ...[
                     const SizedBox(width: 5),
                     GestureDetector(
@@ -995,6 +1021,40 @@ class OverlayShellState extends State<OverlayShell> {
               selected: _activeThread == null,
               onTap: () => _selectThread(null),
             ),
+            if (showAgents)
+              pill(
+                text: 'AGT',
+                selected: _activeThread == _agentsThread,
+                attention: ws.agentApprovals.isNotEmpty,
+                onTap: () => _selectThread(_agentsThread),
+                label: Text.rich(
+                  TextSpan(
+                    style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 9,
+                      color: _activeThread == _agentsThread
+                          ? (theme.isSolid
+                              ? theme.selectionAccent
+                              : _accentColor)
+                          : theme.textMuted,
+                      fontWeight: _activeThread == _agentsThread
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                    children: [
+                      const TextSpan(text: 'AGT'),
+                      if (ws.agentWorking > 0)
+                        TextSpan(text: ' ${ws.agentWorking}'),
+                      if (ws.agentWaiting > 0)
+                        TextSpan(
+                          text: ' ·${ws.agentWaiting}',
+                          style:
+                              const TextStyle(color: Color(0xFFD9A21B)),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             for (final id in ids)
               pill(
                 // ⟳ while this region's task is in flight — visible feedback
@@ -1023,7 +1083,7 @@ class OverlayShellState extends State<OverlayShell> {
         // edge, outside the scrolling tab strip, so a crowd of tabs can
         // never squeeze it out of sight. Term→chat closes the PTY so one
         // session never has two concurrent writers (P3 exclusivity).
-        if (terminalSpikeEnabled)
+        if (terminalSpikeEnabled && _activeThread != _agentsThread)
           pill(
             text: _terminalThreads.contains(_activeTabKey)
                 ? '💬 chat'
@@ -2151,7 +2211,9 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                _terminalThreads.contains(_activeTabKey)
+                _activeThread == _agentsThread
+                    ? const AgentSessionsView(key: ValueKey('agent-sessions'))
+                    : _terminalThreads.contains(_activeTabKey)
                     ? ThreadTerminalView(
                         key: ValueKey('term-$_activeTabKey'),
                         threadId: _activeTabKey,
