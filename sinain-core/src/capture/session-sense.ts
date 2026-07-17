@@ -58,6 +58,10 @@ interface Fingerprint {
   label: string;
   count: number;
   lastTs: number;
+  /** True when the label was TYPED by the user (corrected path) — such a
+   *  label is never overwritten by an inferred assist title. Absent/false
+   *  for labels the user merely accepted (thread fallback or assist title). */
+  userTyped?: boolean;
 }
 
 interface PersistedState {
@@ -311,6 +315,17 @@ export class SessionSenseManager {
           pending.assist = assist;
           msg.goal = assist.goal || undefined;
           msg.steps = assist.steps.length ? assist.steps : undefined;
+          // Container labels ("Google Chrome", "Home / X", a repo name) teach
+          // nothing — the assist just read the screen, so its title names the
+          // WORK. Any label the user didn't type upgrades; when the fresh
+          // title genuinely differs from a remembered one, the claim
+          // downgrades to "Looks like:" — an inference is not the user's own
+          // past answer, even when it replaces one.
+          if (assist.title && this.labelUpgradable(msg.threadId)) {
+            const same = (msg.label ?? "").toLowerCase() === assist.title.toLowerCase();
+            msg.label = assist.title;
+            if (!same) msg.grade = "stock";
+          }
         } else {
           // Late composition still lands on the pending nudge — a track after
           // the race window reuses it for the chip's ✦ instead of recomposing.
@@ -318,7 +333,11 @@ export class SessionSenseManager {
             if (late && this.pendingNudge === pending) pending.assist = late;
           }).catch(() => { /* already degraded */ });
         }
-      } catch { /* bare card — the moment matters more than the details */ }
+      } catch (err) {
+        // Bare card — the moment matters more than the details. But say so:
+        // a silently-swallowed composition failure cost a debugging session.
+        warn(TAG, `nudge assist composition failed: ${String(err).slice(0, 160)}`);
+      }
     }
 
     if (this.pendingNudge !== pending) return; // expired during composition
@@ -349,13 +368,20 @@ export class SessionSenseManager {
 
     let sessionId: string | undefined;
     switch (response) {
-      case "tracked":
-        sessionId = this.startSession(pending, pending.msg.label ?? "");
-        this.recordFingerprint(pending.msg.threadId, pending.msg.label ?? "");
+      case "tracked": {
+        // A late assist (lost the 4s race, resolved before the tap) still
+        // upgrades a weak label at consent time — same rule as the card.
+        let accepted = pending.msg.label ?? "";
+        if (pending.assist?.title && this.labelUpgradable(pending.msg.threadId)) {
+          accepted = pending.assist.title;
+        }
+        sessionId = this.startSession(pending, accepted);
+        this.recordFingerprint(pending.msg.threadId, accepted);
         break;
+      }
       case "corrected":
         sessionId = this.startSession(pending, (label ?? "").trim());
-        this.recordFingerprint(pending.msg.threadId, (label ?? "").trim());
+        this.recordFingerprint(pending.msg.threadId, (label ?? "").trim(), true);
         break;
       case "dismissed":
         // An explicit no is respected for the rest of the day.
@@ -381,17 +407,46 @@ export class SessionSenseManager {
     return { ok: true, sessionId };
   }
 
+  /** The assist's inferred title may upgrade ANY label the user didn't type
+   *  themselves (product call 2026-07-17: all sessions — "Home / X" or a repo
+   *  name describe the container just like "Google Chrome" does; the title
+   *  names the work). Only a user-TYPED label (corrected path) is permanent. */
+  private labelUpgradable(threadId: string): boolean {
+    return !this.state.fingerprints[threadId]?.userTyped;
+  }
+
   /** An accept is a consent moment AND a lesson: remember thread → label so
    *  the next qualification on this thread greets with the user's own
    *  answer ("Back on: <label>") instead of the raw window title. */
-  private recordFingerprint(threadId: string, label: string): void {
+  private recordFingerprint(threadId: string, label: string, userTyped = false): void {
     const prev = this.state.fingerprints[threadId];
     this.state.fingerprints[threadId] = {
       label: label || prev?.label || "",
       count: (prev?.count ?? 0) + 1,
       lastTs: Date.now(),
+      userTyped: (userTyped && !!label) || prev?.userTyped || undefined,
     };
     this.saveState();
+  }
+
+  /** Upgrade a weak (app-name) label to the assist's inferred title everywhere
+   *  the old label lives: the running session, its bookmark row, and the
+   *  thread fingerprint. Call sites guard with weakLabel, so a user-typed
+   *  label can never be renamed away. */
+  private renameSession(s: Session, title: string): void {
+    const old = s.label || "(unlabeled)";
+    s.label = title;
+    const bm = this.state.bookmarks[s.threadId];
+    if (bm) bm.label = title;
+    const fp = this.state.fingerprints[s.threadId];
+    if (fp && !fp.userTyped) fp.label = title;
+    this.saveState();
+    this.broadcastChip(s, s.paused ? "paused" : "running");
+    this.appendLabel({
+      id: `ss-rename-${s.id}`, ts: Date.now(), kind: "session_sense", event: "renamed",
+      sessionId: s.id, threadId: s.threadId, from: old, to: title,
+    });
+    log(TAG, `${s.id}: renamed "${old}" → "${title}" (assist title)`);
   }
 
   private startSession(pending: PendingNudge, label: string): string {
@@ -442,6 +497,7 @@ export class SessionSenseManager {
       .then((assist) => {
         if (!this.sessions.has(sessionId)) return; // session already gone
         if (!assist || (!assist.goal && assist.steps.length === 0)) {
+          warn(TAG, `${sessionId}: assist composed nothing`);
           this.broadcast({ type: "session_assist", sessionId, status: "error", error: "nothing composed", ts: Date.now() });
           return;
         }
@@ -450,8 +506,16 @@ export class SessionSenseManager {
           goal: assist.goal, steps: assist.steps, ts: Date.now(),
         });
         log(TAG, `${sessionId}: assist ready (${assist.steps.length} steps)`);
+        // Session started under an app-name label (nudge went out bare) —
+        // the assist read the screen anyway, so rename the running session
+        // after the work. Chip re-broadcast carries the new label to the UI.
+        if (assist.title && this.labelUpgradable(s.threadId) &&
+            s.label.toLowerCase() !== assist.title.toLowerCase()) {
+          this.renameSession(s, assist.title);
+        }
       })
       .catch((err) => {
+        warn(TAG, `${sessionId}: assist failed: ${String(err).slice(0, 160)}`);
         this.broadcast({
           type: "session_assist", sessionId, status: "error",
           error: String(err).slice(0, 160), ts: Date.now(),
@@ -538,8 +602,12 @@ export class SessionSenseManager {
 
   private bookmarkThread(threadId: string, label: string): void {
     const existing = this.state.bookmarks[threadId];
+    // A user-typed label is kept; anything else yields to the incoming label,
+    // so a bookmark row upgrades the first time its thread tracks under a
+    // real title.
+    const keep = existing?.label && !this.labelUpgradable(threadId);
     this.state.bookmarks[threadId] = existing
-      ? { ...existing, label: existing.label || label }
+      ? { ...existing, label: keep ? existing.label : (label || existing.label) }
       : { label, sessions: 0, totalMs: 0, lastTs: Date.now(), createdTs: Date.now() };
     this.saveState();
     log(TAG, `⚑ bookmarked ${threadId} ("${label}")`);

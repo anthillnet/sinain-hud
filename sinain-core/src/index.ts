@@ -1874,9 +1874,21 @@ async function main() {
   // burst lane — consent already given. Null when the lane is unavailable.
   const composeSessionAssist = config.burstConfig.enabled && config.burstConfig.apiKey
     ? async (minutes: number, apps: string[], label: string) => {
-        const slice = assembleWindow(feedBuffer, senseBuffer, minutes, apps.length ? { apps } : undefined);
-        if (slice.lineCount === 0) return null;
+        let slice = assembleWindow(feedBuffer, senseBuffer, minutes, apps.length ? { apps } : undefined);
+        if (slice.lineCount === 0 && apps.length) {
+          // The app filter can starve the slice (chips name apps the buffers
+          // attribute differently, e.g. localized/renamed bundle names) —
+          // fall back to the unfiltered window rather than silently skipping
+          // the assist: a slightly broader slice beats none.
+          slice = assembleWindow(feedBuffer, senseBuffer, minutes);
+        }
+        if (slice.lineCount === 0) {
+          log("core", `session assist: empty window slice (${minutes}m, apps=[${apps.join(", ")}]) — skipping composition`);
+          return null;
+        }
+        const t0 = Date.now();
         const { assist, result } = await assistNextSteps(config.burstConfig, slice, label);
+        log("core", `session assist composed in ${Date.now() - t0}ms (cached=${result.cached}, title="${assist.title}", steps=${assist.steps.length})`);
         if (!result.cached) {
           costTracker.record({
             source: "burst", model: config.burstConfig.model,
