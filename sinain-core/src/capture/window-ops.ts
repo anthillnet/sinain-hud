@@ -560,11 +560,15 @@ export async function enrichFocus(
 
 const ASSIST_SYSTEM = `You are Sinain, an ambient assistant. The user just confirmed they are working on a session; you get a chronological slice of their screen OCR, window titles, and transcript.
 Return JSON only:
-{"goal":"<what they are trying to accomplish, one specific sentence>",
+{"title":"<the activity as a 2-5 word noun phrase, e.g. \\"Job application — Arc\\", \\"Meet with Vladimir\\", \\"Hackathon logistics\\">",
+ "goal":"<what they are trying to accomplish, one specific sentence>",
  "steps":["<concrete next step, short imperative>"]}
-Rules: exactly 2-3 steps, each grounded in what is visibly unfinished in THIS activity — never generic advice.`;
+Rules: title names the WORK, never the app ("Chrome"/"Slack" are wrong answers); exactly 2-3 steps, each grounded in what is visibly unfinished in THIS activity — never generic advice.`;
 
 export interface SessionAssist {
+  /** Short inferred name of the activity (2-5 words). Upgrades weak app-name
+   *  session labels; a user-typed label always wins over this. */
+  title: string;
   goal: string;
   steps: string[];
 }
@@ -584,6 +588,7 @@ export async function assistNextSteps(
   const raw = parseBurstJson<Partial<SessionAssist>>(result.content);
   return {
     assist: {
+      title: String(raw.title ?? "").trim().slice(0, 60),
       goal: String(raw.goal ?? "").trim(),
       steps: Array.isArray(raw.steps) ? raw.steps.map(String).filter(Boolean).slice(0, 3) : [],
     },
