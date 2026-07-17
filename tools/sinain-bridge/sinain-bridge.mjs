@@ -7,6 +7,29 @@ function argValue(name, fallback) {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
+const EVENT_ALIASES = new Map(Object.entries({
+  beforeShellExecution: 'PreToolUse',
+  beforeMCPExecution: 'PreToolUse',
+  beforeReadFile: 'PreToolUse',
+  afterShellExecution: 'PostToolUse',
+  afterFileEdit: 'PostToolUse',
+  stop: 'Stop',
+  sessionStart: 'SessionStart',
+  session_start: 'SessionStart',
+  session_end: 'SessionEnd',
+  pre_tool_call: 'PreToolUse',
+  pre_tool_use: 'PreToolUse',
+  post_tool_call: 'PostToolUse',
+  post_tool_use: 'PostToolUse',
+  user_prompt_submit: 'UserPromptSubmit',
+  turn_end: 'Stop',
+  'turn-ended': 'Stop',
+  turn_ended: 'Stop',
+  notification: 'Notification',
+  permission_request: 'PermissionRequest',
+  'permission.asked': 'PermissionRequest',
+}));
+
 async function readInput() {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
@@ -56,6 +79,17 @@ const frame = {
   hook_event_name: input.hook_event_name ?? event,
   ts: Date.now(),
 };
+const normalizedEvent = EVENT_ALIASES.get(frame.hook_event_name);
+if (normalizedEvent && normalizedEvent !== frame.hook_event_name) {
+  frame.native_event_name = frame.hook_event_name;
+  frame.hook_event_name = normalizedEvent;
+}
+if (source === 'cursor' && Object.hasOwn(frame, 'command')) {
+  const toolInput = frame.tool_input && typeof frame.tool_input === 'object' && !Array.isArray(frame.tool_input)
+    ? frame.tool_input : {};
+  frame.tool_input = { ...toolInput, command: frame.command };
+  delete frame.command;
+}
 
 if (frame.hook_event_name === 'SessionStart') {
   const names = [
@@ -107,5 +141,8 @@ if (frame.hook_event_name === 'PermissionRequest') {
     await post(`${baseUrl}/agent/event`, frame, 1500);
   } catch {
     // Lifecycle hooks must never disrupt the agent.
+  }
+  if (process.argv.includes('--cursor-ack')) {
+    console.log(JSON.stringify({ permission: 'allow' }));
   }
 }
