@@ -17,6 +17,52 @@ class _TestWebSocketService extends WebSocketService {
 }
 
 void main() {
+  testWidgets('pins a live voice lane above tracked sessions', (tester) async {
+    const chip = SessionChipState(
+      sessionId: 'tracked-1',
+      threadId: 'thread-1',
+      status: 'running',
+      label: 'visa application',
+      startedTs: 1,
+      activeMs: 120000,
+    );
+    final ws = _TestWebSocketService(
+      const SessionList(sessions: [chip], bookmarks: []),
+    );
+    ws.voiceSession = const VoiceSession(
+      status: VoiceStatus.live,
+      mode: VoiceMode.webview,
+      minutes: 15,
+      coverage: 'last 15 minutes',
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: SettingsService(),
+        child: MaterialApp(
+          home: SizedBox(
+            width: 520,
+            height: 700,
+            child: SessionListView(
+              ws: ws,
+              onShare: (_) {},
+              onCallAi: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('live-assist-lane')), findsOneWidget);
+    expect(find.text('● live'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('● live')).dy,
+        lessThan(tester.getTopLeft(find.text('visa application')).dy));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    ws.dispose();
+  });
+
   testWidgets('groups attached lane and context card before unattached agents',
       (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch;

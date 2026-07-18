@@ -158,6 +158,34 @@ void main() {
     expect(label.style?.color, const Color(0xFFCDE8D4));
   });
 
+  testWidgets('live assist overrides every other island state', (tester) async {
+    var tapped = false;
+    await tester.pumpWidget(MaterialApp(
+      home: AgentIslandBar(
+        working: 2,
+        waiting: 1,
+        trackedLabel: 'visa-app',
+        saveOfferLabel: 'goal met',
+        enrichLabel: 'visa-app',
+        liveAssist: true,
+        accent: const Color(0xFF3369D6),
+        onEyeTap: () {},
+        onEyeDragUpdate: (_) {},
+        onEyeDragEnd: (_) {},
+        onCountsTap: () {},
+        onLiveAssistTap: () => tapped = true,
+      ),
+    ));
+
+    final live = find.text('● live · call assist');
+    expect(live, findsOneWidget);
+    expect(find.text('1 waiting'), findsNothing);
+    expect(find.textContaining('save?'), findsNothing);
+    expect(tester.widget<Text>(live).style?.color, const Color(0xFFF2C4BC));
+    await tester.tap(live);
+    expect(tapped, isTrue);
+  });
+
   testWidgets('approval card renders request and sends allow reply',
       (tester) async {
     final ws = _RecordingWebSocketService();

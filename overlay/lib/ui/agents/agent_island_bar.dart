@@ -9,6 +9,7 @@ class AgentIslandBar extends StatefulWidget {
   final int trackedActiveMs;
   final String? saveOfferLabel;
   final String? enrichLabel;
+  final bool liveAssist;
 
   /// Agent-liveness color — the user's accent from settings (default green).
   final Color accent;
@@ -18,6 +19,7 @@ class AgentIslandBar extends StatefulWidget {
   final VoidCallback onCountsTap;
   final VoidCallback? onSaveOfferTap;
   final VoidCallback? onEnrichTap;
+  final VoidCallback? onLiveAssistTap;
   final double notchGap;
   final double notchHeight;
   final double barHeight;
@@ -30,6 +32,7 @@ class AgentIslandBar extends StatefulWidget {
     this.trackedActiveMs = 0,
     this.saveOfferLabel,
     this.enrichLabel,
+    this.liveAssist = false,
     required this.accent,
     required this.onEyeTap,
     required this.onEyeDragUpdate,
@@ -37,6 +40,7 @@ class AgentIslandBar extends StatefulWidget {
     required this.onCountsTap,
     this.onSaveOfferTap,
     this.onEnrichTap,
+    this.onLiveAssistTap,
     this.notchGap = 0,
     this.notchHeight = 0,
     this.barHeight = 34,
@@ -50,6 +54,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
     with TickerProviderStateMixin {
   late final AnimationController _halo;
   late final AnimationController _pulse;
+  late final AnimationController _livePulse;
 
   @override
   void initState() {
@@ -62,12 +67,17 @@ class _AgentIslandBarState extends State<AgentIslandBar>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
+    _livePulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
     _halo.dispose();
     _pulse.dispose();
+    _livePulse.dispose();
     super.dispose();
   }
 
@@ -86,13 +96,14 @@ class _AgentIslandBarState extends State<AgentIslandBar>
       ),
     );
     final primary = _buildPrimary();
-    final enrich = widget.waiting > 0 || widget.enrichLabel == null
-        ? null
-        : _IslandSegment(
-            color: const Color(0xFF4CAF6E),
-            label: 'enrich? · ${widget.enrichLabel}',
-            onTap: widget.onEnrichTap,
-          );
+    final enrich =
+        widget.liveAssist || widget.waiting > 0 || widget.enrichLabel == null
+            ? null
+            : _IslandSegment(
+                color: const Color(0xFF4CAF6E),
+                label: 'enrich? · ${widget.enrichLabel}',
+                onTap: widget.onEnrichTap,
+              );
     final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -110,7 +121,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
           horizontal: notchMode ? 8 : 10,
           vertical: notchMode || widget.barHeight >= 34 ? 8 : 3,
         ),
-        child: widget.waiting > 0
+        child: widget.waiting > 0 && !widget.liveAssist
             ? Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -234,6 +245,18 @@ class _AgentIslandBarState extends State<AgentIslandBar>
   }
 
   Widget? _buildPrimary() {
+    // Live voice is the one interruptive island state: it stays visible over
+    // approvals, tracking, save offers, and agent activity.
+    if (widget.liveAssist) {
+      return _IslandSegment(
+        color: const Color(0xFFE06C5B),
+        labelColor: const Color(0xFFF2C4BC),
+        label: '● live · call assist',
+        // 700 ms each way matches the design's 1.4 s pulse cycle.
+        pulse: _livePulse,
+        onTap: widget.onLiveAssistTap,
+      );
+    }
     if (widget.waiting > 0) return null; // waiting uses the animated legacy row
     if (widget.saveOfferLabel != null) {
       return _IslandSegment(
@@ -281,6 +304,7 @@ class _IslandSegment extends StatelessWidget {
     this.onTap,
     this.pulse,
     this.halo = false,
+    this.labelColor,
   });
 
   final Color color;
@@ -288,6 +312,7 @@ class _IslandSegment extends StatelessWidget {
   final VoidCallback? onTap;
   final Animation<double>? pulse;
   final bool halo;
+  final Color? labelColor;
 
   @override
   Widget build(BuildContext context) {
@@ -318,9 +343,10 @@ class _IslandSegment extends StatelessWidget {
               style: TextStyle(
                 fontFamily: 'JetBrainsMono',
                 fontSize: 10,
-                color: color == const Color(0xFF4CAF6E)
-                    ? const Color(0xFFCDE8D4)
-                    : const Color(0xFFE8EAEE),
+                color: labelColor ??
+                    (color == const Color(0xFF4CAF6E)
+                        ? const Color(0xFFCDE8D4)
+                        : const Color(0xFFE8EAEE)),
               )),
         ]),
       ),

@@ -48,21 +48,25 @@ class OverlayShellState extends State<OverlayShell> {
   // The bar grows when the amber "· N waiting" segment is present.
   static const double _islandBarWaitingWidth = 284;
   double _islandBarWidthFor(WebSocketService ws) {
+    final liveAssist = ws.voiceSession?.isActive ?? false;
     final hasEnrich = _islandEnrichLabel != null;
     final hasSave = _saveOffer != null;
     final tracked = _warmChip;
     if (_notchHeight > 0) {
-      final rightWing = ws.agentWaiting > 0
-          ? 236.0
-          : hasEnrich
-              ? 286.0
-              : hasSave || tracked != null
-                  ? 210.0
-                  : ws.agentWorking > 0
-                      ? 132.0
-                      : 0.0;
+      final rightWing = liveAssist
+          ? 210.0
+          : ws.agentWaiting > 0
+              ? 236.0
+              : hasEnrich
+                  ? 286.0
+                  : hasSave || tracked != null
+                      ? 210.0
+                      : ws.agentWorking > 0
+                          ? 132.0
+                          : 0.0;
       return 46 + _notchWidth + rightWing;
     }
+    if (liveAssist) return 250;
     if (ws.agentWaiting > 0) return _islandBarWaitingWidth;
     if (hasEnrich) return 330;
     if (hasSave || tracked != null) return 250;
@@ -2681,6 +2685,7 @@ class OverlayShellState extends State<OverlayShell> {
         trackedActiveMs: _warmChip?.activeMs ?? 0,
         saveOfferLabel: _saveOffer?.threadLabel ?? _saveOffer?.coverage,
         enrichLabel: _islandEnrichLabel,
+        liveAssist: ws.voiceSession?.isActive ?? false,
         accent: _accentColor,
         notchGap: _notchWidth,
         notchHeight: _notchHeight,
@@ -2706,6 +2711,7 @@ class OverlayShellState extends State<OverlayShell> {
         },
         onSaveOfferTap: () => _raiseParkedCard(clearEnrich: false),
         onEnrichTap: () => _raiseParkedCard(clearEnrich: true),
+        onLiveAssistTap: () => _raiseParkedCard(clearEnrich: false),
       ),
     );
     return MouseRegion(

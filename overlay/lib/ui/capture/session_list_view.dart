@@ -11,6 +11,7 @@ import '../../core/theme/hud_theme.dart';
 const _green = Color(0xFF1F8039);
 const _amber = Color(0xFFD9A21B);
 const _violet = Color(0xFF7A56D6);
+const _liveRed = Color(0xFFE06C5B);
 
 TextStyle _mono(double size, Color color,
         {FontWeight weight = FontWeight.w400, double? height}) =>
@@ -59,6 +60,7 @@ class _SessionListViewState extends State<SessionListView> {
   StreamSubscription<SessionChipState>? _chipSub;
   StreamSubscription<void>? _agentSessionsSub;
   StreamSubscription<SessionAssist>? _assistSub;
+  StreamSubscription<VoiceSession>? _voiceSub;
   Timer? _ticker;
   final Map<String, DateTime> _receivedAt = {};
   bool _loaded = false;
@@ -103,6 +105,9 @@ class _SessionListViewState extends State<SessionListView> {
         setState(() => _assists[assist.sessionId] = assist);
       }
     });
+    _voiceSub = widget.ws.voiceSessionStream.listen((_) {
+      if (mounted) setState(() {});
+    });
     _syncTicker();
   }
 
@@ -133,6 +138,7 @@ class _SessionListViewState extends State<SessionListView> {
     _chipSub?.cancel();
     _agentSessionsSub?.cancel();
     _assistSub?.cancel();
+    _voiceSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -159,6 +165,7 @@ class _SessionListViewState extends State<SessionListView> {
     final orphans = widget.ws.agentSessions
         .where((agent) => agent.threadId == null || agent.threadId!.isEmpty)
         .toList();
+    final liveVoice = widget.ws.voiceSession;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
@@ -173,7 +180,13 @@ class _SessionListViewState extends State<SessionListView> {
             ],
           ]),
           const SizedBox(height: 6),
-          if (sessions.isEmpty)
+          if (liveVoice?.isActive ?? false) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _liveLane(t, liveVoice!),
+            ),
+          ],
+          if (sessions.isEmpty && !(liveVoice?.isActive ?? false))
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
@@ -230,6 +243,44 @@ class _SessionListViewState extends State<SessionListView> {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _liveLane(HudTheme t, VoiceSession voice) {
+    final detail = voice.coverage.trim().isEmpty
+        ? 'voice session'
+        : 'voice session · ${voice.coverage.trim()}';
+    return Container(
+      key: const ValueKey('live-assist-lane'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: _liveRed.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration:
+              const BoxDecoration(color: _liveRed, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 7),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: _liveRed.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text('● live', style: _mono(9, const Color(0xFFF2C4BC))),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(detail,
+              style: _mono(10, t.textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ),
+      ]),
     );
   }
 
