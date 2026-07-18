@@ -2377,8 +2377,8 @@ class OverlayShellState extends State<OverlayShell> {
                 child: Container(
                   width: 5,
                   height: 5,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF3369D6),
+                  decoration: BoxDecoration(
+                    color: _accentColor,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -2408,6 +2408,7 @@ class OverlayShellState extends State<OverlayShell> {
       child: AgentIslandBar(
         working: ws.agentWorking,
         waiting: ws.agentWaiting,
+        accent: _accentColor,
         onEyeTap: () {
           if (_islandView == _IslandView.bar) {
             _unparkIsland(byUser: true);
@@ -2487,8 +2488,12 @@ class OverlayShellState extends State<OverlayShell> {
             ],
           ]),
         ),
-        const Expanded(
-          child: AgentSessionsView(showHeader: false, showApprovals: false),
+        Expanded(
+          child: AgentSessionsView(
+            showHeader: false,
+            showApprovals: false,
+            accent: _accentColor,
+          ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 5, 10, 8),
@@ -2889,6 +2894,7 @@ class OverlayShellState extends State<OverlayShell> {
                     ? SessionListView(
                         key: const ValueKey('sessions'),
                         ws: ws,
+                        accent: _accentColor,
                         onShare: _shareBookmark,
                         onCallAi: _callAiOnActiveSession,
                       )

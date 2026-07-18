@@ -15,6 +15,7 @@ import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
 import { AgentSessionRegistry } from "./agent-sessions/registry.js";
+import { AttachmentCoordinator } from "./agent-sessions/attachment.js";
 import { ApprovalManager } from "./agent-sessions/approvals.js";
 import { ClaudeUsageTracker } from "./agent-sessions/usage.js";
 import { setupCommands } from "./overlay/commands.js";
@@ -991,6 +992,7 @@ async function main() {
   // ── Initialize overlay WS handler ──
   const wsHandler = new WsHandler();
   const agentSessionRegistry = new AgentSessionRegistry();
+  let attachmentCoordinator: AttachmentCoordinator | null = null;
   const approvalManager = new ApprovalManager((request) => {
     agentSessionRegistry.finishApproval(request.sessionId, "ask", request.command);
   });
@@ -998,6 +1000,7 @@ async function main() {
   const claudeUsageTracker = new ClaudeUsageTracker((snapshot) => wsHandler.broadcastUsage({ type: "usage", ...snapshot }));
   let agentSessionsFlushScheduled = false;
   agentSessionRegistry.onChange(() => {
+    attachmentCoordinator?.sync();
     if (config.claudeUsageEnabled && agentSessionRegistry.snapshot().length > 0) claudeUsageTracker.start(config.claudeUsagePollMs);
     else claudeUsageTracker.stop();
     if (agentSessionsFlushScheduled) return;
@@ -1931,6 +1934,14 @@ async function main() {
     composeSessionAssist,
     (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
   );
+  attachmentCoordinator = new AttachmentCoordinator(
+    agentSessionRegistry,
+    () => sessionSense.activeSessions(),
+    (threadId) => sessionSense.rebroadcastChip(threadId),
+  );
+  sessionSense.setAgentAugments((threadId) => attachmentCoordinator!.augmentsFor(threadId));
+  sessionSense.setAgentWrapHook((threadId) => attachmentCoordinator!.onWrap(threadId));
+  attachmentCoordinator.sync();
   offerManager.setEpisodeConsumedCheck((threadId, startTs, endTs) =>
     sessionSense.wasAskedDuring(threadId, startTs, endTs));
   // The nudge trigger IS the autosave detector: a live episode that crosses

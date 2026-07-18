@@ -1,5 +1,6 @@
 class AgentSession {
   final String sessionId;
+  final String? threadId;
   final String source;
   final String name;
   final String? cwd;
@@ -19,6 +20,7 @@ class AgentSession {
     required this.state,
     required this.startedAt,
     required this.lastEventAt,
+    this.threadId,
     this.cwd,
     this.model,
     this.branch,
@@ -32,6 +34,7 @@ class AgentSession {
     final startedAt = _dateFromEpoch(json['startedAt']) ?? now;
     return AgentSession(
       sessionId: json['sessionId'] as String? ?? '',
+      threadId: json['threadId'] as String?,
       source: json['source'] as String? ?? '',
       name: json['name'] as String? ?? 'agent',
       cwd: json['cwd'] as String?,

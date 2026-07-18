@@ -246,6 +246,7 @@ export interface AgentEventFrame {
 
 export interface AgentSession {
   sessionId: string;
+  threadId?: string;
   source: string;
   name: string;
   cwd?: string;
@@ -509,12 +510,14 @@ export type SessionNudgeResponse = "tracked" | "corrected" | "dismissed" | "expi
 export interface SessionChipMessage {
   type: "session_chip";
   sessionId: string;
+  threadId: string;
   status: "running" | "paused" | "ended";
   label: string;
   /** Credited-from timestamp (candidateStartTs). */
   startedTs: number;
   /** Accumulated active (non-paused) milliseconds. */
   activeMs: number;
+  agentsWorking?: number;
   ts: number;
 }
 

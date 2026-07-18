@@ -117,6 +117,8 @@ export class SessionSenseManager {
    *  one session is ever warm; the rest sit paused, each heading toward its
    *  own wrap flow independently. Keyed by session id. */
   private sessions = new Map<string, Session>();
+  private agentAugments: ((threadId: string) => { working: number; receipts: string[] }) | null = null;
+  private agentWrapHook: ((threadId: string) => void) | null = null;
 
   /** Policy A (§7): nudges shown, so a rung-1 offer never re-asks the episode. */
   private askedEpisodes: { threadId: string; ts: number }[] = [];
@@ -146,6 +148,25 @@ export class SessionSenseManager {
 
   stop(): void {
     clearInterval(this.housekeeping);
+  }
+
+  activeSessions(): { id: string; threadId: string; label: string; startTs: number; paused: boolean }[] {
+    return [...this.sessions.values()].map((s) => ({
+      id: s.id, threadId: s.threadId, label: s.label, startTs: s.startTs, paused: s.paused,
+    }));
+  }
+
+  setAgentAugments(fn: (threadId: string) => { working: number; receipts: string[] }): void {
+    this.agentAugments = fn;
+  }
+
+  setAgentWrapHook(fn: (threadId: string) => void): void {
+    this.agentWrapHook = fn;
+  }
+
+  rebroadcastChip(threadId: string): void {
+    const session = [...this.sessions.values()].find((s) => s.threadId === threadId);
+    if (session) this.broadcastChip(session, session.paused ? "paused" : "running");
   }
 
   private get statePath(): string { return join(this.memoryDir, "session-sense-state.json"); }
@@ -625,6 +646,9 @@ export class SessionSenseManager {
         startedTs: s.startTs,
         activeMs: this.activeMsOf(s, now),
         threadId: s.threadId,
+        ...(this.agentAugments && this.agentAugments(s.threadId).working > 0
+          ? { agentsWorking: this.agentAugments(s.threadId).working }
+          : {}),
       }))
       .sort((a, b) =>
         a.status === b.status ? b.activeMs - a.activeMs : a.status === "running" ? -1 : 1);
@@ -730,8 +754,10 @@ export class SessionSenseManager {
       Math.max(1, Math.ceil((now - s.startTs) / 60_000)),
     );
     const apps = [...s.apps];
+    const agentAugments = this.agentAugments?.(s.threadId) ?? { working: 0, receipts: [] };
     // Scope to the session's own apps — never "mic" (privacy floor, §7).
-    const saveId = this.saveManager.save(minutes, apps.length ? { apps } : undefined, "session_sense");
+    const saveId = this.saveManager.save(minutes, apps.length ? { apps } : undefined, "session_sense", agentAugments.receipts);
+    this.agentWrapHook?.(s.threadId);
 
     // Cumulative bookmark history (§9): sessions link by thread id — three
     // workouts, one habit. Any wrap on a bookmarked thread counts.
@@ -760,10 +786,14 @@ export class SessionSenseManager {
     this.broadcast({
       type: "session_chip",
       sessionId: s.id,
+      threadId: s.threadId,
       status,
       label: s.label || "session",
       startedTs: s.startTs,
       activeMs: this.activeMsOf(s, Date.now()),
+      ...(this.agentAugments && this.agentAugments(s.threadId).working > 0
+        ? { agentsWorking: this.agentAugments(s.threadId).working }
+        : {}),
       ts: Date.now(),
     });
   }

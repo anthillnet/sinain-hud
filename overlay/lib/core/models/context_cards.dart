@@ -349,10 +349,12 @@ class SessionBookmark {
 /// `ended` clears the chip.
 class SessionChipState {
   final String sessionId;
+  final String threadId;
   final String status; // running | paused | ended
   final String label;
   final int startedTs;
   final int activeMs;
+  final int agentsWorking;
 
   const SessionChipState({
     required this.sessionId,
@@ -360,6 +362,8 @@ class SessionChipState {
     required this.label,
     required this.startedTs,
     required this.activeMs,
+    this.threadId = '',
+    this.agentsWorking = 0,
   });
 
   bool get ended => status == 'ended';
@@ -368,10 +372,12 @@ class SessionChipState {
   factory SessionChipState.fromJson(Map<String, dynamic> json) =>
       SessionChipState(
         sessionId: json['sessionId'] as String? ?? '',
+        threadId: json['threadId'] as String? ?? '',
         status: json['status'] as String? ?? 'ended',
         label: json['label'] as String? ?? 'session',
         startedTs: (json['startedTs'] as num?)?.toInt() ?? 0,
         activeMs: (json['activeMs'] as num?)?.toInt() ?? 0,
+        agentsWorking: (json['agentsWorking'] as num?)?.toInt() ?? 0,
       );
 }
 

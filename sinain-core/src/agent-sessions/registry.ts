@@ -110,6 +110,24 @@ export class AgentSessionRegistry {
     this.changeCb?.();
   }
 
+  setThread(sessionId: string, threadId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.threadId === threadId) return;
+    session.threadId = threadId;
+    this.changeCb?.();
+  }
+
+  detachThread(threadId: string): void {
+    let changed = false;
+    for (const session of this.sessions.values()) {
+      if (session.threadId === threadId && session.state !== "done") {
+        delete session.threadId;
+        changed = true;
+      }
+    }
+    if (changed) this.changeCb?.();
+  }
+
   snapshot(): AgentSession[] {
     const cutoff = Date.now() - DONE_TTL_MS;
     for (const [id, session] of this.sessions) {

@@ -10,11 +10,14 @@ import 'agent_approval_card.dart';
 class AgentSessionsView extends StatefulWidget {
   final bool showHeader;
   final bool showApprovals;
+  /// Agent-liveness color — the user's accent from settings (default green).
+  final Color accent;
 
   const AgentSessionsView({
     super.key,
     this.showHeader = true,
     this.showApprovals = true,
+    this.accent = const Color(0xFF1F8039),
   });
 
   @override
@@ -23,7 +26,6 @@ class AgentSessionsView extends StatefulWidget {
 
 class _AgentSessionsViewState extends State<AgentSessionsView> {
   static const _amber = Color(0xFFD9A21B);
-  static const _workingBlue = Color(0xFF3369D6);
   static const _doneGrey = Color(0xFF6C707E);
 
   List<AgentSession> _sessions = const [];
@@ -73,7 +75,7 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
 
   Color _stateColor(String state) => switch (state) {
         'waiting' => _amber,
-        'working' => _workingBlue,
+        'working' => widget.accent,
         _ => _doneGrey,
       };
 

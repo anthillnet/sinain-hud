@@ -5,6 +5,8 @@ import '../feed/idle_animation.dart';
 class AgentIslandBar extends StatefulWidget {
   final int working;
   final int waiting;
+  /// Agent-liveness color — the user's accent from settings (default green).
+  final Color accent;
   final VoidCallback onEyeTap;
   final GestureDragUpdateCallback onEyeDragUpdate;
   final GestureDragEndCallback onEyeDragEnd;
@@ -14,6 +16,7 @@ class AgentIslandBar extends StatefulWidget {
     super.key,
     required this.working,
     required this.waiting,
+    required this.accent,
     required this.onEyeTap,
     required this.onEyeDragUpdate,
     required this.onEyeDragEnd,
@@ -104,7 +107,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
                                 height: 7,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: const Color(0xFF3369D6)),
+                                  border: Border.all(color: widget.accent),
                                 ),
                               ),
                             ),
@@ -116,8 +119,8 @@ class _AgentIslandBarState extends State<AgentIslandBar>
                     child: Container(
                       width: 7,
                       height: 7,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF3369D6),
+                      decoration: BoxDecoration(
+                        color: widget.accent,
                         shape: BoxShape.circle,
                       ),
                     ),

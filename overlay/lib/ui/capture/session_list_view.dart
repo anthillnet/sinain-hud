@@ -29,6 +29,7 @@ TextStyle _mono(double size, Color color,
 /// rides the chip stream.
 class SessionListView extends StatefulWidget {
   final WebSocketService ws;
+  final Color accent;
 
   /// ↗ share — the shell owns URL launching (KG entity page).
   final ValueChanged<SessionBookmark> onShare;
@@ -41,6 +42,7 @@ class SessionListView extends StatefulWidget {
     required this.ws,
     required this.onShare,
     required this.onCallAi,
+    this.accent = const Color(0xFF1F8039),
   });
 
   /// Hover-preview span cap (matches the summon clamp).
@@ -53,6 +55,7 @@ class SessionListView extends StatefulWidget {
 class _SessionListViewState extends State<SessionListView> {
   SessionList _list = const SessionList(sessions: [], bookmarks: []);
   StreamSubscription<SessionChipState>? _chipSub;
+  StreamSubscription<void>? _agentSessionsSub;
   Timer? _ticker;
   final Map<String, DateTime> _receivedAt = {};
   bool _loaded = false;
@@ -82,6 +85,9 @@ class _SessionListViewState extends State<SessionListView> {
       if (c.ended) _refresh();
       _syncTicker();
     });
+    _agentSessionsSub = widget.ws.agentSessionsStream.listen((_) {
+      if (mounted) setState(() {});
+    });
     _syncTicker();
   }
 
@@ -110,6 +116,7 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   void dispose() {
     _chipSub?.cancel();
+    _agentSessionsSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -197,55 +204,86 @@ class _SessionListViewState extends State<SessionListView> {
 
   Widget _activeRow(HudTheme t, SessionChipState s) {
     final dot = s.paused ? _amber : _green;
+    final agents = widget.ws.agentSessions
+        .where((agent) => agent.threadId == s.threadId && agent.state != 'done')
+        .toList();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         border: Border.all(color: dot.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: dot,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(color: dot.withValues(alpha: 0.3), spreadRadius: 2),
-            ],
+      child: Column(children: [
+        Row(children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: dot,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: dot.withValues(alpha: 0.3), spreadRadius: 2),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-          child: Text(s.label,
-              style: _mono(11, t.textPrimary, weight: FontWeight.w500),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
-        ),
-        Text(_elapsed(s), style: _mono(10, s.paused ? _amber : t.textMuted)),
-        if (s.paused) ...[
-          const SizedBox(width: 6),
-          Text('paused', style: _mono(9, _amber)),
-        ],
-        const SizedBox(width: 8),
-        MouseRegion(
-          onEnter: (_) => _loadPreview(s),
-          onExit: (_) => setState(() {
-            _preview = null;
-            _previewFor = null;
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(s.label,
+                style: _mono(11, t.textPrimary, weight: FontWeight.w500),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ),
+          Text(_elapsed(s), style: _mono(10, s.paused ? _amber : t.textMuted)),
+          if (s.paused) ...[
+            const SizedBox(width: 6),
+            Text(
+              s.agentsWorking > 0
+                  ? 'paused · ${s.agentsWorking} agent${s.agentsWorking == 1 ? '' : 's'} working'
+                  : 'paused',
+              style: _mono(9, _amber),
+            ),
+          ],
+          const SizedBox(width: 8),
+          MouseRegion(
+            onEnter: (_) => _loadPreview(s),
+            onExit: (_) => setState(() {
+              _preview = null;
+              _previewFor = null;
+            }),
+            child: _action(
+                t, '✦', 'Call AI on this session', () => widget.onCallAi(s)),
+          ),
+          const SizedBox(width: 5),
+          _action(t, '⚑', 'Come back later (bookmark)', () async {
+            await widget.ws.sessionAction(s.sessionId, 'flag');
+            _refresh();
           }),
-          child:
-              _action(t, '✦', 'Call AI on this session', () => widget.onCallAi(s)),
-        ),
-        const SizedBox(width: 5),
-        _action(t, '⚑', 'Come back later (bookmark)', () async {
-          await widget.ws.sessionAction(s.sessionId, 'flag');
-          _refresh();
-        }),
-        const SizedBox(width: 5),
-        _action(t, '✕', 'End session', () {
-          widget.ws.sessionAction(s.sessionId, 'ended');
-        }),
+          const SizedBox(width: 5),
+          _action(t, '✕', 'End session', () {
+            widget.ws.sessionAction(s.sessionId, 'ended');
+          }),
+        ]),
+        for (final agent in agents)
+          Padding(
+            padding: const EdgeInsets.only(left: 17, top: 6),
+            child: Row(children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: agent.state == 'waiting' ? _amber : widget.accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text('${agent.name} · ${agent.toolLine ?? ''}',
+                    style: _mono(10, t.textMuted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ),
       ]),
     );
   }

@@ -27,6 +27,7 @@ void main() {
             child: AgentIslandBar(
               working: 2,
               waiting: 1,
+              accent: const Color(0xFF1F8039),
               onEyeTap: () {},
               onEyeDragUpdate: (_) {},
               onEyeDragEnd: (_) {},
