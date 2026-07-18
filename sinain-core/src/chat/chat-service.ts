@@ -62,15 +62,28 @@ export class ChatService {
         try { ws.close(); } catch { /* ignore */ }
         fn();
       };
-      const timer = setTimeout(
+      // INACTIVITY timeout, not a wall-clock cap: an agent turn legitimately
+      // runs long (multiple 15s bash tool calls + LLM latency), and timing
+      // out mid-work threw away a turn that was visibly streaming. The timer
+      // re-arms on every event from the sidecar; only true silence rejects.
+      let timer = setTimeout(
         () => finish(() => reject(new Error("chat sidecar timeout"))),
         this.timeoutMs,
       );
+      const touch = () => {
+        if (settled) return;
+        clearTimeout(timer);
+        timer = setTimeout(
+          () => finish(() => reject(new Error("chat sidecar timeout (no activity)"))),
+          this.timeoutMs,
+        );
+      };
 
       ws.on("open", () => {
         ws.send(JSON.stringify({ message: text, context }));
       });
       ws.on("message", (data: unknown) => {
+        touch(); // any sidecar event proves liveness — re-arm the timeout
         let ev: { type?: string; text?: string; tool_name?: string; usage?: ChatUsage };
         try {
           ev = JSON.parse(String(data));

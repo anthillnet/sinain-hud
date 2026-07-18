@@ -550,3 +550,66 @@ export async function enrichFocus(
     stats: slice.stats,
   };
 }
+
+// ── Session Sense assist: goal + next steps (DESIGN-SESSION-SENSE wireframes §8, variant C) ──
+//
+// Composed ON the track tap — the consent is already given, so this spends
+// zero contract. Instant inference (the burst lane) means next steps are
+// ready by the time the chip renders; help offered on a label the user just
+// confirmed — a fact, not a guess.
+
+const ASSIST_SYSTEM = `You are Sinain, an ambient assistant. The user just confirmed they are working on a session; you get a chronological slice of their screen OCR, window titles, and transcript.
+Return JSON only:
+{"title":"<the activity as a 2-5 word noun phrase, e.g. \\"Job application — Arc\\", \\"Meet with Vladimir\\", \\"Hackathon logistics\\">",
+ "goal":"<what they are trying to accomplish, one specific sentence>",
+ "steps":["<concrete next step, short imperative>"]}
+Rules: title names the WORK, never the app ("Chrome"/"Slack" are wrong answers); exactly 2-3 steps, each grounded in what is visibly unfinished in THIS activity — never generic advice.`;
+
+export interface SessionAssist {
+  /** Short inferred name of the activity (2-5 words). Upgrades weak app-name
+   *  session labels; a user-typed label always wins over this. */
+  title: string;
+  goal: string;
+  steps: string[];
+}
+
+export async function assistNextSteps(
+  config: BurstConfig,
+  slice: WindowSlice,
+  label: string,
+): Promise<{ assist: SessionAssist; result: BurstCallResult }> {
+  const result = await burstCall(config, {
+    system: ASSIST_SYSTEM,
+    user: `Session label (user-confirmed): ${label || "(unlabeled work session)"}\n\nActivity so far:\n${slice.text}\n\nProduce goal + next steps.`,
+    // 320 (was 220): rich contexts (code-heavy OCR) made the model verbose
+    // enough to hit the cap, and JSON truncated mid-array parses as nothing —
+    // every assist on those threads silently died ("burst response was not
+    // JSON", field 2026-07-17).
+    maxTokens: 320,
+    cacheKey: "sinain-assist-v1",
+    jsonMode: true,
+  });
+  let raw: Partial<SessionAssist>;
+  try {
+    raw = parseBurstJson<Partial<SessionAssist>>(result.content);
+  } catch (err) {
+    // Truncated JSON (no closing brace) still carries the fields we need
+    // most — salvage title/goal per-key instead of dropping the assist.
+    const grab = (k: string) =>
+      result.content.match(new RegExp(`"${k}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`))?.[1] ?? "";
+    const title = grab("title");
+    const goal = grab("goal");
+    if (!title && !goal) {
+      throw new Error(`assist response unparseable (${result.content.length} chars): ${JSON.stringify(result.content.slice(0, 160))}`);
+    }
+    raw = { title, goal, steps: [] };
+  }
+  return {
+    assist: {
+      title: String(raw.title ?? "").trim().slice(0, 60),
+      goal: String(raw.goal ?? "").trim(),
+      steps: Array.isArray(raw.steps) ? raw.steps.map(String).filter(Boolean).slice(0, 3) : [],
+    },
+    result,
+  };
+}

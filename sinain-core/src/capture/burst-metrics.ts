@@ -24,7 +24,7 @@ import { log } from "../log.js";
 
 const TAG = "burst-metric";
 
-export type BurstGesture = "summon" | "enrich" | "preview" | "voice-seed";
+export type BurstGesture = "summon" | "enrich" | "preview" | "voice-seed" | "assist";
 
 export interface BurstMetricEntry {
   gesture: BurstGesture;
