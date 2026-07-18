@@ -374,6 +374,22 @@ export function loadConfig(): CoreConfig {
     expirySeconds: intEnv("SAVE_OFFER_EXPIRY_SECONDS", 45),
   };
 
+  // Session Sense (DESIGN-SESSION-SENSE.md): the shipped autosave detection
+  // (episode tracker), reskinned to ask DURING the episode — "Looks like
+  // you're working on: <thread> — track from 11:02?". No classifier; thread
+  // identity + engaged dwell are the whole detector. The distillation LLM
+  // runs only after the tap. Default OFF — autonomous lane.
+  const sessionSenseConfig: import("./types.js").SessionSenseConfig = {
+    enabled: boolEnv("SESSION_SENSE_ENABLED", false),
+    qualifyMinutes: intEnv("SESSION_SENSE_QUALIFY_MINUTES", 2),
+    snoozeMinutes: intEnv("SESSION_SENSE_SNOOZE_MINUTES", 60),
+    pauseGraceSeconds: intEnv("SESSION_SENSE_PAUSE_GRACE_SECONDS", 90),
+    endQuietMinutes: intEnv("SESSION_SENSE_END_QUIET_MINUTES", 6),
+    wrapGraceMinutes: intEnv("SESSION_SENSE_WRAP_GRACE_MINUTES", 10),
+    expirySeconds: intEnv("SESSION_SENSE_EXPIRY_SECONDS", 45),
+    maxSessionMinutes: intEnv("SESSION_SENSE_MAX_MINUTES", 120),
+  };
+
   // "Talk to Sinain" voice sessions — the ar-bridge publishes screen + mic to
   // an ARSinain server over WebRTC, seeded with a window brief. Local dev
   // default: ARSinain on 127.0.0.1:8089 (its AR_HELP_PORT default).
@@ -501,6 +517,7 @@ export function loadConfig(): CoreConfig {
     regionSlmConfig,
     burstConfig,
     saveOfferConfig,
+    sessionSenseConfig,
     voiceConfig,
     // Rolling window retention (deliberate capture): how far back "save/summon
     // last N minutes" can reach. Default 8h; buffers evict past this horizon.

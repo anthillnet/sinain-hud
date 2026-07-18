@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import sys
+import time
 
 
 def _ensure_venv() -> None:
@@ -78,6 +79,23 @@ import tools
 # the Conversation so one stalled turn can't permanently wedge the resident chat
 # lane — previously this required a manual sidecar restart. Default 90s.
 TURN_TIMEOUT = float(os.environ.get("SINAIN_CHAT_TURN_TIMEOUT", "90"))
+
+log = logging.getLogger("sinain-chat")
+
+# ── Harness control (2026-07-16) ─────────────────────────────────────────────
+# A runaway turn compounded the resident Conversation to ~1M input tokens at
+# $0.10/step, invisible to CostTracker (usage only shipped on `done`, which
+# never came). The HARNESS owns the ceiling, not the agent:
+#   - TURN_BUDGET_USD / TURN_MAX_INPUT_TOKENS: hard per-turn caps — crossing
+#     either pauses the conversation and closes the turn with what it has.
+#   - CONTEXT_RESET_TOKENS: a turn whose summed prompt tokens crossed this
+#     rebuilds a fresh Conversation next turn — resident history stays bounded.
+#   - Usage ticks every USAGE_TICK_SECONDS: cost deltas ship mid-turn, so
+#     spend is visible in CostTracker while a turn runs, not just after it.
+TURN_BUDGET_USD = float(os.environ.get("SINAIN_CHAT_TURN_BUDGET_USD", "0.50"))
+TURN_MAX_INPUT_TOKENS = int(os.environ.get("SINAIN_CHAT_TURN_MAX_INPUT_TOKENS", "400000"))
+CONTEXT_RESET_TOKENS = int(os.environ.get("SINAIN_CHAT_CONTEXT_RESET_TOKENS", "150000"))
+USAGE_TICK_SECONDS = float(os.environ.get("SINAIN_CHAT_USAGE_TICK_SECONDS", "15"))
 
 SYSTEM = (
     "You are Sinain's chat assistant — a fast, concise helper with access to the user's "
@@ -226,40 +244,96 @@ class ChatAgent:
 
             def _work():
                 try:
-                    c0, p0, k0 = _usage_snapshot()
                     self._conv.send_message(msg)
                     self._conv.run()
                     if self._gen == gen:
-                        c1, p1, k1 = _usage_snapshot()
-                        usage = {
-                            "cost": max(0.0, c1 - c0),
-                            "tokensIn": max(0, p1 - p0),
-                            "tokensOut": max(0, k1 - k0),
-                            "model": getattr(self._llm.metrics, "model_name", "")
-                                     or os.environ.get("SINAIN_CHAT_MODEL", "sinain-chat"),
-                        }
-                        self._emit({"type": "done", "text": self._acc, "usage": usage})
+                        # Usage is attached by the consumer loop (it owns the
+                        # tick ledger) — the worker only reports completion.
+                        self._emit({"type": "done", "text": self._acc})
                 except Exception as e:  # noqa: BLE001
                     if self._gen == gen:
                         self._emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
 
+            c0, p0, k0 = _usage_snapshot()
+            reported = (c0, p0, k0)
+            model_name = (getattr(self._llm.metrics, "model_name", "")
+                          or os.environ.get("SINAIN_CHAT_MODEL", "sinain-chat"))
+
+            def _delta_since_reported():
+                # Usage since the last report — every terminal event and every
+                # tick carries a DELTA, so core's CostTracker can sum blindly.
+                nonlocal reported
+                c, p, k = _usage_snapshot()
+                d = {"cost": max(0.0, c - reported[0]),
+                     "tokensIn": max(0, p - reported[1]),
+                     "tokensOut": max(0, k - reported[2]),
+                     "model": model_name}
+                reported = (c, p, k)
+                return d
+
             worker = asyncio.create_task(asyncio.to_thread(_work))
             stalled = False
+            budget_stop: str | None = None
+            last_event = time.monotonic()
+            last_tick = time.monotonic()
             try:
                 while True:
                     try:
-                        ev = await asyncio.wait_for(self._q.get(), timeout=TURN_TIMEOUT)
+                        ev = await asyncio.wait_for(self._q.get(), timeout=2.0)
                     except asyncio.TimeoutError:
-                        # No event for the whole window — the LLM call is wedged.
-                        # Abandon it (don't block the lane) and rebuild next turn.
-                        stalled = True
-                        self.cancel()
-                        yield {"type": "error",
-                               "text": f"chat turn stalled (>{int(TURN_TIMEOUT)}s) — resetting the chat lane"}
+                        ev = None
+                    now = time.monotonic()
+
+                    # The harness owns the ceiling: crossing either budget
+                    # pauses the conversation; the turn closes with what it has.
+                    if budget_stop is None:
+                        c_now, p_now, _ = _usage_snapshot()
+                        spent, toks = c_now - c0, p_now - p0
+                        if spent > TURN_BUDGET_USD or toks > TURN_MAX_INPUT_TOKENS:
+                            budget_stop = (f"turn budget exceeded "
+                                           f"(${spent:.2f}, {toks} input tokens)")
+                            log.warning("budget stop: %s", budget_stop)
+                            self.cancel()  # pause — run() unwinds at the step boundary
+
+                    if ev is None:
+                        if now - last_event > TURN_TIMEOUT:
+                            # No event for the whole window — the LLM call is
+                            # wedged. Abandon it and rebuild next turn.
+                            stalled = True
+                            self.cancel()
+                            yield {"type": "error",
+                                   "text": f"chat turn stalled (>{int(TURN_TIMEOUT)}s) — resetting the chat lane",
+                                   "usage": _delta_since_reported()}
+                            break
+                        if budget_stop is not None and now - last_event > 20:
+                            # The paused run didn't unwind — close the turn
+                            # ourselves with the partial answer.
+                            stalled = True
+                            yield {"type": "done",
+                                   "text": f"{self._acc}\n\n[stopped: {budget_stop}]",
+                                   "usage": _delta_since_reported()}
+                            break
+                        if now - last_tick >= USAGE_TICK_SECONDS:
+                            last_tick = now
+                            d = _delta_since_reported()
+                            if d["cost"] or d["tokensIn"]:
+                                yield {"type": "usage_tick", "usage": d}
+                        continue
+
+                    last_event = now
+                    if now - last_tick >= USAGE_TICK_SECONDS:
+                        # Mid-stream spend stays visible even while events flow.
+                        last_tick = now
+                        d = _delta_since_reported()
+                        if d["cost"] or d["tokensIn"]:
+                            yield {"type": "usage_tick", "usage": d}
+                    if ev["type"] in ("done", "error"):
+                        if budget_stop is not None and ev["type"] == "done":
+                            ev["text"] = f"{ev.get('text') or self._acc}\n\n[stopped: {budget_stop}]"
+                        ev["usage"] = _delta_since_reported()
+                        yield ev
                         break
                     yield ev
-                    if ev["type"] in ("done", "error"):
-                        break
             finally:
                 if stalled:
                     # The worker thread is stuck in a blocking call we can't
@@ -271,6 +345,14 @@ class ChatAgent:
                         await asyncio.wait_for(asyncio.shield(worker), timeout=5)
                     except asyncio.TimeoutError:
                         self._needs_resetup = True
+                # Bounded resident history: a budget stop, or a turn whose
+                # summed prompt tokens crossed the reset bound, rebuilds a
+                # fresh Conversation next turn — history can't compound.
+                _, p_end, _ = _usage_snapshot()
+                if budget_stop is not None or (p_end - p0) > CONTEXT_RESET_TOKENS:
+                    log.warning("resident history bound hit (%d turn prompt tokens) — fresh Conversation next turn",
+                                p_end - p0)
+                    self._needs_resetup = True
                 self._active_source = None
 
     def cancel(self) -> None:
