@@ -49,8 +49,12 @@ class OverlayShellState extends State<OverlayShell> {
   static const double _islandBarWaitingWidth = 284;
   static const double _islandBarHeight = 34;
 
-  double _islandBarWidthFor(WebSocketService ws) =>
-      ws.agentWaiting > 0 ? _islandBarWaitingWidth : _islandBarWidth;
+  double _islandBarWidthFor(WebSocketService ws) {
+    if (ws.agentWaiting > 0) return _islandBarWaitingWidth;
+    // Pinned with no agents: eye-only pill.
+    if (ws.agentWorking == 0) return 46;
+    return _islandBarWidth;
+  }
 
   late HudState _state;
   late HudState _lastVisibleState;
@@ -90,6 +94,8 @@ class OverlayShellState extends State<OverlayShell> {
 
   bool _parked = false;
   bool _unparkedByUser = false;
+  // Set by drag-to-park: the island stays parked even with no agent sessions.
+  bool _pinnedByUser = false;
   bool _windowOpInFlight = false;
   Map<String, double>? _preParkFrame;
   Map<String, double>? _islandScreenFrame;
@@ -545,7 +551,8 @@ class OverlayShellState extends State<OverlayShell> {
     _dismissedApprovals.removeWhere((id) => !ws.agentApprovals.containsKey(id));
     if (completelyIdle) {
       _unparkedByUser = false;
-      if (_parked) _unparkIsland();
+      // A drag-parked (pinned) island rides out idle as the eye-only pill.
+      if (_parked && !_pinnedByUser) _unparkIsland();
       return;
     }
     if (!_parked && _state == HudState.eye && active && !_unparkedByUser) {
@@ -570,7 +577,7 @@ class OverlayShellState extends State<OverlayShell> {
     _islandBarHasWaiting = hasWaiting;
   }
 
-  Future<void> _parkIsland() async {
+  Future<void> _parkIsland({Map<String, double>? homeFrame}) async {
     if (_parked || _windowOpInFlight || _state != HudState.eye) return;
     _windowOpInFlight = true;
     final frame = await _windowService.getWindowFrame();
@@ -584,7 +591,9 @@ class OverlayShellState extends State<OverlayShell> {
       _windowOpInFlight = false;
       return;
     }
-    _preParkFrame = frame;
+    // For a drag-park the current frame is the notch drop point — unparking
+    // should return the eye to its persisted home instead.
+    _preParkFrame = homeFrame ?? frame;
     _islandScreenFrame = screen;
     setState(() {
       _parked = true;
@@ -631,6 +640,7 @@ class OverlayShellState extends State<OverlayShell> {
   Future<void> _unparkIsland({bool byUser = false}) async {
     if (!_parked) return;
     if (byUser) _unparkedByUser = true;
+    _pinnedByUser = false;
     _resolutionTimer?.cancel();
     final frame = _preParkFrame;
     setState(() {
@@ -759,6 +769,42 @@ class OverlayShellState extends State<OverlayShell> {
     if (frame != null && mounted) {
       _settingsService.setEyePosition(frame['x']!, frame['y']!);
     }
+  }
+
+  /// Eye drag finished: dropping it in the notch zone (top edge, middle third
+  /// of the screen) parks it as the island — the symmetric gesture to
+  /// drag-to-unpark. Elsewhere, persist the position as usual.
+  Future<void> _onEyeDragEnd() async {
+    final frame = await _windowService.getWindowFrame();
+    if (frame == null || !mounted) return;
+    final screen = await _windowService.getScreenFrame();
+    if (screen != null && _inParkZone(frame, screen)) {
+      // Manual park pins the island: it stays parked even with no agent
+      // sessions (eye-only pill) and idle never auto-unparks it.
+      _pinnedByUser = true;
+      _unparkedByUser = false;
+      final s = _settingsService.settings;
+      await _parkIsland(
+        homeFrame: s.eyeX >= 0 && s.eyeY >= 0
+            ? {'x': s.eyeX, 'y': s.eyeY, 'w': frame['w']!, 'h': frame['h']!}
+            : null,
+      );
+      return;
+    }
+    _settingsService.setEyePosition(frame['x']!, frame['y']!);
+  }
+
+  bool _inParkZone(Map<String, double> frame, Map<String, double> screen) {
+    final centerX = frame['x']! + frame['w']! / 2;
+    final third = screen['w']! / 3;
+    final inMiddleThird = centerX >= screen['x']! + third &&
+        centerX <= screen['x']! + 2 * third;
+    final windowTop = frame['y']! + frame['h']!;
+    final screenTop = screen['y']! + screen['h']!;
+    final nearTop = _isMacOS
+        ? windowTop >= screenTop - 80
+        : frame['y']! <= screen['y']! + 80;
+    return inMiddleThird && nearTop;
   }
 
   void _transitionTo(HudState target) {
@@ -2366,7 +2412,7 @@ class OverlayShellState extends State<OverlayShell> {
               onDoubleTap: _isMacOS ? _startManualRoi : null,
               onLongPress: () => toggleVisibility(false),
               onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
-              onDragEnd: _persistEyePosition,
+              onDragEnd: _onEyeDragEnd,
               pupilDilation: _pupilDilation,
               eyeColor: _eyeColor,
             ),

@@ -81,6 +81,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
               child: IdleAnimation(size: 14),
             ),
           ),
+          if (widget.working + widget.waiting > 0) ...[
           Container(width: 1, height: 16, color: const Color(0x1FFFFFFF)),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -165,6 +166,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
               ),
             ),
           ),
+          ],
         ],
       ),
     );
