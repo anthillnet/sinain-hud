@@ -5,9 +5,17 @@ import 'package:provider/provider.dart';
 
 import '../../core/models/agent_session.dart';
 import '../../core/services/websocket_service.dart';
+import 'agent_approval_card.dart';
 
 class AgentSessionsView extends StatefulWidget {
-  const AgentSessionsView({super.key});
+  final bool showHeader;
+  final bool showApprovals;
+
+  const AgentSessionsView({
+    super.key,
+    this.showHeader = true,
+    this.showApprovals = true,
+  });
 
   @override
   State<AgentSessionsView> createState() => _AgentSessionsViewState();
@@ -86,10 +94,15 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
       children: [
-        _buildHeader(),
-        if (_approvals.isNotEmpty) ...[
+        if (widget.showHeader) _buildHeader(),
+        if (widget.showApprovals && _approvals.isNotEmpty) ...[
           const SizedBox(height: 7),
-          _buildApprovalCard(_approvals.first),
+          AgentApprovalCard(
+            request: _approvals.first,
+            onReply: (behavior) => context
+                .read<WebSocketService>()
+                .sendAgentApprovalReply(_approvals.first.id, behavior),
+          ),
         ],
         const SizedBox(height: 7),
         if (_sessions.isEmpty)
@@ -144,122 +157,6 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
           _chip('7d ${_usage7d!.round()}%'),
         ],
       ],
-    );
-  }
-
-  Widget _buildApprovalCard(AgentApprovalRequest request) {
-    return Container(
-      padding: const EdgeInsets.all(9),
-      decoration: BoxDecoration(
-        color: _amber.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: _amber.withValues(alpha: 0.42)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _dot(_amber),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  request.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFE8DCC0),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 7),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.32),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              request.command,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontFamily: 'JetBrainsMono',
-                color: Color(0xFFE8DCC0),
-                fontSize: 10,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              _approvalButton(
-                'Allow',
-                onTap: () => _reply(request.id, 'allow'),
-                filled: true,
-              ),
-              const SizedBox(width: 5),
-              _approvalButton(
-                'Always',
-                onTap: () => _reply(request.id, 'always'),
-                bordered: true,
-              ),
-              const SizedBox(width: 5),
-              _approvalButton(
-                'Deny',
-                onTap: () => _reply(request.id, 'deny'),
-                quiet: true,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _reply(String id, String behavior) {
-    context.read<WebSocketService>().sendAgentApprovalReply(id, behavior);
-  }
-
-  Widget _approvalButton(
-    String text, {
-    required VoidCallback onTap,
-    bool quiet = false,
-    bool bordered = false,
-    bool filled = false,
-  }) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: filled ? const Color(0xFF1F8039) : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-            border: bordered
-                ? Border.all(color: Colors.white.withValues(alpha: 0.25))
-                : null,
-          ),
-          child: Text(
-            text,
-            style: TextStyle(
-              fontFamily: 'JetBrainsMono',
-              fontSize: 9,
-              fontWeight: filled ? FontWeight.w700 : FontWeight.normal,
-              color: quiet
-                  ? Colors.white.withValues(alpha: 0.42)
-                  : Colors.white.withValues(alpha: 0.9),
-            ),
-          ),
-        ),
-      ),
     );
   }
 

@@ -127,6 +127,21 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 "h": frame.size.height,
             ])
 
+        case "getScreenFrame":
+            let screen = NSScreen.main
+            let frame = screen?.frame ?? HUDConfig.fallbackScreenRect
+            let visibleFrame = screen?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            result([
+                "x": frame.origin.x,
+                "y": frame.origin.y,
+                "w": frame.size.width,
+                "h": frame.size.height,
+                "vx": visibleFrame.origin.x,
+                "vy": visibleFrame.origin.y,
+                "vw": visibleFrame.size.width,
+                "vh": visibleFrame.size.height,
+            ])
+
         case "moveWindowBy":
             let dx = args?["dx"] as? Double ?? 0
             let dy = args?["dy"] as? Double ?? 0

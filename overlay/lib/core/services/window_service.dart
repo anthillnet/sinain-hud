@@ -134,6 +134,28 @@ class WindowService {
     return null;
   }
 
+  /// Get the primary screen frame and visible work area.
+  Future<Map<String, double>?> getScreenFrame() async {
+    try {
+      final result = await _channel.invokeMethod('getScreenFrame');
+      if (result is Map) {
+        return {
+          'x': (result['x'] as num).toDouble(),
+          'y': (result['y'] as num).toDouble(),
+          'w': (result['w'] as num).toDouble(),
+          'h': (result['h'] as num).toDouble(),
+          'vx': (result['vx'] as num).toDouble(),
+          'vy': (result['vy'] as num).toDouble(),
+          'vw': (result['vw'] as num).toDouble(),
+          'vh': (result['vh'] as num).toDouble(),
+        };
+      }
+    } catch (e) {
+      _log('getScreenFrame failed: $e');
+    }
+    return null;
+  }
+
   /// Move window by delta (screen points). Synchronous native call — no frame fetch needed.
   Future<void> moveWindowBy(double dx, double dy) async {
     try {

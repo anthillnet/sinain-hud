@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/app_control.dart';
 import '../core/constants.dart';
 import '../core/models/hud_settings.dart';
+import '../core/models/agent_session.dart';
 import '../core/services/settings_service.dart';
 import '../core/theme/hud_theme.dart';
 import '../core/services/websocket_service.dart';
@@ -27,6 +28,10 @@ import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 import 'capture/capture_ui.dart';
 import 'agents/agent_sessions_view.dart';
+import 'agents/agent_approval_card.dart';
+import 'agents/agent_island_bar.dart';
+
+enum _IslandView { bar, stack, approval }
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -38,9 +43,13 @@ class OverlayShell extends StatefulWidget {
 
 class OverlayShellState extends State<OverlayShell> {
   static final bool _isMacOS = Platform.isMacOS;
-  // UI-only sentinel tab key for the Agent Sessions surface (not a server
-  // conversation id — never sent over the WS).
-  static const String _agentsThread = '__agents__';
+  static const double _islandBarWidth = 208;
+  // The bar grows when the amber "· N waiting" segment is present.
+  static const double _islandBarWaitingWidth = 284;
+  static const double _islandBarHeight = 34;
+
+  double _islandBarWidthFor(WebSocketService ws) =>
+      ws.agentWaiting > 0 ? _islandBarWaitingWidth : _islandBarWidth;
 
   late HudState _state;
   late HudState _lastVisibleState;
@@ -77,6 +86,18 @@ class OverlayShellState extends State<OverlayShell> {
   int _pendingAttention = 0;
   WebSocketService? _wsForListener;
   VoidCallback? _wsListener;
+
+  bool _parked = false;
+  bool _unparkedByUser = false;
+  bool _windowOpInFlight = false;
+  Map<String, double>? _preParkFrame;
+  Map<String, double>? _islandScreenFrame;
+  _IslandView _islandView = _IslandView.bar;
+  double _islandDragDistance = 0;
+  final Set<String> _dismissedApprovals = {};
+  AgentApprovalRequest? _resolvedApproval;
+  String? _approvalResolution;
+  Timer? _resolutionTimer;
 
   // Display settings panel
   bool _showDisplaySettings = false;
@@ -363,18 +384,11 @@ class OverlayShellState extends State<OverlayShell> {
     _wsListener = () {
       if (!mounted) return;
       final n = ws.pendingAttentionCount;
-      // Kick the user off the AGT tab when the last agent session/approval
-      // disappears — the pill hides with it, so the tab would be unreachable.
-      final agentsGone = _activeThread == _agentsThread &&
-          ws.agentSessions.isEmpty &&
-          ws.agentApprovals.isEmpty;
-      if (n == _pendingAttention && !agentsGone) return;
-      setState(() {
-        _pendingAttention = n;
-        if (agentsGone) _activeThread = null;
-      });
+      if (n != _pendingAttention) setState(() => _pendingAttention = n);
+      _syncIslandFromWs(ws);
     };
     ws.addListener(_wsListener!);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncIslandFromWs(ws));
 
     // Region eyes (Grammarly mode) — native NSPanels, macOS only
     if (_isMacOS) {
@@ -446,6 +460,171 @@ class OverlayShellState extends State<OverlayShell> {
     return _settingsService.settings.privacyMode ? _accentColor : _redEye;
   }
 
+  bool _islandBarHasWaiting = false;
+
+  AgentApprovalRequest? _nextApproval(WebSocketService ws) {
+    final approvals = ws.agentApprovals.values
+        .where((request) => !_dismissedApprovals.contains(request.id))
+        .toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return approvals.isEmpty ? null : approvals.first;
+  }
+
+  void _syncIslandFromWs(WebSocketService ws) {
+    if (!mounted) return;
+    final active = ws.agentWorking + ws.agentWaiting > 0;
+    final completelyIdle = !active && ws.agentApprovals.isEmpty;
+    _dismissedApprovals.removeWhere((id) => !ws.agentApprovals.containsKey(id));
+    if (completelyIdle) {
+      _unparkedByUser = false;
+      if (_parked) _unparkIsland();
+      return;
+    }
+    if (!_parked && _state == HudState.eye && active && !_unparkedByUser) {
+      _parkIsland();
+      return;
+    }
+    final approval = _nextApproval(ws);
+    if (_parked && _islandView == _IslandView.bar && approval != null &&
+        _resolvedApproval == null) {
+      _setIslandView(_IslandView.approval);
+    } else if (_parked && _islandView == _IslandView.approval &&
+        approval == null && _resolvedApproval == null) {
+      _setIslandView(_IslandView.bar);
+    }
+    // Bar width depends on the waiting segment — re-place the window when it
+    // appears/disappears while parked in bar view.
+    final hasWaiting = ws.agentWaiting > 0;
+    if (_parked && _islandView == _IslandView.bar &&
+        hasWaiting != _islandBarHasWaiting) {
+      _snapIslandToNotch();
+    }
+    _islandBarHasWaiting = hasWaiting;
+  }
+
+  Future<void> _parkIsland() async {
+    if (_parked || _windowOpInFlight || _state != HudState.eye) return;
+    _windowOpInFlight = true;
+    final frame = await _windowService.getWindowFrame();
+    final screen = await _windowService.getScreenFrame();
+    if (!mounted) {
+      _windowOpInFlight = false;
+      return;
+    }
+    if (frame == null || screen == null || _state != HudState.eye ||
+        _unparkedByUser) {
+      _windowOpInFlight = false;
+      return;
+    }
+    _preParkFrame = frame;
+    _islandScreenFrame = screen;
+    setState(() {
+      _parked = true;
+      _islandView = _nextApproval(context.read<WebSocketService>()) == null
+          ? _IslandView.bar
+          : _IslandView.approval;
+    });
+    await _placeIslandFrame();
+    _windowOpInFlight = false;
+  }
+
+  Future<void> _placeIslandFrame() async {
+    final screen = _islandScreenFrame;
+    if (screen == null) return;
+    final size = switch (_islandView) {
+      _IslandView.bar => Size(
+          _islandBarWidthFor(context.read<WebSocketService>()),
+          _islandBarHeight),
+      _IslandView.stack => const Size(320, 440),
+      _IslandView.approval => const Size(320, 250),
+    };
+    final x = screen['x']! + (screen['w']! - size.width) / 2;
+    final y = _isMacOS
+        ? screen['y']! + screen['h']! - size.height
+        : screen['y']!;
+    await _windowService.setWindowFrame(x, y, size.width, size.height);
+  }
+
+  Future<void> _setIslandView(_IslandView view) async {
+    if (!_parked || _islandView == view || _windowOpInFlight) return;
+    _windowOpInFlight = true;
+    setState(() => _islandView = view);
+    await _placeIslandFrame();
+    _windowOpInFlight = false;
+  }
+
+  Future<void> _snapIslandToNotch() async {
+    if (!_parked || _windowOpInFlight) return;
+    _windowOpInFlight = true;
+    await _placeIslandFrame();
+    _windowOpInFlight = false;
+  }
+
+  Future<void> _unparkIsland({bool byUser = false}) async {
+    if (!_parked) return;
+    if (byUser) _unparkedByUser = true;
+    _resolutionTimer?.cancel();
+    final frame = _preParkFrame;
+    setState(() {
+      _parked = false;
+      _islandView = _IslandView.bar;
+      _resolvedApproval = null;
+      _approvalResolution = null;
+    });
+    if (frame != null) {
+      while (_windowOpInFlight) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      _windowOpInFlight = true;
+      await _windowService.setWindowFrame(
+        frame['x']!, frame['y']!, frame['w']!, frame['h']!,
+      );
+      _windowOpInFlight = false;
+    }
+    _preParkFrame = null;
+    _islandScreenFrame = null;
+  }
+
+  void _onIslandDragUpdate(DragUpdateDetails details) {
+    _islandDragDistance += details.delta.dy.abs();
+    _windowService.moveWindowBy(
+      details.delta.dx,
+      _isMacOS ? -details.delta.dy : details.delta.dy,
+    );
+  }
+
+  void _onIslandDragEnd(DragEndDetails details) {
+    final shouldUnpark = _islandDragDistance > 40;
+    _islandDragDistance = 0;
+    if (shouldUnpark) {
+      _unparkIsland(byUser: true);
+    } else {
+      _snapIslandToNotch();
+    }
+  }
+
+  void _replyToIslandApproval(AgentApprovalRequest request, String behavior) {
+    final label = switch (behavior) {
+      'always' => 'Always allowed',
+      'deny' => 'Denied',
+      _ => 'Allowed',
+    };
+    setState(() {
+      _resolvedApproval = request;
+      _approvalResolution = label;
+    });
+    context.read<WebSocketService>().sendAgentApprovalReply(request.id, behavior);
+    _resolutionTimer?.cancel();
+    _resolutionTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (!mounted || _resolvedApproval?.id != request.id) return;
+      setState(() {
+        _resolvedApproval = null;
+        _approvalResolution = null;
+      });
+      _setIslandView(_IslandView.bar);
+    });
+  }
+
   void toggleVisibility(bool visible) {
     if (visible) {
       // Restore to last visible state and resize window accordingly
@@ -453,7 +632,14 @@ class OverlayShellState extends State<OverlayShell> {
       _settingsService.setHudState(_lastVisibleState);
       _windowService.showWindow();
       _resizeWindowForState(_lastVisibleState);
+      _syncIslandFromWs(context.read<WebSocketService>());
     } else {
+      if (_parked) {
+        _unparkIsland().then((_) {
+          if (mounted) toggleVisibility(false);
+        });
+        return;
+      }
       _lastVisibleState = _state;
       setState(() => _state = HudState.hidden);
       _settingsService.setHudState(HudState.hidden);
@@ -509,6 +695,12 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _transitionTo(HudState target) {
     if (_state == target) return;
+    if (_parked && target != HudState.eye) {
+      _unparkIsland().then((_) {
+        if (mounted) _transitionTo(target);
+      });
+      return;
+    }
     HudTooltip.dismissAll();
     setState(() => _state = target);
     _settingsService.setHudState(target);
@@ -567,8 +759,6 @@ class OverlayShellState extends State<OverlayShell> {
       _activeThread = id;
       if (id == null) {
         _activeRegion = null;
-      } else if (id == _agentsThread) {
-        _activeRegion = null;
       } else if (_activeRegion?.id != id) {
         // Re-resolve the live region for the banner (null if expired)
         RegionHighlight? live;
@@ -582,7 +772,6 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   void _closeThread(String id) {
-    if (id == _agentsThread) return; // AGT pill has no close affordance
     context.read<WebSocketService>().closeRegionThread(id);
     ThreadTerminalSession.close(id); // kill the thread's PTY, if any
     setState(() {
@@ -793,9 +982,7 @@ class OverlayShellState extends State<OverlayShell> {
   /// transcript. Wired to the global "copy seed" hotkey and the handoff popover.
   Future<void> _copySeedForActiveThread() async {
     final ws = context.read<WebSocketService>();
-    // AGT is a UI-only sentinel, not a server conversation id — copy from
-    // that tab behaves like MAIN.
-    final thread = _activeThread == _agentsThread ? null : _activeThread;
+    final thread = _activeThread;
     final items = thread != null
         ? (ws.regionThreads[thread] ?? const <FeedItem>[])
         : ws.agentFeedItems;
@@ -927,11 +1114,7 @@ class OverlayShellState extends State<OverlayShell> {
     }.toList();
     // SPIKE: with the terminal enabled the row is always shown so the ⌨
     // toggle is reachable from MAIN even before any region thread exists.
-    final showAgents =
-        ws.agentSessions.isNotEmpty || ws.agentApprovals.isNotEmpty;
-    if (ids.isEmpty && !terminalSpikeEnabled && !showAgents) {
-      return const SizedBox.shrink();
-    }
+    if (ids.isEmpty && !terminalSpikeEnabled) return const SizedBox.shrink();
 
     String labelFor(String id) {
       final label = _threadTitleFor(ws, id);
@@ -943,8 +1126,6 @@ class OverlayShellState extends State<OverlayShell> {
       required bool selected,
       required VoidCallback onTap,
       VoidCallback? onClose,
-      Widget? label, // rich override for the default Text(text) body
-      bool attention = false, // amber border — approval waiting
     }) {
       final accent = _accentColor;
       return Padding(
@@ -965,31 +1146,28 @@ class OverlayShellState extends State<OverlayShell> {
                         : Colors.white.withValues(alpha: 0.04)),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: attention
-                      ? const Color(0xFFD9A21B).withValues(alpha: 0.75)
-                      : selected
-                          ? (theme.isSolid
-                              ? theme.selectionAccent.withValues(alpha: 0.6)
-                              : accent.withValues(alpha: 0.5))
-                          : theme.border,
+                  color: selected
+                      ? (theme.isSolid
+                          ? theme.selectionAccent.withValues(alpha: 0.6)
+                          : accent.withValues(alpha: 0.5))
+                      : theme.border,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  label ??
-                      Text(
-                        text,
-                        style: TextStyle(
-                          fontFamily: 'JetBrainsMono',
-                          fontSize: 9,
-                          color: selected
-                              ? (theme.isSolid ? theme.selectionAccent : accent)
-                              : theme.textMuted,
-                          fontWeight:
-                              selected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
+                  Text(
+                    text,
+                    style: TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 9,
+                      color: selected
+                          ? (theme.isSolid ? theme.selectionAccent : accent)
+                          : theme.textMuted,
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
                   if (onClose != null) ...[
                     const SizedBox(width: 5),
                     GestureDetector(
@@ -1021,40 +1199,6 @@ class OverlayShellState extends State<OverlayShell> {
               selected: _activeThread == null,
               onTap: () => _selectThread(null),
             ),
-            if (showAgents)
-              pill(
-                text: 'AGT',
-                selected: _activeThread == _agentsThread,
-                attention: ws.agentApprovals.isNotEmpty,
-                onTap: () => _selectThread(_agentsThread),
-                label: Text.rich(
-                  TextSpan(
-                    style: TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 9,
-                      color: _activeThread == _agentsThread
-                          ? (theme.isSolid
-                              ? theme.selectionAccent
-                              : _accentColor)
-                          : theme.textMuted,
-                      fontWeight: _activeThread == _agentsThread
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                    children: [
-                      const TextSpan(text: 'AGT'),
-                      if (ws.agentWorking > 0)
-                        TextSpan(text: ' ${ws.agentWorking}'),
-                      if (ws.agentWaiting > 0)
-                        TextSpan(
-                          text: ' ·${ws.agentWaiting}',
-                          style:
-                              const TextStyle(color: Color(0xFFD9A21B)),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
             for (final id in ids)
               pill(
                 // ⟳ while this region's task is in flight — visible feedback
@@ -1083,7 +1227,7 @@ class OverlayShellState extends State<OverlayShell> {
         // edge, outside the scrolling tab strip, so a crowd of tabs can
         // never squeeze it out of sight. Term→chat closes the PTY so one
         // session never has two concurrent writers (P3 exclusivity).
-        if (terminalSpikeEnabled && _activeThread != _agentsThread)
+        if (terminalSpikeEnabled)
           pill(
             text: _terminalThreads.contains(_activeTabKey)
                 ? '💬 chat'
@@ -1163,6 +1307,7 @@ class OverlayShellState extends State<OverlayShell> {
     _voiceSub?.cancel();
     _offerSub?.cancel();
     _offerExpiryTimer?.cancel();
+    _resolutionTimer?.cancel();
     if (_wsForListener != null && _wsListener != null) {
       _wsForListener!.removeListener(_wsListener!);
     }
@@ -1806,6 +1951,8 @@ class OverlayShellState extends State<OverlayShell> {
       return const SizedBox.shrink();
     }
 
+    if (_parked) return _buildAgentIsland();
+
     // Compact card mode: capture cards without the full HUD (any non-chat
     // state — the chat renders cards in its own Stack).
     if (_cardMode && _state != HudState.chat) {
@@ -1814,19 +1961,37 @@ class OverlayShellState extends State<OverlayShell> {
 
     switch (_state) {
       case HudState.eye:
-        return EyeWidget(
-          // Controls/middle mode disabled — tapping the eye opens chat
-          // directly (where any pending permission already auto-switched
-          // to its tab).
-          onTap: () => _transitionTo(HudState.chat),
-          // Double-tap the eye → instantly grab a screen region (same flow as
-          // the ⊕ tab pill). macOS only — the drag selector is native.
-          onDoubleTap: _isMacOS ? _startManualRoi : null,
-          onLongPress: () => toggleVisibility(false),
-          onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
-          onDragEnd: _persistEyePosition,
-          pupilDilation: _pupilDilation,
-          eyeColor: _eyeColor,
+        final ws = context.watch<WebSocketService>();
+        return Stack(
+          children: [
+            EyeWidget(
+              // Controls/middle mode disabled — tapping the eye opens chat
+              // directly (where any pending permission already auto-switched
+              // to its tab).
+              onTap: () => _transitionTo(HudState.chat),
+              // Double-tap the eye → instantly grab a screen region (same flow as
+              // the ⊕ tab pill). macOS only — the drag selector is native.
+              onDoubleTap: _isMacOS ? _startManualRoi : null,
+              onLongPress: () => toggleVisibility(false),
+              onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
+              onDragEnd: _persistEyePosition,
+              pupilDilation: _pupilDilation,
+              eyeColor: _eyeColor,
+            ),
+            if (_unparkedByUser && ws.agentWorking + ws.agentWaiting > 0)
+              Positioned(
+                top: 3,
+                right: 3,
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF3369D6),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
         );
       case HudState.controls:
         return _buildControlsBar();
@@ -1836,6 +2001,123 @@ class OverlayShellState extends State<OverlayShell> {
         return const SizedBox.shrink();
     }
   }
+
+  Widget _buildAgentIsland() {
+    final ws = context.watch<WebSocketService>();
+    final request = _resolvedApproval ?? _nextApproval(ws);
+    AgentSession? approvalSession;
+    if (request != null) {
+      for (final session in ws.agentSessions) {
+        if (session.sessionId == request.sessionId) approvalSession = session;
+      }
+    }
+    final bar = SizedBox(
+      width: _islandBarWidthFor(ws),
+      child: AgentIslandBar(
+        working: ws.agentWorking,
+        waiting: ws.agentWaiting,
+        onEyeTap: () {
+          if (_islandView == _IslandView.bar) {
+            _unparkIsland(byUser: true);
+          } else {
+            _setIslandView(_IslandView.bar);
+          }
+        },
+        onEyeDragUpdate: _onIslandDragUpdate,
+        onEyeDragEnd: _onIslandDragEnd,
+        onCountsTap: () => _setIslandView(
+          _islandView == _IslandView.stack
+              ? _IslandView.bar
+              : _IslandView.stack,
+        ),
+      ),
+    );
+    return ColoredBox(
+      color: Colors.transparent,
+      child: Column(children: [
+        Align(alignment: Alignment.topCenter, child: bar),
+        if (_islandView == _IslandView.stack)
+          Expanded(child: _buildAgentStack(ws))
+        else if (_islandView == _IslandView.approval && request != null)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  width: double.infinity,
+                  child: AgentApprovalCard(
+                    request: request,
+                    branch: approvalSession?.branch,
+                    resolution: _approvalResolution,
+                    onDismiss: _resolvedApproval == null
+                        ? () {
+                            _dismissedApprovals.add(request.id);
+                            _setIslandView(_IslandView.bar);
+                          }
+                        : null,
+                    onReply: (behavior) =>
+                        _replyToIslandApproval(request, behavior),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+
+  Widget _buildAgentStack(WebSocketService ws) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1F22),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 5),
+          child: Row(children: [
+            const IdleAnimation(size: 16),
+            const SizedBox(width: 6),
+            const Text('Agents', style: TextStyle(color: Color(0xFFE8EAEE), fontSize: 12, fontWeight: FontWeight.w700)),
+            const SizedBox(width: 7),
+            Expanded(child: Text(
+              '${ws.agentWorking} working${ws.agentWaiting > 0 ? ' · ${ws.agentWaiting} waiting' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFFA8ADBD), fontSize: 10),
+            )),
+            const SizedBox(width: 5),
+            if (ws.usage5h != null) _islandUsageChip('5h ${ws.usage5h!.round()}%'),
+            if (ws.usage7d != null) ...[
+              const SizedBox(width: 4),
+              _islandUsageChip('7d ${ws.usage7d!.round()}%'),
+            ],
+          ]),
+        ),
+        const Expanded(
+          child: AgentSessionsView(showHeader: false, showApprovals: false),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 5, 10, 8),
+          child: Row(children: [
+            Text('${ws.agentSessions.length} sessions', style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFF6C707E), fontSize: 9)),
+            const Spacer(),
+            Text(ws.connected ? 'bridge ok · :9500' : 'bridge —', style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFF6C707E), fontSize: 9)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _islandUsageChip(String text) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        child: Text(text, style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFFA8ADBD), fontSize: 9)),
+      );
 
   // ── State 2: Controls Bar ──────────────────────────────────────────────────
 
@@ -2211,9 +2493,7 @@ class OverlayShellState extends State<OverlayShell> {
           Expanded(
             child: Stack(
               children: [
-                _activeThread == _agentsThread
-                    ? const AgentSessionsView(key: ValueKey('agent-sessions'))
-                    : _terminalThreads.contains(_activeTabKey)
+                _terminalThreads.contains(_activeTabKey)
                     ? ThreadTerminalView(
                         key: ValueKey('term-$_activeTabKey'),
                         threadId: _activeTabKey,

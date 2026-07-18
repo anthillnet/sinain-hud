@@ -136,6 +136,20 @@ void WindowControlPlugin::HandleMethodCall(
     map[flutter::EncodableValue("h")] = flutter::EncodableValue(static_cast<double>(rect.bottom - rect.top));
     result->Success(flutter::EncodableValue(map));
 
+  } else if (call.method_name() == "getScreenFrame") {
+    RECT rect = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    SystemParametersInfo(SPI_GETWORKAREA, 0, &rect, 0);
+    flutter::EncodableMap map;
+    map[flutter::EncodableValue("x")] = flutter::EncodableValue(static_cast<double>(rect.left));
+    map[flutter::EncodableValue("y")] = flutter::EncodableValue(static_cast<double>(rect.top));
+    map[flutter::EncodableValue("w")] = flutter::EncodableValue(static_cast<double>(rect.right - rect.left));
+    map[flutter::EncodableValue("h")] = flutter::EncodableValue(static_cast<double>(rect.bottom - rect.top));
+    map[flutter::EncodableValue("vx")] = flutter::EncodableValue(static_cast<double>(rect.left));
+    map[flutter::EncodableValue("vy")] = flutter::EncodableValue(static_cast<double>(rect.top));
+    map[flutter::EncodableValue("vw")] = flutter::EncodableValue(static_cast<double>(rect.right - rect.left));
+    map[flutter::EncodableValue("vh")] = flutter::EncodableValue(static_cast<double>(rect.bottom - rect.top));
+    result->Success(flutter::EncodableValue(map));
+
   } else if (call.method_name() == "moveWindowBy") {
     double dx = 0, dy = 0;
     if (args) {
