@@ -50,9 +50,9 @@ class OverlayShellState extends State<OverlayShell> {
   double _islandBarWidthFor(WebSocketService ws) {
     if (_notchHeight > 0) {
       final rightWing = ws.agentWaiting > 0
-          ? 200.0
+          ? 236.0
           : ws.agentWorking > 0
-              ? 128.0
+              ? 132.0
               : 0.0;
       return 46 + _notchWidth + rightWing;
     }

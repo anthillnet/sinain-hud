@@ -186,7 +186,16 @@ class _AgentIslandBarState extends State<AgentIslandBar>
           if (widget.working + widget.waiting > 0) ...[
             if (!notchMode)
               Container(width: 1, height: 16, color: const Color(0x1FFFFFFF)),
-            if (notchMode) Expanded(child: Center(child: counts)) else counts,
+            if (notchMode)
+              // scaleDown: the wing width is an estimate — mono font metrics
+              // and multi-digit counts must degrade gracefully, never overflow.
+              Expanded(
+                child: Center(
+                  child: FittedBox(fit: BoxFit.scaleDown, child: counts),
+                ),
+              )
+            else
+              counts,
           ],
         ],
       ),

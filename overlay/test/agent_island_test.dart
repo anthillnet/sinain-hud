@@ -51,7 +51,7 @@ void main() {
         home: Align(
           alignment: Alignment.topCenter,
           child: SizedBox(
-            width: 46 + 180 + 128,
+            width: 46 + 180 + 132,
             child: AgentIslandBar(
               working: 2,
               waiting: 0,
@@ -81,6 +81,34 @@ void main() {
           (widget.decoration as BoxDecoration).color == const Color(0xFF000000),
     ));
     expect((bar.decoration as BoxDecoration).color, const Color(0xFF000000));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('notch island with waiting count never overflows the wing',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: 46 + 180 + 236,
+            child: AgentIslandBar(
+              working: 12,
+              waiting: 3,
+              accent: const Color(0xFF1F8039),
+              notchGap: 180,
+              notchHeight: 37,
+              onEyeTap: () {},
+              onEyeDragUpdate: (_) {},
+              onEyeDragEnd: (_) {},
+              onCountsTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('12 working'), findsOneWidget);
+    expect(find.text('3 waiting'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
