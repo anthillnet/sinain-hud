@@ -1007,6 +1007,11 @@ export function createAppServer(deps: ServerDeps) {
           ? await composeEnrichBrief({
               registry: deps.agentSessions.registry,
               activeSessions: deps.agentSessions.activeSessions,
+              recentFeed: () => feedBuffer.queryByTime(Date.now() - 10 * 60_000).slice(-6).map((item) => ({
+                text: item.text,
+                source: item.source,
+                ts: item.ts,
+              })),
               getSenseContext: () => senseBuffer.getStructuredContext({ limit: 5, includeDeltas: true, includeSummary: true }),
               searchEntities: deps.searchEntities,
             }, sessionId, cwd)

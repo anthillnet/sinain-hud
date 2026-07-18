@@ -91,8 +91,11 @@ async function main() {
   const snap1 = await waitFor((m) => m.type === "agent_sessions" && m.working === 1 && m.sessions?.[0]?.toolLine?.includes("npm test"));
   check("SessionStart+PreToolUse → agent_sessions broadcast", !!snap1, snap1.sessions[0].name);
 
+  const recentFeedText = "feed context reaches agent enrichment";
+  feedBuffer.push(recentFeedText, "normal", "audio");
   const enrich = await fetch(`http://127.0.0.1:${PORT}/agent/enrich?session_id=s1&cwd=${encodeURIComponent(process.cwd())}`).then((r) => r.json()) as any;
   check("GET /agent/enrich never throws", enrich.ok === true && (enrich.brief.includes("Other agents") || enrich.brief.includes("[sinain] Ambient context")));
+  check("GET /agent/enrich includes recent feed", enrich.brief.includes("Recent activity") && enrich.brief.includes(recentFeedText));
 
   const { stdout: enrichOut } = await pExecFileWithStdin({ session_id: "s1", hook_event_name: "SessionStart", cwd: process.cwd() });
   if (enrich.brief) {

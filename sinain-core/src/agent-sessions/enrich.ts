@@ -11,6 +11,7 @@ interface ActiveSession {
 export interface EnrichDeps {
   registry: AgentSessionRegistry;
   activeSessions?: () => ActiveSession[];
+  recentFeed?: () => { text: string; source: string; ts: number }[];
   getSenseContext?: () => unknown;
   searchEntities?: (q: string, limit: number) => Promise<unknown>;
 }
@@ -87,6 +88,19 @@ export async function composeEnrichBrief(
   } catch { /* optional context */ }
 
   try {
+    const recent = (deps.recentFeed?.() ?? [])
+      .filter((item) => !item.text.startsWith("[PERIODIC]"))
+      .slice(-6);
+    if (recent.length) {
+      const lines = recent.map((item) => {
+        const minutes = Math.max(0, Math.floor((Date.now() - item.ts) / 60_000));
+        return `- [${minutes}m ago · ${item.source}] ${cap(item.text, 90)}`;
+      });
+      sections.push(cap(`Recent activity (transcripts + HUD):\n${lines.join("\n")}`, 500));
+    }
+  } catch { /* optional context */ }
+
+  try {
     const lines = senseLines(deps.getSenseContext?.());
     if (lines.length) sections.push(cap(`Recently on screen:\n${lines.join("\n")}`, 400));
   } catch { /* optional context */ }
@@ -99,6 +113,6 @@ export async function composeEnrichBrief(
     }
   } catch { /* optional context */ }
 
-  const bodyBudget = 1400 - FOOTER.length - 1;
+  const bodyBudget = 1800 - FOOTER.length - 1;
   return `${cap(sections.join("\n"), bodyBudget)}\n${FOOTER}`;
 }
