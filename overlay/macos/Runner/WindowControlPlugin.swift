@@ -79,12 +79,10 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         case "setNotchParked":
             // Parked island draws inside the menu-bar band (next to the
-            // notch) — needs a level above the status bar. Restored to
+            // notch) — needs to draw above the menu bar. Restored to
             // .floating on unpark so normal HUD stacking is unchanged.
             let parked = args?["enabled"] as? Bool ?? false
-            window.level = parked
-                ? NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
-                : .floating
+            window.level = parked ? .screenSaver : .floating
             result(nil)
 
         case "setDockIconVisible":
@@ -150,6 +148,21 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 "vy": visibleFrame.origin.y,
                 "vw": visibleFrame.size.width,
                 "vh": visibleFrame.size.height,
+            ])
+
+        case "getNotchInfo":
+            var notchHeight: CGFloat = 0
+            var leftAuxWidth: CGFloat = 0
+            var rightAuxWidth: CGFloat = 0
+            if #available(macOS 12.0, *), let screen = NSScreen.main {
+                notchHeight = screen.safeAreaInsets.top
+                leftAuxWidth = screen.auxiliaryTopLeftArea?.width ?? 0
+                rightAuxWidth = screen.auxiliaryTopRightArea?.width ?? 0
+            }
+            result([
+                "notchHeight": Double(notchHeight),
+                "leftAuxWidth": Double(leftAuxWidth),
+                "rightAuxWidth": Double(rightAuxWidth),
             ])
 
         case "moveWindowBy":

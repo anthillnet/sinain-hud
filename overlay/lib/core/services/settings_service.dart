@@ -10,6 +10,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyWsUrl = 'ws_url';
   static const _keyEyeX = 'eye_x';
   static const _keyEyeY = 'eye_y';
+  static const _keyNotchParked = 'notch_parked';
   static const _keyChatWidth = 'chat_width';
   static const _keyChatHeight = 'chat_height';
   static const _keyFontSize = 'font_size';
@@ -40,6 +41,7 @@ class SettingsService extends ChangeNotifier {
       wsUrl: _prefs.getString(_keyWsUrl) ?? 'ws://localhost:9500',
       eyeX: _prefs.getDouble(_keyEyeX) ?? -1,
       eyeY: _prefs.getDouble(_keyEyeY) ?? -1,
+      notchParked: _prefs.getBool(_keyNotchParked) ?? false,
       chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
       chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
@@ -125,6 +127,11 @@ class SettingsService extends ChangeNotifier {
     await _prefs.setDouble(_keyEyeX, x);
     await _prefs.setDouble(_keyEyeY, y);
     // Don't notify — position updates are high frequency during drag
+  }
+
+  Future<void> setNotchParked(bool value) async {
+    _settings.notchParked = value;
+    await _prefs.setBool(_keyNotchParked, value);
   }
 
   Future<void> setChatSize(double w, double h) async {

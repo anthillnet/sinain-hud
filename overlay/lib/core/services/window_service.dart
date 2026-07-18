@@ -156,6 +156,23 @@ class WindowService {
     return null;
   }
 
+  /// Get the primary screen's notch and auxiliary menu-bar geometry.
+  Future<Map<String, double>?> getNotchInfo() async {
+    try {
+      final result = await _channel.invokeMethod('getNotchInfo');
+      if (result is Map) {
+        return {
+          'notchHeight': (result['notchHeight'] as num).toDouble(),
+          'leftAuxWidth': (result['leftAuxWidth'] as num).toDouble(),
+          'rightAuxWidth': (result['rightAuxWidth'] as num).toDouble(),
+        };
+      }
+    } catch (e) {
+      _log('getNotchInfo failed: $e');
+    }
+    return null;
+  }
+
   /// Move window by delta (screen points). Synchronous native call — no frame fetch needed.
   Future<void> moveWindowBy(double dx, double dy) async {
     try {

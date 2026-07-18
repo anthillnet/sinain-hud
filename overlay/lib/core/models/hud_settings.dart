@@ -29,6 +29,9 @@ class HudSettings {
   double eyeX;
   double eyeY;
 
+  /// Whether the eye was last parked at the display notch.
+  bool notchParked;
+
   /// Persisted chat panel size.
   double chatWidth;
   double chatHeight;
@@ -73,6 +76,7 @@ class HudSettings {
     this.wsUrl = 'ws://localhost:9500',
     this.eyeX = -1, // -1 means "use default position"
     this.eyeY = -1,
+    this.notchParked = false,
     this.chatWidth = 427,
     this.chatHeight = 293,
     this.fontSize = 12.0,
@@ -115,6 +119,7 @@ class HudSettings {
     String? wsUrl,
     double? eyeX,
     double? eyeY,
+    bool? notchParked,
     double? chatWidth,
     double? chatHeight,
     double? fontSize,
@@ -135,6 +140,7 @@ class HudSettings {
       wsUrl: wsUrl ?? this.wsUrl,
       eyeX: eyeX ?? this.eyeX,
       eyeY: eyeY ?? this.eyeY,
+      notchParked: notchParked ?? this.notchParked,
       chatWidth: chatWidth ?? this.chatWidth,
       chatHeight: chatHeight ?? this.chatHeight,
       fontSize: fontSize ?? this.fontSize,
@@ -145,7 +151,8 @@ class HudSettings {
       hudStyle: hudStyle ?? this.hudStyle,
       autoUpdateCheck: autoUpdateCheck ?? this.autoUpdateCheck,
       feedbackStatus: feedbackStatus ?? this.feedbackStatus,
-      feedbackSnoozeUntilMs: feedbackSnoozeUntilMs ?? this.feedbackSnoozeUntilMs,
+      feedbackSnoozeUntilMs:
+          feedbackSnoozeUntilMs ?? this.feedbackSnoozeUntilMs,
       feedbackAskCount: feedbackAskCount ?? this.feedbackAskCount,
     );
   }

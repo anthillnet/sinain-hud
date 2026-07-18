@@ -5,6 +5,7 @@ import 'package:sinain_hud/core/models/agent_session.dart';
 import 'package:sinain_hud/core/services/websocket_service.dart';
 import 'package:sinain_hud/ui/agents/agent_approval_card.dart';
 import 'package:sinain_hud/ui/agents/agent_island_bar.dart';
+import 'package:sinain_hud/ui/feed/idle_animation.dart';
 
 class _RecordingWebSocketService extends WebSocketService {
   String? reply;
@@ -41,6 +42,46 @@ void main() {
     expect(find.text('2 working'), findsOneWidget);
     final waiting = tester.widget<Text>(find.text('1 waiting'));
     expect(waiting.style?.color, const Color(0xFFD9A21B));
+  });
+
+  testWidgets('notch island leaves the cutout gap on a pure-black bar',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: 46 + 180 + 128,
+            child: AgentIslandBar(
+              working: 2,
+              waiting: 0,
+              accent: const Color(0xFF1F8039),
+              notchGap: 180,
+              notchHeight: 37,
+              onEyeTap: () {},
+              onEyeDragUpdate: (_) {},
+              onEyeDragEnd: (_) {},
+              onCountsTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final eye = find.byType(IdleAnimation);
+    final counts = find.text('2 working');
+    expect(eye, findsOneWidget);
+    expect(counts, findsOneWidget);
+    expect(tester.getRect(counts).left - tester.getRect(eye).right,
+        greaterThanOrEqualTo(180));
+    final bar = tester.widget<Container>(find.byWidgetPredicate(
+      (widget) =>
+          widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration as BoxDecoration).color == const Color(0xFF000000),
+    ));
+    expect((bar.decoration as BoxDecoration).color, const Color(0xFF000000));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('approval card renders request and sends allow reply',
