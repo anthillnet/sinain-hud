@@ -610,6 +610,7 @@ class OverlayShellState extends State<OverlayShell> {
           ? _IslandView.bar
           : _IslandView.approval;
     });
+    if (_isMacOS) await _windowService.setNotchParked(true);
     await _placeIslandFrame();
     _windowOpInFlight = false;
   }
@@ -663,10 +664,13 @@ class OverlayShellState extends State<OverlayShell> {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
       _windowOpInFlight = true;
+      if (_isMacOS) await _windowService.setNotchParked(false);
       await _windowService.setWindowFrame(
         frame['x']!, frame['y']!, frame['w']!, frame['h']!,
       );
       _windowOpInFlight = false;
+    } else if (_isMacOS) {
+      await _windowService.setNotchParked(false);
     }
     _preParkFrame = null;
     _islandScreenFrame = null;

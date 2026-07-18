@@ -263,6 +263,16 @@ class WindowService {
     }
   }
 
+  /// Raise/restore the window level for the notch-parked island (macOS).
+  /// Parked: above the status bar so the bar draws inside the menu-bar band.
+  Future<void> setNotchParked(bool enabled) async {
+    try {
+      await _channel.invokeMethod('setNotchParked', {'enabled': enabled});
+    } catch (e) {
+      _log('setNotchParked failed: $e');
+    }
+  }
+
   /// Start native drag tracking (macOS only). Native handles all mouse events
   /// and calls back onNativeDragComplete when done.
   Future<void> beginNativeDrag() async {

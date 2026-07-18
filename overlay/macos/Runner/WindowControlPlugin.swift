@@ -77,6 +77,16 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.level = enabled ? .floating : .normal
             result(nil)
 
+        case "setNotchParked":
+            // Parked island draws inside the menu-bar band (next to the
+            // notch) — needs a level above the status bar. Restored to
+            // .floating on unpark so normal HUD stacking is unchanged.
+            let parked = args?["enabled"] as? Bool ?? false
+            window.level = parked
+                ? NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+                : .floating
+            result(nil)
+
         case "setDockIconVisible":
             // Flip the Dock icon (and app menu) live. .regular shows it,
             // .accessory hides it (the LSUIElement default). Going .accessory →
