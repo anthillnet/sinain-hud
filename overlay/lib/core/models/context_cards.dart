@@ -198,6 +198,209 @@ class SaveOffer {
       );
 }
 
+/// Session Sense (WS `session_nudge`, DESIGN-SESSION-SENSE.md): the live
+/// workflow nudge — "Looks like: applying for a job — track from 11:02?".
+/// Credit-led card: the retroactive-credit sliver is visible before the tap.
+class SessionNudge {
+  final String nudgeId;
+
+  /// Confidence grade: `personal` ("Back on: …"), `stock` ("Looks like: …"),
+  /// `unlabeled` ("Session in progress" — a statement, never a hedge).
+  final String grade;
+
+  /// Absent when unlabeled (medium confidence or category floor).
+  final String? label;
+  final String threadId;
+
+  /// Retroactive credit start — "11:02 — credited from here".
+  final int candidateStartTs;
+  final int elapsedMinutes;
+  final List<String> apps;
+
+  /// "Wrong?" picker rows (classifier's next candidates; may be empty).
+  final List<String> alternates;
+
+  /// Help-forward variant A (§8): goal + next steps composed before consent
+  /// on the burst lane. Empty when the lane was unavailable or slow — the
+  /// card renders bare, never waits.
+  final String goal;
+  final List<String> steps;
+
+  /// Bookmark return (§9): "Resume this session?" — the ⚑ marks the user's
+  /// own promise, not the classifier's guess.
+  final bool resume;
+
+  /// "bookmarked yesterday · 2 sessions · 1h 19m so far" (resume only).
+  final String? resumeMeta;
+  final int expirySeconds;
+
+  const SessionNudge({
+    required this.nudgeId,
+    required this.grade,
+    this.label,
+    required this.threadId,
+    required this.candidateStartTs,
+    required this.elapsedMinutes,
+    required this.apps,
+    required this.alternates,
+    this.goal = '',
+    this.steps = const [],
+    this.resume = false,
+    this.resumeMeta,
+    required this.expirySeconds,
+  });
+
+  factory SessionNudge.fromJson(Map<String, dynamic> json) => SessionNudge(
+        nudgeId: json['nudgeId'] as String? ?? '',
+        grade: json['grade'] as String? ?? 'unlabeled',
+        label: json['label'] as String?,
+        threadId: json['threadId'] as String? ?? '',
+        candidateStartTs: (json['candidateStartTs'] as num?)?.toInt() ?? 0,
+        elapsedMinutes: (json['elapsedMinutes'] as num?)?.toInt() ?? 0,
+        apps: (json['apps'] as List? ?? const []).map((e) => '$e').toList(),
+        alternates:
+            (json['alternates'] as List? ?? const []).map((e) => '$e').toList(),
+        goal: json['goal'] as String? ?? '',
+        steps: (json['steps'] as List? ?? const []).map((e) => '$e').toList(),
+        resume: json['resume'] as bool? ?? false,
+        resumeMeta: json['resumeMeta'] as String?,
+        expirySeconds: (json['expirySeconds'] as num?)?.toInt() ?? 45,
+      );
+}
+
+/// Help-forward assist (WS `session_assist`, §8 C): goal + next steps
+/// composed on the track tap — help offered on a fact, not a guess.
+class SessionAssist {
+  final String sessionId;
+  final String status; // working | ready | error
+  final String goal;
+  final List<String> steps;
+  final String? error;
+
+  const SessionAssist({
+    required this.sessionId,
+    required this.status,
+    required this.goal,
+    required this.steps,
+    this.error,
+  });
+
+  bool get ready => status == 'ready';
+
+  factory SessionAssist.fromJson(Map<String, dynamic> json) => SessionAssist(
+        sessionId: json['sessionId'] as String? ?? '',
+        status: json['status'] as String? ?? 'error',
+        goal: json['goal'] as String? ?? '',
+        steps: (json['steps'] as List? ?? const []).map((e) => '$e').toList(),
+        error: json['error'] as String?,
+      );
+}
+
+/// The sessions list: what's being tracked right now (possibly several in
+/// parallel — warm first) + the ⚑ shelf.
+class SessionList {
+  final List<SessionChipState> sessions;
+  final List<SessionBookmark> bookmarks;
+  const SessionList({required this.sessions, required this.bookmarks});
+}
+
+/// A bookmarked session thread (§9) — one shelf row.
+class SessionBookmark {
+  final String threadId;
+  final String label;
+  final int sessions;
+  final int totalMs;
+  final int lastTs;
+
+  /// Wiki path for ↗ share (existing KG share mechanic lives on the entity
+  /// page); null when the KG doesn't know the thread by name yet.
+  final String? kgPath;
+
+  const SessionBookmark({
+    required this.threadId,
+    required this.label,
+    required this.sessions,
+    required this.totalMs,
+    required this.lastTs,
+    this.kgPath,
+  });
+
+  String get meta {
+    final m = (totalMs / 60000).round();
+    final dur = m >= 60 ? '${m ~/ 60}h ${(m % 60).toString().padLeft(2, '0')}m' : '${m}m';
+    final ago = DateTime.now().millisecondsSinceEpoch - lastTs;
+    final days = ago ~/ 86400000;
+    final when = days <= 0 ? 'today' : days == 1 ? 'yesterday' : '${days}d ago';
+    return sessions > 0 ? '$sessions session${sessions == 1 ? '' : 's'} · $dur · $when' : when;
+  }
+
+  factory SessionBookmark.fromJson(Map<String, dynamic> json) =>
+      SessionBookmark(
+        threadId: json['threadId'] as String? ?? '',
+        label: json['label'] as String? ?? 'session',
+        sessions: (json['sessions'] as num?)?.toInt() ?? 0,
+        totalMs: (json['totalMs'] as num?)?.toInt() ?? 0,
+        lastTs: (json['lastTs'] as num?)?.toInt() ?? 0,
+        kgPath: json['kgPath'] as String?,
+      );
+}
+
+/// Running-session chip state (WS `session_chip`): label · elapsed · paused.
+/// `ended` clears the chip.
+class SessionChipState {
+  final String sessionId;
+  final String status; // running | paused | ended
+  final String label;
+  final int startedTs;
+  final int activeMs;
+
+  const SessionChipState({
+    required this.sessionId,
+    required this.status,
+    required this.label,
+    required this.startedTs,
+    required this.activeMs,
+  });
+
+  bool get ended => status == 'ended';
+  bool get paused => status == 'paused';
+
+  factory SessionChipState.fromJson(Map<String, dynamic> json) =>
+      SessionChipState(
+        sessionId: json['sessionId'] as String? ?? '',
+        status: json['status'] as String? ?? 'ended',
+        label: json['label'] as String? ?? 'session',
+        startedTs: (json['startedTs'] as num?)?.toInt() ?? 0,
+        activeMs: (json['activeMs'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// The symmetric "End workout?" prompt (WS `session_wrap`): ignorable; the
+/// grace period auto-wraps server-side, and the countdown line says so.
+class SessionWrap {
+  final String sessionId;
+  final String label;
+  final int activeMinutes;
+  final int quietMinutes;
+  final int graceMinutes;
+
+  const SessionWrap({
+    required this.sessionId,
+    required this.label,
+    required this.activeMinutes,
+    required this.quietMinutes,
+    required this.graceMinutes,
+  });
+
+  factory SessionWrap.fromJson(Map<String, dynamic> json) => SessionWrap(
+        sessionId: json['sessionId'] as String? ?? '',
+        label: json['label'] as String? ?? 'session',
+        activeMinutes: (json['activeMinutes'] as num?)?.toInt() ?? 0,
+        quietMinutes: (json['quietMinutes'] as num?)?.toInt() ?? 0,
+        graceMinutes: (json['graceMinutes'] as num?)?.toInt() ?? 10,
+      );
+}
+
 enum VoiceStatus { starting, live, ended, error }
 
 enum VoiceMode { webview, bridge, meet }

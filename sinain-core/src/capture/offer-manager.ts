@@ -49,6 +49,9 @@ interface PendingOffer {
 export class OfferManager {
   private state: PersistedState;
   private pending = new Map<string, PendingOffer>();
+  /** Policy A (DESIGN-SESSION-SENSE §7): a Session Sense nudge shown inside an
+   *  episode's span was that episode's one ask — the rung-1 offer stays silent. */
+  private episodeConsumed: ((threadId: string, startTs: number, endTs: number) => boolean) | null = null;
 
   constructor(
     private feedBuffer: FeedBuffer,
@@ -102,6 +105,10 @@ export class OfferManager {
     }
   }
 
+  setEpisodeConsumedCheck(fn: (threadId: string, startTs: number, endTs: number) => boolean): void {
+    this.episodeConsumed = fn;
+  }
+
   /** Episode-tracker breakpoint hook: decide skip-or-offer. Free — no LLM, no I/O beyond
    *  the ring buffers; every skip path returns before composing anything. */
   onBreakpoint(ev: { threadId: string; label: string; at: number; engagedMs: number }): void {
@@ -122,6 +129,11 @@ export class OfferManager {
     if (Date.now() - this.state.lastOfferTs < this.cfg.cooldownMinutes * 60_000) return skip(`cooldown (${this.cfg.cooldownMinutes}m)`);
     const episodeKey = `${ev.threadId}@${ev.at}`;
     if (this.state.offeredEpisodes.includes(episodeKey)) return skip("already offered");
+    // Policy A: one ask per episode, EVER — an expired Session Sense nudge
+    // inside this span was the ask; the breakpoint passes quietly.
+    if (this.episodeConsumed?.(ev.threadId, ev.at - ev.engagedMs, ev.at)) {
+      return skip("session-sense nudge already asked this episode");
+    }
 
     // Scope: apps with a real share of the episode, minus learned exclusions.
     // Never "mic" (privacy floor — voice is opt-in through Adjust only).

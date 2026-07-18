@@ -40,11 +40,50 @@ _PRONOUNS = {
 _model = None
 
 
+def _coref_enabled() -> bool:
+    """Decide whether the coref stage should run.
+
+    SINAIN_COREF=1/true/yes forces ON, 0/false/no forces OFF. When UNSET the
+    gate is AUTO: run only for LOCAL distiller models. Coref was added to
+    pre-resolve pronouns for weak local distillers (privacy mode); strong cloud
+    models resolve coreference themselves, and the longformer pass costs ~5s of
+    save latency plus a ~4GB transient RSS peak on a full-save transcript
+    (whole transcript = one document; attention memory scales with doc length).
+    History: default-ON 2026-06-02 (validated "He migrated" -> "Sam migrated"
+    for local distillers); auto-gated 2026-07-16 (save-latency investigation).
+    """
+    env = os.environ.get("SINAIN_COREF", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
+    if env in ("0", "false", "no"):
+        return False
+    try:
+        from common import _load_config, _resolve_model
+        logical = _load_config().get("scripts", {}).get("session_distiller", {}).get("model", "fast")
+        model = _resolve_model(logical)
+    except Exception:
+        return True  # can't tell which distiller runs → keep the quality stage
+    return model.startswith(("ollama/", "llamacpp/"))
+
+
 def _get_model():
     global _model
     if _model is None:
         import logging
+        from pathlib import Path
         logging.getLogger("fastcoref").setLevel(logging.ERROR)
+        # Privacy + latency: when f-coref is already in the local HF cache,
+        # force offline mode so loading makes ZERO network calls. Without this,
+        # huggingface_hub fires ~a dozen blocking metadata requests to the Hub
+        # on EVERY distiller run (~2s of the save latency, and an outbound
+        # request the privacy design doesn't want). First-ever run (no cache)
+        # still downloads normally. Same pattern as common.load_sentence_transformer.
+        _repo_dir = "models--biu-nlp--f-coref"
+        _cache_root = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+        if (_cache_root / "hub" / _repo_dir).exists():
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
         # Compat shim: transformers >=5.x's _finalize_model_loading calls
         # `model.all_tied_weights_keys.keys()`, but fastcoref's older
         # FCorefModel never sets that attribute. Provide an empty dict on the
@@ -121,10 +160,7 @@ def resolve_items(items: list[dict]) -> list[dict]:
     Mentions are noun phrases that never span a newline, so joining items with
     '\\n' and splitting the resolved doc back by '\\n' preserves the 1:1 item
     mapping (replacements only change span contents, not newline count)."""
-    # Default-ON (2026-06-02): cross-turn pronoun resolution is a deterministic
-    # production-robustness stage (validated: "He migrated" -> "Sam migrated"),
-    # now that E1 entity-canonicalization is on. Set SINAIN_COREF=0 to disable.
-    if os.environ.get("SINAIN_COREF", "1").lower() not in ("1", "true", "yes"):
+    if not _coref_enabled():
         return items
     if not items:
         return items
