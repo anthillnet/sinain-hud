@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants.dart';
 import '../../core/models/context_cards.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/theme/hud_theme.dart';
 
 const _green = Color(0xFF1F8039);
 const _amber = Color(0xFFD9A21B);
+const _violet = Color(0xFF7A56D6);
 
 TextStyle _mono(double size, Color color,
         {FontWeight weight = FontWeight.w400, double? height}) =>
@@ -56,9 +58,12 @@ class _SessionListViewState extends State<SessionListView> {
   SessionList _list = const SessionList(sessions: [], bookmarks: []);
   StreamSubscription<SessionChipState>? _chipSub;
   StreamSubscription<void>? _agentSessionsSub;
+  StreamSubscription<SessionAssist>? _assistSub;
   Timer? _ticker;
   final Map<String, DateTime> _receivedAt = {};
   bool _loaded = false;
+  final Map<String, SessionAssist> _assists = {};
+  final Set<String> _expandedCards = {};
   // Hover preview of the context the ✦ call would carry (cached core-side).
   String? _preview;
   String? _previewFor; // sessionId the preview belongs under
@@ -67,6 +72,11 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   void initState() {
     super.initState();
+    _assists.addAll(widget.ws.sessionAssists);
+    _list = SessionList(
+      sessions: widget.ws.sessionChips.values.toList(),
+      bookmarks: const [],
+    );
     _refresh();
     _chipSub = widget.ws.sessionChipStream.listen((c) {
       if (!mounted) return;
@@ -87,6 +97,11 @@ class _SessionListViewState extends State<SessionListView> {
     });
     _agentSessionsSub = widget.ws.agentSessionsStream.listen((_) {
       if (mounted) setState(() {});
+    });
+    _assistSub = widget.ws.sessionAssistStream.listen((assist) {
+      if (mounted && assist.ready) {
+        setState(() => _assists[assist.sessionId] = assist);
+      }
     });
     _syncTicker();
   }
@@ -117,6 +132,7 @@ class _SessionListViewState extends State<SessionListView> {
   void dispose() {
     _chipSub?.cancel();
     _agentSessionsSub?.cancel();
+    _assistSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -134,7 +150,15 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   Widget build(BuildContext context) {
     final t = HudTheme.of(context);
-    final sessions = _list.sessions;
+    final sessions = [..._list.sessions]..sort((a, b) {
+        final aWaiting = _agentsFor(a).any((x) => x.state == 'waiting');
+        final bWaiting = _agentsFor(b).any((x) => x.state == 'waiting');
+        if (aWaiting != bWaiting) return aWaiting ? -1 : 1;
+        return 0;
+      });
+    final orphans = widget.ws.agentSessions
+        .where((agent) => agent.threadId == null || agent.threadId!.isEmpty)
+        .toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
@@ -174,6 +198,13 @@ class _SessionListViewState extends State<SessionListView> {
                       overflow: TextOverflow.ellipsis),
                 ),
             ],
+          if (orphans.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _unattachedGroup(t, orphans),
+            ),
+          ],
           const SizedBox(height: 14),
           Row(children: [
             Text('BOOKMARKED',
@@ -203,14 +234,14 @@ class _SessionListViewState extends State<SessionListView> {
   }
 
   Widget _activeRow(HudTheme t, SessionChipState s) {
-    final dot = s.paused ? _amber : _green;
-    final agents = widget.ws.agentSessions
-        .where((agent) => agent.threadId == s.threadId && agent.state != 'done')
-        .toList();
+    final dot = s.paused ? _violet.withValues(alpha: 0.45) : _violet;
+    final agents = _agentsFor(s)..sort(_laneOrder);
+    final waiting = agents.any((agent) => agent.state == 'waiting');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        border: Border.all(color: dot.withValues(alpha: 0.4)),
+        border:
+            Border.all(color: (waiting ? _amber : dot).withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(children: [
@@ -263,27 +294,113 @@ class _SessionListViewState extends State<SessionListView> {
             widget.ws.sessionAction(s.sessionId, 'ended');
           }),
         ]),
-        for (final agent in agents)
-          Padding(
-            padding: const EdgeInsets.only(left: 17, top: 6),
-            child: Row(children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: agent.state == 'waiting' ? _amber : widget.accent,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text('${agent.name} · ${agent.toolLine ?? ''}',
-                    style: _mono(10, t.textMuted),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-              ),
-            ]),
+        if (_assists[s.sessionId] case final assist?)
+          _contextCard(t, s.sessionId, assist),
+        for (final agent in agents) _lane(t, agent),
+      ]),
+    );
+  }
+
+  List<AgentSession> _agentsFor(SessionChipState session) => widget
+      .ws.agentSessions
+      .where((agent) =>
+          session.threadId.isNotEmpty && agent.threadId == session.threadId)
+      .toList();
+
+  int _laneOrder(AgentSession a, AgentSession b) {
+    int rank(String state) => state == 'waiting'
+        ? 0
+        : state == 'working'
+            ? 1
+            : 2;
+    return rank(a.state).compareTo(rank(b.state));
+  }
+
+  Widget _contextCard(HudTheme t, String sessionId, SessionAssist assist) {
+    final expanded = _expandedCards.contains(sessionId);
+    return GestureDetector(
+      key: ValueKey('context-card-$sessionId'),
+      onTap: () => setState(() => expanded
+          ? _expandedCards.remove(sessionId)
+          : _expandedCards.add(sessionId)),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 17, top: 7),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('card · goal: ${assist.goal}',
+              style: _mono(9, t.textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          if (expanded) ...[
+            const SizedBox(height: 5),
+            Text('goal · ${assist.goal}', style: _mono(9, t.textPrimary)),
+            if (assist.steps.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              for (var i = 0; i < assist.steps.length; i++)
+                Text('${i == 0 ? 'next' : '    '} · ${assist.steps[i]}',
+                    style: _mono(9, t.textMuted, height: 1.35)),
+            ],
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _lane(HudTheme t, AgentSession agent) {
+    final done = agent.state == 'done';
+    final color = agent.state == 'waiting'
+        ? _amber
+        : done
+            ? t.textDim
+            : widget.accent;
+    final detail = done
+        ? (agent.summary?.trim().isNotEmpty == true
+            ? agent.summary!
+            : agent.toolLine ?? 'done')
+        : agent.toolLine ?? agent.state;
+    return Opacity(
+      opacity: done ? 0.55 : 1,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 17, top: 6),
+        child: Row(children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text('${agent.name} · $detail',
+                style: _mono(done ? 9 : 10, t.textMuted),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _unattachedGroup(HudTheme t, List<AgentSession> agents) {
+    agents.sort(_laneOrder);
+    final waiting = agents.any((agent) => agent.state == 'waiting');
+    return Container(
+      key: const ValueKey('unattached-group'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(
+            color: (waiting ? _amber : t.textDim).withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(children: [
+        Row(children: [
+          Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                  color: waiting ? _amber : t.textDim, shape: BoxShape.circle)),
+          const SizedBox(width: 9),
+          Expanded(child: Text('unattached', style: _mono(11, t.textPrimary))),
+        ]),
+        for (final agent in agents) _lane(t, agent),
       ]),
     );
   }

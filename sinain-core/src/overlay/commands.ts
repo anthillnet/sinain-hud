@@ -70,7 +70,7 @@ export interface CommandDeps {
    *  built-in sinain chat lane is selected but unreachable. */
   onRestartChatSidecar?: () => { ok: boolean; error?: string };
   /** Resolve an approval requested by an attached agent CLI. */
-  onAgentApprovalReply?: (id: string, behavior: "allow" | "deny" | "always") => void;
+  onAgentApprovalReply?: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => void;
 }
 
 /**
@@ -180,7 +180,11 @@ export function setupCommands(deps: CommandDeps): void {
         break;
       }
       case "agent_approval_reply": {
-        deps.onAgentApprovalReply?.(msg.id, msg.behavior);
+        deps.onAgentApprovalReply?.(
+          msg.id,
+          msg.behavior,
+          typeof msg.answer === "string" ? msg.answer : undefined,
+        );
         break;
       }
       case "command": {

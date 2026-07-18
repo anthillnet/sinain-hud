@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/models/agent_session.dart';
+import '../../core/services/websocket_service.dart';
 
-class AgentApprovalCard extends StatelessWidget {
+class AgentApprovalCard extends StatefulWidget {
   final AgentApprovalRequest request;
   final ValueChanged<String> onReply;
+  final void Function(String behavior, {String? answer})? onReplyWithAnswer;
   final VoidCallback? onDismiss;
   final String? branch;
   final String? resolution;
@@ -13,6 +16,7 @@ class AgentApprovalCard extends StatelessWidget {
     super.key,
     required this.request,
     required this.onReply,
+    this.onReplyWithAnswer,
     this.onDismiss,
     this.branch,
     this.resolution,
@@ -20,8 +24,41 @@ class AgentApprovalCard extends StatelessWidget {
 
   static const _amber = Color(0xFFD9A21B);
 
+  @override
+  State<AgentApprovalCard> createState() => _AgentApprovalCardState();
+}
+
+class _AgentApprovalCardState extends State<AgentApprovalCard> {
+  final _answerController = TextEditingController();
+
+  static const _amber = AgentApprovalCard._amber;
+
+  @override
+  void dispose() {
+    _answerController.dispose();
+    super.dispose();
+  }
+
+  void _reply(String behavior) {
+    final answer = _answerController.text.trim();
+    final callback = widget.onReplyWithAnswer;
+    if (callback != null) {
+      callback(behavior, answer: answer.isEmpty ? null : answer);
+    } else if (answer.isNotEmpty) {
+      // Compatibility for hosts that still provide the original one-argument
+      // callback: the note must not be dropped while those call sites migrate.
+      context.read<WebSocketService>().sendAgentApprovalReply(
+            widget.request.id,
+            behavior,
+            answer: answer,
+          );
+    } else {
+      widget.onReply(behavior);
+    }
+  }
+
   String get _elapsed {
-    final seconds = request.elapsed.inSeconds.clamp(0, 359999);
+    final seconds = widget.request.elapsed.inSeconds.clamp(0, 359999);
     if (seconds < 60) return '${seconds}s';
     if (seconds < 3600) return '${seconds ~/ 60}m';
     return '${seconds ~/ 3600}h';
@@ -29,9 +66,11 @@ class AgentApprovalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (resolution != null) {
-      final denied = resolution == 'Denied';
-      return Container(
+    if (widget.resolution != null) {
+      final denied = widget.resolution == 'Denied';
+      return Material(
+      type: MaterialType.transparency,
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: const Color(0xFF232427),
@@ -41,13 +80,27 @@ class AgentApprovalCard extends StatelessWidget {
         child: Row(children: [
           _dot(denied ? const Color(0xFFB3361C) : const Color(0xFF1F8039)),
           const SizedBox(width: 7),
-          Text(resolution!, style: const TextStyle(color: Color(0xFFE8EAEE), fontSize: 11, fontWeight: FontWeight.w700)),
+          Text(widget.resolution!,
+              style: const TextStyle(
+                  color: Color(0xFFE8EAEE),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700)),
           const SizedBox(width: 8),
-          Expanded(child: Text(request.command, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFFA8ADBD), fontSize: 10))),
+          Expanded(
+              child: Text(widget.request.command,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      color: Color(0xFFA8ADBD),
+                      fontSize: 10))),
         ]),
+        ),
       );
     }
-    return Container(
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF1E1F22),
@@ -65,43 +118,119 @@ class AgentApprovalCard extends StatelessWidget {
               decoration: const BoxDecoration(
                 color: _amber,
                 shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Color(0x66D9A21B), blurRadius: 3, spreadRadius: 3)],
+                boxShadow: [
+                  BoxShadow(
+                      color: Color(0x66D9A21B), blurRadius: 3, spreadRadius: 3)
+                ],
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(child: Text(request.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFE8EAEE), fontSize: 12, fontWeight: FontWeight.w700))),
-            if (onDismiss != null)
-              GestureDetector(onTap: onDismiss, child: const Padding(padding: EdgeInsets.all(3), child: Text('✕', style: TextStyle(color: Color(0xFF6C707E), fontSize: 11)))),
+            Expanded(
+                child: Text(widget.request.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Color(0xFFE8EAEE),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700))),
+            if (widget.onDismiss != null)
+              GestureDetector(
+                  onTap: widget.onDismiss,
+                  child: const Padding(
+                      padding: EdgeInsets.all(3),
+                      child: Text('✕',
+                          style: TextStyle(
+                              color: Color(0xFF6C707E), fontSize: 11)))),
           ]),
           const SizedBox(height: 9),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(color: const Color(0xFF232427), borderRadius: BorderRadius.circular(7)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(request.command, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFFE8EAEE), fontSize: 11)),
+            decoration: BoxDecoration(
+                color: const Color(0xFF232427),
+                borderRadius: BorderRadius.circular(7)),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.request.command,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      color: Color(0xFFE8EAEE),
+                      fontSize: 11)),
               const SizedBox(height: 7),
-              Wrap(spacing: 5, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                Text('$_elapsed in', style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFFA8ADBD), fontSize: 10)),
-                if (request.source.isNotEmpty) _chip(request.source),
-                if (branch?.isNotEmpty ?? false) _chip('⎇ $branch'),
-              ]),
+              Wrap(
+                  spacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text('$_elapsed in',
+                        style: const TextStyle(
+                            fontFamily: 'JetBrainsMono',
+                            color: Color(0xFFA8ADBD),
+                            fontSize: 10)),
+                    if (widget.request.source.isNotEmpty)
+                      _chip(widget.request.source),
+                    if (widget.branch?.isNotEmpty ?? false)
+                      _chip('⎇ ${widget.branch}'),
+                  ]),
             ]),
           ),
           const SizedBox(height: 9),
           Row(children: [
-            _button('Allow', () => onReply('allow'), filled: true),
+            _button('Allow', () => _reply('allow'), filled: true),
             const SizedBox(width: 6),
-            _button('Always', () => onReply('always'), bordered: true),
+            _button('Always', () => _reply('always'), bordered: true),
             const Spacer(),
-            _button('Deny', () => onReply('deny'), quiet: true),
+            _button('Deny', () => _reply('deny'), quiet: true),
           ]),
+          const SizedBox(height: 9),
+          CustomPaint(
+            foregroundPainter:
+                _DashedBorderPainter(_amber.withValues(alpha: 0.48)),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _answerController,
+                  maxLength: 500,
+                  maxLines: 1,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _reply('allow'),
+                  style: const TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      color: Color(0xFFE8EAEE),
+                      fontSize: 10),
+                  decoration: const InputDecoration(
+                    hintText: 'add a note for the agent…',
+                    hintStyle: TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        color: Color(0xFF7D7461),
+                        fontSize: 10),
+                    counterText: '',
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+              const Tooltip(
+                message: 'soon',
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 9),
+                  child: Text('⌖',
+                      style: TextStyle(color: Color(0xFF665E4D), fontSize: 13)),
+                ),
+              ),
+            ]),
+          ),
         ],
       ),
+    ),
     );
   }
 
-  Widget _button(String text, VoidCallback onTap, {bool filled = false, bool bordered = false, bool quiet = false}) {
+  Widget _button(String text, VoidCallback onTap,
+      {bool filled = false, bool bordered = false, bool quiet = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -111,18 +240,63 @@ class AgentApprovalCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: filled ? const Color(0xFF1F8039) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
-          border: bordered ? Border.all(color: Colors.white.withValues(alpha: 0.25)) : null,
+          border: bordered
+              ? Border.all(color: Colors.white.withValues(alpha: 0.25))
+              : null,
         ),
-        child: Text(text, style: TextStyle(color: const Color(0xFFE8EAEE), fontSize: 10, fontWeight: filled ? FontWeight.w700 : FontWeight.normal, decoration: quiet ? TextDecoration.underline : null, decorationColor: const Color(0xFFA8ADBD))),
+        child: Text(text,
+            style: TextStyle(
+                color: const Color(0xFFE8EAEE),
+                fontSize: 10,
+                fontWeight: filled ? FontWeight.w700 : FontWeight.normal,
+                decoration: quiet ? TextDecoration.underline : null,
+                decorationColor: const Color(0xFFA8ADBD))),
       ),
     );
   }
 
   Widget _chip(String text) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.white.withValues(alpha: 0.12))),
-        child: Text(text, style: const TextStyle(fontFamily: 'JetBrainsMono', color: Color(0xFFA8ADBD), fontSize: 10)),
+        decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12))),
+        child: Text(text,
+            style: const TextStyle(
+                fontFamily: 'JetBrainsMono',
+                color: Color(0xFFA8ADBD),
+                fontSize: 10)),
       );
 
-  Widget _dot(Color color) => Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
+  Widget _dot(Color color) => Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle));
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  final Color color;
+  const _DashedBorderPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+          Offset.zero & size, const Radius.circular(6)));
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final metric in path.computeMetrics()) {
+      for (double distance = 0; distance < metric.length; distance += 6) {
+        canvas.drawPath(
+            metric.extractPath(
+                distance, (distance + 3).clamp(0, metric.length)),
+            paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter oldDelegate) =>
+      oldDelegate.color != color;
 }

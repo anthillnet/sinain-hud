@@ -58,9 +58,9 @@ async function main() {
   setupCommands({
     wsHandler, config,
     onUserMessage: async () => {}, onUserCommand: () => {}, onCommand: () => {},
-    onAgentApprovalReply: (id: string, behavior: "allow" | "deny" | "always") => {
+    onAgentApprovalReply: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => {
       const request = approvals.get(id);
-      if (!request || !approvals.resolve(id, behavior)) return;
+      if (!request || !approvals.resolve(id, behavior, answer)) return;
       registry.finishApproval(request.sessionId, behavior, request.command);
       wsHandler.broadcastRaw({ type: "agent_approval_resolved", id, behavior } as any);
     },
@@ -140,9 +140,10 @@ async function main() {
   // 4. Deny path
   const denyP = pExecFileWithStdin({ session_id: "s1", hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "git push --force" } });
   const denyApproval = await waitFor((m) => m.type === "agent_approval" && m.request.command === "git push --force");
-  ws.send(JSON.stringify({ type: "agent_approval_reply", id: denyApproval.request.id, behavior: "deny" }));
+  const denyReason = "Protected branch; open a PR instead";
+  ws.send(JSON.stringify({ type: "agent_approval_reply", id: denyApproval.request.id, behavior: "deny", answer: denyReason }));
   const { stdout: denyOut } = await denyP;
-  check("deny decision reaches bridge", denyOut.includes('"behavior":"deny"'), denyOut);
+  check("deny decision and answer reach bridge", denyOut.includes('"behavior":"deny"') && denyOut.includes(`"reason":"${denyReason}"`), denyOut);
 
   // 5. Stop → done receipt; GET /agent/sessions
   await pExecFileWithStdin({ session_id: "s1", hook_event_name: "Stop", message: "published bridge v0.3" });

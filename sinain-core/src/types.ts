@@ -261,7 +261,7 @@ export interface AgentSession {
   term?: Record<string, string>;
 }
 
-export type ApprovalDecision = { behavior: "allow" | "deny" | "always" | "ask" };
+export type ApprovalDecision = { behavior: "allow" | "deny" | "always" | "ask"; answer?: string };
 
 export interface AgentApprovalRequest {
   id: string;
@@ -295,6 +295,7 @@ export interface AgentApprovalReplyMessage {
   type: "agent_approval_reply";
   id: string;
   behavior: "allow" | "deny" | "always";
+  answer?: string;
 }
 
 /** Overlay → sinain-core: frontmost application changed. A fast OS-level

@@ -828,7 +828,11 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  void _replyToIslandApproval(AgentApprovalRequest request, String behavior) {
+  void _replyToIslandApproval(
+    AgentApprovalRequest request,
+    String behavior, {
+    String? answer,
+  }) {
     final label = switch (behavior) {
       'always' => 'Always allowed',
       'deny' => 'Denied',
@@ -840,7 +844,7 @@ class OverlayShellState extends State<OverlayShell> {
     });
     context
         .read<WebSocketService>()
-        .sendAgentApprovalReply(request.id, behavior);
+        .sendAgentApprovalReply(request.id, behavior, answer: answer);
     _resolutionTimer?.cancel();
     _resolutionTimer = Timer(const Duration(milliseconds: 2500), () {
       if (!mounted || _resolvedApproval?.id != request.id) return;
@@ -2701,6 +2705,12 @@ class OverlayShellState extends State<OverlayShell> {
                           : null,
                       onReply: (behavior) =>
                           _replyToIslandApproval(request, behavior),
+                      onReplyWithAnswer: (behavior, {answer}) =>
+                          _replyToIslandApproval(
+                        request,
+                        behavior,
+                        answer: answer,
+                      ),
                     ),
                   ),
                 ),

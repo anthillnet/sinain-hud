@@ -2566,9 +2566,9 @@ async function main() {
     systemAudioPipeline,
     micPipeline,
     config,
-    onAgentApprovalReply: (id, behavior) => {
+    onAgentApprovalReply: (id, behavior, answer) => {
       const request = approvalManager.get(id);
-      if (!request || !approvalManager.resolve(id, behavior)) return;
+      if (!request || !approvalManager.resolve(id, behavior, answer)) return;
       agentSessionRegistry.finishApproval(request.sessionId, behavior, request.command);
       wsHandler.broadcastRaw({ type: "agent_approval_resolved", id, behavior });
     },

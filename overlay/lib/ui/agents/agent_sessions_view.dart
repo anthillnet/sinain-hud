@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/agent_session.dart';
+import '../../core/models/context_cards.dart';
 import '../../core/services/websocket_service.dart';
 import 'agent_approval_card.dart';
 
 class AgentSessionsView extends StatefulWidget {
   final bool showHeader;
   final bool showApprovals;
+
   /// Agent-liveness color — the user's accent from settings (default green).
   final Color accent;
 
@@ -35,6 +37,8 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
   double? _usage5h;
   double? _usage7d;
   StreamSubscription<void>? _sessionsSub;
+  StreamSubscription<dynamic>? _chipSub;
+  WebSocketService? _ws;
   Timer? _tickTimer;
 
   @override
@@ -50,9 +54,13 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
     super.didChangeDependencies();
     if (_sessionsSub != null) return;
     final ws = context.read<WebSocketService>();
+    _ws = ws;
     _syncFrom(ws);
     _sessionsSub = ws.agentSessionsStream.listen((_) {
       if (mounted) setState(() => _syncFrom(ws));
+    });
+    _chipSub = ws.sessionChipStream.listen((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -69,6 +77,7 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
   @override
   void dispose() {
     _sessionsSub?.cancel();
+    _chipSub?.cancel();
     _tickTimer?.cancel();
     super.dispose();
   }
@@ -185,8 +194,20 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
               _dot(color),
               const SizedBox(width: 7),
               Expanded(
-                child: Text(
-                  session.name,
+                child: Text.rich(
+                  TextSpan(children: [
+                    if (_sessionLabel(session) case final label?)
+                      TextSpan(
+                        text: '· $label  ',
+                        style: const TextStyle(
+                          color: Color(0xFF9B7BE3),
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    TextSpan(text: session.name),
+                  ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -237,6 +258,15 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
         ],
       ),
     );
+  }
+
+  String? _sessionLabel(AgentSession session) {
+    final threadId = session.threadId;
+    if (threadId == null || threadId.isEmpty) return null;
+    for (final chip in _ws?.sessionChips.values ?? const <SessionChipState>[]) {
+      if (chip.threadId == threadId) return chip.label;
+    }
+    return null;
   }
 
   Widget _buildDoneReceipt(AgentSession session) {

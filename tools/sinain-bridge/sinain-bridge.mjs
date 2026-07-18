@@ -126,11 +126,13 @@ const baseUrl = `http://${host}:${port}`;
 
 if (frame.hook_event_name === 'PermissionRequest') {
   let behavior = 'ask';
+  let answer;
   try {
     const { response, body } = await post(`${baseUrl}/agent/approve`, frame, 130_000, true);
     if (response.ok) {
       if (['allow', 'deny', 'always', 'ask'].includes(body?.behavior)) {
         behavior = body.behavior;
+        if (typeof body?.answer === 'string' && body.answer) answer = body.answer;
       }
     }
   } catch {
@@ -143,7 +145,7 @@ if (frame.hook_event_name === 'PermissionRequest') {
     console.log(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'PermissionRequest',
-        decision: { behavior },
+        decision: answer ? { behavior, reason: answer } : { behavior },
       },
     }));
   }

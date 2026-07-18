@@ -9,10 +9,12 @@ import 'package:sinain_hud/ui/feed/idle_animation.dart';
 
 class _RecordingWebSocketService extends WebSocketService {
   String? reply;
+  String? answer;
 
   @override
-  void sendAgentApprovalReply(String id, String behavior) {
+  void sendAgentApprovalReply(String id, String behavior, {String? answer}) {
     reply = behavior;
+    this.answer = answer;
   }
 }
 
@@ -128,21 +130,27 @@ void main() {
       ChangeNotifierProvider<WebSocketService>.value(
         value: ws,
         child: MaterialApp(
-          home: AgentApprovalCard(
+          home: Scaffold(backgroundColor: Colors.black, body: Center(child: SizedBox(width: 320, child: AgentApprovalCard(
             request: request,
             onReply: (behavior) => ws.sendAgentApprovalReply(
               request.id,
               behavior,
             ),
+            onReplyWithAnswer: (behavior, {answer}) =>
+                ws.sendAgentApprovalReply(request.id, behavior, answer: answer),
           ),
+        ))),
         ),
       ),
     );
 
     expect(find.text('codex wants to run a command'), findsOneWidget);
     expect(find.text('flutter test'), findsOneWidget);
+    await tester.enterText(
+        find.byType(TextField), 'Please preserve the lockfile');
     await tester.tap(find.text('Allow'));
     expect(ws.reply, 'allow');
+    expect(ws.answer, 'Please preserve the lockfile');
 
     await tester.pumpWidget(const SizedBox.shrink());
     ws.dispose();
