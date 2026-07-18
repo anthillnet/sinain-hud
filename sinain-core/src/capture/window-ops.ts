@@ -581,11 +581,29 @@ export async function assistNextSteps(
   const result = await burstCall(config, {
     system: ASSIST_SYSTEM,
     user: `Session label (user-confirmed): ${label || "(unlabeled work session)"}\n\nActivity so far:\n${slice.text}\n\nProduce goal + next steps.`,
-    maxTokens: 220,
+    // 320 (was 220): rich contexts (code-heavy OCR) made the model verbose
+    // enough to hit the cap, and JSON truncated mid-array parses as nothing —
+    // every assist on those threads silently died ("burst response was not
+    // JSON", field 2026-07-17).
+    maxTokens: 320,
     cacheKey: "sinain-assist-v1",
     jsonMode: true,
   });
-  const raw = parseBurstJson<Partial<SessionAssist>>(result.content);
+  let raw: Partial<SessionAssist>;
+  try {
+    raw = parseBurstJson<Partial<SessionAssist>>(result.content);
+  } catch (err) {
+    // Truncated JSON (no closing brace) still carries the fields we need
+    // most — salvage title/goal per-key instead of dropping the assist.
+    const grab = (k: string) =>
+      result.content.match(new RegExp(`"${k}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`))?.[1] ?? "";
+    const title = grab("title");
+    const goal = grab("goal");
+    if (!title && !goal) {
+      throw new Error(`assist response unparseable (${result.content.length} chars): ${JSON.stringify(result.content.slice(0, 160))}`);
+    }
+    raw = { title, goal, steps: [] };
+  }
   return {
     assist: {
       title: String(raw.title ?? "").trim().slice(0, 60),
