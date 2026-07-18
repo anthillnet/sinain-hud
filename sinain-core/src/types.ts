@@ -1074,6 +1074,8 @@ export interface CoreConfig {
   agentConfig: AnalysisConfig;
   agentApproveTimeoutMs: number;
   agentEnrichEnabled: boolean;
+  /** Boot default / environment kill switch for the optional agent-start LLM brief. */
+  agentLlmBriefEnabled: boolean;
   claudeUsageEnabled: boolean;
   claudeUsagePollMs: number;
   regionSlmConfig: RegionSlmConfig;

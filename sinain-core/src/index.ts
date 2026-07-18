@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
@@ -2024,6 +2024,17 @@ async function main() {
     }
   };
 
+  // Mutable at runtime from the overlay; the env value is the boot default and
+  // kill switch for installs that never connect an overlay.
+  let agentLlmBriefEnabled = config.agentLlmBriefEnabled;
+  const agentLlmBrief = async (cwd: string): Promise<string> => {
+    const agentCwd = cwd || process.cwd();
+    const focus = `Briefing an AI coding agent that just started in ${basename(agentCwd)} (${agentCwd}). What is the user working on right now and what should the agent know?`;
+    const { card, result } = await enrichFocus(config.burstConfig, feedBuffer, senseBuffer, focus);
+    recordBurstUsage(result);
+    return card.context;
+  };
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
@@ -2068,6 +2079,8 @@ async function main() {
       sessionSense.bookmarkAction(threadId, action as "resume" | "remove"),
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
+    agentLlmBrief: config.burstConfig.enabled && config.burstConfig.apiKey ? agentLlmBrief : undefined,
+    isAgentLlmBriefEnabled: () => agentLlmBriefEnabled,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
     windowSources: (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
     windowCoverageAt: (minutes) => {
@@ -2593,6 +2606,11 @@ async function main() {
         regionTracker.clear();
         wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
       }
+    },
+    onSetAgentLlmBrief: (enabled) => {
+      // AGENT_ENRICH_LLM=false is an installation-level kill switch; the
+      // overlay may turn an allowed lane off/on but cannot override it.
+      agentLlmBriefEnabled = config.agentLlmBriefEnabled && enabled;
     },
     // Fast ROI restore: the overlay's NSWorkspace observer fires on app switch
     // ~1.5s before the sense pipeline catches up. Additively restore the new

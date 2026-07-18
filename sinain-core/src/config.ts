@@ -513,6 +513,7 @@ export function loadConfig(): CoreConfig {
     agentConfig,
     agentApproveTimeoutMs: intEnv("AGENT_APPROVE_TIMEOUT_MS", 120_000),
     agentEnrichEnabled: boolEnv("AGENT_ENRICH", true),
+    agentLlmBriefEnabled: boolEnv("AGENT_ENRICH_LLM", true),
     claudeUsageEnabled: boolEnv("CLAUDE_USAGE_ENABLED", true),
     claudeUsagePollMs: intEnv("CLAUDE_USAGE_POLL_MS", 60_000),
     regionSlmConfig,

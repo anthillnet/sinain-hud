@@ -43,6 +43,9 @@ class HudSettings {
   /// Grammarly mode: show clickable region eyes at actionable screen areas.
   bool autoDetectIssues;
 
+  /// Add an LLM-composed Build-Context section when an agent session starts.
+  bool agentLlmBrief;
+
   /// ChatGPT network harness: expose the local MCP server over a public tunnel
   /// so ChatGPT can pull ROI context. Off by default — security-sensitive.
   bool chatgptHarness;
@@ -82,6 +85,7 @@ class HudSettings {
     this.fontSize = 12.0,
     this.accentColor = 0xFF00FF88,
     this.autoDetectIssues = false,
+    this.agentLlmBrief = true,
     this.chatgptHarness = false,
     this.showInDock = true,
     this.hudStyle = HudStyle.solid,
@@ -125,6 +129,7 @@ class HudSettings {
     double? fontSize,
     int? accentColor,
     bool? autoDetectIssues,
+    bool? agentLlmBrief,
     bool? chatgptHarness,
     bool? showInDock,
     HudStyle? hudStyle,
@@ -146,6 +151,7 @@ class HudSettings {
       fontSize: fontSize ?? this.fontSize,
       accentColor: accentColor ?? this.accentColor,
       autoDetectIssues: autoDetectIssues ?? this.autoDetectIssues,
+      agentLlmBrief: agentLlmBrief ?? this.agentLlmBrief,
       chatgptHarness: chatgptHarness ?? this.chatgptHarness,
       showInDock: showInDock ?? this.showInDock,
       hudStyle: hudStyle ?? this.hudStyle,

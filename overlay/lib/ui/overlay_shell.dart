@@ -123,6 +123,7 @@ class OverlayShellState extends State<OverlayShell> {
   int _pendingAttention = 0;
   WebSocketService? _wsForListener;
   VoidCallback? _wsListener;
+  bool _wsWasConnected = false;
 
   bool _parked = false;
   bool _unparkedByUser = false;
@@ -511,11 +512,21 @@ class OverlayShellState extends State<OverlayShell> {
     _wsForListener = ws;
     _wsListener = () {
       if (!mounted) return;
+      if (ws.connected && !_wsWasConnected) {
+        ws.sendCommand('set_agent_llm_brief',
+            {'enabled': _settingsService.settings.agentLlmBrief});
+      }
+      _wsWasConnected = ws.connected;
       final n = ws.pendingAttentionCount;
       if (n != _pendingAttention) setState(() => _pendingAttention = n);
       _syncIslandFromWs(ws);
     };
     ws.addListener(_wsListener!);
+    if (ws.connected) {
+      _wsWasConnected = true;
+      ws.sendCommand('set_agent_llm_brief',
+          {'enabled': _settingsService.settings.agentLlmBrief});
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncIslandFromWs(ws));
 
     // Region eyes (Grammarly mode) — native NSPanels, macOS only

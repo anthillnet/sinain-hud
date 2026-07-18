@@ -359,6 +359,44 @@ class DisplaySettingsPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
 
+                    // Agent-start Build-Context brief (gesture-anchored LLM).
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () {
+                          final enabled = !settings.settings.agentLlmBrief;
+                          settings.setAgentLlmBrief(enabled);
+                          ws.sendCommand(
+                              'set_agent_llm_brief', {'enabled': enabled});
+                        },
+                        child: Row(
+                          children: [
+                            Text(
+                              'AGENT BRIEF (LLM)',
+                              style: TextStyle(
+                                fontFamily: HudConstants.monoFont,
+                                fontFamilyFallback:
+                                    HudConstants.monoFontFallbacks,
+                                fontSize: 9,
+                                color: Colors.white.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              settings.settings.agentLlmBrief
+                                  ? Icons.toggle_on
+                                  : Icons.toggle_off,
+                              size: 22,
+                              color: settings.settings.agentLlmBrief
+                                  ? Color(accentColor)
+                                  : Colors.white.withValues(alpha: 0.3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
                     // Show in Dock — flip the macOS Dock icon (and app menu) live. On by
                     // default; opting out drops the app back to an accessory for the
                     // ambient/invisible feel.

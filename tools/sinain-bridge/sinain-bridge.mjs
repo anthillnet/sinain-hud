@@ -159,7 +159,7 @@ if (frame.hook_event_name === 'PermissionRequest') {
         session_id: String(frame.session_id ?? ''),
         cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
       });
-      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 700);
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 8000);
       if (response.ok && typeof body?.brief === 'string' && body.brief) {
         console.log(JSON.stringify({
           hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: body.brief },

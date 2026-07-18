@@ -55,6 +55,8 @@ export interface CommandDeps {
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
+  /** Toggle the optional burst-lane brief injected when an agent starts. */
+  onSetAgentLlmBrief?: (enabled: boolean) => void;
   /** Hold ambient escalations for [ms] — user is actively interacting. */
   onUserBusy?: (ms: number) => void;
   /** Start the local bare-agent runner for the selected escalation agent. */
@@ -424,6 +426,20 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         log(TAG, `auto-detect issues ${enabled ? "enabled" : "disabled"}`);
       } else {
         log(TAG, `set_auto_detect: no handler wired`);
+      }
+      break;
+    }
+    case "set_agent_llm_brief": {
+      const enabled = (msg as any).enabled;
+      if (typeof enabled !== "boolean") {
+        log(TAG, `set_agent_llm_brief: missing or non-boolean enabled field`);
+        break;
+      }
+      if (deps.onSetAgentLlmBrief) {
+        deps.onSetAgentLlmBrief(enabled);
+        log(TAG, `agent LLM brief ${enabled ? "enabled" : "disabled"}`);
+      } else {
+        log(TAG, `set_agent_llm_brief: no handler wired`);
       }
       break;
     }

@@ -16,6 +16,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyFontSize = 'font_size';
   static const _keyAccentColor = 'accent_color';
   static const _keyAutoDetectIssues = 'auto_detect_issues';
+  static const _keyAgentLlmBrief = 'agent_llm_brief';
   static const _keyChatgptHarness = 'chatgpt_harness';
   // NB: shared_preferences stores this under UserDefaults key
   // "flutter.show_in_dock" — AppDelegate reads it natively at launch to set the
@@ -47,6 +48,7 @@ class SettingsService extends ChangeNotifier {
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
       accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
       autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
+      agentLlmBrief: _prefs.getBool(_keyAgentLlmBrief) ?? true,
       chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
       showInDock: _prefs.getBool(_keyShowInDock) ?? true,
       hudStyle: _loadHudStyle(),
@@ -162,6 +164,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setAutoDetectIssues(bool value) async {
     _settings.autoDetectIssues = value;
     await _prefs.setBool(_keyAutoDetectIssues, value);
+    notifyListeners();
+  }
+
+  Future<void> setAgentLlmBrief(bool value) async {
+    _settings.agentLlmBrief = value;
+    await _prefs.setBool(_keyAgentLlmBrief, value);
     notifyListeners();
   }
 

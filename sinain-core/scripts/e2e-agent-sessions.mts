@@ -94,8 +94,20 @@ async function main() {
   const recentFeedText = "feed context reaches agent enrichment";
   feedBuffer.push(recentFeedText, "normal", "audio");
   const enrich = await fetch(`http://127.0.0.1:${PORT}/agent/enrich?session_id=s1&cwd=${encodeURIComponent(process.cwd())}`).then((r) => r.json()) as any;
-  check("GET /agent/enrich never throws", enrich.ok === true && (enrich.brief.includes("Other agents") || enrich.brief.includes("[sinain] Ambient context")));
-  check("GET /agent/enrich includes recent feed", enrich.brief.includes("Recent activity") && enrich.brief.includes(recentFeedText));
+  check(
+    "GET /agent/enrich never throws and skips unavailable LLM lane",
+    enrich.ok === true
+      && (enrich.brief.includes("Other agents") || enrich.brief.includes("[sinain] Ambient context"))
+      && !enrich.brief.includes("Build-Context brief:"),
+  );
+  const audioCanonical = enrich.brief.includes("Recent activity (audio):");
+  const audioVisible = enrich.brief.includes(recentFeedText);
+  const audioSuppressed = enrich.brief.includes("(suppressed: privacy uninitialized)");
+  check(
+    "GET /agent/enrich uses canonical audio context",
+    audioCanonical && (audioVisible || audioSuppressed),
+    audioVisible ? "visible branch" : audioSuppressed ? "privacy-suppressed branch" : "missing canonical audio lines",
+  );
 
   const { stdout: enrichOut } = await pExecFileWithStdin({ session_id: "s1", hook_event_name: "SessionStart", cwd: process.cwd() });
   if (enrich.brief) {

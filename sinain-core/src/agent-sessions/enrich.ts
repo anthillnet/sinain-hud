@@ -1,4 +1,6 @@
 import { basename, resolve } from "node:path";
+import type { ContextWindow } from "../types.js";
+import { renderContextLines } from "../agent/analyzer.js";
 import type { AgentSessionRegistry } from "./registry.js";
 
 interface ActiveSession {
@@ -11,8 +13,7 @@ interface ActiveSession {
 export interface EnrichDeps {
   registry: AgentSessionRegistry;
   activeSessions?: () => ActiveSession[];
-  recentFeed?: () => { text: string; source: string; ts: number }[];
-  getSenseContext?: () => unknown;
+  contextWindow?: () => ContextWindow;
   searchEntities?: (q: string, limit: number) => Promise<unknown>;
 }
 
@@ -22,21 +23,6 @@ const FOOTER = "(From the sinain HUD — screen+session awareness. Treat as cont
 function cap(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
-}
-
-function senseLines(value: unknown): string[] {
-  if (!value || typeof value !== "object") return [];
-  const context = value as {
-    visible?: { summary?: unknown };
-    deltas?: { delta?: unknown; context?: unknown }[];
-  };
-  const lines: string[] = [];
-  if (typeof context.visible?.summary === "string") lines.push(...context.visible.summary.split("\n"));
-  for (const delta of context.deltas ?? []) {
-    if (typeof delta.delta === "string") lines.push(...delta.delta.split("\n"));
-    else if (typeof delta.context === "string") lines.push(...delta.context.split("\n"));
-  }
-  return lines.map((line) => line.trim()).filter(Boolean).slice(-5);
 }
 
 function knowledgeSnippets(value: unknown): string[] {
@@ -88,21 +74,12 @@ export async function composeEnrichBrief(
   } catch { /* optional context */ }
 
   try {
-    const recent = (deps.recentFeed?.() ?? [])
-      .filter((item) => !item.text.startsWith("[PERIODIC]"))
-      .slice(-6);
-    if (recent.length) {
-      const lines = recent.map((item) => {
-        const minutes = Math.max(0, Math.floor((Date.now() - item.ts) / 60_000));
-        return `- [${minutes}m ago · ${item.source}] ${cap(item.text, 90)}`;
-      });
-      sections.push(cap(`Recent activity (transcripts + HUD):\n${lines.join("\n")}`, 500));
+    const context = deps.contextWindow?.();
+    if (context) {
+      const { audioLines, screenLines } = renderContextLines(context);
+      if (audioLines) sections.push(cap(`Recent activity (audio):\n${audioLines}`, 500));
+      if (screenLines) sections.push(cap(`Recently on screen:\n${screenLines}`, 500));
     }
-  } catch { /* optional context */ }
-
-  try {
-    const lines = senseLines(deps.getSenseContext?.());
-    if (lines.length) sections.push(cap(`Recently on screen:\n${lines.join("\n")}`, 400));
   } catch { /* optional context */ }
 
   try {
@@ -115,4 +92,16 @@ export async function composeEnrichBrief(
 
   const bodyBudget = 1800 - FOOTER.length - 1;
   return `${cap(sections.join("\n"), bodyBudget)}\n${FOOTER}`;
+}
+
+/** Add the optional gesture-anchored LLM section without disturbing the
+ * deterministic brief's footer or allowing agent startup context to balloon. */
+export function appendBuildContextBrief(brief: string, cardText: string): string {
+  const text = cap(cardText.trim(), 900);
+  if (!text) return brief;
+  const deterministic = brief.endsWith(`\n${FOOTER}`)
+    ? brief.slice(0, -FOOTER.length - 1)
+    : brief;
+  const bodyBudget = 2800 - FOOTER.length - 1;
+  return `${cap(`${deterministic}\nBuild-Context brief:\n${text}`, bodyBudget)}\n${FOOTER}`;
 }

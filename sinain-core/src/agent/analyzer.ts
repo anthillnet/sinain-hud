@@ -118,10 +118,12 @@ Usually emit 1-2 (the main thing in focus); [] only for a blank/idle screen.`;
 const SYSTEM_PROMPT_WITH_REGIONS = SYSTEM_PROMPT + REGIONS_SECTION;
 
 /**
- * Build the dynamic user prompt (changes every tick).
- * Contains the current context data: screen OCR, audio transcripts, app state.
+ * Render privacy-gated screen and audio lines for a context window.
  */
-export function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
+export function renderContextLines(
+  ctx: ContextWindow,
+  { withSourceIds = false }: { withSourceIds?: boolean } = {},
+): { screenLines: string; audioLines: string } {
   const now = Date.now();
 
   // [S<id>] prefix lets the LLM anchor regions to a sense event (Grammarly mode)
@@ -175,6 +177,16 @@ export function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStat
       })
       .join("\n");
   }
+
+  return { screenLines, audioLines };
+}
+
+/**
+ * Build the dynamic user prompt (changes every tick).
+ * Contains the current context data: screen OCR, audio transcripts, app state.
+ */
+export function buildUserPrompt(ctx: ContextWindow, recorderStatus: RecorderStatus | null = null, withSourceIds = false): string {
+  const { screenLines, audioLines } = renderContextLines(ctx, { withSourceIds });
 
   const appSwitches = ctx.appHistory
     .map(a => normalizeAppName(a.app))

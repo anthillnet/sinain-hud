@@ -9,7 +9,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { AgentEventFrame, CoreConfig, SenseEvent } from "./types.js";
 import type { AgentSessionRegistry } from "./agent-sessions/registry.js";
 import type { ApprovalManager } from "./agent-sessions/approvals.js";
-import { composeEnrichBrief } from "./agent-sessions/enrich.js";
+import { appendBuildContextBrief, composeEnrichBrief } from "./agent-sessions/enrich.js";
+import { buildContextWindow } from "./agent/context-window.js";
 import type { Profiler } from "./profiler.js";
 import type { CostTracker } from "./cost/tracker.js";
 import type { FeedbackStore } from "./learning/feedback-store.js";
@@ -276,6 +277,10 @@ export interface ServerDeps {
   contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
   /** "Build context" for a focus item (clipboard) → what/connects/next card. */
   contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
+  /** Optional direct burst-lane composer for /agent/enrich (never broadcasts cards). */
+  agentLlmBrief?: (cwd: string) => Promise<string>;
+  /** Runtime overlay-controlled gate for agentLlmBrief. */
+  isAgentLlmBriefEnabled?: () => boolean;
   /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
   windowCoverage?: () => unknown;
   /** Live coverage for an arbitrary N (the chooser slider). */
@@ -1003,19 +1008,29 @@ export function createAppServer(deps: ServerDeps) {
         }
         const sessionId = url.searchParams.get("session_id") || "";
         const cwd = url.searchParams.get("cwd") || "";
-        const brief = deps.agentSessions
+        let brief = deps.agentSessions
           ? await composeEnrichBrief({
               registry: deps.agentSessions.registry,
               activeSessions: deps.agentSessions.activeSessions,
-              recentFeed: () => feedBuffer.queryByTime(Date.now() - 10 * 60_000).slice(-6).map((item) => ({
-                text: item.text,
-                source: item.source,
-                ts: item.ts,
-              })),
-              getSenseContext: () => senseBuffer.getStructuredContext({ limit: 5, includeDeltas: true, includeSummary: true }),
+              contextWindow: () => buildContextWindow(feedBuffer, senseBuffer, "standard", 10 * 60_000),
               searchEntities: deps.searchEntities,
             }, sessionId, cwd)
           : "";
+        if (brief && deps.agentLlmBrief && deps.isAgentLlmBriefEnabled?.()) {
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const cardText = await Promise.race([
+              deps.agentLlmBrief(cwd),
+              new Promise<never>((_, reject) => {
+                timeout = setTimeout(() => reject(new Error("agent LLM brief timeout")), 6_500);
+              }),
+            ]);
+            brief = appendBuildContextBrief(brief, cardText);
+          } catch { /* optional context: deterministic brief still returns */
+          } finally {
+            if (timeout) clearTimeout(timeout);
+          }
+        }
         res.end(JSON.stringify({ ok: true, brief }));
         return;
       }
