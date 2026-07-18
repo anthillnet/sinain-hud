@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/agent_session.dart';
 import '../../core/models/context_cards.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/window_service.dart';
 import 'agent_approval_card.dart';
 
 class AgentSessionsView extends StatefulWidget {
@@ -226,6 +227,10 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                   fontSize: 9,
                 ),
               ),
+              if (session.term.isNotEmpty) ...[
+                const SizedBox(width: 7),
+                _jumpButton(session),
+              ],
             ],
           ),
           if (session.toolLine?.trim().isNotEmpty ?? false) ...[
@@ -304,6 +309,10 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                 fontSize: 9,
               ),
             ),
+            if (session.term.isNotEmpty) ...[
+              const SizedBox(width: 7),
+              _jumpButton(session),
+            ],
           ],
         ),
       ),
@@ -323,6 +332,27 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
           fontFamily: 'JetBrainsMono',
           fontSize: 10,
           color: Colors.white.withValues(alpha: 0.55),
+        ),
+      ),
+    );
+  }
+
+  Widget _jumpButton(AgentSession session) {
+    return Tooltip(
+      message: 'Jump to terminal',
+      child: InkWell(
+        onTap: () => context.read<WindowService>().jumpToTerminal(session.term),
+        borderRadius: BorderRadius.circular(3),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+          child: Text(
+            '⏵',
+            style: TextStyle(
+              color: Colors.white,
+              fontFamily: 'JetBrainsMono',
+              fontSize: 10,
+            ),
+          ),
         ),
       ),
     );

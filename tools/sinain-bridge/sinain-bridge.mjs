@@ -150,11 +150,27 @@ if (frame.hook_event_name === 'PermissionRequest') {
     }));
   }
 } else {
-  // PreToolUse fact carry-forward is deferred until analyzer state exists.
   try {
     await post(`${baseUrl}/agent/event`, frame, 1500);
   } catch {
     // Lifecycle hooks must never disrupt the agent.
+  }
+  if (frame.hook_event_name === 'PreToolUse' && source === 'claude' && process.env.SINAIN_ENRICH_FACTS !== '0') {
+    try {
+      const params = new URLSearchParams({
+        mode: 'facts',
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 900);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Fresh facts are best-effort and must never delay a tool call.
+    }
   }
   if (frame.hook_event_name === 'SessionStart' && ['claude', 'codex'].includes(source) && process.env.SINAIN_ENRICH !== '0') {
     try {

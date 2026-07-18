@@ -13,11 +13,13 @@ export interface ActiveSession {
 export class AttachmentCoordinator {
   private detached = new Map<string, Set<string>>();
   private countByThread = new Map<string, number>();
+  private seededOrphans = new Set<string>();
 
   constructor(
     private registry: AgentSessionRegistry,
     private getActiveSessions: () => ActiveSession[],
     private onCountsChanged: (threadId: string) => void,
+    private onOrphanLaunch?: (cwd: string, ts: number) => void,
   ) {}
 
   sync(): void {
@@ -46,10 +48,15 @@ export class AttachmentCoordinator {
         }
       }
       if (match) this.registry.setThread(session.sessionId, match.threadId);
+      else if (session.cwd && !this.seededOrphans.has(session.sessionId)) {
+        this.seededOrphans.add(session.sessionId);
+        this.onOrphanLaunch?.(session.cwd, session.startedAt);
+      }
     }
 
     this.notifyCountChanges();
-    // Orphan agent sessions deliberately do not seed Session Sense candidates.
+    // The design rule now wins: orphans seed Session Sense candidates once;
+    // they do not force qualification or attachment.
   }
 
   augmentsFor(threadId: string): { working: number; receipts: string[] } {
@@ -60,6 +67,16 @@ export class AttachmentCoordinator {
       .sort((a, b) => a.startedAt - b.startedAt || a.sessionId.localeCompare(b.sessionId))
       .map((session) => this.receiptFor(session));
     return { working, receipts };
+  }
+
+  receiptFactsSince(threadId: string, since: number): string[] {
+    return this.registry.snapshot()
+      .filter((session) => session.threadId === threadId
+        && session.state === "done"
+        && (session.endedAt ?? session.lastEventAt) > since)
+      .sort((a, b) => (a.endedAt ?? a.lastEventAt) - (b.endedAt ?? b.lastEventAt)
+        || a.sessionId.localeCompare(b.sessionId))
+      .map((session) => this.receiptFor(session));
   }
 
   onWrap(threadId: string): void {

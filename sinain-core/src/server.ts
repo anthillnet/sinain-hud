@@ -176,6 +176,7 @@ export interface ServerDeps {
     approvals: ApprovalManager;
     activeSessions?: () => { id: string; threadId: string; label: string; startTs: number; paused: boolean }[];
     sessionAssist?: (threadId: string) => { goal: string; steps: string[] } | null;
+    factLinesSince?: (threadId: string, since: number) => string[];
   };
   profiler?: Profiler;
   costTracker?: CostTracker;
@@ -1009,6 +1010,14 @@ export function createAppServer(deps: ServerDeps) {
         }
         const sessionId = url.searchParams.get("session_id") || "";
         const cwd = url.searchParams.get("cwd") || "";
+        if (url.searchParams.get("mode") === "facts") {
+          const lines = deps.agentSessions?.factLinesSince
+            ? deps.agentSessions.registry.consumeFactLines(sessionId, deps.agentSessions.factLinesSince)
+            : [];
+          const brief = lines.join("\n").slice(0, 300).trimEnd();
+          res.end(JSON.stringify({ ok: true, brief }));
+          return;
+        }
         const mode = url.searchParams.get("mode") === "refresh" ? "refresh" : "full";
         let brief = deps.agentSessions
           ? await composeEnrichBrief({

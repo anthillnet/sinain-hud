@@ -1938,6 +1938,7 @@ async function main() {
     agentSessionRegistry,
     () => sessionSense.activeSessions(),
     (threadId) => sessionSense.rebroadcastChip(threadId),
+    (cwd, ts) => episodeTracker?.noteAgentLaunch(cwd, ts),
   );
   sessionSense.setAgentAugments((threadId) => attachmentCoordinator!.augmentsFor(threadId));
   sessionSense.setAgentWrapHook((threadId) => attachmentCoordinator!.onWrap(threadId));
@@ -2046,6 +2047,9 @@ async function main() {
       approvals: approvalManager,
       activeSessions: () => sessionSense.activeSessions(),
       sessionAssist: (threadId) => sessionSense.assistForThread(threadId),
+      // Session Sense may add its own queued thread facts here when present;
+      // v1 always carries freshly completed attached-agent receipts.
+      factLinesSince: (threadId, since) => attachmentCoordinator?.receiptFactsSince(threadId, since) ?? [],
     },
     profiler,
     costTracker,

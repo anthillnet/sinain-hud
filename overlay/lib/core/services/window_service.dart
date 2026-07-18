@@ -102,6 +102,15 @@ class WindowService {
     }
   }
 
+  /// Bring the terminal associated with an agent session to the foreground.
+  Future<void> jumpToTerminal(Map<String, dynamic> term) async {
+    try {
+      await _channel.invokeMethod('jumpToTerminal', {'term': term});
+    } catch (e) {
+      _log('jumpToTerminal failed: $e');
+    }
+  }
+
   /// Set the window frame (position + size).
   Future<void> setWindowFrame(double x, double y, double w, double h) async {
     try {

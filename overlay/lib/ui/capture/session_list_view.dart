@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
 import '../../core/models/context_cards.dart';
 import '../../core/models/agent_session.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/window_service.dart';
 import '../../core/theme/hud_theme.dart';
 
 const _green = Color(0xFF1F8039);
@@ -425,6 +427,11 @@ class _SessionListViewState extends State<SessionListView> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis),
           ),
+          if (agent.term.isNotEmpty) ...[
+            const SizedBox(width: 5),
+            _action(t, '⏵', 'Jump to terminal',
+                () => context.read<WindowService>().jumpToTerminal(agent.term)),
+          ],
         ]),
       ),
     );

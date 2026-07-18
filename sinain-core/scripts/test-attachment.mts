@@ -86,6 +86,23 @@ check("done run produces deterministic receipt", () => {
   });
 });
 
+check("fact cursor starts empty then consumes only fresh receipts", () => {
+  const start = Date.now();
+  const h = harness([{ id: "w1", threadId: "thread-one", label: "Work", startTs: start - 100, paused: false }]);
+  h.event("reader", start);
+  equal(h.registry.consumeFactLines("reader", (thread, since) => h.coordinator.receiptFactsSince(thread, since), start + 10), []);
+  h.event("worker", start + 20);
+  h.registry.handleEvent({
+    session_id: "worker", source: "claude", hook_event_name: "Stop",
+    message: "CI ✓ on main", ts: start + 40,
+  });
+  h.coordinator.sync();
+  equal(h.registry.consumeFactLines("reader", (thread, since) => h.coordinator.receiptFactsSince(thread, since), start + 50), [
+    "agent: codex — project — CI ✓ on main (1m)",
+  ]);
+  equal(h.registry.consumeFactLines("reader", (thread, since) => h.coordinator.receiptFactsSince(thread, since), start + 60), []);
+});
+
 check("wrap detaches live run without same-thread reattachment", () => {
   const active: ActiveSession[] = [
     { id: "w1", threadId: "thread-one", label: "Work", startTs: 100, paused: false },

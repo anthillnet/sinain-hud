@@ -26,6 +26,16 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
     }
 
     func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        // Terminal focus is independent of the overlay window and deliberately
+        // best-effort: stale session hints must never surface an error to Dart.
+        if call.method == "jumpToTerminal" {
+            let args = call.arguments as? [String: Any]
+            let term = args?["term"] as? [String: Any] ?? [:]
+            jumpToTerminal(term)
+            result(nil)
+            return
+        }
+
         guard let window = NSApplication.shared.windows.first else {
             result(FlutterError(code: "NO_WINDOW",
                               message: "No window available",
@@ -394,6 +404,69 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         default:
             result(FlutterMethodNotImplemented)
+        }
+    }
+
+    // MARK: - Terminal jump
+
+    private func jumpToTerminal(_ term: [String: Any]) {
+        func hint(_ key: String) -> String? {
+            guard let value = term[key] as? String, !value.isEmpty else { return nil }
+            return value
+        }
+
+        if let pane = hint("TMUX_PANE") {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                task.arguments = ["tmux", "select-pane", "-t", pane]
+                task.standardOutput = FileHandle.nullDevice
+                task.standardError = FileHandle.nullDevice
+                try? task.run()
+            }
+        }
+
+        if let sessionId = hint("ITERM_SESSION_ID") {
+            let escaped = sessionId
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            let source = """
+            tell application "iTerm2"
+              activate
+              repeat with w in windows
+                repeat with t in tabs of w
+                  repeat with s in sessions of t
+                    if unique ID of s is "\(escaped)" then
+                      select t
+                      select s
+                      return
+                    end if
+                  end repeat
+                end repeat
+              end repeat
+            end tell
+            """
+            DispatchQueue.global(qos: .userInitiated).async {
+                NSAppleScript(source: source)?.executeAndReturnError(nil)
+            }
+            return
+        }
+
+        if hint("TERM_SESSION_ID") != nil {
+            NSWorkspace.shared.launchApplication(withBundleIdentifier: "com.apple.Terminal",
+                                                 options: [.default],
+                                                 additionalEventParamDescriptor: nil,
+                                                 launchIdentifier: nil)
+            return
+        }
+
+        if let bundleId = hint("__CFBundleIdentifier"),
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: appURL,
+                                               configuration: configuration,
+                                               completionHandler: nil)
         }
     }
 

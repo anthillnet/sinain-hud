@@ -25,6 +25,7 @@ export function shortAgentInput(input: unknown, max = 120): string {
 
 export class AgentSessionRegistry {
   private sessions = new Map<string, AgentSession>();
+  private factFetchAt = new Map<string, number>();
   private changeCb: (() => void) | null = null;
 
   onChange(cb: () => void): void {
@@ -115,6 +116,20 @@ export class AgentSessionRegistry {
     if (!session || session.threadId === threadId) return;
     session.threadId = threadId;
     this.changeCb?.();
+  }
+
+  /** Consume facts queued for this agent's attached thread. The first fetch
+   * establishes the cursor so an agent never inherits stale receipts. */
+  consumeFactLines(
+    sessionId: string,
+    linesSince: (threadId: string, since: number) => string[],
+    now = Date.now(),
+  ): string[] {
+    const session = this.sessions.get(sessionId);
+    const previous = this.factFetchAt.get(sessionId);
+    this.factFetchAt.set(sessionId, now);
+    if (!session?.threadId || previous === undefined) return [];
+    return linesSince(session.threadId, previous);
   }
 
   detachThread(threadId: string): void {

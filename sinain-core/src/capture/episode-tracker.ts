@@ -18,6 +18,7 @@
  * is the OfferManager's job — this only draws the episode boundary.
  */
 
+import { basename } from "node:path";
 import { deriveProject } from "./thread-identity.js";
 
 const MINUTE = 60_000;
@@ -75,7 +76,19 @@ export class EpisodeTracker {
   observe(app: string | undefined, windowTitle: string | undefined, ts: number): void {
     if (!app || app === "unknown") return;
     const { key, label } = deriveProject(app, windowTitle ?? "");
+    this.observeThread(key, label, ts);
+  }
 
+  /** Feed one cwd-derived agent-launch signal through the same candidate
+   *  detector as attended screen events. One launch can seed an episode or a
+   *  pending switch, but cannot by itself qualify either one. */
+  noteAgentLaunch(cwd: string, ts = Date.now()): void {
+    const label = basename(cwd);
+    if (!label) return;
+    this.observeThread(`proj:${label.toLowerCase()}`, label, ts);
+  }
+
+  private observeThread(key: string, label: string, ts: number): void {
     if (this.startTs === 0) {
       this.start(key, label, ts);
       return;

@@ -12,6 +12,7 @@ class AgentSession {
   final DateTime lastEventAt;
   final DateTime? endedAt;
   final String? summary;
+  final Map<String, dynamic> term;
 
   const AgentSession({
     required this.sessionId,
@@ -27,6 +28,7 @@ class AgentSession {
     this.toolLine,
     this.endedAt,
     this.summary,
+    this.term = const {},
   });
 
   factory AgentSession.fromJson(Map<String, dynamic> json) {
@@ -46,6 +48,9 @@ class AgentSession {
       lastEventAt: _dateFromEpoch(json['lastEventAt']) ?? startedAt,
       endedAt: _dateFromEpoch(json['endedAt']),
       summary: json['summary'] as String?,
+      term: json['term'] is Map
+          ? Map<String, dynamic>.from(json['term'] as Map)
+          : const {},
     );
   }
 

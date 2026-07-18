@@ -7,6 +7,7 @@ import { FeedBuffer } from "../src/buffers/feed-buffer.js";
 import { SenseBuffer } from "../src/buffers/sense-buffer.js";
 import { WsHandler } from "../src/overlay/ws-handler.js";
 import { AgentSessionRegistry } from "../src/agent-sessions/registry.js";
+import { AttachmentCoordinator, type ActiveSession } from "../src/agent-sessions/attachment.js";
 import { ApprovalManager } from "../src/agent-sessions/approvals.js";
 import { setupCommands } from "../src/overlay/commands.js";
 
@@ -20,9 +21,9 @@ function check(name: string, ok: boolean, note?: string) {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${note ? ` — ${note}` : ""}`);
 }
 
-function pExecFileWithStdin(frame: object): Promise<{ stdout: string }> {
+function pExecFileWithStdin(frame: object, source = "codex"): Promise<{ stdout: string }> {
   return new Promise((resolve) => {
-    const child = execFile("node", [BRIDGE, "--source", "codex"], {
+    const child = execFile("node", [BRIDGE, "--source", source], {
       env: { ...process.env, SINAIN_PORT: String(PORT) },
       timeout: 150_000,
     }, (_err, stdout) => resolve({ stdout: (stdout ?? "").toString().trim() }));
@@ -35,12 +36,17 @@ async function main() {
   const senseBuffer = new (SenseBuffer as any)();
   const wsHandler = new WsHandler();
   const registry = new AgentSessionRegistry();
+  const activeSessions: ActiveSession[] = [
+    { id: "work-1", threadId: "thread-one", label: "Agent bridge", startTs: 0, paused: false },
+  ];
+  const attachment = new AttachmentCoordinator(registry, () => activeSessions, () => {});
   const approvals = new ApprovalManager((request) => {
     registry.finishApproval(request.sessionId, "ask", request.command);
   });
   wsHandler.setAgentApprovalSupplier(() => approvals.pending());
   let flush = false;
   registry.onChange(() => {
+    attachment.sync();
     if (flush) return;
     flush = true;
     queueMicrotask(() => {
@@ -52,7 +58,11 @@ async function main() {
   const config: any = { port: PORT, host: "127.0.0.1", agentApproveTimeoutMs: 4000, agentEnrichEnabled: true };
   const deps: any = {
     config, feedBuffer, senseBuffer, wsHandler,
-    agentSessions: { registry, approvals },
+    agentSessions: {
+      registry, approvals,
+      activeSessions: () => activeSessions,
+      factLinesSince: (threadId: string, since: number) => attachment.receiptFactsSince(threadId, since),
+    },
     onSenseEvent: () => {}, onFeedPost: () => {}, getAgentDigest: () => "",
   };
   setupCommands({
@@ -161,6 +171,35 @@ async function main() {
   check("Stop → done + summary", doneSnap.sessions[0].summary === "published bridge v0.3");
   const http = await fetch(`http://127.0.0.1:${PORT}/agent/sessions`).then((r) => r.json());
   check("GET /agent/sessions", http.sessions.length === 1 && http.working === 0);
+
+  // Facts are one-shot per requesting session and scoped to its attached thread.
+  await pExecFileWithStdin({ session_id: "reader", hook_event_name: "SessionStart", cwd: process.cwd() });
+  const factsUrl = `http://127.0.0.1:${PORT}/agent/enrich?mode=facts&session_id=reader&cwd=${encodeURIComponent(process.cwd())}`;
+  const factsEmpty = await fetch(factsUrl).then((r) => r.json()) as any;
+  await pExecFileWithStdin({ session_id: "worker", hook_event_name: "SessionStart", cwd: process.cwd() });
+  await pExecFileWithStdin({ session_id: "worker", hook_event_name: "Stop", message: "CI ✓ on main" });
+  const factsFresh = await fetch(factsUrl).then((r) => r.json()) as any;
+  const factsConsumed = await fetch(factsUrl).then((r) => r.json()) as any;
+  check(
+    "facts mode returns empty then one fresh Stop receipt",
+    factsEmpty.brief === "" && factsFresh.brief.includes("CI ✓ on main") && factsConsumed.brief === "" && factsFresh.brief.length <= 300,
+    JSON.stringify({ factsEmpty, factsFresh, factsConsumed }),
+  );
+
+  await pExecFileWithStdin({ session_id: "worker-2", hook_event_name: "SessionStart", cwd: process.cwd() });
+  await pExecFileWithStdin({ session_id: "worker-2", hook_event_name: "Stop", message: "release checks passed" });
+  const { stdout: factHookOut } = await pExecFileWithStdin({
+    session_id: "reader", hook_event_name: "PreToolUse", cwd: process.cwd(),
+    tool_name: "Bash", tool_input: { command: "git status" },
+  }, "claude");
+  let factHook: any;
+  try { factHook = JSON.parse(factHookOut); } catch { /* checked below */ }
+  check(
+    "Claude PreToolUse prints fresh facts as additionalContext",
+    factHook?.hookSpecificOutput?.hookEventName === "PreToolUse"
+      && factHook?.hookSpecificOutput?.additionalContext?.includes("release checks passed"),
+    factHookOut,
+  );
 
   // 6. Late-joining client replays snapshot
   const ws2 = new WebSocket(`ws://127.0.0.1:${PORT}`);
