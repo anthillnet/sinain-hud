@@ -226,7 +226,16 @@ class OverlayShellState extends State<OverlayShell> {
     // Native drag/resize callbacks (macOS only)
     if (_isMacOS) {
       _windowService.setupNativeCallbacks(
-        onDragDone: (x, y) => _settingsService.setEyePosition(x, y),
+        // Eye drags may end in the notch zone → park as the island; the
+        // zone check + persist both live in _onEyeDragEnd. Other window
+        // drags (chat, wizard) keep the plain position persist.
+        onDragDone: (x, y) {
+          if (_state == HudState.eye && !_parked) {
+            _onEyeDragEnd();
+          } else {
+            _settingsService.setEyePosition(x, y);
+          }
+        },
         onResizeDone: (w, h) => _settingsService.setChatSize(w, h),
       );
     }
