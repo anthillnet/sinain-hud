@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { AgentEventFrame, CoreConfig, SenseEvent } from "./types.js";
 import type { AgentSessionRegistry } from "./agent-sessions/registry.js";
 import type { ApprovalManager } from "./agent-sessions/approvals.js";
+import { composeEnrichBrief } from "./agent-sessions/enrich.js";
 import type { Profiler } from "./profiler.js";
 import type { CostTracker } from "./cost/tracker.js";
 import type { FeedbackStore } from "./learning/feedback-store.js";
@@ -169,7 +170,11 @@ export interface ServerDeps {
   feedBuffer: FeedBuffer;
   senseBuffer: SenseBuffer;
   wsHandler: WsHandler;
-  agentSessions?: { registry: AgentSessionRegistry; approvals: ApprovalManager };
+  agentSessions?: {
+    registry: AgentSessionRegistry;
+    approvals: ApprovalManager;
+    activeSessions?: () => { id: string; threadId: string; label: string; startTs: number; paused: boolean }[];
+  };
   profiler?: Profiler;
   costTracker?: CostTracker;
   onSenseEvent: (event: SenseEvent) => void;
@@ -991,6 +996,25 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /agent ──
+      if (req.method === "GET" && url.pathname === "/agent/enrich") {
+        if (config.agentEnrichEnabled === false) {
+          res.end(JSON.stringify({ ok: true, brief: "" }));
+          return;
+        }
+        const sessionId = url.searchParams.get("session_id") || "";
+        const cwd = url.searchParams.get("cwd") || "";
+        const brief = deps.agentSessions
+          ? await composeEnrichBrief({
+              registry: deps.agentSessions.registry,
+              activeSessions: deps.agentSessions.activeSessions,
+              getSenseContext: () => senseBuffer.getStructuredContext({ limit: 5, includeDeltas: true, includeSummary: true }),
+              searchEntities: deps.searchEntities,
+            }, sessionId, cwd)
+          : "";
+        res.end(JSON.stringify({ ok: true, brief }));
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/agent/event") {
         if (!deps.agentSessions) {
           res.writeHead(503);

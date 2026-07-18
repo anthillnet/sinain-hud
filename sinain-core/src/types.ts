@@ -1073,6 +1073,7 @@ export interface CoreConfig {
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AnalysisConfig;
   agentApproveTimeoutMs: number;
+  agentEnrichEnabled: boolean;
   claudeUsageEnabled: boolean;
   claudeUsagePollMs: number;
   regionSlmConfig: RegionSlmConfig;

@@ -2030,7 +2030,11 @@ async function main() {
     feedBuffer,
     senseBuffer,
     wsHandler,
-    agentSessions: { registry: agentSessionRegistry, approvals: approvalManager },
+    agentSessions: {
+      registry: agentSessionRegistry,
+      approvals: approvalManager,
+      activeSessions: () => sessionSense.activeSessions(),
+    },
     profiler,
     costTracker,
     feedbackStore: feedbackStore ?? undefined,

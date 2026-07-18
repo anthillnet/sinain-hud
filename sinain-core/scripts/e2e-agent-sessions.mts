@@ -49,7 +49,7 @@ async function main() {
     });
   });
 
-  const config: any = { port: PORT, host: "127.0.0.1", agentApproveTimeoutMs: 4000 };
+  const config: any = { port: PORT, host: "127.0.0.1", agentApproveTimeoutMs: 4000, agentEnrichEnabled: true };
   const deps: any = {
     config, feedBuffer, senseBuffer, wsHandler,
     agentSessions: { registry, approvals },
@@ -90,6 +90,18 @@ async function main() {
   await pExecFileWithStdin({ session_id: "s1", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } });
   const snap1 = await waitFor((m) => m.type === "agent_sessions" && m.working === 1 && m.sessions?.[0]?.toolLine?.includes("npm test"));
   check("SessionStart+PreToolUse → agent_sessions broadcast", !!snap1, snap1.sessions[0].name);
+
+  const enrich = await fetch(`http://127.0.0.1:${PORT}/agent/enrich?session_id=s1&cwd=${encodeURIComponent(process.cwd())}`).then((r) => r.json()) as any;
+  check("GET /agent/enrich never throws", enrich.ok === true && (enrich.brief.includes("Other agents") || enrich.brief.includes("[sinain] Ambient context")));
+
+  const { stdout: enrichOut } = await pExecFileWithStdin({ session_id: "s1", hook_event_name: "SessionStart", cwd: process.cwd() });
+  if (enrich.brief) {
+    let hookOutput: any;
+    try { hookOutput = JSON.parse(enrichOut); } catch { /* checked below */ }
+    check("bridge prints SessionStart additionalContext", hookOutput?.hookSpecificOutput?.hookEventName === "SessionStart" && !!hookOutput?.hookSpecificOutput?.additionalContext, enrichOut);
+  } else {
+    check("bridge keeps stdout empty for empty enrich brief", enrichOut === "", "empty-brief branch");
+  }
 
   // 2. Blocking PermissionRequest → overlay approves → bridge unblocks with allow
   const approvedP = pExecFileWithStdin({ session_id: "s1", hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "npm publish --access public" } });

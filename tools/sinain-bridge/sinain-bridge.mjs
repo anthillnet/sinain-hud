@@ -70,6 +70,17 @@ async function post(url, frame, timeout, readJson = false) {
   }
 }
 
+async function get(url, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return { response, body: await response.json() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const input = await readInput();
 const source = argValue('--source', 'claude');
 const event = argValue('--event');
@@ -141,6 +152,22 @@ if (frame.hook_event_name === 'PermissionRequest') {
     await post(`${baseUrl}/agent/event`, frame, 1500);
   } catch {
     // Lifecycle hooks must never disrupt the agent.
+  }
+  if (frame.hook_event_name === 'SessionStart' && ['claude', 'codex'].includes(source) && process.env.SINAIN_ENRICH !== '0') {
+    try {
+      const params = new URLSearchParams({
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 700);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Enrichment is best-effort and must not disrupt session startup.
+    }
   }
   if (process.argv.includes('--cursor-ack')) {
     console.log(JSON.stringify({ permission: 'allow' }));
