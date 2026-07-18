@@ -108,6 +108,16 @@ async function main() {
     audioCanonical && (audioVisible || audioSuppressed),
     audioVisible ? "visible branch" : audioSuppressed ? "privacy-suppressed branch" : "missing canonical audio lines",
   );
+  const refresh = await fetch(`http://127.0.0.1:${PORT}/agent/enrich?mode=refresh&session_id=s1&cwd=${encodeURIComponent(process.cwd())}`).then((r) => r.json()) as any;
+  check(
+    "GET /agent/enrich?mode=refresh returns situational sections only",
+    refresh.ok === true
+      && refresh.brief.length <= 700
+      && !refresh.brief.includes("Other agents in flight:")
+      && !refresh.brief.includes("Known about ")
+      && !refresh.brief.includes("Build-Context brief:"),
+    refresh.brief,
+  );
 
   const { stdout: enrichOut } = await pExecFileWithStdin({ session_id: "s1", hook_event_name: "SessionStart", cwd: process.cwd() });
   if (enrich.brief) {

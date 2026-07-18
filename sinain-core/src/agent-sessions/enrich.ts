@@ -14,6 +14,7 @@ export interface EnrichDeps {
   registry: AgentSessionRegistry;
   activeSessions?: () => ActiveSession[];
   contextWindow?: () => ContextWindow;
+  sessionAssist?: (threadId: string) => { goal: string; steps: string[] } | null;
   searchEntities?: (q: string, limit: number) => Promise<unknown>;
 }
 
@@ -43,6 +44,7 @@ export async function composeEnrichBrief(
   deps: EnrichDeps,
   sessionId: string,
   cwd: string,
+  mode: "full" | "refresh" = "full",
 ): Promise<string> {
   const sections: string[] = [HEADER];
   let sessions: ReturnType<AgentSessionRegistry["snapshot"]> = [];
@@ -56,10 +58,17 @@ export async function composeEnrichBrief(
       const minutes = Math.max(0, Math.floor((Date.now() - working.startTs) / 60_000));
       const attached = self?.threadId === working.threadId;
       sections.push(`Working session: "${working.label}" — ${minutes}m active${attached ? ", this agent run is attached to it" : " (not attached)"}`);
+      if (attached) {
+        const assist = deps.sessionAssist?.(working.threadId);
+        if (assist && (assist.goal || assist.steps.length)) {
+          const parts = [assist.goal ? `goal ${assist.goal}` : "", assist.steps.length ? `next ${assist.steps.join("; ")}` : ""].filter(Boolean);
+          sections.push(cap(`Card: ${parts.join(" · ")}`, 300));
+        }
+      }
     }
   } catch { /* optional context */ }
 
-  try {
+  if (mode === "full") try {
     const selfCwd = cwd ? resolve(cwd) : "";
     const others = sessions.filter((session) => session.state !== "done" && session.sessionId !== sessionId).slice(0, 3);
     if (others.length) {
@@ -82,7 +91,7 @@ export async function composeEnrichBrief(
     }
   } catch { /* optional context */ }
 
-  try {
+  if (mode === "full") try {
     const name = cwd ? basename(resolve(cwd)) : "";
     if (name && deps.searchEntities) {
       const snippets = knowledgeSnippets(await deps.searchEntities(name, 3));
@@ -90,7 +99,8 @@ export async function composeEnrichBrief(
     }
   } catch { /* optional context */ }
 
-  const bodyBudget = 1800 - FOOTER.length - 1;
+  const totalBudget = mode === "refresh" ? 700 : 1800;
+  const bodyBudget = totalBudget - FOOTER.length - 1;
   return `${cap(sections.join("\n"), bodyBudget)}\n${FOOTER}`;
 }
 

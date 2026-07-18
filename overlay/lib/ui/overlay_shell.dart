@@ -48,15 +48,24 @@ class OverlayShellState extends State<OverlayShell> {
   // The bar grows when the amber "· N waiting" segment is present.
   static const double _islandBarWaitingWidth = 284;
   double _islandBarWidthFor(WebSocketService ws) {
+    final hasEnrich = _islandEnrichLabel != null;
+    final hasSave = _saveOffer != null;
+    final tracked = _warmChip;
     if (_notchHeight > 0) {
       final rightWing = ws.agentWaiting > 0
           ? 236.0
-          : ws.agentWorking > 0
-              ? 132.0
-              : 0.0;
+          : hasEnrich
+              ? 286.0
+              : hasSave || tracked != null
+                  ? 210.0
+                  : ws.agentWorking > 0
+                      ? 132.0
+                      : 0.0;
       return 46 + _notchWidth + rightWing;
     }
     if (ws.agentWaiting > 0) return _islandBarWaitingWidth;
+    if (hasEnrich) return 330;
+    if (hasSave || tracked != null) return 250;
     // Pinned with no agents: eye-only pill.
     if (ws.agentWorking == 0) return 46;
     return _islandBarWidth;
@@ -175,6 +184,8 @@ class OverlayShellState extends State<OverlayShell> {
   List<RangeOption> _rangeOptions = const [];
   ContextBrief? _activeBrief;
   EnrichCard? _activeEnrich;
+  String? _islandEnrichLabel;
+  Timer? _enrichChipTimer;
   SaveReceipt? _saveReceipt;
   StreamSubscription<ContextBrief>? _briefSub;
   StreamSubscription<EnrichCard>? _enrichSub;
@@ -420,8 +431,29 @@ class OverlayShellState extends State<OverlayShell> {
     });
     _enrichSub = ws.enrichStream.listen((c) {
       if (!mounted) return;
-      setState(() => _activeEnrich = c);
-      _enterCardMode();
+      _enrichChipTimer?.cancel();
+      setState(() {
+        _activeEnrich = c;
+        if (_parked && c.status != CardStatus.error) {
+          _islandEnrichLabel = _warmChip?.label ?? 'session';
+        }
+      });
+      if (_parked) _scheduleIslandResize();
+      if (_parked) {
+        if (c.status == CardStatus.ready) {
+          _enrichChipTimer = Timer(const Duration(seconds: 6), () {
+            if (mounted && _activeEnrich?.requestId == c.requestId) {
+              setState(() => _islandEnrichLabel = null);
+              _scheduleIslandResize();
+            }
+          });
+        } else if (c.status == CardStatus.error) {
+          setState(() => _islandEnrichLabel = null);
+          _scheduleIslandResize();
+        }
+      } else {
+        _enterCardMode();
+      }
     });
     _receiptSub = ws.saveReceiptStream.listen((r) {
       if (!mounted) return;
@@ -1621,6 +1653,7 @@ class OverlayShellState extends State<OverlayShell> {
     _contentResetTimer?.cancel();
     _briefSub?.cancel();
     _enrichSub?.cancel();
+    _enrichChipTimer?.cancel();
     _receiptSub?.cancel();
     _voiceSub?.cancel();
     _offerSub?.cancel();
@@ -1979,8 +2012,11 @@ class OverlayShellState extends State<OverlayShell> {
   void _showSaveOffer(SaveOffer o) {
     _offerExpiryTimer?.cancel();
     setState(() => _saveOffer = o);
+    if (_parked) _scheduleIslandResize();
     _offerExpiryTimer = Timer(Duration(seconds: o.expirySeconds), _expireOffer);
-    if (_state != HudState.hidden) _enterCardMode(); // no-op in chat
+    if (_state != HudState.hidden && !_parked) {
+      _enterCardMode(); // no-op in chat
+    }
   }
 
   /// Accept: the same save lifecycle as the manual gesture, offered_save
@@ -2023,6 +2059,7 @@ class OverlayShellState extends State<OverlayShell> {
   void _clearOffer({bool exitSurfaces = true}) {
     _offerExpiryTimer?.cancel();
     setState(() => _saveOffer = null);
+    if (_parked) _scheduleIslandResize();
     if (exitSurfaces) _maybeExitCardMode();
   }
 
@@ -2640,6 +2677,10 @@ class OverlayShellState extends State<OverlayShell> {
       child: AgentIslandBar(
         working: ws.agentWorking,
         waiting: ws.agentWaiting,
+        trackedLabel: _warmChip?.label,
+        trackedActiveMs: _warmChip?.activeMs ?? 0,
+        saveOfferLabel: _saveOffer?.threadLabel ?? _saveOffer?.coverage,
+        enrichLabel: _islandEnrichLabel,
         accent: _accentColor,
         notchGap: _notchWidth,
         notchHeight: _notchHeight,
@@ -2663,6 +2704,8 @@ class OverlayShellState extends State<OverlayShell> {
             _collapseIsland();
           }
         },
+        onSaveOfferTap: () => _raiseParkedCard(clearEnrich: false),
+        onEnrichTap: () => _raiseParkedCard(clearEnrich: true),
       ),
     );
     return MouseRegion(
@@ -2719,6 +2762,22 @@ class OverlayShellState extends State<OverlayShell> {
         ]),
       ),
     );
+  }
+
+  Future<void> _raiseParkedCard({required bool clearEnrich}) async {
+    if (clearEnrich) {
+      _enrichChipTimer?.cancel();
+      setState(() => _islandEnrichLabel = null);
+    }
+    await _unparkIsland();
+    if (!mounted) return;
+    _enterCardMode();
+  }
+
+  void _scheduleIslandResize() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _parked) _snapIslandToNotch();
+    });
   }
 
   Widget _buildAgentStack(WebSocketService ws) {

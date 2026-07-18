@@ -2045,6 +2045,7 @@ async function main() {
       registry: agentSessionRegistry,
       approvals: approvalManager,
       activeSessions: () => sessionSense.activeSessions(),
+      sessionAssist: (threadId) => sessionSense.assistForThread(threadId),
     },
     profiler,
     costTracker,

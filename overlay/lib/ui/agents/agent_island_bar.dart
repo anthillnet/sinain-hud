@@ -5,6 +5,10 @@ import '../feed/idle_animation.dart';
 class AgentIslandBar extends StatefulWidget {
   final int working;
   final int waiting;
+  final String? trackedLabel;
+  final int trackedActiveMs;
+  final String? saveOfferLabel;
+  final String? enrichLabel;
 
   /// Agent-liveness color — the user's accent from settings (default green).
   final Color accent;
@@ -12,6 +16,8 @@ class AgentIslandBar extends StatefulWidget {
   final GestureDragUpdateCallback onEyeDragUpdate;
   final GestureDragEndCallback onEyeDragEnd;
   final VoidCallback onCountsTap;
+  final VoidCallback? onSaveOfferTap;
+  final VoidCallback? onEnrichTap;
   final double notchGap;
   final double notchHeight;
   final double barHeight;
@@ -20,11 +26,17 @@ class AgentIslandBar extends StatefulWidget {
     super.key,
     required this.working,
     required this.waiting,
+    this.trackedLabel,
+    this.trackedActiveMs = 0,
+    this.saveOfferLabel,
+    this.enrichLabel,
     required this.accent,
     required this.onEyeTap,
     required this.onEyeDragUpdate,
     required this.onEyeDragEnd,
     required this.onCountsTap,
+    this.onSaveOfferTap,
+    this.onEnrichTap,
     this.notchGap = 0,
     this.notchHeight = 0,
     this.barHeight = 34,
@@ -73,6 +85,23 @@ class _AgentIslandBarState extends State<AgentIslandBar>
         child: const IdleAnimation(size: 14),
       ),
     );
+    final primary = _buildPrimary();
+    final enrich = widget.waiting > 0 || widget.enrichLabel == null
+        ? null
+        : _IslandSegment(
+            color: const Color(0xFF4CAF6E),
+            label: 'enrich? · ${widget.enrichLabel}',
+            onTap: widget.onEnrichTap,
+          );
+    final content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (primary != null) primary,
+        if (primary != null && enrich != null)
+          Container(width: 1, height: 16, color: const Color(0x1FFFFFFF)),
+        if (enrich != null) enrich,
+      ],
+    );
     final counts = GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onCountsTap,
@@ -81,82 +110,84 @@ class _AgentIslandBarState extends State<AgentIslandBar>
           horizontal: notchMode ? 8 : 10,
           vertical: notchMode || widget.barHeight >= 34 ? 8 : 3,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedBuilder(
-              animation: _halo,
-              builder: (context, child) {
-                final halo = Curves.easeOut.transform(_halo.value);
-                return SizedBox(
-                  width: 17,
-                  height: 17,
-                  child: Stack(alignment: Alignment.center, children: [
-                    Transform.scale(
-                      scale: 0.6 + halo * 1.6,
-                      child: Opacity(
-                        opacity: 1 - halo,
-                        child: Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: widget.accent),
+        child: widget.waiting > 0
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedBuilder(
+                    animation: _halo,
+                    builder: (context, child) {
+                      final halo = Curves.easeOut.transform(_halo.value);
+                      return SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: Stack(alignment: Alignment.center, children: [
+                          Transform.scale(
+                            scale: 0.6 + halo * 1.6,
+                            child: Opacity(
+                              opacity: 1 - halo,
+                              child: Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: widget.accent),
+                                ),
+                              ),
+                            ),
                           ),
+                          child!,
+                        ]),
+                      );
+                    },
+                    child: Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: widget.accent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${widget.working} working',
+                    style: const TextStyle(
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 10,
+                      color: Color(0xFFE8EAEE),
+                    ),
+                  ),
+                  if (widget.waiting > 0) ...[
+                    const SizedBox(width: 7),
+                    Container(
+                      width: 2,
+                      height: 2,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF6C707E),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    AnimatedBuilder(
+                      animation: _pulse,
+                      builder: (context, child) => Opacity(
+                        opacity: 1 - _pulse.value * 0.65,
+                        child: child,
+                      ),
+                      child: Text(
+                        '${widget.waiting} waiting',
+                        style: const TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 10,
+                          color: Color(0xFFD9A21B),
                         ),
                       ),
                     ),
-                    child!,
-                  ]),
-                );
-              },
-              child: Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: widget.accent,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              '${widget.working} working',
-              style: const TextStyle(
-                fontFamily: 'JetBrainsMono',
-                fontSize: 10,
-                color: Color(0xFFE8EAEE),
-              ),
-            ),
-            if (widget.waiting > 0) ...[
-              const SizedBox(width: 7),
-              Container(
-                width: 2,
-                height: 2,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF6C707E),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 7),
-              AnimatedBuilder(
-                animation: _pulse,
-                builder: (context, child) => Opacity(
-                  opacity: 1 - _pulse.value * 0.65,
-                  child: child,
-                ),
-                child: Text(
-                  '${widget.waiting} waiting',
-                  style: const TextStyle(
-                    fontFamily: 'JetBrainsMono',
-                    fontSize: 10,
-                    color: Color(0xFFD9A21B),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
+                  ],
+                ],
+              )
+            : content,
       ),
     );
     return Container(
@@ -183,7 +214,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
         children: [
           eye,
           if (notchMode) SizedBox(width: widget.notchGap),
-          if (widget.working + widget.waiting > 0) ...[
+          if (widget.waiting > 0 || primary != null || enrich != null) ...[
             if (!notchMode)
               Container(width: 1, height: 16, color: const Color(0x1FFFFFFF)),
             if (notchMode)
@@ -198,6 +229,100 @@ class _AgentIslandBarState extends State<AgentIslandBar>
               counts,
           ],
         ],
+      ),
+    );
+  }
+
+  Widget? _buildPrimary() {
+    if (widget.waiting > 0) return null; // waiting uses the animated legacy row
+    if (widget.saveOfferLabel != null) {
+      return _IslandSegment(
+        color: const Color(0xFF4CAF6E),
+        label: 'save? ${widget.saveOfferLabel}',
+        pulse: _pulse,
+        onTap: widget.onSaveOfferTap,
+      );
+    }
+    if (widget.trackedLabel != null) {
+      final suffix = widget.working > 0
+          ? '${widget.working} working'
+          : _elapsed(widget.trackedActiveMs);
+      return _IslandSegment(
+        color: const Color(0xFF7A56D6),
+        label: '${widget.trackedLabel} · $suffix',
+        onTap: widget.onCountsTap,
+      );
+    }
+    if (widget.working > 0) {
+      return _IslandSegment(
+        color: widget.accent,
+        label: '${widget.working} working',
+        pulse: _halo,
+        halo: true,
+        onTap: widget.onCountsTap,
+      );
+    }
+    return null;
+  }
+
+  String _elapsed(int milliseconds) {
+    final minutes = (milliseconds / 60000).floor();
+    if (minutes < 60) return '${minutes.clamp(1, 59)}m';
+    final hours = minutes ~/ 60;
+    final remainder = minutes % 60;
+    return remainder == 0 ? '${hours}h' : '${hours}h ${remainder}m';
+  }
+}
+
+class _IslandSegment extends StatelessWidget {
+  const _IslandSegment({
+    required this.color,
+    required this.label,
+    this.onTap,
+    this.pulse,
+    this.halo = false,
+  });
+
+  final Color color;
+  final String label;
+  final VoidCallback? onTap;
+  final Animation<double>? pulse;
+  final bool halo;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget dot = Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+    if (pulse != null) {
+      dot = AnimatedBuilder(
+        animation: pulse!,
+        builder: (context, child) => Opacity(
+          opacity: halo ? 1 : 0.55 + pulse!.value * 0.45,
+          child: child,
+        ),
+        child: dot,
+      );
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          dot,
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(
+                fontFamily: 'JetBrainsMono',
+                fontSize: 10,
+                color: color == const Color(0xFF4CAF6E)
+                    ? const Color(0xFFCDE8D4)
+                    : const Color(0xFFE8EAEE),
+              )),
+        ]),
       ),
     );
   }

@@ -114,6 +114,50 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('tracked-label state renders violet label pill', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AgentIslandBar(
+        working: 0,
+        waiting: 0,
+        trackedLabel: 'visa-app',
+        trackedActiveMs: const Duration(minutes: 25).inMilliseconds,
+        accent: const Color(0xFF3369D6),
+        onEyeTap: () {},
+        onEyeDragUpdate: (_) {},
+        onEyeDragEnd: (_) {},
+        onCountsTap: () {},
+      ),
+    ));
+
+    expect(find.text('visa-app · 25m'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) =>
+          widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration as BoxDecoration).color ==
+              const Color(0xFF7A56D6)),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('save-offer state renders green save pill', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AgentIslandBar(
+        working: 0,
+        waiting: 0,
+        saveOfferLabel: 'goal met · 6 facts',
+        accent: const Color(0xFF3369D6),
+        onEyeTap: () {},
+        onEyeDragUpdate: (_) {},
+        onEyeDragEnd: (_) {},
+        onCountsTap: () {},
+      ),
+    ));
+
+    final label = tester.widget<Text>(find.text('save? goal met · 6 facts'));
+    expect(label.style?.color, const Color(0xFFCDE8D4));
+  });
+
   testWidgets('approval card renders request and sends allow reply',
       (tester) async {
     final ws = _RecordingWebSocketService();
@@ -130,16 +174,22 @@ void main() {
       ChangeNotifierProvider<WebSocketService>.value(
         value: ws,
         child: MaterialApp(
-          home: Scaffold(backgroundColor: Colors.black, body: Center(child: SizedBox(width: 320, child: AgentApprovalCard(
-            request: request,
-            onReply: (behavior) => ws.sendAgentApprovalReply(
-              request.id,
-              behavior,
-            ),
-            onReplyWithAnswer: (behavior, {answer}) =>
-                ws.sendAgentApprovalReply(request.id, behavior, answer: answer),
-          ),
-        ))),
+          home: Scaffold(
+              backgroundColor: Colors.black,
+              body: Center(
+                  child: SizedBox(
+                width: 320,
+                child: AgentApprovalCard(
+                  request: request,
+                  onReply: (behavior) => ws.sendAgentApprovalReply(
+                    request.id,
+                    behavior,
+                  ),
+                  onReplyWithAnswer: (behavior, {answer}) =>
+                      ws.sendAgentApprovalReply(request.id, behavior,
+                          answer: answer),
+                ),
+              ))),
         ),
       ),
     );

@@ -150,6 +150,7 @@ if (frame.hook_event_name === 'PermissionRequest') {
     }));
   }
 } else {
+  // PreToolUse fact carry-forward is deferred until analyzer state exists.
   try {
     await post(`${baseUrl}/agent/event`, frame, 1500);
   } catch {
@@ -169,6 +170,23 @@ if (frame.hook_event_name === 'PermissionRequest') {
       }
     } catch {
       // Enrichment is best-effort and must not disrupt session startup.
+    }
+  }
+  if (frame.hook_event_name === 'UserPromptSubmit' && source === 'claude' && process.env.SINAIN_ENRICH_PROMPT === '1') {
+    try {
+      const params = new URLSearchParams({
+        mode: 'refresh',
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 1500);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Per-prompt enrichment is opt-in and silent on every failure.
     }
   }
   if (process.argv.includes('--cursor-ack')) {

@@ -175,6 +175,7 @@ export interface ServerDeps {
     registry: AgentSessionRegistry;
     approvals: ApprovalManager;
     activeSessions?: () => { id: string; threadId: string; label: string; startTs: number; paused: boolean }[];
+    sessionAssist?: (threadId: string) => { goal: string; steps: string[] } | null;
   };
   profiler?: Profiler;
   costTracker?: CostTracker;
@@ -1008,15 +1009,17 @@ export function createAppServer(deps: ServerDeps) {
         }
         const sessionId = url.searchParams.get("session_id") || "";
         const cwd = url.searchParams.get("cwd") || "";
+        const mode = url.searchParams.get("mode") === "refresh" ? "refresh" : "full";
         let brief = deps.agentSessions
           ? await composeEnrichBrief({
               registry: deps.agentSessions.registry,
               activeSessions: deps.agentSessions.activeSessions,
+              sessionAssist: deps.agentSessions.sessionAssist,
               contextWindow: () => buildContextWindow(feedBuffer, senseBuffer, "standard", 10 * 60_000),
               searchEntities: deps.searchEntities,
-            }, sessionId, cwd)
+            }, sessionId, cwd, mode)
           : "";
-        if (brief && deps.agentLlmBrief && deps.isAgentLlmBriefEnabled?.()) {
+        if (mode === "full" && brief && deps.agentLlmBrief && deps.isAgentLlmBriefEnabled?.()) {
           let timeout: ReturnType<typeof setTimeout> | undefined;
           try {
             const cardText = await Promise.race([

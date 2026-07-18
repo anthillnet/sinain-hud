@@ -117,6 +117,9 @@ export class SessionSenseManager {
    *  one session is ever warm; the rest sit paused, each heading toward its
    *  own wrap flow independently. Keyed by session id. */
   private sessions = new Map<string, Session>();
+  /** Latest ready assist per live session, retained only for deterministic
+   *  hook enrichment while that Session Sense session is active. */
+  private assists = new Map<string, SessionAssist>();
   private agentAugments: ((threadId: string) => { working: number; receipts: string[] }) | null = null;
   private agentWrapHook: ((threadId: string) => void) | null = null;
 
@@ -154,6 +157,11 @@ export class SessionSenseManager {
     return [...this.sessions.values()].map((s) => ({
       id: s.id, threadId: s.threadId, label: s.label, startTs: s.startTs, paused: s.paused,
     }));
+  }
+
+  assistForThread(threadId: string): SessionAssist | null {
+    const session = [...this.sessions.values()].find((s) => s.threadId === threadId);
+    return session ? this.assists.get(session.id) ?? null : null;
   }
 
   setAgentAugments(fn: (threadId: string) => { working: number; receipts: string[] }): void {
@@ -494,6 +502,7 @@ export class SessionSenseManager {
     this.broadcastChip(session, "running");
     if (pending.assist) {
       // The nudge already paid for the composition — the chip's ✦ reuses it.
+      this.assists.set(id, pending.assist);
       this.broadcast({
         type: "session_assist", sessionId: id, status: "ready",
         goal: pending.assist.goal, steps: pending.assist.steps, ts: now,
@@ -522,6 +531,7 @@ export class SessionSenseManager {
           this.broadcast({ type: "session_assist", sessionId, status: "error", error: "nothing composed", ts: Date.now() });
           return;
         }
+        this.assists.set(sessionId, assist);
         this.broadcast({
           type: "session_assist", sessionId, status: "ready",
           goal: assist.goal, steps: assist.steps, ts: Date.now(),
@@ -779,6 +789,7 @@ export class SessionSenseManager {
     this.broadcastChip(s, "ended");
     log(TAG, `${s.id}: wrapped (${how}) — saving ${minutes}m over ${apps.join(", ")} → ${saveId}`);
     this.sessions.delete(s.id);
+    this.assists.delete(s.id);
     return saveId;
   }
 
