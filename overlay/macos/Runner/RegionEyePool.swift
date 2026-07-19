@@ -9,6 +9,11 @@ import FlutterMacOS
 /// so they never steal focus and stay invisible to screen capture.
 class RegionEyePool {
     static let eyeSize: CGFloat = 24
+    /// Manual/detected ROI affordances must stay above the notch island, whose
+    /// parked level is screenSaver + 1.
+    private static let roiLevel = NSWindow.Level(
+        rawValue: NSWindow.Level.screenSaver.rawValue + 2
+    )
 
     private var panels: [String: NSPanel] = [:]
     private var previewPanel: NSPanel?
@@ -265,7 +270,7 @@ class RegionEyePool {
                             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
-        panel.level = .floating
+        panel.level = Self.roiLevel
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -350,7 +355,7 @@ class RegionEyePool {
         )
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
-        panel.level = .floating
+        panel.level = Self.roiLevel
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear

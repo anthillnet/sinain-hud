@@ -150,6 +150,7 @@ class OverlayShellState extends State<OverlayShell> {
   Map<String, double>? _islandNotchInfo;
   _IslandView _islandView = _IslandView.bar;
   bool _islandHoverExpanded = false;
+  bool _islandContextMenuOpen = false;
   bool _islandPinned = false;
   Timer? _islandCollapseTimer;
   double _islandDragDistance = 0;
@@ -340,6 +341,14 @@ class OverlayShellState extends State<OverlayShell> {
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
+      // Manual catches use the same lightweight ROI affordance as detected
+      // regions: keep the HUD/island where it is and surface the eye + native
+      // Chat/Term card beside the selection. The menu's enrich flow is the one
+      // exception; it deliberately continues into its context card below.
+      if (!_regionViaMenu) {
+        unawaited(_regionEyes?.showRegionCard(picked.id));
+        return;
+      }
       // Region + minutes (context-menu flow): attach the window brief to this
       // thread BEFORE the first agent turn — commands are ordered on the same
       // socket, so a stash sent now lands before run()'s spawn seed is built.
@@ -814,7 +823,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _onIslandEnter(PointerEnterEvent event) {
     _islandCollapseTimer?.cancel();
-    if (!_parked) return;
+    if (!_parked || _islandContextMenuOpen) return;
     if (_islandView == _IslandView.bar) {
       _islandHoverExpanded = true;
       _setIslandView(_IslandView.stack);
@@ -1122,14 +1131,14 @@ class OverlayShellState extends State<OverlayShell> {
     _syncBusyState();
   }
 
-  /// Manual ROI capture — drag-select a screen region, then the toolbar under
-  /// the box picks Chat/Term. Triggered by the ⊕ tab pill and by double-tapping
-  /// the main eye. The freshly-created r-man-* region is picked up in the
-  /// regionStream listener, which opens it in the chosen mode.
+  /// Manual ROI capture — drag-select a screen region, then surface its native
+  /// eye + Chat/Term suggestion card. Triggered by the ⊕ tab pill, Region
+  /// Catch, and by double-tapping the main eye. The freshly-created r-man-*
+  /// region is picked up in the regionStream listener.
   ///
   /// [immediate] (capture-menu flow) skips the toolbar: the selector resolves
   /// on mouse-up and the context card follows the drop.
-  Future<void> _startManualRoi({bool immediate = false}) async {
+  Future<void> _startManualRoi({bool immediate = true}) async {
     final ws = context.read<WebSocketService>();
     final res = await _windowService.selectRegion(immediate: immediate);
     if (res == null) return; // cancelled (Esc / ✕)
@@ -1393,7 +1402,7 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'capCall', 'title': 'Call AI…'},
       // The two Context sources sit together: pick a screen region, or take
       // whatever is on the clipboard — both flow into the same enrich card.
-      if (_isMacOS) {'id': 'region', 'title': 'Context from Screen…'},
+      if (_isMacOS) {'id': 'region', 'title': 'Region Catch'},
       // Absorbs the former "Enrich Clipboard" (silent seed rewrite): the card's
       // "Copy for agent" action produces the same agent-grade seed, visibly.
       {
@@ -1423,7 +1432,20 @@ class OverlayShellState extends State<OverlayShell> {
       {'separator': true},
       {'id': 'quit', 'title': 'Quit Sinain'},
     ];
-    final selected = await _windowService.showContextMenu(items);
+    final wasParked = _parked;
+    _islandContextMenuOpen = true;
+    _islandCollapseTimer?.cancel();
+    // NSMenu's tracking window is not guaranteed to outrank a screen-saver
+    // level panel. Drop only the native level while the modal menu is up; the
+    // Dart parked state/frame stay intact.
+    if (wasParked) await _windowService.setNotchParked(false);
+    String? selected;
+    try {
+      selected = await _windowService.showContextMenu(items);
+    } finally {
+      if (wasParked && _parked) await _windowService.setNotchParked(true);
+      _islandContextMenuOpen = false;
+    }
     if (!mounted || selected == null) return;
     switch (selected) {
       case 'capSave':
@@ -1436,10 +1458,8 @@ class OverlayShellState extends State<OverlayShell> {
         _enterCardMode();
         await _buildContextFromClipboard();
       case 'region':
-        // Selection FIRST — the drag defines the subject; the enrich card
-        // (card mode) follows with the region as its focus. A default-range
-        // window brief is prefetched for the region thread's opening context.
-        await _startRegionSelect();
+        // Deliberately the exact same entry point as the chat tab's ⊕ pill.
+        await _startManualRoi();
       case 'sessions':
         await _showSessionShelf();
       case 'copySeed':
@@ -1758,27 +1778,6 @@ class OverlayShellState extends State<OverlayShell> {
             ));
       }
     }
-  }
-
-  /// "Select Region…" (menu): straight into the native drag-select; the
-  /// enrich card follows the drop. A brief of the last N minutes is kicked
-  /// off NOW so it's usually ready when the drag lands — the region handler
-  /// stashes it into the thread. Brief errors degrade to a plain region
-  /// grab; the selection is never blocked on the LLM.
-  static const _regionBriefMinutes = 30;
-
-  Future<void> _startRegionSelect() async {
-    final ws = context.read<WebSocketService>();
-    _regionBriefPending = true;
-    _regionViaMenu = true;
-    _pendingRegionBrief = null;
-    _regionBriefTarget = null;
-    ws.requestSummon(_regionBriefMinutes).then((err) {
-      if (err != null) _regionBriefPending = false;
-    });
-    // No toolbar under the box: releasing the drag is the confirmation, the
-    // enrich card appears right away.
-    await _startManualRoi(immediate: true);
   }
 
   /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC

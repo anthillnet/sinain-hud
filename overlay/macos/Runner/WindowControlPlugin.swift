@@ -92,7 +92,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             // notch) — needs to draw above the menu bar. Restored to
             // .floating on unpark so normal HUD stacking is unchanged.
             let parked = args?["enabled"] as? Bool ?? false
-            window.level = parked ? .screenSaver : .floating
+            window.level = parked
+                ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+                : .floating
             result(nil)
 
         case "setDockIconVisible":
