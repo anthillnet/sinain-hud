@@ -5,14 +5,15 @@ import '../../core/models/context_cards.dart';
 import '../../core/models/region_highlight.dart';
 import '../../core/theme/hud_theme.dart';
 
-typedef RegionRoute = ({String agent, bool isTerminal});
+typedef RegionRoute = ({String agent, bool isTerminal, String? sessionId});
 
 /// Island-raised result of an explicit region catch. The selection is already
 /// the prompt; this card only witnesses the composed seed and picks its lane.
 class RegionRouteCard extends StatefulWidget {
   final RegionHighlight region;
-  final String? sessionLabel;
-  final SessionAssist? assist;
+  final List<SessionChipState> sessions;
+  final Map<String, SessionAssist> assists;
+  final String? initialSessionId;
   final List<String> chatAgents;
   final List<String> terminalAgents;
   final String initialChatAgent;
@@ -29,8 +30,9 @@ class RegionRouteCard extends StatefulWidget {
     required this.initialTerminalAgent,
     required this.onRoute,
     required this.onDismiss,
-    this.sessionLabel,
-    this.assist,
+    this.sessions = const [],
+    this.assists = const {},
+    this.initialSessionId,
   });
 
   @override
@@ -39,13 +41,40 @@ class RegionRouteCard extends StatefulWidget {
 
 class _RegionRouteCardState extends State<RegionRouteCard> {
   RegionRoute? _selected;
+  String? _selectedSessionId;
 
   List<RegionRoute> get _routes => [
         for (final agent in widget.chatAgents)
-          (agent: agent, isTerminal: false),
+          (agent: agent, isTerminal: false, sessionId: null),
         for (final agent in widget.terminalAgents)
-          (agent: agent, isTerminal: true),
+          (agent: agent, isTerminal: true, sessionId: null),
       ];
+
+  List<SessionChipState> get _contextSessions => widget.sessions
+      .where((session) =>
+          !session.ended &&
+          widget.assists[session.sessionId]?.ready == true &&
+          (widget.assists[session.sessionId]!.goal.trim().isNotEmpty ||
+              widget.assists[session.sessionId]!.steps.isNotEmpty))
+      .toList();
+
+  SessionChipState? get _contextSession {
+    final sessions = _contextSessions;
+    if (sessions.isEmpty) return null;
+    final selectedId = _selectedSessionId ?? widget.initialSessionId;
+    return sessions.cast<SessionChipState?>().firstWhere(
+          (session) => session?.sessionId == selectedId,
+          orElse: () => sessions.first,
+        );
+  }
+
+  void _cycleContextSession() {
+    final sessions = _contextSessions;
+    if (sessions.length < 2) return;
+    final current = _contextSession!;
+    final next = (sessions.indexOf(current) + 1) % sessions.length;
+    setState(() => _selectedSessionId = sessions[next].sessionId);
+  }
 
   RegionRoute? get _choice {
     final routes = _routes;
@@ -92,7 +121,10 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
   Widget build(BuildContext context) {
     final theme = HudTheme.of(context);
     final choice = _choice;
-    final assist = widget.assist;
+    final contextSession = _contextSession;
+    final assist = contextSession == null
+        ? null
+        : widget.assists[contextSession.sessionId];
     final preview = [widget.region.issue, widget.region.tip]
         .where((text) => text.trim().isNotEmpty)
         .join(' · ');
@@ -141,88 +173,123 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
             'CAPTURED REGION',
             preview.isEmpty ? 'selected screen region' : preview,
           ),
-          const SizedBox(height: 7),
-          _panel(
-            theme,
-            widget.sessionLabel == null
-                ? 'CONTEXT CARD'
-                : 'CONTEXT CARD · ${widget.sessionLabel}',
-            assist == null
-                ? 'goal · current work\nnext · continue from this region'
-                : 'goal · ${assist.goal}\n${assist.steps.isEmpty ? 'next · continue from this region' : 'next · ${assist.steps.first}'}',
-          ),
+          if (assist != null && contextSession != null) ...[
+            const SizedBox(height: 7),
+            _contextPanel(theme, contextSession, assist),
+          ],
           const SizedBox(height: 8),
-          Text('DESTINATION LANE',
-              style: _mono(9, theme.textDim, weight: FontWeight.w600)),
-          const SizedBox(height: 5),
           if (choice != null)
-            Container(
-              height: 34,
-              padding: const EdgeInsets.symmetric(horizontal: 9),
-              decoration: BoxDecoration(
-                color: theme.bubbleBg,
-                border: Border.all(color: theme.border),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<RegionRoute>(
-                  key: const ValueKey('roi-lane-selector'),
-                  value: choice,
-                  isExpanded: true,
-                  dropdownColor: theme.panelBg,
-                  icon:
-                      Icon(Icons.expand_more, size: 15, color: theme.textMuted),
-                  style: _mono(11, theme.textPrimary),
-                  items: [
-                    for (final route in _routes)
-                      DropdownMenuItem(
-                        value: route,
-                        child: Row(children: [
-                          Icon(
-                              route.isTerminal
-                                  ? Icons.terminal
-                                  : Icons.chat_bubble_outline,
-                              size: 13,
-                              color: theme.textMuted),
-                          const SizedBox(width: 7),
-                          Text(_agentLabel(route.agent)),
-                          const Spacer(),
-                          Text(route.isTerminal ? 'terminal' : 'chat',
-                              style: _mono(9, theme.textDim)),
-                        ]),
-                      ),
-                  ],
-                  onChanged: (route) => setState(() => _selected = route),
-                ),
-              ),
-            )
+            Align(
+                alignment: Alignment.centerLeft, child: _verbRow(theme, choice))
           else
             Text('No AI lanes available', style: _mono(10, theme.textDim)),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton(
-              key: const ValueKey('roi-route-confirm'),
-              onPressed: choice == null ? null : () => widget.onRoute(choice),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(0, 30),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                backgroundColor: const Color(0xFF1F8039),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(6)),
-              ),
-              child: Text(
-                choice == null
-                    ? '▶ Select a lane'
-                    : '▶ ${_agentLabel(choice.agent)}',
-                style: _mono(11, Colors.white, weight: FontWeight.w600),
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
+
+  Widget _contextPanel(
+      HudTheme theme, SessionChipState session, SessionAssist assist) {
+    final canSwitch = _contextSessions.length > 1;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.bubbleBg,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('CONTEXT CARD',
+              style: _mono(8, theme.textDim, weight: FontWeight.w600)),
+          InkWell(
+            key: const ValueKey('roi-session-picker'),
+            onTap: canSwitch ? _cycleContextSession : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+              child: Text('· ${session.label}',
+                  style: _mono(8, canSwitch ? theme.textMuted : theme.textDim,
+                      weight: FontWeight.w600)),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        if (assist.goal.trim().isNotEmpty)
+          Text('goal · ${assist.goal}',
+              style: _mono(10, theme.textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        if (assist.steps.isNotEmpty)
+          Text('next · ${assist.steps.first}',
+              style: _mono(10, theme.textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+      ]),
+    );
+  }
+
+  Widget _verbRow(HudTheme theme, RegionRoute choice) => Row(children: [
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1F22),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            InkWell(
+              key: const ValueKey('roi-route-confirm'),
+              onTap: () => widget.onRoute((
+                agent: choice.agent,
+                isTerminal: choice.isTerminal,
+                sessionId: _contextSession?.sessionId,
+              )),
+              child: Container(
+                color: const Color(0xFF1F8039),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                child: Text('▶', style: _mono(8, Colors.white)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+              child: Text(
+                  '${_agentLabel(choice.agent)} — ${choice.isTerminal ? 'bridge' : 'chat'}',
+                  style: _mono(8, const Color(0xFFE8EAEE))),
+            ),
+            PopupMenuButton<RegionRoute>(
+              key: const ValueKey('roi-lane-selector'),
+              tooltip: 'Switch lane',
+              padding: EdgeInsets.zero,
+              color: theme.panelBg,
+              onSelected: (route) => setState(() => _selected = route),
+              itemBuilder: (_) => [
+                for (final route in _routes)
+                  PopupMenuItem(
+                    value: route,
+                    child: Text(_agentLabel(route.agent),
+                        style: _mono(10, theme.textPrimary)),
+                  ),
+              ],
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: const BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: Color(0x24FFFFFF)),
+                  ),
+                ),
+                child: Text('▾', style: _mono(8, const Color(0xFF6C707E))),
+              ),
+            ),
+          ]),
+        ),
+        const SizedBox(width: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1F22),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text('⤓', style: _mono(8, const Color(0xBFE8EAEE))),
+        ),
+      ]);
 
   Widget _panel(HudTheme theme, String label, String body) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),

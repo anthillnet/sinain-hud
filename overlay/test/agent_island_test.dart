@@ -261,13 +261,37 @@ void main() {
                   issue: 'Submit button overlaps the footer',
                   tip: 'captured checkout panel',
                 ),
-                sessionLabel: 'visa-app',
-                assist: const SessionAssist(
-                  sessionId: 'session-1',
-                  status: 'ready',
-                  goal: 'ship the checkout fix',
-                  steps: ['test the corrected layout'],
-                ),
+                sessions: const [
+                  SessionChipState(
+                    sessionId: 'session-1',
+                    status: 'running',
+                    label: 'visa-app',
+                    startedTs: 1,
+                    activeMs: 1000,
+                  ),
+                  SessionChipState(
+                    sessionId: 'session-2',
+                    status: 'running',
+                    label: 'docs',
+                    startedTs: 2,
+                    activeMs: 1000,
+                  ),
+                ],
+                assists: const {
+                  'session-1': SessionAssist(
+                    sessionId: 'session-1',
+                    status: 'ready',
+                    goal: 'ship the checkout fix',
+                    steps: ['test the corrected layout'],
+                  ),
+                  'session-2': SessionAssist(
+                    sessionId: 'session-2',
+                    status: 'ready',
+                    goal: 'publish the docs',
+                    steps: ['review examples'],
+                  ),
+                },
+                initialSessionId: 'session-1',
                 chatAgents: const ['sinain', 'claude-desktop'],
                 terminalAgents: const ['codex'],
                 initialChatAgent: 'sinain',
@@ -286,11 +310,49 @@ void main() {
     expect(find.textContaining('next · test the corrected layout'),
         findsOneWidget);
 
+    await tester.tap(find.byKey(const ValueKey('roi-session-picker')));
+    await tester.pump();
+    expect(find.text('· docs'), findsOneWidget);
+    expect(find.textContaining('goal · publish the docs'), findsOneWidget);
+
     await tester.tap(find.byKey(const ValueKey('roi-lane-selector')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Codex').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('roi-route-confirm')));
-    expect(routed, (agent: 'codex', isTerminal: true));
+    expect(routed, (agent: 'codex', isTerminal: true, sessionId: 'session-2'));
+  });
+
+  testWidgets('ROI card omits context when no session assist exists',
+      (tester) async {
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: SettingsService(),
+      child: MaterialApp(
+        home: Scaffold(
+          body: RegionRouteCard(
+            region: const RegionHighlight(id: 'r-empty', issue: '', tip: ''),
+            sessions: const [
+              SessionChipState(
+                sessionId: 'session-1',
+                status: 'running',
+                label: 'visa-app',
+                startedTs: 1,
+                activeMs: 1000,
+              ),
+            ],
+            chatAgents: const ['sinain'],
+            terminalAgents: const [],
+            initialChatAgent: 'sinain',
+            initialTerminalAgent: 'codex',
+            onRoute: (_) {},
+            onDismiss: () {},
+          ),
+        ),
+      ),
+    ));
+
+    expect(find.textContaining('CONTEXT CARD'), findsNothing);
+    expect(find.textContaining('current work'), findsNothing);
+    expect(find.textContaining('continue from'), findsNothing);
   });
 }

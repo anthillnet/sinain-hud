@@ -921,16 +921,19 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
-  String _roiContextCardText() {
-    final session = _warmChip;
+  String? _roiContextCardText(String? sessionId) {
+    final session = _sessionChips[sessionId];
     final assist = session == null ? null : _sessionAssists[session.sessionId];
-    final text = StringBuffer('Context card');
-    if (session != null) text.write(' · ${session.label}');
+    if (session == null ||
+        assist == null ||
+        !assist.ready ||
+        (assist.goal.trim().isEmpty && assist.steps.isEmpty)) {
+      return null;
+    }
+    final text = StringBuffer('Context card · ${session.label}');
     text.writeln();
-    text.writeln(
-        'goal · ${assist?.goal.trim().isNotEmpty == true ? assist!.goal : 'current work'}');
-    text.write(
-        'next · ${assist?.steps.isNotEmpty == true ? assist!.steps.first : 'continue from the selected region'}');
+    if (assist.goal.trim().isNotEmpty) text.writeln('goal · ${assist.goal}');
+    if (assist.steps.isNotEmpty) text.write('next · ${assist.steps.first}');
     return text.toString();
   }
 
@@ -941,10 +944,12 @@ class OverlayShellState extends State<OverlayShell> {
     // The region seed is built core-side. Stash the working session's context
     // card alongside it before starting either lane; socket ordering makes the
     // composed region + card seed available to hooked and unhooked AIs alike.
-    ws.sendCommand('set_handoff_context', {
-      'key': region.id,
-      'transcript': _roiContextCardText(),
-    });
+    if (_roiContextCardText(route.sessionId) case final contextCard?) {
+      ws.sendCommand('set_handoff_context', {
+        'key': region.id,
+        'transcript': contextCard,
+      });
+    }
     if (route.isTerminal) {
       ws.setAgent('terminal', route.agent);
       setState(() {
@@ -2886,10 +2891,9 @@ class OverlayShellState extends State<OverlayShell> {
                     width: 320,
                     child: RegionRouteCard(
                       region: _islandRoi!,
-                      sessionLabel: _warmChip?.label,
-                      assist: _warmChip == null
-                          ? null
-                          : _sessionAssists[_warmChip!.sessionId],
+                      sessions: _sessionChips.values.toList(),
+                      assists: _sessionAssists,
+                      initialSessionId: _warmChip?.sessionId,
                       chatAgents: ws.availableAgents,
                       terminalAgents: ws.terminalAvailable,
                       initialChatAgent: ws.escalationAgent,
