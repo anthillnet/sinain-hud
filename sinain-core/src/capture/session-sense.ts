@@ -720,6 +720,20 @@ export class SessionSenseManager {
     return { ok: true, sessionId: id };
   }
 
+  /** Make an explicitly selected thread the warm tracking session now.
+   *  Candidate merges use the same bookmark and paused-session machinery as
+   *  the shelf resume and normal activity paths; no time is credited before
+   *  the user's drop. */
+  resumeThread(threadId: string): { ok: boolean; sessionId?: string; error?: string } {
+    const tracked = [...this.sessions.values()].find((s) => s.threadId === threadId);
+    if (tracked) {
+      if (tracked.paused) this.resumeSession(tracked);
+      if (tracked.wrapPromptTs) this.keepGoing(tracked, "user merged current activity");
+      return { ok: true, sessionId: tracked.id };
+    }
+    return this.bookmarkAction(threadId, "resume");
+  }
+
   // ── Session internals ───────────────────────────────────────────────────────
 
   private keepGoing(s: Session, why: string): void {

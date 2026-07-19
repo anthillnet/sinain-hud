@@ -85,7 +85,11 @@ async function main() {
   setupCommands({
     wsHandler, config,
     onUserMessage: async () => {}, onUserCommand: () => {}, onCommand: () => {},
-    onMergeCandidate: (candidate: string, target: string) => attachment.mergeCandidate(candidate, target),
+    onMergeCandidate: (candidate: string, target: string) => {
+      if (!attachment.mergeCandidate(candidate, target)) return;
+      const tracked = activeSessions.find((session) => session.threadId === target);
+      if (tracked) tracked.paused = false;
+    },
     onAgentApprovalReply: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => {
       const request = approvals.get(id);
       if (!request || !approvals.resolve(id, behavior, answer)) return;
@@ -268,7 +272,10 @@ async function main() {
 
   // User-taught merge moves the whole lane (including receipt/fact state),
   // then deterministically attaches later launches from the same cwd.
-  activeSessions.push({ id: "work-2", threadId: "thread-two", label: "Other", startTs: 0, paused: false });
+  activeSessions.find((session) => session.threadId === "thread-one")!.paused = true;
+  // Paused too: a warm session would claim the launch via sole-warm preference
+  // and no candidate would form — this scenario needs candidate attachment.
+  activeSessions.push({ id: "work-2", threadId: "thread-two", label: "Other", startTs: 0, paused: true });
   const mergeCwd = "/tmp/sinain-merge-taught";
   registry.handleEvent({ session_id: "candidate-worker", source: "codex", hook_event_name: "SessionStart", cwd: mergeCwd, ts: Date.now() });
   attachment.sync();
@@ -282,7 +289,9 @@ async function main() {
   check(
     "merge command reassigns lane + facts follow + future cwd launch learns target",
     attachment.receiptFactsSince("thread-one", 0).some((line) => line.includes("candidate receipt follows"))
-      && merged.some((s) => s.sessionId === "future-worker" && s.threadId === "thread-one" && !s.candidate),
+      && merged.some((s) => s.sessionId === "future-worker" && s.threadId === "thread-one" && !s.candidate)
+      && activeSessions.some((s) => s.threadId === "thread-one" && !s.paused)
+      && !merged.some((s) => s.threadId === "proj:sinain-merge-taught"),
     JSON.stringify(merged.filter((s) => s.sessionId.includes("worker"))),
   );
 

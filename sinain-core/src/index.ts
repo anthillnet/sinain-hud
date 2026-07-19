@@ -2577,7 +2577,9 @@ async function main() {
     micPipeline,
     config,
     onMergeCandidate: (candidateThreadId, targetThreadId) => {
-      attachmentCoordinator?.mergeCandidate(candidateThreadId, targetThreadId);
+      if (attachmentCoordinator?.mergeCandidate(candidateThreadId, targetThreadId)) {
+        sessionSense.resumeThread(targetThreadId);
+      }
     },
     onAgentApprovalReply: (id, behavior, answer) => {
       const request = approvalManager.get(id);
