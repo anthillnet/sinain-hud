@@ -26,6 +26,16 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
     }
 
     func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        // Terminal focus is independent of the overlay window and deliberately
+        // best-effort: stale session hints must never surface an error to Dart.
+        if call.method == "jumpToTerminal" {
+            let args = call.arguments as? [String: Any]
+            let term = args?["term"] as? [String: Any] ?? [:]
+            jumpToTerminal(term)
+            result(nil)
+            return
+        }
+
         guard let window = NSApplication.shared.windows.first else {
             result(FlutterError(code: "NO_WINDOW",
                               message: "No window available",
@@ -77,6 +87,16 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             window.level = enabled ? .floating : .normal
             result(nil)
 
+        case "setNotchParked":
+            // Parked island draws inside the menu-bar band (next to the
+            // notch) — needs to draw above the menu bar. Restored to
+            // .floating on unpark so normal HUD stacking is unchanged.
+            let parked = args?["enabled"] as? Bool ?? false
+            window.level = parked
+                ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+                : .floating
+            result(nil)
+
         case "setDockIconVisible":
             // Flip the Dock icon (and app menu) live. .regular shows it,
             // .accessory hides it (the LSUIElement default). Going .accessory →
@@ -125,6 +145,36 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 "y": frame.origin.y,
                 "w": frame.size.width,
                 "h": frame.size.height,
+            ])
+
+        case "getScreenFrame":
+            let screen = NSScreen.main
+            let frame = screen?.frame ?? HUDConfig.fallbackScreenRect
+            let visibleFrame = screen?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            result([
+                "x": frame.origin.x,
+                "y": frame.origin.y,
+                "w": frame.size.width,
+                "h": frame.size.height,
+                "vx": visibleFrame.origin.x,
+                "vy": visibleFrame.origin.y,
+                "vw": visibleFrame.size.width,
+                "vh": visibleFrame.size.height,
+            ])
+
+        case "getNotchInfo":
+            var notchHeight: CGFloat = 0
+            var leftAuxWidth: CGFloat = 0
+            var rightAuxWidth: CGFloat = 0
+            if #available(macOS 12.0, *), let screen = NSScreen.main {
+                notchHeight = screen.safeAreaInsets.top
+                leftAuxWidth = screen.auxiliaryTopLeftArea?.width ?? 0
+                rightAuxWidth = screen.auxiliaryTopRightArea?.width ?? 0
+            }
+            result([
+                "notchHeight": Double(notchHeight),
+                "leftAuxWidth": Double(leftAuxWidth),
+                "rightAuxWidth": Double(rightAuxWidth),
             ])
 
         case "moveWindowBy":
@@ -356,6 +406,69 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         default:
             result(FlutterMethodNotImplemented)
+        }
+    }
+
+    // MARK: - Terminal jump
+
+    private func jumpToTerminal(_ term: [String: Any]) {
+        func hint(_ key: String) -> String? {
+            guard let value = term[key] as? String, !value.isEmpty else { return nil }
+            return value
+        }
+
+        if let pane = hint("TMUX_PANE") {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                task.arguments = ["tmux", "select-pane", "-t", pane]
+                task.standardOutput = FileHandle.nullDevice
+                task.standardError = FileHandle.nullDevice
+                try? task.run()
+            }
+        }
+
+        if let sessionId = hint("ITERM_SESSION_ID") {
+            let escaped = sessionId
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            let source = """
+            tell application "iTerm2"
+              activate
+              repeat with w in windows
+                repeat with t in tabs of w
+                  repeat with s in sessions of t
+                    if unique ID of s is "\(escaped)" then
+                      select t
+                      select s
+                      return
+                    end if
+                  end repeat
+                end repeat
+              end repeat
+            end tell
+            """
+            DispatchQueue.global(qos: .userInitiated).async {
+                NSAppleScript(source: source)?.executeAndReturnError(nil)
+            }
+            return
+        }
+
+        if hint("TERM_SESSION_ID") != nil {
+            NSWorkspace.shared.launchApplication(withBundleIdentifier: "com.apple.Terminal",
+                                                 options: [.default],
+                                                 additionalEventParamDescriptor: nil,
+                                                 launchIdentifier: nil)
+            return
+        }
+
+        if let bundleId = hint("__CFBundleIdentifier"),
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: appURL,
+                                               configuration: configuration,
+                                               completionHandler: nil)
         }
     }
 

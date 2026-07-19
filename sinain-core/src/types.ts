@@ -246,6 +246,9 @@ export interface AgentEventFrame {
 
 export interface AgentSession {
   sessionId: string;
+  threadId?: string;
+  /** Attached to a pre-track Session Sense candidate, not a tracked session. */
+  candidate?: boolean;
   source: string;
   name: string;
   cwd?: string;
@@ -260,7 +263,7 @@ export interface AgentSession {
   term?: Record<string, string>;
 }
 
-export type ApprovalDecision = { behavior: "allow" | "deny" | "always" | "ask" };
+export type ApprovalDecision = { behavior: "allow" | "deny" | "always" | "ask"; answer?: string };
 
 export interface AgentApprovalRequest {
   id: string;
@@ -294,6 +297,7 @@ export interface AgentApprovalReplyMessage {
   type: "agent_approval_reply";
   id: string;
   behavior: "allow" | "deny" | "always";
+  answer?: string;
 }
 
 /** Overlay → sinain-core: frontmost application changed. A fast OS-level
@@ -509,12 +513,14 @@ export type SessionNudgeResponse = "tracked" | "corrected" | "dismissed" | "expi
 export interface SessionChipMessage {
   type: "session_chip";
   sessionId: string;
+  threadId: string;
   status: "running" | "paused" | "ended";
   label: string;
   /** Credited-from timestamp (candidateStartTs). */
   startedTs: number;
   /** Accumulated active (non-paused) milliseconds. */
   activeMs: number;
+  agentsWorking?: number;
   ts: number;
 }
 
@@ -1070,6 +1076,9 @@ export interface CoreConfig {
   transcriptionConfig: TranscriptionConfig;
   agentConfig: AnalysisConfig;
   agentApproveTimeoutMs: number;
+  agentEnrichEnabled: boolean;
+  /** Boot default / environment kill switch for the optional agent-start LLM brief. */
+  agentLlmBriefEnabled: boolean;
   claudeUsageEnabled: boolean;
   claudeUsagePollMs: number;
   regionSlmConfig: RegionSlmConfig;

@@ -33,11 +33,11 @@ export class SaveManager {
   ) {}
 
   /** Kick off a save of the last N minutes. Returns the saveId immediately. */
-  save(minutes: number, scope?: WindowScope, provenance: SaveProvenance = "user_save"): string {
+  save(minutes: number, scope?: WindowScope, provenance: SaveProvenance = "user_save", receiptLines: string[] = []): string {
     const saveId = `save-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
     const coverage = describeCoverage(this.feedBuffer, this.senseBuffer, minutes, scope);
     this.broadcast({ type: "save_receipt", saveId, status: "saving", minutes, coverage, provenance, ts: Date.now() });
-    void this.runSave(saveId, minutes, coverage, scope, provenance);
+    void this.runSave(saveId, minutes, coverage, scope, provenance, receiptLines);
     return saveId;
   }
 
@@ -52,7 +52,7 @@ export class SaveManager {
     return true;
   }
 
-  private async runSave(saveId: string, minutes: number, coverage: string, scope?: WindowScope, provenance: SaveProvenance = "user_save"): Promise<void> {
+  private async runSave(saveId: string, minutes: number, coverage: string, scope?: WindowScope, provenance: SaveProvenance = "user_save", receiptLines: string[] = []): Promise<void> {
     const fail = (error: string) =>
       this.broadcast({ type: "save_receipt", saveId, status: "error", minutes, coverage, provenance, error, ts: Date.now() });
 
@@ -72,7 +72,6 @@ export class SaveManager {
           })),
         ...this.curation.senseContextForRange(since, scope?.apps),
       ].sort((a, b) => a.ts - b.ts);
-
       if (items.length === 0) {
         fail("nothing to save in that range — it was idle");
         return;
@@ -113,6 +112,10 @@ export class SaveManager {
       if (!digest) {
         fail("distillation produced nothing for that range");
         return;
+      }
+      if (receiptLines.length) {
+        digest.whatHappened = [String(digest.whatHappened ?? "").trimEnd(), ...receiptLines]
+          .filter(Boolean).join("\n");
       }
 
       const facts = Array.isArray(digest.facts) ? digest.facts.length : 0;

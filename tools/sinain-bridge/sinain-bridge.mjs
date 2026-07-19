@@ -70,6 +70,17 @@ async function post(url, frame, timeout, readJson = false) {
   }
 }
 
+async function get(url, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return { response, body: await response.json() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const input = await readInput();
 const source = argValue('--source', 'claude');
 const event = argValue('--event');
@@ -115,11 +126,13 @@ const baseUrl = `http://${host}:${port}`;
 
 if (frame.hook_event_name === 'PermissionRequest') {
   let behavior = 'ask';
+  let answer;
   try {
     const { response, body } = await post(`${baseUrl}/agent/approve`, frame, 130_000, true);
     if (response.ok) {
       if (['allow', 'deny', 'always', 'ask'].includes(body?.behavior)) {
         behavior = body.behavior;
+        if (typeof body?.answer === 'string' && body.answer) answer = body.answer;
       }
     }
   } catch {
@@ -132,7 +145,7 @@ if (frame.hook_event_name === 'PermissionRequest') {
     console.log(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'PermissionRequest',
-        decision: { behavior },
+        decision: answer ? { behavior, reason: answer } : { behavior },
       },
     }));
   }
@@ -141,6 +154,56 @@ if (frame.hook_event_name === 'PermissionRequest') {
     await post(`${baseUrl}/agent/event`, frame, 1500);
   } catch {
     // Lifecycle hooks must never disrupt the agent.
+  }
+  if (frame.hook_event_name === 'PreToolUse' && source === 'claude' && process.env.SINAIN_ENRICH_FACTS !== '0') {
+    try {
+      const params = new URLSearchParams({
+        mode: 'facts',
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 900);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Fresh facts are best-effort and must never delay a tool call.
+    }
+  }
+  if (frame.hook_event_name === 'SessionStart' && ['claude', 'codex'].includes(source) && process.env.SINAIN_ENRICH !== '0') {
+    try {
+      const params = new URLSearchParams({
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 8000);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Enrichment is best-effort and must not disrupt session startup.
+    }
+  }
+  if (frame.hook_event_name === 'UserPromptSubmit' && source === 'claude' && process.env.SINAIN_ENRICH_PROMPT === '1') {
+    try {
+      const params = new URLSearchParams({
+        mode: 'refresh',
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 1500);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Per-prompt enrichment is opt-in and silent on every failure.
+    }
   }
   if (process.argv.includes('--cursor-ack')) {
     console.log(JSON.stringify({ permission: 'allow' }));

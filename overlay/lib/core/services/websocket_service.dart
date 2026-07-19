@@ -28,6 +28,7 @@ class WebSocketService extends ChangeNotifier {
   // Service guard: per-service liveness from core. Each: {name,label,state,detail}.
   List<Map<String, dynamic>> _services = const [];
   List<Map<String, dynamic>> get services => _services;
+
   /// Services in a state the user should be warned about (running-but-stale or
   /// expected-but-down). 'off'/'live' are silent.
   List<Map<String, dynamic>> get staleServices => _services
@@ -89,6 +90,8 @@ class WebSocketService extends ChangeNotifier {
 
   /// Agent-session registry snapshot (external agent CLIs via sinain-bridge).
   List<AgentSession> agentSessions = const [];
+  final Map<String, SessionChipState> sessionChips = {};
+  final Map<String, SessionAssist> sessionAssists = {};
   int agentWorking = 0;
   int agentWaiting = 0;
   double? usage5h;
@@ -171,7 +174,8 @@ class WebSocketService extends ChangeNotifier {
   /// TasksView reads this on mount to seed its local list with any tasks
   /// that arrived before the Chat panel (and TasksView itself) was built.
   /// The map is unmodifiable — mutations go through the stream only.
-  Map<String, ThreadStatusUpdate> get spawnTasks => Map.unmodifiable(_spawnTasks);
+  Map<String, ThreadStatusUpdate> get spawnTasks =>
+      Map.unmodifiable(_spawnTasks);
 
   bool get connected => _connected;
   String get audioState => _audioState;
@@ -181,6 +185,7 @@ class WebSocketService extends ChangeNotifier {
   bool get idleMessagesEnabled => _idleMessagesEnabled;
   String get responseSize => _responseSize;
   String get envPath => _envPath;
+
   /// ChatGPT MCP-tunnel state (null until the harness is enabled).
   Map<String, dynamic>? get tunnel => _tunnel;
   String get tunnelStatus => (_tunnel?['status'] as String?) ?? 'off';
@@ -190,18 +195,22 @@ class WebSocketService extends ChangeNotifier {
   String? get tunnelAccountEmail => _tunnel?['accountEmail'] as String?;
   String? get tunnelError => _tunnel?['error'] as String?;
   List<String> get availableAgents => _availableAgents;
+
   /// Terminal-lane roster (sinain-excluded). Falls back to the full roster
   /// when core hasn't populated it.
   List<String> get terminalAvailable =>
       _terminalAvailable.isNotEmpty ? _terminalAvailable : _availableAgents;
   String get escalationAgent => _escalationAgent;
   String get terminalAgent => _terminalAgent;
+
   /// Chat lane is the built-in sinain sidecar — connected by definition, no
   /// bare-agent registration / terminal / start applies.
   bool get escalationResident => _escalationResident;
+
   /// Chat lane is a desktop app (Claude Desktop / ChatGPT) — chat opens the
   /// external app rather than the in-HUD chat surface.
   bool get escalationDesktop => _escalationDesktop;
+
   /// Resident chat sidecar (:9610) reachable.
   bool get chatSidecarUp => _chatSidecarUp;
   bool get agentRegistered => _agentRegistered;
@@ -389,7 +398,10 @@ class WebSocketService extends ChangeNotifier {
           // Service guard: per-service liveness (sense/backend/sinain-chat/runner).
           final svc = statusData['services'] as List?;
           if (svc != null) {
-            final list = svc.whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();
+            final list = svc
+                .whereType<Map>()
+                .map((m) => m.cast<String, dynamic>())
+                .toList();
             String key(List<Map<String, dynamic>> l) =>
                 l.map((s) => '${s['name']}:${s['state']}').join('|');
             if (key(list) != key(_services)) {
@@ -491,8 +503,8 @@ class WebSocketService extends ChangeNotifier {
         case 'agent_sessions':
           agentSessions = (json['sessions'] as List? ?? const [])
               .whereType<Map>()
-              .map((item) =>
-                  AgentSession.fromJson(item.cast<String, dynamic>()))
+              .map(
+                  (item) => AgentSession.fromJson(item.cast<String, dynamic>()))
               .toList(growable: false);
           agentWorking = (json['working'] as num?)?.toInt() ?? 0;
           agentWaiting = (json['waiting'] as num?)?.toInt() ?? 0;
@@ -508,8 +520,8 @@ class WebSocketService extends ChangeNotifier {
         case 'agent_approval':
           final requestJson = json['request'];
           if (requestJson is Map) {
-            final request =
-                AgentApprovalRequest.fromJson(requestJson.cast<String, dynamic>());
+            final request = AgentApprovalRequest.fromJson(
+                requestJson.cast<String, dynamic>());
             if (request.id.isNotEmpty) _agentApprovals[request.id] = request;
             notifyListeners();
             _agentSessionsController.add(null);
@@ -527,7 +539,8 @@ class WebSocketService extends ChangeNotifier {
               .map(RegionHighlight.fromJson)
               .where((r) => r.id.isNotEmpty)
               .toList();
-          _log('REGION_HIGHLIGHT: ${list.length} regions [${list.map((r) => r.id).join(", ")}]');
+          _log(
+              'REGION_HIGHLIGHT: ${list.length} regions [${list.map((r) => r.id).join(", ")}]');
           regions = list;
           _regionController.add(list);
           break;
@@ -550,13 +563,24 @@ class WebSocketService extends ChangeNotifier {
           _sessionNudgeController.add(SessionNudge.fromJson(json));
           break;
         case 'session_chip':
-          _sessionChipController.add(SessionChipState.fromJson(json));
+          final chip = SessionChipState.fromJson(json);
+          if (chip.ended) {
+            sessionChips.remove(chip.sessionId);
+            sessionAssists.remove(chip.sessionId);
+          } else {
+            sessionChips[chip.sessionId] = chip;
+          }
+          _sessionChipController.add(chip);
+          notifyListeners();
           break;
         case 'session_wrap':
           _sessionWrapController.add(SessionWrap.fromJson(json));
           break;
         case 'session_assist':
-          _sessionAssistController.add(SessionAssist.fromJson(json));
+          final assist = SessionAssist.fromJson(json);
+          if (assist.ready) sessionAssists[assist.sessionId] = assist;
+          _sessionAssistController.add(assist);
+          notifyListeners();
           break;
         case 'voice_session':
           final session = VoiceSession.fromJson(json);
@@ -627,8 +651,14 @@ class WebSocketService extends ChangeNotifier {
 
   /// Resolve a pending agent approval (Allow / Always / Deny tap). Removes the
   /// card optimistically — the server's agent_approval_resolved confirms it.
-  void sendAgentApprovalReply(String id, String behavior) {
-    send({'type': 'agent_approval_reply', 'id': id, 'behavior': behavior});
+  void sendAgentApprovalReply(String id, String behavior, {String? answer}) {
+    final note = answer?.trim();
+    send({
+      'type': 'agent_approval_reply',
+      'id': id,
+      'behavior': behavior,
+      if (note != null && note.isNotEmpty) 'answer': note,
+    });
     _agentApprovals.remove(id);
     notifyListeners();
     _agentSessionsController.add(null);
@@ -675,7 +705,8 @@ class WebSocketService extends ChangeNotifier {
       'text': text,
       if (regionId != null) 'regionId': regionId,
     });
-    _log('Spawn command sent${regionId != null ? " (region=$regionId)" : ""}: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
+    _log(
+        'Spawn command sent${regionId != null ? " (region=$regionId)" : ""}: ${text.substring(0, text.length > 60 ? 60 : text.length)}');
   }
 
   /// Core's HTTP base derived from the WS url (ws→http, wss→https).
@@ -692,7 +723,8 @@ class WebSocketService extends ChangeNotifier {
   /// Fetch the portable seed text for a thread (key = regionId or "main") so it
   /// can be copied to the clipboard — the same context we feed supported
   /// agents, built server-side. Returns null on any failure.
-  Future<String?> fetchSeedText(String key, {String? transcript, String? focus}) async {
+  Future<String?> fetchSeedText(String key,
+      {String? transcript, String? focus}) async {
     final base = _httpBase;
     if (base == null) return null;
     HttpClient? client;
@@ -744,6 +776,13 @@ class WebSocketService extends ChangeNotifier {
       client?.close();
     }
   }
+
+  Future<bool> postAgentContextNote(String sessionId, String text) async =>
+      (await _postJson('/agent/context-note', {
+        'session_id': sessionId,
+        'text': text,
+      }))?['ok'] ==
+      true;
 
   /// Chooser options (5/15/30/60) with free coverage strings.
   Future<List<RangeOption>> fetchRangeOptions() async {
@@ -930,7 +969,8 @@ class WebSocketService extends ChangeNotifier {
   /// "Call sinain" via the deployed meetbot: the bot joins the given
   /// Meet/Teams call, seeded with the last N minutes.
   Future<String?> requestVoiceMeet(String url, int minutes) async {
-    final data = await _postJson('/voice/meet', {'url': url, 'minutes': minutes});
+    final data =
+        await _postJson('/voice/meet', {'url': url, 'minutes': minutes});
     if (data == null) return 'core unreachable';
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }

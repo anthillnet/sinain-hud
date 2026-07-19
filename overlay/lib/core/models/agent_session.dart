@@ -1,5 +1,7 @@
 class AgentSession {
   final String sessionId;
+  final String? threadId;
+  final bool candidate;
   final String source;
   final String name;
   final String? cwd;
@@ -11,6 +13,7 @@ class AgentSession {
   final DateTime lastEventAt;
   final DateTime? endedAt;
   final String? summary;
+  final Map<String, dynamic> term;
 
   const AgentSession({
     required this.sessionId,
@@ -19,12 +22,15 @@ class AgentSession {
     required this.state,
     required this.startedAt,
     required this.lastEventAt,
+    this.threadId,
+    this.candidate = false,
     this.cwd,
     this.model,
     this.branch,
     this.toolLine,
     this.endedAt,
     this.summary,
+    this.term = const {},
   });
 
   factory AgentSession.fromJson(Map<String, dynamic> json) {
@@ -32,6 +38,8 @@ class AgentSession {
     final startedAt = _dateFromEpoch(json['startedAt']) ?? now;
     return AgentSession(
       sessionId: json['sessionId'] as String? ?? '',
+      threadId: json['threadId'] as String?,
+      candidate: json['candidate'] as bool? ?? false,
       source: json['source'] as String? ?? '',
       name: json['name'] as String? ?? 'agent',
       cwd: json['cwd'] as String?,
@@ -43,6 +51,9 @@ class AgentSession {
       lastEventAt: _dateFromEpoch(json['lastEventAt']) ?? startedAt,
       endedAt: _dateFromEpoch(json['endedAt']),
       summary: json['summary'] as String?,
+      term: json['term'] is Map
+          ? Map<String, dynamic>.from(json['term'] as Map)
+          : const {},
     );
   }
 

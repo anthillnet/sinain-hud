@@ -143,8 +143,9 @@ server.tool(
   { title: "Fetch ROI seed", readOnlyHint: true, openWorldHint: false },
   async ({ id }) => {
     try {
-      const qs = id ? `?id=${encodeURIComponent(id)}` : "";
-      const data = await coreRequest("GET", `/roi/pending${qs}`);
+      const qs = new URLSearchParams({ enriched: "1" });
+      if (id) qs.set("id", id);
+      const data = await coreRequest("GET", `/roi/pending?${qs.toString()}`);
       if (!data || data.ok === false || !data.seed) {
         return textResult(
           id

@@ -4,10 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/agent_session.dart';
+import '../../core/models/context_cards.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/window_service.dart';
+import 'agent_approval_card.dart';
 
 class AgentSessionsView extends StatefulWidget {
-  const AgentSessionsView({super.key});
+  final bool showHeader;
+  final bool showApprovals;
+
+  /// Agent-liveness color — the user's accent from settings (default green).
+  final Color accent;
+  final VoidCallback? onSnapRegion;
+  final ValueNotifier<String?>? externalAnswerAppend;
+  final VoidCallback? onApprovalDispose;
+
+  const AgentSessionsView({
+    super.key,
+    this.showHeader = true,
+    this.showApprovals = true,
+    this.accent = const Color(0xFF1F8039),
+    this.onSnapRegion,
+    this.externalAnswerAppend,
+    this.onApprovalDispose,
+  });
 
   @override
   State<AgentSessionsView> createState() => _AgentSessionsViewState();
@@ -15,7 +35,6 @@ class AgentSessionsView extends StatefulWidget {
 
 class _AgentSessionsViewState extends State<AgentSessionsView> {
   static const _amber = Color(0xFFD9A21B);
-  static const _workingBlue = Color(0xFF3369D6);
   static const _doneGrey = Color(0xFF6C707E);
 
   List<AgentSession> _sessions = const [];
@@ -25,6 +44,8 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
   double? _usage5h;
   double? _usage7d;
   StreamSubscription<void>? _sessionsSub;
+  StreamSubscription<dynamic>? _chipSub;
+  WebSocketService? _ws;
   Timer? _tickTimer;
 
   @override
@@ -40,9 +61,13 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
     super.didChangeDependencies();
     if (_sessionsSub != null) return;
     final ws = context.read<WebSocketService>();
+    _ws = ws;
     _syncFrom(ws);
     _sessionsSub = ws.agentSessionsStream.listen((_) {
       if (mounted) setState(() => _syncFrom(ws));
+    });
+    _chipSub = ws.sessionChipStream.listen((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -59,13 +84,14 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
   @override
   void dispose() {
     _sessionsSub?.cancel();
+    _chipSub?.cancel();
     _tickTimer?.cancel();
     super.dispose();
   }
 
   Color _stateColor(String state) => switch (state) {
         'waiting' => _amber,
-        'working' => _workingBlue,
+        'working' => widget.accent,
         _ => _doneGrey,
       };
 
@@ -86,10 +112,18 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
       children: [
-        _buildHeader(),
-        if (_approvals.isNotEmpty) ...[
+        if (widget.showHeader) _buildHeader(),
+        if (widget.showApprovals && _approvals.isNotEmpty) ...[
           const SizedBox(height: 7),
-          _buildApprovalCard(_approvals.first),
+          AgentApprovalCard(
+            request: _approvals.first,
+            onSnapRegion: widget.onSnapRegion,
+            externalAnswerAppend: widget.externalAnswerAppend,
+            onDispose: widget.onApprovalDispose,
+            onReply: (behavior) => context
+                .read<WebSocketService>()
+                .sendAgentApprovalReply(_approvals.first.id, behavior),
+          ),
         ],
         const SizedBox(height: 7),
         if (_sessions.isEmpty)
@@ -147,122 +181,6 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
     );
   }
 
-  Widget _buildApprovalCard(AgentApprovalRequest request) {
-    return Container(
-      padding: const EdgeInsets.all(9),
-      decoration: BoxDecoration(
-        color: _amber.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: _amber.withValues(alpha: 0.42)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _dot(_amber),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  request.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFE8DCC0),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 7),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.32),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              request.command,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontFamily: 'JetBrainsMono',
-                color: Color(0xFFE8DCC0),
-                fontSize: 10,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              _approvalButton(
-                'Allow',
-                onTap: () => _reply(request.id, 'allow'),
-                filled: true,
-              ),
-              const SizedBox(width: 5),
-              _approvalButton(
-                'Always',
-                onTap: () => _reply(request.id, 'always'),
-                bordered: true,
-              ),
-              const SizedBox(width: 5),
-              _approvalButton(
-                'Deny',
-                onTap: () => _reply(request.id, 'deny'),
-                quiet: true,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _reply(String id, String behavior) {
-    context.read<WebSocketService>().sendAgentApprovalReply(id, behavior);
-  }
-
-  Widget _approvalButton(
-    String text, {
-    required VoidCallback onTap,
-    bool quiet = false,
-    bool bordered = false,
-    bool filled = false,
-  }) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: filled ? const Color(0xFF1F8039) : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-            border: bordered
-                ? Border.all(color: Colors.white.withValues(alpha: 0.25))
-                : null,
-          ),
-          child: Text(
-            text,
-            style: TextStyle(
-              fontFamily: 'JetBrainsMono',
-              fontSize: 9,
-              fontWeight: filled ? FontWeight.w700 : FontWeight.normal,
-              color: quiet
-                  ? Colors.white.withValues(alpha: 0.42)
-                  : Colors.white.withValues(alpha: 0.9),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSessionCard(AgentSession session) {
     if (session.state == 'done') return _buildDoneReceipt(session);
     final color = _stateColor(session.state);
@@ -286,8 +204,20 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
               _dot(color),
               const SizedBox(width: 7),
               Expanded(
-                child: Text(
-                  session.name,
+                child: Text.rich(
+                  TextSpan(children: [
+                    if (_sessionLabel(session) case final label?)
+                      TextSpan(
+                        text: '· $label  ',
+                        style: const TextStyle(
+                          color: Color(0xFF9B7BE3),
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    TextSpan(text: session.name),
+                  ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -306,6 +236,10 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                   fontSize: 9,
                 ),
               ),
+              if (session.term.isNotEmpty) ...[
+                const SizedBox(width: 7),
+                _jumpButton(session),
+              ],
             ],
           ),
           if (session.toolLine?.trim().isNotEmpty ?? false) ...[
@@ -338,6 +272,15 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
         ],
       ),
     );
+  }
+
+  String? _sessionLabel(AgentSession session) {
+    final threadId = session.threadId;
+    if (threadId == null || threadId.isEmpty) return null;
+    for (final chip in _ws?.sessionChips.values ?? const <SessionChipState>[]) {
+      if (chip.threadId == threadId) return chip.label;
+    }
+    return null;
   }
 
   Widget _buildDoneReceipt(AgentSession session) {
@@ -375,6 +318,10 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                 fontSize: 9,
               ),
             ),
+            if (session.term.isNotEmpty) ...[
+              const SizedBox(width: 7),
+              _jumpButton(session),
+            ],
           ],
         ),
       ),
@@ -394,6 +341,27 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
           fontFamily: 'JetBrainsMono',
           fontSize: 10,
           color: Colors.white.withValues(alpha: 0.55),
+        ),
+      ),
+    );
+  }
+
+  Widget _jumpButton(AgentSession session) {
+    return Tooltip(
+      message: 'Jump to terminal',
+      child: InkWell(
+        onTap: () => context.read<WindowService>().jumpToTerminal(session.term),
+        borderRadius: BorderRadius.circular(3),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+          child: Text(
+            '⏵',
+            style: TextStyle(
+              color: Colors.white,
+              fontFamily: 'JetBrainsMono',
+              fontSize: 10,
+            ),
+          ),
         ),
       ),
     );

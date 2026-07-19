@@ -24,6 +24,9 @@ const TAG = "voice";
  * messages: starting → live → ended | error.
  */
 export class VoiceSessionManager {
+  // V1 intentionally only publishes voice lifecycle state for overlay
+  // surfaces. Streaming call audio/screen/card frames into agent hooks needs
+  // the realtime lane design (ownership, ordering, and teardown) first.
   private proc: ChildProcess | null = null;
   private state: VoiceSessionMessage["status"] = "ended";
   private mode: VoiceSessionMessage["mode"] = "bridge";

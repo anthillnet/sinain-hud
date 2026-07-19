@@ -1,14 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
 import '../../core/models/context_cards.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/window_service.dart';
 import '../../core/theme/hud_theme.dart';
 
 const _green = Color(0xFF1F8039);
 const _amber = Color(0xFFD9A21B);
+const _violet = Color(0xFF7A56D6);
+const _liveRed = Color(0xFFE06C5B);
 
 TextStyle _mono(double size, Color color,
         {FontWeight weight = FontWeight.w400, double? height}) =>
@@ -29,6 +34,7 @@ TextStyle _mono(double size, Color color,
 /// rides the chip stream.
 class SessionListView extends StatefulWidget {
   final WebSocketService ws;
+  final Color accent;
 
   /// ↗ share — the shell owns URL launching (KG entity page).
   final ValueChanged<SessionBookmark> onShare;
@@ -36,11 +42,17 @@ class SessionListView extends StatefulWidget {
   /// Call AI over the live session's span (shell owns the summon flow).
   final ValueChanged<SessionChipState> onCallAi;
 
+  /// Dense 320px presentation used by the notch island. Session groups are
+  /// independently collapsible; groups with a waiting lane start expanded.
+  final bool islandMode;
+
   const SessionListView({
     super.key,
     required this.ws,
     required this.onShare,
     required this.onCallAi,
+    this.accent = const Color(0xFF1F8039),
+    this.islandMode = false,
   });
 
   /// Hover-preview span cap (matches the summon clamp).
@@ -53,9 +65,16 @@ class SessionListView extends StatefulWidget {
 class _SessionListViewState extends State<SessionListView> {
   SessionList _list = const SessionList(sessions: [], bookmarks: []);
   StreamSubscription<SessionChipState>? _chipSub;
+  StreamSubscription<void>? _agentSessionsSub;
+  StreamSubscription<SessionAssist>? _assistSub;
+  StreamSubscription<VoiceSession>? _voiceSub;
   Timer? _ticker;
   final Map<String, DateTime> _receivedAt = {};
   bool _loaded = false;
+  final Map<String, SessionAssist> _assists = {};
+  final Set<String> _expandedCards = {};
+  final Set<String> _expandedGroups = {};
+  final Set<String> _initializedGroups = {};
   // Hover preview of the context the ✦ call would carry (cached core-side).
   String? _preview;
   String? _previewFor; // sessionId the preview belongs under
@@ -64,6 +83,11 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   void initState() {
     super.initState();
+    _assists.addAll(widget.ws.sessionAssists);
+    _list = SessionList(
+      sessions: widget.ws.sessionChips.values.toList(),
+      bookmarks: const [],
+    );
     _refresh();
     _chipSub = widget.ws.sessionChipStream.listen((c) {
       if (!mounted) return;
@@ -81,6 +105,17 @@ class _SessionListViewState extends State<SessionListView> {
       // A wrap may have updated bookmark history — refetch quietly.
       if (c.ended) _refresh();
       _syncTicker();
+    });
+    _agentSessionsSub = widget.ws.agentSessionsStream.listen((_) {
+      if (mounted) setState(() {});
+    });
+    _assistSub = widget.ws.sessionAssistStream.listen((assist) {
+      if (mounted && assist.ready) {
+        setState(() => _assists[assist.sessionId] = assist);
+      }
+    });
+    _voiceSub = widget.ws.voiceSessionStream.listen((_) {
+      if (mounted) setState(() {});
     });
     _syncTicker();
   }
@@ -110,6 +145,9 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   void dispose() {
     _chipSub?.cancel();
+    _agentSessionsSub?.cancel();
+    _assistSub?.cancel();
+    _voiceSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -127,7 +165,65 @@ class _SessionListViewState extends State<SessionListView> {
   @override
   Widget build(BuildContext context) {
     final t = HudTheme.of(context);
-    final sessions = _list.sessions;
+    final sessions = [..._list.sessions]..sort((a, b) {
+        final aWaiting = _agentsFor(a).any((x) => x.state == 'waiting');
+        final bWaiting = _agentsFor(b).any((x) => x.state == 'waiting');
+        if (aWaiting != bWaiting) return aWaiting ? -1 : 1;
+        return 0;
+      });
+    final candidateGroups = <String, List<AgentSession>>{};
+    for (final agent in widget.ws.agentSessions.where((a) => a.candidate)) {
+      final threadId = agent.threadId;
+      if (threadId != null && threadId.isNotEmpty) {
+        candidateGroups.putIfAbsent(threadId, () => []).add(agent);
+      }
+    }
+    final liveVoice = widget.ws.voiceSession;
+    if (widget.islandMode) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            if (liveVoice?.isActive ?? false)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _liveLane(t, liveVoice!),
+              ),
+            if (sessions.isEmpty &&
+                !(liveVoice?.isActive ?? false) &&
+                candidateGroups.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  _loaded ? 'nothing tracked' : ' ',
+                  textAlign: TextAlign.center,
+                  style: _mono(10, t.textDim),
+                ),
+              ),
+            for (final s in sessions) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _activeRow(t, s),
+              ),
+              if (_preview != null && _previewFor == s.sessionId)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+                  child: Text(_preview!,
+                      style: _mono(9, t.textDim, height: 1.35),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            for (final entry in candidateGroups.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _candidateGroup(t, entry.key, entry.value),
+              ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
@@ -142,7 +238,13 @@ class _SessionListViewState extends State<SessionListView> {
             ],
           ]),
           const SizedBox(height: 6),
-          if (sessions.isEmpty)
+          if (liveVoice?.isActive ?? false) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _liveLane(t, liveVoice!),
+            ),
+          ],
+          if (sessions.isEmpty && !(liveVoice?.isActive ?? false))
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
@@ -167,6 +269,14 @@ class _SessionListViewState extends State<SessionListView> {
                       overflow: TextOverflow.ellipsis),
                 ),
             ],
+          if (candidateGroups.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            for (final entry in candidateGroups.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _candidateGroup(t, entry.key, entry.value),
+              ),
+          ],
           const SizedBox(height: 14),
           Row(children: [
             Text('BOOKMARKED',
@@ -195,58 +305,320 @@ class _SessionListViewState extends State<SessionListView> {
     );
   }
 
-  Widget _activeRow(HudTheme t, SessionChipState s) {
-    final dot = s.paused ? _amber : _green;
+  Widget _liveLane(HudTheme t, VoiceSession voice) {
+    final detail = voice.coverage.trim().isEmpty
+        ? 'voice session'
+        : 'voice session · ${voice.coverage.trim()}';
     return Container(
+      key: const ValueKey('live-assist-lane'),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        border: Border.all(color: dot.withValues(alpha: 0.4)),
+        border: Border.all(color: _liveRed.withValues(alpha: 0.45)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(children: [
         Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: dot,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(color: dot.withValues(alpha: 0.3), spreadRadius: 2),
-            ],
-          ),
+          width: 7,
+          height: 7,
+          decoration:
+              const BoxDecoration(color: _liveRed, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 9),
+        const SizedBox(width: 7),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: _liveRed.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text('● live', style: _mono(9, const Color(0xFFF2C4BC))),
+        ),
+        const SizedBox(width: 8),
         Expanded(
-          child: Text(s.label,
-              style: _mono(11, t.textPrimary, weight: FontWeight.w500),
+          child: Text(detail,
+              style: _mono(10, t.textMuted),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
         ),
-        Text(_elapsed(s), style: _mono(10, s.paused ? _amber : t.textMuted)),
-        if (s.paused) ...[
-          const SizedBox(width: 6),
-          Text('paused', style: _mono(9, _amber)),
-        ],
-        const SizedBox(width: 8),
-        MouseRegion(
-          onEnter: (_) => _loadPreview(s),
-          onExit: (_) => setState(() {
-            _preview = null;
-            _previewFor = null;
-          }),
-          child:
-              _action(t, '✦', 'Call AI on this session', () => widget.onCallAi(s)),
-        ),
-        const SizedBox(width: 5),
-        _action(t, '⚑', 'Come back later (bookmark)', () async {
-          await widget.ws.sessionAction(s.sessionId, 'flag');
-          _refresh();
-        }),
-        const SizedBox(width: 5),
-        _action(t, '✕', 'End session', () {
-          widget.ws.sessionAction(s.sessionId, 'ended');
-        }),
       ]),
+    );
+  }
+
+  Widget _activeRow(HudTheme t, SessionChipState s) {
+    final dot = s.paused ? _violet.withValues(alpha: 0.45) : _violet;
+    final agents = _agentsFor(s)..sort(_laneOrder);
+    final waiting = agents.any((agent) => agent.state == 'waiting');
+    final expanded = _isGroupExpanded(s.sessionId, waiting);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        border:
+            Border.all(color: (waiting ? _amber : dot).withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(children: [
+        _dragSource(
+            s.threadId,
+            GestureDetector(
+                key: ValueKey('session-group-header-${s.sessionId}'),
+                behavior: HitTestBehavior.opaque,
+                onTap: widget.islandMode
+                    ? () => setState(() => expanded
+                        ? _expandedGroups.remove(s.sessionId)
+                        : _expandedGroups.add(s.sessionId))
+                    : null,
+                child: Row(children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: dot,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                            color: dot.withValues(alpha: 0.3), spreadRadius: 2),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(s.label,
+                        style:
+                            _mono(11, t.textPrimary, weight: FontWeight.w500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  Text(_elapsed(s),
+                      style: _mono(10, s.paused ? _amber : t.textMuted)),
+                  if (widget.islandMode) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      s.paused
+                          ? (agents.isEmpty
+                              ? 'paused'
+                              : 'paused · ${agents.length} agents')
+                          : '${agents.length} agent${agents.length == 1 ? '' : 's'}',
+                      style: _mono(9, s.paused ? _amber : t.textDim),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(expanded ? '▴' : '▾', style: _mono(8, t.textDim)),
+                  ] else if (s.paused) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      s.agentsWorking > 0
+                          ? 'paused · ${s.agentsWorking} agent${s.agentsWorking == 1 ? '' : 's'} working'
+                          : 'paused',
+                      style: _mono(9, _amber),
+                    ),
+                  ],
+                  if (!widget.islandMode) ...[
+                    const SizedBox(width: 8),
+                    MouseRegion(
+                      onEnter: (_) => _loadPreview(s),
+                      onExit: (_) => setState(() {
+                        _preview = null;
+                        _previewFor = null;
+                      }),
+                      child: _action(t, '✦', 'Call AI on this session',
+                          () => widget.onCallAi(s)),
+                    ),
+                    const SizedBox(width: 5),
+                    _action(t, '⚑', 'Come back later (bookmark)', () async {
+                      await widget.ws.sessionAction(s.sessionId, 'flag');
+                      _refresh();
+                    }),
+                    const SizedBox(width: 5),
+                    _action(t, '✕', 'End session', () {
+                      widget.ws.sessionAction(s.sessionId, 'ended');
+                    }),
+                  ],
+                ]))),
+        if (expanded) ...[
+          if (widget.islandMode)
+            Padding(
+              padding: const EdgeInsets.only(left: 17, top: 6),
+              child: Row(children: [
+                MouseRegion(
+                  onEnter: (_) => _loadPreview(s),
+                  onExit: (_) => setState(() {
+                    _preview = null;
+                    _previewFor = null;
+                  }),
+                  child: _action(t, '✦', 'Call AI on this session',
+                      () => widget.onCallAi(s)),
+                ),
+                const SizedBox(width: 5),
+                _action(t, '⚑', 'Come back later (bookmark)', () async {
+                  await widget.ws.sessionAction(s.sessionId, 'flag');
+                  _refresh();
+                }),
+                const SizedBox(width: 5),
+                _action(t, '✕', 'End session',
+                    () => widget.ws.sessionAction(s.sessionId, 'ended')),
+              ]),
+            ),
+          if (_assists[s.sessionId] case final assist?)
+            _contextCard(t, s.sessionId, assist,
+                forceExpanded: widget.islandMode),
+          for (final agent in agents) _lane(t, agent),
+        ],
+      ]),
+    );
+  }
+
+  bool _isGroupExpanded(String id, bool waiting) {
+    if (!widget.islandMode) return true;
+    if (_initializedGroups.add(id) && waiting) _expandedGroups.add(id);
+    return _expandedGroups.contains(id);
+  }
+
+  List<AgentSession> _agentsFor(SessionChipState session) => widget
+      .ws.agentSessions
+      .where((agent) =>
+          session.threadId.isNotEmpty && agent.threadId == session.threadId)
+      .toList();
+
+  int _laneOrder(AgentSession a, AgentSession b) {
+    int rank(String state) => state == 'waiting'
+        ? 0
+        : state == 'working'
+            ? 1
+            : 2;
+    return rank(a.state).compareTo(rank(b.state));
+  }
+
+  Widget _contextCard(HudTheme t, String sessionId, SessionAssist assist,
+      {bool forceExpanded = false}) {
+    final expanded = forceExpanded || _expandedCards.contains(sessionId);
+    return GestureDetector(
+      key: ValueKey('context-card-$sessionId'),
+      onTap: forceExpanded
+          ? null
+          : () => setState(() => expanded
+              ? _expandedCards.remove(sessionId)
+              : _expandedCards.add(sessionId)),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 17, top: 7),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('card · goal: ${assist.goal}',
+              style: _mono(9, t.textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          if (expanded) ...[
+            const SizedBox(height: 5),
+            Text('goal · ${assist.goal}', style: _mono(9, t.textPrimary)),
+            if (assist.steps.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              for (var i = 0; i < assist.steps.length; i++)
+                Text('${i == 0 ? 'next' : '    '} · ${assist.steps[i]}',
+                    style: _mono(9, t.textMuted, height: 1.35)),
+            ],
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _lane(HudTheme t, AgentSession agent) {
+    final done = agent.state == 'done';
+    final color = agent.state == 'waiting'
+        ? _amber
+        : done
+            ? t.textDim
+            : widget.accent;
+    final detail = done
+        ? (agent.summary?.trim().isNotEmpty == true
+            ? agent.summary!
+            : agent.toolLine ?? 'done')
+        : agent.toolLine ?? agent.state;
+    return Opacity(
+      opacity: done ? 0.55 : 1,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 17, top: 6),
+        child: Row(children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text('${agent.name} · $detail',
+                style: _mono(done ? 9 : 10, t.textMuted),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ),
+          if (agent.term.isNotEmpty) ...[
+            const SizedBox(width: 5),
+            _action(t, '⏵', 'Jump to terminal',
+                () => context.read<WindowService>().jumpToTerminal(agent.term)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _candidateGroup(
+      HudTheme t, String threadId, List<AgentSession> agents) {
+    agents.sort(_laneOrder);
+    final groupId = 'candidate:$threadId';
+    if (_initializedGroups.add(groupId)) _expandedGroups.add(groupId);
+    final expanded = _expandedGroups.contains(groupId);
+    final cwd = agents.first.cwd ?? '';
+    final cwdParts =
+        cwd.split(RegExp(r'[/\\]')).where((part) => part.isNotEmpty).toList();
+    final name = cwdParts.isNotEmpty
+        ? cwdParts.last
+        : threadId.replaceFirst(RegExp(r'^(proj|cand):'), '');
+    final color = _violet.withValues(alpha: 0.48);
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          details.data.isNotEmpty && details.data != threadId,
+      onAcceptWithDetails: (details) => widget.ws.sendCommand(
+          'merge_candidate', {'candidate': threadId, 'target': details.data}),
+      builder: (context, candidates, rejected) {
+        final hovering = candidates.isNotEmpty;
+        final hoverColor = hovering ? widget.accent : color;
+        return Stack(children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _DashedRoundedBorderPainter(hoverColor),
+              ),
+            ),
+          ),
+          Padding(
+              key: ValueKey('candidate-group-$threadId'),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Column(children: [
+                GestureDetector(
+                    key: ValueKey('candidate-group-header-$threadId'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => expanded
+                        ? _expandedGroups.remove(groupId)
+                        : _expandedGroups.add(groupId)),
+                    child: Row(children: [
+                      Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                              color: color, shape: BoxShape.circle)),
+                      const SizedBox(width: 9),
+                      Expanded(
+                          child: Text('candidate · $name',
+                              style: _mono(11, hoverColor),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis)),
+                      Text(
+                          '${agents.length} agent${agents.length == 1 ? '' : 's'}',
+                          style: _mono(9, color)),
+                      const SizedBox(width: 5),
+                      Text(expanded ? '▴' : '▾', style: _mono(8, color)),
+                    ])),
+                if (expanded)
+                  for (final agent in agents) _lane(t, agent),
+              ])),
+        ]);
+      },
     );
   }
 
@@ -275,35 +647,50 @@ class _SessionListViewState extends State<SessionListView> {
   }
 
   Widget _bookmarkRow(HudTheme t, SessionBookmark b) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        Text('⚑ ', style: _mono(11, _green)),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(b.label,
-                  style: _mono(11, t.textPrimary, weight: FontWeight.w500),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-              Text(b.meta, style: _mono(9, t.textDim)),
-            ],
-          ),
-        ),
-        _action(t, '▶', 'Resume', () async {
-          await widget.ws.sessionBookmarkAction(b.threadId, 'resume');
-          _refresh();
-        }, accent: _green),
-        const SizedBox(width: 5),
-        _action(t, '↗', 'Share session (KG view)', () => widget.onShare(b)),
-        const SizedBox(width: 5),
-        _action(t, '✕', 'Release', () async {
-          await widget.ws.sessionBookmarkAction(b.threadId, 'remove');
-          _refresh();
-        }),
-      ]),
+    return _dragSource(
+        b.threadId,
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Text('⚑ ', style: _mono(11, _green)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(b.label,
+                      style: _mono(11, t.textPrimary, weight: FontWeight.w500),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  Text(b.meta, style: _mono(9, t.textDim)),
+                ],
+              ),
+            ),
+            _action(t, '▶', 'Resume', () async {
+              await widget.ws.sessionBookmarkAction(b.threadId, 'resume');
+              _refresh();
+            }, accent: _green),
+            const SizedBox(width: 5),
+            _action(t, '↗', 'Share session (KG view)', () => widget.onShare(b)),
+            const SizedBox(width: 5),
+            _action(t, '✕', 'Release', () async {
+              await widget.ws.sessionBookmarkAction(b.threadId, 'remove');
+              _refresh();
+            }),
+          ]),
+        ));
+  }
+
+  Widget _dragSource(String threadId, Widget child) {
+    if (threadId.isEmpty) return child;
+    final feedback = Material(
+      color: Colors.transparent,
+      child: Opacity(opacity: 0.85, child: SizedBox(width: 220, child: child)),
     );
+    if (widget.islandMode) {
+      return LongPressDraggable<String>(
+          data: threadId, feedback: feedback, child: child);
+    }
+    return Draggable<String>(data: threadId, feedback: feedback, child: child);
   }
 
   Widget _action(HudTheme t, String glyph, String tooltip, VoidCallback onTap,
@@ -329,4 +716,31 @@ class _SessionListViewState extends State<SessionListView> {
       ),
     );
   }
+}
+
+class _DashedRoundedBorderPainter extends CustomPainter {
+  final Color color;
+
+  const _DashedRoundedBorderPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+          Offset.zero & size, const Radius.circular(8)));
+    final metric = path.computeMetrics().first;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    const dash = 4.0;
+    const gap = 3.0;
+    for (double start = 0; start < metric.length; start += dash + gap) {
+      canvas.drawPath(metric.extractPath(start, start + dash), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRoundedBorderPainter oldDelegate) =>
+      oldDelegate.color != color;
 }

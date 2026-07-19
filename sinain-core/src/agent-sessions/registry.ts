@@ -25,6 +25,8 @@ export function shortAgentInput(input: unknown, max = 120): string {
 
 export class AgentSessionRegistry {
   private sessions = new Map<string, AgentSession>();
+  private factFetchAt = new Map<string, number>();
+  private pendingContextNotes = new Map<string, string[]>();
   private changeCb: (() => void) | null = null;
 
   onChange(cb: () => void): void {
@@ -108,6 +110,68 @@ export class AgentSessionRegistry {
     session.lastEventAt = Date.now();
     if (behavior === "deny") session.toolLine = `denied${command ? ` · ${truncate(command, 120)}` : ""}`;
     this.changeCb?.();
+  }
+
+  setThread(sessionId: string, threadId: string, candidate = false): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || (session.threadId === threadId && !!session.candidate === candidate)) return;
+    session.threadId = threadId;
+    if (candidate) session.candidate = true;
+    else delete session.candidate;
+    this.changeCb?.();
+  }
+
+  /** Move an entire candidate lane at once. Per-session receipt cursors and
+   * queued context notes deliberately remain keyed to the same session ids. */
+  reassignThread(fromThreadId: string, toThreadId: string): number {
+    let changed = 0;
+    for (const session of this.sessions.values()) {
+      if (session.threadId !== fromThreadId) continue;
+      session.threadId = toThreadId;
+      delete session.candidate;
+      changed++;
+    }
+    if (changed) this.changeCb?.();
+    return changed;
+  }
+
+  /** Consume facts queued for this agent's attached thread. The first fetch
+   * establishes the cursor so an agent never inherits stale receipts. */
+  consumeFactLines(
+    sessionId: string,
+    linesSince: (threadId: string, since: number) => string[],
+    now = Date.now(),
+  ): string[] {
+    const session = this.sessions.get(sessionId);
+    const previous = this.factFetchAt.get(sessionId);
+    this.factFetchAt.set(sessionId, now);
+    const notes = this.pendingContextNotes.get(sessionId) ?? [];
+    this.pendingContextNotes.delete(sessionId);
+    const receipts = session?.threadId && previous !== undefined
+      ? linesSince(session.threadId, previous)
+      : [];
+    return [...notes, ...receipts];
+  }
+
+  queueContextNote(sessionId: string, text: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.state === "done") return false;
+    const pending = this.pendingContextNotes.get(sessionId) ?? [];
+    pending.push(text);
+    this.pendingContextNotes.set(sessionId, pending);
+    return true;
+  }
+
+  detachThread(threadId: string): void {
+    let changed = false;
+    for (const session of this.sessions.values()) {
+      if (session.threadId === threadId && session.state !== "done") {
+        delete session.threadId;
+        delete session.candidate;
+        changed = true;
+      }
+    }
+    if (changed) this.changeCb?.();
   }
 
   snapshot(): AgentSession[] {

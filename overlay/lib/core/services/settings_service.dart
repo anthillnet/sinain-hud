@@ -10,11 +10,13 @@ class SettingsService extends ChangeNotifier {
   static const _keyWsUrl = 'ws_url';
   static const _keyEyeX = 'eye_x';
   static const _keyEyeY = 'eye_y';
+  static const _keyNotchParked = 'notch_parked';
   static const _keyChatWidth = 'chat_width';
   static const _keyChatHeight = 'chat_height';
   static const _keyFontSize = 'font_size';
   static const _keyAccentColor = 'accent_color';
   static const _keyAutoDetectIssues = 'auto_detect_issues';
+  static const _keyAgentLlmBrief = 'agent_llm_brief';
   static const _keyChatgptHarness = 'chatgpt_harness';
   // NB: shared_preferences stores this under UserDefaults key
   // "flutter.show_in_dock" — AppDelegate reads it natively at launch to set the
@@ -40,11 +42,13 @@ class SettingsService extends ChangeNotifier {
       wsUrl: _prefs.getString(_keyWsUrl) ?? 'ws://localhost:9500',
       eyeX: _prefs.getDouble(_keyEyeX) ?? -1,
       eyeY: _prefs.getDouble(_keyEyeY) ?? -1,
+      notchParked: _prefs.getBool(_keyNotchParked) ?? false,
       chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
       chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
       accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
       autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
+      agentLlmBrief: _prefs.getBool(_keyAgentLlmBrief) ?? true,
       chatgptHarness: _prefs.getBool(_keyChatgptHarness) ?? false,
       showInDock: _prefs.getBool(_keyShowInDock) ?? true,
       hudStyle: _loadHudStyle(),
@@ -127,6 +131,11 @@ class SettingsService extends ChangeNotifier {
     // Don't notify — position updates are high frequency during drag
   }
 
+  Future<void> setNotchParked(bool value) async {
+    _settings.notchParked = value;
+    await _prefs.setBool(_keyNotchParked, value);
+  }
+
   Future<void> setChatSize(double w, double h) async {
     _settings.chatWidth = w;
     _settings.chatHeight = h;
@@ -155,6 +164,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setAutoDetectIssues(bool value) async {
     _settings.autoDetectIssues = value;
     await _prefs.setBool(_keyAutoDetectIssues, value);
+    notifyListeners();
+  }
+
+  Future<void> setAgentLlmBrief(bool value) async {
+    _settings.agentLlmBrief = value;
+    await _prefs.setBool(_keyAgentLlmBrief, value);
     notifyListeners();
   }
 

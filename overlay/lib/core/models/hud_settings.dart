@@ -29,6 +29,9 @@ class HudSettings {
   double eyeX;
   double eyeY;
 
+  /// Whether the eye was last parked at the display notch.
+  bool notchParked;
+
   /// Persisted chat panel size.
   double chatWidth;
   double chatHeight;
@@ -39,6 +42,9 @@ class HudSettings {
 
   /// Grammarly mode: show clickable region eyes at actionable screen areas.
   bool autoDetectIssues;
+
+  /// Add an LLM-composed Build-Context section when an agent session starts.
+  bool agentLlmBrief;
 
   /// ChatGPT network harness: expose the local MCP server over a public tunnel
   /// so ChatGPT can pull ROI context. Off by default — security-sensitive.
@@ -73,11 +79,13 @@ class HudSettings {
     this.wsUrl = 'ws://localhost:9500',
     this.eyeX = -1, // -1 means "use default position"
     this.eyeY = -1,
+    this.notchParked = false,
     this.chatWidth = 427,
     this.chatHeight = 293,
     this.fontSize = 12.0,
     this.accentColor = 0xFF00FF88,
     this.autoDetectIssues = false,
+    this.agentLlmBrief = true,
     this.chatgptHarness = false,
     this.showInDock = true,
     this.hudStyle = HudStyle.solid,
@@ -115,11 +123,13 @@ class HudSettings {
     String? wsUrl,
     double? eyeX,
     double? eyeY,
+    bool? notchParked,
     double? chatWidth,
     double? chatHeight,
     double? fontSize,
     int? accentColor,
     bool? autoDetectIssues,
+    bool? agentLlmBrief,
     bool? chatgptHarness,
     bool? showInDock,
     HudStyle? hudStyle,
@@ -135,17 +145,20 @@ class HudSettings {
       wsUrl: wsUrl ?? this.wsUrl,
       eyeX: eyeX ?? this.eyeX,
       eyeY: eyeY ?? this.eyeY,
+      notchParked: notchParked ?? this.notchParked,
       chatWidth: chatWidth ?? this.chatWidth,
       chatHeight: chatHeight ?? this.chatHeight,
       fontSize: fontSize ?? this.fontSize,
       accentColor: accentColor ?? this.accentColor,
       autoDetectIssues: autoDetectIssues ?? this.autoDetectIssues,
+      agentLlmBrief: agentLlmBrief ?? this.agentLlmBrief,
       chatgptHarness: chatgptHarness ?? this.chatgptHarness,
       showInDock: showInDock ?? this.showInDock,
       hudStyle: hudStyle ?? this.hudStyle,
       autoUpdateCheck: autoUpdateCheck ?? this.autoUpdateCheck,
       feedbackStatus: feedbackStatus ?? this.feedbackStatus,
-      feedbackSnoozeUntilMs: feedbackSnoozeUntilMs ?? this.feedbackSnoozeUntilMs,
+      feedbackSnoozeUntilMs:
+          feedbackSnoozeUntilMs ?? this.feedbackSnoozeUntilMs,
       feedbackAskCount: feedbackAskCount ?? this.feedbackAskCount,
     );
   }

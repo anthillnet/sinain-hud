@@ -102,6 +102,15 @@ class WindowService {
     }
   }
 
+  /// Bring the terminal associated with an agent session to the foreground.
+  Future<void> jumpToTerminal(Map<String, dynamic> term) async {
+    try {
+      await _channel.invokeMethod('jumpToTerminal', {'term': term});
+    } catch (e) {
+      _log('jumpToTerminal failed: $e');
+    }
+  }
+
   /// Set the window frame (position + size).
   Future<void> setWindowFrame(double x, double y, double w, double h) async {
     try {
@@ -130,6 +139,45 @@ class WindowService {
       }
     } catch (e) {
       _log('getWindowFrame failed: $e');
+    }
+    return null;
+  }
+
+  /// Get the primary screen frame and visible work area.
+  Future<Map<String, double>?> getScreenFrame() async {
+    try {
+      final result = await _channel.invokeMethod('getScreenFrame');
+      if (result is Map) {
+        return {
+          'x': (result['x'] as num).toDouble(),
+          'y': (result['y'] as num).toDouble(),
+          'w': (result['w'] as num).toDouble(),
+          'h': (result['h'] as num).toDouble(),
+          'vx': (result['vx'] as num).toDouble(),
+          'vy': (result['vy'] as num).toDouble(),
+          'vw': (result['vw'] as num).toDouble(),
+          'vh': (result['vh'] as num).toDouble(),
+        };
+      }
+    } catch (e) {
+      _log('getScreenFrame failed: $e');
+    }
+    return null;
+  }
+
+  /// Get the primary screen's notch and auxiliary menu-bar geometry.
+  Future<Map<String, double>?> getNotchInfo() async {
+    try {
+      final result = await _channel.invokeMethod('getNotchInfo');
+      if (result is Map) {
+        return {
+          'notchHeight': (result['notchHeight'] as num).toDouble(),
+          'leftAuxWidth': (result['leftAuxWidth'] as num).toDouble(),
+          'rightAuxWidth': (result['rightAuxWidth'] as num).toDouble(),
+        };
+      }
+    } catch (e) {
+      _log('getNotchInfo failed: $e');
     }
     return null;
   }
@@ -238,6 +286,16 @@ class WindowService {
       await _channel.invokeMethod('openScreenRecordingSettings');
     } catch (e) {
       _log('openScreenRecordingSettings failed: $e');
+    }
+  }
+
+  /// Raise/restore the window level for the notch-parked island (macOS).
+  /// Parked: above the status bar so the bar draws inside the menu-bar band.
+  Future<void> setNotchParked(bool enabled) async {
+    try {
+      await _channel.invokeMethod('setNotchParked', {'enabled': enabled});
+    } catch (e) {
+      _log('setNotchParked failed: $e');
     }
   }
 

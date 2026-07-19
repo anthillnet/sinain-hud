@@ -55,6 +55,8 @@ export interface CommandDeps {
   /** Toggle issue auto-detection (Grammarly mode regions) at runtime.
    *  The overlay's settings toggle is the source of truth. */
   onSetAutoDetect?: (enabled: boolean) => void;
+  /** Toggle the optional burst-lane brief injected when an agent starts. */
+  onSetAgentLlmBrief?: (enabled: boolean) => void;
   /** Hold ambient escalations for [ms] — user is actively interacting. */
   onUserBusy?: (ms: number) => void;
   /** Start the local bare-agent runner for the selected escalation agent. */
@@ -68,7 +70,9 @@ export interface CommandDeps {
    *  built-in sinain chat lane is selected but unreachable. */
   onRestartChatSidecar?: () => { ok: boolean; error?: string };
   /** Resolve an approval requested by an attached agent CLI. */
-  onAgentApprovalReply?: (id: string, behavior: "allow" | "deny" | "always") => void;
+  onAgentApprovalReply?: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => void;
+  /** Merge a candidate agent lane into a tracked session thread. */
+  onMergeCandidate?: (candidateThreadId: string, targetThreadId: string) => void;
 }
 
 /**
@@ -178,7 +182,11 @@ export function setupCommands(deps: CommandDeps): void {
         break;
       }
       case "agent_approval_reply": {
-        deps.onAgentApprovalReply?.(msg.id, msg.behavior);
+        deps.onAgentApprovalReply?.(
+          msg.id,
+          msg.behavior,
+          typeof msg.answer === "string" ? msg.answer : undefined,
+        );
         break;
       }
       case "command": {
@@ -197,6 +205,12 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
   const action = msg.action;
 
   switch (action) {
+    case "merge_candidate": {
+      const candidate = typeof (msg as any).candidate === "string" ? (msg as any).candidate : "";
+      const target = typeof (msg as any).target === "string" ? (msg as any).target : "";
+      if (candidate && target) deps.onMergeCandidate?.(candidate, target);
+      break;
+    }
     case "toggle_audio": {
       const isSck = systemAudioPipeline.getCaptureCommand() === "screencapturekit";
       if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {
@@ -424,6 +438,20 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
         log(TAG, `auto-detect issues ${enabled ? "enabled" : "disabled"}`);
       } else {
         log(TAG, `set_auto_detect: no handler wired`);
+      }
+      break;
+    }
+    case "set_agent_llm_brief": {
+      const enabled = (msg as any).enabled;
+      if (typeof enabled !== "boolean") {
+        log(TAG, `set_agent_llm_brief: missing or non-boolean enabled field`);
+        break;
+      }
+      if (deps.onSetAgentLlmBrief) {
+        deps.onSetAgentLlmBrief(enabled);
+        log(TAG, `agent LLM brief ${enabled ? "enabled" : "disabled"}`);
+      } else {
+        log(TAG, `set_agent_llm_brief: no handler wired`);
       }
       break;
     }
