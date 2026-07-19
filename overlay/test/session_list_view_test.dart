@@ -63,7 +63,7 @@ void main() {
     ws.dispose();
   });
 
-  testWidgets('groups attached lane and context card before unattached agents',
+  testWidgets('groups attached lane and context card before candidate agents',
       (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     const chip = SessionChipState(
@@ -97,9 +97,12 @@ void main() {
         'lastEventAt': now,
       }),
       AgentSession.fromJson({
-        'sessionId': 'agent-orphan',
+        'sessionId': 'agent-candidate',
+        'threadId': 'proj:candidate-project',
+        'candidate': true,
+        'cwd': '/work/candidate-project',
         'source': 'claude',
-        'name': 'orphan agent',
+        'name': 'candidate agent',
         'state': 'working',
         'toolLine': 'Bash · tests',
         'startedAt': now,
@@ -128,13 +131,15 @@ void main() {
     expect(find.text('visa application'), findsOneWidget);
     expect(find.text('card · goal: finish the application'), findsOneWidget);
     expect(find.text('attached agent · Read · documents'), findsOneWidget);
-    expect(find.text('unattached'), findsOneWidget);
-    expect(find.text('orphan agent · Bash · tests'), findsOneWidget);
+    expect(find.text('candidate · candidate-project'), findsOneWidget);
+    expect(find.text('candidate agent · Bash · tests'), findsOneWidget);
+    expect(find.text('unattached'), findsNothing);
 
     final attachedY =
         tester.getTopLeft(find.text('attached agent · Read · documents')).dy;
-    final unattachedY = tester.getTopLeft(find.text('unattached')).dy;
-    expect(attachedY, lessThan(unattachedY));
+    final candidateY =
+        tester.getTopLeft(find.text('candidate · candidate-project')).dy;
+    expect(attachedY, lessThan(candidateY));
 
     await tester.pumpWidget(const SizedBox.shrink());
     ws.dispose();

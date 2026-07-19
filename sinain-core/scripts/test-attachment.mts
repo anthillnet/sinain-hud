@@ -38,7 +38,7 @@ check("single candidate attaches", () => {
   equal(h.registry.snapshot()[0].threadId, "thread-one");
 });
 
-check("cwd basename resolves ambiguity", () => {
+check("sole warm session wins regardless of label", () => {
   const h = harness([
     { id: "w1", threadId: "thread-one", label: "Mail", startTs: 100, paused: true },
     { id: "w2", threadId: "thread-project", label: "Project release", startTs: 120, paused: false },
@@ -47,19 +47,42 @@ check("cwd basename resolves ambiguity", () => {
   equal(h.registry.snapshot()[0].threadId, "thread-project");
 });
 
-check("unresolved ambiguity stays orphaned", () => {
+check("unresolved warm ambiguity falls back to candidate", () => {
   const h = harness([
-    { id: "w1", threadId: "thread-one", label: "Mail", startTs: 100, paused: true },
+    { id: "w1", threadId: "thread-one", label: "Mail", startTs: 100, paused: false },
     { id: "w2", threadId: "thread-two", label: "Docs", startTs: 120, paused: false },
   ]);
   h.event("a1", 200, "/work/project");
-  equal(h.registry.snapshot()[0].threadId, undefined);
+  equal(h.registry.snapshot()[0].threadId, "proj:project");
+  equal(h.registry.snapshot()[0].candidate, true);
 });
 
-check("launch before span stays orphaned", () => {
+check("launch before tracked span attaches to cwd candidate", () => {
   const h = harness([{ id: "w1", threadId: "thread-one", label: "Work", startTs: 300, paused: false }]);
   h.event("a1", 200);
-  equal(h.registry.snapshot()[0].threadId, undefined);
+  equal(h.registry.snapshot()[0].threadId, "proj:project");
+  equal(h.registry.snapshot()[0].candidate, true);
+});
+
+check("several warm sessions use cwd label only as tie-breaker", () => {
+  const h = harness([
+    { id: "w1", threadId: "thread-one", label: "Mail", startTs: 100, paused: false },
+    { id: "w2", threadId: "thread-project", label: "Project release", startTs: 120, paused: false },
+  ]);
+  h.event("a1", 200, "/work/project");
+  equal(h.registry.snapshot()[0].threadId, "thread-project");
+  equal(h.registry.snapshot()[0].candidate, undefined);
+});
+
+check("candidate upgrades when a real warm session appears", () => {
+  const active: ActiveSession[] = [];
+  const h = harness(active);
+  h.event("a1", 200, "/work/project");
+  equal(h.registry.snapshot()[0].candidate, true);
+  active.push({ id: "w1", threadId: "tracked-project", label: "Unrelated", startTs: 100, paused: false });
+  h.coordinator.sync();
+  equal(h.registry.snapshot()[0].threadId, "tracked-project");
+  equal(h.registry.snapshot()[0].candidate, undefined);
 });
 
 check("working and waiting runs count", () => {
@@ -111,7 +134,8 @@ check("wrap detaches live run without same-thread reattachment", () => {
   h.event("a1", 200);
   h.coordinator.onWrap("thread-one");
   h.coordinator.sync();
-  equal(h.registry.snapshot()[0].threadId, undefined);
+  equal(h.registry.snapshot()[0].threadId, "proj:project");
+  equal(h.registry.snapshot()[0].candidate, true);
 
   active.splice(0, 1, { id: "w2", threadId: "thread-new", label: "Work", startTs: 150, paused: false });
   h.coordinator.sync();

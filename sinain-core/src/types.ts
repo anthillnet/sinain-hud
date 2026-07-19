@@ -247,6 +247,8 @@ export interface AgentEventFrame {
 export interface AgentSession {
   sessionId: string;
   threadId?: string;
+  /** Attached to a pre-track Session Sense candidate, not a tracked session. */
+  candidate?: boolean;
   source: string;
   name: string;
   cwd?: string;

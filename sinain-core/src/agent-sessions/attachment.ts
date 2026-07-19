@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import type { AgentSession } from "../types.js";
+import { deriveAgentLaunchCandidate } from "../capture/episode-tracker.js";
 import type { AgentSessionRegistry } from "./registry.js";
 
 export interface ActiveSession {
@@ -29,34 +30,45 @@ export class AttachmentCoordinator {
         for (const ids of this.detached.values()) ids.delete(session.sessionId);
         continue;
       }
-      if (session.threadId) continue;
+      if (session.threadId && !session.candidate) continue;
 
       const candidates = this.getActiveSessions().filter(
         (active) => active.startTs <= session.startedAt
           && !this.detached.get(active.threadId)?.has(session.sessionId),
       );
+      const warm = candidates.filter((active) => !active.paused);
       let match: ActiveSession | undefined;
-      if (candidates.length === 1) {
-        match = candidates[0];
-      } else if (candidates.length > 1 && session.cwd) {
-        const project = basename(session.cwd).toLowerCase();
-        if (project) {
-          const matching = candidates.filter((active) =>
-            active.label.toLowerCase().includes(project)
-              || active.threadId.toLowerCase().includes(project));
-          if (matching.length === 1) match = matching[0];
+      if (warm.length === 1) {
+        match = warm[0];
+      } else {
+        const pool = warm.length > 1 ? warm : candidates;
+        if (pool.length === 1) match = pool[0];
+        else if (pool.length > 1 && session.cwd) {
+          const project = basename(session.cwd).toLowerCase();
+          if (project) {
+            const matching = pool.filter((active) =>
+              active.label.toLowerCase().includes(project)
+                || active.threadId.toLowerCase().includes(project));
+            if (matching.length === 1) match = matching[0];
+          }
         }
       }
       if (match) this.registry.setThread(session.sessionId, match.threadId);
-      else if (session.cwd && !this.seededOrphans.has(session.sessionId)) {
-        this.seededOrphans.add(session.sessionId);
-        this.onOrphanLaunch?.(session.cwd, session.startedAt);
+      else if (session.cwd) {
+        const derived = deriveAgentLaunchCandidate(session.cwd);
+        const fallbackLabel = basename(session.cwd).toLowerCase();
+        const threadId = derived?.threadId || (fallbackLabel ? `cand:${fallbackLabel}` : "");
+        if (threadId) this.registry.setThread(session.sessionId, threadId, true);
+        if (!this.seededOrphans.has(session.sessionId)) {
+          this.seededOrphans.add(session.sessionId);
+          this.onOrphanLaunch?.(session.cwd, session.startedAt);
+        }
       }
     }
 
     this.notifyCountChanges();
-    // The design rule now wins: orphans seed Session Sense candidates once;
-    // they do not force qualification or attachment.
+    // Candidate lanes seed Session Sense once; they never force qualification
+    // or create a tracked session.
   }
 
   augmentsFor(threadId: string): { working: number; receipts: string[] } {

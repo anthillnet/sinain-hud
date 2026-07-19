@@ -46,6 +46,14 @@ export interface EpisodeQualified {
   at: number;
 }
 
+/** The cwd identity shared by agent attachment and the Session Sense
+ * candidate detector. Keeping this here makes a pre-track lane land on the
+ * same thread that noteAgentLaunch seeds. */
+export function deriveAgentLaunchCandidate(cwd: string): { threadId: string; label: string } | null {
+  const label = basename(cwd);
+  return label ? { threadId: `proj:${label.toLowerCase()}`, label } : null;
+}
+
 export class EpisodeTracker {
   private readonly idleGapMs =
     (Number(process.env.SAVE_OFFER_IDLE_GAP_MINUTES) || 5) * MINUTE;
@@ -83,9 +91,9 @@ export class EpisodeTracker {
    *  detector as attended screen events. One launch can seed an episode or a
    *  pending switch, but cannot by itself qualify either one. */
   noteAgentLaunch(cwd: string, ts = Date.now()): void {
-    const label = basename(cwd);
-    if (!label) return;
-    this.observeThread(`proj:${label.toLowerCase()}`, label, ts);
+    const candidate = deriveAgentLaunchCandidate(cwd);
+    if (!candidate) return;
+    this.observeThread(candidate.threadId, candidate.label, ts);
   }
 
   private observeThread(key: string, label: string, ts: number): void {

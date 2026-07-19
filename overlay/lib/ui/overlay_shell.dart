@@ -337,6 +337,7 @@ class OverlayShellState extends State<OverlayShell> {
       final approvalSnap = _pendingApprovalSnap;
       if (approvalSnap != null) {
         _pendingApprovalSnap = null;
+        _manualCatchFromIsland = false;
         approvalSnap(picked.id);
         return;
       }
@@ -346,6 +347,7 @@ class OverlayShellState extends State<OverlayShell> {
       if (_manualCatchFromIsland && _parked) {
         _manualCatchFromIsland = false;
         setState(() => _islandRoi = picked);
+        unawaited(_regionEyes?.excludeRegion(picked.id));
         unawaited(_setIslandView(_IslandView.roi));
         return;
       }
@@ -983,7 +985,9 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   void _dismissIslandRoi() {
+    final regionId = _islandRoi?.id;
     setState(() => _islandRoi = null);
+    if (regionId != null) _closeThread(regionId);
     _setIslandView(_IslandView.bar);
   }
 

@@ -1,6 +1,7 @@
 class AgentSession {
   final String sessionId;
   final String? threadId;
+  final bool candidate;
   final String source;
   final String name;
   final String? cwd;
@@ -22,6 +23,7 @@ class AgentSession {
     required this.startedAt,
     required this.lastEventAt,
     this.threadId,
+    this.candidate = false,
     this.cwd,
     this.model,
     this.branch,
@@ -37,6 +39,7 @@ class AgentSession {
     return AgentSession(
       sessionId: json['sessionId'] as String? ?? '',
       threadId: json['threadId'] as String?,
+      candidate: json['candidate'] as bool? ?? false,
       source: json['source'] as String? ?? '',
       name: json['name'] as String? ?? 'agent',
       cwd: json['cwd'] as String?,

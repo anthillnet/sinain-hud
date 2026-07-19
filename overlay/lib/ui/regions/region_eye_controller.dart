@@ -67,6 +67,10 @@ class RegionEyeController {
   final Map<String, Offset> _eyePositions = {};
   // 'idle' | 'working' | 'ready' | 'failed' — survives region set refreshes
   final Map<String, String> _eyeStates = {};
+  // Island route-card catches use the card as their only surface. Keep their
+  // core region alive for routing, but never reconcile a native eye/panel for
+  // them. Other manual catches still follow the legacy eye flow.
+  final Set<String> _excludedRegionIds = {};
   // Single/double-tap discrimination on the native eye-tap stream.
   String? _pendingTapId;
   Timer? _pendingTapTimer;
@@ -154,9 +158,15 @@ class RegionEyeController {
   Future<void> _onRegions(List<RegionHighlight> regions) async {
     // Manual catches are user-requested, not auto-detection. They must remain
     // visible even when the ambient auto-detect preference is disabled.
-    final visibleRegions = _enabled
+    final eligibleRegions = _enabled
         ? regions
         : regions.where((r) => r.id.startsWith('r-man-')).toList();
+    final visibleRegions = eligibleRegions
+        .where((r) => !_excludedRegionIds.contains(r.id))
+        .toList();
+
+    _excludedRegionIds
+        .removeWhere((id) => !regions.any((region) => region.id == id));
 
     _regions
       ..clear()
@@ -233,6 +243,15 @@ class RegionEyeController {
       });
     }
     await windowService.showRegionEyes(eyes);
+  }
+
+  /// Remove and continue suppressing the native eye for an island route-card
+  /// catch. Reconciliation is immediate so this also closes an eye that won a
+  /// listener race and was briefly created from the region broadcast.
+  Future<void> excludeRegion(String id) async {
+    _excludedRegionIds.add(id);
+    await windowService.hideRegionPreview();
+    await _onRegions(ws.regions);
   }
 
   /// Ensure a newly caught manual ROI is reconciled, then open its native

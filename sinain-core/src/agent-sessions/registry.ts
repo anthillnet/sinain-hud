@@ -112,10 +112,12 @@ export class AgentSessionRegistry {
     this.changeCb?.();
   }
 
-  setThread(sessionId: string, threadId: string): void {
+  setThread(sessionId: string, threadId: string, candidate = false): void {
     const session = this.sessions.get(sessionId);
-    if (!session || session.threadId === threadId) return;
+    if (!session || (session.threadId === threadId && !!session.candidate === candidate)) return;
     session.threadId = threadId;
+    if (candidate) session.candidate = true;
+    else delete session.candidate;
     this.changeCb?.();
   }
 
@@ -151,6 +153,7 @@ export class AgentSessionRegistry {
     for (const session of this.sessions.values()) {
       if (session.threadId === threadId && session.state !== "done") {
         delete session.threadId;
+        delete session.candidate;
         changed = true;
       }
     }

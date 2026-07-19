@@ -1929,7 +1929,12 @@ async function main() {
     : null;
   const sessionSense = new SessionSenseManager(
     saveManager,
-    (msg) => wsHandler.broadcastRaw(msg),
+    (msg) => {
+      // Tracking and warmth changes can turn a candidate lane into an
+      // unambiguous real attachment even when the agent emits no new hook.
+      attachmentCoordinator?.sync();
+      wsHandler.broadcastRaw(msg);
+    },
     resolveLocalMemoryDir(), config.sessionSenseConfig,
     composeSessionAssist,
     (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),

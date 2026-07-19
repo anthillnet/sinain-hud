@@ -40,8 +40,8 @@ async function main() {
   const activeSessions: ActiveSession[] = [
     { id: "work-1", threadId: "thread-one", label: "Agent bridge", startTs: 0, paused: false },
     // Future startTs: the ROI thread must never capture the harness's agent
-    // session (attachment requires startTs <= launch) — facts checks rely on
-    // s1 staying orphan. The ROI composition targets this thread explicitly.
+    // session (attachment requires startTs <= launch). The sole warm eligible
+    // session wins; ROI composition still targets its thread explicitly.
     { id: "roi-work", threadId: "roi-thread", label: "ROI route", startTs: Date.now() + 3_600_000, paused: false },
   ];
   const attachment = new AttachmentCoordinator(registry, () => activeSessions, () => {});
@@ -117,6 +117,11 @@ async function main() {
   await pExecFileWithStdin({ session_id: "s1", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } });
   const snap1 = await waitFor((m) => m.type === "agent_sessions" && m.working === 1 && m.sessions?.[0]?.toolLine?.includes("npm test"));
   check("SessionStart+PreToolUse → agent_sessions broadcast", !!snap1, snap1.sessions[0].name);
+  check(
+    "sole warm session attaches regardless of label",
+    snap1.sessions[0].threadId === "thread-one" && snap1.sessions[0].candidate !== true,
+    snap1.sessions[0].threadId,
+  );
 
   const recentFeedText = "feed context reaches agent enrichment";
   feedBuffer.push(recentFeedText, "normal", "audio");

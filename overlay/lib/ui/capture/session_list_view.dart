@@ -171,9 +171,13 @@ class _SessionListViewState extends State<SessionListView> {
         if (aWaiting != bWaiting) return aWaiting ? -1 : 1;
         return 0;
       });
-    final orphans = widget.ws.agentSessions
-        .where((agent) => agent.threadId == null || agent.threadId!.isEmpty)
-        .toList();
+    final candidateGroups = <String, List<AgentSession>>{};
+    for (final agent in widget.ws.agentSessions.where((a) => a.candidate)) {
+      final threadId = agent.threadId;
+      if (threadId != null && threadId.isNotEmpty) {
+        candidateGroups.putIfAbsent(threadId, () => []).add(agent);
+      }
+    }
     final liveVoice = widget.ws.voiceSession;
     if (widget.islandMode) {
       return Padding(
@@ -188,7 +192,7 @@ class _SessionListViewState extends State<SessionListView> {
               ),
             if (sessions.isEmpty &&
                 !(liveVoice?.isActive ?? false) &&
-                orphans.isEmpty)
+                candidateGroups.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
@@ -211,7 +215,11 @@ class _SessionListViewState extends State<SessionListView> {
                       overflow: TextOverflow.ellipsis),
                 ),
             ],
-            if (orphans.isNotEmpty) _unattachedGroup(t, orphans),
+            for (final entry in candidateGroups.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _candidateGroup(t, entry.key, entry.value),
+              ),
           ],
         ),
       );
@@ -261,12 +269,13 @@ class _SessionListViewState extends State<SessionListView> {
                       overflow: TextOverflow.ellipsis),
                 ),
             ],
-          if (orphans.isNotEmpty) ...[
+          if (candidateGroups.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: _unattachedGroup(t, orphans),
-            ),
+            for (final entry in candidateGroups.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _candidateGroup(t, entry.key, entry.value),
+              ),
           ],
           const SizedBox(height: 14),
           Row(children: [
@@ -545,49 +554,58 @@ class _SessionListViewState extends State<SessionListView> {
     );
   }
 
-  Widget _unattachedGroup(HudTheme t, List<AgentSession> agents) {
+  Widget _candidateGroup(
+      HudTheme t, String threadId, List<AgentSession> agents) {
     agents.sort(_laneOrder);
-    final waiting = agents.any((agent) => agent.state == 'waiting');
-    const groupId = '__unattached__';
-    final expanded = _isGroupExpanded(groupId, waiting);
-    return Container(
-      key: const ValueKey('unattached-group'),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        border: Border.all(
-            color: (waiting ? _amber : t.textDim).withValues(alpha: 0.4)),
-        borderRadius: BorderRadius.circular(8),
+    final groupId = 'candidate:$threadId';
+    if (_initializedGroups.add(groupId)) _expandedGroups.add(groupId);
+    final expanded = _expandedGroups.contains(groupId);
+    final cwd = agents.first.cwd ?? '';
+    final cwdParts =
+        cwd.split(RegExp(r'[/\\]')).where((part) => part.isNotEmpty).toList();
+    final name = cwdParts.isNotEmpty
+        ? cwdParts.last
+        : threadId.replaceFirst(RegExp(r'^(proj|cand):'), '');
+    final color = _violet.withValues(alpha: 0.48);
+    return Stack(children: [
+      Positioned.fill(
+        child: IgnorePointer(
+          child: CustomPaint(
+            painter: _DashedRoundedBorderPainter(color),
+          ),
+        ),
       ),
-      child: Column(children: [
-        GestureDetector(
-            key: const ValueKey('unattached-group-header'),
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.islandMode
-                ? () => setState(() => expanded
+      Padding(
+          key: ValueKey('candidate-group-$threadId'),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Column(children: [
+            GestureDetector(
+                key: ValueKey('candidate-group-header-$threadId'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => expanded
                     ? _expandedGroups.remove(groupId)
-                    : _expandedGroups.add(groupId))
-                : null,
-            child: Row(children: [
-              Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                      color: waiting ? _amber : t.textDim,
-                      shape: BoxShape.circle)),
-              const SizedBox(width: 9),
-              Expanded(
-                  child: Text('unattached', style: _mono(11, t.textPrimary))),
-              if (widget.islandMode) ...[
-                Text('${agents.length} agent${agents.length == 1 ? '' : 's'}',
-                    style: _mono(9, waiting ? _amber : t.textDim)),
-                const SizedBox(width: 5),
-                Text(expanded ? '▴' : '▾', style: _mono(8, t.textDim)),
-              ],
-            ])),
-        if (expanded)
-          for (final agent in agents) _lane(t, agent),
-      ]),
-    );
+                    : _expandedGroups.add(groupId)),
+                child: Row(children: [
+                  Container(
+                      width: 8,
+                      height: 8,
+                      decoration:
+                          BoxDecoration(color: color, shape: BoxShape.circle)),
+                  const SizedBox(width: 9),
+                  Expanded(
+                      child: Text('candidate · $name',
+                          style: _mono(11, color),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis)),
+                  Text('${agents.length} agent${agents.length == 1 ? '' : 's'}',
+                      style: _mono(9, color)),
+                  const SizedBox(width: 5),
+                  Text(expanded ? '▴' : '▾', style: _mono(8, color)),
+                ])),
+            if (expanded)
+              for (final agent in agents) _lane(t, agent),
+          ])),
+    ]);
   }
 
   /// Fetch the (core-cached) window preview for the session's span — shown
@@ -669,4 +687,31 @@ class _SessionListViewState extends State<SessionListView> {
       ),
     );
   }
+}
+
+class _DashedRoundedBorderPainter extends CustomPainter {
+  final Color color;
+
+  const _DashedRoundedBorderPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+          Offset.zero & size, const Radius.circular(8)));
+    final metric = path.computeMetrics().first;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    const dash = 4.0;
+    const gap = 3.0;
+    for (double start = 0; start < metric.length; start += dash + gap) {
+      canvas.drawPath(metric.extractPath(start, start + dash), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRoundedBorderPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
