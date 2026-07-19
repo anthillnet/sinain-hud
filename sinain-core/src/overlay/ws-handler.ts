@@ -9,7 +9,10 @@ import type {
   ThreadStatusMessage,
   RegionHighlightMessage,
   CostMessage,
+  UsageMessage,
   CostSnapshot,
+  AgentApprovalRequest,
+  AgentSessionsMessage,
   Priority,
   FeedChannel,
 } from "../types.js";
@@ -48,7 +51,10 @@ export class WsHandler {
   private replayBuffer: FeedMessage[] = [];
   private spawnTaskBuffer: Map<string, ThreadStatusMessage> = new Map();
   private latestCostMsg: CostMessage | null = null;
+  private latestUsageMsg: UsageMessage | null = null;
   private latestRegionMsg: RegionHighlightMessage | null = null;
+  private latestAgentSessionsMsg: AgentSessionsMessage | null = null;
+  private agentApprovalSupplier: (() => AgentApprovalRequest[]) | null = null;
   private regionFlushScheduled = false;
   // ChatGPT MCP-tunnel state (connector URL + pairing code). Kept here rather
   // than in BridgeState so the feature is self-contained in the WS layer.
@@ -121,6 +127,12 @@ export class WsHandler {
       startedAt: Date.now(),
       displayEnabled: false,
     });
+    if (this.latestUsageMsg) this.sendTo(ws, this.latestUsageMsg);
+
+    if (this.latestAgentSessionsMsg) this.sendTo(ws, this.latestAgentSessionsMsg);
+    for (const request of this.agentApprovalSupplier?.() ?? []) {
+      this.sendTo(ws, { type: "agent_approval", request });
+    }
 
     ws.on("message", (raw) => {
       try {
@@ -235,6 +247,20 @@ export class WsHandler {
     this.broadcastMessage(msg);
   }
 
+  broadcastUsage(msg: UsageMessage): void {
+    this.latestUsageMsg = msg;
+    this.broadcastMessage(msg);
+  }
+
+  setAgentApprovalSupplier(supplier: () => AgentApprovalRequest[]): void {
+    this.agentApprovalSupplier = supplier;
+  }
+
+  broadcastAgentSessions(msg: AgentSessionsMessage): void {
+    this.latestAgentSessionsMsg = msg;
+    this.broadcastMessage(msg);
+  }
+
   /** Update internal state and broadcast. */
   updateState(partial: Partial<BridgeState>): void {
     Object.assign(this.state, partial);
@@ -293,6 +319,9 @@ export class WsHandler {
         break;
       case "spawn_permission_reply":
         log(TAG, `\u2190 spawn permission reply: taskId=${(msg as any).taskId} decision=${(msg as any).decision}`);
+        break;
+      case "agent_approval_reply":
+        log(TAG, `← agent approval reply: id=${msg.id} behavior=${msg.behavior}`);
         break;
       case "profiling":
         if (this.onProfilingCb) this.onProfilingCb(msg);

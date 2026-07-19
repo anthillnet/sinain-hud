@@ -7,6 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/context_cards.dart';
 import '../models/feed_item.dart';
 import '../models/region_highlight.dart';
+import '../models/agent_session.dart';
 import '../models/thread_status.dart';
 
 /// WebSocket service with auto-reconnect and exponential backoff.
@@ -84,6 +85,19 @@ class WebSocketService extends ChangeNotifier {
   final _sessionWrapController = StreamController<SessionWrap>.broadcast();
   final _sessionAssistController = StreamController<SessionAssist>.broadcast();
   final _voiceController = StreamController<VoiceSession>.broadcast();
+  final _agentSessionsController = StreamController<void>.broadcast();
+
+  /// Agent-session registry snapshot (external agent CLIs via sinain-bridge).
+  List<AgentSession> agentSessions = const [];
+  int agentWorking = 0;
+  int agentWaiting = 0;
+  double? usage5h;
+  double? usage7d;
+  final Map<String, AgentApprovalRequest> _agentApprovals = {};
+
+  Stream<void> get agentSessionsStream => _agentSessionsController.stream;
+  Map<String, AgentApprovalRequest> get agentApprovals =>
+      Map.unmodifiable(_agentApprovals);
 
   /// Latest voice session state (snapshot for late-mounting UI); updates via
   /// [voiceSessionStream] + notifyListeners.
@@ -474,6 +488,39 @@ class WebSocketService extends ChangeNotifier {
           if (pendingAttentionCount != prevAttention) notifyListeners();
           _spawnTaskController.add(task);
           break;
+        case 'agent_sessions':
+          agentSessions = (json['sessions'] as List? ?? const [])
+              .whereType<Map>()
+              .map((item) =>
+                  AgentSession.fromJson(item.cast<String, dynamic>()))
+              .toList(growable: false);
+          agentWorking = (json['working'] as num?)?.toInt() ?? 0;
+          agentWaiting = (json['waiting'] as num?)?.toInt() ?? 0;
+          notifyListeners();
+          _agentSessionsController.add(null);
+          break;
+        case 'usage':
+          usage5h = (json['fiveHour']?['utilization'] as num?)?.toDouble();
+          usage7d = (json['sevenDay']?['utilization'] as num?)?.toDouble();
+          notifyListeners();
+          _agentSessionsController.add(null);
+          break;
+        case 'agent_approval':
+          final requestJson = json['request'];
+          if (requestJson is Map) {
+            final request =
+                AgentApprovalRequest.fromJson(requestJson.cast<String, dynamic>());
+            if (request.id.isNotEmpty) _agentApprovals[request.id] = request;
+            notifyListeners();
+            _agentSessionsController.add(null);
+          }
+          break;
+        case 'agent_approval_resolved':
+          final id = json['id'] as String?;
+          if (id != null) _agentApprovals.remove(id);
+          notifyListeners();
+          _agentSessionsController.add(null);
+          break;
         case 'region_highlight':
           final list = (json['regions'] as List? ?? const [])
               .whereType<Map<String, dynamic>>()
@@ -576,6 +623,15 @@ class WebSocketService extends ChangeNotifier {
     if (_connected && _channel != null) {
       _channel!.sink.add(jsonEncode(message));
     }
+  }
+
+  /// Resolve a pending agent approval (Allow / Always / Deny tap). Removes the
+  /// card optimistically — the server's agent_approval_resolved confirms it.
+  void sendAgentApprovalReply(String id, String behavior) {
+    send({'type': 'agent_approval_reply', 'id': id, 'behavior': behavior});
+    _agentApprovals.remove(id);
+    notifyListeners();
+    _agentSessionsController.add(null);
   }
 
   void sendCommand(String command, [Map<String, dynamic>? params]) {
@@ -976,6 +1032,7 @@ class WebSocketService extends ChangeNotifier {
     _sessionWrapController.close();
     _sessionAssistController.close();
     _voiceController.close();
+    _agentSessionsController.close();
     super.dispose();
   }
 

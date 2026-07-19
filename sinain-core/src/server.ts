@@ -6,7 +6,9 @@ import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import type { CoreConfig, SenseEvent } from "./types.js";
+import type { AgentEventFrame, CoreConfig, SenseEvent } from "./types.js";
+import type { AgentSessionRegistry } from "./agent-sessions/registry.js";
+import type { ApprovalManager } from "./agent-sessions/approvals.js";
 import type { Profiler } from "./profiler.js";
 import type { CostTracker } from "./cost/tracker.js";
 import type { FeedbackStore } from "./learning/feedback-store.js";
@@ -167,6 +169,7 @@ export interface ServerDeps {
   feedBuffer: FeedBuffer;
   senseBuffer: SenseBuffer;
   wsHandler: WsHandler;
+  agentSessions?: { registry: AgentSessionRegistry; approvals: ApprovalManager };
   profiler?: Profiler;
   costTracker?: CostTracker;
   onSenseEvent: (event: SenseEvent) => void;
@@ -988,6 +991,86 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /agent ──
+      if (req.method === "POST" && url.pathname === "/agent/event") {
+        if (!deps.agentSessions) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "agent sessions unavailable" }));
+          return;
+        }
+        let frame: AgentEventFrame;
+        try {
+          frame = JSON.parse(await readBody(req, 65_536)) as AgentEventFrame;
+        } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON" }));
+          return;
+        }
+        if (typeof frame.session_id !== "string" || typeof frame.hook_event_name !== "string") {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing session_id or hook_event_name" }));
+          return;
+        }
+        deps.agentSessions.registry.handleEvent(frame);
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/agent/approve") {
+        if (!deps.agentSessions) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "agent sessions unavailable" }));
+          return;
+        }
+        let frame: AgentEventFrame;
+        try {
+          frame = JSON.parse(await readBody(req, 65_536)) as AgentEventFrame;
+        } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "invalid JSON" }));
+          return;
+        }
+        if (typeof frame.session_id !== "string" || typeof frame.hook_event_name !== "string") {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "missing session_id or hook_event_name" }));
+          return;
+        }
+        req.setTimeout(0);
+        const { registry, approvals } = deps.agentSessions;
+        registry.handleEvent(frame);
+        const approval = approvals.create(frame, config.agentApproveTimeoutMs);
+        const request = approvals.get(approval.id)!;
+        registry.markWaiting(frame.session_id, request.command);
+        wsHandler.broadcastRaw({ type: "agent_approval", request });
+
+        let settled = false;
+        let clientClosed = false;
+        res.on("close", () => {
+          if (settled) return;
+          clientClosed = true;
+          if (!approvals.cancel(approval.id)) return;
+          registry.finishApproval(request.sessionId, "ask", request.command);
+          wsHandler.broadcastRaw({ type: "agent_approval_resolved", id: approval.id, behavior: "ask" });
+        });
+        const decision = await approval.promise;
+        settled = true;
+        if (decision.behavior === "ask" && !clientClosed) {
+          wsHandler.broadcastRaw({ type: "agent_approval_resolved", id: approval.id, behavior: "ask" });
+        }
+        if (!res.destroyed) res.end(JSON.stringify(decision));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/agent/sessions") {
+        if (!deps.agentSessions) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "agent sessions unavailable" }));
+          return;
+        }
+        const sessions = deps.agentSessions.registry.snapshot();
+        res.end(JSON.stringify({ sessions, ...deps.agentSessions.registry.counts() }));
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/agent/digest") {
         res.end(JSON.stringify({ ok: true, digest: deps.getAgentDigest() }));
         return;

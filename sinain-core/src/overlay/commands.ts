@@ -67,6 +67,8 @@ export interface CommandDeps {
   /** (Re)start the resident chat sidecar — overlay Run button when the
    *  built-in sinain chat lane is selected but unreachable. */
   onRestartChatSidecar?: () => { ok: boolean; error?: string };
+  /** Resolve an approval requested by an attached agent CLI. */
+  onAgentApprovalReply?: (id: string, behavior: "allow" | "deny" | "always") => void;
 }
 
 /**
@@ -173,6 +175,10 @@ export function setupCommands(deps: CommandDeps): void {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ taskId, decision }),
         }).catch(() => {});
+        break;
+      }
+      case "agent_approval_reply": {
+        deps.onAgentApprovalReply?.(msg.id, msg.behavior);
         break;
       }
       case "command": {
