@@ -21,6 +21,7 @@ import 'hud_tooltip.dart';
 import 'chat/permission_banner.dart';
 import 'chat/feedback_prompt.dart';
 import 'regions/region_eye_controller.dart';
+import 'regions/region_route_card.dart';
 import 'chat/chat_thread_view.dart';
 import 'terminal/thread_terminal_view.dart';
 import '../core/models/context_cards.dart';
@@ -32,7 +33,7 @@ import 'agents/agent_sessions_view.dart';
 import 'agents/agent_approval_card.dart';
 import 'agents/agent_island_bar.dart';
 
-enum _IslandView { bar, stack, approval }
+enum _IslandView { bar, stack, approval, roi }
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -128,6 +129,8 @@ class OverlayShellState extends State<OverlayShell> {
   // Top-left-origin screen point to teleport the HUD to for a manual ROI (the
   // selection's bottom-left, so the chat opens just below the grabbed region).
   Offset? _pendingManualPos;
+  bool _manualCatchFromIsland = false;
+  RegionHighlight? _islandRoi;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -341,6 +344,13 @@ class OverlayShellState extends State<OverlayShell> {
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
+      if (_manualCatchFromIsland && _parked) {
+        _manualCatchFromIsland = false;
+        setState(() => _islandRoi = picked);
+        unawaited(_setIslandView(_IslandView.roi));
+        return;
+      }
+      _manualCatchFromIsland = false;
       // Manual catches use the same lightweight ROI affordance as detected
       // regions: keep the HUD/island where it is and surface the eye + native
       // Chat/Term card beside the selection. The menu's enrich flow is the one
@@ -745,11 +755,13 @@ class OverlayShellState extends State<OverlayShell> {
             _IslandView.bar => _notchHeight,
             _IslandView.stack => _notchHeight + 406,
             _IslandView.approval => _notchHeight + 216,
+            _IslandView.roi => _notchHeight + 338,
           }
         : switch (_islandView) {
             _IslandView.bar => _menuBarHeight,
             _IslandView.stack => 440.0,
             _IslandView.approval => 250.0,
+            _IslandView.roi => 372.0,
           };
     final x = notchMode
         ? screen['x']! + _islandNotchInfo!['leftAuxWidth']! - 46
@@ -907,6 +919,58 @@ class OverlayShellState extends State<OverlayShell> {
       });
       _setIslandView(_IslandView.bar);
     });
+  }
+
+  String _roiContextCardText() {
+    final session = _warmChip;
+    final assist = session == null ? null : _sessionAssists[session.sessionId];
+    final text = StringBuffer('Context card');
+    if (session != null) text.write(' · ${session.label}');
+    text.writeln();
+    text.writeln(
+        'goal · ${assist?.goal.trim().isNotEmpty == true ? assist!.goal : 'current work'}');
+    text.write(
+        'next · ${assist?.steps.isNotEmpty == true ? assist!.steps.first : 'continue from the selected region'}');
+    return text.toString();
+  }
+
+  Future<void> _routeIslandRoi(RegionRoute route) async {
+    final region = _islandRoi;
+    if (region == null) return;
+    final ws = context.read<WebSocketService>();
+    // The region seed is built core-side. Stash the working session's context
+    // card alongside it before starting either lane; socket ordering makes the
+    // composed region + card seed available to hooked and unhooked AIs alike.
+    ws.sendCommand('set_handoff_context', {
+      'key': region.id,
+      'transcript': _roiContextCardText(),
+    });
+    if (route.isTerminal) {
+      ws.setAgent('terminal', route.agent);
+      setState(() {
+        _islandRoi = null;
+        _activeRegion = region;
+        _activeThread = region.id;
+      });
+      await _unparkIsland(byUser: true);
+      if (!mounted) return;
+      _transitionTo(HudState.chat);
+      _openTerminalForTab(region.id);
+      return;
+    }
+    ws.sendCommand(
+        'set_thread_agent', {'key': region.id, 'agent': route.agent});
+    setState(() => _islandRoi = null);
+    // Match RegionEyeController.run: the drag itself is the prompt, with the
+    // returned OCR/issue naming what the chosen lane should inspect.
+    _sendToRegionThread(
+        region.id, '[👁 ${region.action ?? "help"}] ${region.issue}');
+    await _setIslandView(_IslandView.bar);
+  }
+
+  void _dismissIslandRoi() {
+    setState(() => _islandRoi = null);
+    _setIslandView(_IslandView.bar);
   }
 
   void toggleVisibility(bool visible) {
@@ -1140,8 +1204,12 @@ class OverlayShellState extends State<OverlayShell> {
   /// on mouse-up and the context card follows the drop.
   Future<void> _startManualRoi({bool immediate = true}) async {
     final ws = context.read<WebSocketService>();
+    _manualCatchFromIsland = _parked;
     final res = await _windowService.selectRegion(immediate: immediate);
-    if (res == null) return; // cancelled (Esc / ✕)
+    if (res == null) {
+      _manualCatchFromIsland = false;
+      return; // cancelled (Esc / ✕)
+    }
     // The toolbar under the box returns the destination: 'chat' | 'term' |
     // 'copy' (copy the seed to the clipboard).
     final mode = res['mode'] as String?;
@@ -2803,6 +2871,31 @@ class OverlayShellState extends State<OverlayShell> {
                         behavior,
                         answer: answer,
                       ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_islandView == _IslandView.roi && _islandRoi != null)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    width: 320,
+                    child: RegionRouteCard(
+                      region: _islandRoi!,
+                      sessionLabel: _warmChip?.label,
+                      assist: _warmChip == null
+                          ? null
+                          : _sessionAssists[_warmChip!.sessionId],
+                      chatAgents: ws.availableAgents,
+                      terminalAgents: ws.terminalAvailable,
+                      initialChatAgent: ws.escalationAgent,
+                      initialTerminalAgent: ws.terminalAgent,
+                      onRoute: _routeIslandRoi,
+                      onDismiss: _dismissIslandRoi,
                     ),
                   ),
                 ),

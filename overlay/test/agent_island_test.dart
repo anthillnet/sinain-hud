@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:sinain_hud/core/models/agent_session.dart';
+import 'package:sinain_hud/core/models/context_cards.dart';
+import 'package:sinain_hud/core/models/region_highlight.dart';
 import 'package:sinain_hud/core/services/websocket_service.dart';
+import 'package:sinain_hud/core/services/settings_service.dart';
 import 'package:sinain_hud/ui/agents/agent_approval_card.dart';
 import 'package:sinain_hud/ui/agents/agent_island_bar.dart';
 import 'package:sinain_hud/ui/feed/idle_animation.dart';
+import 'package:sinain_hud/ui/regions/region_route_card.dart';
 
 class _RecordingWebSocketService extends WebSocketService {
   String? reply;
@@ -238,5 +242,55 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     append.dispose();
     ws.dispose();
+  });
+
+  testWidgets('ROI card composes region and context then routes chosen lane',
+      (tester) async {
+    RegionRoute? routed;
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: SettingsService(),
+      child: MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: SizedBox(
+              width: 320,
+              child: RegionRouteCard(
+                region: const RegionHighlight(
+                  id: 'r-man-test',
+                  issue: 'Submit button overlaps the footer',
+                  tip: 'captured checkout panel',
+                ),
+                sessionLabel: 'visa-app',
+                assist: const SessionAssist(
+                  sessionId: 'session-1',
+                  status: 'ready',
+                  goal: 'ship the checkout fix',
+                  steps: ['test the corrected layout'],
+                ),
+                chatAgents: const ['sinain', 'claude-desktop'],
+                terminalAgents: const ['codex'],
+                initialChatAgent: 'sinain',
+                initialTerminalAgent: 'codex',
+                onRoute: (route) => routed = route,
+                onDismiss: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    expect(find.textContaining('Submit button overlaps'), findsOneWidget);
+    expect(find.textContaining('goal · ship the checkout fix'), findsOneWidget);
+    expect(find.textContaining('next · test the corrected layout'),
+        findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('roi-lane-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Codex').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('roi-route-confirm')));
+    expect(routed, (agent: 'codex', isTerminal: true));
   });
 }
