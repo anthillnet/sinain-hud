@@ -777,6 +777,13 @@ class WebSocketService extends ChangeNotifier {
     }
   }
 
+  Future<bool> postAgentContextNote(String sessionId, String text) async =>
+      (await _postJson('/agent/context-note', {
+        'session_id': sessionId,
+        'text': text,
+      }))?['ok'] ==
+      true;
+
   /// Chooser options (5/15/30/60) with free coverage strings.
   Future<List<RangeOption>> fetchRangeOptions() async {
     final base = _httpBase;

@@ -2,10 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants.dart';
 import '../../core/models/context_cards.dart';
+import '../../core/models/agent_session.dart';
 import '../../core/models/region_highlight.dart';
 import '../../core/theme/hud_theme.dart';
 
-typedef RegionRoute = ({String agent, bool isTerminal, String? sessionId});
+typedef RegionRoute = ({
+  String agent,
+  bool isTerminal,
+  String? sessionId,
+  String? agentSessionId,
+});
 
 /// Island-raised result of an explicit region catch. The selection is already
 /// the prompt; this card only witnesses the composed seed and picks its lane.
@@ -16,6 +22,7 @@ class RegionRouteCard extends StatefulWidget {
   final String? initialSessionId;
   final List<String> chatAgents;
   final List<String> terminalAgents;
+  final List<AgentSession> agentSessions;
   final String initialChatAgent;
   final String initialTerminalAgent;
   final ValueChanged<RegionRoute> onRoute;
@@ -28,6 +35,7 @@ class RegionRouteCard extends StatefulWidget {
     required this.terminalAgents,
     required this.initialChatAgent,
     required this.initialTerminalAgent,
+    this.agentSessions = const [],
     required this.onRoute,
     required this.onDismiss,
     this.sessions = const [],
@@ -45,9 +53,27 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
 
   List<RegionRoute> get _routes => [
         for (final agent in widget.chatAgents)
-          (agent: agent, isTerminal: false, sessionId: null),
+          (
+            agent: agent,
+            isTerminal: false,
+            sessionId: null,
+            agentSessionId: null
+          ),
         for (final agent in widget.terminalAgents)
-          (agent: agent, isTerminal: true, sessionId: null),
+          (
+            agent: agent,
+            isTerminal: true,
+            sessionId: null,
+            agentSessionId: null
+          ),
+        for (final session in widget.agentSessions)
+          if (session.state == 'working' || session.state == 'waiting')
+            (
+              agent: session.name,
+              isTerminal: false,
+              sessionId: null,
+              agentSessionId: session.sessionId,
+            ),
       ];
 
   List<SessionChipState> get _contextSessions => widget.sessions
@@ -241,6 +267,7 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
                 agent: choice.agent,
                 isTerminal: choice.isTerminal,
                 sessionId: _contextSession?.sessionId,
+                agentSessionId: choice.agentSessionId,
               )),
               child: Container(
                 color: const Color(0xFF1F8039),
@@ -251,7 +278,9 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
               child: Text(
-                  '${_agentLabel(choice.agent)} — ${choice.isTerminal ? 'bridge' : 'chat'}',
+                  choice.agentSessionId != null
+                      ? choice.agent
+                      : '${_agentLabel(choice.agent)} — ${choice.isTerminal ? 'bridge' : 'chat'}',
                   style: _mono(8, const Color(0xFFE8EAEE))),
             ),
             PopupMenuButton<RegionRoute>(
@@ -264,7 +293,10 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
                 for (final route in _routes)
                   PopupMenuItem(
                     value: route,
-                    child: Text(_agentLabel(route.agent),
+                    child: Text(
+                        route.agentSessionId != null
+                            ? '▶ ${route.agent}'
+                            : _agentLabel(route.agent),
                         style: _mono(10, theme.textPrimary)),
                   ),
               ],

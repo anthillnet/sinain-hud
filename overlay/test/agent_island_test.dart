@@ -320,7 +320,12 @@ void main() {
     await tester.tap(find.text('Codex').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('roi-route-confirm')));
-    expect(routed, (agent: 'codex', isTerminal: true, sessionId: 'session-2'));
+    expect(routed, (
+      agent: 'codex',
+      isTerminal: true,
+      sessionId: 'session-2',
+      agentSessionId: null
+    ));
   });
 
   testWidgets('ROI card omits context when no session assist exists',

@@ -176,6 +176,18 @@ async function main() {
   await pExecFileWithStdin({ session_id: "reader", hook_event_name: "SessionStart", cwd: process.cwd() });
   const factsUrl = `http://127.0.0.1:${PORT}/agent/enrich?mode=facts&session_id=reader&cwd=${encodeURIComponent(process.cwd())}`;
   const factsEmpty = await fetch(factsUrl).then((r) => r.json()) as any;
+  const notePost = await fetch(`http://127.0.0.1:${PORT}/agent/context-note`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ session_id: "reader", text: "ROI seed for the live agent" }),
+  }).then((r) => r.json()) as any;
+  const noteFresh = await fetch(factsUrl).then((r) => r.json()) as any;
+  const noteConsumed = await fetch(factsUrl).then((r) => r.json()) as any;
+  check(
+    "context note reaches facts once then empties",
+    notePost.ok === true && noteFresh.brief === "ROI seed for the live agent" && noteConsumed.brief === "",
+    JSON.stringify({ notePost, noteFresh, noteConsumed }),
+  );
   await pExecFileWithStdin({ session_id: "worker", hook_event_name: "SessionStart", cwd: process.cwd() });
   await pExecFileWithStdin({ session_id: "worker", hook_event_name: "Stop", message: "CI ✓ on main" });
   const factsFresh = await fetch(factsUrl).then((r) => r.json()) as any;

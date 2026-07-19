@@ -941,10 +941,20 @@ class OverlayShellState extends State<OverlayShell> {
     final region = _islandRoi;
     if (region == null) return;
     final ws = context.read<WebSocketService>();
+    final contextCard = _roiContextCardText(route.sessionId);
+    if (route.agentSessionId case final agentSessionId?) {
+      final seed = await ws.fetchSeedText(region.id, transcript: contextCard);
+      if (seed != null && seed.trim().isNotEmpty) {
+        await ws.postAgentContextNote(agentSessionId, seed.trim());
+      }
+      if (mounted) setState(() => _islandRoi = null);
+      await _setIslandView(_IslandView.bar);
+      return;
+    }
     // The region seed is built core-side. Stash the working session's context
     // card alongside it before starting either lane; socket ordering makes the
     // composed region + card seed available to hooked and unhooked AIs alike.
-    if (_roiContextCardText(route.sessionId) case final contextCard?) {
+    if (contextCard case final contextCard?) {
       ws.sendCommand('set_handoff_context', {
         'key': region.id,
         'transcript': contextCard,
@@ -2896,6 +2906,7 @@ class OverlayShellState extends State<OverlayShell> {
                       initialSessionId: _warmChip?.sessionId,
                       chatAgents: ws.availableAgents,
                       terminalAgents: ws.terminalAvailable,
+                      agentSessions: ws.agentSessions,
                       initialChatAgent: ws.escalationAgent,
                       initialTerminalAgent: ws.terminalAgent,
                       onRoute: _routeIslandRoi,

@@ -1003,6 +1003,29 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /agent ──
+      if (req.method === "POST" && url.pathname === "/agent/context-note") {
+        const body = await readBody(req, 4 * 1024);
+        let sessionId = "";
+        let text = "";
+        try {
+          const parsed = JSON.parse(body);
+          sessionId = String(parsed.session_id ?? "").trim();
+          text = String(parsed.text ?? "").trim().slice(0, 1200);
+        } catch { /* bad body */ }
+        if (!sessionId || !text || !deps.agentSessions) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: "missing session_id, text, or agent sessions" }));
+          return;
+        }
+        if (!deps.agentSessions.registry.queueContextNote(sessionId, text)) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "live agent session not found" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/agent/enrich") {
         if (config.agentEnrichEnabled === false) {
           res.end(JSON.stringify({ ok: true, brief: "" }));
@@ -1011,10 +1034,13 @@ export function createAppServer(deps: ServerDeps) {
         const sessionId = url.searchParams.get("session_id") || "";
         const cwd = url.searchParams.get("cwd") || "";
         if (url.searchParams.get("mode") === "facts") {
-          const lines = deps.agentSessions?.factLinesSince
-            ? deps.agentSessions.registry.consumeFactLines(sessionId, deps.agentSessions.factLinesSince)
+          const lines = deps.agentSessions
+            ? deps.agentSessions.registry.consumeFactLines(
+                sessionId,
+                deps.agentSessions.factLinesSince ?? (() => []),
+              )
             : [];
-          const brief = lines.join("\n").slice(0, 300).trimEnd();
+          const brief = lines.join("\n").slice(0, 1200).trimEnd();
           res.end(JSON.stringify({ ok: true, brief }));
           return;
         }

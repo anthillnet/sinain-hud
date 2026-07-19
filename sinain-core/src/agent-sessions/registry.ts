@@ -26,6 +26,7 @@ export function shortAgentInput(input: unknown, max = 120): string {
 export class AgentSessionRegistry {
   private sessions = new Map<string, AgentSession>();
   private factFetchAt = new Map<string, number>();
+  private pendingContextNotes = new Map<string, string[]>();
   private changeCb: (() => void) | null = null;
 
   onChange(cb: () => void): void {
@@ -128,8 +129,21 @@ export class AgentSessionRegistry {
     const session = this.sessions.get(sessionId);
     const previous = this.factFetchAt.get(sessionId);
     this.factFetchAt.set(sessionId, now);
-    if (!session?.threadId || previous === undefined) return [];
-    return linesSince(session.threadId, previous);
+    const notes = this.pendingContextNotes.get(sessionId) ?? [];
+    this.pendingContextNotes.delete(sessionId);
+    const receipts = session?.threadId && previous !== undefined
+      ? linesSince(session.threadId, previous)
+      : [];
+    return [...notes, ...receipts];
+  }
+
+  queueContextNote(sessionId: string, text: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.state === "done") return false;
+    const pending = this.pendingContextNotes.get(sessionId) ?? [];
+    pending.push(text);
+    this.pendingContextNotes.set(sessionId, pending);
+    return true;
   }
 
   detachThread(threadId: string): void {
