@@ -380,7 +380,7 @@ export function loadConfig(): CoreConfig {
   // identity + engaged dwell are the whole detector. The distillation LLM
   // runs only after the tap. Default OFF — autonomous lane.
   const sessionSenseConfig: import("./types.js").SessionSenseConfig = {
-    enabled: boolEnv("SESSION_SENSE_ENABLED", false),
+    enabled: boolEnv("SESSION_SENSE_ENABLED", true),
     qualifyMinutes: intEnv("SESSION_SENSE_QUALIFY_MINUTES", 2),
     snoozeMinutes: intEnv("SESSION_SENSE_SNOOZE_MINUTES", 60),
     pauseGraceSeconds: intEnv("SESSION_SENSE_PAUSE_GRACE_SECONDS", 90),
