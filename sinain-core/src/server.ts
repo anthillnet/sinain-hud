@@ -389,6 +389,21 @@ export function createAppServer(deps: ServerDeps) {
     return origin && trustedOrigins.has(origin) ? origin : null;
   };
 
+  const composeServerBrief = async (
+    sessionId: string,
+    cwd: string,
+    mode: "full" | "refresh",
+    composition: { seedText?: string; threadId?: string; knowledgeQuery?: string } = {},
+  ): Promise<string> => deps.agentSessions
+    ? composeEnrichBrief({
+        registry: deps.agentSessions.registry,
+        activeSessions: deps.agentSessions.activeSessions,
+        sessionAssist: deps.agentSessions.sessionAssist,
+        contextWindow: () => buildContextWindow(feedBuffer, senseBuffer, "standard", 10 * 60_000),
+        searchEntities: deps.searchEntities,
+      }, sessionId, cwd, mode, composition)
+    : composition.seedText ?? "";
+
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const allowedOrigin = corsOrigin(req);
     if (allowedOrigin) {
@@ -938,9 +953,17 @@ export function createAppServer(deps: ServerDeps) {
           return;
         }
         const sess = deps.getThreadSession?.(regionId);
+        // sessionId deliberately empty: the ROI composition must be identical
+        // whether pulled here or via /roi/pending?enriched=1 (sinain_roi MCP).
+        const text = await composeServerBrief(
+          "",
+          "",
+          "full",
+          { seedText: seed.text, threadId: regionId, knowledgeQuery: seed.text },
+        );
         // `text` kept for back-compat; `roiSeedId` is the unified pull handle —
         // the terminal can `sinain_roi(id)` instead of embedding the text.
-        res.end(JSON.stringify({ ok: true, text: seed.text, roiSeedId: seed.id, ...(sess ?? {}) }));
+        res.end(JSON.stringify({ ok: true, text, roiSeedId: seed.id, ...(sess ?? {}) }));
         return;
       }
 
@@ -1040,20 +1063,11 @@ export function createAppServer(deps: ServerDeps) {
                 deps.agentSessions.factLinesSince ?? (() => []),
               )
             : [];
-          const brief = lines.join("\n").slice(0, 1200).trimEnd();
-          res.end(JSON.stringify({ ok: true, brief }));
+          res.end(JSON.stringify({ ok: true, brief: lines.join("\n").slice(0, 1200).trimEnd() }));
           return;
         }
         const mode = url.searchParams.get("mode") === "refresh" ? "refresh" : "full";
-        let brief = deps.agentSessions
-          ? await composeEnrichBrief({
-              registry: deps.agentSessions.registry,
-              activeSessions: deps.agentSessions.activeSessions,
-              sessionAssist: deps.agentSessions.sessionAssist,
-              contextWindow: () => buildContextWindow(feedBuffer, senseBuffer, "standard", 10 * 60_000),
-              searchEntities: deps.searchEntities,
-            }, sessionId, cwd, mode)
-          : "";
+        let brief = await composeServerBrief(sessionId, cwd, mode);
         if (mode === "full" && brief && deps.agentLlmBrief && deps.isAgentLlmBriefEnabled?.()) {
           let timeout: ReturnType<typeof setTimeout> | undefined;
           try {
@@ -2087,8 +2101,20 @@ export function createAppServer(deps: ServerDeps) {
       //    desktop agent (routeDesktopChat). No id → most recent seed. ──
       if (req.method === "GET" && url.pathname === "/roi/pending") {
         const s = roiSeeds.get(url.searchParams.get("id"));
-        if (!s) { res.end(JSON.stringify({ ok: false, error: "no matching seed" })); return; }
-        res.end(JSON.stringify({ ok: true, id: s.id, regionId: s.regionId, seed: s.seed }));
+        if (!s) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "ROI seed not found or expired" }));
+          return;
+        }
+        const enriched = url.searchParams.get("enriched") === "1";
+        const text = enriched
+          ? await composeServerBrief("", "", "full", {
+              seedText: s.seed.text,
+              threadId: s.regionId || undefined,
+              knowledgeQuery: s.seed.text,
+            })
+          : s.seed.text;
+        res.end(JSON.stringify({ ok: true, id: s.id, regionId: s.regionId, seed: { ...s.seed, text } }));
         return;
       }
 

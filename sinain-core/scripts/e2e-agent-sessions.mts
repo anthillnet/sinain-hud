@@ -10,6 +10,7 @@ import { AgentSessionRegistry } from "../src/agent-sessions/registry.js";
 import { AttachmentCoordinator, type ActiveSession } from "../src/agent-sessions/attachment.js";
 import { ApprovalManager } from "../src/agent-sessions/approvals.js";
 import { setupCommands } from "../src/overlay/commands.js";
+import { roiSeeds } from "../src/chat/roi-seeds.js";
 
 const PORT = 9573;
 const BRIDGE = new URL("../../tools/sinain-bridge/sinain-bridge.mjs", import.meta.url).pathname;
@@ -38,6 +39,10 @@ async function main() {
   const registry = new AgentSessionRegistry();
   const activeSessions: ActiveSession[] = [
     { id: "work-1", threadId: "thread-one", label: "Agent bridge", startTs: 0, paused: false },
+    // Future startTs: the ROI thread must never capture the harness's agent
+    // session (attachment requires startTs <= launch) — facts checks rely on
+    // s1 staying orphan. The ROI composition targets this thread explicitly.
+    { id: "roi-work", threadId: "roi-thread", label: "ROI route", startTs: Date.now() + 3_600_000, paused: false },
   ];
   const attachment = new AttachmentCoordinator(registry, () => activeSessions, () => {});
   const approvals = new ApprovalManager((request) => {
@@ -61,8 +66,20 @@ async function main() {
     agentSessions: {
       registry, approvals,
       activeSessions: () => activeSessions,
+      sessionAssist: (threadId: string) => threadId === "roi-thread"
+        ? { goal: "repair the ROI fetch", steps: ["verify unified context"] }
+        : null,
       factLinesSince: (threadId: string, since: number) => attachment.receiptFactsSince(threadId, since),
     },
+    searchEntities: async (q: string) => ({
+      results: q.includes("ROI seed body") ? [{ snippet: "ROI knowledge fact" }] : [],
+    }),
+    getRegionTask: async (regionId: string) => {
+      if (regionId !== "roi-thread") return null;
+      const text = "ROI seed body: investigate the selected control";
+      return { id: roiSeeds.put(text, regionId), text };
+    },
+    getThreadSession: () => ({ sessionId: "roi-agent-session", isNew: true }),
     onSenseEvent: () => {}, onFeedPost: () => {}, getAgentDigest: () => "",
   };
   setupCommands({
@@ -127,6 +144,36 @@ async function main() {
       && !refresh.brief.includes("Known about ")
       && !refresh.brief.includes("Build-Context brief:"),
     refresh.brief,
+  );
+
+  // ROI route card and MCP-facing enriched fetch must use the same server-side
+  // composition (seed + attached assist card + canonical screen + seed FTS).
+  senseBuffer.push({
+    type: "text", ts: Date.now(), ocr: "canonical ROI screen line",
+    meta: { ssim: 0, app: "TestApp", screen: 0 },
+  });
+  const routeCard = await fetch(`http://127.0.0.1:${PORT}/region/roi-thread/task`).then((r) => r.json()) as any;
+  const enrichedRoi = await fetch(`http://127.0.0.1:${PORT}/roi/pending?id=${encodeURIComponent(routeCard.roiSeedId)}&enriched=1`).then((r) => r.json()) as any;
+  const unified = String(enrichedRoi.seed?.text ?? "");
+  check(
+    "enriched ROI fetch equals route-card composition end-to-end",
+    routeCard.ok === true
+      && enrichedRoi.ok === true
+      && routeCard.text === unified
+      && unified.includes("ROI seed body")
+      && unified.includes("Card: goal repair the ROI fetch · next verify unified context")
+      // Screen section not asserted: the harness lacks the sense/privacy init
+      // the canonical renderer needs (verified on the live stack instead).
+      && unified.includes("Relevant knowledge:")
+      && unified.includes("ROI knowledge fact"),
+    unified,
+  );
+  const missingRoiResponse = await fetch(`http://127.0.0.1:${PORT}/roi/pending?id=expired&enriched=1`);
+  const missingRoi = await missingRoiResponse.json() as any;
+  check(
+    "missing enriched ROI returns clean 404",
+    missingRoiResponse.status === 404 && missingRoi.ok === false && /not found or expired/i.test(missingRoi.error),
+    JSON.stringify(missingRoi),
   );
 
   const { stdout: enrichOut } = await pExecFileWithStdin({ session_id: "s1", hook_event_name: "SessionStart", cwd: process.cwd() });
