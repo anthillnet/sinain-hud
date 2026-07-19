@@ -1160,8 +1160,17 @@ class OverlayShellState extends State<OverlayShell> {
   void _startApprovalSnap() {
     final ws = context.read<WebSocketService>();
     _pendingApprovalSnap = (regionId) async {
-      final text = (await ws.fetchSeedText(regionId))?.trim();
-      if (!mounted || text == null || text.isEmpty) return;
+      // A fresh manual region has no seed until the sense pipeline OCRs it
+      // (next tick, seconds away) — poll briefly instead of giving up.
+      String? text;
+      for (var attempt = 0; attempt < 6; attempt++) {
+        text = (await ws.fetchSeedText(regionId))?.trim();
+        if (!mounted) return;
+        if (text != null && text.isNotEmpty) break;
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        if (!mounted) return;
+      }
+      if (text == null || text.isEmpty) return;
       final answer = '[screen] $text';
       _approvalAnswerAppend.value = null;
       _approvalAnswerAppend.value =

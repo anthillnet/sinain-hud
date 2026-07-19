@@ -204,7 +204,11 @@ class _AgentIslandBarState extends State<AgentIslandBar>
             : content,
       ),
     );
-    return Container(
+    return GestureDetector(
+      // Right-click anywhere on the bar opens the eye context menu — the
+      // 46px eye alone is too small a target in the notch band.
+      onSecondaryTap: widget.onEyeSecondaryTap,
+      child: Container(
       height: notchMode ? widget.notchHeight : widget.barHeight,
       decoration: BoxDecoration(
         color: notchMode ? const Color(0xFF000000) : const Color(0xFF1E1F22),
@@ -243,6 +247,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
               counts,
           ],
         ],
+        ),
       ),
     );
   }
