@@ -139,4 +139,84 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     ws.dispose();
   });
+
+  testWidgets('island groups default closed except waiting groups',
+      (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    const quiet = SessionChipState(
+      sessionId: 'quiet',
+      threadId: 'thread-quiet',
+      status: 'running',
+      label: 'quiet session',
+      startedTs: 1,
+      activeMs: 60000,
+    );
+    const waiting = SessionChipState(
+      sessionId: 'waiting',
+      threadId: 'thread-waiting',
+      status: 'running',
+      label: 'waiting session',
+      startedTs: 1,
+      activeMs: 120000,
+    );
+    final ws = _TestWebSocketService(
+      const SessionList(sessions: [quiet, waiting], bookmarks: []),
+    );
+    ws.agentSessions = [
+      AgentSession.fromJson({
+        'sessionId': 'agent-quiet',
+        'threadId': 'thread-quiet',
+        'source': 'codex',
+        'name': 'quiet agent',
+        'state': 'working',
+        'toolLine': 'Read · code',
+        'startedAt': now,
+        'lastEventAt': now,
+      }),
+      AgentSession.fromJson({
+        'sessionId': 'agent-waiting',
+        'threadId': 'thread-waiting',
+        'source': 'claude',
+        'name': 'waiting agent',
+        'state': 'waiting',
+        'toolLine': 'permission needed',
+        'startedAt': now,
+        'lastEventAt': now,
+      }),
+    ];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: SettingsService(),
+        child: MaterialApp(
+          home: SizedBox(
+            width: 320,
+            height: 400,
+            child: SessionListView(
+              ws: ws,
+              islandMode: true,
+              onShare: (_) {},
+              onCallAi: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('waiting agent · permission needed'), findsOneWidget);
+    expect(find.text('quiet agent · Read · code'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('session-group-header-quiet')));
+    await tester.pump();
+    expect(find.text('quiet agent · Read · code'), findsOneWidget);
+
+    await tester
+        .tap(find.byKey(const ValueKey('session-group-header-waiting')));
+    await tester.pump();
+    expect(find.text('waiting agent · permission needed'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    ws.dispose();
+  });
 }

@@ -29,7 +29,6 @@ import '../core/models/feed_item.dart';
 import '../core/models/region_highlight.dart';
 import 'capture/capture_ui.dart';
 import 'capture/session_list_view.dart';
-import 'agents/agent_sessions_view.dart';
 import 'agents/agent_approval_card.dart';
 import 'agents/agent_island_bar.dart';
 
@@ -2975,13 +2974,13 @@ class OverlayShellState extends State<OverlayShell> {
           ]),
         ),
         Expanded(
-          child: AgentSessionsView(
-            showHeader: false,
-            showApprovals: false,
+          child: SessionListView(
+            key: const ValueKey('island-sessions'),
+            ws: ws,
+            islandMode: true,
             accent: _accentColor,
-            onSnapRegion: _startApprovalSnap,
-            externalAnswerAppend: _approvalAnswerAppend,
-            onApprovalDispose: _clearPendingApprovalSnap,
+            onShare: _shareBookmark,
+            onCallAi: _callAiOnActiveSession,
           ),
         ),
         Padding(
