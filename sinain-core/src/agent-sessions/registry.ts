@@ -121,6 +121,20 @@ export class AgentSessionRegistry {
     this.changeCb?.();
   }
 
+  /** Move an entire candidate lane at once. Per-session receipt cursors and
+   * queued context notes deliberately remain keyed to the same session ids. */
+  reassignThread(fromThreadId: string, toThreadId: string): number {
+    let changed = 0;
+    for (const session of this.sessions.values()) {
+      if (session.threadId !== fromThreadId) continue;
+      session.threadId = toThreadId;
+      delete session.candidate;
+      changed++;
+    }
+    if (changed) this.changeCb?.();
+    return changed;
+  }
+
   /** Consume facts queued for this agent's attached thread. The first fetch
    * establishes the cursor so an agent never inherits stale receipts. */
   consumeFactLines(

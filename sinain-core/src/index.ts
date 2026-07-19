@@ -2576,6 +2576,9 @@ async function main() {
     systemAudioPipeline,
     micPipeline,
     config,
+    onMergeCandidate: (candidateThreadId, targetThreadId) => {
+      attachmentCoordinator?.mergeCandidate(candidateThreadId, targetThreadId);
+    },
     onAgentApprovalReply: (id, behavior, answer) => {
       const request = approvalManager.get(id);
       if (!request || !approvalManager.resolve(id, behavior, answer)) return;

@@ -71,6 +71,8 @@ export interface CommandDeps {
   onRestartChatSidecar?: () => { ok: boolean; error?: string };
   /** Resolve an approval requested by an attached agent CLI. */
   onAgentApprovalReply?: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => void;
+  /** Merge a candidate agent lane into a tracked session thread. */
+  onMergeCandidate?: (candidateThreadId: string, targetThreadId: string) => void;
 }
 
 /**
@@ -203,6 +205,12 @@ function handleCommand(msg: InboundMessage & { action: string }, deps: CommandDe
   const action = msg.action;
 
   switch (action) {
+    case "merge_candidate": {
+      const candidate = typeof (msg as any).candidate === "string" ? (msg as any).candidate : "";
+      const target = typeof (msg as any).target === "string" ? (msg as any).target : "";
+      if (candidate && target) deps.onMergeCandidate?.(candidate, target);
+      break;
+    }
     case "toggle_audio": {
       const isSck = systemAudioPipeline.getCaptureCommand() === "screencapturekit";
       if (systemAudioPipeline.isRunning() && !systemAudioPipeline.isMuted()) {

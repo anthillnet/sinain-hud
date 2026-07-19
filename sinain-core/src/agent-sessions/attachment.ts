@@ -15,6 +15,7 @@ export class AttachmentCoordinator {
   private detached = new Map<string, Set<string>>();
   private countByThread = new Map<string, number>();
   private seededOrphans = new Set<string>();
+  private learnedTargetsByCwd = new Map<string, string>();
 
   constructor(
     private registry: AgentSessionRegistry,
@@ -31,6 +32,13 @@ export class AttachmentCoordinator {
         continue;
       }
       if (session.threadId && !session.candidate) continue;
+
+      const cwdKey = session.cwd ? basename(session.cwd).toLowerCase() : "";
+      const learnedTarget = cwdKey ? this.learnedTargetsByCwd.get(cwdKey) : undefined;
+      if (learnedTarget && this.getActiveSessions().some((active) => active.threadId === learnedTarget)) {
+        this.registry.setThread(session.sessionId, learnedTarget);
+        continue;
+      }
 
       const candidates = this.getActiveSessions().filter(
         (active) => active.startTs <= session.startedAt
@@ -69,6 +77,23 @@ export class AttachmentCoordinator {
     this.notifyCountChanges();
     // Candidate lanes seed Session Sense once; they never force qualification
     // or create a tracked session.
+  }
+
+  /** User-taught deterministic attachment: merge the current lane and retain
+   * its cwd basename as a hint while the target remains tracked. */
+  mergeCandidate(candidateThreadId: string, targetThreadId: string): boolean {
+    if (!candidateThreadId || !targetThreadId || candidateThreadId === targetThreadId) return false;
+    const candidates = this.registry.snapshot().filter(
+      (session) => session.threadId === candidateThreadId && session.candidate,
+    );
+    if (!candidates.length) return false;
+    for (const session of candidates) {
+      const key = session.cwd ? basename(session.cwd).toLowerCase() : "";
+      if (key) this.learnedTargetsByCwd.set(key, targetThreadId);
+    }
+    this.registry.reassignThread(candidateThreadId, targetThreadId);
+    this.notifyCountChanges();
+    return true;
   }
 
   augmentsFor(threadId: string): { working: number; receipts: string[] } {

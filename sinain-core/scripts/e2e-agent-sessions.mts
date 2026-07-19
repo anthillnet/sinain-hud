@@ -85,6 +85,7 @@ async function main() {
   setupCommands({
     wsHandler, config,
     onUserMessage: async () => {}, onUserCommand: () => {}, onCommand: () => {},
+    onMergeCandidate: (candidate: string, target: string) => attachment.mergeCandidate(candidate, target),
     onAgentApprovalReply: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => {
       const request = approvals.get(id);
       if (!request || !approvals.resolve(id, behavior, answer)) return;
@@ -263,6 +264,26 @@ async function main() {
     factHook?.hookSpecificOutput?.hookEventName === "PreToolUse"
       && factHook?.hookSpecificOutput?.additionalContext?.includes("release checks passed"),
     factHookOut,
+  );
+
+  // User-taught merge moves the whole lane (including receipt/fact state),
+  // then deterministically attaches later launches from the same cwd.
+  activeSessions.push({ id: "work-2", threadId: "thread-two", label: "Other", startTs: 0, paused: false });
+  const mergeCwd = "/tmp/sinain-merge-taught";
+  registry.handleEvent({ session_id: "candidate-worker", source: "codex", hook_event_name: "SessionStart", cwd: mergeCwd, ts: Date.now() });
+  attachment.sync();
+  registry.handleEvent({ session_id: "candidate-worker", source: "codex", hook_event_name: "Stop", cwd: mergeCwd, message: "candidate receipt follows", ts: Date.now() + 1 });
+  ws.send(JSON.stringify({ type: "command", action: "merge_candidate", candidate: "proj:sinain-merge-taught", target: "thread-one" }));
+  await waitFor((m) => m.type === "agent_sessions"
+    && m.sessions?.some((s: any) => s.sessionId === "candidate-worker" && s.threadId === "thread-one" && !s.candidate));
+  registry.handleEvent({ session_id: "future-worker", source: "codex", hook_event_name: "SessionStart", cwd: mergeCwd, ts: Date.now() + 2 });
+  attachment.sync();
+  const merged = registry.snapshot();
+  check(
+    "merge command reassigns lane + facts follow + future cwd launch learns target",
+    attachment.receiptFactsSince("thread-one", 0).some((line) => line.includes("candidate receipt follows"))
+      && merged.some((s) => s.sessionId === "future-worker" && s.threadId === "thread-one" && !s.candidate),
+    JSON.stringify(merged.filter((s) => s.sessionId.includes("worker"))),
   );
 
   // 6. Late-joining client replays snapshot

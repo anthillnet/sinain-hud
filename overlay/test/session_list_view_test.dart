@@ -9,11 +9,15 @@ import 'package:sinain_hud/ui/capture/session_list_view.dart';
 
 class _TestWebSocketService extends WebSocketService {
   final SessionList list;
+  final sent = <Map<String, dynamic>>[];
 
   _TestWebSocketService(this.list);
 
   @override
   Future<SessionList> fetchSessionList() async => list;
+
+  @override
+  void send(Map<String, dynamic> message) => sent.add(message);
 }
 
 void main() {
@@ -141,6 +145,63 @@ void main() {
         tester.getTopLeft(find.text('candidate · candidate-project')).dy;
     expect(attachedY, lessThan(candidateY));
 
+    await tester.pumpWidget(const SizedBox.shrink());
+    ws.dispose();
+  });
+
+  testWidgets('dragging a tracked header onto a candidate sends merge command',
+      (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    const chip = SessionChipState(
+      sessionId: 'tracked-1',
+      threadId: 'thread-1',
+      status: 'running',
+      label: 'tracked',
+      startedTs: 1,
+      activeMs: 1000,
+    );
+    final ws = _TestWebSocketService(
+      const SessionList(sessions: [chip], bookmarks: []),
+    );
+    ws.agentSessions = [
+      AgentSession.fromJson({
+        'sessionId': 'candidate-agent',
+        'threadId': 'proj:candidate-project',
+        'candidate': true,
+        'cwd': '/work/candidate-project',
+        'source': 'codex',
+        'name': 'candidate agent',
+        'state': 'working',
+        'startedAt': now,
+        'lastEventAt': now,
+      })
+    ];
+
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: SettingsService(),
+      child: MaterialApp(
+          home: SizedBox(
+        width: 520,
+        height: 700,
+        child: SessionListView(ws: ws, onShare: (_) {}, onCallAi: (_) {}),
+      )),
+    ));
+    await tester.pump();
+    await tester.drag(
+      find.byKey(const ValueKey('session-group-header-tracked-1')),
+      tester.getCenter(find.byKey(const ValueKey(
+              'candidate-group-header-proj:candidate-project'))) -
+          tester.getCenter(
+              find.byKey(const ValueKey('session-group-header-tracked-1'))),
+    );
+    await tester.pump();
+
+    expect(ws.sent.single, {
+      'type': 'command',
+      'action': 'merge_candidate',
+      'candidate': 'proj:candidate-project',
+      'target': 'thread-1',
+    });
     await tester.pumpWidget(const SizedBox.shrink());
     ws.dispose();
   });
