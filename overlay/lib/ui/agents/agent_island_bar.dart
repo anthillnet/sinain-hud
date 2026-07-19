@@ -347,15 +347,20 @@ class _IslandSegment extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           dot,
           const SizedBox(width: 5),
-          Text(label,
+          Flexible(
+            child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontFamily: 'JetBrainsMono',
-                fontSize: 10,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
                 color: labelColor ??
                     (color == const Color(0xFF4CAF6E)
                         ? const Color(0xFFCDE8D4)
                         : const Color(0xFFE8EAEE)),
               )),
+          ),
         ]),
       ),
     );

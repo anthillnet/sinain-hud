@@ -755,13 +755,13 @@ class OverlayShellState extends State<OverlayShell> {
         ? switch (_islandView) {
             _IslandView.bar => _notchHeight,
             _IslandView.stack => _notchHeight + 406,
-            _IslandView.approval => _notchHeight + 216,
+            _IslandView.approval => _notchHeight + 300,
             _IslandView.roi => _notchHeight + 338,
           }
         : switch (_islandView) {
             _IslandView.bar => _menuBarHeight,
             _IslandView.stack => 440.0,
-            _IslandView.approval => 250.0,
+            _IslandView.approval => 320.0,
             _IslandView.roi => 372.0,
           };
     final x = notchMode
@@ -2862,8 +2862,8 @@ class OverlayShellState extends State<OverlayShell> {
             )
           else if (_islandView == _IslandView.approval && request != null)
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
                 child: Align(
                   alignment: Alignment.topCenter,
                   child: SizedBox(
