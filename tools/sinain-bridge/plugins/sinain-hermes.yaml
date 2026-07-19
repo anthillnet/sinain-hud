@@ -1,0 +1,7 @@
+# sinain-bridge managed
+name: sinain-bridge
+hooks:
+  session_start: { command: ["node", "__SINAIN_BRIDGE_PATH__", "--source", "hermes", "--event", "session_start"] }
+  pre_tool_call: { command: ["node", "__SINAIN_BRIDGE_PATH__", "--source", "hermes", "--event", "pre_tool_call"] }
+  post_tool_call: { command: ["node", "__SINAIN_BRIDGE_PATH__", "--source", "hermes", "--event", "post_tool_call"] }
+  stop: { command: ["node", "__SINAIN_BRIDGE_PATH__", "--source", "hermes", "--event", "stop"] }

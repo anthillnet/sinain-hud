@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
@@ -15,6 +15,7 @@ import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
 import { AgentSessionRegistry } from "./agent-sessions/registry.js";
+import { AttachmentCoordinator } from "./agent-sessions/attachment.js";
 import { ApprovalManager } from "./agent-sessions/approvals.js";
 import { ClaudeUsageTracker } from "./agent-sessions/usage.js";
 import { setupCommands } from "./overlay/commands.js";
@@ -991,6 +992,7 @@ async function main() {
   // ── Initialize overlay WS handler ──
   const wsHandler = new WsHandler();
   const agentSessionRegistry = new AgentSessionRegistry();
+  let attachmentCoordinator: AttachmentCoordinator | null = null;
   const approvalManager = new ApprovalManager((request) => {
     agentSessionRegistry.finishApproval(request.sessionId, "ask", request.command);
   });
@@ -998,6 +1000,7 @@ async function main() {
   const claudeUsageTracker = new ClaudeUsageTracker((snapshot) => wsHandler.broadcastUsage({ type: "usage", ...snapshot }));
   let agentSessionsFlushScheduled = false;
   agentSessionRegistry.onChange(() => {
+    attachmentCoordinator?.sync();
     if (config.claudeUsageEnabled && agentSessionRegistry.snapshot().length > 0) claudeUsageTracker.start(config.claudeUsagePollMs);
     else claudeUsageTracker.stop();
     if (agentSessionsFlushScheduled) return;
@@ -1926,11 +1929,25 @@ async function main() {
     : null;
   const sessionSense = new SessionSenseManager(
     saveManager,
-    (msg) => wsHandler.broadcastRaw(msg),
+    (msg) => {
+      // Tracking and warmth changes can turn a candidate lane into an
+      // unambiguous real attachment even when the agent emits no new hook.
+      attachmentCoordinator?.sync();
+      wsHandler.broadcastRaw(msg);
+    },
     resolveLocalMemoryDir(), config.sessionSenseConfig,
     composeSessionAssist,
     (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
   );
+  attachmentCoordinator = new AttachmentCoordinator(
+    agentSessionRegistry,
+    () => sessionSense.activeSessions(),
+    (threadId) => sessionSense.rebroadcastChip(threadId),
+    (cwd, ts) => episodeTracker?.noteAgentLaunch(cwd, ts),
+  );
+  sessionSense.setAgentAugments((threadId) => attachmentCoordinator!.augmentsFor(threadId));
+  sessionSense.setAgentWrapHook((threadId) => attachmentCoordinator!.onWrap(threadId));
+  attachmentCoordinator.sync();
   offerManager.setEpisodeConsumedCheck((threadId, startTs, endTs) =>
     sessionSense.wasAskedDuring(threadId, startTs, endTs));
   // The nudge trigger IS the autosave detector: a live episode that crosses
@@ -2013,13 +2030,32 @@ async function main() {
     }
   };
 
+  // Mutable at runtime from the overlay; the env value is the boot default and
+  // kill switch for installs that never connect an overlay.
+  let agentLlmBriefEnabled = config.agentLlmBriefEnabled;
+  const agentLlmBrief = async (cwd: string): Promise<string> => {
+    const agentCwd = cwd || process.cwd();
+    const focus = `Briefing an AI coding agent that just started in ${basename(agentCwd)} (${agentCwd}). What is the user working on right now and what should the agent know?`;
+    const { card, result } = await enrichFocus(config.burstConfig, feedBuffer, senseBuffer, focus);
+    recordBurstUsage(result);
+    return card.context;
+  };
+
   // ── Create HTTP + WS server ──
   const server = createAppServer({
     config,
     feedBuffer,
     senseBuffer,
     wsHandler,
-    agentSessions: { registry: agentSessionRegistry, approvals: approvalManager },
+    agentSessions: {
+      registry: agentSessionRegistry,
+      approvals: approvalManager,
+      activeSessions: () => sessionSense.activeSessions(),
+      sessionAssist: (threadId) => sessionSense.assistForThread(threadId),
+      // Session Sense may add its own queued thread facts here when present;
+      // v1 always carries freshly completed attached-agent receipts.
+      factLinesSince: (threadId, since) => attachmentCoordinator?.receiptFactsSince(threadId, since) ?? [],
+    },
     profiler,
     costTracker,
     feedbackStore: feedbackStore ?? undefined,
@@ -2053,6 +2089,8 @@ async function main() {
       sessionSense.bookmarkAction(threadId, action as "resume" | "remove"),
     contextSummon: config.burstConfig.enabled && config.burstConfig.apiKey ? contextSummon : undefined,
     contextEnrich: config.burstConfig.enabled && config.burstConfig.apiKey ? contextEnrich : undefined,
+    agentLlmBrief: config.burstConfig.enabled && config.burstConfig.apiKey ? agentLlmBrief : undefined,
+    isAgentLlmBriefEnabled: () => agentLlmBriefEnabled,
     windowCoverage: () => chooserOptions(feedBuffer, senseBuffer),
     windowSources: (minutes) => listWindowSources(feedBuffer, senseBuffer, minutes),
     windowCoverageAt: (minutes) => {
@@ -2538,9 +2576,14 @@ async function main() {
     systemAudioPipeline,
     micPipeline,
     config,
-    onAgentApprovalReply: (id, behavior) => {
+    onMergeCandidate: (candidateThreadId, targetThreadId) => {
+      if (attachmentCoordinator?.mergeCandidate(candidateThreadId, targetThreadId)) {
+        sessionSense.resumeThread(targetThreadId);
+      }
+    },
+    onAgentApprovalReply: (id, behavior, answer) => {
       const request = approvalManager.get(id);
-      if (!request || !approvalManager.resolve(id, behavior)) return;
+      if (!request || !approvalManager.resolve(id, behavior, answer)) return;
       agentSessionRegistry.finishApproval(request.sessionId, behavior, request.command);
       wsHandler.broadcastRaw({ type: "agent_approval_resolved", id, behavior });
     },
@@ -2578,6 +2621,11 @@ async function main() {
         regionTracker.clear();
         wsHandler.broadcastRaw({ type: "region_highlight", regions: [], ts: Date.now() });
       }
+    },
+    onSetAgentLlmBrief: (enabled) => {
+      // AGENT_ENRICH_LLM=false is an installation-level kill switch; the
+      // overlay may turn an allowed lane off/on but cannot override it.
+      agentLlmBriefEnabled = config.agentLlmBriefEnabled && enabled;
     },
     // Fast ROI restore: the overlay's NSWorkspace observer fires on app switch
     // ~1.5s before the sense pipeline catches up. Additively restore the new

@@ -18,6 +18,7 @@
  * is the OfferManager's job — this only draws the episode boundary.
  */
 
+import { basename } from "node:path";
 import { deriveProject } from "./thread-identity.js";
 
 const MINUTE = 60_000;
@@ -43,6 +44,14 @@ export interface EpisodeQualified {
   startTs: number;
   engagedMs: number;
   at: number;
+}
+
+/** The cwd identity shared by agent attachment and the Session Sense
+ * candidate detector. Keeping this here makes a pre-track lane land on the
+ * same thread that noteAgentLaunch seeds. */
+export function deriveAgentLaunchCandidate(cwd: string): { threadId: string; label: string } | null {
+  const label = basename(cwd);
+  return label ? { threadId: `proj:${label.toLowerCase()}`, label } : null;
 }
 
 export class EpisodeTracker {
@@ -75,7 +84,19 @@ export class EpisodeTracker {
   observe(app: string | undefined, windowTitle: string | undefined, ts: number): void {
     if (!app || app === "unknown") return;
     const { key, label } = deriveProject(app, windowTitle ?? "");
+    this.observeThread(key, label, ts);
+  }
 
+  /** Feed one cwd-derived agent-launch signal through the same candidate
+   *  detector as attended screen events. One launch can seed an episode or a
+   *  pending switch, but cannot by itself qualify either one. */
+  noteAgentLaunch(cwd: string, ts = Date.now()): void {
+    const candidate = deriveAgentLaunchCandidate(cwd);
+    if (!candidate) return;
+    this.observeThread(candidate.threadId, candidate.label, ts);
+  }
+
+  private observeThread(key: string, label: string, ts: number): void {
     if (this.startTs === 0) {
       this.start(key, label, ts);
       return;

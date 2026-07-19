@@ -42,7 +42,8 @@ class RegionEyeController {
   /// Tapped region + its eye position (top-left origin screen points).
   /// [teleport] is false for a single tap (toggle the lightweight preview) and
   /// true for a double tap (move the HUD/chat to the region).
-  final void Function(RegionHighlight region, Offset pos, bool teleport) onRegionTap;
+  final void Function(RegionHighlight region, Offset pos, bool teleport)
+      onRegionTap;
 
   /// "Term" chosen on the native ROI card — open the region as a terminal
   /// thread (vs onRegionTap which opens a chat thread).
@@ -66,6 +67,10 @@ class RegionEyeController {
   final Map<String, Offset> _eyePositions = {};
   // 'idle' | 'working' | 'ready' | 'failed' — survives region set refreshes
   final Map<String, String> _eyeStates = {};
+  // Island route-card catches use the card as their only surface. Keep their
+  // core region alive for routing, but never reconcile a native eye/panel for
+  // them. Other manual catches still follow the legacy eye flow.
+  final Set<String> _excludedRegionIds = {};
   // Single/double-tap discrimination on the native eye-tap stream.
   String? _pendingTapId;
   Timer? _pendingTapTimer;
@@ -90,8 +95,7 @@ class RegionEyeController {
   void start() {
     _regionSub = ws.regionStream.listen(_onRegions);
     _tapSub = windowService.regionTapStream.listen(_onTap);
-    _cardActionSub =
-        windowService.regionCardActionStream.listen(_onCardAction);
+    _cardActionSub = windowService.regionCardActionStream.listen(_onCardAction);
     _taskSub = ws.spawnTaskStream.listen(_onSpawnTask);
     _lastEnabled = _enabled;
     _settingsListener = () {
@@ -109,7 +113,8 @@ class RegionEyeController {
       // analyzer only spends prompt tokens on regions when enabled.
       _pushEnableState();
       if (!_enabled) {
-        windowService.clearRegionEyes();
+        // Remove detected eyes but retain user-created manual catches.
+        _onRegions(ws.regions);
       } else if (ws.regions.isNotEmpty) {
         _onRegions(ws.regions);
       }
@@ -151,11 +156,21 @@ class RegionEyeController {
   }
 
   Future<void> _onRegions(List<RegionHighlight> regions) async {
-    if (!_enabled) return;
+    // Manual catches are user-requested, not auto-detection. They must remain
+    // visible even when the ambient auto-detect preference is disabled.
+    final eligibleRegions = _enabled
+        ? regions
+        : regions.where((r) => r.id.startsWith('r-man-')).toList();
+    final visibleRegions = eligibleRegions
+        .where((r) => !_excludedRegionIds.contains(r.id))
+        .toList();
+
+    _excludedRegionIds
+        .removeWhere((id) => !regions.any((region) => region.id == id));
 
     _regions
       ..clear()
-      ..addEntries(regions.map((r) => MapEntry(r.id, r)));
+      ..addEntries(visibleRegions.map((r) => MapEntry(r.id, r)));
     // Drop badge state for regions that disappeared
     _eyeStates.removeWhere((id, _) => !_regions.containsKey(id));
     _eyePositions.clear();
@@ -171,6 +186,7 @@ class RegionEyeController {
       }
       return {'id': 0.0, 'w': 1440.0, 'h': 900.0};
     }
+
     Map<String, double> screenFor(int display) {
       if (screens != null && display != 0) {
         for (final s in screens) {
@@ -182,13 +198,15 @@ class RegionEyeController {
 
     var cornerSlot = 0;
     final eyes = <Map<String, dynamic>>[];
-    for (final r in regions) {
+    for (final r in visibleRegions) {
       final scr = screenFor(r.display);
       final screenW = scr['w']!;
       final screenH = scr['h']!;
       Offset pos;
-      if (r.bbox != null && r.frameSize != null &&
-          r.frameSize![0] > 0 && r.frameSize![1] > 0) {
+      if (r.bbox != null &&
+          r.frameSize != null &&
+          r.frameSize![0] > 0 &&
+          r.frameSize![1] > 0) {
         final sx = screenW / r.frameSize![0];
         final sy = screenH / r.frameSize![1];
         // Eye at the bbox's top-right corner, just outside the content
@@ -198,7 +216,8 @@ class RegionEyeController {
         );
       } else {
         // No anchor — stack below the top-right corner
-        pos = Offset(screenW - _eyeSize - 16, 72.0 + cornerSlot * (_eyeSize + 8));
+        pos =
+            Offset(screenW - _eyeSize - 16, 72.0 + cornerSlot * (_eyeSize + 8));
         cornerSlot++;
       }
       pos = Offset(
@@ -217,12 +236,35 @@ class RegionEyeController {
         // A live spawn state (working/failed) wins; otherwise a pending
         // (restored) or provisional (SLM placeholder, awaiting the main lane's
         // quality label) region renders dimmed until confirmed/upgraded.
-        'state': _eyeStates[r.id] ?? ((r.pending || r.provisional) ? 'pending' : 'idle'),
+        'state': _eyeStates[r.id] ??
+            ((r.pending || r.provisional) ? 'pending' : 'idle'),
         'size': _eyeSize,
         'accent': settingsService.settings.accentColor,
       });
     }
     await windowService.showRegionEyes(eyes);
+  }
+
+  /// Remove and continue suppressing the native eye for an island route-card
+  /// catch. Reconciliation is immediate so this also closes an eye that won a
+  /// listener race and was briefly created from the region broadcast.
+  Future<void> excludeRegion(String id) async {
+    _excludedRegionIds.add(id);
+    await windowService.hideRegionPreview();
+    await _onRegions(ws.regions);
+  }
+
+  /// Ensure a newly caught manual ROI is reconciled, then open its native
+  /// suggestion card. This is explicit because auto-detection may be off.
+  Future<void> showRegionCard(String id) async {
+    await _onRegions(ws.regions);
+    final region = _regions[id];
+    if (region == null) return;
+    await windowService.toggleRegionPreview(
+      region.id,
+      region.issue,
+      region.tip,
+    );
   }
 
   void _onTap(String id) {

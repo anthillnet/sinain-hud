@@ -117,6 +117,11 @@ export class SessionSenseManager {
    *  one session is ever warm; the rest sit paused, each heading toward its
    *  own wrap flow independently. Keyed by session id. */
   private sessions = new Map<string, Session>();
+  /** Latest ready assist per live session, retained only for deterministic
+   *  hook enrichment while that Session Sense session is active. */
+  private assists = new Map<string, SessionAssist>();
+  private agentAugments: ((threadId: string) => { working: number; receipts: string[] }) | null = null;
+  private agentWrapHook: ((threadId: string) => void) | null = null;
 
   /** Policy A (§7): nudges shown, so a rung-1 offer never re-asks the episode. */
   private askedEpisodes: { threadId: string; ts: number }[] = [];
@@ -146,6 +151,30 @@ export class SessionSenseManager {
 
   stop(): void {
     clearInterval(this.housekeeping);
+  }
+
+  activeSessions(): { id: string; threadId: string; label: string; startTs: number; paused: boolean }[] {
+    return [...this.sessions.values()].map((s) => ({
+      id: s.id, threadId: s.threadId, label: s.label, startTs: s.startTs, paused: s.paused,
+    }));
+  }
+
+  assistForThread(threadId: string): SessionAssist | null {
+    const session = [...this.sessions.values()].find((s) => s.threadId === threadId);
+    return session ? this.assists.get(session.id) ?? null : null;
+  }
+
+  setAgentAugments(fn: (threadId: string) => { working: number; receipts: string[] }): void {
+    this.agentAugments = fn;
+  }
+
+  setAgentWrapHook(fn: (threadId: string) => void): void {
+    this.agentWrapHook = fn;
+  }
+
+  rebroadcastChip(threadId: string): void {
+    const session = [...this.sessions.values()].find((s) => s.threadId === threadId);
+    if (session) this.broadcastChip(session, session.paused ? "paused" : "running");
   }
 
   private get statePath(): string { return join(this.memoryDir, "session-sense-state.json"); }
@@ -473,6 +502,7 @@ export class SessionSenseManager {
     this.broadcastChip(session, "running");
     if (pending.assist) {
       // The nudge already paid for the composition — the chip's ✦ reuses it.
+      this.assists.set(id, pending.assist);
       this.broadcast({
         type: "session_assist", sessionId: id, status: "ready",
         goal: pending.assist.goal, steps: pending.assist.steps, ts: now,
@@ -501,6 +531,7 @@ export class SessionSenseManager {
           this.broadcast({ type: "session_assist", sessionId, status: "error", error: "nothing composed", ts: Date.now() });
           return;
         }
+        this.assists.set(sessionId, assist);
         this.broadcast({
           type: "session_assist", sessionId, status: "ready",
           goal: assist.goal, steps: assist.steps, ts: Date.now(),
@@ -625,6 +656,9 @@ export class SessionSenseManager {
         startedTs: s.startTs,
         activeMs: this.activeMsOf(s, now),
         threadId: s.threadId,
+        ...(this.agentAugments && this.agentAugments(s.threadId).working > 0
+          ? { agentsWorking: this.agentAugments(s.threadId).working }
+          : {}),
       }))
       .sort((a, b) =>
         a.status === b.status ? b.activeMs - a.activeMs : a.status === "running" ? -1 : 1);
@@ -686,6 +720,20 @@ export class SessionSenseManager {
     return { ok: true, sessionId: id };
   }
 
+  /** Make an explicitly selected thread the warm tracking session now.
+   *  Candidate merges use the same bookmark and paused-session machinery as
+   *  the shelf resume and normal activity paths; no time is credited before
+   *  the user's drop. */
+  resumeThread(threadId: string): { ok: boolean; sessionId?: string; error?: string } {
+    const tracked = [...this.sessions.values()].find((s) => s.threadId === threadId);
+    if (tracked) {
+      if (tracked.paused) this.resumeSession(tracked);
+      if (tracked.wrapPromptTs) this.keepGoing(tracked, "user merged current activity");
+      return { ok: true, sessionId: tracked.id };
+    }
+    return this.bookmarkAction(threadId, "resume");
+  }
+
   // ── Session internals ───────────────────────────────────────────────────────
 
   private keepGoing(s: Session, why: string): void {
@@ -730,8 +778,10 @@ export class SessionSenseManager {
       Math.max(1, Math.ceil((now - s.startTs) / 60_000)),
     );
     const apps = [...s.apps];
+    const agentAugments = this.agentAugments?.(s.threadId) ?? { working: 0, receipts: [] };
     // Scope to the session's own apps — never "mic" (privacy floor, §7).
-    const saveId = this.saveManager.save(minutes, apps.length ? { apps } : undefined, "session_sense");
+    const saveId = this.saveManager.save(minutes, apps.length ? { apps } : undefined, "session_sense", agentAugments.receipts);
+    this.agentWrapHook?.(s.threadId);
 
     // Cumulative bookmark history (§9): sessions link by thread id — three
     // workouts, one habit. Any wrap on a bookmarked thread counts.
@@ -753,6 +803,7 @@ export class SessionSenseManager {
     this.broadcastChip(s, "ended");
     log(TAG, `${s.id}: wrapped (${how}) — saving ${minutes}m over ${apps.join(", ")} → ${saveId}`);
     this.sessions.delete(s.id);
+    this.assists.delete(s.id);
     return saveId;
   }
 
@@ -760,10 +811,14 @@ export class SessionSenseManager {
     this.broadcast({
       type: "session_chip",
       sessionId: s.id,
+      threadId: s.threadId,
       status,
       label: s.label || "session",
       startedTs: s.startTs,
       activeMs: this.activeMsOf(s, Date.now()),
+      ...(this.agentAugments && this.agentAugments(s.threadId).working > 0
+        ? { agentsWorking: this.agentAugments(s.threadId).working }
+        : {}),
       ts: Date.now(),
     });
   }

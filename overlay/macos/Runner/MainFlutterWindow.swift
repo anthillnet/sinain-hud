@@ -27,6 +27,13 @@ class MainFlutterWindow: NSPanel {
         super.awakeFromNib()
     }
 
+    // Notch island: the parked bar sits flush at the physical top edge,
+    // inside the menu-bar band — never let AppKit clamp the frame to the
+    // visible area (which would push it below the menu bar).
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        return frameRect
+    }
+
     // Allow the panel to become key when needed but don't force it
     override var canBecomeKey: Bool {
         return true

@@ -20,6 +20,7 @@ void main() {
       'lastEventAt': 1720000001000,
       'endedAt': null,
       'summary': null,
+      'term': {'ITERM_SESSION_ID': 'w0t0p0:session-1'},
     });
 
     expect(session.sessionId, 'session-1');
@@ -30,6 +31,7 @@ void main() {
     expect(session.startedAt.millisecondsSinceEpoch, 1720000000000);
     expect(session.lastEventAt.millisecondsSinceEpoch, 1720000001000);
     expect(session.endedAt, isNull);
+    expect(session.term['ITERM_SESSION_ID'], 'w0t0p0:session-1');
   });
 
   test('AgentApprovalRequest parses the reply identifier and command', () {

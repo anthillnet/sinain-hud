@@ -9,6 +9,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { AgentEventFrame, CoreConfig, SenseEvent } from "./types.js";
 import type { AgentSessionRegistry } from "./agent-sessions/registry.js";
 import type { ApprovalManager } from "./agent-sessions/approvals.js";
+import { appendBuildContextBrief, composeEnrichBrief } from "./agent-sessions/enrich.js";
+import { buildContextWindow } from "./agent/context-window.js";
 import type { Profiler } from "./profiler.js";
 import type { CostTracker } from "./cost/tracker.js";
 import type { FeedbackStore } from "./learning/feedback-store.js";
@@ -169,7 +171,13 @@ export interface ServerDeps {
   feedBuffer: FeedBuffer;
   senseBuffer: SenseBuffer;
   wsHandler: WsHandler;
-  agentSessions?: { registry: AgentSessionRegistry; approvals: ApprovalManager };
+  agentSessions?: {
+    registry: AgentSessionRegistry;
+    approvals: ApprovalManager;
+    activeSessions?: () => { id: string; threadId: string; label: string; startTs: number; paused: boolean }[];
+    sessionAssist?: (threadId: string) => { goal: string; steps: string[] } | null;
+    factLinesSince?: (threadId: string, since: number) => string[];
+  };
   profiler?: Profiler;
   costTracker?: CostTracker;
   onSenseEvent: (event: SenseEvent) => void;
@@ -271,6 +279,10 @@ export interface ServerDeps {
   contextSummon?: (minutes: number, requestId: string, apps?: string[]) => Promise<unknown>;
   /** "Build context" for a focus item (clipboard) → what/connects/next card. */
   contextEnrich?: (focus: string, requestId: string) => Promise<unknown>;
+  /** Optional direct burst-lane composer for /agent/enrich (never broadcasts cards). */
+  agentLlmBrief?: (cwd: string) => Promise<string>;
+  /** Runtime overlay-controlled gate for agentLlmBrief. */
+  isAgentLlmBriefEnabled?: () => boolean;
   /** Chooser options: 5/15/30/60 with free coverage strings + available history. */
   windowCoverage?: () => unknown;
   /** Live coverage for an arbitrary N (the chooser slider). */
@@ -376,6 +388,21 @@ export function createAppServer(deps: ServerDeps) {
     const origin = req.headers.origin;
     return origin && trustedOrigins.has(origin) ? origin : null;
   };
+
+  const composeServerBrief = async (
+    sessionId: string,
+    cwd: string,
+    mode: "full" | "refresh",
+    composition: { seedText?: string; threadId?: string; knowledgeQuery?: string } = {},
+  ): Promise<string> => deps.agentSessions
+    ? composeEnrichBrief({
+        registry: deps.agentSessions.registry,
+        activeSessions: deps.agentSessions.activeSessions,
+        sessionAssist: deps.agentSessions.sessionAssist,
+        contextWindow: () => buildContextWindow(feedBuffer, senseBuffer, "standard", 10 * 60_000),
+        searchEntities: deps.searchEntities,
+      }, sessionId, cwd, mode, composition)
+    : composition.seedText ?? "";
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const allowedOrigin = corsOrigin(req);
@@ -926,9 +953,17 @@ export function createAppServer(deps: ServerDeps) {
           return;
         }
         const sess = deps.getThreadSession?.(regionId);
+        // sessionId deliberately empty: the ROI composition must be identical
+        // whether pulled here or via /roi/pending?enriched=1 (sinain_roi MCP).
+        const text = await composeServerBrief(
+          "",
+          "",
+          "full",
+          { seedText: seed.text, threadId: regionId, knowledgeQuery: seed.text },
+        );
         // `text` kept for back-compat; `roiSeedId` is the unified pull handle —
         // the terminal can `sinain_roi(id)` instead of embedding the text.
-        res.end(JSON.stringify({ ok: true, text: seed.text, roiSeedId: seed.id, ...(sess ?? {}) }));
+        res.end(JSON.stringify({ ok: true, text, roiSeedId: seed.id, ...(sess ?? {}) }));
         return;
       }
 
@@ -991,6 +1026,67 @@ export function createAppServer(deps: ServerDeps) {
       }
 
       // ── /agent ──
+      if (req.method === "POST" && url.pathname === "/agent/context-note") {
+        const body = await readBody(req, 4 * 1024);
+        let sessionId = "";
+        let text = "";
+        try {
+          const parsed = JSON.parse(body);
+          sessionId = String(parsed.session_id ?? "").trim();
+          text = String(parsed.text ?? "").trim().slice(0, 1200);
+        } catch { /* bad body */ }
+        if (!sessionId || !text || !deps.agentSessions) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: "missing session_id, text, or agent sessions" }));
+          return;
+        }
+        if (!deps.agentSessions.registry.queueContextNote(sessionId, text)) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "live agent session not found" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/agent/enrich") {
+        if (config.agentEnrichEnabled === false) {
+          res.end(JSON.stringify({ ok: true, brief: "" }));
+          return;
+        }
+        const sessionId = url.searchParams.get("session_id") || "";
+        const cwd = url.searchParams.get("cwd") || "";
+        if (url.searchParams.get("mode") === "facts") {
+          const lines = deps.agentSessions
+            ? deps.agentSessions.registry.consumeFactLines(
+                sessionId,
+                deps.agentSessions.factLinesSince ?? (() => []),
+              )
+            : [];
+          res.end(JSON.stringify({ ok: true, brief: lines.join("\n").slice(0, 1200).trimEnd() }));
+          return;
+        }
+        const mode = url.searchParams.get("mode") === "refresh" ? "refresh" : "full";
+        let brief = await composeServerBrief(sessionId, cwd, mode);
+        if (mode === "full" && brief && deps.agentLlmBrief && deps.isAgentLlmBriefEnabled?.()) {
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const cardText = await Promise.race([
+              deps.agentLlmBrief(cwd),
+              new Promise<never>((_, reject) => {
+                timeout = setTimeout(() => reject(new Error("agent LLM brief timeout")), 6_500);
+              }),
+            ]);
+            brief = appendBuildContextBrief(brief, cardText);
+          } catch { /* optional context: deterministic brief still returns */
+          } finally {
+            if (timeout) clearTimeout(timeout);
+          }
+        }
+        res.end(JSON.stringify({ ok: true, brief }));
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/agent/event") {
         if (!deps.agentSessions) {
           res.writeHead(503);
@@ -2005,8 +2101,20 @@ export function createAppServer(deps: ServerDeps) {
       //    desktop agent (routeDesktopChat). No id → most recent seed. ──
       if (req.method === "GET" && url.pathname === "/roi/pending") {
         const s = roiSeeds.get(url.searchParams.get("id"));
-        if (!s) { res.end(JSON.stringify({ ok: false, error: "no matching seed" })); return; }
-        res.end(JSON.stringify({ ok: true, id: s.id, regionId: s.regionId, seed: s.seed }));
+        if (!s) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, error: "ROI seed not found or expired" }));
+          return;
+        }
+        const enriched = url.searchParams.get("enriched") === "1";
+        const text = enriched
+          ? await composeServerBrief("", "", "full", {
+              seedText: s.seed.text,
+              threadId: s.regionId || undefined,
+              knowledgeQuery: s.seed.text,
+            })
+          : s.seed.text;
+        res.end(JSON.stringify({ ok: true, id: s.id, regionId: s.regionId, seed: { ...s.seed, text } }));
         return;
       }
 

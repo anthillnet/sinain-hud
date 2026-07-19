@@ -7,6 +7,29 @@ function argValue(name, fallback) {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
+const EVENT_ALIASES = new Map(Object.entries({
+  beforeShellExecution: 'PreToolUse',
+  beforeMCPExecution: 'PreToolUse',
+  beforeReadFile: 'PreToolUse',
+  afterShellExecution: 'PostToolUse',
+  afterFileEdit: 'PostToolUse',
+  stop: 'Stop',
+  sessionStart: 'SessionStart',
+  session_start: 'SessionStart',
+  session_end: 'SessionEnd',
+  pre_tool_call: 'PreToolUse',
+  pre_tool_use: 'PreToolUse',
+  post_tool_call: 'PostToolUse',
+  post_tool_use: 'PostToolUse',
+  user_prompt_submit: 'UserPromptSubmit',
+  turn_end: 'Stop',
+  'turn-ended': 'Stop',
+  turn_ended: 'Stop',
+  notification: 'Notification',
+  permission_request: 'PermissionRequest',
+  'permission.asked': 'PermissionRequest',
+}));
+
 async function readInput() {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
@@ -47,6 +70,17 @@ async function post(url, frame, timeout, readJson = false) {
   }
 }
 
+async function get(url, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return { response, body: await response.json() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const input = await readInput();
 const source = argValue('--source', 'claude');
 const event = argValue('--event');
@@ -56,6 +90,17 @@ const frame = {
   hook_event_name: input.hook_event_name ?? event,
   ts: Date.now(),
 };
+const normalizedEvent = EVENT_ALIASES.get(frame.hook_event_name);
+if (normalizedEvent && normalizedEvent !== frame.hook_event_name) {
+  frame.native_event_name = frame.hook_event_name;
+  frame.hook_event_name = normalizedEvent;
+}
+if (source === 'cursor' && Object.hasOwn(frame, 'command')) {
+  const toolInput = frame.tool_input && typeof frame.tool_input === 'object' && !Array.isArray(frame.tool_input)
+    ? frame.tool_input : {};
+  frame.tool_input = { ...toolInput, command: frame.command };
+  delete frame.command;
+}
 
 if (frame.hook_event_name === 'SessionStart') {
   const names = [
@@ -81,11 +126,13 @@ const baseUrl = `http://${host}:${port}`;
 
 if (frame.hook_event_name === 'PermissionRequest') {
   let behavior = 'ask';
+  let answer;
   try {
     const { response, body } = await post(`${baseUrl}/agent/approve`, frame, 130_000, true);
     if (response.ok) {
       if (['allow', 'deny', 'always', 'ask'].includes(body?.behavior)) {
         behavior = body.behavior;
+        if (typeof body?.answer === 'string' && body.answer) answer = body.answer;
       }
     }
   } catch {
@@ -98,7 +145,7 @@ if (frame.hook_event_name === 'PermissionRequest') {
     console.log(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'PermissionRequest',
-        decision: { behavior },
+        decision: answer ? { behavior, reason: answer } : { behavior },
       },
     }));
   }
@@ -107,5 +154,58 @@ if (frame.hook_event_name === 'PermissionRequest') {
     await post(`${baseUrl}/agent/event`, frame, 1500);
   } catch {
     // Lifecycle hooks must never disrupt the agent.
+  }
+  if (frame.hook_event_name === 'PreToolUse' && source === 'claude' && process.env.SINAIN_ENRICH_FACTS !== '0') {
+    try {
+      const params = new URLSearchParams({
+        mode: 'facts',
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 900);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Fresh facts are best-effort and must never delay a tool call.
+    }
+  }
+  if (frame.hook_event_name === 'SessionStart' && ['claude', 'codex'].includes(source) && process.env.SINAIN_ENRICH !== '0') {
+    try {
+      const params = new URLSearchParams({
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 8000);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Enrichment is best-effort and must not disrupt session startup.
+    }
+  }
+  if (frame.hook_event_name === 'UserPromptSubmit' && source === 'claude' && process.env.SINAIN_ENRICH_PROMPT === '1') {
+    try {
+      const params = new URLSearchParams({
+        mode: 'refresh',
+        session_id: String(frame.session_id ?? ''),
+        cwd: typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
+      });
+      const { response, body } = await get(`${baseUrl}/agent/enrich?${params}`, 1500);
+      if (response.ok && typeof body?.brief === 'string' && body.brief) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: body.brief },
+        }));
+      }
+    } catch {
+      // Per-prompt enrichment is opt-in and silent on every failure.
+    }
+  }
+  if (process.argv.includes('--cursor-ack')) {
+    console.log(JSON.stringify({ permission: 'allow' }));
   }
 }

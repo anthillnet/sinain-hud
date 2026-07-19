@@ -1,0 +1,153 @@
+import { basename } from "node:path";
+import type { AgentSession } from "../types.js";
+import { deriveAgentLaunchCandidate } from "../capture/episode-tracker.js";
+import type { AgentSessionRegistry } from "./registry.js";
+
+export interface ActiveSession {
+  id: string;
+  threadId: string;
+  label: string;
+  startTs: number;
+  paused: boolean;
+}
+
+export class AttachmentCoordinator {
+  private detached = new Map<string, Set<string>>();
+  private countByThread = new Map<string, number>();
+  private seededOrphans = new Set<string>();
+  private learnedTargetsByCwd = new Map<string, string>();
+
+  constructor(
+    private registry: AgentSessionRegistry,
+    private getActiveSessions: () => ActiveSession[],
+    private onCountsChanged: (threadId: string) => void,
+    private onOrphanLaunch?: (cwd: string, ts: number) => void,
+  ) {}
+
+  sync(): void {
+    const sessions = this.registry.snapshot();
+    for (const session of sessions) {
+      if (session.state === "done") {
+        for (const ids of this.detached.values()) ids.delete(session.sessionId);
+        continue;
+      }
+      if (session.threadId && !session.candidate) continue;
+
+      const cwdKey = session.cwd ? basename(session.cwd).toLowerCase() : "";
+      const learnedTarget = cwdKey ? this.learnedTargetsByCwd.get(cwdKey) : undefined;
+      if (learnedTarget && this.getActiveSessions().some((active) => active.threadId === learnedTarget)) {
+        this.registry.setThread(session.sessionId, learnedTarget);
+        continue;
+      }
+
+      const candidates = this.getActiveSessions().filter(
+        (active) => active.startTs <= session.startedAt
+          && !this.detached.get(active.threadId)?.has(session.sessionId),
+      );
+      const warm = candidates.filter((active) => !active.paused);
+      let match: ActiveSession | undefined;
+      if (warm.length === 1) {
+        match = warm[0];
+      } else {
+        const pool = warm.length > 1 ? warm : candidates;
+        if (pool.length === 1) match = pool[0];
+        else if (pool.length > 1 && session.cwd) {
+          const project = basename(session.cwd).toLowerCase();
+          if (project) {
+            const matching = pool.filter((active) =>
+              active.label.toLowerCase().includes(project)
+                || active.threadId.toLowerCase().includes(project));
+            if (matching.length === 1) match = matching[0];
+          }
+        }
+      }
+      if (match) this.registry.setThread(session.sessionId, match.threadId);
+      else if (session.cwd) {
+        const derived = deriveAgentLaunchCandidate(session.cwd);
+        const fallbackLabel = basename(session.cwd).toLowerCase();
+        const threadId = derived?.threadId || (fallbackLabel ? `cand:${fallbackLabel}` : "");
+        if (threadId) this.registry.setThread(session.sessionId, threadId, true);
+        if (!this.seededOrphans.has(session.sessionId)) {
+          this.seededOrphans.add(session.sessionId);
+          this.onOrphanLaunch?.(session.cwd, session.startedAt);
+        }
+      }
+    }
+
+    this.notifyCountChanges();
+    // Candidate lanes seed Session Sense once; they never force qualification
+    // or create a tracked session.
+  }
+
+  /** User-taught deterministic attachment: merge the current lane and retain
+   * its cwd basename as a hint while the target remains tracked. */
+  mergeCandidate(candidateThreadId: string, targetThreadId: string): boolean {
+    if (!candidateThreadId || !targetThreadId || candidateThreadId === targetThreadId) return false;
+    const candidates = this.registry.snapshot().filter(
+      (session) => session.threadId === candidateThreadId && session.candidate,
+    );
+    if (!candidates.length) return false;
+    for (const session of candidates) {
+      const key = session.cwd ? basename(session.cwd).toLowerCase() : "";
+      if (key) this.learnedTargetsByCwd.set(key, targetThreadId);
+    }
+    this.registry.reassignThread(candidateThreadId, targetThreadId);
+    this.notifyCountChanges();
+    return true;
+  }
+
+  augmentsFor(threadId: string): { working: number; receipts: string[] } {
+    const attached = this.registry.snapshot().filter((session) => session.threadId === threadId);
+    const working = attached.filter((session) => session.state === "working" || session.state === "waiting").length;
+    const receipts = attached
+      .filter((session) => session.state === "done")
+      .sort((a, b) => a.startedAt - b.startedAt || a.sessionId.localeCompare(b.sessionId))
+      .map((session) => this.receiptFor(session));
+    return { working, receipts };
+  }
+
+  receiptFactsSince(threadId: string, since: number): string[] {
+    return this.registry.snapshot()
+      .filter((session) => session.threadId === threadId
+        && session.state === "done"
+        && (session.endedAt ?? session.lastEventAt) > since)
+      .sort((a, b) => (a.endedAt ?? a.lastEventAt) - (b.endedAt ?? b.lastEventAt)
+        || a.sessionId.localeCompare(b.sessionId))
+      .map((session) => this.receiptFor(session));
+  }
+
+  onWrap(threadId: string): void {
+    const liveIds = this.registry.snapshot()
+      .filter((session) => session.threadId === threadId && session.state !== "done")
+      .map((session) => session.sessionId);
+    if (liveIds.length) {
+      const ids = this.detached.get(threadId) ?? new Set<string>();
+      for (const id of liveIds) ids.add(id);
+      this.detached.set(threadId, ids);
+    }
+    this.registry.detachThread(threadId);
+    this.notifyCountChanges();
+  }
+
+  private receiptFor(session: AgentSession): string {
+    const end = session.endedAt ?? session.lastEventAt;
+    const minutes = Math.max(1, Math.ceil(Math.max(0, end - session.startedAt) / 60_000));
+    return `agent: ${session.name} — ${session.summary ?? session.toolLine} (${minutes}m)`;
+  }
+
+  private notifyCountChanges(): void {
+    const next = new Map<string, number>();
+    for (const session of this.registry.snapshot()) {
+      if (session.threadId && (session.state === "working" || session.state === "waiting")) {
+        next.set(session.threadId, (next.get(session.threadId) ?? 0) + 1);
+      }
+    }
+    const threadIds = new Set([...this.countByThread.keys(), ...next.keys()]);
+    for (const threadId of threadIds) {
+      if ((this.countByThread.get(threadId) ?? 0) !== (next.get(threadId) ?? 0)) {
+        this.onCountsChanged(threadId);
+      }
+    }
+    this.countByThread = next;
+  }
+}

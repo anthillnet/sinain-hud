@@ -7,8 +7,10 @@ import { FeedBuffer } from "../src/buffers/feed-buffer.js";
 import { SenseBuffer } from "../src/buffers/sense-buffer.js";
 import { WsHandler } from "../src/overlay/ws-handler.js";
 import { AgentSessionRegistry } from "../src/agent-sessions/registry.js";
+import { AttachmentCoordinator, type ActiveSession } from "../src/agent-sessions/attachment.js";
 import { ApprovalManager } from "../src/agent-sessions/approvals.js";
 import { setupCommands } from "../src/overlay/commands.js";
+import { roiSeeds } from "../src/chat/roi-seeds.js";
 
 const PORT = 9573;
 const BRIDGE = new URL("../../tools/sinain-bridge/sinain-bridge.mjs", import.meta.url).pathname;
@@ -20,9 +22,9 @@ function check(name: string, ok: boolean, note?: string) {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${note ? ` — ${note}` : ""}`);
 }
 
-function pExecFileWithStdin(frame: object): Promise<{ stdout: string }> {
+function pExecFileWithStdin(frame: object, source = "codex"): Promise<{ stdout: string }> {
   return new Promise((resolve) => {
-    const child = execFile("node", [BRIDGE, "--source", "codex"], {
+    const child = execFile("node", [BRIDGE, "--source", source], {
       env: { ...process.env, SINAIN_PORT: String(PORT) },
       timeout: 150_000,
     }, (_err, stdout) => resolve({ stdout: (stdout ?? "").toString().trim() }));
@@ -35,12 +37,21 @@ async function main() {
   const senseBuffer = new (SenseBuffer as any)();
   const wsHandler = new WsHandler();
   const registry = new AgentSessionRegistry();
+  const activeSessions: ActiveSession[] = [
+    { id: "work-1", threadId: "thread-one", label: "Agent bridge", startTs: 0, paused: false },
+    // Future startTs: the ROI thread must never capture the harness's agent
+    // session (attachment requires startTs <= launch). The sole warm eligible
+    // session wins; ROI composition still targets its thread explicitly.
+    { id: "roi-work", threadId: "roi-thread", label: "ROI route", startTs: Date.now() + 3_600_000, paused: false },
+  ];
+  const attachment = new AttachmentCoordinator(registry, () => activeSessions, () => {});
   const approvals = new ApprovalManager((request) => {
     registry.finishApproval(request.sessionId, "ask", request.command);
   });
   wsHandler.setAgentApprovalSupplier(() => approvals.pending());
   let flush = false;
   registry.onChange(() => {
+    attachment.sync();
     if (flush) return;
     flush = true;
     queueMicrotask(() => {
@@ -49,18 +60,39 @@ async function main() {
     });
   });
 
-  const config: any = { port: PORT, host: "127.0.0.1", agentApproveTimeoutMs: 4000 };
+  const config: any = { port: PORT, host: "127.0.0.1", agentApproveTimeoutMs: 4000, agentEnrichEnabled: true };
   const deps: any = {
     config, feedBuffer, senseBuffer, wsHandler,
-    agentSessions: { registry, approvals },
+    agentSessions: {
+      registry, approvals,
+      activeSessions: () => activeSessions,
+      sessionAssist: (threadId: string) => threadId === "roi-thread"
+        ? { goal: "repair the ROI fetch", steps: ["verify unified context"] }
+        : null,
+      factLinesSince: (threadId: string, since: number) => attachment.receiptFactsSince(threadId, since),
+    },
+    searchEntities: async (q: string) => ({
+      results: q.includes("ROI seed body") ? [{ snippet: "ROI knowledge fact" }] : [],
+    }),
+    getRegionTask: async (regionId: string) => {
+      if (regionId !== "roi-thread") return null;
+      const text = "ROI seed body: investigate the selected control";
+      return { id: roiSeeds.put(text, regionId), text };
+    },
+    getThreadSession: () => ({ sessionId: "roi-agent-session", isNew: true }),
     onSenseEvent: () => {}, onFeedPost: () => {}, getAgentDigest: () => "",
   };
   setupCommands({
     wsHandler, config,
     onUserMessage: async () => {}, onUserCommand: () => {}, onCommand: () => {},
-    onAgentApprovalReply: (id: string, behavior: "allow" | "deny" | "always") => {
+    onMergeCandidate: (candidate: string, target: string) => {
+      if (!attachment.mergeCandidate(candidate, target)) return;
+      const tracked = activeSessions.find((session) => session.threadId === target);
+      if (tracked) tracked.paused = false;
+    },
+    onAgentApprovalReply: (id: string, behavior: "allow" | "deny" | "always", answer?: string) => {
       const request = approvals.get(id);
-      if (!request || !approvals.resolve(id, behavior)) return;
+      if (!request || !approvals.resolve(id, behavior, answer)) return;
       registry.finishApproval(request.sessionId, behavior, request.command);
       wsHandler.broadcastRaw({ type: "agent_approval_resolved", id, behavior } as any);
     },
@@ -90,6 +122,78 @@ async function main() {
   await pExecFileWithStdin({ session_id: "s1", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } });
   const snap1 = await waitFor((m) => m.type === "agent_sessions" && m.working === 1 && m.sessions?.[0]?.toolLine?.includes("npm test"));
   check("SessionStart+PreToolUse → agent_sessions broadcast", !!snap1, snap1.sessions[0].name);
+  check(
+    "sole warm session attaches regardless of label",
+    snap1.sessions[0].threadId === "thread-one" && snap1.sessions[0].candidate !== true,
+    snap1.sessions[0].threadId,
+  );
+
+  const recentFeedText = "feed context reaches agent enrichment";
+  feedBuffer.push(recentFeedText, "normal", "audio");
+  const enrich = await fetch(`http://127.0.0.1:${PORT}/agent/enrich?session_id=s1&cwd=${encodeURIComponent(process.cwd())}`).then((r) => r.json()) as any;
+  check(
+    "GET /agent/enrich never throws and skips unavailable LLM lane",
+    enrich.ok === true
+      && (enrich.brief.includes("Other agents") || enrich.brief.includes("[sinain] Ambient context"))
+      && !enrich.brief.includes("Build-Context brief:"),
+  );
+  const audioCanonical = enrich.brief.includes("Recent activity (audio):");
+  const audioVisible = enrich.brief.includes(recentFeedText);
+  const audioSuppressed = enrich.brief.includes("(suppressed: privacy uninitialized)");
+  check(
+    "GET /agent/enrich uses canonical audio context",
+    audioCanonical && (audioVisible || audioSuppressed),
+    audioVisible ? "visible branch" : audioSuppressed ? "privacy-suppressed branch" : "missing canonical audio lines",
+  );
+  const refresh = await fetch(`http://127.0.0.1:${PORT}/agent/enrich?mode=refresh&session_id=s1&cwd=${encodeURIComponent(process.cwd())}`).then((r) => r.json()) as any;
+  check(
+    "GET /agent/enrich?mode=refresh returns situational sections only",
+    refresh.ok === true
+      && refresh.brief.length <= 700
+      && !refresh.brief.includes("Other agents in flight:")
+      && !refresh.brief.includes("Known about ")
+      && !refresh.brief.includes("Build-Context brief:"),
+    refresh.brief,
+  );
+
+  // ROI route card and MCP-facing enriched fetch must use the same server-side
+  // composition (seed + attached assist card + canonical screen + seed FTS).
+  senseBuffer.push({
+    type: "text", ts: Date.now(), ocr: "canonical ROI screen line",
+    meta: { ssim: 0, app: "TestApp", screen: 0 },
+  });
+  const routeCard = await fetch(`http://127.0.0.1:${PORT}/region/roi-thread/task`).then((r) => r.json()) as any;
+  const enrichedRoi = await fetch(`http://127.0.0.1:${PORT}/roi/pending?id=${encodeURIComponent(routeCard.roiSeedId)}&enriched=1`).then((r) => r.json()) as any;
+  const unified = String(enrichedRoi.seed?.text ?? "");
+  check(
+    "enriched ROI fetch equals route-card composition end-to-end",
+    routeCard.ok === true
+      && enrichedRoi.ok === true
+      && routeCard.text === unified
+      && unified.includes("ROI seed body")
+      && unified.includes("Card: goal repair the ROI fetch · next verify unified context")
+      // Screen section not asserted: the harness lacks the sense/privacy init
+      // the canonical renderer needs (verified on the live stack instead).
+      && unified.includes("Relevant knowledge:")
+      && unified.includes("ROI knowledge fact"),
+    unified,
+  );
+  const missingRoiResponse = await fetch(`http://127.0.0.1:${PORT}/roi/pending?id=expired&enriched=1`);
+  const missingRoi = await missingRoiResponse.json() as any;
+  check(
+    "missing enriched ROI returns clean 404",
+    missingRoiResponse.status === 404 && missingRoi.ok === false && /not found or expired/i.test(missingRoi.error),
+    JSON.stringify(missingRoi),
+  );
+
+  const { stdout: enrichOut } = await pExecFileWithStdin({ session_id: "s1", hook_event_name: "SessionStart", cwd: process.cwd() });
+  if (enrich.brief) {
+    let hookOutput: any;
+    try { hookOutput = JSON.parse(enrichOut); } catch { /* checked below */ }
+    check("bridge prints SessionStart additionalContext", hookOutput?.hookSpecificOutput?.hookEventName === "SessionStart" && !!hookOutput?.hookSpecificOutput?.additionalContext, enrichOut);
+  } else {
+    check("bridge keeps stdout empty for empty enrich brief", enrichOut === "", "empty-brief branch");
+  }
 
   // 2. Blocking PermissionRequest → overlay approves → bridge unblocks with allow
   const approvedP = pExecFileWithStdin({ session_id: "s1", hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "npm publish --access public" } });
@@ -113,9 +217,10 @@ async function main() {
   // 4. Deny path
   const denyP = pExecFileWithStdin({ session_id: "s1", hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "git push --force" } });
   const denyApproval = await waitFor((m) => m.type === "agent_approval" && m.request.command === "git push --force");
-  ws.send(JSON.stringify({ type: "agent_approval_reply", id: denyApproval.request.id, behavior: "deny" }));
+  const denyReason = "Protected branch; open a PR instead";
+  ws.send(JSON.stringify({ type: "agent_approval_reply", id: denyApproval.request.id, behavior: "deny", answer: denyReason }));
   const { stdout: denyOut } = await denyP;
-  check("deny decision reaches bridge", denyOut.includes('"behavior":"deny"'), denyOut);
+  check("deny decision and answer reach bridge", denyOut.includes('"behavior":"deny"') && denyOut.includes(`"reason":"${denyReason}"`), denyOut);
 
   // 5. Stop → done receipt; GET /agent/sessions
   await pExecFileWithStdin({ session_id: "s1", hook_event_name: "Stop", message: "published bridge v0.3" });
@@ -123,6 +228,72 @@ async function main() {
   check("Stop → done + summary", doneSnap.sessions[0].summary === "published bridge v0.3");
   const http = await fetch(`http://127.0.0.1:${PORT}/agent/sessions`).then((r) => r.json());
   check("GET /agent/sessions", http.sessions.length === 1 && http.working === 0);
+
+  // Facts are one-shot per requesting session and scoped to its attached thread.
+  await pExecFileWithStdin({ session_id: "reader", hook_event_name: "SessionStart", cwd: process.cwd() });
+  const factsUrl = `http://127.0.0.1:${PORT}/agent/enrich?mode=facts&session_id=reader&cwd=${encodeURIComponent(process.cwd())}`;
+  const factsEmpty = await fetch(factsUrl).then((r) => r.json()) as any;
+  const notePost = await fetch(`http://127.0.0.1:${PORT}/agent/context-note`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ session_id: "reader", text: "ROI seed for the live agent" }),
+  }).then((r) => r.json()) as any;
+  const noteFresh = await fetch(factsUrl).then((r) => r.json()) as any;
+  const noteConsumed = await fetch(factsUrl).then((r) => r.json()) as any;
+  check(
+    "context note reaches facts once then empties",
+    notePost.ok === true && noteFresh.brief === "ROI seed for the live agent" && noteConsumed.brief === "",
+    JSON.stringify({ notePost, noteFresh, noteConsumed }),
+  );
+  await pExecFileWithStdin({ session_id: "worker", hook_event_name: "SessionStart", cwd: process.cwd() });
+  await pExecFileWithStdin({ session_id: "worker", hook_event_name: "Stop", message: "CI ✓ on main" });
+  const factsFresh = await fetch(factsUrl).then((r) => r.json()) as any;
+  const factsConsumed = await fetch(factsUrl).then((r) => r.json()) as any;
+  check(
+    "facts mode returns empty then one fresh Stop receipt",
+    factsEmpty.brief === "" && factsFresh.brief.includes("CI ✓ on main") && factsConsumed.brief === "" && factsFresh.brief.length <= 300,
+    JSON.stringify({ factsEmpty, factsFresh, factsConsumed }),
+  );
+
+  await pExecFileWithStdin({ session_id: "worker-2", hook_event_name: "SessionStart", cwd: process.cwd() });
+  await pExecFileWithStdin({ session_id: "worker-2", hook_event_name: "Stop", message: "release checks passed" });
+  const { stdout: factHookOut } = await pExecFileWithStdin({
+    session_id: "reader", hook_event_name: "PreToolUse", cwd: process.cwd(),
+    tool_name: "Bash", tool_input: { command: "git status" },
+  }, "claude");
+  let factHook: any;
+  try { factHook = JSON.parse(factHookOut); } catch { /* checked below */ }
+  check(
+    "Claude PreToolUse prints fresh facts as additionalContext",
+    factHook?.hookSpecificOutput?.hookEventName === "PreToolUse"
+      && factHook?.hookSpecificOutput?.additionalContext?.includes("release checks passed"),
+    factHookOut,
+  );
+
+  // User-taught merge moves the whole lane (including receipt/fact state),
+  // then deterministically attaches later launches from the same cwd.
+  activeSessions.find((session) => session.threadId === "thread-one")!.paused = true;
+  // Paused too: a warm session would claim the launch via sole-warm preference
+  // and no candidate would form — this scenario needs candidate attachment.
+  activeSessions.push({ id: "work-2", threadId: "thread-two", label: "Other", startTs: 0, paused: true });
+  const mergeCwd = "/tmp/sinain-merge-taught";
+  registry.handleEvent({ session_id: "candidate-worker", source: "codex", hook_event_name: "SessionStart", cwd: mergeCwd, ts: Date.now() });
+  attachment.sync();
+  registry.handleEvent({ session_id: "candidate-worker", source: "codex", hook_event_name: "Stop", cwd: mergeCwd, message: "candidate receipt follows", ts: Date.now() + 1 });
+  ws.send(JSON.stringify({ type: "command", action: "merge_candidate", candidate: "proj:sinain-merge-taught", target: "thread-one" }));
+  await waitFor((m) => m.type === "agent_sessions"
+    && m.sessions?.some((s: any) => s.sessionId === "candidate-worker" && s.threadId === "thread-one" && !s.candidate));
+  registry.handleEvent({ session_id: "future-worker", source: "codex", hook_event_name: "SessionStart", cwd: mergeCwd, ts: Date.now() + 2 });
+  attachment.sync();
+  const merged = registry.snapshot();
+  check(
+    "merge command reassigns lane + facts follow + future cwd launch learns target",
+    attachment.receiptFactsSince("thread-one", 0).some((line) => line.includes("candidate receipt follows"))
+      && merged.some((s) => s.sessionId === "future-worker" && s.threadId === "thread-one" && !s.candidate)
+      && activeSessions.some((s) => s.threadId === "thread-one" && !s.paused)
+      && !merged.some((s) => s.threadId === "proj:sinain-merge-taught"),
+    JSON.stringify(merged.filter((s) => s.sessionId.includes("worker"))),
+  );
 
   // 6. Late-joining client replays snapshot
   const ws2 = new WebSocket(`ws://127.0.0.1:${PORT}`);

@@ -26,6 +26,7 @@ void main() {
       final settings = HudSettings();
       expect(settings.overlayState, HudState.chat);
       expect(settings.eyeX, -1);
+      expect(settings.notchParked, isFalse);
       expect(settings.chatWidth, 427);
     });
 
@@ -41,6 +42,7 @@ void main() {
       expect(copied.fontSize, 16.0);
       expect(copied.accentColor, 0xFF00E5FF);
       expect(copied.overlayState, HudState.eye);
+      expect(copied.notchParked, isFalse);
     });
 
     test('copyWith overrides display settings', () {

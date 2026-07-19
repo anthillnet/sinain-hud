@@ -41,8 +41,8 @@ export class ApprovalManager {
     return { id, promise };
   }
 
-  resolve(id: string, behavior: "allow" | "deny" | "always"): boolean {
-    return this.settle(id, behavior);
+  resolve(id: string, behavior: "allow" | "deny" | "always", answer?: string): boolean {
+    return this.settle(id, behavior, answer);
   }
 
   cancel(id: string): boolean {
@@ -57,12 +57,13 @@ export class ApprovalManager {
     return [...this.approvals.values()].map((entry) => entry.request);
   }
 
-  private settle(id: string, behavior: ApprovalDecision["behavior"]): boolean {
+  private settle(id: string, behavior: ApprovalDecision["behavior"], answer?: string): boolean {
     const pending = this.approvals.get(id);
     if (!pending) return false;
     this.approvals.delete(id);
     clearTimeout(pending.timer);
-    pending.resolve({ behavior });
+    const normalized = answer?.trim().slice(0, 500);
+    pending.resolve({ behavior, ...(normalized ? { answer: normalized } : {}) });
     return true;
   }
 }
