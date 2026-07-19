@@ -9,6 +9,9 @@ class AgentApprovalCard extends StatefulWidget {
   final ValueChanged<String> onReply;
   final void Function(String behavior, {String? answer})? onReplyWithAnswer;
   final VoidCallback? onDismiss;
+  final VoidCallback? onSnapRegion;
+  final ValueNotifier<String?>? externalAnswerAppend;
+  final VoidCallback? onDispose;
   final String? branch;
   final String? resolution;
 
@@ -18,6 +21,9 @@ class AgentApprovalCard extends StatefulWidget {
     required this.onReply,
     this.onReplyWithAnswer,
     this.onDismiss,
+    this.onSnapRegion,
+    this.externalAnswerAppend,
+    this.onDispose,
     this.branch,
     this.resolution,
   });
@@ -34,7 +40,34 @@ class _AgentApprovalCardState extends State<AgentApprovalCard> {
   static const _amber = AgentApprovalCard._amber;
 
   @override
+  void initState() {
+    super.initState();
+    widget.externalAnswerAppend?.addListener(_appendExternalAnswer);
+  }
+
+  @override
+  void didUpdateWidget(covariant AgentApprovalCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.externalAnswerAppend != widget.externalAnswerAppend) {
+      oldWidget.externalAnswerAppend?.removeListener(_appendExternalAnswer);
+      widget.externalAnswerAppend?.addListener(_appendExternalAnswer);
+    }
+  }
+
+  void _appendExternalAnswer() {
+    final append = widget.externalAnswerAppend?.value;
+    if (append == null || append.isEmpty) return;
+    final current = _answerController.text;
+    _answerController.text = current.isEmpty ? append : '$current $append';
+    _answerController.selection = TextSelection.collapsed(
+      offset: _answerController.text.length,
+    );
+  }
+
+  @override
   void dispose() {
+    widget.externalAnswerAppend?.removeListener(_appendExternalAnswer);
+    widget.onDispose?.call();
     _answerController.dispose();
     super.dispose();
   }
@@ -69,163 +102,169 @@ class _AgentApprovalCardState extends State<AgentApprovalCard> {
     if (widget.resolution != null) {
       final denied = widget.resolution == 'Denied';
       return Material(
-      type: MaterialType.transparency,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF232427),
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Row(children: [
-          _dot(denied ? const Color(0xFFB3361C) : const Color(0xFF1F8039)),
-          const SizedBox(width: 7),
-          Text(widget.resolution!,
-              style: const TextStyle(
-                  color: Color(0xFFE8EAEE),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(width: 8),
-          Expanded(
-              child: Text(widget.request.command,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      color: Color(0xFFA8ADBD),
-                      fontSize: 10))),
-        ]),
+        type: MaterialType.transparency,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF232427),
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Row(children: [
+            _dot(denied ? const Color(0xFFB3361C) : const Color(0xFF1F8039)),
+            const SizedBox(width: 7),
+            Text(widget.resolution!,
+                style: const TextStyle(
+                    color: Color(0xFFE8EAEE),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: Text(widget.request.command,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        color: Color(0xFFA8ADBD),
+                        fontSize: 10))),
+          ]),
         ),
       );
     }
     return Material(
       type: MaterialType.transparency,
       child: Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1F22),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: _amber,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                      color: Color(0x66D9A21B), blurRadius: 3, spreadRadius: 3)
-                ],
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1F22),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: _amber,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                        color: Color(0x66D9A21B),
+                        blurRadius: 3,
+                        spreadRadius: 3)
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-                child: Text(widget.request.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Color(0xFFE8EAEE),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700))),
-            if (widget.onDismiss != null)
-              GestureDetector(
-                  onTap: widget.onDismiss,
-                  child: const Padding(
-                      padding: EdgeInsets.all(3),
-                      child: Text('✕',
-                          style: TextStyle(
-                              color: Color(0xFF6C707E), fontSize: 11)))),
-          ]),
-          const SizedBox(height: 9),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(
-                color: const Color(0xFF232427),
-                borderRadius: BorderRadius.circular(7)),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.request.command,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      color: Color(0xFFE8EAEE),
-                      fontSize: 11)),
-              const SizedBox(height: 7),
-              Wrap(
-                  spacing: 5,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text(widget.request.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Color(0xFFE8EAEE),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700))),
+              if (widget.onDismiss != null)
+                GestureDetector(
+                    onTap: widget.onDismiss,
+                    child: const Padding(
+                        padding: EdgeInsets.all(3),
+                        child: Text('✕',
+                            style: TextStyle(
+                                color: Color(0xFF6C707E), fontSize: 11)))),
+            ]),
+            const SizedBox(height: 9),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF232427),
+                  borderRadius: BorderRadius.circular(7)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('$_elapsed in',
+                    Text(widget.request.command,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             fontFamily: 'JetBrainsMono',
-                            color: Color(0xFFA8ADBD),
-                            fontSize: 10)),
-                    if (widget.request.source.isNotEmpty)
-                      _chip(widget.request.source),
-                    if (widget.branch?.isNotEmpty ?? false)
-                      _chip('⎇ ${widget.branch}'),
+                            color: Color(0xFFE8EAEE),
+                            fontSize: 11)),
+                    const SizedBox(height: 7),
+                    Wrap(
+                        spacing: 5,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text('$_elapsed in',
+                              style: const TextStyle(
+                                  fontFamily: 'JetBrainsMono',
+                                  color: Color(0xFFA8ADBD),
+                                  fontSize: 10)),
+                          if (widget.request.source.isNotEmpty)
+                            _chip(widget.request.source),
+                          if (widget.branch?.isNotEmpty ?? false)
+                            _chip('⎇ ${widget.branch}'),
+                        ]),
                   ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              _button('Allow', () => _reply('allow'), filled: true),
+              const SizedBox(width: 6),
+              _button('Always', () => _reply('always'), bordered: true),
+              const Spacer(),
+              _button('Deny', () => _reply('deny'), quiet: true),
             ]),
-          ),
-          const SizedBox(height: 9),
-          Row(children: [
-            _button('Allow', () => _reply('allow'), filled: true),
-            const SizedBox(width: 6),
-            _button('Always', () => _reply('always'), bordered: true),
-            const Spacer(),
-            _button('Deny', () => _reply('deny'), quiet: true),
-          ]),
-          const SizedBox(height: 9),
-          CustomPaint(
-            foregroundPainter:
-                _DashedBorderPainter(_amber.withValues(alpha: 0.48)),
-            child: Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: _answerController,
-                  maxLength: 500,
-                  maxLines: 1,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _reply('allow'),
-                  style: const TextStyle(
-                      fontFamily: 'JetBrainsMono',
-                      color: Color(0xFFE8EAEE),
-                      fontSize: 10),
-                  decoration: const InputDecoration(
-                    hintText: 'add a note for the agent…',
-                    hintStyle: TextStyle(
+            const SizedBox(height: 9),
+            CustomPaint(
+              foregroundPainter:
+                  _DashedBorderPainter(_amber.withValues(alpha: 0.48)),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _answerController,
+                    maxLength: 500,
+                    maxLines: 1,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _reply('allow'),
+                    style: const TextStyle(
                         fontFamily: 'JetBrainsMono',
-                        color: Color(0xFF7D7461),
+                        color: Color(0xFFE8EAEE),
                         fontSize: 10),
-                    counterText: '',
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-                    border: InputBorder.none,
+                    decoration: const InputDecoration(
+                      hintText: 'add a note for the agent…',
+                      hintStyle: TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          color: Color(0xFF7D7461),
+                          fontSize: 10),
+                      counterText: '',
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                      border: InputBorder.none,
+                    ),
                   ),
                 ),
-              ),
-              const Tooltip(
-                message: 'soon',
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 9),
-                  child: Text('⌖',
-                      style: TextStyle(color: Color(0xFF665E4D), fontSize: 13)),
+                Tooltip(
+                  message: 'Add screen region',
+                  child: GestureDetector(
+                    onTap: widget.onSnapRegion,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 9),
+                      child: Text('⌖',
+                          style: TextStyle(color: _amber, fontSize: 13)),
+                    ),
+                  ),
                 ),
-              ),
-            ]),
-          ),
-        ],
+              ]),
+            ),
+          ],
+        ),
       ),
-    ),
     );
   }
 

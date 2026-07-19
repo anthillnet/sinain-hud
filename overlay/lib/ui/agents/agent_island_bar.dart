@@ -14,6 +14,7 @@ class AgentIslandBar extends StatefulWidget {
   /// Agent-liveness color — the user's accent from settings (default green).
   final Color accent;
   final VoidCallback onEyeTap;
+  final VoidCallback? onEyeSecondaryTap;
   final GestureDragUpdateCallback onEyeDragUpdate;
   final GestureDragEndCallback onEyeDragEnd;
   final VoidCallback onCountsTap;
@@ -35,6 +36,7 @@ class AgentIslandBar extends StatefulWidget {
     this.liveAssist = false,
     required this.accent,
     required this.onEyeTap,
+    this.onEyeSecondaryTap,
     required this.onEyeDragUpdate,
     required this.onEyeDragEnd,
     required this.onCountsTap,
@@ -87,6 +89,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
     final eye = GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onEyeTap,
+      onSecondaryTap: widget.onEyeSecondaryTap,
       onPanUpdate: widget.onEyeDragUpdate,
       onPanEnd: widget.onEyeDragEnd,
       child: SizedBox(

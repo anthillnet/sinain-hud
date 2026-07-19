@@ -116,6 +116,8 @@ class OverlayShellState extends State<OverlayShell> {
   bool _awaitingFork = false;
   StreamSubscription? _manualRegionSub;
   bool _awaitingManualRegion = false;
+  void Function(String regionId)? _pendingApprovalSnap;
+  final ValueNotifier<String?> _approvalAnswerAppend = ValueNotifier(null);
   // Manual ROI ids present BEFORE the current drag-select, so the broadcast
   // handler can pick the NEWLY-created region instead of re-grabbing an earlier
   // one (which would keep the user stuck on the first ROI's thread).
@@ -329,6 +331,12 @@ class OverlayShellState extends State<OverlayShell> {
       final picked =
           fresh; // final → survives promotion into the setState closure
       _awaitingManualRegion = false;
+      final approvalSnap = _pendingApprovalSnap;
+      if (approvalSnap != null) {
+        _pendingApprovalSnap = null;
+        approvalSnap(picked.id);
+        return;
+      }
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
@@ -1149,6 +1157,23 @@ class OverlayShellState extends State<OverlayShell> {
     });
   }
 
+  void _startApprovalSnap() {
+    final ws = context.read<WebSocketService>();
+    _pendingApprovalSnap = (regionId) async {
+      final text = (await ws.fetchSeedText(regionId))?.trim();
+      if (!mounted || text == null || text.isEmpty) return;
+      final answer = '[screen] $text';
+      _approvalAnswerAppend.value = null;
+      _approvalAnswerAppend.value =
+          answer.length > 300 ? answer.substring(0, 300) : answer;
+    };
+    _startManualRoi();
+  }
+
+  void _clearPendingApprovalSnap() {
+    _pendingApprovalSnap = null;
+  }
+
   /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
   /// spike can be exercised without waiting for a region thread.
   String get _activeTabKey => _activeThread ?? 'main';
@@ -1374,7 +1399,10 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'sessions', 'title': 'Bookmarked Sessions…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
-      if (!_parked) {'id': 'parkNotch', 'title': 'Park at Notch'},
+      if (_parked)
+        {'id': 'unpark', 'title': 'Unpark'}
+      else
+        {'id': 'parkNotch', 'title': 'Park at Notch'},
       {
         'id': 'reset',
         'title': 'Reset Window Position',
@@ -1409,6 +1437,8 @@ class OverlayShellState extends State<OverlayShell> {
         await _copySeedForActiveThread();
       case 'parkNotch':
         await _manualParkIsland();
+      case 'unpark':
+        await _unparkIsland(byUser: true);
       case 'reset':
         await resetPosition();
       case 'settings':
@@ -1673,6 +1703,7 @@ class OverlayShellState extends State<OverlayShell> {
       _wsForListener!.removeListener(_wsListener!);
     }
     _commandFocusNode.dispose();
+    _approvalAnswerAppend.dispose();
     super.dispose();
   }
 
@@ -2697,6 +2728,7 @@ class OverlayShellState extends State<OverlayShell> {
             _collapseIsland();
           }
         },
+        onEyeSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
         onEyeDragUpdate: _onIslandDragUpdate,
         onEyeDragEnd: _onIslandDragEnd,
         onCountsTap: () {
@@ -2744,6 +2776,9 @@ class OverlayShellState extends State<OverlayShell> {
                     width: 320,
                     child: AgentApprovalCard(
                       request: request,
+                      onSnapRegion: _startApprovalSnap,
+                      externalAnswerAppend: _approvalAnswerAppend,
+                      onDispose: _clearPendingApprovalSnap,
                       branch: approvalSession?.branch,
                       resolution: _approvalResolution,
                       onDismiss: _resolvedApproval == null
@@ -2828,6 +2863,9 @@ class OverlayShellState extends State<OverlayShell> {
             showHeader: false,
             showApprovals: false,
             accent: _accentColor,
+            onSnapRegion: _startApprovalSnap,
+            externalAnswerAppend: _approvalAnswerAppend,
+            onApprovalDispose: _clearPendingApprovalSnap,
           ),
         ),
         Padding(

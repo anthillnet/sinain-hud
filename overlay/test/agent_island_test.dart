@@ -197,6 +197,7 @@ void main() {
       command: 'flutter test',
       createdAt: DateTime.now(),
     );
+    final append = ValueNotifier<String?>(null);
 
     await tester.pumpWidget(
       ChangeNotifierProvider<WebSocketService>.value(
@@ -209,6 +210,7 @@ void main() {
                 width: 320,
                 child: AgentApprovalCard(
                   request: request,
+                  externalAnswerAppend: append,
                   onReply: (behavior) => ws.sendAgentApprovalReply(
                     request.id,
                     behavior,
@@ -224,6 +226,9 @@ void main() {
 
     expect(find.text('codex wants to run a command'), findsOneWidget);
     expect(find.text('flutter test'), findsOneWidget);
+    append.value = '[screen] selected text';
+    await tester.pump();
+    expect(find.textContaining('[screen] selected text'), findsOneWidget);
     await tester.enterText(
         find.byType(TextField), 'Please preserve the lockfile');
     await tester.tap(find.text('Allow'));
@@ -231,6 +236,7 @@ void main() {
     expect(ws.answer, 'Please preserve the lockfile');
 
     await tester.pumpWidget(const SizedBox.shrink());
+    append.dispose();
     ws.dispose();
   });
 }

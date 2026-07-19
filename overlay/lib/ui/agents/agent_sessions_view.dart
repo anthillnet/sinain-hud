@@ -15,12 +15,18 @@ class AgentSessionsView extends StatefulWidget {
 
   /// Agent-liveness color — the user's accent from settings (default green).
   final Color accent;
+  final VoidCallback? onSnapRegion;
+  final ValueNotifier<String?>? externalAnswerAppend;
+  final VoidCallback? onApprovalDispose;
 
   const AgentSessionsView({
     super.key,
     this.showHeader = true,
     this.showApprovals = true,
     this.accent = const Color(0xFF1F8039),
+    this.onSnapRegion,
+    this.externalAnswerAppend,
+    this.onApprovalDispose,
   });
 
   @override
@@ -111,6 +117,9 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
           const SizedBox(height: 7),
           AgentApprovalCard(
             request: _approvals.first,
+            onSnapRegion: widget.onSnapRegion,
+            externalAnswerAppend: widget.externalAnswerAppend,
+            onDispose: widget.onApprovalDispose,
             onReply: (behavior) => context
                 .read<WebSocketService>()
                 .sendAgentApprovalReply(_approvals.first.id, behavior),
