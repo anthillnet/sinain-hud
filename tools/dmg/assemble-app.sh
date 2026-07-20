@@ -49,5 +49,10 @@ chmod +x "$OUT_APP/Contents/Resources/scripts/launch-backend.sh"
 chmod +x "$OUT_APP/Contents/Resources/node/bin/node"
 chmod +x "$OUT_APP/Contents/Resources/sck-capture/sck-capture"
 
+bold "Checking assembled bundle hygiene (warning only)"
+if ! "$REPO/tools/dmg/check-binary-hygiene.sh" "$OUT_APP"; then
+  printf "\033[0;33m⚠ Binary hygiene check reported violations; review before release.\033[0m\n" >&2
+fi
+
 bold "✓ Assembled $OUT_APP"
 du -sh "$OUT_APP" 2>/dev/null | awk '{print "  size: "$1}'

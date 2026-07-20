@@ -70,3 +70,17 @@ curl -sIL <that dmg url> | head -1                                # HTTP 200?
   older install it refreshes provisioned python deps automatically
   (`tools/dmg/stage-backend.sh`). User config (`.env`, `agents.json`) and
   models are never touched.
+
+## Pre-release hygiene check
+
+After assembling the app, scan it for credential patterns and undocumented
+HTTPS destinations:
+
+```bash
+tools/dmg/check-binary-hygiene.sh build/Sinain.app
+```
+
+The command also accepts a mounted DMG directory. `assemble-app.sh` runs it as
+a warning; a release operator must resolve any report before publishing. The
+DMG build prints its SHA-256 checksum after notarization for release notes and
+independent download verification.
