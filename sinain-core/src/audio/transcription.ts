@@ -8,6 +8,25 @@ import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe";
 
+export const TRANSCRIPTION_HALLUCINATION_PHRASES = [
+  "thank you for watching", "thanks for watching", "please subscribe",
+  "like and subscribe", "see you in the next video", "thank you", "thanks for listening",
+  "you", "bye", "so", "субтитры сделал dimatorzok", "субтитры создавал dimatorzok",
+  "продолжение следует", "редактор субтитров", "спасибо за просмотр", "подписывайтесь на канал",
+  "ご視聴ありがとうございました", "字幕視聴ありがとうございました", "字幕by",
+  "sottotitoli creati dalla comunità amara.org", "sous-titres réalisés para la communauté d'amara.org",
+  "untertitel im auftrag des zdf für funk", "legendas pela comunidade amara.org",
+  "[music]", "[музыка]", "[applause]", "[аплодисменты]", "(music)", "♪",
+  "[blank_audio]", "[silence]", "[inaudible]",
+  ...(process.env.TRANSCRIPTION_HALLUCINATION_PHRASES || "").split(",").map((p) => p.trim()).filter(Boolean),
+] as const;
+
+const EXACT_ONLY_HALLUCINATIONS = new Set(["thank you", "you", "bye", "so"]);
+
+function normalizeTranscript(text: string): string {
+  return text.toLowerCase().trim().replace(/[\p{P}\p{Z}]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
 /** Detect repeated-token hallucinations like "kuch kuch kuch kuch..." */
 function isHallucination(text: string): boolean {
   const words = text.split(/[\s,]+/).filter(Boolean);
@@ -19,6 +38,25 @@ function isHallucination(text: string): boolean {
   }
   const maxFreq = Math.max(...freq.values());
   return maxFreq / words.length > 0.6;
+}
+
+export function shouldDropTranscript(text: string): { drop: boolean; reason?: string } {
+  if (text.length < 3) return { drop: true, reason: "too short" };
+  if (isHallucination(text)) return { drop: true, reason: "repeated-token hallucination" };
+
+  const normalized = normalizeTranscript(text);
+  for (const rawPhrase of TRANSCRIPTION_HALLUCINATION_PHRASES) {
+    const phrase = normalizeTranscript(rawPhrase);
+    if (!phrase) continue;
+    if (normalized === phrase) return { drop: true, reason: `known hallucination phrase: ${rawPhrase}` };
+    if (!EXACT_ONLY_HALLUCINATIONS.has(phrase)) {
+      const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`^(?:${escaped})(?:\\s*${escaped})+$`, "u").test(normalized)) {
+        return { drop: true, reason: `repeated hallucination phrase: ${rawPhrase}` };
+      }
+    }
+  }
+  return { drop: false };
 }
 
 /**
@@ -164,13 +202,9 @@ export class TranscriptionService extends EventEmitter {
 
     const { text } = result;
 
-    if (text.length < 3) {
-      debug(TAG, `transcript too short, dropping: "${text}"`);
-      return;
-    }
-
-    if (isHallucination(text)) {
-      warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+    const filter = shouldDropTranscript(text);
+    if (filter.drop) {
+      debug(TAG, `dropping transcript (${filter.reason}): "${text.slice(0, 80)}"`);
       return;
     }
 
@@ -306,13 +340,9 @@ export class TranscriptionService extends EventEmitter {
         return;
       }
 
-      if (text.length < 3) {
-        debug(TAG, `transcript too short, dropping: "${text}"`);
-        return;
-      }
-
-      if (isHallucination(text)) {
-        warn(TAG, `hallucination detected, dropping: "${text.slice(0, 80)}..."`);
+      const filter = shouldDropTranscript(text);
+      if (filter.drop) {
+        debug(TAG, `dropping transcript (${filter.reason}): "${text.slice(0, 80)}"`);
         return;
       }
 

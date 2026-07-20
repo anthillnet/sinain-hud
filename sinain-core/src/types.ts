@@ -663,6 +663,8 @@ export interface TranscriptionConfig {
     modelPath: string;
     language: string;
     timeoutMs: number;
+    noSpeechMax: number;
+    logprobMin: number;
     initialPrompt?: string;
   };
 }
