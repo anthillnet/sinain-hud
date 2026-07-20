@@ -1,11 +1,12 @@
 import type { AnalysisConfig, AgentResult, ContextWindow, RecorderStatus, RecordCommand, RawRegion } from "../types.js";
 import { normalizeAppName } from "./context-window.js";
 import { buildLineList, resolveLineRegions } from "./region-lines.js";
-import { log, debug } from "../log.js";
+import { log, debug, warn } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
 import { redactChatPayload } from "../privacy/cloud-egress.js";
 
 const TAG = "agent";
+let missingProviderLogged = false;
 
 export class AnalysisAuthError extends Error {
   constructor(readonly status: number, body: string) {
@@ -286,6 +287,14 @@ export async function analyzeContext(
   config: AnalysisConfig,
   recorderStatus: RecorderStatus | null = null,
 ): Promise<AgentResult> {
+  if (config.provider !== "ollama" && !config.apiKey) {
+    if (!missingProviderLogged) {
+      warn("privacy", "analysis disabled: no provider configured");
+      missingProviderLogged = true;
+    }
+    throw new Error("analysis provider not configured");
+  }
+
   let userPrompt = buildUserPrompt(contextWindow, recorderStatus, config.regionsEnabled);
   const systemPrompt = config.regionsEnabled ? SYSTEM_PROMPT_WITH_REGIONS : SYSTEM_PROMPT;
 
@@ -320,10 +329,6 @@ export async function analyzeContext(
   }
 
   // OpenRouter path: model chain with fallbacks
-  if (!config.apiKey) {
-    throw new Error("ANALYSIS_API_KEY / OPENROUTER_API_KEY not set");
-  }
-
   const models = [config.model, ...config.fallbackModels];
   // Auto-upgrade to vision model when images are present
   if (images.length > 0 && config.visionModel && !models.includes(config.visionModel)) {

@@ -239,7 +239,7 @@ export function loadConfig(): CoreConfig {
     setLocal("SINAIN_PAGE_MODEL", `ollama/${localLlm}`);
     // Deliberate-capture burst lane (summon/enrich window briefs): route to
     // local Ollama instead of Cerebras. burstCall's ollama branch uses the
-    // native /api/chat; the API key is unused but must be non-empty.
+    // native /api/chat; the API key is unused.
     setLocal("BURST_PROVIDER", "ollama");
     setLocal("BURST_ENDPOINT", "http://localhost:11434");
     setLocal("BURST_MODEL", localLlm);
@@ -248,7 +248,7 @@ export function loadConfig(): CoreConfig {
 
   const transcriptionInitialPrompt = env("TRANSCRIPTION_INITIAL_PROMPT", "");
   const whisperModelPath = resolvePath(env("LOCAL_WHISPER_MODEL", "~/.sinain/models/whisper/ggml-large-v3-turbo.bin"));
-  const transcriptionApiKey = env("OPENROUTER_API_KEY", "");
+  const transcriptionApiKey = localMode ? "" : env("OPENROUTER_API_KEY", "");
   // Local-first by default: audio stays on-device (privacy) and whisper quality
   // beats the cloud LLM path (see eval). But the ~1.5GB model downloads in the
   // background on first launch — until it's present we fall back to cloud (when
@@ -306,7 +306,7 @@ export function loadConfig(): CoreConfig {
     // ON (cloud vision is cheap + parallel). Override with SINAIN_AGENT_VISION.
     agentVision: boolEnv("SINAIN_AGENT_VISION", !localMode),
     endpoint: env("ANALYSIS_ENDPOINT", defaultEndpoint),
-    apiKey: env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
+    apiKey: localMode ? "" : env("ANALYSIS_API_KEY", env("OPENROUTER_API_KEY", "")),
     maxTokens: intEnv("ANALYSIS_MAX_TOKENS", 800),
     temperature: floatEnv("ANALYSIS_TEMPERATURE", 0.3),
     fallbackModels: env("ANALYSIS_FALLBACK_MODELS", "google/gemini-2.5-flash,anthropic/claude-3.5-haiku")
@@ -360,7 +360,7 @@ export function loadConfig(): CoreConfig {
     provider: env("BURST_PROVIDER", "cerebras"),
     model: env("BURST_MODEL", "gemma-4-31b"),
     endpoint: env("BURST_ENDPOINT", "https://api.cerebras.ai/v1/chat/completions"),
-    apiKey: env("BURST_API_KEY", env("CEREBRAS_API_KEY", "")),
+    apiKey: localMode ? "" : env("BURST_API_KEY", env("CEREBRAS_API_KEY", "")),
     maxTokens: intEnv("BURST_MAX_TOKENS", 700),
     timeoutMs: intEnv("BURST_TIMEOUT_MS", 20000),
   };

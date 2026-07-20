@@ -95,6 +95,7 @@ export class AgentLoop extends EventEmitter {
   private lastTickFeedVersion = 0;
   private lastTickSenseVersion = 0;
   private authErrorNotified = false;
+  private missingProviderNotified = false;
   // Salience measurement (no behavior change): tracks how often a Tier-2 tick
   // runs on content identical to the last analyzed state — i.e. how many LLM
   // calls a deterministic salience gate would skip.
@@ -126,7 +127,10 @@ export class AgentLoop extends EventEmitter {
     const ac = this.deps.agentConfig;
     if (!ac.enabled || (ac.provider !== "ollama" && !ac.apiKey)) {
       if (ac.enabled) {
-        warn(TAG, "AGENT_ENABLED=true but no API key and provider is not ollama \u2014 analysis disabled");
+        if (!this.missingProviderNotified) {
+          warn("privacy", "analysis disabled: no provider configured");
+          this.missingProviderNotified = true;
+        }
       }
       return;
     }

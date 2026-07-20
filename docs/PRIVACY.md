@@ -1,14 +1,16 @@
 # Sinain Privacy Policy
 
-_Last updated: 2026-06-25. Draft for publication at `https://sinain.com/privacy`._
+_Last updated: 2026-07-20. Draft for publication at `https://sinain.com/privacy`._
 
 Sinain is a privacy-first context layer that runs on your own computer. This policy
 explains what Sinain collects and, more importantly, what it does **not**.
 
 ## The short version
 
-- Sinain runs on **your machine**. Your screen text, audio transcripts, and memory stay
-  on your device.
+- Sinain runs on **your machine**. In Local mode, or when no cloud provider is
+  configured, your screen text, audio transcripts, and memory stay on your device.
+- When **you enable a cloud provider**, Sinain sends screen text and audio-derived
+  context to that provider for processing.
 - If you connect Sinain to **ChatGPT**, that context is sent **from your device to your
   own ChatGPT** — only while you have Sinain running and the connector enabled.
 - The only data Sinain stores on its servers is your **email** and **which devices are
@@ -23,8 +25,12 @@ explains what Sinain collects and, more importantly, what it does **not**.
 That is the complete list of what Sinain stores on its servers.
 
 **On your device (never sent to Sinain's servers):**
-- Screen text (OCR), audio transcripts, and your local knowledge graph — used by Sinain
-  locally to assist you. Audio is transcribed in memory and not persisted to disk.
+- Screen text (OCR), audio transcripts, your knowledge graph, web library (bookmarks,
+  page cache, and search log in `web.db`), memory, and logs live under `~/.sinain`.
+  Audio is transcribed in memory and not persisted to disk. In Local mode, or without
+  a configured cloud provider, this content stays on your device. When you enable a
+  cloud provider, relevant screen text and audio-derived context is sent to that
+  provider for processing, but not stored on Sinain's servers.
 
 ## The ChatGPT connector
 
@@ -51,6 +57,10 @@ When you add the Sinain connector in ChatGPT and authorize it:
 - **Auth0 (identity):** handles sign-in. It receives your email/login to authenticate you.
 - **OpenAI / ChatGPT:** your own ChatGPT receives the context you choose to send via the
   connector, under OpenAI's terms.
+- **OpenRouter (optional):** provides cloud analysis and transcription when selected
+  and routes context to the model you choose. The defaults use Google Gemini models,
+  with an Anthropic model as a fallback.
+- **Cerebras (optional):** provides cloud analysis when selected.
 
 Sinain does not sell your data and does not use your context to train models.
 
@@ -67,7 +77,9 @@ ChatGPT connector.
 
 - **Disconnect** a device any time from the Sinain settings panel — it removes the
   account↔device mapping.
-- **Delete your account** by contacting us; we remove your email and device mapping.
+- **Delete your account** by contacting us; we purge your email, device mapping, and
+  everything else stored server-side that is tied to your account.
+- All content data is on your device; delete `~/.sinain` to delete it.
 - We retain the account record only while your account exists.
 
 ## Contact
