@@ -122,6 +122,7 @@ class SaveReceipt {
   /// "user_save" | "offered_save" — who initiated (absent on old cores).
   final String? provenance;
   final String? error;
+  final bool retryable;
 
   const SaveReceipt({
     required this.saveId,
@@ -134,6 +135,7 @@ class SaveReceipt {
     this.undoSeconds,
     this.provenance,
     this.error,
+    this.retryable = false,
   });
 
   factory SaveReceipt.fromJson(Map<String, dynamic> json) => SaveReceipt(
@@ -153,6 +155,7 @@ class SaveReceipt {
         undoSeconds: (json['undoSeconds'] as num?)?.toInt(),
         provenance: json['provenance'] as String?,
         error: json['error'] as String?,
+        retryable: json['retryable'] as bool? ?? false,
       );
 }
 

@@ -426,6 +426,7 @@ export interface SaveReceiptMessage {
   /** Who initiated the save. Absent = "user_save" (deployed-overlay skew). */
   provenance?: SaveProvenance;
   error?: string;
+  retryable?: boolean;
   ts: number;
 }
 

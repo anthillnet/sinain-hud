@@ -409,6 +409,7 @@ def main() -> None:
             json_schema=DIGEST_SCHEMA if use_schema else None,
             temperature=_dtemp,
             seed=_dseed,
+            retries=int(os.environ.get("SINAIN_DISTILL_RETRIES", "4")),
         )
         result = extract_json(raw)
     except (ValueError, LLMError) as e:
