@@ -278,6 +278,8 @@ export function loadConfig(): CoreConfig {
       modelPath: whisperModelPath,
       language: env("TRANSCRIPTION_LANGUAGE", "auto"),
       timeoutMs: intEnv("LOCAL_WHISPER_TIMEOUT_MS", 15000),
+      noSpeechMax: floatEnv("TRANSCRIPTION_NO_SPEECH_MAX", 0.6),
+      logprobMin: floatEnv("TRANSCRIPTION_LOGPROB_MIN", -1.0),
       initialPrompt: transcriptionInitialPrompt || undefined,
     },
   };

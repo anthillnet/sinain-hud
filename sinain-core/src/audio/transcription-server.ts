@@ -139,7 +139,7 @@ export class WhisperServerBackend implements TranscriptionBackend {
     try {
       const form = new FormData();
       form.append("file", new Blob([new Uint8Array(chunk.buffer)], { type: "audio/wav" }), "chunk.wav");
-      form.append("response_format", "json");
+      form.append("response_format", "verbose_json");
       form.append("language", this.lang);
       // Hotwords + recent rolling context (A2) — same intent as whisper-cli --prompt.
       const prompt = composeWhisperPrompt(this.config.initialPrompt, contextPrompt);
@@ -154,8 +154,20 @@ export class WhisperServerBackend implements TranscriptionBackend {
         warn(TAG, `inference HTTP ${res.status}`);
         return null;
       }
-      const data = (await res.json()) as { text?: string };
-      const text = (data.text || "").trim();
+      const data = (await res.json()) as {
+        text?: string;
+        segments?: Array<{ text?: string; no_speech_prob?: number; avg_logprob?: number }>;
+      };
+      const text = (data.segments?.length
+        ? data.segments
+          .filter((segment) => {
+            const drop = (typeof segment.no_speech_prob === "number" && segment.no_speech_prob > this.config.noSpeechMax)
+              || (typeof segment.avg_logprob === "number" && segment.avg_logprob < this.config.logprobMin);
+            if (drop) debug(TAG, `dropping low-confidence segment: no_speech_prob=${segment.no_speech_prob} avg_logprob=${segment.avg_logprob}`);
+            return !drop;
+          })
+          .map((segment) => segment.text || "").join(" ")
+        : data.text || "").trim();
       const elapsed = Date.now() - startTs;
       if (!text) {
         debug(TAG, `empty result (${elapsed}ms)`);
