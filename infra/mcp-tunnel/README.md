@@ -36,6 +36,7 @@ Only **7000** (frp control) and **443** (Caddy) are public. Everything else is l
 - **Accountless**: the AS has no user DB. A device-signed `/pair` mints a short
   pairing code shown in the overlay; the user types it on the `/authorize` page,
   binding ChatGPT's token to that device.
+- `GET /signup`: public waitlist signup → IdP → account marked waitlisted.
 - **"Off means off"**: toggling the harness off tears down `frpc` (the real kill
   switch — no tunnel to serve) and `/unpair` revokes refresh.
 

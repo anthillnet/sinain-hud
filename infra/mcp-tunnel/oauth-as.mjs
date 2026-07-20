@@ -346,6 +346,14 @@ async function handleDeviceLink(req, res, url) {
   res.end();
 }
 
+async function handleSignup(req, res) {
+  const fedState = newJti();
+  pendingFed.set(fedState, { type: "signup", exp: nowSec() + FED_TTL });
+  const loc = await idp.authorizeUrl(fedState, CALLBACK(), { screenHint: "signup" });
+  res.writeHead(302, { location: loc, "cache-control": "no-store" });
+  res.end();
+}
+
 // POST /device-account — device-signed; reports whether this device is linked
 // to an account (so the app can show "Sign in" vs "Connected as <email>").
 async function handleDeviceAccount(req, res) {
@@ -411,6 +419,14 @@ async function handleIdpCallback(req, res, url) {
 <style>body{font:16px -apple-system,system-ui,sans-serif;max-width:24rem;margin:12vh auto;text-align:center;color:#111}</style>
 <h2>✓ Connected</h2><p>This device is now linked to <b>${esc(email)}</b>. You can use Sinain from ChatGPT.</p>`);
   }
+  if (p.type === "signup") {
+    accounts.markWaitlisted(accountId);
+    console.error(`[as] signup ${accountId} (${email}) → Pro waitlist`);
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    return res.end(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<style>body{font:16px -apple-system,system-ui,sans-serif;max-width:24rem;margin:12vh auto;text-align:center;color:#111}</style>
+<h2>✓ You're on the Pro waitlist</h2><p>Account created for <b>${esc(email)}</b>. We'll email you when Pro opens.</p><p><a href="https://sinain.com">Back to Sinain</a></p>`);
+  }
   return oauthErr(res, 400, "invalid_request", "unknown login state");
 }
 
@@ -455,6 +471,7 @@ const server = http.createServer(async (req, res) => {
     if (ACCOUNTS_ENABLED) {
       if (req.method === "GET" && path === "/idp/callback") return handleIdpCallback(req, res, url);
       if (req.method === "GET" && path === "/device-link") return handleDeviceLink(req, res, url);
+      if (req.method === "GET" && path === "/signup") return handleSignup(req, res);
       if (req.method === "POST" && path === "/device-account") return handleDeviceAccount(req, res);
       if (req.method === "POST" && path === "/device-unlink") return handleDeviceUnlink(req, res);
       if (idp.isStub && req.method === "GET" && path === "/idp-stub/login") return handleStubLoginGet(res, url);
