@@ -580,11 +580,11 @@ class OverlayShellState extends State<OverlayShell> {
         _maybeExitCardMode();
       } else if (_parked) {
         // A tracked session lives in the notch bar (label pill) — never a
-        // floating chip panel while parked; just resize for the new label.
+        // floating chip panel; just resize the island for the new label.
         _scheduleIslandResize();
-      } else {
-        _enterCardMode();
       }
+      // Unparked: the pill lives in the session list only — a chip arrival
+      // opens no card surface (owner call 2026-07-20).
     });
     _assistSub = ws.sessionAssistStream.listen((a) {
       if (!mounted) return;
@@ -843,8 +843,21 @@ class OverlayShellState extends State<OverlayShell> {
     await _windowService.setWindowFrame(x, y, width, height);
   }
 
+  /// Wait (bounded) for a mid-flight window op instead of dropping the
+  /// request — a dropped stack→bar collapse left the tall, transparent
+  /// island window in place, silently eating clicks under the notch
+  /// (field 2026-07-20). True when clear; false on timeout/unmount.
+  Future<bool> _awaitWindowOpClear() async {
+    var spins = 0;
+    while (_windowOpInFlight && spins++ < 100) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    return mounted && !_windowOpInFlight;
+  }
+
   Future<void> _setIslandView(_IslandView view) async {
-    if (!_parked || _islandView == view || _windowOpInFlight) return;
+    if (!_parked) return;
+    if (!await _awaitWindowOpClear() || !_parked) return;
     if (view != _IslandView.stack) {
       _islandCollapseTimer?.cancel();
       _islandHoverExpanded = false;
@@ -854,13 +867,16 @@ class OverlayShellState extends State<OverlayShell> {
       _windowService.resignKeyWindow();
     }
     _windowOpInFlight = true;
+    // Same-view calls fall through on purpose: re-placing the frame is
+    // idempotent and heals a stale (dropped) placement.
     setState(() => _islandView = view);
     await _placeIslandFrame();
     _windowOpInFlight = false;
   }
 
   Future<void> _snapIslandToNotch() async {
-    if (!_parked || _windowOpInFlight) return;
+    if (!_parked) return;
+    if (!await _awaitWindowOpClear() || !_parked) return;
     _windowOpInFlight = true;
     await _placeIslandFrame();
     _windowOpInFlight = false;
@@ -2325,13 +2341,15 @@ class OverlayShellState extends State<OverlayShell> {
         _saveReceipt != null ||
         _saveOffer != null ||
         _sessionNudge != null ||
-        _sessionChips.isNotEmpty ||
+        // NB: chips deliberately absent — the pill no longer renders on the
+        // card surface, so chips alone must not hold card mode open (the
+        // old chip-only 120px window was itself a click shield).
         _sessionWrap != null ||
         _sessionShelf != null ||
         _voiceSession != null) {
       // Still showing something — but the content class may have shrunk
-      // (last card closed, chip remains): resync the window size so the
-      // invisible area never outgrows the visible panel.
+      // (last card closed): resync the window size so the invisible area
+      // never outgrows the visible panel.
       if (_parked) {
         _setIslandView(_IslandView.cards);
       } else {
@@ -2637,21 +2655,10 @@ class OverlayShellState extends State<OverlayShell> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Session Sense: the running chip is the ambient state; nudge and
-        // wrap cards stack above the save cards (violet = session-scoped).
-        if (_warmChip != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: SessionChip(
-              session: _warmChip!,
-              others: _sessionChips.length - 1,
-              // A click asks for MORE, never ends: expand the detail card.
-              onDetails: () {
-                setState(() => _assistVisible = !_assistVisible);
-                _resizeForCardPanel();
-              },
-            ),
-          ),
+        // Session Sense: the tracked-session pill lives ONLY in the session
+        // list and the notch bar (owner call 2026-07-20) — it no longer
+        // floats on the card surface. The detail card stays reachable from
+        // the list; _assistVisible can still surface it here.
         if (_assistVisible && _warmChip != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
