@@ -6,7 +6,7 @@ struct HUDConfig {
     static let controlsBarHeight: CGFloat = 48
     static let controlsBarWidth: CGFloat = 360
     static let defaultChatWidth: CGFloat = 427
-    static let defaultChatHeight: CGFloat = 293
+    static let defaultChatHeight: CGFloat = 220
 
     // Constraints
     static let minChatWidth: CGFloat = 300
