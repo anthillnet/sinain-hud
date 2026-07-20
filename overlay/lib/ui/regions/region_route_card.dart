@@ -5,6 +5,7 @@ import '../../core/models/context_cards.dart';
 import '../../core/models/agent_session.dart';
 import '../../core/models/region_highlight.dart';
 import '../../core/theme/hud_theme.dart';
+import '../common/handoff_control.dart';
 
 typedef RegionRoute = ({
   String agent,
@@ -119,20 +120,6 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
     }
     return routes.isEmpty ? null : routes.first;
   }
-
-  String _agentLabel(String id) => switch (id) {
-        'sinain' => 'Sinain Chat',
-        'claude' => 'Claude Code',
-        'gclaude' => 'Claude',
-        'openclaude' => 'OpenClaude',
-        'codex' => 'Codex',
-        'goose' => 'Goose',
-        'junie' => 'Junie',
-        'aider' => 'Aider',
-        'claude-desktop' => 'Claude Desktop',
-        'chatgpt-desktop' => 'ChatGPT',
-        _ => id,
-      };
 
   TextStyle _mono(double size, Color color,
           {FontWeight weight = FontWeight.w400}) =>
@@ -280,7 +267,7 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
               child: Text(
                   choice.agentSessionId != null
                       ? choice.agent
-                      : '${_agentLabel(choice.agent)} — ${choice.isTerminal ? 'bridge' : 'chat'}',
+                      : '${handoffAgentLabel(choice.agent)} — ${choice.isTerminal ? 'bridge' : 'chat'}',
                   style: _mono(8, const Color(0xFFE8EAEE))),
             ),
             PopupMenuButton<RegionRoute>(
@@ -296,7 +283,7 @@ class _RegionRouteCardState extends State<RegionRouteCard> {
                     child: Text(
                         route.agentSessionId != null
                             ? '▶ ${route.agent}'
-                            : _agentLabel(route.agent),
+                            : handoffAgentLabel(route.agent),
                         style: _mono(10, theme.textPrimary)),
                   ),
               ],

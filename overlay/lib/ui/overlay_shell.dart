@@ -2007,25 +2007,6 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  /// Display name of the agent the current summon destination opens in —
-  /// the handoff button says where the brief will land.
-  String _handoffAgentLabel(WebSocketService ws) {
-    final id = _summonDest == 'term' ? ws.terminalAgent : ws.escalationAgent;
-    return switch (id) {
-      'sinain' => 'Sinain Chat',
-      'claude' => 'Claude Code',
-      'gclaude' => 'Claude',
-      'openclaude' => 'OpenClaude',
-      'codex' => 'Codex',
-      'goose' => 'Goose',
-      'junie' => 'Junie',
-      'aider' => 'Aider',
-      'claude-desktop' => 'Claude Desktop',
-      'chatgpt-desktop' => 'ChatGPT',
-      _ => id,
-    };
-  }
-
   /// Flatten a situation brief into the text form carried into agent seeds
   /// (Ask follow-up, terminal handoff, region + minutes).
   String _briefText(ContextBrief b) {
@@ -2528,14 +2509,29 @@ class OverlayShellState extends State<OverlayShell> {
               title: _pendingRegion != null
                   ? 'Context from screen'
                   : 'Context from clipboard',
-              handoffLabel:
-                  'Handoff to ${_handoffAgentLabel(context.read<WebSocketService>())}',
+              chatAgents: context.read<WebSocketService>().availableAgents,
+              terminalAgents:
+                  context.read<WebSocketService>().terminalAvailable,
+              initialChatAgent:
+                  context.read<WebSocketService>().escalationAgent,
+              initialTerminalAgent:
+                  context.read<WebSocketService>().terminalAgent,
+              initialIsTerminal: _summonDest == 'term',
               onDismiss: () {
                 setState(() {
                   _activeEnrich = null;
                   _pendingRegion = null;
                 });
                 _maybeExitCardMode();
+              },
+              onHandoff: (agent, isTerminal) {
+                final ws = context.read<WebSocketService>();
+                final lane = isTerminal ? 'terminal' : 'chat';
+                final current =
+                    isTerminal ? ws.terminalAgent : ws.escalationAgent;
+                if (agent != current) ws.setAgent(lane, agent);
+                setState(() => _summonDest = isTerminal ? 'term' : 'chat');
+                _callAiOnEnrich(_activeEnrich!);
               },
               onCallAi: () => _callAiOnEnrich(_activeEnrich!),
               onCopy: () => _copyEnrichCard(_activeEnrich!),
@@ -2546,14 +2542,27 @@ class OverlayShellState extends State<OverlayShell> {
             padding: const EdgeInsets.only(bottom: 8),
             child: BriefCard(
               brief: _activeBrief!,
-              dest: _summonDest,
-              destLabel: _handoffAgentLabel(context.read<WebSocketService>()),
-              onDestChanged: (d) => setState(() => _summonDest = d),
+              chatAgents: context.read<WebSocketService>().availableAgents,
+              terminalAgents:
+                  context.read<WebSocketService>().terminalAvailable,
+              initialChatAgent:
+                  context.read<WebSocketService>().escalationAgent,
+              initialTerminalAgent:
+                  context.read<WebSocketService>().terminalAgent,
+              initialIsTerminal: _summonDest == 'term',
               onDismiss: () {
                 setState(() => _activeBrief = null);
                 _maybeExitCardMode();
               },
-              onAskFollowUp: () => _askFollowUpOnBrief(_activeBrief!),
+              onHandoff: (agent, isTerminal) {
+                final ws = context.read<WebSocketService>();
+                final lane = isTerminal ? 'terminal' : 'chat';
+                final current =
+                    isTerminal ? ws.terminalAgent : ws.escalationAgent;
+                if (agent != current) ws.setAgent(lane, agent);
+                setState(() => _summonDest = isTerminal ? 'term' : 'chat');
+                _askFollowUpOnBrief(_activeBrief!);
+              },
               onSaveRange: () {
                 final minutes = _activeBrief!.minutes;
                 setState(() => _activeBrief = null);

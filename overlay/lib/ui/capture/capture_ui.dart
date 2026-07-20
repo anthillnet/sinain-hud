@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants.dart';
 import '../../core/models/context_cards.dart';
 import '../../core/theme/hud_theme.dart';
+import '../common/handoff_control.dart';
 
 /// Deliberate-capture HUD controls (docs/DESIGN-DELIBERATE-CAPTURE.md §5,
 /// wireframes: "Deliberate Capture.dc.html").
@@ -405,8 +406,20 @@ class _RangeChooserState extends State<RangeChooser> {
                   widget.onConfirmAlt != null) ...[
                 const SizedBox(width: 7),
                 Expanded(
-                  child: _verbButton('Call sinain', const Color(0xFF1F8039),
-                      () => widget.onConfirmAlt!(_minutes, _selectedApps)),
+                  child: Tooltip(
+                    message: 'Coming soon',
+                    child: Container(
+                      height: 28,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: t.textDim.withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text('Call sinain',
+                          style: _mono(12, t.textDim,
+                              weight: FontWeight.w500)),
+                    ),
+                  ),
                 ),
               ],
               const SizedBox(width: 7),
@@ -860,64 +873,25 @@ class BriefCard extends StatelessWidget {
   final ContextBrief brief;
   final VoidCallback onDismiss;
   final VoidCallback onSaveRange;
-  final VoidCallback onAskFollowUp;
-
-  /// Where the follow-up goes: 'chat' (in-HUD agent lane) or 'term'
-  /// (PTY seeded with the brief). Mirrors the tab-level chat/term switch.
-  final String dest;
-  final ValueChanged<String>? onDestChanged;
-
-  /// Display name of the agent the selected destination hands off to
-  /// (e.g. "Sinain Chat", "Claude Code") — we know where it will open.
-  final String destLabel;
+  final List<String> chatAgents;
+  final List<String> terminalAgents;
+  final String? initialChatAgent;
+  final String? initialTerminalAgent;
+  final bool initialIsTerminal;
+  final void Function(String agent, bool isTerminal) onHandoff;
 
   const BriefCard({
     super.key,
     required this.brief,
     required this.onDismiss,
     required this.onSaveRange,
-    required this.onAskFollowUp,
-    this.dest = 'chat',
-    this.onDestChanged,
-    this.destLabel = '',
+    required this.chatAgents,
+    required this.terminalAgents,
+    required this.initialChatAgent,
+    required this.initialTerminalAgent,
+    required this.initialIsTerminal,
+    required this.onHandoff,
   });
-
-  Widget _destToggle(HudTheme t) {
-    Widget pill(String id, String label) {
-      final selected = dest == id;
-      return MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => onDestChanged?.call(id),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            decoration: BoxDecoration(
-              color: selected
-                  ? t.selectionAccent.withValues(alpha: 0.18)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Text(label,
-                style: _mono(10, selected ? t.textPrimary : t.textDim,
-                    weight: selected ? FontWeight.w600 : FontWeight.w400)),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: t.hairline),
-      ),
-      padding: const EdgeInsets.all(1),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        pill('chat', 'chat'),
-        pill('term', '⌨ term'),
-      ]),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -958,20 +932,12 @@ class BriefCard extends StatelessWidget {
                     child: Text('✕', style: _mono(12, t.textDim))),
               ),
             ]),
-            // Metadata line: coverage left, chat/term destination right — kept
-            // out of the action row, which stays two buttons wide.
             Padding(
               padding: const EdgeInsets.only(top: 3),
-              child: Row(children: [
-                Expanded(
-                  child: Text(brief.coverage,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _mono(10, t.textDim)),
-                ),
-                if (onDestChanged != null && brief.status == CardStatus.ready)
-                  _destToggle(t),
-              ]),
+              child: Text(brief.coverage,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _mono(10, t.textDim)),
             ),
             const SizedBox(height: 8),
             if (working) const _Shimmer(),
@@ -1057,15 +1023,17 @@ class BriefCard extends StatelessWidget {
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
-                    child: _cardButton(
-                        t,
-                        destLabel.isNotEmpty
-                            ? 'Handoff to $destLabel'
-                            : (dest == 'term'
-                                ? 'Open terminal'
-                                : 'Ask follow-up'),
-                        onAskFollowUp,
-                        primary: true)),
+                  child: HandoffControl(
+                    chatAgents: chatAgents,
+                    terminalAgents: terminalAgents,
+                    initialChatAgent: initialChatAgent,
+                    initialTerminalAgent: initialTerminalAgent,
+                    initialIsTerminal: initialIsTerminal,
+                    accent: t.selectionAccent,
+                    verb: 'Handoff',
+                    onConfirm: onHandoff,
+                  ),
+                ),
                 const SizedBox(width: 7),
                 _cardButton(t, 'Save this range', onSaveRange),
               ]),
@@ -1084,14 +1052,16 @@ class EnrichCardWidget extends StatelessWidget {
   final VoidCallback onDismiss;
   final VoidCallback? onCallAi;
   final VoidCallback? onCopy;
+  final List<String> chatAgents;
+  final List<String> terminalAgents;
+  final String? initialChatAgent;
+  final String? initialTerminalAgent;
+  final bool initialIsTerminal;
+  final void Function(String agent, bool isTerminal) onHandoff;
 
   /// Header title — "Build context" for clipboard, "Region context" for a
   /// selected screen region: one card experience, different selections.
   final String title;
-
-  /// Handoff button label naming the destination agent
-  /// (e.g. "Handoff to Sinain Chat").
-  final String handoffLabel;
 
   const EnrichCardWidget({
     super.key,
@@ -1099,8 +1069,13 @@ class EnrichCardWidget extends StatelessWidget {
     required this.onDismiss,
     this.onCallAi,
     this.onCopy,
+    required this.chatAgents,
+    required this.terminalAgents,
+    required this.initialChatAgent,
+    required this.initialTerminalAgent,
+    required this.initialIsTerminal,
+    required this.onHandoff,
     this.title = 'Context from clipboard',
-    this.handoffLabel = 'Call AI',
   });
 
   @override
@@ -1148,11 +1123,19 @@ class EnrichCardWidget extends StatelessWidget {
             Text(card.context, style: _mono(11, t.textPrimary, height: 1.35)),
             const SizedBox(height: 12),
             Row(children: [
-              if (onCallAi != null)
-                Expanded(
-                    child:
-                        _cardButton(t, handoffLabel, onCallAi!, primary: true)),
-              if (onCallAi != null && onCopy != null) const SizedBox(width: 7),
+              Expanded(
+                  child: HandoffControl(
+                    chatAgents: chatAgents,
+                    terminalAgents: terminalAgents,
+                    initialChatAgent: initialChatAgent,
+                    initialTerminalAgent: initialTerminalAgent,
+                    initialIsTerminal: initialIsTerminal,
+                    accent: t.selectionAccent,
+                    verb: 'Handoff',
+                    onConfirm: onHandoff,
+                  ),
+                ),
+              if (onCopy != null) const SizedBox(width: 7),
               if (onCopy != null) _cardButton(t, 'Copy for agent', onCopy!),
             ]),
           ],
@@ -1623,23 +1606,17 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
             ),
             if (!n.resume && widget.onCallSinain != null) ...[
               const SizedBox(width: 6),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: widget.onCallSinain,
-                  child: Container(
-                    height: 28,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      border:
-                          Border.all(color: _blue.withValues(alpha: 0.5)),
-                    ),
-                    child:
-                        Text('Call Sinain', style: _mono(11, t.textPrimary)),
+              Tooltip(
+                message: 'Coming soon',
+                child: Container(
+                  height: 28,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: t.textDim.withValues(alpha: 0.35)),
                   ),
+                  child: Text('Call Sinain', style: _mono(11, t.textDim)),
                 ),
               ),
             ],
@@ -2066,21 +2043,17 @@ class SessionDetailCard extends StatelessWidget {
                   _cardButton(t, '▶', onCallAi, primary: true, accent: _track),
             ),
             const SizedBox(width: 6),
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onCallSinain,
-                child: Container(
-                  height: 28,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: _blue.withValues(alpha: 0.5)),
-                  ),
-                  child: Text('Call Sinain', style: _mono(11, t.textPrimary)),
+            Tooltip(
+              message: 'Coming soon',
+              child: Container(
+                height: 28,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: t.textDim.withValues(alpha: 0.35)),
                 ),
+                child: Text('Call Sinain', style: _mono(11, t.textDim)),
               ),
             ),
             const Spacer(),

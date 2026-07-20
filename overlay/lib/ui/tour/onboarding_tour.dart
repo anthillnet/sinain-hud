@@ -299,8 +299,8 @@ class _OnboardingTourState extends State<OnboardingTour> {
         const _Scene(
           title: 'Call AI on your last minutes',
           body: 'The same range can go to an AI instead: Call AI hands a '
-              'brief to your agent as text, Call sinain starts a live voice '
-              'call seeded with it. You always see what it will know.',
+              'brief to your agent as text. Call sinain voice is coming soon. '
+              'You always see what it will know.',
           visual: _CallAiVisual(),
         ),
         // 5 · Context from screen (mode 3)
@@ -1558,7 +1558,7 @@ class _CallAiVisual extends StatelessWidget {
               buttons: Row(children: [
                 _MiniChooser.verb('Call AI', _blue),
                 const SizedBox(width: 6),
-                _MiniChooser.verb('Call sinain', _green),
+                _MiniChooser.verb('Call sinain', _textDim),
               ]),
             ),
           ),
