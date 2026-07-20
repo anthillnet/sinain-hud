@@ -1,4 +1,7 @@
 import type { BurstConfig } from "../types.js";
+import { warn } from "../log.js";
+
+let missingProviderLogged = false;
 
 /**
  * Minimal OpenAI-compatible client for the deliberate-capture burst lane.
@@ -35,13 +38,20 @@ export async function burstCall(
     seed?: number;
   },
 ): Promise<BurstCallResult> {
+  if (config.provider !== "ollama" && !config.apiKey) {
+    if (!missingProviderLogged) {
+      warn("privacy", "burst disabled: no provider configured");
+      missingProviderLogged = true;
+    }
+    throw new BurstError("burst provider not configured", 503);
+  }
+
   // Seed every call (env-overridable) — deterministic briefs run-to-run and
   // reproducible measurements; Cerebras accepts and honours `seed`.
   const envSeed = parseInt(process.env.SINAIN_BURST_SEED || "", 10);
   const seed = opts.seed ?? (Number.isFinite(envSeed) ? envSeed : 42);
 
   if (config.provider === "ollama") return burstCallOllama(config, opts, seed);
-  if (!config.apiKey) throw new BurstError("burst lane has no API key (set CEREBRAS_API_KEY)", 503);
   const body: Record<string, unknown> = {
     model: config.model,
     messages: [

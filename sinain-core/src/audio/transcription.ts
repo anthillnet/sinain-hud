@@ -7,6 +7,7 @@ import { WhisperServerBackend } from "./transcription-server.js";
 import { log, warn, error, debug } from "../log.js";
 
 const TAG = "transcribe";
+let missingProviderLogged = false;
 
 export const TRANSCRIPTION_HALLUCINATION_PHRASES = [
   "thank you for watching", "thanks for watching", "please subscribe",
@@ -104,7 +105,10 @@ export class TranscriptionService extends EventEmitter {
         ? new LocalTranscriptionBackend(config.local)
         : new WhisperServerBackend(config.local);
     } else if (!config.openrouterApiKey) {
-      warn(TAG, "OpenRouter API key not set \u2014 transcription will fail");
+      if (!missingProviderLogged) {
+        warn("privacy", "cloud transcription disabled: no provider configured");
+        missingProviderLogged = true;
+      }
     }
 
     log(TAG, `initialized: backend=${config.backend} model=${config.geminiModel} language=${config.language}`);
@@ -240,9 +244,6 @@ export class TranscriptionService extends EventEmitter {
 
   private async transcribeViaOpenRouter(chunk: AudioChunk): Promise<void> {
     if (!this.config.openrouterApiKey) {
-      this.errorCount++;
-      this.profiler?.gauge("transcription.errors", this.errorCount);
-      error(TAG, "OpenRouter API key not configured");
       return;
     }
 

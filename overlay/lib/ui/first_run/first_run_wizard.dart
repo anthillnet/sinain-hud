@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/app_control.dart';
 import '../../core/services/first_run_service.dart';
@@ -483,6 +484,24 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
                 fontSize: 12,
                 color: kWizardTextDim,
               ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'Cloud mode sends screen and audio-derived context to OpenRouter '
+          'and, if configured, Cerebras for processing. Local mode keeps '
+          'everything on this Mac.',
+          style: TextStyle(fontSize: 11, height: 1.33, color: kWizardTextMuted),
+        ),
+        const SizedBox(height: 5),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: WizardTextLink(
+            label: 'Privacy policy',
+            onTap: () => launchUrl(
+              Uri.parse('https://sinain.com/privacy.html'),
+              mode: LaunchMode.externalApplication,
             ),
           ),
         ),

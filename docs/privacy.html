@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Sinain — Privacy Policy</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-<script defer src="https://analytics.sinain.duckdns.org/script.js" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
+<script defer src="https://analytics.sinain.com/script.js" data-domains="sinain.com" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
 <style>
   :root{
     --bg:#ffffff; --bg-elev:#f8fafc; --fg:#0f172a; --fg-dim:#475569; --fg-faint:#94a3b8;
@@ -57,14 +57,15 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
   </header>
 
   <h1>Privacy Policy</h1>
-  <div class="updated">Last updated: 25 June 2026</div>
+  <div class="updated">Last updated: 20 July 2026</div>
 
   <p>Sinain is a privacy-first context layer that runs on your own computer. This policy
   explains what Sinain collects and, more importantly, what it does <strong>not</strong>.</p>
 
   <div class="lead">
     <ul style="margin:0">
-      <li>Sinain runs on <strong>your machine</strong>. Your screen text, audio transcripts, and memory stay on your device.</li>
+      <li>Sinain runs on <strong>your machine</strong>. In Local mode, or when no cloud provider is configured, your screen text, audio transcripts, and memory stay on your device.</li>
+      <li>When <strong>you enable a cloud provider</strong>, Sinain sends screen text and audio-derived context to that provider for processing.</li>
       <li>If you connect Sinain to <strong>ChatGPT</strong>, that context is sent <strong>from your device to your own ChatGPT</strong> — only while you have Sinain running and the connector enabled.</li>
       <li>The only data Sinain stores on its servers is your <strong>email</strong> and <strong>which devices are yours</strong>. <strong>Never</strong> your screen, audio, or memory.</li>
     </ul>
@@ -78,8 +79,11 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
   </ul>
   <p>That is the complete list of what Sinain stores on its servers.</p>
   <p><strong>On your device (never sent to Sinain's servers):</strong> screen text (OCR), audio
-  transcripts, and your local knowledge graph — used by Sinain locally to assist you. Audio is
-  transcribed in memory and not persisted to disk.</p>
+  transcripts, your knowledge graph, web library (bookmarks, page cache, and search log in
+  <code>web.db</code>), memory, and logs live under <code>~/.sinain</code>. Audio is transcribed
+  in memory and not persisted to disk. In Local mode, or without a configured cloud provider,
+  this content stays on your device. When you enable a cloud provider, relevant screen text and
+  audio-derived context is sent to that provider for processing, but not stored on Sinain's servers.</p>
 
   <h2>The ChatGPT connector</h2>
   <ul>
@@ -99,6 +103,9 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
   <ul>
     <li><strong>Auth0 (identity):</strong> handles sign-in. It receives your email/login to authenticate you.</li>
     <li><strong>OpenAI / ChatGPT:</strong> your own ChatGPT receives the context you choose to send via the connector, under OpenAI's terms.</li>
+    <li><strong>OpenRouter (optional):</strong> provides cloud analysis and transcription when selected and routes context to the model you choose. The defaults use Google Gemini models, with an Anthropic model as a fallback.</li>
+    <li><strong>Cerebras (optional):</strong> provides cloud analysis when selected.</li>
+    <li><strong>Sinain site analytics:</strong> <code>analytics.sinain.com</code> is our self-hosted, first-party Umami analytics service. It uses no cookies and collects no personally identifiable information.</li>
   </ul>
   <p>Sinain does not sell your data and does not use your context to train models.</p>
 
@@ -109,7 +116,8 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
   <h2>Your controls &amp; retention</h2>
   <ul>
     <li><strong>Disconnect</strong> a device any time from the Sinain settings panel — it removes the account&#8596;device mapping.</li>
-    <li><strong>Delete your account</strong> by contacting us; we remove your email and device mapping.</li>
+    <li><strong>Delete your account</strong> by contacting us; we purge your email, device mapping, and everything else stored server-side that is tied to your account.</li>
+    <li>All content data is on your device; delete <code>~/.sinain</code> to delete it.</li>
     <li>We retain the account record only while your account exists.</li>
   </ul>
 
