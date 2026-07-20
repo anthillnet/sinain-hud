@@ -65,6 +65,19 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
 
   ProviderStack? get _selected => _pending ?? _service.status?.activeStack;
 
+  bool get _hasNewKeyForSelection {
+    final s = _service.status;
+    if (s == null) return false;
+    switch (_selected) {
+      case ProviderStack.openrouter:
+        return !s.hasOpenRouterKey && _openRouterKeyCtl.text.trim().isNotEmpty;
+      case ProviderStack.cerebras:
+        return !s.hasCerebrasKey && _cerebrasKeyCtl.text.trim().isNotEmpty;
+      default:
+        return false;
+    }
+  }
+
   bool get _keyMissingForSelection {
     final s = _service.status;
     if (s == null) return false;
@@ -79,7 +92,7 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
   }
 
   Future<void> _apply() async {
-    final stack = _pending;
+    final stack = _pending ?? _selected;
     if (stack == null) return;
     final ok = await _service.switchStack(
       stack,
@@ -353,10 +366,10 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
                 _button(
                   _service.switching ? 'SWITCHING…' : 'APPLY & RESTART',
                   primary: true,
-                  onTap: _pending == null ||
+                  onTap: (_pending == null && !_hasNewKeyForSelection) ||
                           _service.switching ||
                           _keyMissingForSelection ||
-                          (_pending == ProviderStack.local &&
+                          (_selected == ProviderStack.local &&
                               !(s.localReady))
                       ? null
                       : _apply,
