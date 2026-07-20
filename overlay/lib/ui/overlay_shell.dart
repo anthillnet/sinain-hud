@@ -2472,6 +2472,17 @@ class OverlayShellState extends State<OverlayShell> {
     _clearSessionNudge();
   }
 
+  /// OK on a fresh nudge: acknowledge — track, collapse the card, no
+  /// immediate interaction (owner call 2026-07-20). Unlike _trackSession
+  /// this DOES exit the card surface: the arriving chip lives in the island
+  /// bar/pill, not a card.
+  void _acknowledgeSessionNudge() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
+    _clearSessionNudge();
+  }
+
   void _clearSessionNudge({bool exitSurfaces = true}) {
     _nudgeExpiryTimer?.cancel();
     setState(() => _sessionNudge = null);
@@ -2658,6 +2669,8 @@ class OverlayShellState extends State<OverlayShell> {
               // ▶: resume nudges just resume; fresh nudges track + Call AI.
               onTrack:
                   _sessionNudge!.resume ? _trackSession : _playSessionNudge,
+              onAcknowledge:
+                  _sessionNudge!.resume ? null : _acknowledgeSessionNudge,
               onCallSinain: _callSinainOnSessionNudge,
               onCorrect: _correctSession,
               onDismiss: _dismissSessionNudge,

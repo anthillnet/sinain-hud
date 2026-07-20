@@ -1441,6 +1441,11 @@ class SessionNudgeCard extends StatefulWidget {
   final SessionNudge nudge;
   final VoidCallback onTrack;
 
+  /// "OK" on a fresh nudge: acknowledge — track the session and collapse the
+  /// card without any immediate interaction (no Call AI). Null hides it
+  /// (resume nudges keep their single ▶ Resume verb).
+  final VoidCallback? onAcknowledge;
+
   /// "Call Sinain" — a live voice call on the session's span. Calling is a
   /// consent superset of tracking (§1/§10): one tap tracks AND dials.
   /// Null hides the button.
@@ -1454,6 +1459,7 @@ class SessionNudgeCard extends StatefulWidget {
     super.key,
     required this.nudge,
     required this.onTrack,
+    this.onAcknowledge,
     this.onCallSinain,
     required this.onCorrect,
     required this.onDismiss,
@@ -1620,14 +1626,24 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
             const SizedBox(height: 8),
           ],
           Row(children: [
-            // ▶ tracks AND calls the AI on the credited span (product call
-            // 2026-07-16: play = Call AI; voice is the second verb).
+            // OK acknowledges — tracked, card collapses, no interaction
+            // (owner call 2026-07-20). ▶ keeps the immediate track + Call AI
+            // verb (product call 2026-07-16), demoted to secondary.
+            if (!n.resume && widget.onAcknowledge != null) ...[
+              Tooltip(
+                message: 'Got it — track from $from',
+                child: _cardButton(t, 'OK', widget.onAcknowledge!,
+                    primary: true, accent: _track),
+              ),
+              const SizedBox(width: 6),
+            ],
             Tooltip(
               message: n.resume
                   ? 'Resume this session'
                   : 'Track from $from + Call AI',
               child: _cardButton(t, n.resume ? '▶ Resume' : '▶', widget.onTrack,
-                  primary: true, accent: _track),
+                  primary: n.resume || widget.onAcknowledge == null,
+                  accent: _track),
             ),
             if (!n.resume && widget.onCallSinain != null) ...[
               const SizedBox(width: 6),
