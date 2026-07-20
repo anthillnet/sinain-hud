@@ -392,6 +392,15 @@ class RegionEyePool {
 /// pupil, ready = bright green full dilation, failed = red.
 class RegionEyeView: NSView {
     var onTap: (() -> Void)?
+    /// Opt-in manual drag (detached eye). Region eyes stay fire-on-mouseDown;
+    /// a draggable eye defers the tap to mouseUp so a drag isn't also a tap.
+    var draggable = false
+    /// Fired on mouse-up after a real drag with the window's final frame
+    /// (Cocoa global bottom-left).
+    var onDragEnd: ((NSRect) -> Void)?
+    var onSecondaryTap: (() -> Void)?
+    private var lastDragPoint: NSPoint?
+    private var dragDistance: CGFloat = 0
     /// HUD accent color — drives idle/ready tint (working/failed keep their
     /// semantic orange/red).
     var accentColor: CGColor = CGColor(red: 0.0, green: 1.0, blue: 0.53, alpha: 1) {
@@ -428,7 +437,43 @@ class RegionEyeView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        onTap?()
+        guard draggable else {
+            onTap?()
+            return
+        }
+        lastDragPoint = NSEvent.mouseLocation
+        dragDistance = 0
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard draggable, let last = lastDragPoint, let win = window else { return }
+        let p = NSEvent.mouseLocation
+        let dx = p.x - last.x
+        let dy = p.y - last.y
+        dragDistance += abs(dx) + abs(dy)
+        win.setFrameOrigin(NSPoint(x: win.frame.origin.x + dx,
+                                   y: win.frame.origin.y + dy))
+        lastDragPoint = p
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard draggable else { return }
+        // < 4pt of travel is a tap, not a drag.
+        if dragDistance < 4 {
+            onTap?()
+        } else if let win = window {
+            onDragEnd?(win.frame)
+        }
+        lastDragPoint = nil
+        dragDistance = 0
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if let handler = onSecondaryTap {
+            handler()
+        } else {
+            super.rightMouseDown(with: event)
+        }
     }
 
     // Triangle wave 0→1→0 over the cycle, like repeat(reverse: true)

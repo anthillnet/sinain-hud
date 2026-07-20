@@ -11,6 +11,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyEyeX = 'eye_x';
   static const _keyEyeY = 'eye_y';
   static const _keyNotchParked = 'notch_parked';
+  static const _keyDetachedEye = 'detached_eye_visible';
   static const _keyChatWidth = 'chat_width';
   static const _keyChatHeight = 'chat_height';
   static const _keyFontSize = 'font_size';
@@ -43,6 +44,7 @@ class SettingsService extends ChangeNotifier {
       eyeX: _prefs.getDouble(_keyEyeX) ?? -1,
       eyeY: _prefs.getDouble(_keyEyeY) ?? -1,
       notchParked: _prefs.getBool(_keyNotchParked) ?? false,
+      detachedEyeVisible: _prefs.getBool(_keyDetachedEye) ?? false,
       chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
       chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
@@ -134,6 +136,11 @@ class SettingsService extends ChangeNotifier {
   Future<void> setNotchParked(bool value) async {
     _settings.notchParked = value;
     await _prefs.setBool(_keyNotchParked, value);
+  }
+
+  Future<void> setDetachedEyeVisible(bool value) async {
+    _settings.detachedEyeVisible = value;
+    await _prefs.setBool(_keyDetachedEye, value);
   }
 
   Future<void> setChatSize(double w, double h) async {

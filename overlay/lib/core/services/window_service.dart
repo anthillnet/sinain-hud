@@ -18,6 +18,24 @@ class WindowService {
   Stream<(String, String)> get regionCardActionStream =>
       _regionCardActionController.stream;
 
+  final _detachedEyeTapController = StreamController<void>.broadcast();
+  final _detachedEyeSecondaryController = StreamController<void>.broadcast();
+  final _detachedEyeMovedController =
+      StreamController<Map<String, double>>.broadcast();
+
+  /// Taps on the detached free-floating eye (macOS).
+  Stream<void> get detachedEyeTapStream => _detachedEyeTapController.stream;
+
+  /// Right-clicks on the detached eye — opens the eye context menu.
+  Stream<void> get detachedEyeSecondaryStream =>
+      _detachedEyeSecondaryController.stream;
+
+  /// Drag-end of the detached eye. Emits {x, y, w, h, screenX, screenY,
+  /// screenW, screenH} — the eye's frame plus its OWN screen's frame (Cocoa
+  /// global bottom-left), so park-zone tests work on any display.
+  Stream<Map<String, double>> get detachedEyeMovedStream =>
+      _detachedEyeMovedController.stream;
+
   Future<void> setTransparent() async {
     try {
       await _channel.invokeMethod('setTransparent');
@@ -349,6 +367,16 @@ class WindowService {
           if (id != null && id.isNotEmpty && action != null) {
             _regionCardActionController.add((id, action));
           }
+        case 'onDetachedEyeTap':
+          _detachedEyeTapController.add(null);
+        case 'onDetachedEyeSecondary':
+          _detachedEyeSecondaryController.add(null);
+        case 'onDetachedEyeMoved':
+          final args = call.arguments as Map;
+          _detachedEyeMovedController.add({
+            for (final e in args.entries)
+              e.key as String: (e.value as num).toDouble(),
+          });
       }
     });
   }
@@ -474,6 +502,40 @@ class WindowService {
       await _channel.invokeMethod('clearRegionEyes');
     } catch (e) {
       _log('clearRegionEyes failed: $e');
+    }
+  }
+
+  // ── Detached eye (always-parked island's drag-out companion) ──
+
+  /// Show (or move) the detached free-floating eye. [x]/[y] are Cocoa global
+  /// bottom-left; negative = native default bottom-right. [accent] is ARGB.
+  Future<void> showDetachedEye(
+      {required double x,
+      required double y,
+      required String state,
+      required int accent}) async {
+    try {
+      await _channel.invokeMethod('showDetachedEye',
+          {'x': x, 'y': y, 'state': state, 'accent': accent});
+    } catch (e) {
+      _log('showDetachedEye failed: $e');
+    }
+  }
+
+  Future<void> hideDetachedEye() async {
+    try {
+      await _channel.invokeMethod('hideDetachedEye');
+    } catch (e) {
+      _log('hideDetachedEye failed: $e');
+    }
+  }
+
+  Future<void> updateDetachedEye(String state, int accent) async {
+    try {
+      await _channel
+          .invokeMethod('updateDetachedEye', {'state': state, 'accent': accent});
+    } catch (e) {
+      _log('updateDetachedEye failed: $e');
     }
   }
 
