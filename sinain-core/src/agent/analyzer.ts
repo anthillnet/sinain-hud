@@ -3,6 +3,7 @@ import { normalizeAppName } from "./context-window.js";
 import { buildLineList, resolveLineRegions } from "./region-lines.js";
 import { log, debug, warn } from "../log.js";
 import { levelFor, applyLevel } from "../privacy/index.js";
+import { redactChatPayload } from "../privacy/cloud-egress.js";
 
 const TAG = "agent";
 let missingProviderLogged = false;
@@ -386,7 +387,7 @@ async function callOpenRouter(
         "Authorization": `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
+      body: JSON.stringify(redactChatPayload({
         model,
         messages: [
           { role: "system", content: systemPrompt },
@@ -394,7 +395,7 @@ async function callOpenRouter(
         ],
         max_tokens: config.maxTokens,
         temperature: config.temperature,
-      }),
+      })),
       signal: controller.signal,
     });
 

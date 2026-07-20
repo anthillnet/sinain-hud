@@ -1,5 +1,6 @@
 import type { BurstConfig } from "../types.js";
 import { warn } from "../log.js";
+import { redactChatPayload } from "../privacy/cloud-egress.js";
 
 let missingProviderLogged = false;
 
@@ -80,7 +81,7 @@ export async function burstCall(
         "Content-Type": "application/json",
         "User-Agent": "sinain-core-burst/0.1",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(redactChatPayload(body)),
       signal: controller.signal,
     });
     if (!res.ok) {

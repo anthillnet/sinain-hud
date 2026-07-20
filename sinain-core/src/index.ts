@@ -43,7 +43,7 @@ import type { SenseEvent, EscalationMode, FeedItem, RawRegion, ContextWindow } f
 import { isDuplicateTranscript, bigramSimilarity } from "./util/dedup.js";
 import { hardenLocalDataPermissions } from "./util/harden-permissions.js";
 import { runRetention } from "./util/retention.js";
-import { log, warn, error, debug, preview } from "./log.js";
+import { log, warn, error, debug, preview, logSnippet } from "./log.js";
 import { initPrivacy, levelFor, applyLevel } from "./privacy/index.js";
 
 // SECURITY: make every file/dir this process (and its children — sense_client,
@@ -2187,7 +2187,7 @@ async function main() {
       const item = feedBuffer.push(text, priority as any, "system", "stream");
       wsHandler.broadcast(text, priority as any);
       agentLoop.onNewContext();
-      log(TAG, `[feed] #${item.id}: ${text.slice(0, 80)}`);
+      log(TAG, `[feed] #${item.id}: ${logSnippet(text)}`);
     },
 
     onSenseProfile: (snapshot) => profiler.reportSense(snapshot),

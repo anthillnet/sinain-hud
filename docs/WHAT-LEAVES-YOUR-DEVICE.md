@@ -1,0 +1,38 @@
+# What Leaves Your Device
+
+Sinain's default application profile keeps transcription and embeddings local.
+It still checks GitHub for DMG updates when installed from a DMG. Cloud calls
+require a provider key or an explicitly enabled account/connector feature.
+Localhost entries below are network calls, but do not leave the device.
+
+| Trigger | What is sent | Destination | When it happens | Redaction applied | How to disable |
+| --- | --- | --- | --- | --- | --- |
+| Local audio transcription (default) | Short in-memory PCM/WAV audio chunks | Local `whisper-server` or `whisper-cli` | While audio capture is enabled and speech is detected | No egress redaction; data stays local and audio is not persisted | Disable microphone/audio capture |
+| Local embeddings (default) | Text submitted for knowledge deduplication or semantic search | In-process `Xenova/all-MiniLM-L6-v2` | When knowledge is indexed or searched | No network payload; computation is in-process | Disable the knowledge/embedding feature |
+| Local analysis and region detection | Recent screen OCR, transcript, and context prompt | Local Ollama on `localhost:11434` | When local analysis is enabled and context changes | Privacy destination rules are applied before prompting | Disable the agent/region feature or stop Ollama |
+| DMG update check | Installed version is implicit in the requested public releases list; GitHub receives normal HTTP metadata such as IP address and user agent | `api.github.com` | At DMG-app startup and every 24 hours | No screen, audio, memory, or account data is sent | Turn off automatic update checks, or set `SINAIN_NO_NETWORK=1` / paranoid mode |
+| DMG update download | Request for the selected public `Sinain.dmg` asset | `github.com` | In the background when a newer version is found, or after a manual update request | No user context is sent | Turn off automatic update checks; do not request a manual update |
+| Whisper model provisioning | Request for `ggml-large-v3-turbo`; normal HTTP metadata | `huggingface.co` | First local-transcription setup when the model is absent | No user context is sent | Provision the model offline or do not enable local transcription |
+| Cloud agent analysis | Privacy-gated recent OCR, transcripts, window/context metadata, prompt instructions, and optionally permitted images | `openrouter.ai` or a configured OpenAI-compatible endpoint | When the agent is enabled with a cloud provider and new context triggers analysis | `<private>` content and credential patterns are stripped; the selected privacy preset can redact, summarize, or suppress each data type; images are separately gated | Use `ANALYSIS_PROVIDER=ollama`, remove the provider key, set `AGENT_ENABLED=false`, or use strict/paranoid privacy |
+| Cloud screen vision/OCR | Changed screen frame and/or privacy-gated OCR text | `openrouter.ai` | When cloud vision is selected and a changed frame needs processing | `<private>` and credential redaction applies to OCR; `PRIVACY_IMAGES_OPENROUTER` and `PRIVACY_OCR_OPENROUTER` can suppress or reduce payloads | Use local Vision/Ollama, remove `OPENROUTER_API_KEY`, or set the OpenRouter privacy controls to `none` |
+| Cloud audio transcription | Base64-encoded audio chunk, transcription prompt, language/model settings | `openrouter.ai` | Only with `TRANSCRIPTION_BACKEND=openrouter`, while capture is enabled and speech is detected | Audio cannot be text-redacted before transcription; returned text is filtered before later use | Keep the default local backend, remove the key, or disable audio capture |
+| Deliberate-capture burst lane | The selected recent time window: redacted OCR/transcript/context plus the requested summarize/enrich instruction | `api.cerebras.ai`, `openrouter.ai`, or a configured endpoint | After a summon/enrich/save gesture when the burst lane has a cloud key | It consumes the already privacy-filtered context stream; credentials and private-tagged text are removed upstream | Set `BURST_ENABLED=false`, remove its API key, or use `BURST_PROVIDER=ollama` |
+| Cloud memory distillation/curation | Saved session text or facts and the extraction/curation prompt | Configured OpenRouter-compatible provider (normally `openrouter.ai`) | After the user accepts a save or runs cloud-backed curation | Destination privacy levels redact, summarize, or suppress context; secret patterns are stripped | Use local Ollama, disable learning/curation, or remove the provider key |
+| OpenClaw escalation | Privacy-gated digest and selected recent context needed by the chosen agent | Configured OpenClaw HTTP/WebSocket gateway; normally localhost | When escalation is enabled and its score/mode triggers, or the user invokes an agent | Agent-gateway privacy rules are applied; the message builder fails closed if privacy is unavailable | Set `ESCALATION_MODE=off`, remove gateway configuration, or keep the gateway local |
+| Optional Telegram notification adapter | Notification text and Telegram chat identifier | `api.telegram.org` | Only when an OpenClaw knowledge adapter is configured with a Telegram bot token and sends a notification | No additional adapter-side redaction; it receives text already selected by the calling workflow | Do not configure the Telegram adapter/token |
+| ChatGPT connector pairing and account status | Device public key, signed nonce/timestamp, opaque device identity; browser sign-in sends login details to Auth0 | `auth.sinain.com` and Auth0 | When the connector starts pairing, checks link status, or the user signs in/out | Private key stays on device; these requests contain no captured context | Turn off/disconnect the connector and sign out |
+| ChatGPT connector tunnel | MCP requests and responses selected by ChatGPT, which can include current OCR, recent transcript, flagged regions, memory, notes, and notifications | `mcp.sinain.com` relay and the user's ChatGPT/OpenAI account | Only while the connector is enabled, the app is running, and ChatGPT invokes a tool | Tool output follows privacy controls and secret redaction; relay routing uses device authentication | Disconnect the device or turn off the connector |
+| Agent usage lookup | Provider account usage request authenticated with the configured provider credential | `api.anthropic.com` | When an Anthropic-backed agent session requests usage information | No screen/audio context is included | Do not configure that provider/session or disable its usage display |
+| npm/setup downloads | Release metadata and requests for overlay, capture, FRP, or other setup artifacts; normal HTTP metadata | `api.github.com`, `github.com`, and package registries | During install, update, or explicit setup commands | No captured user context exists at setup time | Install verified artifacts offline and do not run update/setup commands |
+| sinain.com site analytics (website only) | Cookieless page-view/event data, referrer and campaign parameters, plus normal HTTP metadata | `analytics.sinain.com` (some pages currently use `analytics.sinain.duckdns.org`) | When visiting hosted sinain.com pages; never from the desktop app | Site configuration does not use cookies or intentionally send app context | Block the analytics host or disable JavaScript in the browser |
+
+## Verify it yourself
+
+On macOS, watch live sockets with `lsof -i -n -P` while exercising one feature
+at a time. A local HTTPS proxy such as Proxyman can show request destinations
+and, when you choose to install its inspection certificate, payloads. Before a
+release, scan the assembled app or mounted DMG with:
+
+```bash
+tools/dmg/check-binary-hygiene.sh build/Sinain.app
+```
