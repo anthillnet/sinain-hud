@@ -54,6 +54,10 @@ When you add the Sinain connector in ChatGPT and authorize it:
 
 Sinain does not sell your data and does not use your context to train models.
 
+See [What Leaves Your Device](WHAT-LEAVES-YOUR-DEVICE.md) for the full egress
+matrix, including local defaults, optional cloud providers, updates, and the
+ChatGPT connector.
+
 ## Security
 
 - Connections use TLS. Devices authenticate with per-device cryptographic keys; account

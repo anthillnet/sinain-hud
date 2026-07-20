@@ -88,3 +88,4 @@ xcrun stapler validate "$DMG"
 
 bold "✓ Done → $DMG"
 ls -lh "$DMG" | awk '{print "  "$5"  "$NF}'
+shasum -a 256 "$DMG"
