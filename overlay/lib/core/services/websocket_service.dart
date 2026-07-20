@@ -822,6 +822,10 @@ class WebSocketService extends ChangeNotifier {
   Future<bool> requestSaveUndo(String saveId) async =>
       (await _postJson('/capture/undo', {'saveId': saveId}))?['undone'] == true;
 
+  /// Retry a failed save using the transcript retained by the core.
+  Future<bool> retrySave(String saveId) async =>
+      (await _postJson('/capture/retry', {'saveId': saveId}))?['retried'] == true;
+
   /// Respond to a breakpoint save offer. accepted/adjusted trigger the save
   /// server-side (receipt arrives on [saveReceiptStream]); every response is
   /// a training label. [minutes]/[apps] carry the Adjust edits.

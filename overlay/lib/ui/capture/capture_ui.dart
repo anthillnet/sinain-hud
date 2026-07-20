@@ -1175,12 +1175,14 @@ class EnrichCardWidget extends StatelessWidget {
 class SaveReceiptCard extends StatefulWidget {
   final SaveReceipt receipt;
   final VoidCallback onUndo;
+  final VoidCallback? onRetry;
   final VoidCallback onDismiss;
 
   const SaveReceiptCard({
     super.key,
     required this.receipt,
     required this.onUndo,
+    this.onRetry,
     required this.onDismiss,
   });
 
@@ -1293,6 +1295,10 @@ class _SaveReceiptCardState extends State<SaveReceiptCard> {
               child: Text(r.error ?? 'unknown error',
                   style: _mono(11, _orange, height: 1.35)),
             ),
+          if (r.status == SaveStatus.error && r.retryable && widget.onRetry != null) ...[
+            const SizedBox(height: 10),
+            _cardButton(t, 'Retry', widget.onRetry!, primary: true),
+          ],
           if (r.status == SaveStatus.saved ||
               r.status == SaveStatus.committed) ...[
             const SizedBox(height: 8),

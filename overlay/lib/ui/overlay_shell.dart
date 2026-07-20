@@ -2741,6 +2741,10 @@ class OverlayShellState extends State<OverlayShell> {
                 final id = _saveReceipt!.saveId;
                 context.read<WebSocketService>().requestSaveUndo(id);
               },
+              onRetry: () {
+                final id = _saveReceipt!.saveId;
+                context.read<WebSocketService>().retrySave(id);
+              },
               onDismiss: () {
                 setState(() => _saveReceipt = null);
                 _maybeExitCardMode();

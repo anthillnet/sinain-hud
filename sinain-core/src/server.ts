@@ -263,6 +263,8 @@ export interface ServerDeps {
   captureSave?: (minutes: number, apps?: string[]) => string;
   /** Cancel a save inside its undo window. */
   captureUndo?: (saveId: string) => boolean;
+  /** Retry a failed save using its retained transcript. */
+  captureRetry?: (saveId: string) => boolean;
   /** Overlay response to a breakpoint save offer (accepted/adjusted/dismissed/expired). */
   captureOfferResponse?: (offerId: string, response: string, minutes?: number, apps?: string[]) => { ok: boolean; saveId?: string; error?: string };
   /** Overlay response to a Session Sense nudge (tracked/corrected/dismissed/expired). */
@@ -667,6 +669,19 @@ export function createAppServer(deps: ServerDeps) {
         }
         const undone = deps.captureUndo(saveId);
         res.end(JSON.stringify({ ok: true, undone }));
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/capture/retry") {
+        const body = await readBody(req, 4096);
+        const { saveId } = JSON.parse(body || "{}") as { saveId?: string };
+        if (!saveId || !deps.captureRetry) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: "saveId required" }));
+          return;
+        }
+        const retried = deps.captureRetry(saveId);
+        res.end(JSON.stringify({ ok: true, retried }));
         return;
       }
 

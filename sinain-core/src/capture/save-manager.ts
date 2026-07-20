@@ -24,6 +24,14 @@ const UNDO_WINDOW_MS = 30_000;
  */
 export class SaveManager {
   private pending = new Map<string, { digest: any; timer: ReturnType<typeof setTimeout> }>();
+  private failed = new Map<string, {
+    items: Array<{ text: string; ts: number; source: string; channel: string }>;
+    minutes: number;
+    coverage: string;
+    provenance: SaveProvenance;
+    receiptLines: string[];
+    ts: number;
+  }>();
 
   constructor(
     private feedBuffer: FeedBuffer,
@@ -49,6 +57,19 @@ export class SaveManager {
     this.pending.delete(saveId);
     log(TAG, `${saveId} undone — digest discarded, nothing written`);
     this.broadcast({ type: "save_receipt", saveId, status: "undone", minutes: 0, coverage: "", ts: Date.now() });
+    return true;
+  }
+
+  /** Retry a failed distillation with its retained transcript. */
+  retry(saveId: string): boolean {
+    const entry = this.failed.get(saveId);
+    if (!entry) return false;
+    this.failed.delete(saveId);
+    this.broadcast({
+      type: "save_receipt", saveId, status: "saving", minutes: entry.minutes,
+      coverage: entry.coverage, provenance: entry.provenance, ts: Date.now(),
+    });
+    void this.distillAndArm(saveId, entry.items, entry.minutes, entry.coverage, entry.provenance, entry.receiptLines);
     return true;
   }
 
@@ -102,6 +123,35 @@ export class SaveManager {
         items = items.slice(cut);
       }
 
+      await this.distillAndArm(saveId, items, minutes, coverage, provenance, receiptLines);
+    } catch (err) {
+      warn(TAG, `${saveId} failed before distillation: ${String(err).slice(0, 200)}`);
+      fail(String(err).slice(0, 200));
+    }
+  }
+
+  private async distillAndArm(
+    saveId: string,
+    items: Array<{ text: string; ts: number; source: string; channel: string }>,
+    minutes: number,
+    coverage: string,
+    provenance: SaveProvenance,
+    receiptLines: string[],
+  ): Promise<void> {
+    const fail = (error: string) => {
+      this.failed.delete(saveId);
+      this.failed.set(saveId, { items, minutes, coverage, provenance, receiptLines, ts: Date.now() });
+      while (this.failed.size > 3) {
+        const oldest = this.failed.keys().next().value;
+        if (oldest !== undefined) this.failed.delete(oldest);
+      }
+      this.broadcast({
+        type: "save_receipt", saveId, status: "error", minutes, coverage, provenance,
+        error, retryable: true, ts: Date.now(),
+      });
+    };
+
+    try {
       const digest = await this.curation.distillOnly(items, {
         ts: new Date().toISOString(),
         sessionKey: `user-save-${saveId}`,

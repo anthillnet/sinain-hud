@@ -2075,6 +2075,7 @@ async function main() {
     // Deliberate capture (save / summon / enrich on the rolling window)
     captureSave: (minutes, apps) => saveManager.save(minutes, apps ? { apps } : undefined),
     captureUndo: (saveId) => saveManager.undo(saveId),
+    captureRetry: (saveId) => saveManager.retry(saveId),
     captureOfferResponse: (offerId, response, minutes, apps) =>
       offerManager
         ? offerManager.respond(offerId, response as import("./types.js").SaveOfferResponse, minutes, apps)
