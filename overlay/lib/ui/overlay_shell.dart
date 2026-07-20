@@ -117,6 +117,7 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription? _manualRegionSub;
   bool _awaitingManualRegion = false;
   void Function(String regionId)? _pendingApprovalSnap;
+  String? _pendingSessionSteer;
   final ValueNotifier<String?> _approvalAnswerAppend = ValueNotifier(null);
   // Manual ROI ids present BEFORE the current drag-select, so the broadcast
   // handler can pick the NEWLY-created region instead of re-grabbing an earlier
@@ -339,6 +340,18 @@ class OverlayShellState extends State<OverlayShell> {
         _pendingApprovalSnap = null;
         _manualCatchFromIsland = false;
         approvalSnap(picked.id);
+        return;
+      }
+      final steerTarget = _pendingSessionSteer;
+      if (steerTarget != null) {
+        _pendingSessionSteer = null;
+        _manualCatchFromIsland = false;
+        unawaited(() async {
+          final seed = (await ws.fetchSeedText(picked.id))?.trim();
+          if (seed != null && seed.isNotEmpty) {
+            await ws.postAgentContextNote(steerTarget, seed);
+          }
+        }());
         return;
       }
       // Register its tab (eye-tap path does this; manual path must too) so the
@@ -1226,6 +1239,7 @@ class OverlayShellState extends State<OverlayShell> {
     final res = await _windowService.selectRegion(immediate: immediate);
     if (res == null) {
       _manualCatchFromIsland = false;
+      _pendingSessionSteer = null;
       return; // cancelled (Esc / ✕)
     }
     // The toolbar under the box returns the destination: 'chat' | 'term' |
@@ -1276,6 +1290,12 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _clearPendingApprovalSnap() {
     _pendingApprovalSnap = null;
+    _pendingSessionSteer = null;
+  }
+
+  void _snapRegionToSession(String agentSessionId) {
+    _pendingSessionSteer = agentSessionId;
+    _startManualRoi();
   }
 
   /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
@@ -2985,6 +3005,7 @@ class OverlayShellState extends State<OverlayShell> {
             accent: _accentColor,
             onShare: _shareBookmark,
             onCallAi: _callAiOnActiveSession,
+            onSteerRegion: _snapRegionToSession,
           ),
         ),
         Padding(
@@ -3401,6 +3422,7 @@ class OverlayShellState extends State<OverlayShell> {
                         accent: _accentColor,
                         onShare: _shareBookmark,
                         onCallAi: _callAiOnActiveSession,
+                        onSteerRegion: _snapRegionToSession,
                       )
                     : _terminalThreads.contains(_activeTabKey)
                         ? ThreadTerminalView(
