@@ -556,6 +556,10 @@ class OverlayShellState extends State<OverlayShell> {
       });
       if (c.ended) {
         _maybeExitCardMode();
+      } else if (_parked) {
+        // A tracked session lives in the notch bar (label pill) — never a
+        // floating chip panel while parked; just resize for the new label.
+        _scheduleIslandResize();
       } else {
         _enterCardMode();
       }
