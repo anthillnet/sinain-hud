@@ -357,7 +357,16 @@ class OverlayShellState extends State<OverlayShell> {
       // Chat/Term card beside the selection. The menu's enrich flow is the one
       // exception; it deliberately continues into its context card below.
       if (!_regionViaMenu) {
-        unawaited(_regionEyes?.showRegionCard(picked.id));
+        if (_settingsService.settings.autoDetectIssues) {
+          unawaited(_regionEyes?.showRegionCard(picked.id));
+        } else {
+          // Legacy ROI marker gated off: the snap's affordance is the thread
+          // tab — switch to it so the chat (already open for ⊕-pill snaps)
+          // lands on the region's conversation.
+          setState(() => _startedRegionThreads.add(picked.id));
+          _selectThread(picked.id);
+          if (_state != HudState.chat) _transitionTo(HudState.chat);
+        }
         return;
       }
       // Region + minutes (context-menu flow): attach the window brief to this
