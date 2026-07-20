@@ -102,14 +102,18 @@ if (source === 'cursor' && Object.hasOwn(frame, 'command')) {
   delete frame.command;
 }
 
-if (frame.hook_event_name === 'SessionStart') {
+if (!Object.hasOwn(frame, 'term')) {
   const names = [
     'ITERM_SESSION_ID', 'TMUX', 'TMUX_PANE', 'KITTY_WINDOW_ID',
     'WEZTERM_PANE', 'TERM_SESSION_ID', '__CFBundleIdentifier',
   ];
-  frame.term = Object.fromEntries(
+  const term = Object.fromEntries(
     names.filter((name) => process.env[name]).map((name) => [name, process.env[name]]),
   );
+  if (Object.keys(term).length > 0) frame.term = term;
+}
+
+if (frame.hook_event_name === 'SessionStart') {
   try {
     const branch = await currentBranch(
       typeof frame.cwd === 'string' ? frame.cwd : process.cwd(),
