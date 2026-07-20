@@ -15,6 +15,10 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
     /// Region eye panels (Grammarly mode) — created lazily on first use.
     private lazy var regionEyes = RegionEyePool(channel: channel)
 
+    /// The single detached free-floating eye (always-parked notch island's
+    /// drag-out companion) — created lazily on first use.
+    private lazy var detachedEye = DetachedEyeController(channel: channel)
+
     static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: channelName,
@@ -80,6 +84,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             // Demo mode applies to every capture-invisible surface, not just
             // the main HUD — region eye panels follow the same toggle.
             regionEyes.setPrivacyMode(enabled: enabled)
+            detachedEye.setPrivacyMode(enabled: enabled)
             result(nil)
 
         case "setAlwaysOnTop":
@@ -288,6 +293,25 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 
         case "clearRegionEyes":
             regionEyes.clear()
+            result(nil)
+
+        case "showDetachedEye":
+            // The drag-out "second eye": the island stays parked in the notch
+            // while this panel floats wherever the user dropped it. x/y are
+            // Cocoa global bottom-left; negative = default bottom-right.
+            detachedEye.show(x: args?["x"] as? Double ?? -1,
+                             y: args?["y"] as? Double ?? -1,
+                             state: args?["state"] as? String ?? "idle",
+                             accent: (args?["accent"] as? NSNumber)?.int64Value)
+            result(nil)
+
+        case "hideDetachedEye":
+            detachedEye.hide()
+            result(nil)
+
+        case "updateDetachedEye":
+            detachedEye.update(state: args?["state"] as? String ?? "idle",
+                               accent: (args?["accent"] as? NSNumber)?.int64Value)
             result(nil)
 
         case "toggleRegionPreview":
@@ -671,6 +695,127 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         }
 
         return p
+    }
+}
+
+// MARK: - DetachedEyeController (drag-out second eye)
+
+/// The single free-floating eye that coexists with the notch-parked island —
+/// the user drags the island out of the notch and this panel appears at the
+/// drop point while the island snaps home ("the eye is in 2 places").
+///
+/// A lightweight non-activating, capture-invisible NSPanel hosting the same
+/// RegionEyeView animation as ROI eyes, but draggable: taps summon the chat
+/// at its location, drags reposition it (drag-end reports the frame so Dart
+/// can persist it or merge it back into the notch), right-click opens the
+/// eye context menu. Level .floating — deliberately below the parked island
+/// (screenSaver+1) and ROI eyes (+2).
+class DetachedEyeController {
+    static let eyeSize: CGFloat = 48
+
+    private var panel: NSPanel?
+    private weak var channel: FlutterMethodChannel?
+    private var privacyEnabled = true
+
+    init(channel: FlutterMethodChannel?) {
+        self.channel = channel
+    }
+
+    func setPrivacyMode(enabled: Bool) {
+        privacyEnabled = enabled
+        if #available(macOS 12.0, *) {
+            panel?.sharingType = enabled ? .none : .readOnly
+        }
+    }
+
+    /// Show (or move) the eye. x/y are Cocoa global bottom-left; negative
+    /// coordinates place it at the default bottom-right of the main screen.
+    func show(x: Double, y: Double, state: String, accent: Int64?) {
+        let size = Self.eyeSize
+        var origin = NSPoint(x: x, y: y)
+        if x < 0 || y < 0 {
+            let f = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            origin = NSPoint(x: f.maxX - size - HUDConfig.margin,
+                             y: f.minY + HUDConfig.margin)
+        }
+        if let panel = panel {
+            panel.setFrameOrigin(origin)
+            update(state: state, accent: accent)
+            panel.orderFront(nil)
+            return
+        }
+
+        let p = NSPanel(
+            contentRect: NSRect(x: origin.x, y: origin.y, width: size, height: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isFloatingPanel = true
+        p.becomesKeyOnlyIfNeeded = true
+        p.level = .floating
+        // User-positioned (not .stationary — it must follow its own drags).
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.hidesOnDeactivate = false
+        if #available(macOS 12.0, *) {
+            p.sharingType = privacyEnabled ? .none : .readOnly
+        }
+
+        let view = RegionEyeView(frame: NSRect(x: 0, y: 0, width: size, height: size))
+        view.state = state
+        if let accent = accent { view.accentColor = Self.argbToColor(accent) }
+        view.draggable = true
+        view.onTap = { [weak self] in
+            self?.channel?.invokeMethod("onDetachedEyeTap", arguments: nil)
+        }
+        view.onSecondaryTap = { [weak self] in
+            self?.channel?.invokeMethod("onDetachedEyeSecondary", arguments: nil)
+        }
+        view.onDragEnd = { [weak self] frame in
+            guard let self = self else { return }
+            // Report the panel's OWN screen so Dart's park-zone test works on
+            // whichever display the eye was dropped on.
+            let scr = self.panel?.screen?.frame
+                ?? NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
+            self.channel?.invokeMethod("onDetachedEyeMoved", arguments: [
+                "x": frame.origin.x, "y": frame.origin.y,
+                "w": frame.width, "h": frame.height,
+                "screenX": scr.minX, "screenY": scr.minY,
+                "screenW": scr.width, "screenH": scr.height,
+            ])
+        }
+        p.contentView = view
+
+        p.alphaValue = 0
+        p.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            p.animator().alphaValue = 1
+        }
+        panel = p
+    }
+
+    func hide() {
+        panel?.orderOut(nil)
+    }
+
+    func update(state: String, accent: Int64?) {
+        guard let view = panel?.contentView as? RegionEyeView else { return }
+        view.state = state
+        if let accent = accent { view.accentColor = Self.argbToColor(accent) }
+    }
+
+    private static func argbToColor(_ argb: Int64) -> CGColor {
+        return CGColor(
+            red: CGFloat((argb >> 16) & 0xFF) / 255.0,
+            green: CGFloat((argb >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(argb & 0xFF) / 255.0,
+            alpha: 1
+        )
     }
 }
 

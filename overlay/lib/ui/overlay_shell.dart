@@ -32,7 +32,7 @@ import 'capture/session_list_view.dart';
 import 'agents/agent_approval_card.dart';
 import 'agents/agent_island_bar.dart';
 
-enum _IslandView { bar, stack, approval, roi }
+enum _IslandView { bar, stack, approval, roi, cards }
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -45,6 +45,10 @@ class OverlayShell extends StatefulWidget {
 class OverlayShellState extends State<OverlayShell> {
   static final bool _isMacOS = Platform.isMacOS;
   static const double _islandBarWidth = 208;
+  // Sized for 2 session cards; the list scrolls for the rest. Header 32 +
+  // list padding 8 + 2 × (card 16 + title 14 + actions 28 + tool row 18 +
+  // spacing 6) + footer 24 = 228.
+  static const double _stackListHeight = 228;
   // The bar grows when the amber "· N waiting" segment is present.
   static const double _islandBarWaitingWidth = 284;
   double _islandBarWidthFor(WebSocketService ws) {
@@ -76,6 +80,7 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   double _islandFrameWidthFor(WebSocketService ws, _IslandView view) {
+    if (view == _IslandView.cards) return 396;
     final barWidth = _islandBarWidthFor(ws);
     if (view == _IslandView.bar) {
       if (_notchHeight > 0 || barWidth >= 300) return barWidth;
@@ -117,6 +122,7 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription? _manualRegionSub;
   bool _awaitingManualRegion = false;
   void Function(String regionId)? _pendingApprovalSnap;
+  String? _pendingSessionSteer;
   final ValueNotifier<String?> _approvalAnswerAppend = ValueNotifier(null);
   // Manual ROI ids present BEFORE the current drag-select, so the broadcast
   // handler can pick the NEWLY-created region instead of re-grabbing an earlier
@@ -143,9 +149,18 @@ class OverlayShellState extends State<OverlayShell> {
   bool _wsWasConnected = false;
 
   bool _parked = false;
+  // Non-macOS only: the user pulled the island out of the top bar. On macOS
+  // the island always lives in the notch (eye state ⇒ parked invariant) and
+  // drag-out spawns the detached eye instead.
   bool _unparkedByUser = false;
   // Set by drag-to-park: the island stays parked even with no agent sessions.
   bool _pinnedByUser = false;
+  // Detached eye (macOS): the drag-out second eye. Streams from the native
+  // panel; last-synced appearance key avoids chatty channel calls.
+  StreamSubscription<void>? _detachedTapSub;
+  StreamSubscription<void>? _detachedSecondarySub;
+  StreamSubscription<Map<String, double>>? _detachedMovedSub;
+  String? _lastDetachedEyeSync;
   bool _windowOpInFlight = false;
   Map<String, double>? _preParkFrame;
   Map<String, double>? _islandScreenFrame;
@@ -268,10 +283,22 @@ class OverlayShellState extends State<OverlayShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _resizeWindowForState(_state);
       if (!mounted) return;
-      if (_state == HudState.eye && _settingsService.settings.notchParked) {
+      // macOS: the notch is the eye's one home — always park (QA: a free
+      // eye at an arbitrary corner reads as "the app broke"). A persisted
+      // pre-invariant free-eye position migrates into the detached eye.
+      // Non-macOS keeps the persisted-park behavior.
+      if (_state == HudState.eye &&
+          (_isMacOS || _settingsService.settings.notchParked)) {
+        final s = _settingsService.settings;
+        final spawnDetached = _isMacOS &&
+            (s.detachedEyeVisible || (!s.notchParked && s.eyeX >= 0));
         _pinnedByUser = true;
         _unparkedByUser = false;
         await _parkIsland();
+        if (spawnDetached && mounted) {
+          await _settingsService.setDetachedEyeVisible(true);
+          await _showDetachedEye();
+        }
       }
       if (_state == HudState.chat) _windowService.makeKeyWindow();
     });
@@ -301,6 +328,12 @@ class OverlayShellState extends State<OverlayShell> {
         },
         onResizeDone: (w, h) => _settingsService.setChatSize(w, h),
       );
+      _detachedTapSub = _windowService.detachedEyeTapStream
+          .listen((_) => _onDetachedEyeTap());
+      _detachedSecondarySub = _windowService.detachedEyeSecondaryStream
+          .listen((_) => _showEyeContextMenu());
+      _detachedMovedSub =
+          _windowService.detachedEyeMovedStream.listen(_onDetachedEyeMoved);
     }
 
     final ws = context.read<WebSocketService>();
@@ -341,6 +374,18 @@ class OverlayShellState extends State<OverlayShell> {
         approvalSnap(picked.id);
         return;
       }
+      final steerTarget = _pendingSessionSteer;
+      if (steerTarget != null) {
+        _pendingSessionSteer = null;
+        _manualCatchFromIsland = false;
+        unawaited(() async {
+          final seed = (await ws.fetchSeedText(picked.id))?.trim();
+          if (seed != null && seed.isNotEmpty) {
+            await ws.postAgentContextNote(steerTarget, seed);
+          }
+        }());
+        return;
+      }
       // Register its tab (eye-tap path does this; manual path must too) so the
       // ROI gets a distinct, switchable tab instead of silently replacing.
       ws.registerRegionThread(picked.id, picked.issue);
@@ -357,7 +402,16 @@ class OverlayShellState extends State<OverlayShell> {
       // Chat/Term card beside the selection. The menu's enrich flow is the one
       // exception; it deliberately continues into its context card below.
       if (!_regionViaMenu) {
-        unawaited(_regionEyes?.showRegionCard(picked.id));
+        if (_settingsService.settings.autoDetectIssues) {
+          unawaited(_regionEyes?.showRegionCard(picked.id));
+        } else {
+          // Legacy ROI marker gated off: the snap's affordance is the thread
+          // tab — switch to it so the chat (already open for ⊕-pill snaps)
+          // lands on the region's conversation.
+          setState(() => _startedRegionThreads.add(picked.id));
+          _selectThread(picked.id);
+          if (_state != HudState.chat) _transitionTo(HudState.chat);
+        }
         return;
       }
       // Region + minutes (context-menu flow): attach the window brief to this
@@ -524,6 +578,10 @@ class OverlayShellState extends State<OverlayShell> {
       });
       if (c.ended) {
         _maybeExitCardMode();
+      } else if (_parked) {
+        // A tracked session lives in the notch bar (label pill) — never a
+        // floating chip panel while parked; just resize for the new label.
+        _scheduleIslandResize();
       } else {
         _enterCardMode();
       }
@@ -678,13 +736,25 @@ class OverlayShellState extends State<OverlayShell> {
     final active = ws.agentWorking + ws.agentWaiting > 0;
     final completelyIdle = !active && ws.agentApprovals.isEmpty;
     _dismissedApprovals.removeWhere((id) => !ws.agentApprovals.containsKey(id));
+    _syncDetachedEyeAppearance();
     if (completelyIdle) {
       _unparkedByUser = false;
-      // A drag-parked (pinned) island rides out idle as the eye-only pill.
-      if (_parked && !_pinnedByUser) _unparkIsland();
-      return;
+      if (!_isMacOS) {
+        // Non-macOS: a drag-parked (pinned) island rides out idle as the
+        // eye-only pill; otherwise idle auto-unparks.
+        if (_parked && !_pinnedByUser) _unparkIsland();
+        return;
+      }
+      // macOS always-parked invariant: idle never unparks — the notch island
+      // IS the eye. Fall through so the view/width sync below still runs.
+      if (!_parked) {
+        if (_state == HudState.eye) _parkIsland();
+        return;
+      }
     }
-    if (!_parked && _state == HudState.eye && active && !_unparkedByUser) {
+    if (!_parked &&
+        _state == HudState.eye &&
+        (_isMacOS || (active && !_unparkedByUser))) {
       _parkIsland();
       return;
     }
@@ -754,15 +824,17 @@ class OverlayShellState extends State<OverlayShell> {
     final height = notchMode
         ? switch (_islandView) {
             _IslandView.bar => _notchHeight,
-            _IslandView.stack => _notchHeight + 406,
+            _IslandView.stack => _notchHeight + _stackListHeight,
             _IslandView.approval => _notchHeight + 300,
             _IslandView.roi => _notchHeight + 338,
+            _IslandView.cards => _notchHeight + 500,
           }
         : switch (_islandView) {
             _IslandView.bar => _menuBarHeight,
-            _IslandView.stack => 440.0,
+            _IslandView.stack => _menuBarHeight + _stackListHeight,
             _IslandView.approval => 320.0,
             _IslandView.roi => 372.0,
+            _IslandView.cards => _menuBarHeight + 500,
           };
     final x = notchMode
         ? screen['x']! + _islandNotchInfo!['leftAuxWidth']! - 46
@@ -885,13 +957,102 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   void _onIslandDragEnd(DragEndDetails details) {
-    final shouldUnpark = _islandDragDistance > 40;
+    final dragged = _islandDragDistance > 40;
     _islandDragDistance = 0;
-    if (shouldUnpark) {
-      _unparkIsland(byUser: true);
-    } else {
+    if (!dragged) {
       _snapIslandToNotch();
+      return;
     }
+    if (_isMacOS) {
+      // Always-parked invariant: dragging the island out doesn't move it —
+      // it spawns the detached eye at the drop point and snaps home. The eye
+      // is now in 2 places (owner's design call, QA 2026-07-20).
+      _detachEyeFromIsland();
+    } else {
+      _unparkIsland(byUser: true);
+    }
+  }
+
+  /// Spawn (or move) the detached eye at the island's drag drop point, then
+  /// snap the island back into the notch.
+  Future<void> _detachEyeFromIsland() async {
+    final frame = await _windowService.getWindowFrame();
+    if (!mounted) return;
+    double x = -1, y = -1;
+    if (frame != null) {
+      // Center a 48×48 eye on the dragged island's center.
+      x = frame['x']! + frame['w']! / 2 - 24;
+      y = frame['y']! + frame['h']! / 2 - 24;
+    }
+    await _settingsService.setEyePosition(x, y);
+    await _settingsService.setDetachedEyeVisible(true);
+    await _showDetachedEye();
+    await _snapIslandToNotch();
+  }
+
+  /// The detached eye mirrors the HUD eye's semantics: orange/working while
+  /// an agent is blocked on the user, otherwise the accent (red = demo mode).
+  String get _detachedEyeStateStr =>
+      _pendingAttention > 0 ? 'working' : 'idle';
+
+  int get _detachedEyeAccent => _settingsService.settings.privacyMode
+      ? _settingsService.settings.accentColor
+      : 0xFFFF3344;
+
+  Future<void> _showDetachedEye() async {
+    final s = _settingsService.settings;
+    await _windowService.showDetachedEye(
+      x: s.eyeX,
+      y: s.eyeY,
+      state: _detachedEyeStateStr,
+      accent: _detachedEyeAccent,
+    );
+    _lastDetachedEyeSync = '$_detachedEyeStateStr:$_detachedEyeAccent';
+  }
+
+  void _syncDetachedEyeAppearance() {
+    if (!_isMacOS || !_settingsService.settings.detachedEyeVisible) return;
+    final key = '$_detachedEyeStateStr:$_detachedEyeAccent';
+    if (key == _lastDetachedEyeSync) return;
+    _lastDetachedEyeSync = key;
+    _windowService.updateDetachedEye(_detachedEyeStateStr, _detachedEyeAccent);
+  }
+
+  /// Tap on the detached eye: open the chat AT the eye (its frame becomes the
+  /// unpark home, and the chat anchors to that top-right corner).
+  void _onDetachedEyeTap() {
+    final s = _settingsService.settings;
+    if (s.eyeX >= 0 && s.eyeY >= 0) {
+      _preParkFrame = {'x': s.eyeX, 'y': s.eyeY, 'w': 48, 'h': 48};
+    }
+    if (_state != HudState.chat) {
+      _transitionTo(HudState.chat);
+    } else {
+      _windowService.makeKeyWindow();
+    }
+  }
+
+  /// Detached eye dropped: inside the notch park zone → merge back (the notch
+  /// island already lives there); anywhere else → persist the new home.
+  void _onDetachedEyeMoved(Map<String, double> f) {
+    final frame = {'x': f['x']!, 'y': f['y']!, 'w': f['w']!, 'h': f['h']!};
+    final screen = {
+      'x': f['screenX']!,
+      'y': f['screenY']!,
+      'w': f['screenW']!,
+      'h': f['screenH']!,
+    };
+    if (_inParkZone(frame, screen)) {
+      _removeDetachedEye();
+    } else {
+      _settingsService.setEyePosition(f['x']!, f['y']!);
+    }
+  }
+
+  Future<void> _removeDetachedEye() async {
+    await _settingsService.setDetachedEyeVisible(false);
+    await _settingsService.setEyePosition(-1, -1);
+    await _windowService.hideDetachedEye();
   }
 
   void _replyToIslandApproval(
@@ -998,6 +1159,9 @@ class OverlayShellState extends State<OverlayShell> {
       _settingsService.setHudState(_lastVisibleState);
       _windowService.showWindow();
       _resizeWindowForState(_lastVisibleState);
+      if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
+        _showDetachedEye();
+      }
       _syncIslandFromWs(context.read<WebSocketService>());
     } else {
       if (_parked) {
@@ -1010,6 +1174,8 @@ class OverlayShellState extends State<OverlayShell> {
       setState(() => _state = HudState.hidden);
       _settingsService.setHudState(HudState.hidden);
       _windowService.hideWindow();
+      // Explicit hide outranks everything — the detached eye vanishes too.
+      if (_isMacOS) _windowService.hideDetachedEye();
     }
   }
 
@@ -1031,9 +1197,21 @@ class OverlayShellState extends State<OverlayShell> {
     toggleChat();
   }
 
-  /// Reset window position to default bottom-right corner.
-  /// Clears persisted position so next launch uses native default.
+  /// Reset window position. macOS: converge on the one predictable home —
+  /// the notch (QA lost a bottom-right eye for 15 s) — and remove the
+  /// detached eye. Non-macOS: default bottom-right corner as before.
   Future<void> resetPosition() async {
+    if (_isMacOS) {
+      await _removeDetachedEye();
+      if (_state != HudState.eye) {
+        _transitionTo(HudState.eye); // parks via the eye invariant
+      } else if (!_parked) {
+        await _parkIsland();
+      } else {
+        await _snapIslandToNotch();
+      }
+      return;
+    }
     if (_parked) await _unparkIsland(byUser: true);
     _settingsService.setEyePosition(-1, -1);
     if (_state != HudState.eye) _transitionTo(HudState.eye);
@@ -1110,6 +1288,7 @@ class OverlayShellState extends State<OverlayShell> {
   void _transitionTo(HudState target) {
     if (_state == target) return;
     if (_parked && target != HudState.eye) {
+      if (_cardMode) setState(() => _cardMode = false);
       _unparkIsland().then((_) {
         if (mounted) _transitionTo(target);
       });
@@ -1129,7 +1308,21 @@ class OverlayShellState extends State<OverlayShell> {
       _state = target;
     });
     _settingsService.setHudState(target);
-    _resizeWindowForState(target);
+    _resizeWindowForState(target).then((_) {
+      // macOS invariant: the eye state lives parked in the notch. The
+      // pre-collapse frame becomes _preParkFrame inside _parkIsland, so
+      // reopening the chat returns to the same spot.
+      if (mounted && target == HudState.eye && _isMacOS) {
+        _unparkedByUser = false;
+        _parkIsland();
+      }
+    });
+
+    if (target == HudState.hidden) {
+      if (_isMacOS) _windowService.hideDetachedEye();
+    } else if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
+      _showDetachedEye();
+    }
 
     if (target == HudState.chat) {
       _windowService.makeKeyWindow();
@@ -1226,6 +1419,7 @@ class OverlayShellState extends State<OverlayShell> {
     final res = await _windowService.selectRegion(immediate: immediate);
     if (res == null) {
       _manualCatchFromIsland = false;
+      _pendingSessionSteer = null;
       return; // cancelled (Esc / ✕)
     }
     // The toolbar under the box returns the destination: 'chat' | 'term' |
@@ -1276,6 +1470,12 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _clearPendingApprovalSnap() {
     _pendingApprovalSnap = null;
+    _pendingSessionSteer = null;
+  }
+
+  void _snapRegionToSession(String agentSessionId) {
+    _pendingSessionSteer = agentSessionId;
+    _startManualRoi();
   }
 
   /// Tab key for the terminal toggle — MAIN uses a stable pseudo-id so the
@@ -1503,7 +1703,12 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'sessions', 'title': 'Bookmarked Sessions…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
-      if (_parked)
+      // macOS: the island always lives in the notch — the menu offers the
+      // detached eye instead of park/unpark. Other platforms keep the toggle.
+      if (_isMacOS) ...[
+        if (!_settingsService.settings.detachedEyeVisible)
+          {'id': 'detachEye', 'title': 'Detach Eye'},
+      ] else if (_parked)
         {'id': 'unpark', 'title': 'Unpark'}
       else
         {'id': 'parkNotch', 'title': 'Park at Notch'},
@@ -1554,6 +1759,11 @@ class OverlayShellState extends State<OverlayShell> {
         await _manualParkIsland();
       case 'unpark':
         await _unparkIsland(byUser: true);
+      case 'detachEye':
+        // Spawn at the native default (bottom-right) — the moved callback
+        // persists wherever the user then drags it.
+        await _settingsService.setDetachedEyeVisible(true);
+        await _showDetachedEye();
       case 'reset':
         await resetPosition();
       case 'settings':
@@ -1797,6 +2007,9 @@ class OverlayShellState extends State<OverlayShell> {
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _forkSub?.cancel();
+    _detachedTapSub?.cancel();
+    _detachedSecondarySub?.cancel();
+    _detachedMovedSub?.cancel();
     _manualRegionSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
@@ -2007,25 +2220,6 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
-  /// Display name of the agent the current summon destination opens in —
-  /// the handoff button says where the brief will land.
-  String _handoffAgentLabel(WebSocketService ws) {
-    final id = _summonDest == 'term' ? ws.terminalAgent : ws.escalationAgent;
-    return switch (id) {
-      'sinain' => 'Sinain Chat',
-      'claude' => 'Claude Code',
-      'gclaude' => 'Claude',
-      'openclaude' => 'OpenClaude',
-      'codex' => 'Codex',
-      'goose' => 'Goose',
-      'junie' => 'Junie',
-      'aider' => 'Aider',
-      'claude-desktop' => 'Claude Desktop',
-      'chatgpt-desktop' => 'ChatGPT',
-      _ => id,
-    };
-  }
-
   /// Flatten a situation brief into the text form carried into agent seeds
   /// (Ask follow-up, terminal handoff, region + minutes).
   String _briefText(ContextBrief b) {
@@ -2079,6 +2273,10 @@ class OverlayShellState extends State<OverlayShell> {
   void _enterCardMode() {
     if (_state == HudState.chat) return;
     if (!_cardMode) setState(() => _cardMode = true);
+    if (_parked) {
+      _setIslandView(_IslandView.cards);
+      return;
+    }
     // Always resync: a card arriving while chip-only card mode is open must
     // grow the window back to card height.
     _resizeForCardPanel();
@@ -2113,6 +2311,14 @@ class OverlayShellState extends State<OverlayShell> {
   /// Leave card mode once nothing is displayed; restore the eye-sized window.
   void _maybeExitCardMode() {
     if (!_cardMode) return;
+    // Parked chip-only card mode has nothing to render — the island bar
+    // already carries the session-chip affordances (pills), so snap straight
+    // back to the bar instead of holding an empty 500px cards view open.
+    if (_parked && !_hasCards) {
+      setState(() => _cardMode = false);
+      _setIslandView(_IslandView.bar);
+      return;
+    }
     if (_chooserFor != null ||
         _activeBrief != null ||
         _activeEnrich != null ||
@@ -2126,11 +2332,19 @@ class OverlayShellState extends State<OverlayShell> {
       // Still showing something — but the content class may have shrunk
       // (last card closed, chip remains): resync the window size so the
       // invisible area never outgrows the visible panel.
-      _resizeForCardPanel();
+      if (_parked) {
+        _setIslandView(_IslandView.cards);
+      } else {
+        _resizeForCardPanel();
+      }
       return;
     }
     setState(() => _cardMode = false);
-    _resizeWindowForState(_state);
+    if (_parked) {
+      _setIslandView(_IslandView.bar);
+    } else {
+      _resizeWindowForState(_state);
+    }
   }
 
   // ── Save offer lifecycle (DESIGN-SAVE-OFFER.md) ───────────────────────────
@@ -2291,6 +2505,17 @@ class OverlayShellState extends State<OverlayShell> {
     _clearSessionNudge();
   }
 
+  /// OK on a fresh nudge: acknowledge — track, collapse the card, no
+  /// immediate interaction (owner call 2026-07-20). Unlike _trackSession
+  /// this DOES exit the card surface: the arriving chip lives in the island
+  /// bar/pill, not a card.
+  void _acknowledgeSessionNudge() {
+    final n = _sessionNudge;
+    if (n == null) return;
+    context.read<WebSocketService>().respondToSessionNudge(n.nudgeId, 'tracked');
+    _clearSessionNudge();
+  }
+
   void _clearSessionNudge({bool exitSurfaces = true}) {
     _nudgeExpiryTimer?.cancel();
     setState(() => _sessionNudge = null);
@@ -2407,7 +2632,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   /// The stacked capture cards (receipt · enrich · brief · chooser). Rendered
   /// bottom-right of the chat panel, and as the body of the card-mode panel.
-  Widget _captureCardsColumn() {
+  Widget _buildCaptureCards() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -2477,6 +2702,8 @@ class OverlayShellState extends State<OverlayShell> {
               // ▶: resume nudges just resume; fresh nudges track + Call AI.
               onTrack:
                   _sessionNudge!.resume ? _trackSession : _playSessionNudge,
+              onAcknowledge:
+                  _sessionNudge!.resume ? null : _acknowledgeSessionNudge,
               onCallSinain: _callSinainOnSessionNudge,
               onCorrect: _correctSession,
               onDismiss: _dismissSessionNudge,
@@ -2528,14 +2755,29 @@ class OverlayShellState extends State<OverlayShell> {
               title: _pendingRegion != null
                   ? 'Context from screen'
                   : 'Context from clipboard',
-              handoffLabel:
-                  'Handoff to ${_handoffAgentLabel(context.read<WebSocketService>())}',
+              chatAgents: context.read<WebSocketService>().availableAgents,
+              terminalAgents:
+                  context.read<WebSocketService>().terminalAvailable,
+              initialChatAgent:
+                  context.read<WebSocketService>().escalationAgent,
+              initialTerminalAgent:
+                  context.read<WebSocketService>().terminalAgent,
+              initialIsTerminal: _summonDest == 'term',
               onDismiss: () {
                 setState(() {
                   _activeEnrich = null;
                   _pendingRegion = null;
                 });
                 _maybeExitCardMode();
+              },
+              onHandoff: (agent, isTerminal) {
+                final ws = context.read<WebSocketService>();
+                final lane = isTerminal ? 'terminal' : 'chat';
+                final current =
+                    isTerminal ? ws.terminalAgent : ws.escalationAgent;
+                if (agent != current) ws.setAgent(lane, agent);
+                setState(() => _summonDest = isTerminal ? 'term' : 'chat');
+                _callAiOnEnrich(_activeEnrich!);
               },
               onCallAi: () => _callAiOnEnrich(_activeEnrich!),
               onCopy: () => _copyEnrichCard(_activeEnrich!),
@@ -2546,14 +2788,27 @@ class OverlayShellState extends State<OverlayShell> {
             padding: const EdgeInsets.only(bottom: 8),
             child: BriefCard(
               brief: _activeBrief!,
-              dest: _summonDest,
-              destLabel: _handoffAgentLabel(context.read<WebSocketService>()),
-              onDestChanged: (d) => setState(() => _summonDest = d),
+              chatAgents: context.read<WebSocketService>().availableAgents,
+              terminalAgents:
+                  context.read<WebSocketService>().terminalAvailable,
+              initialChatAgent:
+                  context.read<WebSocketService>().escalationAgent,
+              initialTerminalAgent:
+                  context.read<WebSocketService>().terminalAgent,
+              initialIsTerminal: _summonDest == 'term',
               onDismiss: () {
                 setState(() => _activeBrief = null);
                 _maybeExitCardMode();
               },
-              onAskFollowUp: () => _askFollowUpOnBrief(_activeBrief!),
+              onHandoff: (agent, isTerminal) {
+                final ws = context.read<WebSocketService>();
+                final lane = isTerminal ? 'terminal' : 'chat';
+                final current =
+                    isTerminal ? ws.terminalAgent : ws.escalationAgent;
+                if (agent != current) ws.setAgent(lane, agent);
+                setState(() => _summonDest = isTerminal ? 'term' : 'chat');
+                _askFollowUpOnBrief(_activeBrief!);
+              },
               onSaveRange: () {
                 final minutes = _activeBrief!.minutes;
                 setState(() => _activeBrief = null);
@@ -2568,6 +2823,23 @@ class OverlayShellState extends State<OverlayShell> {
               kind: _chooserFor == 'save' ? ChooserKind.save : ChooserKind.call,
               options: _rangeOptions,
               onConfirm: _pickRange,
+              chatAgents: context.read<WebSocketService>().availableAgents,
+              terminalAgents:
+                  context.read<WebSocketService>().terminalAvailable,
+              initialChatAgent:
+                  context.read<WebSocketService>().escalationAgent,
+              initialTerminalAgent:
+                  context.read<WebSocketService>().terminalAgent,
+              initialIsTerminal: _summonDest == 'term',
+              onConfirmRoute: (minutes, apps, agent, isTerminal) {
+                final ws = context.read<WebSocketService>();
+                final lane = isTerminal ? 'terminal' : 'chat';
+                final current =
+                    isTerminal ? ws.terminalAgent : ws.escalationAgent;
+                if (agent != current) ws.setAgent(lane, agent);
+                setState(() => _summonDest = isTerminal ? 'term' : 'chat');
+                _pickRange(minutes, apps);
+              },
               defaultMinutes: _offerPrefillMinutes ?? 30,
               preselectedApps:
                   _adjustingOfferId != null ? _offerPrefillApps : null,
@@ -2635,7 +2907,7 @@ class OverlayShellState extends State<OverlayShell> {
         child: SingleChildScrollView(
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.all(10),
-          child: _captureCardsColumn(),
+          child: _buildCaptureCards(),
         ),
       ),
     );
@@ -2894,6 +3166,13 @@ class OverlayShellState extends State<OverlayShell> {
                 ),
               ),
             ),
+          if (_islandView == _IslandView.cards)
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(8),
+                child: _buildCaptureCards(),
+              ),
+            ),
           if (_islandView == _IslandView.roi && _islandRoi != null)
             Expanded(
               child: Padding(
@@ -2985,6 +3264,7 @@ class OverlayShellState extends State<OverlayShell> {
             accent: _accentColor,
             onShare: _shareBookmark,
             onCallAi: _callAiOnActiveSession,
+            onSteerRegion: _snapRegionToSession,
           ),
         ),
         Padding(
@@ -3401,6 +3681,7 @@ class OverlayShellState extends State<OverlayShell> {
                         accent: _accentColor,
                         onShare: _shareBookmark,
                         onCallAi: _callAiOnActiveSession,
+                        onSteerRegion: _snapRegionToSession,
                       )
                     : _terminalThreads.contains(_activeTabKey)
                         ? ThreadTerminalView(
@@ -3460,7 +3741,7 @@ class OverlayShellState extends State<OverlayShell> {
                 Positioned(
                   right: 10,
                   bottom: 10,
-                  child: _captureCardsColumn(),
+                  child: _buildCaptureCards(),
                 ),
               ],
             ),

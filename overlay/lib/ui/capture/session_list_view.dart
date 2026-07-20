@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
@@ -42,6 +43,9 @@ class SessionListView extends StatefulWidget {
   /// Call AI over the live session's span (shell owns the summon flow).
   final ValueChanged<SessionChipState> onCallAi;
 
+  /// Arm a manual region snap as context for a live agent session.
+  final ValueChanged<String> onSteerRegion;
+
   /// Dense 320px presentation used by the notch island. Session groups are
   /// independently collapsible; groups with a waiting lane start expanded.
   final bool islandMode;
@@ -51,6 +55,7 @@ class SessionListView extends StatefulWidget {
     required this.ws,
     required this.onShare,
     required this.onCallAi,
+    required this.onSteerRegion,
     this.accent = const Color(0xFF1F8039),
     this.islandMode = false,
   });
@@ -79,6 +84,12 @@ class _SessionListViewState extends State<SessionListView> {
   String? _preview;
   String? _previewFor; // sessionId the preview belongs under
   bool _previewLoading = false;
+  String? _noteEditorFor;
+  String? _noteStatusFor;
+  String? _noteStatus;
+  final TextEditingController _noteController = TextEditingController();
+  final FocusNode _noteFocus = FocusNode();
+  Timer? _noteStatusTimer;
 
   @override
   void initState() {
@@ -149,6 +160,9 @@ class _SessionListViewState extends State<SessionListView> {
     _assistSub?.cancel();
     _voiceSub?.cancel();
     _ticker?.cancel();
+    _noteStatusTimer?.cancel();
+    _noteController.dispose();
+    _noteFocus.dispose();
     super.dispose();
   }
 
@@ -520,6 +534,7 @@ class _SessionListViewState extends State<SessionListView> {
 
   Widget _lane(HudTheme t, AgentSession agent) {
     final done = agent.state == 'done';
+    final live = agent.state == 'working' || agent.state == 'waiting';
     final color = agent.state == 'waiting'
         ? _amber
         : done
@@ -534,27 +549,141 @@ class _SessionListViewState extends State<SessionListView> {
       opacity: done ? 0.55 : 1,
       child: Padding(
         padding: const EdgeInsets.only(left: 17, top: 6),
-        child: Row(children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text('${agent.name} · $detail',
-                style: _mono(done ? 9 : 10, t.textMuted),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
-          ),
-          if (agent.term.isNotEmpty) ...[
-            const SizedBox(width: 5),
-            _action(t, '⏵', 'Jump to terminal',
-                () => context.read<WindowService>().jumpToTerminal(agent.term)),
-          ],
+        child: Column(children: [
+          Row(children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text('${agent.name} · $detail',
+                  style: _mono(done ? 9 : 10, t.textMuted),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            if (live) ...[
+              const SizedBox(width: 5),
+              _action(t, '◱', 'Add region to this session',
+                  () => widget.onSteerRegion(agent.sessionId)),
+              const SizedBox(width: 5),
+              _action(t, '✎', 'Add a note to this session',
+                  () => _toggleNoteEditor(agent.sessionId)),
+            ],
+            if (agent.term.isNotEmpty) ...[
+              const SizedBox(width: 5),
+              _action(
+                  t,
+                  '⏵',
+                  'Jump to terminal',
+                  () =>
+                      context.read<WindowService>().jumpToTerminal(agent.term)),
+            ],
+          ]),
+          if (_noteEditorFor == agent.sessionId)
+            Padding(
+              padding: const EdgeInsets.only(left: 14, top: 4),
+              child: SizedBox(
+                height: 26,
+                child: Focus(
+                  onKeyEvent: (_, event) {
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.escape) {
+                      _closeNoteEditor();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: TextField(
+                    controller: _noteController,
+                    focusNode: _noteFocus,
+                    autofocus: true,
+                    maxLines: 1,
+                    style: _mono(9, t.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'note for this session',
+                      hintStyle: _mono(9, t.textDim),
+                      contentPadding: const EdgeInsets.fromLTRB(7, 0, 2, 0),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: t.border),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: widget.accent),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      suffixIconConstraints:
+                          const BoxConstraints.tightFor(width: 26, height: 26),
+                      suffixIcon: IconButton(
+                        padding: EdgeInsets.zero,
+                        tooltip: 'Send note',
+                        icon: Text('▸', style: _mono(10, t.textMuted)),
+                        onPressed: () => _submitNote(agent.sessionId),
+                      ),
+                    ),
+                    onSubmitted: (_) => _submitNote(agent.sessionId),
+                    onTapOutside: (_) => _closeNoteEditor(),
+                    onEditingComplete: () {},
+                  ),
+                ),
+              ),
+            ),
+          if (_noteStatusFor == agent.sessionId && _noteStatus != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(_noteStatus!,
+                    style: _mono(9,
+                        _noteStatus == 'queued ✓' ? widget.accent : _liveRed)),
+              ),
+            ),
         ]),
       ),
     );
+  }
+
+  void _toggleNoteEditor(String sessionId) {
+    if (_noteEditorFor == sessionId) {
+      _closeNoteEditor();
+      return;
+    }
+    setState(() {
+      _noteEditorFor = sessionId;
+      _noteController.clear();
+    });
+  }
+
+  void _closeNoteEditor() {
+    if (_noteEditorFor == null) return;
+    setState(() {
+      _noteEditorFor = null;
+      _noteController.clear();
+    });
+  }
+
+  Future<void> _submitNote(String sessionId) async {
+    final text = _noteController.text.trim();
+    if (text.isEmpty) return;
+    final queued = await widget.ws.postAgentContextNote(sessionId, text);
+    if (!mounted) return;
+    _noteStatusTimer?.cancel();
+    setState(() {
+      if (queued) {
+        _noteEditorFor = null;
+        _noteController.clear();
+      }
+      _noteStatusFor = sessionId;
+      _noteStatus = queued ? 'queued ✓' : 'failed';
+    });
+    _noteStatusTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      setState(() {
+        _noteStatusFor = null;
+        _noteStatus = null;
+      });
+    });
   }
 
   Widget _candidateGroup(

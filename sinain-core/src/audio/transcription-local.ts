@@ -16,6 +16,8 @@ export interface LocalTranscriptionConfig {
   language: string;
   /** Timeout per chunk in ms (default: 15000) */
   timeoutMs: number;
+  noSpeechMax: number;
+  logprobMin: number;
   /**
    * Optional hotword/entity hint passed to whisper-cli's --prompt flag.
    * Biases the model toward preserving these proper nouns rather than

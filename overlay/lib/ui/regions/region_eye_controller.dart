@@ -113,7 +113,7 @@ class RegionEyeController {
       // analyzer only spends prompt tokens on regions when enabled.
       _pushEnableState();
       if (!_enabled) {
-        // Remove detected eyes but retain user-created manual catches.
+        // Remove all eyes, including legacy manual-catch markers.
         _onRegions(ws.regions);
       } else if (ws.regions.isNotEmpty) {
         _onRegions(ws.regions);
@@ -156,11 +156,9 @@ class RegionEyeController {
   }
 
   Future<void> _onRegions(List<RegionHighlight> regions) async {
-    // Manual catches are user-requested, not auto-detection. They must remain
-    // visible even when the ambient auto-detect preference is disabled.
-    final eligibleRegions = _enabled
-        ? regions
-        : regions.where((r) => r.id.startsWith('r-man-')).toList();
+    // Manual-catch markers are legacy and share the auto-detect gate. The
+    // island route card and chat thread tabs are the modern affordances.
+    final eligibleRegions = _enabled ? regions : <RegionHighlight>[];
     final visibleRegions = eligibleRegions
         .where((r) => !_excludedRegionIds.contains(r.id))
         .toList();
@@ -255,8 +253,10 @@ class RegionEyeController {
   }
 
   /// Ensure a newly caught manual ROI is reconciled, then open its native
-  /// suggestion card. This is explicit because auto-detection may be off.
+  /// suggestion card.
   Future<void> showRegionCard(String id) async {
+    // With eyes gated off there is no native panel to anchor the legacy card.
+    if (!_enabled) return;
     await _onRegions(ws.regions);
     final region = _regions[id];
     if (region == null) return;

@@ -51,6 +51,7 @@ void main() {
               ws: ws,
               onShare: (_) {},
               onCallAi: (_) {},
+              onSteerRegion: (_) {},
             ),
           ),
         ),
@@ -125,6 +126,7 @@ void main() {
               ws: ws,
               onShare: (_) {},
               onCallAi: (_) {},
+              onSteerRegion: (_) {},
             ),
           ),
         ),
@@ -183,7 +185,8 @@ void main() {
           home: SizedBox(
         width: 520,
         height: 700,
-        child: SessionListView(ws: ws, onShare: (_) {}, onCallAi: (_) {}),
+        child: SessionListView(
+            ws: ws, onShare: (_) {}, onCallAi: (_) {}, onSteerRegion: (_) {}),
       )),
     ));
     await tester.pump();
@@ -263,6 +266,7 @@ void main() {
               islandMode: true,
               onShare: (_) {},
               onCallAi: (_) {},
+              onSteerRegion: (_) {},
             ),
           ),
         ),

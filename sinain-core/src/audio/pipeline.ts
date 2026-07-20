@@ -79,6 +79,8 @@ const VAD_MAX_SEGMENT_MS = Number(process.env.AUDIO_MAX_SEGMENT_MS) || 18000;   
 const VAD_MIN_SEGMENT_MS = Number(process.env.AUDIO_MIN_SEGMENT_MS) || 300;     // drop blips (clicks / coughs)
 const VAD_PREROLL_MS = Number(process.env.AUDIO_PREROLL_MS) || 300;             // lead-in kept before speech onset
 const VAD_SPEECH_FACTOR = Number(process.env.AUDIO_VAD_SPEECH_FACTOR) || 3.5;   // speech = energy > noiseFloor × this
+// Normalized 16-bit PCM RMS (0.0–1.0); 0.0005 is about -66 dBFS, below quiet speech.
+const VAD_MIN_RMS = Number(process.env.VAD_MIN_RMS) || 0.0005;
 
 export class AudioPipeline extends EventEmitter {
   private config: AudioPipelineConfig;
@@ -434,7 +436,7 @@ export class AudioPipeline extends EventEmitter {
         this.noiseFloor += (energy - this.noiseFloor) * 0.0005;
       }
       // Speech = clearly above the floor, but never below the configured minimum.
-      const threshold = Math.max(this.config.vadThreshold, this.noiseFloor * VAD_SPEECH_FACTOR);
+      const threshold = Math.max(this.config.vadThreshold, this.noiseFloor * VAD_SPEECH_FACTOR, VAD_MIN_RMS);
       const isSpeech = !this.config.vadEnabled || energy >= threshold;
       this.processFrame(frame, isSpeech);
     }

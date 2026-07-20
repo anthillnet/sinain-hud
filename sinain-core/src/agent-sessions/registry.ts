@@ -45,7 +45,7 @@ export class AgentSessionRegistry {
         ...(frame.cwd ? { cwd: frame.cwd } : {}),
         ...(frame.model ? { model: frame.model } : {}),
         ...(frame.branch ? { branch: frame.branch } : {}),
-        ...(frame.term ? { term: frame.term } : {}),
+        ...(frame.term && Object.keys(frame.term).length > 0 ? { term: frame.term } : {}),
         state: "working",
         toolLine: "",
         startedAt: now,
@@ -58,7 +58,7 @@ export class AgentSessionRegistry {
     if (frame.cwd) session.cwd = frame.cwd;
     if (frame.model) session.model = frame.model;
     if (frame.branch) session.branch = frame.branch;
-    if (frame.term) session.term = frame.term;
+    if (frame.term && Object.keys(frame.term).length > 0) session.term = frame.term;
     session.name = `${session.source} — ${session.cwd ? basename(session.cwd) : session.sessionId.slice(0, 8)}`;
 
     switch (frame.hook_event_name) {
