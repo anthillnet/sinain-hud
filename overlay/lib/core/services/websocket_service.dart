@@ -62,6 +62,8 @@ class WebSocketService extends ChangeNotifier {
   // Resident chat sidecar (:9610) reachable? With a resident lane, down → the
   // HUD shows "Chat sidecar not running" + a Run-to-restart.
   bool _chatSidecarUp = false;
+  String _chatSidecarState = 'starting';
+  String? _chatSidecarError;
   bool _agentRegistered = false;
   double _totalCost = 0.0;
   int _costCallCount = 0;
@@ -213,6 +215,8 @@ class WebSocketService extends ChangeNotifier {
 
   /// Resident chat sidecar (:9610) reachable.
   bool get chatSidecarUp => _chatSidecarUp;
+  String get chatSidecarState => _chatSidecarState;
+  String? get chatSidecarError => _chatSidecarError;
   bool get agentRegistered => _agentRegistered;
   double get totalCost => _costDisplayEnabled ? _totalCost : 0.0;
   int get costCallCount => _costCallCount;
@@ -480,6 +484,16 @@ class WebSocketService extends ChangeNotifier {
             }
           }
           _statusController.add(statusData);
+          break;
+        case 'chat_status':
+          final state = json['state'] as String? ?? 'failed';
+          final error = json['error'] as String?;
+          if (state != _chatSidecarState || error != _chatSidecarError) {
+            _chatSidecarState = state;
+            _chatSidecarError = error;
+            _chatSidecarUp = state == 'running';
+            notifyListeners();
+          }
           break;
         case 'spawn_task':
           final task = ThreadStatusUpdate.fromJson(json);

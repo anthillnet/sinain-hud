@@ -433,9 +433,8 @@ case "$_privacy_mode" in
 esac
 log "Privacy: mode=${_privacy_mode} ocr_openrouter=${PRIVACY_OCR_OPENROUTER} images_openrouter=${PRIVACY_IMAGES_OPENROUTER}"
 
-# ── 4. Start sense_client + chat sidecar + overlay in parallel ──────────────
+# ── 4. Start sense_client + overlay in parallel ─────────────────────────────
 SENSE_PID=""
-CHAT_PID=""
 OVERLAY_PID=""
 
 if ! $SKIP_SENSE; then
@@ -445,22 +444,6 @@ if ! $SKIP_SENSE; then
   PIDS+=("$SENSE_PID")
 else
   warn "sense_client skipped"
-fi
-
-# Built-in sinain chat lane — resident sidecar on :9610 (reads its own
-# sinain-chat-agent/.env). Skipped if python3 is unavailable. Idle/proactive
-# messages are opt-in inside the sidecar (SINAIN_CHAT_IDLE_ENABLED) — they're
-# the dominant token cost; normal thread chat stays on.
-if command -v python3 >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/sinain-chat-agent/sidecar.py" ]; then
-  # Prefer the sidecar's own .venv (dev); fall back to system python3.
-  CHAT_PY="python3"
-  [ -x "$SCRIPT_DIR/sinain-chat-agent/.venv/bin/python" ] && CHAT_PY="$SCRIPT_DIR/sinain-chat-agent/.venv/bin/python"
-  log "Starting sinain chat sidecar..."
-  (cd "$SCRIPT_DIR/sinain-chat-agent" && "$CHAT_PY" sidecar.py) 2>&1 | pipe_log "[chat]" "$(printf "${MAGENTA}[chat]${RESET}    ")" &
-  CHAT_PID=$!
-  PIDS+=("$CHAT_PID")
-else
-  warn "sinain chat sidecar skipped (python3 or sidecar.py missing)"
 fi
 
 if ! $SKIP_OVERLAY; then
@@ -484,15 +467,6 @@ if [ -n "$SENSE_PID" ]; then
   fi
 fi
 
-if [ -n "$CHAT_PID" ]; then
-  if kill -0 "$CHAT_PID" 2>/dev/null; then
-    ok "sinain chat sidecar running (pid:$CHAT_PID)"
-  else
-    warn "sinain chat sidecar exited early — check logs above"
-    CHAT_PID=""
-  fi
-fi
-
 if [ -n "$OVERLAY_PID" ]; then
   if kill -0 "$OVERLAY_PID" 2>/dev/null; then
     ok "overlay running (pid:$OVERLAY_PID)"
@@ -506,7 +480,6 @@ fi
 {
   echo "core=$CORE_PID"
   [ -n "$SENSE_PID" ]   && echo "sense=$SENSE_PID"
-  [ -n "$CHAT_PID" ]    && echo "chat=$CHAT_PID"
   [ -n "$OVERLAY_PID" ] && echo "overlay=$OVERLAY_PID"
 } > "$PID_FILE"
 

@@ -59,6 +59,12 @@ export interface PingMessage {
   ts: number;
 }
 
+export interface ChatStatusMessage {
+  type: "chat_status";
+  state: "starting" | "running" | "degraded" | "restarting" | "failed";
+  error?: string;
+}
+
 /** sinain-core → Overlay: spawn task lifecycle update */
 export type ThreadStatus = "spawned" | "polling" | "completed" | "failed" | "timeout" | "awaiting_input" | "awaiting_permission";
 
@@ -570,7 +576,7 @@ export interface SessionBookmarkRow {
   kgPath?: string;
 }
 
-export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ThreadStatusMessage | CostMessage | UsageMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | SessionAssistMessage | VoiceSessionMessage | AgentSessionsMessage | AgentApprovalMessage | AgentApprovalResolvedMessage;
+export type OutboundMessage = FeedMessage | StatusMessage | PingMessage | ChatStatusMessage | ThreadStatusMessage | CostMessage | UsageMessage | RegionHighlightMessage | ContextBriefMessage | EnrichCardMessage | SaveReceiptMessage | SaveOfferMessage | SessionNudgeMessage | SessionChipMessage | SessionWrapMessage | SessionAssistMessage | VoiceSessionMessage | AgentSessionsMessage | AgentApprovalMessage | AgentApprovalResolvedMessage;
 export type InboundMessage = UserMessage | CommandMessage | PongMessage | ProfilingMessage | UserCommandMessage | SpawnCommandMessage | SpawnReplyMessage | SpawnPermissionReplyMessage | ForkMainMessage | RegionSelectMessage | AppFocusMessage | AgentApprovalReplyMessage;
 
 /** Abstraction for user commands (text now, voice later). */

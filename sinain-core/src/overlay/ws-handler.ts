@@ -10,6 +10,7 @@ import type {
   RegionHighlightMessage,
   CostMessage,
   UsageMessage,
+  ChatStatusMessage,
   CostSnapshot,
   AgentApprovalRequest,
   AgentSessionsMessage,
@@ -54,6 +55,7 @@ export class WsHandler {
   private latestUsageMsg: UsageMessage | null = null;
   private latestRegionMsg: RegionHighlightMessage | null = null;
   private latestAgentSessionsMsg: AgentSessionsMessage | null = null;
+  private latestChatStatusMsg: ChatStatusMessage | null = null;
   private agentApprovalSupplier: (() => AgentApprovalRequest[]) | null = null;
   private regionFlushScheduled = false;
   // ChatGPT MCP-tunnel state (connector URL + pairing code). Kept here rather
@@ -95,6 +97,7 @@ export class WsHandler {
       responseSize: this.state.responseSize,
       agents: this.state.agents,
     });
+    if (this.latestChatStatusMsg) this.sendTo(ws, this.latestChatStatusMsg);
 
     // Replay recent feed messages for late-joining clients
     for (const msg of this.replayBuffer) {
@@ -207,6 +210,7 @@ export class WsHandler {
 
   /** Broadcast any outbound message (used by escalator for spawn_task events). */
   broadcastRaw(msg: OutboundMessage): void {
+    if (msg.type === "chat_status") this.latestChatStatusMsg = msg;
     if (msg.type === "spawn_task") {
       const taskMsg = msg as ThreadStatusMessage;
       this.spawnTaskBuffer.set(taskMsg.taskId, taskMsg);

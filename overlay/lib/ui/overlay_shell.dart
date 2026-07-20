@@ -4065,7 +4065,12 @@ class _AgentAvailabilityBanner extends StatelessWidget {
     if (ws.escalationAgent.isEmpty) return 'No chat agent selected';
     // Built-in sinain sidecar: connected only if it's actually reachable.
     if (ws.escalationResident) {
-      return ws.chatSidecarUp ? null : 'sinain-chat not running';
+      if (ws.chatSidecarUp) return null;
+      if (ws.chatSidecarState == 'starting') return 'Chat starting…';
+      if (ws.chatSidecarState == 'restarting') {
+        return ws.chatSidecarError ?? 'Chat restarting…';
+      }
+      return ws.chatSidecarError ?? 'sinain chat failed';
     }
     // A CLI chat agent needs bare-agent registration before it can answer.
     if (!ws.agentRegistered) {
@@ -4077,7 +4082,10 @@ class _AgentAvailabilityBanner extends StatelessWidget {
   bool _showStartButton(WebSocketService ws) {
     if (!ws.connected || ws.escalationState != 'active') return false;
     // Resident lane: show Run only when the sidecar is down (Run restarts it).
-    if (ws.escalationResident) return !ws.chatSidecarUp;
+    if (ws.escalationResident) {
+      return ws.chatSidecarState == 'failed' ||
+          ws.chatSidecarState == 'degraded';
+    }
     // CLI lane: show Run only for an unstarted agent (Run launches it).
     if (ws.agentRegistered) return false;
     return ws.escalationAgent.isNotEmpty;

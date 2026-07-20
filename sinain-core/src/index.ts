@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -11,6 +10,7 @@ import { loadAgentsConfig, isGatewayProfile, isSinainProfile, gatewayProfileName
 import { roiSeeds } from "./chat/roi-seeds.js";
 import { launchDesktop, desktopAppInstalled } from "./chat/desktop-launch.js";
 import { ChatService } from "./chat/chat-service.js";
+import { ChatSidecarSupervisor } from "./chat/sidecar-supervisor.js";
 import { FeedBuffer } from "./buffers/feed-buffer.js";
 import { SenseBuffer } from "./buffers/sense-buffer.js";
 import { WsHandler } from "./overlay/ws-handler.js";
@@ -129,15 +129,6 @@ function resolveLocalAgentScript(): string | null {
     resolve(PACKAGE_ROOT, "sinain-agent-runner", "run.sh"),
     resolve(process.cwd(), "..", "sinain-agent-runner", "run.sh"),
     resolve(process.cwd(), "sinain-agent-runner", "run.sh"),
-  ];
-  return candidates.find((path) => existsSync(path)) ?? null;
-}
-
-function resolveChatSidecar(): string | null {
-  const candidates = [
-    resolve(PACKAGE_ROOT, "sinain-chat-agent", "sidecar.py"),
-    resolve(process.cwd(), "..", "sinain-chat-agent", "sidecar.py"),
-    resolve(process.cwd(), "sinain-chat-agent", "sidecar.py"),
   ];
   return candidates.find((path) => existsSync(path)) ?? null;
 }
@@ -1126,14 +1117,15 @@ async function main() {
   const chatSidecarUrl = process.env.SINAIN_CHAT_WS_URL || "ws://127.0.0.1:9610";
   const chatService = new ChatService(chatSidecarUrl);
 
-  // Chat sidecar liveness. The HUD talks only to core, so core polls :9610 and
-  // broadcasts whether the resident chat lane is actually reachable — the
-  // overlay uses this to show "Chat sidecar not running" + a Run-to-restart
-  // instead of silently assuming a selected sinain lane is up.
-  const chatSidecarPort = (() => {
-    try { return Number(new URL(chatSidecarUrl).port) || 9610; } catch { return 9610; }
-  })();
-  let chatSidecarProc: ReturnType<typeof spawn> | null = null;
+  const chatSidecarSupervisor = new ChatSidecarSupervisor(
+    PACKAGE_ROOT,
+    chatSidecarUrl,
+    (status) => {
+      bareAgentState.chatSidecarUp = status.state === "running";
+      wsHandler.updateState({ agents: { ...bareAgentState } });
+      wsHandler.broadcastRaw(status);
+    },
+  );
 
   // ── Resident memory worker (memoryd.py — DESIGN-MEMORY-V2 P1) ──
   // Supersedes kg_daemon on the SAME socket: warm read-only ROI protocol
@@ -1162,66 +1154,6 @@ async function main() {
     });
     child.once("error", (err) => warn(TAG, `KG daemon failed to start: ${err.message}`));
   }
-
-  function probeChatSidecar(): Promise<boolean> {
-    return new Promise((res) => {
-      const sock = netConnect({ host: "127.0.0.1", port: chatSidecarPort });
-      let settled = false;
-      const done = (up: boolean) => {
-        if (settled) return; settled = true;
-        try { sock.destroy(); } catch { /* ignore */ }
-        res(up);
-      };
-      sock.once("connect", () => done(true));
-      sock.once("error", () => done(false));
-      sock.setTimeout(1500, () => done(false));
-    });
-  }
-
-  // (Re)start the sidecar on demand — only when it's actually down, so we never
-  // double-bind against the launcher's instance. Used by the overlay Run button
-  // when the resident chat lane is selected but unreachable.
-  function restartChatSidecar(): { ok: boolean; error?: string } {
-    if (chatSidecarProc && !chatSidecarProc.killed && chatSidecarProc.exitCode === null) {
-      return { ok: true };
-    }
-    const sidecar = resolveChatSidecar();
-    if (!sidecar) return { ok: false, error: "chat sidecar not found" };
-    const sidecarDir = dirname(sidecar);
-    // Prefer the sidecar's own .venv (dev); fall back to system python3 (prod,
-    // where the launcher pip-installs deps into the system interpreter).
-    const venvPy = resolve(sidecarDir, ".venv", "bin", "python");
-    // Prod fallback prefers the sinain-chat shim (a sinain-named symlink the
-    // launcher creates) so the sidecar shows as "sinain-chat", not bare "Python".
-    const py = existsSync(venvPy)
-      ? venvPy
-      : (process.env.SINAIN_CHAT_PYTHON || "python3");
-    log(TAG, `restarting chat sidecar: ${py} ${sidecar}`);
-    const child = spawn(py, ["sidecar.py"], {
-      cwd: sidecarDir,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    });
-    chatSidecarProc = child;
-    pipeLocalAgentOutput(child.stdout, (line) => log("chat", line));
-    pipeLocalAgentOutput(child.stderr, (line) => warn("chat", line));
-    child.once("error", (err) => {
-      warn(TAG, `chat sidecar failed to start: ${err.message}`);
-      wsHandler.broadcast(`⚠ sinain-chat failed to start: ${err.message.slice(0, 120)}`, "high");
-    });
-    return { ok: true };
-  }
-
-  // Poll liveness; broadcast on change. Cheap TCP probe every 5s. NOTE: the
-  // timer is started later (after bareAgentState is declared) — see below.
-  const probeChatLoop = async (): Promise<void> => {
-    const up = await probeChatSidecar();
-    if (up !== bareAgentState.chatSidecarUp) {
-      bareAgentState.chatSidecarUp = up;
-      wsHandler.updateState({ agents: { ...bareAgentState } });
-    }
-  };
 
   // ── Region tracker (Grammarly mode) ──
   // Ingests LLM-detected regions every tick, resolves bboxes from sense
@@ -1865,9 +1797,7 @@ async function main() {
     }
   }
 
-  // Start chat-sidecar liveness polling now that bareAgentState exists.
-  const chatProbeTimer = setInterval(() => { void probeChatLoop(); }, 5000);
-  void probeChatLoop();
+  void chatSidecarSupervisor.start();
 
   // Warm the KG retrieval daemon at boot (no-op if the script is missing).
   startKgDaemon();
@@ -2911,7 +2841,7 @@ async function main() {
       return { ok: true };
     },
     onStartLocalAgent: (agent?: string) => startLocalAgent(agent),
-    onRestartChatSidecar: () => restartChatSidecar(),
+    onRestartChatSidecar: () => chatSidecarSupervisor.restart(),
   });
 
   // Broadcast initial screen state so overlay gets correct status on connect
@@ -3002,6 +2932,7 @@ async function main() {
     if (micPipeline) micPipeline.stop();
     transcription.destroy();
     escalator.stop();
+    chatSidecarSupervisor.stop();
     void tunnelController.stop(); // kill frpc + the HTTP MCP transport
     if (localAgentProcess && localAgentProcess.exitCode === null) {
       localAgentProcess.kill("SIGTERM");

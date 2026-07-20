@@ -18,7 +18,7 @@ sinain-core's ChatService connects over WS and relays to the overlay. Protocol:
       {"type":"done","text":"<full reply>"}
       {"type":"error","text":"..."}
 
-Env: OPENROUTER_API_KEY (required), SINAIN_CHAT_MODEL (default qwen/qwen3.5-flash-02-23),
+Env: selected provider stack from ~/.sinain/.env, with optional SINAIN_CHAT_* overrides,
      SINAIN_CHAT_REASONING (off|on, default off), SINAIN_CORE_URL, SINAIN_CHAT_WS_PORT (9610).
 """
 from __future__ import annotations
@@ -29,6 +29,11 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
+
+
+_PROCESS_ENV = dict(os.environ)
+_FILE_ENV_KEYS: set[str] = set()
 
 
 def _ensure_venv() -> None:
@@ -127,7 +132,8 @@ class ChatAgent:
 
     async def setup(self) -> None:
         tools.register_all()
-        model = os.environ.get("SINAIN_CHAT_MODEL", "qwen/qwen3.5-flash-02-23")
+        cfg = await _resolve_provider()
+        model = cfg["model"]
         # Provider: openrouter (cloud, default) or ollama (local). Local mode
         # FORCES ollama — a .env cloud pin must not win (observed 2026-07-15:
         # this lane analyzed an arc.dev assessment via OpenRouter despite
@@ -136,19 +142,18 @@ class ChatAgent:
         # auto-load .env at import time, before our _load_env runs, so pin
         # origin is indistinguishable. The contract is absolute anyway — in
         # local mode the chat lane never talks to a cloud endpoint.
-        provider = os.environ.get("SINAIN_CHAT_PROVIDER", "").lower()
-        if os.environ.get("SINAIN_LOCAL_MODE") == "true":
+        provider = cfg["stack"]
+        if provider == "local" and not os.environ.get("SINAIN_CHAT_ENDPOINT"):
             provider = "ollama"
-        if not provider:
-            provider = "openrouter"
         if provider in ("ollama", "local"):
-            base = (os.environ.get("SINAIN_CHAT_BASE_URL")
+            base = (cfg["base_url"]
+                    or os.environ.get("SINAIN_CHAT_BASE_URL")
                     or os.environ.get("OLLAMA_BASE_URL")
                     or "http://localhost:11434")
             # litellm: use the ollama_chat/ provider (Ollama /api/chat) — it
             # supports function/tool-calling; the bare ollama/ provider hits
             # /api/generate and rejects the tool list (OllamaException).
-            lm = os.environ.get("SINAIN_CHAT_MODEL", "")
+            lm = model
             if lm.startswith("ollama_chat/"):
                 model_id = lm
             elif lm.startswith("ollama/"):
@@ -167,8 +172,11 @@ class ChatAgent:
                               litellm_extra_body={"think": False},
                               service_id="sinain-chat", stream=True)
         else:
-            llm_kwargs = dict(model="openrouter/" + model,
-                              api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
+            if not cfg["api_key"]:
+                raise RuntimeError(f"sinain chat is not configured: {cfg['stack']} needs an API key — add it in AI Provider settings")
+            model_id = "openrouter/" + model if provider == "openrouter" else "openai/" + model
+            llm_kwargs = dict(model=model_id, base_url=cfg["base_url"],
+                              api_key=SecretStr(cfg["api_key"]),
                               service_id="sinain-chat", stream=True)
             # reasoning:{enabled:false} is an OpenRouter-only param — cloud only.
             if os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on":
@@ -370,6 +378,14 @@ async def _handler(agent: "ChatAgent", ws) -> None:
         except json.JSONDecodeError:
             await ws.send(json.dumps({"type": "error", "text": "bad JSON"}))
             continue
+        if req.get("type") == "status":
+            await ws.send(json.dumps({"type": "status", "state": agent.state,
+                                      "error": agent.error}))
+            continue
+        if agent.state != "running":
+            await ws.send(json.dumps({"type": "error", "text": agent.error or
+                                      "sinain chat is starting"}))
+            continue
         if req.get("cancel"):
             agent.cancel()
             continue
@@ -387,10 +403,35 @@ async def main() -> None:
     logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
     port = int(os.environ.get("SINAIN_CHAT_WS_PORT", "9610"))
     agent = ChatAgent()
+    agent.state = "starting"
+    agent.error = None
     print(f"[sinain-chat] warming OpenHands ({os.environ.get('SINAIN_CHAT_MODEL', 'qwen/qwen3.5-flash-02-23')}, "
           f"reasoning={os.environ.get('SINAIN_CHAT_REASONING', 'off')})…", flush=True)
-    await agent.setup()
-    print(f"[sinain-chat] ready · ws://127.0.0.1:{port}", flush=True)
+    try:
+        await agent.setup()
+        agent.state = "running"
+        print(f"[sinain-chat] ready · ws://127.0.0.1:{port}", flush=True)
+    except Exception as exc:  # config/warmup failures must not take down WS
+        agent.state = "degraded"
+        agent.error = str(exc)
+        print(f"[sinain-chat] degraded: {agent.error}", file=sys.stderr, flush=True)
+
+    async def retry_warmup():
+        while True:
+            await asyncio.sleep(60)
+            if agent.state == "running":
+                continue
+            _load_env()
+            try:
+                await agent.setup()
+                agent.state = "running"
+                agent.error = None
+                print("[sinain-chat] configuration healed · ready", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                agent.state = "degraded"
+                agent.error = str(exc)
+
+    asyncio.create_task(retry_warmup())
 
     async def bound(ws):  # websockets>=11 passes only the connection
         await _handler(agent, ws)
@@ -400,14 +441,76 @@ async def main() -> None:
 
 
 def _load_env() -> None:
-    from pathlib import Path
-    env = Path(__file__).parent / ".env"
-    if env.exists():
+    # Process env wins. File values are rebuilt on every call so adding or
+    # changing a provider key heals the degraded sidecar without a restart.
+    for key in _FILE_ENV_KEYS:
+        if key not in _PROCESS_ENV:
+            os.environ.pop(key, None)
+    _FILE_ENV_KEYS.clear()
+    here = Path(__file__).resolve().parent
+    for env in (here / ".env", Path.home() / ".sinain" / ".env", here.parent / ".env"):
+        if not env.exists():
+            continue
         for ln in env.read_text().splitlines():
             ln = ln.strip()
             if ln and not ln.startswith("#") and "=" in ln:
                 k, v = ln.split("=", 1)
-                os.environ.setdefault(k, v)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k not in os.environ:
+                    os.environ[k] = v
+                    _FILE_ENV_KEYS.add(k)
+
+
+def _openai_base(endpoint: str) -> str:
+    endpoint = endpoint.rstrip("/")
+    suffix = "/chat/completions"
+    return endpoint[:-len(suffix)] if endpoint.endswith(suffix) else endpoint
+
+
+async def _provider_status() -> dict:
+    import urllib.request
+    def fetch():
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9500/setup/providers", timeout=2) as res:
+                return json.loads(res.read())
+        except Exception:  # noqa: BLE001
+            return {}
+    return await asyncio.to_thread(fetch)
+
+
+async def _resolve_provider() -> dict[str, str]:
+    endpoint = os.environ.get("SINAIN_CHAT_ENDPOINT", "").strip()
+    explicit_key = os.environ.get("SINAIN_CHAT_API_KEY", "").strip()
+    explicit_model = os.environ.get("SINAIN_CHAT_MODEL", "").strip()
+    analysis_endpoint = os.environ.get("ANALYSIS_ENDPOINT", "").strip()
+    burst = os.environ.get("BURST_PROVIDER", "").lower()
+    local = os.environ.get("SINAIN_LOCAL_MODE", "").lower() == "true"
+    if local:
+        stack = "local"
+    elif burst == "cerebras" or "cerebras.ai" in analysis_endpoint:
+        stack = "cerebras"
+    elif burst == "openrouter" or "openrouter.ai" in analysis_endpoint:
+        stack = "openrouter"
+    else:
+        status = await _provider_status()
+        stack = str(status.get("activeStack") or "openrouter").lower()
+
+    default_model = "qwen/qwen3.5-flash-02-23"
+    if stack == "cerebras":
+        base = "https://api.cerebras.ai/v1"
+        key = os.environ.get("CEREBRAS_API_KEY", "").strip()
+        model = os.environ.get("SINAIN_CHAT_MODEL_CEREBRAS", "").strip() or os.environ.get("ANALYSIS_MODEL", "gemma-4-31b")
+    elif stack == "local":
+        base = _openai_base(analysis_endpoint) if analysis_endpoint else "http://localhost:11434"
+        key = "local"
+        model = os.environ.get("ANALYSIS_MODEL", "").strip() or os.environ.get("SINAIN_LOCAL_LLM", "qwen2.5vl:7b")
+    else:
+        stack = "openrouter"
+        base = "https://openrouter.ai/api/v1"
+        key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        model = default_model
+    return {"stack": stack, "base_url": _openai_base(endpoint) if endpoint else base,
+            "api_key": explicit_key or key, "model": explicit_model or model}
 
 
 if __name__ == "__main__":
