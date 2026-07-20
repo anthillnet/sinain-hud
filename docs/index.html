@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Sinain — AI that understands what you’re working on</title>
-<meta name="description" content="Sinain helps your AI understand your screen, meetings, and recent work—so you can ask for help without explaining everything again." />
+<title>Sinain — Make your AI tools work as one</title>
+<meta name="description" content="Sinain carries your context between AI tools and sessions, so each one can pick up where the last left off." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <!-- Cookieless analytics (self-hosted Umami, no cookies/PII) — captures UTM + referrers -->
 <script defer src="https://analytics.sinain.com/script.js" data-domains="sinain.com" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
@@ -118,6 +118,33 @@
   }
   .hero-sub strong{color:var(--fg);font-weight:600}
 
+  /* ─── Inline split-flap task board ─── */
+  .task-board{
+    display:inline-flex;align-items:center;gap:1px;max-width:100%;
+    margin:.18em 0 .02em .12em;vertical-align:.12em;
+    line-height:1;perspective:500px;white-space:nowrap;
+  }
+  .task-board-char{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:18px;height:32px;flex:0 0 18px;overflow:hidden;
+    border:1px solid rgba(255,255,255,.09);border-radius:3px;
+    background:linear-gradient(to bottom,#253148 0 48%,#111827 49% 52%,#1e293b 53% 100%);
+    box-shadow:0 2px 5px rgba(15,23,42,.18);
+    color:#f8fafc;font-family:var(--mono);font-size:16px;font-weight:700;
+    text-shadow:0 1px 0 #000;transform-origin:center;
+  }
+  .task-board-char.is-flipping{animation:taskFlip .26s ease-in-out}
+  @keyframes taskFlip{
+    0%{opacity:1;transform:rotateX(0)}
+    46%{opacity:0;transform:rotateX(-88deg)}
+    54%{opacity:0;transform:rotateX(88deg)}
+    100%{opacity:1;transform:rotateX(0)}
+  }
+  .sr-only{
+    position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0;
+  }
+
   .install{
     margin-top:28px;display:flex;align-items:center;gap:0;
     border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);
@@ -226,7 +253,7 @@
   /* ─── Flow walkthrough (§01) — product tour cards, mirroring the
         post-install onboarding tour (Onboarding.dc.html / PR #190) ─── */
   @keyframes sinAnts{to{stroke-dashoffset:-16}}
-  .tour-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .tour-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
   .tour-card{
     margin:0;background:#1E1F22;border-radius:12px;overflow:hidden;color:#fff;
     border:1px solid var(--border);
@@ -529,6 +556,11 @@
     .install .label{display:none}
     .install code{font-size:13px}
     .meta{gap:12px 20px}
+    .task-board{gap:1px;margin-left:0}
+    .task-board-char{width:10px;height:26px;flex-basis:10px;font-size:11px;border-radius:2px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .task-board-char.is-flipping{animation:none}
   }
 </style>
 </head>
@@ -546,7 +578,7 @@
         </g>
       </svg>
       <span>SINAIN</span>
-      <span class="sub">/ AI work assistant</span>
+      <span class="sub">/ your AI tools, working together</span>
     </div>
     <nav class="primary" aria-label="primary">
       <a href="#flow">How it works</a>
@@ -565,26 +597,21 @@
   <div class="container">
     <div class="hero-grid">
       <div>
-        <span class="eyebrow"><span class="bar"></span> An AI assistant that notices what you’re working on</span>
-        <h1 class="hero-title">It sees what you’re doing.<br/><em>It asks before it helps.</em></h1>
+        <span class="eyebrow"><span class="bar"></span> You run several AI tools every day. Sinain makes them work as one.</span>
+        <h1 class="hero-title">Looks like you’re working on… <span class="task-board" id="task-board-value" aria-hidden="true">finding work worth the forms</span></h1>
+        <span class="sr-only">Sinain can notice tasks such as a job search, thesis research, trip planning, or fixing a bug.</span>
+
         <p class="hero-sub">
-          Work as usual. A few minutes into anything — a job application, a bug hunt,
-          planning a trip — Sinain quietly offers to track it: one small card,
-          <em style="font-style:normal;color:var(--fg)">“Looks like you’re working on…”</em>,
-          easy to ignore. Say yes and every minute is credited back to when you started,
-          your goal and next steps are already read, and your AI agents can jump in with
-          the full story. <strong>Nothing is tracked or shared without your tap.</strong>
+          Work the way you already do — across ChatGPT, Claude, Cursor, and the rest.
+          A few minutes into a task, Sinain quietly notices the goal and asks if you want
+          help moving it forward. Say yes, and Sinain brings in the right AI, already
+          briefed with the context it needs. <strong>Nothing is saved or shared until you choose it.</strong>
         </p>
 
         <div class="cta">
           <a class="btn primary btn-lg" href="https://github.com/anthillnet/sinain-hud/releases/download/macos-v0.3.0/Sinain.dmg" data-umami-event="download-macos">⬇ Download for macOS <span class="arr">→</span></a>
           <a class="btn btn-lg" href="/register/" data-umami-event="hero-pro-waitlist">Register and join Pro waitlist</a>
         </div>
-
-        <p style="margin-top:14px;font-size:12.5px;color:var(--fg-dim);max-width:54ch">
-          Apple Silicon · signed &amp; notarized. The app sets itself up on first run —
-          no Node or Python required.
-        </p>
 
       </div>
 
@@ -594,19 +621,19 @@
           <img
             id="demo-img"
             class="demo-img"
-            src="assets/sinain-flow.gif"
-            alt="Sinain flow — highlight a region, open chat or a CLI agent with full context, hand off to any assistant"
+            src="assets/sinain-context-merge-24s.gif"
+            alt="Sinain brings context from several AI tools together and keeps the user in control of the task"
             loading="eager"
             decoding="async"
             style="display:none" />
           <div class="demo-fallback" id="demo-fallback">
             <div class="df-title">Flow demo</div>
-            <div class="df-path">assets/sinain-flow.gif</div>
+            <div class="df-path">assets/sinain-context-merge-24s.gif</div>
             <div class="df-hint">served from sinain.com CDN</div>
           </div>
           <figcaption class="demo-cap">
             <span class="demo-cap-rule"></span>
-            <span class="demo-cap-text">From a glance to a working agent · captured live</span>
+            <span class="demo-cap-text">One task, several AI tools, one coordinated flow</span>
           </figcaption>
         </figure>
       </div>
@@ -618,15 +645,13 @@
 <section class="s" id="flow">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 01 — It notices. It asks. Your agents join.</div>
+      <div class="sec-num">§ 01 — How it works</div>
       <div>
-        <h2 class="sec-title">A polite nudge — then your AI, already briefed.</h2>
+        <h2 class="sec-title">Stay in the loop without staying in every thread.</h2>
         <p class="sec-lede">
-          Sinain notices when you’ve settled into something — the same way a watch notices
-          a workout — and offers to track it. The card is quiet and ignorable; dismissing
-          costs nothing. Accepting credits the session back to when you actually started,
-          and puts your agents one tap away: chat, a live voice call, or a CLI agent,
-          each arriving with the goal and next steps already read from your work.
+          Sinain recognizes a task as your work takes shape. When something important changes,
+          point it out to update the context and steer the agents. Sinain follows their progress
+          while your attention is elsewhere, then brings you back when a decision needs you.
         </p>
       </div>
     </div>
@@ -634,103 +659,102 @@
     <div class="tour-grid">
 
       <!-- 0 · The nudge (Session Sense) -->
-      <article class="tour-card">
+      <article class="tour-card" style="order:1">
         <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
           <div style="width:238px;background:#1E1F22;border:1px solid rgba(31,128,57,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
             <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
               <span style="width:8px;height:8px;border-radius:50%;background:#1F8039;box-shadow:0 0 0 3px rgba(31,128,57,.25)"></span>
-              <span style="font-size:12px;font-weight:600;color:#fff">Looks like: applying for a job</span>
+              <span style="font-size:12px;font-weight:600;color:#fff">Looks like: checkout webhooks</span>
               <span style="margin-left:auto;font-size:11px;color:#6C707E">✕</span>
             </div>
             <div style="background:#15161A;border-radius:6px;padding:8px;margin-bottom:8px">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
                 <span style="font-size:9px;font-family:var(--mono);color:#A8ADBD">12 min in</span>
-                <span style="font-size:9px;font-family:var(--mono);color:#A8ADBD;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:1px 5px">Chrome</span>
-                <span style="font-size:9px;font-family:var(--mono);color:#A8ADBD;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:1px 5px">Pages</span>
+                <span style="font-size:9px;font-family:var(--mono);color:#A8ADBD;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:1px 5px">Terminal</span>
+                <span style="font-size:9px;font-family:var(--mono);color:#A8ADBD;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:1px 5px">Browser</span>
               </div>
               <div style="font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:3px">GOAL · AS READ</div>
-              <div style="font-size:10px;color:#D6DAE3;line-height:1.4;margin-bottom:5px">Tailor the CV to the staff design posting</div>
+              <div style="font-size:10px;color:#D6DAE3;line-height:1.4;margin-bottom:5px">Unblock checkout before launch</div>
               <div style="font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:3px">NEXT STEPS</div>
-              <div style="font-size:10px;color:#D6DAE3;line-height:1.4">· Lead with the design-system case study<br/>· Draft the cover note it asks for</div>
+              <div style="font-size:10px;color:#D6DAE3;line-height:1.4">· Check the v3 signature header<br/>· Run the regression test</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
-              <span style="height:24px;display:flex;align-items:center;justify-content:center;padding:0 14px;font-size:11px;font-weight:600;color:#fff;background:#1F8039;border-radius:5px">▶</span>
+              <span style="height:24px;display:flex;align-items:center;justify-content:center;padding:0 14px;font-size:11px;font-weight:600;color:#fff;background:#1F8039;border-radius:5px">Track</span>
               <span style="height:24px;display:flex;align-items:center;justify-content:center;padding:0 10px;font-size:10px;color:#E8EAEE;border:1px solid rgba(51,105,214,.5);border-radius:5px">Call Sinain</span>
               <span style="margin-left:auto;font-size:9px;font-family:var(--mono);color:#6C707E">credited from 11:02</span>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">The nudge</span>
-          <h3>It notices — and asks first</h3>
-          <p>A few engaged minutes on anything and Sinain offers to track it — with your goal and next steps already read. Ignore it and it fades; one tap tracks <em>and</em> calls your AI, credited back to when you really started.</p>
+          <span class="tour-step">Step 01 · It notices</span>
+          <h3>Sinain recognizes the task</h3>
+          <p>After a few focused minutes, Sinain names the thread and shows the goal and likely next steps. Confirm it with one tap, correct it, or ignore it and let the card fade.</p>
         </div>
       </article>
 
       <!-- 1 · Save Context -->
-      <article class="tour-card">
+      <article class="tour-card" hidden>
         <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
           <div style="width:238px;background:#1E1F22;border:1px solid rgba(31,128,57,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
             <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
               <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
-              <span style="font-size:12px;font-weight:600;color:#fff">Save context…</span>
-              <span style="margin-left:auto;font-size:13px;font-weight:600;font-family:var(--mono);color:#1F8039">30 min</span>
+              <span style="font-size:12px;font-weight:600;color:#fff">Save decision…</span>
+              <span style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--mono);color:#1F8039">Undo · 30s</span>
             </div>
-            <div style="display:flex;gap:4px;margin-bottom:8px">
+            <div style="display:none;gap:4px;margin-bottom:8px">
               <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#A8ADBD;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:4px">5m</span>
               <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#A8ADBD;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:4px">15m</span>
               <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#fff;background:rgba(31,128,57,.25);border:1px solid rgba(31,128,57,.55);border-radius:4px">30m</span>
               <span style="flex:1;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#A8ADBD;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:4px">60m</span>
             </div>
             <div style="background:#15161A;border-radius:6px;padding:8px;margin-bottom:8px">
-              <div style="display:flex;font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:5px"><span>COVERS · CLICK TO EXCLUDE</span><span style="margin-left:auto;font-family:var(--mono);font-weight:400">2 of 3 sources</span></div>
-              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#1F8039;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">IntelliJ IDEA</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">26 min</span></div>
-              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#1F8039;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">Chrome</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">12 min</span></div>
-              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;border:1px solid rgba(255,255,255,.25);border-radius:2px;box-sizing:border-box"></span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#6C707E">Slack</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">4 min</span></div>
+              <div style="font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:5px">DECISION</div>
+              <div style="font-size:10px;line-height:1.45;color:#D6DAE3;margin-bottom:7px">Read signatures from<br/><span style="color:#fff;font-family:var(--mono)">X-Webhook-Signature</span></div>
+              <div style="display:flex;align-items:center;gap:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)"><span style="width:8px;height:8px;border-radius:50%;background:#1F8039"></span><span style="font-size:9px;color:#A8ADBD">Checkout webhooks · v3 migration</span></div>
             </div>
             <div style="display:flex;gap:6px">
-              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#1F8039;border-radius:5px">Save 30 min</span>
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#1F8039;border-radius:5px">Save decision</span>
               <span style="height:24px;display:flex;align-items:center;justify-content:center;padding:0 10px;font-size:10px;color:#A8ADBD;border:1px solid rgba(255,255,255,.18);border-radius:5px">Cancel</span>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Save Context</span>
-          <h3>Remember what just happened</h3>
-          <p>Pick how far back — and which apps — and Sinain distills those minutes into searchable memory. 30 seconds to undo; nothing is saved without you asking.</p>
+          <span class="tour-step">Step 04 · Keep the result</span>
+          <h3>Save the decision, not the noise</h3>
+          <p>Keep the useful conclusion — the new webhook header and why it changed — so Sinain can bring it back next time. Saving is explicit, with 30 seconds to undo.</p>
         </div>
       </article>
 
       <!-- 2 · Call AI on it -->
-      <article class="tour-card">
+      <article class="tour-card" hidden>
         <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
           <div style="width:238px;background:#1E1F22;border:1px solid rgba(51,105,214,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
             <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
               <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#3369D6" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#3369D6"/></svg>
-              <span style="font-size:12px;font-weight:600;color:#fff">Call AI on…</span>
+              <span style="font-size:12px;font-weight:600;color:#fff">Ask Sinain…</span>
               <span style="margin-left:auto;font-size:13px;font-weight:600;font-family:var(--mono);color:#3369D6">30 min</span>
             </div>
             <div style="background:#15161A;border-radius:6px;padding:8px;margin-bottom:6px">
               <div style="display:flex;font-size:8px;font-weight:600;letter-spacing:.4px;color:#6C707E;margin-bottom:5px"><span>AI WILL KNOW · CLICK TO EXCLUDE</span></div>
-              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#3369D6;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">IntelliJ IDEA</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">26 min</span></div>
-              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#3369D6;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">mic</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">9 min</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#3369D6;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">Selected error</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">screen</span></div>
+              <div style="display:flex;align-items:center;gap:7px;padding:2px 0"><span style="width:10px;height:10px;background:#3369D6;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:7px;line-height:1">✓</span><span style="flex:1;font-size:10px;font-family:var(--mono);color:#D6DAE3">v3 release note</span><span style="font-size:8px;font-family:var(--mono);color:#6C707E">related</span></div>
             </div>
             <div style="font-size:10px;color:#6C707E;margin-bottom:8px">brief composed &amp; redacted before anything leaves</div>
             <div style="display:flex;gap:6px">
-              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#3369D6;border-radius:5px">Call AI</span>
-              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#1F8039;border-radius:5px">Call sinain</span>
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#fff;background:#3369D6;border-radius:5px">Ask Sinain</span>
+              <span style="flex:1;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#A8ADBD;border:1px solid rgba(255,255,255,.18);border-radius:5px">Edit context</span>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Call AI</span>
-          <h3>Brief an AI on your last minutes</h3>
-          <p>A ~1.5s situation brief of the range — as text to the agent you pick, or as the seed of a <strong>live voice call with Sinain</strong>: it sees your screen, you just talk.</p>
+          <span class="tour-step">Step 02 · Get an answer</span>
+          <h3>Ask without explaining the setup</h3>
+          <p>Sinain combines the selected error with the relevant release note, then explains the cause, the fix, and the test to add. You can inspect or edit the context before sending.</p>
         </div>
       </article>
 
       <!-- 3 · Context from screen (region) -->
-      <article class="tour-card">
+      <article class="tour-card" style="order:2">
         <div class="tour-vis" style="background:#F7F8FA;cursor:crosshair">
           <div class="tv-skel" style="opacity:.5">
             <div style="height:10px;width:140px;background:#DFE1E5;border-radius:3px;margin-bottom:14px"></div>
@@ -750,14 +774,14 @@
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Context from Screen</span>
-          <h3>Point at anything</h3>
-          <p>Drag a box around any part of your screen — like a screenshot. Sinain enriches the selection with your recent activity and hands it to your AI.</p>
+          <span class="tour-step">Step 02 · Steer the work</span>
+          <h3>Show Sinain what matters</h3>
+          <p>Point to the checkout error or any new detail that changes the task. Sinain adds it to the ongoing context and updates the agents, so they continue in the right direction.</p>
         </div>
       </article>
 
       <!-- 4 · Context from clipboard -->
-      <article class="tour-card">
+      <article class="tour-card" hidden>
         <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center">
           <div style="width:246px;background:#1E1F22;border:1px solid rgba(31,128,57,.45);border-radius:10px;padding:10px;box-shadow:0 8px 26px rgba(0,0,0,.4)">
             <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
@@ -782,7 +806,7 @@
       </article>
 
       <!-- 5 · Where it lands -->
-      <article class="tour-card">
+      <article class="tour-card" style="order:3">
         <div class="tour-vis" style="background:#171819;display:flex;align-items:center;justify-content:center;gap:14px;padding:0 22px;box-sizing:border-box">
           <div style="position:relative;flex:1;max-width:142px;background:#1E1F22;border:1px solid #1F8039;border-radius:8px;overflow:hidden">
             <div style="height:74px;background:#15161a;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;padding:10px">
@@ -791,7 +815,7 @@
             </div>
             <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
               <svg width="13" height="13" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="none" stroke="#1F8039" stroke-width="3"/><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"/></svg>
-              <span style="font-size:11px;font-weight:500">Sinain HUD</span>
+              <span style="font-size:10px;font-weight:500">launch deck · working</span>
             </div>
           </div>
           <span style="font-size:12px;color:#6C707E">or</span>
@@ -802,25 +826,25 @@
               <span style="width:4px;height:14px;background:#3369D6;border-radius:2px"></span>
               <span style="width:4px;height:24px;background:#3369D6;border-radius:2px"></span>
               <span style="width:4px;height:12px;background:#3369D6;border-radius:2px"></span>
-              <span style="margin-left:10px;height:18px;display:inline-flex;align-items:center;padding:0 8px;background:#B3361C;border-radius:4px;color:#fff;font-size:9px">End</span>
+              <span style="margin-left:10px;height:18px;display:inline-flex;align-items:center;padding:0 8px;background:#3369D6;border-radius:4px;color:#fff;font-size:9px">2 / 3</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3369D6" stroke-width="1.8"><path d="M4 12h2l2-5 3 10 2-7 2 4h5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span style="font-size:11px;font-weight:500;color:#A8ADBD">Sinain voice</span>
+              <span style="font-size:10px;font-weight:500;color:#A8ADBD">checkout · testing</span>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Talk to it</span>
-          <h3>Chat, terminal — or a live call</h3>
-          <p>Every context opens a thread: built-in chat, a terminal agent, an app you already use — or a hands-free voice call where Sinain watches your screen as you work.</p>
+          <span class="tour-step">Step 03 · Work moves forward</span>
+          <h3>See progress while you switch</h3>
+          <p>Move to another task while your agents keep going. Sinain keeps each thread separate and shows what changed, what finished, and where an agent is waiting for you.</p>
         </div>
       </article>
 
       <!-- 6 · Move a thread -->
-      <article class="tour-card">
+      <article class="tour-card" style="order:4">
         <div class="tour-vis" style="background:#171819;position:relative;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;box-sizing:border-box">
-          <div style="align-self:flex-start;max-width:84%;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:10px 10px 10px 2px;padding:8px 11px;font-size:12px;line-height:16px;color:#A8ADBD;margin-bottom:12px">I can't run commands myself — want me to hand this to a terminal agent?</div>
+          <div style="align-self:flex-start;max-width:84%;background:#2B2D30;border:1px solid rgba(255,255,255,.08);border-radius:10px 10px 10px 2px;padding:8px 11px;font-size:12px;line-height:16px;color:#A8ADBD;margin-bottom:12px">Back to checkout webhooks? Test still failing · agent waiting.</div>
           <div style="position:relative;display:flex;align-items:center;gap:8px;background:#1E1F22;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:7px 10px">
             <div style="width:28px;height:28px;border-radius:6px;background:rgba(31,128,57,.16);border:1px solid #1F8039;display:flex;align-items:center;justify-content:center;flex:none">
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="7" r="1.6"/><path d="M4 5.6v4.8M5.6 12h3.2a2.6 2.6 0 0 0 2.6-2.6V8.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -828,16 +852,16 @@
             <span style="flex:1;font-size:12px;color:#6C707E">Type a message</span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="#6C707E"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
             <div style="position:absolute;left:0;bottom:40px;width:184px;background:#2B2D30;border:1px solid rgba(255,255,255,.14);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.45);overflow:hidden">
-              <div style="padding:7px 11px;font-size:11px;color:#6C707E;border-bottom:1px solid rgba(255,255,255,.08)">Continue in</div>
-              <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;background:rgba(31,128,57,.16);border-left:2px solid #1F8039"><span style="width:16px;height:16px;border-radius:4px;background:#834DF0;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">C</span><span style="font-size:12px;font-family:var(--mono)">claude code</span></div>
-              <div style="display:flex;align-items:center;gap:8px;padding:7px 11px"><span style="width:16px;height:16px;border-radius:4px;background:#1F8039;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">X</span><span style="font-size:12px;font-family:var(--mono)">codex</span></div>
+              <div style="padding:7px 11px;font-size:11px;color:#6C707E;border-bottom:1px solid rgba(255,255,255,.08)">Re-entry brief</div>
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;background:rgba(31,128,57,.16);border-left:2px solid #1F8039"><span style="width:16px;height:16px;border-radius:4px;background:#1F8039;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">G</span><span style="font-size:11px;font-family:var(--mono)">goal + last decision</span></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 11px"><span style="width:16px;height:16px;border-radius:4px;background:#3369D6;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">N</span><span style="font-size:11px;font-family:var(--mono)">blocker + next step</span></div>
             </div>
           </div>
         </div>
         <div class="tour-body">
-          <span class="tour-step">Hand it off</span>
-          <h3>Move it to any agent</h3>
-          <p>Hand the whole thread — its context and your messages — to a coding agent like claude code or codex. Nothing is lost, nothing re-explained.</p>
+          <span class="tour-step">Step 04 · You rejoin</span>
+          <h3>Come back at the decision point</h3>
+          <p>When you return, Sinain restores the goal, last decision, current blocker, and next step in one glance. Resume with the agent already briefed — no status meeting with your own tools.</p>
         </div>
       </article>
 
@@ -1037,8 +1061,8 @@
         </li>
         <li>
           <div>
-            <h4>Ask your first question</h4>
-            <p>Select something on screen or use your recent work, then ask Sinain for help.</p>
+            <h4>Start working as usual</h4>
+            <p>Open a task and keep going. After a few focused minutes, Sinain notices what you’re working on and quietly offers to help.</p>
           </div>
         </li>
       </ol>
@@ -1106,8 +1130,8 @@
     <div class="cta-card">
       <div>
         <span class="eyebrow"><span class="bar"></span> Ready?</span>
-        <h2>Ask for help without explaining everything first.</h2>
-        <p>Install Sinain and let your AI understand the work already in front of you.</p>
+        <h2>Stop carrying context between your AI tools.</h2>
+        <p>Install Sinain once. Pick up where you left off in any AI you use.</p>
       </div>
       <div class="right">
         <a class="btn primary btn-lg" href="https://github.com/anthillnet/sinain-hud/releases/download/macos-v0.3.0/Sinain.dmg" data-umami-event="download-macos-cta">⬇ Download for macOS</a>
@@ -1133,7 +1157,7 @@
           <span>SINAIN</span>
           <span class="sub mono">/ context os</span>
         </div>
-        <p class="blurb">Sinain helps your AI assistants understand what you are working on, while keeping you in control of privacy and sharing.</p>
+        <p class="blurb">Sinain gives every AI you use the same context, so you can switch tools without starting over.</p>
         <p style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-faint);letter-spacing:.04em">FSL-1.1-ALv2 · anthillnet/sinain-hud</p>
       </div>
       <div>
@@ -1167,7 +1191,7 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
         contact@sinain.com
       </a>
-      <span>AI HELP THAT UNDERSTANDS YOUR WORK</span>
+      <span>YOUR AI TOOLS, WORKING AS ONE</span>
     </div>
   </div>
 </footer>
@@ -1180,6 +1204,60 @@
     const show = () => { fb.style.display = 'none'; img.style.display = ''; };
     img.addEventListener('load', show);
     if (img.complete && img.naturalWidth > 0) show();
+  })();
+
+  // ─── Split-flap task examples ───
+  (function(){
+    const display = document.getElementById('task-board-value');
+    if(!display) return;
+
+    const tasks = [
+      'finding work worth the forms',
+      'wrestling with your thesis',
+      'planning a mildly epic trip',
+      'fixing the bug that has won',
+      'making peace with 47 tabs',
+      'writing the email of destiny',
+      'turning vibes into a roadmap',
+      'renaming final-final-v7'
+    ];
+    const slotCount = Math.max(...tasks.map(task => task.length));
+    let taskIndex = 0;
+    let changing = false;
+
+    const renderBoard = task => {
+      display.textContent = '';
+      task.toUpperCase().padEnd(slotCount, ' ').split('').forEach(letter => {
+        const tile = document.createElement('span');
+        tile.className = 'task-board-char';
+        tile.textContent = letter === ' ' ? '\u00a0' : letter;
+        display.appendChild(tile);
+      });
+    };
+
+    renderBoard(tasks[0]);
+    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    setInterval(() => {
+      if(changing || document.hidden) return;
+      changing = true;
+      taskIndex = (taskIndex + 1) % tasks.length;
+      const nextLetters = tasks[taskIndex].toUpperCase().padEnd(slotCount, ' ').split('');
+      const tiles = display.querySelectorAll('.task-board-char');
+      tiles.forEach((tile, index) => {
+        setTimeout(() => {
+          tile.classList.add('is-flipping');
+          setTimeout(() => {
+            const letter = nextLetters[index];
+            tile.textContent = letter === ' ' ? '\u00a0' : letter;
+          }, 130);
+          setTimeout(() => tile.classList.remove('is-flipping'), 270);
+        }, index * 28);
+      });
+      setTimeout(() => {
+        changing = false;
+      }, slotCount * 28 + 300);
+    }, 3600);
   })();
 
 
