@@ -42,11 +42,18 @@ class RangeChooser extends StatefulWidget {
   final ChooserKind kind;
   final List<RangeOption> options;
   final int defaultMinutes;
+  final List<String> chatAgents;
+  final List<String> terminalAgents;
+  final String? initialChatAgent;
+  final String? initialTerminalAgent;
+  final bool initialIsTerminal;
 
   /// Confirm with the picked range and source scope: `apps` is the selected
   /// subset of the range's sources (app names + "mic"), or null when nothing
   /// was deselected (= everything, no scope).
   final void Function(int minutes, List<String>? apps) onConfirm;
+  final void Function(int minutes, List<String>? apps, String agent,
+      bool isTerminal) onConfirmRoute;
 
   /// Second confirm for [ChooserKind.call]: "Call sinain" (live voice call),
   /// next to the primary "Call AI" (text handoff). Null hides the button.
@@ -71,7 +78,13 @@ class RangeChooser extends StatefulWidget {
     required this.kind,
     required this.options,
     required this.onConfirm,
+    required this.onConfirmRoute,
     required this.onClose,
+    required this.chatAgents,
+    required this.terminalAgents,
+    this.initialChatAgent,
+    this.initialTerminalAgent,
+    required this.initialIsTerminal,
     this.onConfirmAlt,
     this.defaultMinutes = 30,
     this.previewAt,
@@ -399,8 +412,20 @@ class _RangeChooserState extends State<RangeChooser> {
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
             child: Row(children: [
               Expanded(
-                child: _verbButton(_verb, _accent,
-                    () => widget.onConfirm(_minutes, _selectedApps)),
+                child: widget.kind == ChooserKind.call
+                    ? HandoffControl(
+                        chatAgents: widget.chatAgents,
+                        terminalAgents: widget.terminalAgents,
+                        initialChatAgent: widget.initialChatAgent,
+                        initialTerminalAgent: widget.initialTerminalAgent,
+                        initialIsTerminal: widget.initialIsTerminal,
+                        accent: _accent,
+                        verb: 'Call AI',
+                        onConfirm: (agent, isTerminal) => widget.onConfirmRoute(
+                            _minutes, _selectedApps, agent, isTerminal),
+                      )
+                    : _verbButton(_verb, _accent,
+                        () => widget.onConfirm(_minutes, _selectedApps)),
               ),
               if (widget.kind == ChooserKind.call &&
                   widget.onConfirmAlt != null) ...[

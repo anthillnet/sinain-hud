@@ -32,7 +32,7 @@ import 'capture/session_list_view.dart';
 import 'agents/agent_approval_card.dart';
 import 'agents/agent_island_bar.dart';
 
-enum _IslandView { bar, stack, approval, roi }
+enum _IslandView { bar, stack, approval, roi, cards }
 
 /// Top-level shell managing the 3-state overlay: Eye → Controls → Chat.
 class OverlayShell extends StatefulWidget {
@@ -76,6 +76,7 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   double _islandFrameWidthFor(WebSocketService ws, _IslandView view) {
+    if (view == _IslandView.cards) return 396;
     final barWidth = _islandBarWidthFor(ws);
     if (view == _IslandView.bar) {
       if (_notchHeight > 0 || barWidth >= 300) return barWidth;
@@ -796,12 +797,14 @@ class OverlayShellState extends State<OverlayShell> {
             _IslandView.stack => _notchHeight + 406,
             _IslandView.approval => _notchHeight + 300,
             _IslandView.roi => _notchHeight + 338,
+            _IslandView.cards => _notchHeight + 500,
           }
         : switch (_islandView) {
             _IslandView.bar => _menuBarHeight,
             _IslandView.stack => 440.0,
             _IslandView.approval => 320.0,
             _IslandView.roi => 372.0,
+            _IslandView.cards => _menuBarHeight + 500,
           };
     final x = notchMode
         ? screen['x']! + _islandNotchInfo!['leftAuxWidth']! - 46
@@ -1255,6 +1258,7 @@ class OverlayShellState extends State<OverlayShell> {
   void _transitionTo(HudState target) {
     if (_state == target) return;
     if (_parked && target != HudState.eye) {
+      if (_cardMode) setState(() => _cardMode = false);
       _unparkIsland().then((_) {
         if (mounted) _transitionTo(target);
       });
@@ -2232,6 +2236,10 @@ class OverlayShellState extends State<OverlayShell> {
   void _enterCardMode() {
     if (_state == HudState.chat) return;
     if (!_cardMode) setState(() => _cardMode = true);
+    if (_parked) {
+      _setIslandView(_IslandView.cards);
+      return;
+    }
     // Always resync: a card arriving while chip-only card mode is open must
     // grow the window back to card height.
     _resizeForCardPanel();
@@ -2266,6 +2274,14 @@ class OverlayShellState extends State<OverlayShell> {
   /// Leave card mode once nothing is displayed; restore the eye-sized window.
   void _maybeExitCardMode() {
     if (!_cardMode) return;
+    // Parked chip-only card mode has nothing to render — the island bar
+    // already carries the session-chip affordances (pills), so snap straight
+    // back to the bar instead of holding an empty 500px cards view open.
+    if (_parked && !_hasCards) {
+      setState(() => _cardMode = false);
+      _setIslandView(_IslandView.bar);
+      return;
+    }
     if (_chooserFor != null ||
         _activeBrief != null ||
         _activeEnrich != null ||
@@ -2279,11 +2295,19 @@ class OverlayShellState extends State<OverlayShell> {
       // Still showing something — but the content class may have shrunk
       // (last card closed, chip remains): resync the window size so the
       // invisible area never outgrows the visible panel.
-      _resizeForCardPanel();
+      if (_parked) {
+        _setIslandView(_IslandView.cards);
+      } else {
+        _resizeForCardPanel();
+      }
       return;
     }
     setState(() => _cardMode = false);
-    _resizeWindowForState(_state);
+    if (_parked) {
+      _setIslandView(_IslandView.bar);
+    } else {
+      _resizeWindowForState(_state);
+    }
   }
 
   // ── Save offer lifecycle (DESIGN-SAVE-OFFER.md) ───────────────────────────
@@ -2560,7 +2584,7 @@ class OverlayShellState extends State<OverlayShell> {
 
   /// The stacked capture cards (receipt · enrich · brief · chooser). Rendered
   /// bottom-right of the chat panel, and as the body of the card-mode panel.
-  Widget _captureCardsColumn() {
+  Widget _buildCaptureCards() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -2749,6 +2773,23 @@ class OverlayShellState extends State<OverlayShell> {
               kind: _chooserFor == 'save' ? ChooserKind.save : ChooserKind.call,
               options: _rangeOptions,
               onConfirm: _pickRange,
+              chatAgents: context.read<WebSocketService>().availableAgents,
+              terminalAgents:
+                  context.read<WebSocketService>().terminalAvailable,
+              initialChatAgent:
+                  context.read<WebSocketService>().escalationAgent,
+              initialTerminalAgent:
+                  context.read<WebSocketService>().terminalAgent,
+              initialIsTerminal: _summonDest == 'term',
+              onConfirmRoute: (minutes, apps, agent, isTerminal) {
+                final ws = context.read<WebSocketService>();
+                final lane = isTerminal ? 'terminal' : 'chat';
+                final current =
+                    isTerminal ? ws.terminalAgent : ws.escalationAgent;
+                if (agent != current) ws.setAgent(lane, agent);
+                setState(() => _summonDest = isTerminal ? 'term' : 'chat');
+                _pickRange(minutes, apps);
+              },
               defaultMinutes: _offerPrefillMinutes ?? 30,
               preselectedApps:
                   _adjustingOfferId != null ? _offerPrefillApps : null,
@@ -2816,7 +2857,7 @@ class OverlayShellState extends State<OverlayShell> {
         child: SingleChildScrollView(
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.all(10),
-          child: _captureCardsColumn(),
+          child: _buildCaptureCards(),
         ),
       ),
     );
@@ -3073,6 +3114,13 @@ class OverlayShellState extends State<OverlayShell> {
                     ),
                   ),
                 ),
+              ),
+            ),
+          if (_islandView == _IslandView.cards)
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(8),
+                child: _buildCaptureCards(),
               ),
             ),
           if (_islandView == _IslandView.roi && _islandRoi != null)
@@ -3641,7 +3689,7 @@ class OverlayShellState extends State<OverlayShell> {
                 Positioned(
                   right: 10,
                   bottom: 10,
-                  child: _captureCardsColumn(),
+                  child: _buildCaptureCards(),
                 ),
               ],
             ),
