@@ -48,7 +48,7 @@ if ! command -v frps >/dev/null || [[ "$(frps --version 2>/dev/null || true)" !=
 fi
 
 say "node services + frps config"
-install -m644 "$SCRIPT_DIR"/lib.mjs "$SCRIPT_DIR"/oauth-as.mjs "$SCRIPT_DIR"/mcp-authz.mjs "$SCRIPT_DIR"/frps-device-authz.mjs "$APP_DIR"/
+install -m644 "$SCRIPT_DIR"/lib.mjs "$SCRIPT_DIR"/oauth-as.mjs "$SCRIPT_DIR"/idp.mjs "$SCRIPT_DIR"/accounts.mjs "$SCRIPT_DIR"/mcp-authz.mjs "$SCRIPT_DIR"/frps-device-authz.mjs "$APP_DIR"/
 install -m644 "$SCRIPT_DIR"/frps.toml /etc/frp/frps.toml
 
 say "systemd units"

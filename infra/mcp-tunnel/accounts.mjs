@@ -1,5 +1,5 @@
 // Account store for the optional ChatGPT-only identity layer.
-// Holds ONLY email + the account↔device map — never any user content.
+// Holds ONLY email + the account↔device map + waitlist flag — never any user content.
 // Small atomic JSON store (SQLite is a drop-in later). See
 // docs/DESIGN-CHATGPT-ACCOUNTS.md.
 
@@ -42,6 +42,15 @@ export class AccountStore {
 
   getAccount(accountId) {
     return this.data.accounts[accountId] || null;
+  }
+
+  markWaitlisted(accountId) {
+    const account = this.data.accounts[accountId];
+    if (!account) throw new Error("unknown account");
+    if (Object.hasOwn(account, "waitlisted")) return;
+    account.waitlisted = true;
+    account.waitlistedAt = nowIso();
+    this._persist();
   }
 
   /** Link a device handle to an account (idempotent). A handle belongs to one

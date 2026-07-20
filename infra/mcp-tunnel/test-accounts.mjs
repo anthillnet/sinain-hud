@@ -24,6 +24,7 @@ const pubPem = dev.publicKey.export({ type: "spki", format: "pem" });
 const privPem = dev.privateKey.export({ type: "pkcs8", format: "pem" });
 const handle = deriveHandle(pubPem);
 const EMAIL = "alice@example.com";
+const WAITLIST_EMAIL = "waitlist@example.com";
 
 const KEY_DIR = mkdtempSync(join(tmpdir(), "sinain-acct-"));
 const AS_PORT = 18997, AUTHZ_PORT = 18996, FRPS_PORT = 18998;
@@ -54,12 +55,12 @@ const authz = spawn(process.execPath, ["mcp-authz.mjs"], { cwd: import.meta.dirn
 await sleep(600);
 
 // helper: run the stub login leg (302 → stub login → 302 → /idp/callback)
-async function stubLogin(startUrl) {
+async function stubLogin(startUrl, email = EMAIL) {
   let r = await fetch(startUrl, { redirect: "manual" });
   if (r.status !== 302) throw new Error(`expected 302 to stub login, got ${r.status}`);
   const login = new URL(r.headers.get("location"));            // /idp-stub/login?state&cb
   const state = login.searchParams.get("state"), cb = login.searchParams.get("cb");
-  r = await post(`${ISSUER}/idp-stub/login`, form({ email: EMAIL, state, cb }),
+  r = await post(`${ISSUER}/idp-stub/login`, form({ email, state, cb }),
     { "content-type": "application/x-www-form-urlencoded" });  // → 302 /idp/callback?code&state
   if (r.status !== 302) throw new Error(`stub login POST: ${r.status}`);
   return fetch(r.headers.get("location"), { redirect: "manual" }); // GET /idp/callback
@@ -77,7 +78,14 @@ try {
   ok(/^acct_[0-9a-f]{24}$/.test(acctId || ""), "device mapped to an account: " + acctId);
   ok(store.accounts[acctId]?.email === EMAIL, "account carries the IdP email");
 
-  // 2) ChatGPT authorize (account login) → PKCE token sub=acct_…
+  // 2) signup → account created + marked waitlisted
+  r = await stubLogin(`${ISSUER}/signup`, WAITLIST_EMAIL);
+  ok(r.status === 200 && (await r.text()).includes("waitlist"), "signup completes with waitlist confirmation");
+  const signupStore = JSON.parse(readFileSync(join(KEY_DIR, "accounts.json"), "utf8"));
+  const waitlisted = Object.values(signupStore.accounts).find((a) => a.email === WAITLIST_EMAIL);
+  ok(waitlisted?.waitlisted === true && !!waitlisted.waitlistedAt, "signup account is marked waitlisted with a timestamp");
+
+  // 3) ChatGPT authorize (account login) → PKCE token sub=acct_…
   const verifier = crypto.randomBytes(32).toString("base64url");
   const challenge = crypto.createHash("sha256").update(verifier).digest().toString("base64url");
   const authUrl = `${ISSUER}/authorize?` + form({
@@ -99,7 +107,7 @@ try {
   ok(r.status === 200 && claims?.sub === acctId, "token subject is the account id");
   ok(claims?.resource === RESOURCE, "token bound to the single shared resource");
 
-  // 3) mcp-authz: account token → online device
+  // 4) mcp-authz: account token → online device
   // bring the device "online" by simulating frps NewProxy
   const fsig = signEd25519(privPem, handle);
   const np = await post(`http://127.0.0.1:${FRPS_PORT}/handle`, JSON.stringify({
@@ -113,14 +121,14 @@ try {
   r = await verify(tok.access_token);
   ok(r.status === 204 && r.headers.get("x-mcp-handle") === handle, "account token routes to the online device (204 + X-Mcp-Handle)");
 
-  // 4) take the device offline → 503
+  // 5) take the device offline → 503
   await post(`http://127.0.0.1:${FRPS_PORT}/handle`, JSON.stringify({
     op: "CloseProxy", content: { user: { run_id: "run-1" }, proxy_name: "sinain-mcp" },
   }), { "content-type": "application/json" });
   r = await verify(tok.access_token);
   ok(r.status === 503, "offline account device → 503 device_offline");
 
-  // 5) tampered token rejected
+  // 6) tampered token rejected
   r = await verify(tok.access_token.slice(0, -3) + "xyz");
   ok(r.status === 401, "tampered account token → 401");
 

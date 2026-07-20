@@ -18,7 +18,7 @@ export class Idp {
   get isStub() { return this.mode === "stub"; }
 
   /** Where to send the browser to authenticate. `callbackUrl` is our /idp/callback. */
-  async authorizeUrl(state, callbackUrl) {
+  async authorizeUrl(state, callbackUrl, opts = {}) {
     if (this.isStub) {
       // Local fake login page served by the AS (/idp-stub/login).
       return `${this.asIssuer}/idp-stub/login?state=${enc(state)}&cb=${enc(callbackUrl)}`;
@@ -28,6 +28,7 @@ export class Idp {
       response_type: "code", client_id: this.clientId, redirect_uri: callbackUrl,
       scope: "openid email", state,
     });
+    if (opts.screenHint) p.set("screen_hint", opts.screenHint);
     return `${m.authorization_endpoint}?${p}`;
   }
 
