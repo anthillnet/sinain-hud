@@ -4,7 +4,8 @@ import type { Profiler } from "../profiler.js";
 import type { CostTracker } from "../cost/tracker.js";
 import { LocalTranscriptionBackend, type TranscriptionBackend } from "./transcription-local.js";
 import { WhisperServerBackend } from "./transcription-server.js";
-import { log, warn, error, debug } from "../log.js";
+import { log, warn, error, debug, logSnippet } from "../log.js";
+import { redactChatPayload } from "../privacy/cloud-egress.js";
 
 const TAG = "transcribe";
 
@@ -204,7 +205,7 @@ export class TranscriptionService extends EventEmitter {
 
     const filter = shouldDropTranscript(text);
     if (filter.drop) {
-      debug(TAG, `dropping transcript (${filter.reason}): "${text.slice(0, 80)}"`);
+      debug(TAG, `dropping transcript (${filter.reason}): ${logSnippet(text)}`);
       return;
     }
 
@@ -261,7 +262,7 @@ export class TranscriptionService extends EventEmitter {
           "Authorization": `Bearer ${this.config.openrouterApiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
+        body: JSON.stringify(redactChatPayload({
           model: this.config.geminiModel,
           messages: [{
             role: "user",
@@ -294,7 +295,7 @@ export class TranscriptionService extends EventEmitter {
               })() },
             ],
           }],
-        }),
+        })),
         signal: controller.signal,
       });
 
@@ -342,11 +343,11 @@ export class TranscriptionService extends EventEmitter {
 
       const filter = shouldDropTranscript(text);
       if (filter.drop) {
-        debug(TAG, `dropping transcript (${filter.reason}): "${text.slice(0, 80)}"`);
+        debug(TAG, `dropping transcript (${filter.reason}): ${logSnippet(text)}`);
         return;
       }
 
-      log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
+      log(TAG, `transcript (${elapsed}ms): ${logSnippet(text)}`);
 
       const result: TranscriptResult = {
         text,

@@ -4,6 +4,7 @@ import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import { buildContextWindow } from "./context-window.js";
 import { buildLineList, resolveLineRegions, placeholderFor } from "./region-lines.js";
 import { log, debug, error } from "../log.js";
+import { redactChatPayload } from "../privacy/cloud-egress.js";
 
 const TAG = "region-slm";
 const MAX_REGIONS = 2;  // quality over quantity — better to surface fewer, real ones
@@ -197,10 +198,10 @@ export class RegionDetector {
       const response = await fetch(cfg.cloudEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.cloudApiKey}` },
-        body: JSON.stringify({
+        body: JSON.stringify(redactChatPayload({
           model: cfg.cloudModel, messages, temperature: 0.2,
           max_tokens: cfg.maxTokens, response_format: { type: "json_object" },
-        }),
+        })),
         signal,
       });
       if (!response.ok) throw new Error(`openrouter ${response.status}: ${await response.text()}`);

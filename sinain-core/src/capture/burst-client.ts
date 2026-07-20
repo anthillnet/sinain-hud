@@ -1,4 +1,5 @@
 import type { BurstConfig } from "../types.js";
+import { redactChatPayload } from "../privacy/cloud-egress.js";
 
 /**
  * Minimal OpenAI-compatible client for the deliberate-capture burst lane.
@@ -70,7 +71,7 @@ export async function burstCall(
         "Content-Type": "application/json",
         "User-Agent": "sinain-core-burst/0.1",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(redactChatPayload(body)),
       signal: controller.signal,
     });
     if (!res.ok) {

@@ -15,6 +15,7 @@ const AUTH_CREDENTIALS = [
 const API_TOKENS = [
   /\bBearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
   /\bsk-[A-Za-z0-9]{20,}/g,
+  /\bcsk-[A-Za-z0-9]{20,}/g,
   /\bghp_[A-Za-z0-9]{36}/g,
   /\bghs_[A-Za-z0-9]{36}/g,
   /\b(AKIA|ASIA)[A-Z0-9]{16}\b/g,
@@ -55,7 +56,7 @@ const ALL_PATTERNS: RegExp[] = [
 ];
 
 export function redactText(text: string): string {
-  let result = text;
+  let result = text.replace(/<private>[\s\S]*?<\/private>/gi, "[REDACTED]");
   for (const pattern of ALL_PATTERNS) {
     result = result.replace(pattern, "[REDACTED]");
   }

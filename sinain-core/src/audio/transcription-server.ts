@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { AudioChunk, TranscriptResult } from "../types.js";
-import { log, warn, error, debug } from "../log.js";
+import { log, warn, error, debug, logSnippet } from "../log.js";
 import { LocalTranscriptionBackend, composeWhisperPrompt, type LocalTranscriptionConfig, type TranscriptionBackend } from "./transcription-local.js";
 
 const TAG = "transcribe-server";
@@ -173,7 +173,7 @@ export class WhisperServerBackend implements TranscriptionBackend {
         debug(TAG, `empty result (${elapsed}ms)`);
         return null;
       }
-      log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
+      log(TAG, `transcript (${elapsed}ms): ${logSnippet(text)}`);
       return {
         text,
         source: "whisper",

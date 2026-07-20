@@ -3,7 +3,7 @@ import { writeFile, unlink, rmdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AudioChunk, TranscriptResult } from "../types.js";
-import { log, warn, error, debug } from "../log.js";
+import { log, warn, error, debug, logSnippet } from "../log.js";
 
 const TAG = "transcribe-local";
 
@@ -79,7 +79,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
         return null;
       }
 
-      log(TAG, `transcript (${elapsed}ms): "${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`);
+      log(TAG, `transcript (${elapsed}ms): ${logSnippet(text)}`);
 
       return {
         text,
