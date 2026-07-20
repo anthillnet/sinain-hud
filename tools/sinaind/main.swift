@@ -409,16 +409,6 @@ func buildSpecs() -> [ChildSpec] {
         }
     }
 
-    let chatDir = "\(root)/sinain-chat-agent"
-    if fm.fileExists(atPath: "\(chatDir)/sidecar.py") {
-        let venvPy = "\(chatDir)/.venv/bin/python"
-        let py = fm.isExecutableFile(atPath: venvPy) ? venvPy : which("python3")
-        if let py = py {
-            specs.append(ChildSpec(name: "chat", tag: "chat", executable: py,
-                                   arguments: ["sidecar.py"], cwd: chatDir, critical: false))
-        }
-    }
-
     if !flagNoOverlay {
         let products = "\(root)/overlay/build/macos/Build/Products"
         let appBins = ["\(products)/Release/sinain_hud.app/Contents/MacOS/sinain_hud",
