@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Create your Sinain account</title>
+<meta name="description" content="Create your Sinain account and join the Sinain Pro waitlist." />
+<link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+<script defer src="https://analytics.sinain.duckdns.org/script.js" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
+<style>
+  :root{
+    --bg:#ffffff; --bg-elev:#f8fafc; --bg-hover:#f1f5f9; --fg:#0f172a; --fg-dim:#475569; --fg-faint:#94a3b8;
+    --accent:#2563eb; --accent-dim:#1d4ed8; --accent-soft:rgba(37,99,235,0.10); --border:#e2e8f0; --border-strong:#cbd5e1;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.6;font-size:17px}
+  .wrap{max-width:48rem;margin:0 auto;padding:3.5rem 1.4rem 5rem}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  header{margin-bottom:3rem}
+  .logo{display:inline-flex;align-items:center;gap:.7rem;color:var(--fg)}
+  .logo:hover{text-decoration:none}
+  .logo img{width:34px;height:34px;border-radius:8px}
+  .logo .name{font-weight:700;font-size:1.15rem}
+  h1{font-size:2.35rem;line-height:1.15;letter-spacing:-.02em;margin:0 0 .8rem}
+  h2{font-size:1.35rem;margin:0 0 .65rem}
+  .hero-sub{font-size:1.1rem;color:var(--fg-dim);margin:0;max-width:42rem}
+  section{margin-top:2.5rem}
+  .card{background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:1.4rem 1.5rem}
+  .card p{color:var(--fg-dim);margin:.55rem 0}
+  .actions{margin-top:1.25rem}
+  .btn{display:inline-flex;align-items:center;background:var(--accent);color:#fff;border:1px solid var(--accent);padding:11px 18px;border-radius:8px;font-weight:600;line-height:1;transition:background .15s,border-color .15s}
+  .btn:hover{background:var(--accent-dim);border-color:var(--accent-dim);color:#fff;text-decoration:none}
+  .btn.disabled{opacity:.45;pointer-events:none}
+  .consent{margin-top:1.2rem}
+  .consent-row{display:flex;align-items:flex-start;gap:.65rem}
+  .consent-row input{width:18px;height:18px;margin:.25rem 0 0;accent-color:var(--accent);flex:none}
+  .consent-row label{cursor:pointer}
+  details{margin-top:.85rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:.8rem 1rem}
+  summary{cursor:pointer;color:var(--accent);font-weight:600}
+  details ol{margin:1rem 0 .2rem;padding-left:1.4rem}
+  details li{margin:.65rem 0;color:var(--fg-dim)}
+  details li strong{color:var(--fg)}
+  .pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:1.1rem}
+  .pillar{background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:1.2rem}
+  .pillar h3{font-size:1rem;margin:0 0 .45rem}
+  .pillar p{font-size:.92rem;color:var(--fg-dim);margin:0}
+  footer{margin-top:3rem;padding-top:1.4rem;border-top:1px solid var(--border);color:var(--fg-faint);font-size:.9rem}
+  @media (max-width:640px){
+    .wrap{padding-top:2rem}
+    h1{font-size:1.9rem}
+    .pillars{grid-template-columns:1fr}
+    .btn{width:100%;justify-content:center}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="/">
+      <img src="../logo-240.png" alt="Sinain" />
+      <span class="name">Sinain</span>
+    </a>
+  </header>
+
+  <main>
+    <h1>Create your Sinain account</h1>
+    <p class="hero-sub">Registering creates your Sinain account and puts you on the <strong>Pro waitlist</strong> — you’ll be first in line when Pro opens up.</p>
+
+    <section class="card" aria-labelledby="account-title">
+      <h2 id="account-title">One account, no new password</h2>
+      <p>Your account is created via OAuth: you sign in with an identity provider such as Google, so there is no new password to manage.</p>
+      <p>It links your devices and carries your Pro waitlist spot. When Pro opens, it is how the Sinain agent knows it’s you.</p>
+
+      <div class="actions">
+        <a id="signup" class="btn disabled" href="https://auth.sinain.com/signup" aria-disabled="true" tabindex="-1" data-umami-event="register-oauth-signup">Create Sinain account →</a>
+      </div>
+
+      <div class="consent">
+        <div class="consent-row">
+          <input type="checkbox" id="data-terms" />
+          <label for="data-terms">I agree to the Sinain data terms.</label>
+        </div>
+        <details>
+          <summary>Default data terms</summary>
+          <ol>
+            <li><strong>Account data.</strong> We store your email address and the OAuth identity your provider shares, plus your waitlist status. Nothing else is collected at signup.</li>
+            <li><strong>Your content stays on your machine.</strong> Screen text, audio transcripts, and saved knowledge are processed on your device or through the AI providers you configure — they are not sent to or stored on Sinain servers.</li>
+            <li><strong>Redaction first.</strong> Passwords, credit-card numbers, API keys, and anything wrapped in <code>&lt;private&gt;</code> tags are wiped before anything is remembered.</li>
+            <li><strong>Pro session access is opt-in.</strong> In Pro, the Sinain agent connects to your laptop session only after you approve it on the device. Every connection is visible while active and can be revoked at any time.</li>
+            <li><strong>No selling, no training.</strong> We do not sell your data and do not train models on your content.</li>
+            <li><strong>Deletion.</strong> Email <a href="mailto:support@sinain.com">support@sinain.com</a> to delete your account and waitlist data at any time.</li>
+            <li>The full <a href="/privacy.html">Privacy Policy</a> governs anything not covered here.</li>
+          </ol>
+        </details>
+      </div>
+    </section>
+
+    <section aria-labelledby="pro-title">
+      <h2 id="pro-title">What Pro unlocks</h2>
+      <p>In Pro, the Sinain agent can <strong>connect to your laptop session and work alongside you</strong>. It sees the screen context you already share with Sinain, picks up tasks in flight, and acts in your session with your permission — like a colleague looking over your shoulder who can also grab the keyboard when you ask.</p>
+      <div class="pillars">
+        <div class="pillar">
+          <h3>Gesture-gated</h3>
+          <p>The agent connects and acts only after you approve it on your device.</p>
+        </div>
+        <div class="pillar">
+          <h3>Redaction-first</h3>
+          <p>Private tags and sensitive credentials are wiped before anything is remembered.</p>
+        </div>
+        <div class="pillar">
+          <h3>Revocable</h3>
+          <p>Every active connection is visible, and you can end access at any time.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>© 2026 Sinain · <a href="/privacy.html">Privacy Policy</a> · <a href="mailto:support@sinain.com">support@sinain.com</a></footer>
+</div>
+<script>
+  const consent = document.getElementById('data-terms');
+  const signup = document.getElementById('signup');
+  consent.addEventListener('change', () => {
+    signup.classList.toggle('disabled', !consent.checked);
+    signup.setAttribute('aria-disabled', String(!consent.checked));
+    signup.setAttribute('tabindex', consent.checked ? '0' : '-1');
+  });
+  signup.addEventListener('click', (e) => { if (!consent.checked) e.preventDefault(); });
+</script>
+</body>
+</html>
