@@ -143,9 +143,18 @@ class OverlayShellState extends State<OverlayShell> {
   bool _wsWasConnected = false;
 
   bool _parked = false;
+  // Non-macOS only: the user pulled the island out of the top bar. On macOS
+  // the island always lives in the notch (eye state ⇒ parked invariant) and
+  // drag-out spawns the detached eye instead.
   bool _unparkedByUser = false;
   // Set by drag-to-park: the island stays parked even with no agent sessions.
   bool _pinnedByUser = false;
+  // Detached eye (macOS): the drag-out second eye. Streams from the native
+  // panel; last-synced appearance key avoids chatty channel calls.
+  StreamSubscription<void>? _detachedTapSub;
+  StreamSubscription<void>? _detachedSecondarySub;
+  StreamSubscription<Map<String, double>>? _detachedMovedSub;
+  String? _lastDetachedEyeSync;
   bool _windowOpInFlight = false;
   Map<String, double>? _preParkFrame;
   Map<String, double>? _islandScreenFrame;
@@ -268,10 +277,22 @@ class OverlayShellState extends State<OverlayShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _resizeWindowForState(_state);
       if (!mounted) return;
-      if (_state == HudState.eye && _settingsService.settings.notchParked) {
+      // macOS: the notch is the eye's one home — always park (QA: a free
+      // eye at an arbitrary corner reads as "the app broke"). A persisted
+      // pre-invariant free-eye position migrates into the detached eye.
+      // Non-macOS keeps the persisted-park behavior.
+      if (_state == HudState.eye &&
+          (_isMacOS || _settingsService.settings.notchParked)) {
+        final s = _settingsService.settings;
+        final spawnDetached = _isMacOS &&
+            (s.detachedEyeVisible || (!s.notchParked && s.eyeX >= 0));
         _pinnedByUser = true;
         _unparkedByUser = false;
         await _parkIsland();
+        if (spawnDetached && mounted) {
+          await _settingsService.setDetachedEyeVisible(true);
+          await _showDetachedEye();
+        }
       }
       if (_state == HudState.chat) _windowService.makeKeyWindow();
     });
@@ -301,6 +322,12 @@ class OverlayShellState extends State<OverlayShell> {
         },
         onResizeDone: (w, h) => _settingsService.setChatSize(w, h),
       );
+      _detachedTapSub = _windowService.detachedEyeTapStream
+          .listen((_) => _onDetachedEyeTap());
+      _detachedSecondarySub = _windowService.detachedEyeSecondaryStream
+          .listen((_) => _showEyeContextMenu());
+      _detachedMovedSub =
+          _windowService.detachedEyeMovedStream.listen(_onDetachedEyeMoved);
     }
 
     final ws = context.read<WebSocketService>();
@@ -678,13 +705,25 @@ class OverlayShellState extends State<OverlayShell> {
     final active = ws.agentWorking + ws.agentWaiting > 0;
     final completelyIdle = !active && ws.agentApprovals.isEmpty;
     _dismissedApprovals.removeWhere((id) => !ws.agentApprovals.containsKey(id));
+    _syncDetachedEyeAppearance();
     if (completelyIdle) {
       _unparkedByUser = false;
-      // A drag-parked (pinned) island rides out idle as the eye-only pill.
-      if (_parked && !_pinnedByUser) _unparkIsland();
-      return;
+      if (!_isMacOS) {
+        // Non-macOS: a drag-parked (pinned) island rides out idle as the
+        // eye-only pill; otherwise idle auto-unparks.
+        if (_parked && !_pinnedByUser) _unparkIsland();
+        return;
+      }
+      // macOS always-parked invariant: idle never unparks — the notch island
+      // IS the eye. Fall through so the view/width sync below still runs.
+      if (!_parked) {
+        if (_state == HudState.eye) _parkIsland();
+        return;
+      }
     }
-    if (!_parked && _state == HudState.eye && active && !_unparkedByUser) {
+    if (!_parked &&
+        _state == HudState.eye &&
+        (_isMacOS || (active && !_unparkedByUser))) {
       _parkIsland();
       return;
     }
@@ -885,13 +924,102 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   void _onIslandDragEnd(DragEndDetails details) {
-    final shouldUnpark = _islandDragDistance > 40;
+    final dragged = _islandDragDistance > 40;
     _islandDragDistance = 0;
-    if (shouldUnpark) {
-      _unparkIsland(byUser: true);
-    } else {
+    if (!dragged) {
       _snapIslandToNotch();
+      return;
     }
+    if (_isMacOS) {
+      // Always-parked invariant: dragging the island out doesn't move it —
+      // it spawns the detached eye at the drop point and snaps home. The eye
+      // is now in 2 places (owner's design call, QA 2026-07-20).
+      _detachEyeFromIsland();
+    } else {
+      _unparkIsland(byUser: true);
+    }
+  }
+
+  /// Spawn (or move) the detached eye at the island's drag drop point, then
+  /// snap the island back into the notch.
+  Future<void> _detachEyeFromIsland() async {
+    final frame = await _windowService.getWindowFrame();
+    if (!mounted) return;
+    double x = -1, y = -1;
+    if (frame != null) {
+      // Center a 48×48 eye on the dragged island's center.
+      x = frame['x']! + frame['w']! / 2 - 24;
+      y = frame['y']! + frame['h']! / 2 - 24;
+    }
+    await _settingsService.setEyePosition(x, y);
+    await _settingsService.setDetachedEyeVisible(true);
+    await _showDetachedEye();
+    await _snapIslandToNotch();
+  }
+
+  /// The detached eye mirrors the HUD eye's semantics: orange/working while
+  /// an agent is blocked on the user, otherwise the accent (red = demo mode).
+  String get _detachedEyeStateStr =>
+      _pendingAttention > 0 ? 'working' : 'idle';
+
+  int get _detachedEyeAccent => _settingsService.settings.privacyMode
+      ? _settingsService.settings.accentColor
+      : 0xFFFF3344;
+
+  Future<void> _showDetachedEye() async {
+    final s = _settingsService.settings;
+    await _windowService.showDetachedEye(
+      x: s.eyeX,
+      y: s.eyeY,
+      state: _detachedEyeStateStr,
+      accent: _detachedEyeAccent,
+    );
+    _lastDetachedEyeSync = '$_detachedEyeStateStr:$_detachedEyeAccent';
+  }
+
+  void _syncDetachedEyeAppearance() {
+    if (!_isMacOS || !_settingsService.settings.detachedEyeVisible) return;
+    final key = '$_detachedEyeStateStr:$_detachedEyeAccent';
+    if (key == _lastDetachedEyeSync) return;
+    _lastDetachedEyeSync = key;
+    _windowService.updateDetachedEye(_detachedEyeStateStr, _detachedEyeAccent);
+  }
+
+  /// Tap on the detached eye: open the chat AT the eye (its frame becomes the
+  /// unpark home, and the chat anchors to that top-right corner).
+  void _onDetachedEyeTap() {
+    final s = _settingsService.settings;
+    if (s.eyeX >= 0 && s.eyeY >= 0) {
+      _preParkFrame = {'x': s.eyeX, 'y': s.eyeY, 'w': 48, 'h': 48};
+    }
+    if (_state != HudState.chat) {
+      _transitionTo(HudState.chat);
+    } else {
+      _windowService.makeKeyWindow();
+    }
+  }
+
+  /// Detached eye dropped: inside the notch park zone → merge back (the notch
+  /// island already lives there); anywhere else → persist the new home.
+  void _onDetachedEyeMoved(Map<String, double> f) {
+    final frame = {'x': f['x']!, 'y': f['y']!, 'w': f['w']!, 'h': f['h']!};
+    final screen = {
+      'x': f['screenX']!,
+      'y': f['screenY']!,
+      'w': f['screenW']!,
+      'h': f['screenH']!,
+    };
+    if (_inParkZone(frame, screen)) {
+      _removeDetachedEye();
+    } else {
+      _settingsService.setEyePosition(f['x']!, f['y']!);
+    }
+  }
+
+  Future<void> _removeDetachedEye() async {
+    await _settingsService.setDetachedEyeVisible(false);
+    await _settingsService.setEyePosition(-1, -1);
+    await _windowService.hideDetachedEye();
   }
 
   void _replyToIslandApproval(
@@ -998,6 +1126,9 @@ class OverlayShellState extends State<OverlayShell> {
       _settingsService.setHudState(_lastVisibleState);
       _windowService.showWindow();
       _resizeWindowForState(_lastVisibleState);
+      if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
+        _showDetachedEye();
+      }
       _syncIslandFromWs(context.read<WebSocketService>());
     } else {
       if (_parked) {
@@ -1010,6 +1141,8 @@ class OverlayShellState extends State<OverlayShell> {
       setState(() => _state = HudState.hidden);
       _settingsService.setHudState(HudState.hidden);
       _windowService.hideWindow();
+      // Explicit hide outranks everything — the detached eye vanishes too.
+      if (_isMacOS) _windowService.hideDetachedEye();
     }
   }
 
@@ -1031,9 +1164,21 @@ class OverlayShellState extends State<OverlayShell> {
     toggleChat();
   }
 
-  /// Reset window position to default bottom-right corner.
-  /// Clears persisted position so next launch uses native default.
+  /// Reset window position. macOS: converge on the one predictable home —
+  /// the notch (QA lost a bottom-right eye for 15 s) — and remove the
+  /// detached eye. Non-macOS: default bottom-right corner as before.
   Future<void> resetPosition() async {
+    if (_isMacOS) {
+      await _removeDetachedEye();
+      if (_state != HudState.eye) {
+        _transitionTo(HudState.eye); // parks via the eye invariant
+      } else if (!_parked) {
+        await _parkIsland();
+      } else {
+        await _snapIslandToNotch();
+      }
+      return;
+    }
     if (_parked) await _unparkIsland(byUser: true);
     _settingsService.setEyePosition(-1, -1);
     if (_state != HudState.eye) _transitionTo(HudState.eye);
@@ -1129,7 +1274,21 @@ class OverlayShellState extends State<OverlayShell> {
       _state = target;
     });
     _settingsService.setHudState(target);
-    _resizeWindowForState(target);
+    _resizeWindowForState(target).then((_) {
+      // macOS invariant: the eye state lives parked in the notch. The
+      // pre-collapse frame becomes _preParkFrame inside _parkIsland, so
+      // reopening the chat returns to the same spot.
+      if (mounted && target == HudState.eye && _isMacOS) {
+        _unparkedByUser = false;
+        _parkIsland();
+      }
+    });
+
+    if (target == HudState.hidden) {
+      if (_isMacOS) _windowService.hideDetachedEye();
+    } else if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
+      _showDetachedEye();
+    }
 
     if (target == HudState.chat) {
       _windowService.makeKeyWindow();
@@ -1503,7 +1662,12 @@ class OverlayShellState extends State<OverlayShell> {
       {'id': 'sessions', 'title': 'Bookmarked Sessions…'},
       {'id': 'copySeed', 'title': 'Copy Context Seed'},
       {'separator': true},
-      if (_parked)
+      // macOS: the island always lives in the notch — the menu offers the
+      // detached eye instead of park/unpark. Other platforms keep the toggle.
+      if (_isMacOS) ...[
+        if (!_settingsService.settings.detachedEyeVisible)
+          {'id': 'detachEye', 'title': 'Detach Eye'},
+      ] else if (_parked)
         {'id': 'unpark', 'title': 'Unpark'}
       else
         {'id': 'parkNotch', 'title': 'Park at Notch'},
@@ -1554,6 +1718,11 @@ class OverlayShellState extends State<OverlayShell> {
         await _manualParkIsland();
       case 'unpark':
         await _unparkIsland(byUser: true);
+      case 'detachEye':
+        // Spawn at the native default (bottom-right) — the moved callback
+        // persists wherever the user then drags it.
+        await _settingsService.setDetachedEyeVisible(true);
+        await _showDetachedEye();
       case 'reset':
         await resetPosition();
       case 'settings':
@@ -1797,6 +1966,9 @@ class OverlayShellState extends State<OverlayShell> {
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _forkSub?.cancel();
+    _detachedTapSub?.cancel();
+    _detachedSecondarySub?.cancel();
+    _detachedMovedSub?.cancel();
     _manualRegionSub?.cancel();
     _contentSub?.cancel();
     _contentResetTimer?.cancel();
