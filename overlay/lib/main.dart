@@ -136,7 +136,12 @@ Future<void> _startApp() async {
   // owns the window, or their panel size gets clobbered back to the eye/chat
   // frame (visible when dev runs share prefs with an installed HUD).
   final hudOwnsWindow = !firstRunService.needsSetup && !featureTourService.needsTour;
-  if (hudOwnsWindow && settingsService.settings.eyeX >= 0) {
+  // macOS eye state skips the geometry restore: the shell parks the window in
+  // the notch on first frame, and eyeX/eyeY now belong to the detached eye.
+  final restoreGeometry = hudOwnsWindow &&
+      !(Platform.isMacOS &&
+          settingsService.settings.overlayState == HudState.eye);
+  if (restoreGeometry && settingsService.settings.eyeX >= 0) {
     final s = settingsService.settings;
     // Size depends on saved state
     final w = s.overlayState == HudState.chat

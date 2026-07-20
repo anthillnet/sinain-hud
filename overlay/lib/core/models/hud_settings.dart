@@ -30,7 +30,14 @@ class HudSettings {
   double eyeY;
 
   /// Whether the eye was last parked at the display notch.
+  /// Vestigial since the always-park invariant (eye state ⇒ notch): kept so a
+  /// downgrade still restores sensibly. [eyeX]/[eyeY] now mean the detached
+  /// eye's position.
   bool notchParked;
+
+  /// Whether the user dragged a free-floating eye out of the notch — the
+  /// detached eye lives at [eyeX]/[eyeY] while the island stays parked.
+  bool detachedEyeVisible;
 
   /// Persisted chat panel size.
   double chatWidth;
@@ -80,6 +87,7 @@ class HudSettings {
     this.eyeX = -1, // -1 means "use default position"
     this.eyeY = -1,
     this.notchParked = false,
+    this.detachedEyeVisible = false,
     this.chatWidth = 427,
     this.chatHeight = 293,
     this.fontSize = 12.0,
@@ -124,6 +132,7 @@ class HudSettings {
     double? eyeX,
     double? eyeY,
     bool? notchParked,
+    bool? detachedEyeVisible,
     double? chatWidth,
     double? chatHeight,
     double? fontSize,
@@ -146,6 +155,7 @@ class HudSettings {
       eyeX: eyeX ?? this.eyeX,
       eyeY: eyeY ?? this.eyeY,
       notchParked: notchParked ?? this.notchParked,
+      detachedEyeVisible: detachedEyeVisible ?? this.detachedEyeVisible,
       chatWidth: chatWidth ?? this.chatWidth,
       chatHeight: chatHeight ?? this.chatHeight,
       fontSize: fontSize ?? this.fontSize,
