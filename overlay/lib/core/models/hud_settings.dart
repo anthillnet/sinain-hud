@@ -89,7 +89,7 @@ class HudSettings {
     this.notchParked = false,
     this.detachedEyeVisible = false,
     this.chatWidth = 427,
-    this.chatHeight = 293,
+    this.chatHeight = 220,
     this.fontSize = 12.0,
     this.accentColor = 0xFF00FF88,
     this.autoDetectIssues = false,

@@ -45,6 +45,10 @@ class OverlayShell extends StatefulWidget {
 class OverlayShellState extends State<OverlayShell> {
   static final bool _isMacOS = Platform.isMacOS;
   static const double _islandBarWidth = 208;
+  // Sized for 2 session cards; the list scrolls for the rest. Header 32 +
+  // list padding 8 + 2 × (card 16 + title 14 + actions 28 + tool row 18 +
+  // spacing 6) + footer 24 = 228.
+  static const double _stackListHeight = 228;
   // The bar grows when the amber "· N waiting" segment is present.
   static const double _islandBarWaitingWidth = 284;
   double _islandBarWidthFor(WebSocketService ws) {
@@ -793,13 +797,13 @@ class OverlayShellState extends State<OverlayShell> {
     final height = notchMode
         ? switch (_islandView) {
             _IslandView.bar => _notchHeight,
-            _IslandView.stack => _notchHeight + 406,
+            _IslandView.stack => _notchHeight + _stackListHeight,
             _IslandView.approval => _notchHeight + 300,
             _IslandView.roi => _notchHeight + 338,
           }
         : switch (_islandView) {
             _IslandView.bar => _menuBarHeight,
-            _IslandView.stack => 440.0,
+            _IslandView.stack => _menuBarHeight + _stackListHeight,
             _IslandView.approval => 320.0,
             _IslandView.roi => 372.0,
           };

@@ -46,7 +46,7 @@ class SettingsService extends ChangeNotifier {
       notchParked: _prefs.getBool(_keyNotchParked) ?? false,
       detachedEyeVisible: _prefs.getBool(_keyDetachedEye) ?? false,
       chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
-      chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
+      chatHeight: _prefs.getDouble(_keyChatHeight) ?? 220,
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
       accentColor: _prefs.getInt(_keyAccentColor) ?? 0xFF00FF88,
       autoDetectIssues: _prefs.getBool(_keyAutoDetectIssues) ?? false,
