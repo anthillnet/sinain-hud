@@ -891,7 +891,16 @@ class OverlayShellState extends State<OverlayShell> {
         return;
       }
       _lastIslandContentHeight = measured;
-      await _fitIslandToContent(measured);
+      // +6px safety: a fit that lands a hair short clips the bottom action
+      // row (field 2026-07-21: unclickable Resume on the nudge card).
+      await _fitIslandToContent(measured.ceilToDouble() + 6);
+      // Content can keep growing after this frame (async card sections,
+      // text layout) with no shell rebuild — schedule one follow-up check.
+      if (mounted && _parked && _islandView != _IslandView.bar) {
+        Future<void>.delayed(const Duration(milliseconds: 250), () {
+          if (mounted) _measureIslandContent();
+        });
+      }
     });
   }
 
@@ -2371,7 +2380,10 @@ class OverlayShellState extends State<OverlayShell> {
     // clicks to other apps whenever a session chip held card mode open
     // (field 2026-07-16). Size to the measured cards, with a small floor for
     // transient empty states while cards are changing.
-    final h = (_lastCardContentHeight ?? 500.0).clamp(60.0, 500.0);
+    // _lastCardContentHeight already includes the scroll padding; add a 6px
+    // safety so the fit never clips the last card's action row
+    // (field 2026-07-21: unclickable Resume button).
+    final h = ((_lastCardContentHeight ?? 500.0) + 6).clamp(60.0, 500.0);
     _windowService.setWindowFrame(right - 380, top - h, 380, h);
   }
 
@@ -2390,6 +2402,13 @@ class OverlayShellState extends State<OverlayShell> {
       }
       _lastCardContentHeight = measured;
       await _resizeForCardPanel();
+      // One follow-up check: card content can grow after this frame (async
+      // sections, text layout) without a shell rebuild.
+      if (mounted && !_parked && _cardMode) {
+        Future<void>.delayed(const Duration(milliseconds: 250), () {
+          if (mounted) _measureCardContent();
+        });
+      }
     });
   }
 
