@@ -54,6 +54,10 @@ class AgentIslandBar extends StatefulWidget {
 
 class _AgentIslandBarState extends State<AgentIslandBar>
     with TickerProviderStateMixin {
+  /// Wing text never scales below this — long labels ellipsize instead of
+  /// shrinking unreadably (12px label bottoms out at ~10px).
+  static const double _minWingTextScale = 0.85;
+
   late final AnimationController _halo;
   late final AnimationController _pulse;
   late final AnimationController _livePulse;
@@ -110,10 +114,10 @@ class _AgentIslandBarState extends State<AgentIslandBar>
     final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (primary != null) primary,
+        if (primary != null) Flexible(child: primary),
         if (primary != null && enrich != null)
           Container(width: 1, height: 16, color: const Color(0x1FFFFFFF)),
-        if (enrich != null) enrich,
+        if (enrich != null) Flexible(child: enrich),
       ],
     );
     final counts = GestureDetector(
@@ -207,6 +211,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
     return GestureDetector(
       // Right-click anywhere on the bar opens the eye context menu — the
       // 46px eye alone is too small a target in the notch band.
+      onTap: widget.onCountsTap,
       onSecondaryTap: widget.onEyeSecondaryTap,
       child: Container(
       height: notchMode ? widget.notchHeight : widget.barHeight,
@@ -240,7 +245,18 @@ class _AgentIslandBarState extends State<AgentIslandBar>
               // and multi-digit counts must degrade gracefully, never overflow.
               Expanded(
                 child: Center(
-                  child: FittedBox(fit: BoxFit.scaleDown, child: counts),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth:
+                              constraints.maxWidth / _minWingTextScale,
+                        ),
+                        child: counts,
+                      ),
+                    ),
+                  ),
                 ),
               )
             else

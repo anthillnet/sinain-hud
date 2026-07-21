@@ -209,7 +209,7 @@ void main() {
     ws.dispose();
   });
 
-  testWidgets('island groups default closed except waiting groups',
+  testWidgets('session groups are expanded and bookmarks header is visible',
       (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     const quiet = SessionChipState(
@@ -263,7 +263,6 @@ void main() {
             height: 400,
             child: SessionListView(
               ws: ws,
-              islandMode: true,
               onShare: (_) {},
               onCallAi: (_) {},
               onSteerRegion: (_) {},
@@ -275,16 +274,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('waiting agent · permission needed'), findsOneWidget);
-    expect(find.text('quiet agent · Read · code'), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('session-group-header-quiet')));
-    await tester.pump();
     expect(find.text('quiet agent · Read · code'), findsOneWidget);
-
-    await tester
-        .tap(find.byKey(const ValueKey('session-group-header-waiting')));
-    await tester.pump();
-    expect(find.text('waiting agent · permission needed'), findsNothing);
+    expect(find.text('BOOKMARKED'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     ws.dispose();
