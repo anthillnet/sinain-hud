@@ -36,10 +36,17 @@ class FeatureTourService extends ChangeNotifier {
     _pending = _prefs.getBool(_keyPending) ?? false;
     _complete = _prefs.getBool(_keyComplete) ?? false;
 
-    // QA / preview override: `SINAIN_FORCE_TOUR=1` arms the tour on any launch
-    // (including `flutter run`, where there is no first-run wizard to arm it).
+    // QA / preview override: `SINAIN_FORCE_TOUR=1` arms the tour on any
+    // launch. Checked both as a process env var (works for a packaged app
+    // launched from a shell) and as a compile-time define — `flutter run
+    // --dart-define=SINAIN_FORCE_TOUR=1` — because the flutter tool launches
+    // the macOS app without passing its shell environment through.
+    const defined = String.fromEnvironment('SINAIN_FORCE_TOUR');
     final force = Platform.environment['SINAIN_FORCE_TOUR'];
-    if (force == '1' || force == 'true') {
+    if (defined == '1' ||
+        defined == 'true' ||
+        force == '1' ||
+        force == 'true') {
       _pending = true;
       _complete = false;
     }
