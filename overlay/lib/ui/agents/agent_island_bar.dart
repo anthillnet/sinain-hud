@@ -207,6 +207,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
     return GestureDetector(
       // Right-click anywhere on the bar opens the eye context menu — the
       // 46px eye alone is too small a target in the notch band.
+      onTap: widget.onCountsTap,
       onSecondaryTap: widget.onEyeSecondaryTap,
       child: Container(
       height: notchMode ? widget.notchHeight : widget.barHeight,

@@ -166,10 +166,7 @@ class OverlayShellState extends State<OverlayShell> {
   Map<String, double>? _islandScreenFrame;
   Map<String, double>? _islandNotchInfo;
   _IslandView _islandView = _IslandView.bar;
-  bool _islandHoverExpanded = false;
   bool _islandContextMenuOpen = false;
-  bool _islandPinned = false;
-  Timer? _islandCollapseTimer;
   double _islandDragDistance = 0;
   final Set<String> _dismissedApprovals = {};
   AgentApprovalRequest? _resolvedApproval;
@@ -858,12 +855,7 @@ class OverlayShellState extends State<OverlayShell> {
   Future<void> _setIslandView(_IslandView view) async {
     if (!_parked) return;
     if (!await _awaitWindowOpClear() || !_parked) return;
-    if (view != _IslandView.stack) {
-      _islandCollapseTimer?.cancel();
-      _islandHoverExpanded = false;
-    }
     if (view == _IslandView.bar) {
-      _islandPinned = false;
       _windowService.resignKeyWindow();
     }
     _windowOpInFlight = true;
@@ -889,9 +881,6 @@ class OverlayShellState extends State<OverlayShell> {
       _settingsService.setNotchParked(false);
     }
     _pinnedByUser = false;
-    _islandPinned = false;
-    _islandHoverExpanded = false;
-    _islandCollapseTimer?.cancel();
     _resolutionTimer?.cancel();
     final frame = _preParkFrame;
     setState(() {
@@ -922,45 +911,11 @@ class OverlayShellState extends State<OverlayShell> {
     _islandSnappedWidth = null;
   }
 
-  void _onIslandEnter(PointerEnterEvent event) {
-    _islandCollapseTimer?.cancel();
-    if (!_parked || _islandContextMenuOpen) return;
-    if (_islandView == _IslandView.bar) {
-      _islandHoverExpanded = true;
-      _setIslandView(_IslandView.stack);
-    }
-  }
-
-  void _onIslandExit(PointerExitEvent event) {
-    if (!_islandHoverExpanded ||
-        _islandPinned ||
-        _islandView == _IslandView.approval) {
-      return;
-    }
-    _islandCollapseTimer?.cancel();
-    _islandCollapseTimer = Timer(const Duration(milliseconds: 400), () {
-      if (!mounted ||
-          !_parked ||
-          !_islandHoverExpanded ||
-          _islandPinned ||
-          _islandView == _IslandView.approval) {
-        return;
-      }
-      _setIslandView(_IslandView.bar);
-    });
-  }
-
   void _pinIsland() {
-    _islandCollapseTimer?.cancel();
-    _islandHoverExpanded = false;
-    _islandPinned = true;
     _windowService.makeKeyWindow();
   }
 
   void _collapseIsland() {
-    _islandPinned = false;
-    _islandHoverExpanded = false;
-    _islandCollapseTimer?.cancel();
     _setIslandView(_IslandView.bar);
   }
 
@@ -1741,7 +1696,6 @@ class OverlayShellState extends State<OverlayShell> {
     ];
     final wasParked = _parked;
     _islandContextMenuOpen = true;
-    _islandCollapseTimer?.cancel();
     // NSMenu's tracking window is not guaranteed to outrank a screen-saver
     // level panel. Drop only the native level while the modal menu is up; the
     // Dart parked state/frame stay intact.
@@ -2037,7 +1991,6 @@ class OverlayShellState extends State<OverlayShell> {
     _offerSub?.cancel();
     _offerExpiryTimer?.cancel();
     _resolutionTimer?.cancel();
-    _islandCollapseTimer?.cancel();
     _nudgeSub?.cancel();
     _chipSub?.cancel();
     _wrapSub?.cancel();
@@ -3109,9 +3062,9 @@ class OverlayShellState extends State<OverlayShell> {
         onEyeDragUpdate: _onIslandDragUpdate,
         onEyeDragEnd: _onIslandDragEnd,
         onCountsTap: () {
+          if (_islandContextMenuOpen) return;
           if (_islandView == _IslandView.approval) return;
-          if (_islandView == _IslandView.bar ||
-              (_islandHoverExpanded && !_islandPinned)) {
+          if (_islandView == _IslandView.bar) {
             _pinIsland();
             _setIslandView(_IslandView.stack);
           } else {
@@ -3123,12 +3076,9 @@ class OverlayShellState extends State<OverlayShell> {
         onLiveAssistTap: () => _raiseParkedCard(clearEnrich: false),
       ),
     );
-    return MouseRegion(
-      onEnter: _onIslandEnter,
-      onExit: _onIslandExit,
-      child: ColoredBox(
-        color: Colors.transparent,
-        child: Column(children: [
+    return ColoredBox(
+      color: Colors.transparent,
+      child: Column(children: [
           Align(alignment: Alignment.topCenter, child: bar),
           if (_islandView == _IslandView.stack)
             Expanded(
@@ -3209,8 +3159,7 @@ class OverlayShellState extends State<OverlayShell> {
                 ),
               ),
             ),
-        ]),
-      ),
+      ]),
     );
   }
 
