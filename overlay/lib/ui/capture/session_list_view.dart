@@ -197,6 +197,7 @@ class _SessionListViewState extends State<SessionListView> {
       return Padding(
         padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
         child: ListView(
+          shrinkWrap: true,
           padding: EdgeInsets.zero,
           children: [
             if (liveVoice?.isActive ?? false)
@@ -212,7 +213,7 @@ class _SessionListViewState extends State<SessionListView> {
                 child: Text(
                   _loaded ? 'nothing tracked' : ' ',
                   textAlign: TextAlign.center,
-                  style: _mono(10, t.textDim),
+                  style: _mono(11, t.textDim),
                 ),
               ),
             for (final s in sessions) ...[
@@ -245,7 +246,7 @@ class _SessionListViewState extends State<SessionListView> {
         children: [
           Row(children: [
             Text('TRACKING NOW',
-                style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                style: _mono(10, t.textDim, weight: FontWeight.w600)),
             if (sessions.length > 1) ...[
               const SizedBox(width: 8),
               Text('${sessions.length}', style: _mono(9, t.textDim)),
@@ -294,7 +295,7 @@ class _SessionListViewState extends State<SessionListView> {
           const SizedBox(height: 14),
           Row(children: [
             Text('BOOKMARKED',
-                style: _mono(9, t.textDim, weight: FontWeight.w600)),
+                style: _mono(10, t.textDim, weight: FontWeight.w600)),
             const SizedBox(width: 8),
             Text('${_list.bookmarks.length}', style: _mono(9, t.textDim)),
           ]),
@@ -397,7 +398,7 @@ class _SessionListViewState extends State<SessionListView> {
                   Expanded(
                     child: Text(s.label,
                         style:
-                            _mono(11, t.textPrimary, weight: FontWeight.w500),
+                            _mono(12, t.textPrimary, weight: FontWeight.w500),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis),
                   ),
@@ -559,7 +560,7 @@ class _SessionListViewState extends State<SessionListView> {
             const SizedBox(width: 7),
             Expanded(
               child: Text('${agent.name} · $detail',
-                  style: _mono(done ? 9 : 10, t.textMuted),
+                  style: _mono(done ? 10 : 11, t.textMuted),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
             ),

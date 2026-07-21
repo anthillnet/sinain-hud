@@ -50,7 +50,7 @@ class OverlayShellState extends State<OverlayShell> {
   // spacing 6) + footer 24 = 228.
   static const double _stackListHeight = 228;
   // The bar grows when the amber "· N waiting" segment is present.
-  static const double _islandBarWaitingWidth = 284;
+  static const double _islandBarWaitingWidth = 300;
   double _islandBarWidthFor(WebSocketService ws) {
     final liveAssist = ws.voiceSession?.isActive ?? false;
     final hasEnrich = _islandEnrichLabel != null;
@@ -170,6 +170,12 @@ class OverlayShellState extends State<OverlayShell> {
   bool _islandContextMenuOpen = false;
   bool _islandPinned = false;
   Timer? _islandCollapseTimer;
+  final GlobalKey _islandContentKey = GlobalKey();
+  final GlobalKey _cardContentKey = GlobalKey();
+  bool _islandResizePending = false;
+  bool _cardResizePending = false;
+  double? _lastIslandContentHeight;
+  double? _lastCardContentHeight;
   double _islandDragDistance = 0;
   final Set<String> _dismissedApprovals = {};
   AgentApprovalRequest? _resolvedApproval;
@@ -843,6 +849,52 @@ class OverlayShellState extends State<OverlayShell> {
     await _windowService.setWindowFrame(x, y, width, height);
   }
 
+  double _islandViewMax(_IslandView view) => switch (view) {
+        _IslandView.stack => _stackListHeight,
+        _IslandView.approval => _notchHeight > 0 ? 300 : 320 - _menuBarHeight,
+        _IslandView.roi => _notchHeight > 0 ? 338 : 372 - _menuBarHeight,
+        _IslandView.cards => 500,
+        _IslandView.bar => 0,
+      };
+
+  Future<void> _fitIslandToContent(double measured) async {
+    if (!_parked || _islandView == _IslandView.bar) return;
+    if (!await _awaitWindowOpClear() || !_parked) return;
+    if (!mounted) return;
+    final screen = _islandScreenFrame;
+    if (screen == null) return;
+    final ws = context.read<WebSocketService>();
+    final height = (_notchHeight > 0 ? _notchHeight : _menuBarHeight) +
+        measured.clamp(0, _islandViewMax(_islandView));
+    final width = _islandFrameWidthFor(ws, _islandView);
+    final x = _notchHeight > 0
+        ? screen['x']! + _islandNotchInfo!['leftAuxWidth']! - 46
+        : screen['x']! + (screen['w']! - width) / 2;
+    final y = _isMacOS ? screen['y']! + screen['h']! - height : screen['y']!;
+    _windowOpInFlight = true;
+    await _windowService.setWindowFrame(x, y, width, height);
+    _windowOpInFlight = false;
+  }
+
+  void _measureIslandContent() {
+    if (_islandResizePending || !_parked || _islandView == _IslandView.bar) {
+      return;
+    }
+    _islandResizePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _islandResizePending = false;
+      if (!mounted || !_parked || _islandView == _IslandView.bar) return;
+      final measured = _islandContentKey.currentContext?.size?.height;
+      if (measured == null ||
+          (_lastIslandContentHeight != null &&
+              (measured - _lastIslandContentHeight!).abs() <= 2)) {
+        return;
+      }
+      _lastIslandContentHeight = measured;
+      await _fitIslandToContent(measured);
+    });
+  }
+
   /// Wait (bounded) for a mid-flight window op instead of dropping the
   /// request — a dropped stack→bar collapse left the tall, transparent
   /// island window in place, silently eating clicks under the notch
@@ -867,6 +919,7 @@ class OverlayShellState extends State<OverlayShell> {
       _windowService.resignKeyWindow();
     }
     _windowOpInFlight = true;
+    _lastIslandContentHeight = null;
     // Same-view calls fall through on purpose: re-placing the frame is
     // idempotent and heals a stale (dropped) placement.
     setState(() => _islandView = view);
@@ -924,11 +977,6 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _onIslandEnter(PointerEnterEvent event) {
     _islandCollapseTimer?.cancel();
-    if (!_parked || _islandContextMenuOpen) return;
-    if (_islandView == _IslandView.bar) {
-      _islandHoverExpanded = true;
-      _setIslandView(_IslandView.stack);
-    }
   }
 
   void _onIslandExit(PointerExitEvent event) {
@@ -2288,7 +2336,10 @@ class OverlayShellState extends State<OverlayShell> {
 
   void _enterCardMode() {
     if (_state == HudState.chat) return;
-    if (!_cardMode) setState(() => _cardMode = true);
+    if (!_cardMode) {
+      _lastCardContentHeight = null;
+      setState(() => _cardMode = true);
+    }
     if (_parked) {
       _setIslandView(_IslandView.cards);
       return;
@@ -2318,10 +2369,28 @@ class OverlayShellState extends State<OverlayShell> {
     final top = frame['y']! + frame['h']!;
     // The window IS the clickable area — an invisible 380×500 shield blocked
     // clicks to other apps whenever a session chip held card mode open
-    // (field 2026-07-16). Chip-only card mode gets a chip-sized window; full
-    // height only while actual cards are showing.
-    final h = _hasCards ? 500.0 : 120.0;
+    // (field 2026-07-16). Size to the measured cards, with a small floor for
+    // transient empty states while cards are changing.
+    final h = (_lastCardContentHeight ?? 500.0).clamp(60.0, 500.0);
     _windowService.setWindowFrame(right - 380, top - h, 380, h);
+  }
+
+  void _measureCardContent() {
+    if (_cardResizePending || _parked || !_cardMode) return;
+    _cardResizePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _cardResizePending = false;
+      if (!mounted || _parked || !_cardMode) return;
+      final contentHeight = _cardContentKey.currentContext?.size?.height;
+      if (contentHeight == null) return;
+      final measured = contentHeight + 20;
+      if (_lastCardContentHeight != null &&
+          (measured - _lastCardContentHeight!).abs() <= 2) {
+        return;
+      }
+      _lastCardContentHeight = measured;
+      await _resizeForCardPanel();
+    });
   }
 
   /// Leave card mode once nothing is displayed; restore the eye-sized window.
@@ -2905,6 +2974,7 @@ class OverlayShellState extends State<OverlayShell> {
   /// Card-mode surface: a slim panel with just the capture cards — the whole
   /// HUD stays closed. Clicking the eye glyph or ✕ collapses back to the eye.
   Widget _buildCardPanel() {
+    _measureCardContent();
     return Align(
       alignment: Alignment.topRight,
       child: GestureDetector(
@@ -2918,7 +2988,10 @@ class OverlayShellState extends State<OverlayShell> {
         child: SingleChildScrollView(
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.all(10),
-          child: _buildCaptureCards(),
+          child: KeyedSubtree(
+            key: _cardContentKey,
+            child: _buildCaptureCards(),
+          ),
         ),
       ),
     );
@@ -3076,6 +3149,7 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   Widget _buildAgentIsland() {
+    _measureIslandContent();
     final ws = context.watch<WebSocketService>();
     final request = _resolvedApproval ?? _nextApproval(ws);
     AgentSession? approvalSession;
@@ -3118,6 +3192,17 @@ class OverlayShellState extends State<OverlayShell> {
             _collapseIsland();
           }
         },
+        onBarTap: () {
+          if (_islandContextMenuOpen || _islandView == _IslandView.approval) {
+            return;
+          }
+          if (_islandView == _IslandView.bar) {
+            _pinIsland();
+            _setIslandView(_IslandView.stack);
+          } else {
+            _collapseIsland();
+          }
+        },
         onSaveOfferTap: () => _raiseParkedCard(clearEnrich: false),
         onEnrichTap: () => _raiseParkedCard(clearEnrich: true),
         onLiveAssistTap: () => _raiseParkedCard(clearEnrich: false),
@@ -3128,14 +3213,19 @@ class OverlayShellState extends State<OverlayShell> {
       onExit: _onIslandExit,
       child: ColoredBox(
         color: Colors.transparent,
-        child: Column(children: [
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
           Align(alignment: Alignment.topCenter, child: bar),
           if (_islandView == _IslandView.stack)
-            Expanded(
+            KeyedSubtree(
+              key: _islandContentKey,
               child: Align(
                 alignment: Alignment.topCenter,
-                child: SizedBox(
-                  width: 320,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 320,
+                    maxWidth: 320,
+                    maxHeight: _stackListHeight,
+                  ),
                   child: Listener(
                     onPointerDown: (_) => _pinIsland(),
                     child: _buildAgentStack(ws),
@@ -3144,8 +3234,12 @@ class OverlayShellState extends State<OverlayShell> {
               ),
             )
           else if (_islandView == _IslandView.approval && request != null)
-            Expanded(
-              child: SingleChildScrollView(
+            KeyedSubtree(
+              key: _islandContentKey,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                    maxHeight: _islandViewMax(_IslandView.approval)),
+                child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(0, 8, 0, 8),
                 child: Align(
                   alignment: Alignment.topCenter,
@@ -3175,20 +3269,30 @@ class OverlayShellState extends State<OverlayShell> {
                     ),
                   ),
                 ),
+                ),
               ),
             ),
           if (_islandView == _IslandView.cards)
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(8),
-                child: _buildCaptureCards(),
+            KeyedSubtree(
+              key: _islandContentKey,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 500),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(8),
+                  child: _buildCaptureCards(),
+                ),
               ),
             ),
           if (_islandView == _IslandView.roi && _islandRoi != null)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Align(
+            KeyedSubtree(
+              key: _islandContentKey,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                    maxHeight: _islandViewMax(_IslandView.roi)),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Align(
                   alignment: Alignment.topCenter,
                   child: SizedBox(
                     width: 320,
@@ -3204,6 +3308,8 @@ class OverlayShellState extends State<OverlayShell> {
                       initialTerminalAgent: ws.terminalAgent,
                       onRoute: _routeIslandRoi,
                       onDismiss: _dismissIslandRoi,
+                    ),
+                  ),
                     ),
                   ),
                 ),
@@ -3236,7 +3342,7 @@ class OverlayShellState extends State<OverlayShell> {
         color: const Color(0xFF1E1F22),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(children: [
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 10, 10, 5),
           child: Row(children: [
@@ -3267,7 +3373,8 @@ class OverlayShellState extends State<OverlayShell> {
             ],
           ]),
         ),
-        Expanded(
+        Flexible(
+          fit: FlexFit.loose,
           child: SessionListView(
             key: const ValueKey('island-sessions'),
             ws: ws,

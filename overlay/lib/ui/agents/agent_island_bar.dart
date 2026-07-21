@@ -18,6 +18,7 @@ class AgentIslandBar extends StatefulWidget {
   final GestureDragUpdateCallback onEyeDragUpdate;
   final GestureDragEndCallback onEyeDragEnd;
   final VoidCallback onCountsTap;
+  final VoidCallback? onBarTap;
   final VoidCallback? onSaveOfferTap;
   final VoidCallback? onEnrichTap;
   final VoidCallback? onLiveAssistTap;
@@ -40,6 +41,7 @@ class AgentIslandBar extends StatefulWidget {
     required this.onEyeDragUpdate,
     required this.onEyeDragEnd,
     required this.onCountsTap,
+    this.onBarTap,
     this.onSaveOfferTap,
     this.onEnrichTap,
     this.onLiveAssistTap,
@@ -168,7 +170,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
                     '${widget.working} working',
                     style: const TextStyle(
                       fontFamily: 'JetBrainsMono',
-                      fontSize: 10,
+                      fontSize: 11.5,
                       color: Color(0xFFE8EAEE),
                     ),
                   ),
@@ -193,7 +195,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
                         '${widget.waiting} waiting',
                         style: const TextStyle(
                           fontFamily: 'JetBrainsMono',
-                          fontSize: 10,
+                          fontSize: 11.5,
                           color: Color(0xFFD9A21B),
                         ),
                       ),
@@ -208,6 +210,7 @@ class _AgentIslandBarState extends State<AgentIslandBar>
       // Right-click anywhere on the bar opens the eye context menu — the
       // 46px eye alone is too small a target in the notch band.
       onSecondaryTap: widget.onEyeSecondaryTap,
+      onTap: widget.onBarTap,
       child: Container(
       height: notchMode ? widget.notchHeight : widget.barHeight,
       decoration: BoxDecoration(
@@ -244,7 +247,9 @@ class _AgentIslandBarState extends State<AgentIslandBar>
                 ),
               )
             else
-              counts,
+              Flexible(
+                child: FittedBox(fit: BoxFit.scaleDown, child: counts),
+              ),
           ],
         ],
         ),
