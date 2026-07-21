@@ -170,6 +170,7 @@ class OverlayShellState extends State<OverlayShell> {
   bool _islandContextMenuOpen = false;
   bool _islandPinned = false;
   Timer? _islandCollapseTimer;
+  Timer? _islandResnapDebounce;
   double _islandDragDistance = 0;
   final Set<String> _dismissedApprovals = {};
   AgentApprovalRequest? _resolvedApproval;
@@ -770,11 +771,22 @@ class OverlayShellState extends State<OverlayShell> {
         _resolvedApproval == null) {
       _setIslandView(_IslandView.bar);
     }
-    // Re-place whenever the content-dependent bar width changes.
+    // Re-place whenever the content-dependent bar width changes — DEBOUNCED:
+    // agent working↔idle flaps toggle the wing width on every hook event, and
+    // an un-damped resnap per ws event kept the window in constant re-frame
+    // churn under heavy agent traffic (field 2026-07-21: island stopped
+    // reacting to clicks entirely).
     final islandWidth = _islandFrameWidthFor(ws, _islandView);
     if (_parked && islandWidth != _islandSnappedWidth) {
-      _islandSnappedWidth = islandWidth;
-      _snapIslandToNotch();
+      _islandResnapDebounce?.cancel();
+      _islandResnapDebounce = Timer(const Duration(milliseconds: 350), () {
+        if (!mounted || !_parked) return;
+        final width = _islandFrameWidthFor(
+            context.read<WebSocketService>(), _islandView);
+        if (width == _islandSnappedWidth) return; // settled back — skip
+        _islandSnappedWidth = width;
+        _snapIslandToNotch();
+      });
     }
   }
 
@@ -843,21 +855,37 @@ class OverlayShellState extends State<OverlayShell> {
     await _windowService.setWindowFrame(x, y, width, height);
   }
 
-  /// Wait (bounded) for a mid-flight window op instead of dropping the
-  /// request — a dropped stack→bar collapse left the tall, transparent
-  /// island window in place, silently eating clicks under the notch
-  /// (field 2026-07-20). True when clear; false on timeout/unmount.
-  Future<bool> _awaitWindowOpClear() async {
-    var spins = 0;
-    while (_windowOpInFlight && spins++ < 100) {
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+  // Coalesced island placement (field 2026-07-21): the previous queue-and-
+  // wait approach let _syncIslandFromWs (fires on EVERY ws event; bar width
+  // flips whenever an agent toggles working↔idle) pile up window re-frames —
+  // under heavy agent traffic the island re-placed itself continuously and
+  // the whole window stopped reacting to clicks. Placement requests now
+  // COALESCE: one in flight, at most one pending; redundant requests merge.
+  // The pending pass also heals any stale frame (the 2026-07-20 bug the
+  // queueing was meant to fix) because the LAST request always applies.
+  bool _islandPlaceQueued = false;
+
+  Future<void> _requestIslandPlace() async {
+    if (_islandPlaceQueued) return; // one pending pass is enough
+    if (_windowOpInFlight) {
+      _islandPlaceQueued = true;
+      var spins = 0;
+      while (_windowOpInFlight && spins++ < 100) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      _islandPlaceQueued = false;
+      if (!mounted || !_parked || _windowOpInFlight) return;
     }
-    return mounted && !_windowOpInFlight;
+    _windowOpInFlight = true;
+    try {
+      await _placeIslandFrame();
+    } finally {
+      _windowOpInFlight = false;
+    }
   }
 
   Future<void> _setIslandView(_IslandView view) async {
     if (!_parked) return;
-    if (!await _awaitWindowOpClear() || !_parked) return;
     if (view != _IslandView.stack) {
       _islandCollapseTimer?.cancel();
       _islandHoverExpanded = false;
@@ -866,20 +894,15 @@ class OverlayShellState extends State<OverlayShell> {
       _islandPinned = false;
       _windowService.resignKeyWindow();
     }
-    _windowOpInFlight = true;
-    // Same-view calls fall through on purpose: re-placing the frame is
-    // idempotent and heals a stale (dropped) placement.
-    setState(() => _islandView = view);
-    await _placeIslandFrame();
-    _windowOpInFlight = false;
+    if (_islandView != view && mounted) {
+      setState(() => _islandView = view);
+    }
+    await _requestIslandPlace();
   }
 
   Future<void> _snapIslandToNotch() async {
     if (!_parked) return;
-    if (!await _awaitWindowOpClear() || !_parked) return;
-    _windowOpInFlight = true;
-    await _placeIslandFrame();
-    _windowOpInFlight = false;
+    await _requestIslandPlace();
   }
 
   Future<void> _unparkIsland({bool byUser = false}) async {
@@ -2020,6 +2043,7 @@ class OverlayShellState extends State<OverlayShell> {
   @override
   void dispose() {
     _busyTimer?.cancel();
+    _islandResnapDebounce?.cancel();
     _regionEyes?.dispose();
     _thinkingSub?.cancel();
     _forkSub?.cancel();
