@@ -45,10 +45,8 @@ class OverlayShell extends StatefulWidget {
 class OverlayShellState extends State<OverlayShell> {
   static final bool _isMacOS = Platform.isMacOS;
   static const double _islandBarWidth = 208;
-  // Sized for 2 session cards; the list scrolls for the rest. Header 32 +
-  // list padding 8 + 2 × (card 16 + title 14 + actions 28 + tool row 18 +
-  // spacing 6) + footer 24 = 228.
-  static const double _stackListHeight = 228;
+  // Sized to show the unified session and bookmarks list in the island.
+  static const double _stackListHeight = 380;
   // The bar grows when the amber "· N waiting" segment is present.
   static const double _islandBarWaitingWidth = 284;
   double _islandBarWidthFor(WebSocketService ws) {
@@ -3220,7 +3218,6 @@ class OverlayShellState extends State<OverlayShell> {
           child: SessionListView(
             key: const ValueKey('island-sessions'),
             ws: ws,
-            islandMode: true,
             accent: _accentColor,
             onShare: _shareBookmark,
             onCallAi: _callAiOnActiveSession,
