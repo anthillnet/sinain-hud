@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -8,12 +9,17 @@ import '../../core/services/feature_tour_service.dart';
 import '../../core/services/settings_service.dart';
 import '../../core/services/window_service.dart';
 
-/// Post-install feature walkthrough — the Claude Design "first-run flow" (v3),
-/// nine designed scenes plus two Sinain additions (knowledge browser + share).
+/// Post-install feature walkthrough — the "default journey" from the Claude
+/// Design "Sinain Sessions Tab v2" blueprint, told as one day with Sinain:
+/// Track a session → rooms change freely → agent lanes attach → approve from
+/// the corner → step away → select-then-verb → save.
 ///
 /// A short centered window: each scene is one visual, a line of copy, and a
-/// single primary action. Gated by [FeatureTourService.needsTour]; mounted by
-/// `main.dart` after the first-run wizard and provisioning, before the HUD.
+/// single primary action. Every button drawn in a scene is live — the user
+/// tries the journey's taps (Track, Allow, jump, ▶, enrich, Save) inside the
+/// tour, with the first button of each scene highlighted until touched.
+/// Gated by [FeatureTourService.needsTour]; mounted by `main.dart` after the
+/// first-run wizard and provisioning, before the HUD.
 ///
 /// The palette is the design's, not the HUD's brighter `0xFF00FF88` accent —
 /// this is a distinct, self-contained surface meant to match the mockups.
@@ -33,16 +39,21 @@ class OnboardingTour extends StatefulWidget {
   State<OnboardingTour> createState() => _OnboardingTourState();
 }
 
-// ── Design palette (from Onboarding.dc.html) ─────────────────────────────────
+// ── Design palette (from Sinain Sessions Tab v2.dc.html) ─────────────────────
 const _cardBg = Color(0xFF1E1F22);
 const _visualDark = Color(0xFF171819);
 const _visualDarker = Color(0xFF15161A);
 const _panel = Color(0xFF2B2D30);
+const _evidence = Color(0xFF232427);
 const _green = Color(0xFF1F8039);
-const _blue = Color(0xFF3369D6);
+const _greenBright = Color(0xFF4CAF6E);
+const _blue = Color(0xFF3369D6); // agent accent — agent-scoped liveness
 const _red = Color(0xFFCC3645);
-const _orange = Color(0xFFE56D17);
-const _purple = Color(0xFF834DF0);
+const _denyRed = Color(0xFFB3361C);
+const _amber = Color(0xFFD9A21B); // waiting — the only state that wants a tap
+const _amberText = Color(0xFFE8DCC0);
+const _violet = Color(0xFF7A56D6); // tracking — the working session itself
+const _saveMint = Color(0xFFCDE8D4);
 const _textMuted = Color(0xFFA8ADBD);
 const _textDim = Color(0xFF6C707E);
 const _dotInactive = Color(0xFF3A3D42);
@@ -52,8 +63,8 @@ const _shimmer2 = Color(0xFFEBECF0);
 const _hairline = Color(0x14FFFFFF); // rgba(255,255,255,.08)
 
 // Knowledge web-UI "day theme" tokens — copied from the :root vars in
-// sinain-core/src/server.ts so scenes 7–8 render the real browser UI, not a
-// dark stand-in.
+// sinain-core/src/server.ts so the memory scene renders the real browser UI,
+// not a dark stand-in.
 const _webBg = Color(0xFFFFFFFF);
 const _webElev = Color(0xFFF8FAFC);
 const _webFg = Color(0xFF0F172A);
@@ -67,23 +78,10 @@ class _Scene {
     required this.title,
     required this.body,
     required this.visual,
-    this.action,
   });
   final String title;
   final String body;
   final Widget visual;
-  final _LiveAction? action;
-}
-
-class _LiveAction {
-  const _LiveAction(this.label, this.path, {this.icon});
-  final String label;
-
-  /// Path appended to the derived sinain-core http origin (e.g. /knowledge/ui).
-  final String path;
-
-  /// Leading glyph — the real HUD control the user taps for this destination.
-  final IconData? icon;
 }
 
 class _OnboardingTourState extends State<OnboardingTour> {
@@ -210,14 +208,6 @@ class _OnboardingTourState extends State<OnboardingTour> {
                           ),
                         ),
                       ),
-                      if (scene.action != null) ...[
-                        const SizedBox(height: 12),
-                        _SecondaryAction(
-                          label: scene.action!.label,
-                          icon: scene.action!.icon,
-                          onTap: () => _openPath(scene.action!.path),
-                        ),
-                      ],
                       const SizedBox(height: 20),
                       _footer(isLast),
                     ],
@@ -276,119 +266,109 @@ class _OnboardingTourState extends State<OnboardingTour> {
   }
 
   // ── Scenes ─────────────────────────────────────────────────────────────────
+  //
+  // Ordered as the design's §4 "default journey": one session, five hours,
+  // six taps — every button drawn in a scene is live.
 
   List<_Scene> _buildScenes() => [
         // 1 · Welcome
         const _Scene(
           title: 'Meet Sinain',
-          body: "Sinain watches what's on your screen and offers help exactly "
-              'where you need it — without getting in your way.',
+          body: 'Sinain sits at your notch and watches quietly — your work, '
+              'your agents, your memory. Everything reads at a glance; '
+              'nothing interrupts unless it truly needs you.',
           visual: _WelcomeVisual(),
         ),
-        // (markers scene sunset for now — auto-ROI markers aren't the
-        // headline; the four deliberate-capture modes are)
-        // 2 · Save context (deliberate capture mode 1)
+        // 2 · Track (tap 1 of the journey — live)
         const _Scene(
-          title: 'Save what just happened',
-          body: 'Right-click the eye → Save Context. Pick how far back — and '
-              'which apps — and Sinain distills those minutes into memory. '
-              '30 seconds to undo; nothing is saved without you asking.',
-          visual: _SaveContextVisual(),
+          title: 'It notices when work starts',
+          body: 'Focus for a few minutes and Sinain recognizes the thread. '
+              'One nudge — Track — and a context card is born: goal, done, '
+              'next. Nothing is tracked without your tap. Try it on the card.',
+          visual: _TrackNudgeVisual(),
         ),
-        // 4 · Call AI on a range (mode 2)
+        // 3 · Rooms
         const _Scene(
-          title: 'Call AI on your last minutes',
-          body: 'The same range can go to an AI instead: Call AI hands a '
-              'brief to your agent as text. Call sinain voice is coming soon. '
-              'You always see what it will know.',
-          visual: _CallAiVisual(),
+          title: 'The session follows your work',
+          body: 'Browser, documents, email, spreadsheets — to Sinain they’re '
+              'rooms of one thread. Switch apps freely: the session and its '
+              'card come along, and nothing ever re-asks.',
+          visual: _RoomsVisual(),
         ),
-        // 5 · Context from screen (mode 3)
+        // 4 · Agent lanes
         const _Scene(
-          title: 'Context from your screen',
-          body: 'Pick Context from Screen — or double-tap the eye — then drag '
-              'a box around any part of your screen. Sinain enriches the '
-              'selection with your recent activity and hands it to your AI.',
-          visual: _RegionVisual(),
+          title: 'Your agents ride along',
+          body: 'Hand work to your AIs — Claude, ChatGPT, any of them — and '
+              'each run attaches to your session as a lane, live progress '
+              'included. Connected agents get your context injected '
+              'automatically: zero taps.',
+          visual: _LanesVisual(),
         ),
-        // 6 · Context from clipboard (mode 4)
+        // 5 · Approve from the corner (tap 2 — live)
         const _Scene(
-          title: 'Context from your clipboard',
-          body: 'Copy anything — an error, a link, a paragraph — then Context '
-              'from Clipboard. Sinain wraps it with what you were doing, so '
-              'any AI gets the full picture instead of a bare snippet.',
-          visual: _ClipboardVisual(),
+          title: 'Approve from the corner',
+          body: 'When an agent needs a go-ahead, the card comes to you — '
+              'invisible to screen share. Allow once, Always to never be '
+              'asked again, or Deny. Try all three.',
+          visual: _ApprovalVisual(),
         ),
-        // · Where chat lands
+        // 6 · Away & back
         const _Scene(
-          title: 'Chat, your way',
-          body: 'A thread can stay in the Sinain HUD, pop out into an app you '
-              'already use — ChatGPT, Claude, anything — or become a live '
-              'voice call with sinain. Either way the context rides along.',
-          visual: _WhereChatLandsVisual(),
+          title: 'Step away — nothing stops',
+          body: "Lunch, a call, hours away: your attention pauses, your "
+              "agents don't. The island keeps the count honest, and coming "
+              'back raises one card — what changed, what’s next.',
+          visual: _AwayVisual(),
         ),
-        // 5 · Pick your agents
+        // 7 · Select, then verb
         const _Scene(
-          title: 'Chat or terminal',
-          body:
-              'Every context — a saved range, a screen region, a clipboard — '
-              'opens a thread. Reply in built-in chat, or hand it to a '
-              'terminal agent you already use. We listed the ones found on '
-              'your machine — change them anytime.',
-          visual: _AgentsVisual(),
+          title: 'Select, then verb',
+          body: 'Drag any region of your screen — or tap the eye to select '
+              'the last minutes. The same row appears: ▶ send to a lane, '
+              '📞 call, ⤓ save. The seed carries your context card, so '
+              '“this” needs no explaining.',
+          visual: _VerbRowVisual(),
         ),
-        // 6 · Move a thread (handoff)
+        // 8 · Enrich chip
         const _Scene(
-          title: 'Move it to any agent',
-          body:
-              'Start in Sinain chat, then hand the whole thread — its context '
-              'and your messages — to another agent like claude code. Tap the '
-              'branch button by the message box. Nothing is lost.',
-          visual: _HandoffVisual(),
+          title: 'Copy, paste smarter',
+          body: '⌘C anything and a quiet chip slides out by the island: '
+              'Enrich? One optional tap wraps the snippet with your '
+              'session’s frame — which build, which step — so any AI gets '
+              'the full picture.',
+          visual: _EnrichChipVisual(),
         ),
-        // 7 · Memory & knowledge browser (NEW)
+        // 9 · Save (tap 3 — live)
         const _Scene(
+          title: 'One tap saves the session',
+          body: 'When the thread winds down Sinain offers a preview of '
+              'exactly what’s kept — facts, decisions, agent runs. Save it, '
+              'undo it, or walk away; nothing is saved without you. Try it.',
+          visual: _SaveOfferVisual(),
+        ),
+        // 10 · Memory & knowledge browser
+        _Scene(
           title: 'Sinain remembers',
           body: 'Everything Sinain learns becomes searchable memory — facts, '
               'people, decisions — across every session. Open the knowledge '
               'browser to explore or search it.',
-          visual: _KnowledgeVisual(),
-          action: _LiveAction('Open knowledge browser  ↗', '/knowledge/ui',
-              icon: Icons.psychology_outlined),
+          visual: _KnowledgeVisual(onOpen: () => _openPath('/knowledge/ui')),
         ),
-        // 8 · Share a concept (NEW)
-        const _Scene(
-          title: 'Share what it knows',
-          body:
-              'Turn any concept into a private link. The page renders on your '
-              'Mac; whoever you send it to sees the knowledge, never your '
-              'screen — and the host only ever logs a generic page view.',
-          visual: _ShareVisual(),
-          action:
-              _LiveAction('Open your share links  ↗', '/knowledge/ui/shares'),
-        ),
-        // 9 · Screen & audio
-        const _Scene(
-          title: 'Screen and audio',
-          body: 'Sinain reads your screen and can capture video and audio for '
-              'richer context. Flip either one on or off from the controls '
-              'whenever you like.',
-          visual: _CaptureVisual(),
-        ),
-        // 10 · Private by design
+        // 11 · Private by design
         const _Scene(
           title: 'Private by design',
-          body: 'When you share your screen, others see only your apps — never '
-              'Sinain. In demo mode the eye turns red and Sinain sees itself, '
-              'which can cause vision artifacts.',
+          body: 'When you share your screen, others see only your apps — '
+              'never Sinain or its cards. Screen and audio capture flip on '
+              'or off from the controls, and nothing leaves your Mac '
+              'without a gesture.',
           visual: _PrivacyVisual(),
         ),
-        // 11 · You're set
+        // 12 · You're set
         const _Scene(
           title: "You're all set",
-          body:
-              'Sinain is running and ready. Markers will start appearing as it '
-              'learns what you’re working on.',
+          body: 'The eye is parked at your notch: glance for the counts, '
+              'click for the stack. Sinain will nudge when your next '
+              'session starts.',
           visual: _DoneVisual(),
         ),
       ];
@@ -484,44 +464,6 @@ class _TextButton extends StatelessWidget {
       );
 }
 
-class _SecondaryAction extends StatelessWidget {
-  const _SecondaryAction({required this.label, required this.onTap, this.icon});
-  final String label;
-  final VoidCallback onTap;
-  final IconData? icon;
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Container(
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0x281F8039), // rgba(31,128,57,.16)
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: _green),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 15, color: const Color(0xFF4CC56A)),
-                  const SizedBox(width: 7),
-                ],
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF4CC56A))),
-              ],
-            ),
-          ),
-        ),
-      );
-}
-
 /// A faint "page behind the overlay" — grey shimmer lines on a light surface.
 class _MockPage extends StatelessWidget {
   const _MockPage({this.opacity = 0.55});
@@ -530,7 +472,7 @@ class _MockPage extends StatelessWidget {
   Widget build(BuildContext context) => Opacity(
         opacity: opacity,
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(20, 40, 20, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -549,6 +491,301 @@ class _MockPage extends StatelessWidget {
       );
   static BoxDecoration _bar(Color c) =>
       BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
+}
+
+/// Looping opacity pulse — the design's `ssPulse` (waiting states, live dots).
+class _Pulse extends StatefulWidget {
+  const _Pulse({required this.child});
+  final Widget child;
+  @override
+  State<_Pulse> createState() => _PulseState();
+}
+
+class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1000))
+    ..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: Tween(begin: 1.0, end: 0.35)
+            .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+        child: widget.child,
+      );
+}
+
+/// A working dot with an expanding, fading ring — the design's `ssHalo`.
+class _HaloDot extends StatefulWidget {
+  const _HaloDot({required this.color, this.size = 14, this.dotSize = 7});
+  final Color color;
+  final double size;
+  final double dotSize;
+  @override
+  State<_HaloDot> createState() => _HaloDotState();
+}
+
+class _HaloDotState extends State<_HaloDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 2400))
+    ..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, __) {
+            final t = _c.value;
+            final scale = 0.6 + 1.6 * t;
+            final opacity = t < 0.7 ? 0.5 * (1 - t / 0.7) : 0.0;
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                Transform.scale(
+                  scale: scale,
+                  child: Opacity(
+                    opacity: opacity,
+                    child: Container(
+                      width: widget.size,
+                      height: widget.size,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: widget.color.withValues(alpha: 0.5)),
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                  width: widget.dotSize,
+                  height: widget.dotSize,
+                  decoration: BoxDecoration(
+                      color: widget.color, shape: BoxShape.circle),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+}
+
+Widget _plainDot(Color c, [double size = 7]) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(color: c, shape: BoxShape.circle));
+
+Text _mono(String t,
+        {double size = 9, Color color = _textMuted, FontWeight? weight}) =>
+    Text(t,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            fontSize: size,
+            fontFamily: 'monospace',
+            fontWeight: weight,
+            color: color));
+
+/// The collapsed notch island: the parked eye, a divider, then status content.
+/// Rounded only at the bottom — it hangs from the notch.
+class _IslandBar extends StatelessWidget {
+  const _IslandBar({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.fromLTRB(8, 5, 12, 5),
+        decoration: const BoxDecoration(
+          color: _cardBg,
+          border: Border(
+            left: BorderSide(color: Color(0x1AFFFFFF)),
+            right: BorderSide(color: Color(0x1AFFFFFF)),
+            bottom: BorderSide(color: Color(0x1AFFFFFF)),
+          ),
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(10)),
+          boxShadow: [
+            BoxShadow(
+                color: Color(0x47001C36), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const _EyeGlyph(size: 14, strokeWidth: 3),
+            const SizedBox(width: 8),
+            Container(width: 1, height: 10, color: const Color(0x1FFFFFFF)),
+            const SizedBox(width: 8),
+            ...children,
+          ],
+        ),
+      );
+}
+
+/// "TRY IT" — a steady bright badge next to the live element so the
+/// invitation is unmissable. Shown only until the scene is first touched.
+class _TryIt extends StatelessWidget {
+  const _TryIt();
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: _greenBright,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.touch_app, size: 12, color: Colors.white),
+            SizedBox(width: 5),
+            Text('TRY IT',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: Colors.white)),
+          ],
+        ),
+      );
+}
+
+/// A pulsing glow behind a scene's first button — "this is the one to try".
+/// Turns off (and stops animating) once the scene has been touched.
+class _Highlight extends StatefulWidget {
+  const _Highlight(
+      {required this.child,
+      this.on = true,
+      this.color = _greenBright,
+      this.radius = 6});
+  final Widget child;
+  final bool on;
+  final Color color;
+  final double radius;
+  @override
+  State<_Highlight> createState() => _HighlightState();
+}
+
+class _HighlightState extends State<_Highlight>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.on) return widget.child;
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, child) => Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(widget.radius),
+          boxShadow: [
+            BoxShadow(
+              color:
+                  widget.color.withValues(alpha: 0.25 + 0.35 * _c.value),
+              blurRadius: 6 + 6 * _c.value,
+              spreadRadius: 1 + 1.5 * _c.value,
+            ),
+          ],
+        ),
+        child: child,
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+/// "replay" affordance for the live scenes, bottom-right of the visual.
+class _Replay extends StatelessWidget {
+  const _Replay(this.onTap);
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: const Text('replay',
+            style: TextStyle(
+                fontSize: 10,
+                color: _textDim,
+                decoration: TextDecoration.underline,
+                decorationColor: Color(0x33FFFFFF))),
+      );
+}
+
+/// Card verbs — the design's three weights: filled commits an action,
+/// outline is the secondary path, quiet is the ignorable one.
+enum _VerbStyle { filled, outline, quiet }
+
+class _CardVerb extends StatelessWidget {
+  const _CardVerb(this.label, {this.style = _VerbStyle.outline, this.onTap});
+  final String label;
+  final _VerbStyle style;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final filled = style == _VerbStyle.filled;
+    final quiet = style == _VerbStyle.quiet;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: filled ? _green : Colors.transparent,
+          border: quiet
+              ? null
+              : Border.all(
+                  color: filled ? _green : const Color(0x2EFFFFFF)),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: filled ? FontWeight.w600 : FontWeight.w400,
+              color: filled
+                  ? Colors.white
+                  : quiet
+                      ? _textDim
+                      : _textMuted,
+              decoration: quiet ? TextDecoration.underline : null,
+              decorationColor: const Color(0x33FFFFFF),
+            )),
+      ),
+    );
+  }
+}
+
+/// Card close (✕) — always live: closing is the quiet way out everywhere.
+class _CardClose extends StatelessWidget {
+  const _CardClose(this.onTap);
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: const Padding(
+          padding: EdgeInsets.all(2),
+          child: Text('✕', style: TextStyle(fontSize: 10, color: _textDim)),
+        ),
+      );
 }
 
 // ── Scene visuals ────────────────────────────────────────────────────────────
@@ -570,8 +807,814 @@ class _WelcomeVisual extends StatelessWidget {
       );
 }
 
-class _RegionVisual extends StatelessWidget {
-  const _RegionVisual();
+// ── 2 · Track (live) ─────────────────────────────────────────────────────────
+
+enum _NudgeState { pending, tracked, declined }
+
+/// The "Looks like…" nudge — the one ask Sinain ever initiates. Tapping Track
+/// turns the guess into a context card (goal · done · next); "not now" (or ✕)
+/// shows that declining is quiet and free.
+class _TrackNudgeVisual extends StatefulWidget {
+  const _TrackNudgeVisual();
+  @override
+  State<_TrackNudgeVisual> createState() => _TrackNudgeVisualState();
+}
+
+class _TrackNudgeVisualState extends State<_TrackNudgeVisual> {
+  _NudgeState _s = _NudgeState.pending;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _lightBg,
+        child: Stack(
+          children: [
+            const Positioned.fill(child: _MockPage(opacity: 0.5)),
+            // island — amber "looks like…" while pending, violet once tracked
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: _IslandBar(children: [
+                  if (_s == _NudgeState.pending) ...[
+                    _Pulse(child: _plainDot(_amber, 6)),
+                    const SizedBox(width: 6),
+                    _mono('looks like…', color: _amberText, size: 10),
+                  ] else if (_s == _NudgeState.tracked) ...[
+                    _plainDot(_violet, 6),
+                    const SizedBox(width: 6),
+                    _mono('visa · tracking', size: 10),
+                  ] else ...[
+                    _plainDot(_textDim, 6),
+                    const SizedBox(width: 6),
+                    _mono('eye · quiet', color: _textDim, size: 10),
+                  ],
+                ]),
+              ),
+            ),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_s == _NudgeState.pending) ...[
+                      const _TryIt(),
+                      const SizedBox(height: 8),
+                    ],
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: switch (_s) {
+                        _NudgeState.pending => _nudgeCard(),
+                        _NudgeState.tracked => _contextCard(),
+                        _NudgeState.declined => _declinedNote(),
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_s != _NudgeState.pending)
+              Positioned(
+                right: 12,
+                bottom: 8,
+                child: _Replay(() => setState(() => _s = _NudgeState.pending)),
+              ),
+          ],
+        ),
+      );
+
+  Widget _nudgeCard() => Container(
+        key: const ValueKey('nudge'),
+        width: 244,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _amber.withValues(alpha: 0.45)),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              _Pulse(child: _plainDot(_amber, 6)),
+              const SizedBox(width: 7),
+              const Expanded(
+                child: Text('Looks like: preparing a visa application',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white)),
+              ),
+              _CardClose(() => setState(() => _s = _NudgeState.declined)),
+            ]),
+            const SizedBox(height: 7),
+            _mono('engaged 12 min · chrome'),
+            const SizedBox(height: 3),
+            _mono('credit starts at 9:40', color: _textDim),
+            const SizedBox(height: 9),
+            Row(children: [
+              _Highlight(
+                radius: 5,
+                child: _CardVerb('Track',
+                    style: _VerbStyle.filled,
+                    onTap: () => setState(() => _s = _NudgeState.tracked)),
+              ),
+              const SizedBox(width: 8),
+              _CardVerb('not now',
+                  style: _VerbStyle.quiet,
+                  onTap: () => setState(() => _s = _NudgeState.declined)),
+            ]),
+          ],
+        ),
+      );
+
+  Widget _contextCard() => Container(
+        key: const ValueKey('card'),
+        width: 250,
+        padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
+        decoration: const BoxDecoration(
+          color: _evidence,
+          border: Border(left: BorderSide(color: _violet, width: 2)),
+          borderRadius: BorderRadius.only(
+              topRight: Radius.circular(8), bottomRight: Radius.circular(8)),
+          boxShadow: [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _cardRow('goal', 'submit the visa application', Colors.white),
+            const SizedBox(height: 5),
+            _cardRow('done', 'requirements researched', _textMuted),
+            const SizedBox(height: 5),
+            _cardRow('next', 'draft the cover letter', Colors.white),
+          ],
+        ),
+      );
+
+  Widget _cardRow(String k, String v, Color vColor) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 32, child: _mono(k, color: _textDim)),
+          Expanded(
+            child: Text(v,
+                style: TextStyle(fontSize: 11, height: 1.25, color: vColor)),
+          ),
+        ],
+      );
+
+  Widget _declinedNote() => Container(
+        key: const ValueKey('declined'),
+        width: 244,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _hairline),
+        ),
+        child: const Text(
+          'Sinain goes quiet — no timer, no guilt. The day still ends with a '
+          'save offer, and launching an agent re-seeds the same nudge.',
+          style: TextStyle(fontSize: 11, height: 1.35, color: _textMuted),
+        ),
+      );
+}
+
+// ── 3 · Rooms ────────────────────────────────────────────────────────────────
+
+/// One violet thread through four rooms — the active room cycles to show the
+/// session following the work while the card stays constant.
+class _RoomsVisual extends StatefulWidget {
+  const _RoomsVisual();
+  @override
+  State<_RoomsVisual> createState() => _RoomsVisualState();
+}
+
+class _RoomsVisualState extends State<_RoomsVisual> {
+  static const _rooms = [
+    (Icons.language, 'Chrome'),
+    (Icons.description_outlined, 'Docs'),
+    (Icons.mail_outline, 'Mail'),
+    (Icons.table_chart_outlined, 'Sheets'),
+  ];
+  int _active = 0;
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(milliseconds: 1400), (_) {
+      if (mounted) setState(() => _active = (_active + 1) % _rooms.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // the session pill — never changes as rooms do
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border:
+                      Border.all(color: _violet.withValues(alpha: 0.55)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _plainDot(_violet, 6),
+                  const SizedBox(width: 6),
+                  _mono('visa application · 2h 14m', size: 10),
+                ]),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: 360,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // the thread
+                    Container(
+                        height: 2,
+                        margin: const EdgeInsets.symmetric(horizontal: 30),
+                        color: _violet.withValues(alpha: 0.35)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        for (var i = 0; i < _rooms.length; i++)
+                          _room(_rooms[i].$1, _rooms[i].$2, i == _active),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _mono('rooms change · the session doesn’t',
+                  color: _textDim, size: 10),
+            ],
+          ),
+        ),
+      );
+
+  Widget _room(IconData icon, String label, bool active) => AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: 66,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? _panel : _visualDarker,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: active ? _violet : const Color(0x1FFFFFFF)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: active ? Colors.white : _textDim),
+            const SizedBox(height: 4),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 9,
+                    color: active ? Colors.white : _textDim)),
+          ],
+        ),
+      );
+}
+
+// ── 4 · Agent lanes ──────────────────────────────────────────────────────────
+
+/// The sessions-tab anatomy: a working-session group row wrapping agent lanes
+/// with live tool lines (design §1).
+class _LanesVisual extends StatelessWidget {
+  const _LanesVisual();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _visualDark,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: 300,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // group row — the working session wraps its agents
+                  Row(children: [
+                    _plainDot(_violet, 6),
+                    const SizedBox(width: 7),
+                    const Text('visa application',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white)),
+                    const SizedBox(width: 7),
+                    _mono('2 agents', color: _textDim),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Container(height: 1, color: _hairline)),
+                    const SizedBox(width: 8),
+                    _mono('2h 14m', color: _textDim),
+                  ]),
+                  const SizedBox(height: 7),
+                  _lane(
+                    name: 'claude — paperwork',
+                    tool: 'Draft · cover letter for the consulate',
+                    chips: const ['claude', 'Docs'],
+                    elapsed: '14m',
+                  ),
+                  const SizedBox(height: 6),
+                  _lane(
+                    name: 'chatgpt — research',
+                    tool: 'Reading · embassy checklist & fees',
+                    chips: const ['chatgpt', 'Chrome'],
+                    elapsed: '26m',
+                  ),
+                  const SizedBox(height: 7),
+                  Row(children: [
+                    const Icon(Icons.bolt, size: 11, color: _blue),
+                    const SizedBox(width: 5),
+                    _mono('hooked: context injected · goal · done · next',
+                        color: _textDim),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  Widget _lane({
+    required String name,
+    required String tool,
+    required List<String> chips,
+    required String elapsed,
+  }) =>
+      Container(
+        margin: const EdgeInsets.only(left: 13),
+        padding: const EdgeInsets.fromLTRB(9, 8, 9, 8),
+        decoration: BoxDecoration(
+          color: _evidence,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0x14FFFFFF)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const _HaloDot(color: _blue, size: 12, dotSize: 6),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white)),
+              ),
+              _mono('working', color: _blue),
+            ]),
+            const SizedBox(height: 5),
+            Padding(
+              padding: const EdgeInsets.only(left: 19),
+              child: _mono(tool),
+            ),
+            const SizedBox(height: 5),
+            Padding(
+              padding: const EdgeInsets.only(left: 19),
+              child: Row(children: [
+                for (final c in chips) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: const Color(0x1FFFFFFF)),
+                    ),
+                    child: Text(c,
+                        style: const TextStyle(
+                            fontSize: 8.5, color: _textMuted)),
+                  ),
+                  const SizedBox(width: 5),
+                ],
+                const Spacer(),
+                _mono(elapsed, color: _textDim, size: 8.5),
+              ]),
+            ),
+          ],
+        ),
+      );
+}
+
+// ── 5 · Approve from the corner (live) ───────────────────────────────────────
+
+enum _ApprovalState { pending, allowed, always, denied, dismissed }
+
+/// The design's §0 moment, interactive: a PermissionRequest raises the card in
+/// the corner; Allow / Always / Deny resolve it, ✕ just closes it (the lane
+/// keeps waiting in the stack), and the island count follows.
+class _ApprovalVisual extends StatefulWidget {
+  const _ApprovalVisual();
+  @override
+  State<_ApprovalVisual> createState() => _ApprovalVisualState();
+}
+
+class _ApprovalVisualState extends State<_ApprovalVisual> {
+  _ApprovalState _s = _ApprovalState.pending;
+
+  bool get _pending => _s == _ApprovalState.pending;
+  bool get _stillWaiting => _pending || _s == _ApprovalState.dismissed;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _lightBg,
+        child: Stack(
+          children: [
+            const Positioned.fill(child: _MockPage(opacity: 0.5)),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: _IslandBar(children: [
+                  _plainDot(_blue, 6),
+                  const SizedBox(width: 6),
+                  _mono(
+                      _s == _ApprovalState.allowed ||
+                              _s == _ApprovalState.always
+                          ? '4 working'
+                          : '3 working',
+                      size: 10),
+                  if (_stillWaiting) ...[
+                    const SizedBox(width: 6),
+                    _plainDot(_textDim, 2),
+                    const SizedBox(width: 6),
+                    _Pulse(
+                        child: _mono('1 waiting',
+                            color: _amberText, size: 10)),
+                  ],
+                ]),
+              ),
+            ),
+            if (_pending)
+              const Positioned(
+                top: 34,
+                left: 0,
+                right: 0,
+                child: Center(child: _TryIt()),
+              ),
+            Positioned(
+              right: 10,
+              bottom: 8,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: _pending ? _askCard() : _receipt(),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _askCard() => Container(
+        key: const ValueKey('ask'),
+        width: 252,
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0x1AFFFFFF)),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x4D001C36), blurRadius: 32, offset: Offset(0, 8)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 6),
+              child: Row(children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: _amber,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                          color: _amber.withValues(alpha: 0.15),
+                          spreadRadius: 3),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Claude wants to send an email',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white)),
+                ),
+                _CardClose(
+                    () => setState(() => _s = _ApprovalState.dismissed)),
+              ]),
+            ),
+            // evidence panel — the raw command, glanceable, never required
+            Container(
+              padding: const EdgeInsets.fromLTRB(9, 7, 9, 7),
+              decoration: BoxDecoration(
+                color: _evidence,
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _mono('To: consulate visa desk — “Appointment request”',
+                      size: 10, color: const Color(0xFFE8EAEE)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    _mono('paperwork · 14m in', size: 8.5),
+                    const SizedBox(width: 6),
+                    _metaChip('claude'),
+                    const SizedBox(width: 4),
+                    _metaChip('Mail'),
+                  ]),
+                ],
+              ),
+            ),
+            const SizedBox(height: 7),
+            Row(children: [
+              _Highlight(
+                radius: 5,
+                child: _CardVerb('Allow',
+                    style: _VerbStyle.filled,
+                    onTap: () =>
+                        setState(() => _s = _ApprovalState.allowed)),
+              ),
+              const SizedBox(width: 6),
+              _CardVerb('Always',
+                  onTap: () => setState(() => _s = _ApprovalState.always)),
+              const Spacer(),
+              _CardVerb('Deny',
+                  style: _VerbStyle.quiet,
+                  onTap: () => setState(() => _s = _ApprovalState.denied)),
+            ]),
+          ],
+        ),
+      );
+
+  Widget _metaChip(String t) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: const Color(0x1FFFFFFF)),
+        ),
+        child: Text(t,
+            style: const TextStyle(fontSize: 8.5, color: _textMuted)),
+      );
+
+  Widget _receipt() {
+    final (label, dot) = switch (_s) {
+      _ApprovalState.allowed => ('Allowed — lane resumes', _green),
+      _ApprovalState.always => ('Always — this ask now costs 0 taps', _green),
+      _ApprovalState.denied => ('Denied — lane holds', _denyRed),
+      _ApprovalState.dismissed => (
+          'Closed — claude still waiting in the stack',
+          _amber
+        ),
+      _ApprovalState.pending => ('', _green),
+    };
+    return Container(
+      key: const ValueKey('receipt'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0x1AFFFFFF)),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x47001C36), blurRadius: 20, offset: Offset(0, 6)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _plainDot(dot, 7),
+          const SizedBox(width: 7),
+          Text(label,
+              style: const TextStyle(fontSize: 10.5, color: Colors.white)),
+          const SizedBox(width: 8),
+          _mono('send email', size: 9, color: _textDim),
+          const SizedBox(width: 8),
+          _Replay(() => setState(() => _s = _ApprovalState.pending)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── 6 · Away & back (live) ───────────────────────────────────────────────────
+
+enum _AwayState { card, jumped, calling, dismissed }
+
+/// Paused attention over live agents, and the single re-entry card the return
+/// raises — its verbs are the real ones: ⏵ jump, 📞 call, ok.
+class _AwayVisual extends StatefulWidget {
+  const _AwayVisual();
+  @override
+  State<_AwayVisual> createState() => _AwayVisualState();
+}
+
+class _AwayVisualState extends State<_AwayVisual> {
+  _AwayState _s = _AwayState.card;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _lightBg,
+        child: Stack(
+          children: [
+            const Positioned.fill(child: _MockPage(opacity: 0.5)),
+            // the away dim
+            const Positioned.fill(
+                child: ColoredBox(color: Color(0x3D1E1F22))),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: _IslandBar(children: [
+                  _plainDot(_textDim, 6),
+                  const SizedBox(width: 6),
+                  _mono('paused · 2 working', size: 10),
+                ]),
+              ),
+            ),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_s == _AwayState.card) ...[
+                      const _TryIt(),
+                      const SizedBox(height: 8),
+                    ],
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: switch (_s) {
+                        _AwayState.card => _returnCard(),
+                        _AwayState.jumped => _resultPill(
+                            'jumped',
+                            _blue,
+                            '⏵ claude — paperwork · straight to the chat'),
+                        _AwayState.calling => _resultPill(
+                            'calling',
+                            _greenBright,
+                            '📞 “where were we?” — the digest, spoken'),
+                        _AwayState.dismissed => _dismissedNote(),
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_s != _AwayState.card)
+              Positioned(
+                right: 12,
+                bottom: 8,
+                child: _Replay(() => setState(() => _s = _AwayState.card)),
+              ),
+          ],
+        ),
+      );
+
+  Widget _returnCard() => Container(
+        key: const ValueKey('return'),
+        width: 250,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _violet.withValues(alpha: 0.45)),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              _plainDot(_violet, 6),
+              const SizedBox(width: 7),
+              const Expanded(
+                child: Text('While you were away — 40m',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white)),
+              ),
+              _CardClose(() => setState(() => _s = _AwayState.dismissed)),
+            ]),
+            const SizedBox(height: 7),
+            _mono('claude ✓ drafted the cover letter', color: _saveMint),
+            const SizedBox(height: 3),
+            _mono('research still reading · next: book appointment'),
+            const SizedBox(height: 9),
+            Row(children: [
+              _Highlight(
+                radius: 5,
+                child: _CardVerb('⏵ jump',
+                    onTap: () => setState(() => _s = _AwayState.jumped)),
+              ),
+              const SizedBox(width: 6),
+              _CardVerb('📞 call',
+                  onTap: () => setState(() => _s = _AwayState.calling)),
+              const Spacer(),
+              _CardVerb('ok',
+                  style: _VerbStyle.quiet,
+                  onTap: () => setState(() => _s = _AwayState.dismissed)),
+            ]),
+          ],
+        ),
+      );
+
+  Widget _resultPill(String key, Color dot, String text) => Container(
+        key: ValueKey(key),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0x1AFFFFFF)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _plainDot(dot, 7),
+            const SizedBox(width: 7),
+            Text(text,
+                style: const TextStyle(fontSize: 10.5, color: Colors.white)),
+          ],
+        ),
+      );
+
+  Widget _dismissedNote() => Container(
+        key: const ValueKey('dismissed'),
+        width: 250,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _hairline),
+        ),
+        child: const Text(
+          'Also fine — the card never stacks up. The island keeps the counts '
+          'honest until you look again.',
+          style: TextStyle(fontSize: 11, height: 1.35, color: _textMuted),
+        ),
+      );
+}
+
+// ── 7 · Select, then verb (live) ─────────────────────────────────────────────
+
+enum _VerbResult { none, sent, call, saved }
+
+/// The unified verb row on a region selection: ▶ [lane] ▾ · 📞 · ⤓ — drag
+/// selects space, the eye selects time, both get the same row (design §3).
+/// ▶ wears the selected lane's name; ▾ switches it inline.
+class _VerbRowVisual extends StatefulWidget {
+  const _VerbRowVisual();
+  @override
+  State<_VerbRowVisual> createState() => _VerbRowVisualState();
+}
+
+class _VerbRowVisualState extends State<_VerbRowVisual> {
+  static const _lanes = ['claude — paperwork', 'chatgpt', 'Sinain chat'];
+  int _lane = 0;
+  _VerbResult _r = _VerbResult.none;
+
   @override
   Widget build(BuildContext context) => Container(
         color: _lightBg,
@@ -579,13 +1622,20 @@ class _RegionVisual extends StatelessWidget {
           children: [
             const Positioned.fill(child: _MockPage(opacity: 0.5)),
             const Positioned.fill(child: ColoredBox(color: Color(0x4D1E1F22))),
+            if (_r == _VerbResult.none)
+              const Positioned(
+                top: 12,
+                left: 0,
+                right: 0,
+                child: Center(child: _TryIt()),
+              ),
             // selection box
             Positioned(
               left: 70,
-              top: 54,
+              top: 46,
               child: SizedBox(
                 width: 240,
-                height: 104,
+                height: 100,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -605,58 +1655,30 @@ class _RegionVisual extends StatelessWidget {
                         decoration: BoxDecoration(
                             color: const Color(0xFF27282E),
                             borderRadius: BorderRadius.circular(3)),
-                        child: const Text('240 × 104',
+                        child: const Text('240 × 100',
                             style: TextStyle(
                                 fontSize: 10,
                                 color: Colors.white,
                                 fontFamily: 'monospace')),
                       ),
                     ),
-                    // Context card right after the drop — releasing the drag
-                    // is the confirmation, no Chat/Term toolbar in this flow.
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: -58,
-                      child: Center(
-                        child: Container(
-                          width: 200,
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: _cardBg,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0x24FFFFFF)),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(children: [
-                                _EyeGlyph(size: 11, strokeWidth: 3),
-                                SizedBox(width: 6),
-                                Text('Context from screen',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white)),
-                              ]),
-                              const SizedBox(height: 7),
-                              Container(height: 6, decoration: _bar(_panel)),
-                              const SizedBox(height: 5),
-                              FractionallySizedBox(
-                                  widthFactor: 0.7,
-                                  child: Container(
-                                      height: 6, decoration: _bar(_panel))),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
             ),
-            // gesture pill, top-right
+            // the verb row — release the drag, the row is already there.
+            // A sibling of the selection box (not a child positioned outside
+            // its bounds): out-of-bounds Stack children paint but never
+            // hit-test, which made these buttons dead.
+            Positioned(
+              left: 70,
+              top: 154,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: _r == _VerbResult.none ? _verbRow() : _resultRow(),
+              ),
+            ),
+            // gesture hint, top-right
             Positioned(
               right: 14,
               top: 14,
@@ -671,7 +1693,7 @@ class _RegionVisual extends StatelessWidget {
                   children: [
                     _EyeGlyph(size: 13, strokeWidth: 3),
                     SizedBox(width: 7),
-                    Text('Double-tap the eye',
+                    Text('Drag a box — or tap the eye',
                         style: TextStyle(fontSize: 11, color: Colors.white)),
                   ],
                 ),
@@ -681,456 +1703,464 @@ class _RegionVisual extends StatelessWidget {
         ),
       );
 
-  static BoxDecoration _bar(Color c) =>
-      BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
+  Widget _verbRow() => Row(
+        key: const ValueKey('verbs'),
+        children: [
+          // ▶ wears the selected lane's name; ▾ switches it inline
+          _Highlight(
+            child: Container(
+              height: 24,
+              decoration: BoxDecoration(
+                color: _cardBg,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0x24FFFFFF)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                GestureDetector(
+                  onTap: () => setState(() => _r = _VerbResult.sent),
+                  child: Container(
+                    color: _green,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    alignment: Alignment.center,
+                    child: const Text('▶',
+                        style:
+                            TextStyle(fontSize: 10, color: Colors.white)),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => setState(() => _r = _VerbResult.sent),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: _mono(_lanes[_lane],
+                        size: 10, color: const Color(0xFFE8EAEE)),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => setState(
+                      () => _lane = (_lane + 1) % _lanes.length),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    height: 24,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                          left: BorderSide(color: Color(0x24FFFFFF))),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text('▾',
+                        style: TextStyle(fontSize: 9, color: _textDim)),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 6),
+          _pill('📞', () => setState(() => _r = _VerbResult.call)),
+          const SizedBox(width: 6),
+          _pill('⤓', () => setState(() => _r = _VerbResult.saved)),
+        ],
+      );
+
+  Widget _resultRow() {
+    final (dot, text) = switch (_r) {
+      _VerbResult.sent => (
+          _greenBright,
+          'seed → ${_lanes[_lane]} · region + card'
+        ),
+      _VerbResult.call => (_greenBright, 'call open · agent sees this region'),
+      _VerbResult.saved => (_greenBright, 'saved · receipt in memory · undo'),
+      _VerbResult.none => (_greenBright, ''),
+    };
+    return Container(
+      key: const ValueKey('result'),
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0x24FFFFFF)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        _plainDot(dot, 6),
+        const SizedBox(width: 6),
+        _mono(text, size: 9.5, color: const Color(0xFFE8EAEE)),
+        const SizedBox(width: 8),
+        _Replay(() => setState(() => _r = _VerbResult.none)),
+      ]),
+    );
+  }
+
+  Widget _pill(String t, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 24,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _cardBg,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0x24FFFFFF)),
+          ),
+          child: Text(t,
+              style: const TextStyle(fontSize: 10, color: _textMuted)),
+        ),
+      );
 }
 
-class _WhereChatLandsVisual extends StatelessWidget {
-  const _WhereChatLandsVisual();
+// ── 8 · Enrich chip (live) ───────────────────────────────────────────────────
+
+/// A ⌘C mid-session: the quiet "enrich?" chip rides the island's edge — one
+/// message point, never at the cursor. Tap it and the clipboard gains the
+/// session's frame; ignored, it melts.
+class _EnrichChipVisual extends StatefulWidget {
+  const _EnrichChipVisual();
+  @override
+  State<_EnrichChipVisual> createState() => _EnrichChipVisualState();
+}
+
+class _EnrichChipVisualState extends State<_EnrichChipVisual> {
+  bool _enriched = false;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: _lightBg,
+        child: Stack(
+          children: [
+            const Positioned.fill(child: _MockPage(opacity: 0.5)),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _IslandBar(children: [
+                      _plainDot(_blue, 6),
+                      const SizedBox(width: 6),
+                      _mono('2 working', size: 10),
+                    ]),
+                    const SizedBox(width: 4),
+                    // the chip — slides out from the island's edge
+                    _Highlight(
+                      on: !_enriched,
+                      radius: 7,
+                      child: GestureDetector(
+                        onTap: () => setState(() => _enriched = true),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: const BoxDecoration(
+                            color: _cardBg,
+                            border: Border(
+                              left: BorderSide(color: Color(0x24FFFFFF)),
+                              right: BorderSide(color: Color(0x24FFFFFF)),
+                              bottom: BorderSide(color: Color(0x24FFFFFF)),
+                            ),
+                            borderRadius: BorderRadius.vertical(
+                                bottom: Radius.circular(7)),
+                          ),
+                          child: _enriched
+                              ? _mono('enriched ✓',
+                                  color: _saveMint, size: 9.5)
+                              : _Pulse(
+                                  child: _mono('enrich? · visa',
+                                      color: _saveMint, size: 9.5)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!_enriched) ...[
+                      const _TryIt(),
+                      const SizedBox(height: 8),
+                    ],
+                    Container(
+                      width: 250,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: _cardBg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0x731F8039)),
+                        boxShadow: const [
+                          BoxShadow(
+                              color: Color(0x40000000),
+                              blurRadius: 20,
+                              offset: Offset(0, 6)),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.copy,
+                                size: 11, color: _textDim),
+                            const SizedBox(width: 6),
+                            _mono('copied', color: _textDim),
+                          ]),
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _visualDarker,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: _mono('"DS-160 confirmation: AA004TX…"',
+                                size: 10, color: const Color(0xFFD6DAE3)),
+                          ),
+                          const SizedBox(height: 7),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 250),
+                            child: _enriched
+                                ? Container(
+                                    key: const ValueKey('frame'),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      borderRadius:
+                                          BorderRadius.circular(5),
+                                      border: Border.all(
+                                          color: _green.withValues(
+                                              alpha: 0.55)),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _mono(
+                                            '+ goal: submit the visa application',
+                                            color: _saveMint),
+                                        const SizedBox(height: 3),
+                                        _mono(
+                                            '+ step: book appointment · source: Chrome',
+                                            color: _saveMint),
+                                      ],
+                                    ),
+                                  )
+                                : Row(
+                                    key: const ValueKey('hint'),
+                                    children: [
+                                      const Icon(Icons.add,
+                                          size: 11, color: _greenBright),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: _mono(
+                                            'which task · which step · source app',
+                                            color: _textMuted),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_enriched)
+              Positioned(
+                right: 12,
+                bottom: 8,
+                child: _Replay(() => setState(() => _enriched = false)),
+              ),
+          ],
+        ),
+      );
+}
+
+// ── 9 · Save the session (live) ──────────────────────────────────────────────
+
+enum _SaveState { offer, saved, later }
+
+/// The save offer previews WHAT is kept before the tap; the receipt is
+/// editable and undo-able. Walking away is free — the tap is offered, never
+/// owed.
+class _SaveOfferVisual extends StatefulWidget {
+  const _SaveOfferVisual();
+  @override
+  State<_SaveOfferVisual> createState() => _SaveOfferVisualState();
+}
+
+class _SaveOfferVisualState extends State<_SaveOfferVisual> {
+  _SaveState _s = _SaveState.offer;
+
   @override
   Widget build(BuildContext context) => Container(
         color: _visualDark,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Row(
-              children: [
-                // Sinain HUD card (selected, green border + check)
-                _appCard(
-                  borderColor: _green,
-                  header: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _EyeGlyph(size: 14, strokeWidth: 3),
-                      SizedBox(width: 6),
-                      Text('Sinain HUD',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white)),
-                    ],
+        child: Stack(
+          children: [
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_s == _SaveState.offer) ...[
+                    const _TryIt(),
+                    const SizedBox(height: 8),
+                  ],
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    child: switch (_s) {
+                      _SaveState.offer => _offerCard(),
+                      _SaveState.saved => _receiptCard(),
+                      _SaveState.later => _laterNote(),
+                    },
                   ),
-                  footerColor: Colors.white,
-                  check: true,
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 12),
-                  child: Text('or',
-                      style: TextStyle(fontSize: 12, color: _textDim)),
-                ),
-                // External app card (ChatGPT)
-                _appCard(
-                  borderColor: const Color(0x1FFFFFFF),
-                  titleBar: true,
-                  header: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.open_in_new, size: 14, color: _textMuted),
-                      SizedBox(width: 6),
-                      Text('Your app',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: _textMuted)),
-                    ],
-                  ),
-                  footerColor: _textMuted,
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 12),
-                  child: Text('or',
-                      style: TextStyle(fontSize: 12, color: _textDim)),
-                ),
-                _voiceCard(),
-              ],
+                ],
+              ),
             ),
-          ),
+            if (_s != _SaveState.offer)
+              Positioned(
+                right: 12,
+                bottom: 8,
+                child: _Replay(() => setState(() => _s = _SaveState.offer)),
+              ),
+          ],
         ),
       );
 
-  /// Third destination: a live voice call with sinain — the call chip.
-  Widget _voiceCard() => Container(
-        width: 150,
+  Widget _offerCard() => Container(
+        key: const ValueKey('offer'),
+        width: 254,
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: _cardBg,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0x733369D6)),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _green.withValues(alpha: 0.5)),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
+          ],
         ),
-        clipBehavior: Clip.antiAlias,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              color: _visualDarker,
-              height: 80,
-              alignment: Alignment.center,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  for (final h in const [8.0, 18.0, 12.0, 22.0, 10.0]) ...[
-                    Container(
-                        width: 4,
-                        height: h,
-                        decoration: BoxDecoration(
-                            color: _blue,
-                            borderRadius: BorderRadius.circular(2))),
-                    const SizedBox(width: 3),
-                  ],
-                  const SizedBox(width: 7),
-                  Container(
-                    height: 18,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFB3361C),
-                        borderRadius: BorderRadius.circular(4)),
-                    child: const Text('End',
-                        style: TextStyle(fontSize: 9, color: Colors.white)),
-                  ),
-                ],
+            Row(children: [
+              _plainDot(_greenBright, 6),
+              const SizedBox(width: 7),
+              const Expanded(
+                child: Text('Save this session?',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white)),
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: const BoxDecoration(
-                  border: Border(top: BorderSide(color: _hairline))),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.graphic_eq, size: 14, color: _blue),
-                  SizedBox(width: 6),
-                  Text('Sinain voice',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: _textMuted)),
-                ],
+              _mono('4h 50m', color: _textDim),
+            ]),
+            const SizedBox(height: 7),
+            _mono('goal met · 6 facts · 3 agent runs', color: _saveMint),
+            const SizedBox(height: 3),
+            _mono('cover letter · appointment ✓ · undo after',
+                color: _textMuted),
+            const SizedBox(height: 9),
+            Row(children: [
+              _Highlight(
+                radius: 5,
+                child: _CardVerb('⤓ Save',
+                    style: _VerbStyle.filled,
+                    onTap: () => setState(() => _s = _SaveState.saved)),
               ),
-            ),
+              const SizedBox(width: 8),
+              _CardVerb('later',
+                  style: _VerbStyle.quiet,
+                  onTap: () => setState(() => _s = _SaveState.later)),
+            ]),
           ],
         ),
       );
 
-  Widget _appCard({
-    required Color borderColor,
-    required Widget header,
-    required Color footerColor,
-    bool check = false,
-    bool titleBar = false,
-  }) {
-    return Container(
-      width: 150,
-      decoration: BoxDecoration(
-        color: _cardBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (titleBar)
-                Container(
-                  height: 22,
-                  color: _panel,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Row(
-                    children: [
-                      _dot(_red),
-                      const SizedBox(width: 4),
-                      _dot(_orange),
-                      const SizedBox(width: 4),
-                      _dot(_green),
-                      const SizedBox(width: 6),
-                      const Text('ChatGPT',
-                          style: TextStyle(fontSize: 10, color: _textMuted)),
-                    ],
-                  ),
-                ),
-              // message bubbles
-              Container(
-                color: titleBar ? null : _visualDarker,
-                height: titleBar ? 58 : 80,
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Container(
-                          width: 54,
-                          height: 13,
-                          decoration: BoxDecoration(
-                              color: titleBar ? _blue : _green,
-                              borderRadius: BorderRadius.circular(7))),
-                    ),
-                    const SizedBox(height: 5),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Container(
-                          width: 70,
-                          height: 13,
-                          decoration: BoxDecoration(
-                              color: _panel,
-                              borderRadius: BorderRadius.circular(7),
-                              border:
-                                  Border.all(color: const Color(0x1AFFFFFF)))),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: const BoxDecoration(
-                    border: Border(top: BorderSide(color: _hairline))),
-                child: header,
-              ),
-            ],
-          ),
-          if (check)
-            Positioned(
-              top: 6,
-              right: 6,
-              child: Container(
-                width: 16,
-                height: 16,
-                decoration:
-                    const BoxDecoration(color: _green, shape: BoxShape.circle),
-                child: const Icon(Icons.check, size: 10, color: Colors.white),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _dot(Color c) => Container(
-      width: 7,
-      height: 7,
-      decoration: BoxDecoration(color: c, shape: BoxShape.circle));
-}
-
-class _AgentsVisual extends StatelessWidget {
-  const _AgentsVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: SizedBox(
-            width: 300,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Chat opens with',
-                    style: TextStyle(fontSize: 11, color: _textMuted)),
-                const SizedBox(height: 5),
-                _row(_green, 'S', 'Sinain', 'Built in', isMono: false),
-                const SizedBox(height: 12),
-                const Text('Terminal runs',
-                    style: TextStyle(fontSize: 11, color: _textMuted)),
-                const SizedBox(height: 5),
-                _row(_blue, 'O', 'openclaude', null, isMono: true),
-              ],
-            ),
-          ),
-        ),
-      );
-
-  Widget _row(Color badge, String letter, String name, String? tag,
-      {bool isMono = false}) {
-    return Container(
-      height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: _panel,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0x24FFFFFF)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 18,
-            height: 18,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-                color: badge, borderRadius: BorderRadius.circular(4)),
-            child: Text(letter,
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
-          ),
-          const SizedBox(width: 8),
-          Text(name,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.white,
-                  fontFamily: isMono ? 'monospace' : null)),
-          if (tag != null) ...[
-            const SizedBox(width: 8),
-            Text(tag, style: const TextStyle(fontSize: 11, color: _textDim)),
-          ],
-          const Spacer(),
-          const Icon(Icons.keyboard_arrow_down, size: 16, color: _textMuted),
-        ],
-      ),
-    );
-  }
-}
-
-class _HandoffVisual extends StatelessWidget {
-  const _HandoffVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              constraints: const BoxConstraints(maxWidth: 320),
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-              decoration: BoxDecoration(
-                color: _panel,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(10),
-                  topRight: Radius.circular(10),
-                  bottomRight: Radius.circular(10),
-                  bottomLeft: Radius.circular(2),
-                ),
-                border: Border.all(color: _hairline),
-              ),
-              child: const Text(
-                "I can't run commands myself — want me to hand this to a "
-                'terminal agent?',
-                style: TextStyle(fontSize: 12, height: 1.33, color: _textMuted),
-              ),
-            ),
-            const SizedBox(height: 12),
-            // composer + popover
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: _cardBg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0x1AFFFFFF)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: const Color(0x281F8039),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _green),
-                        ),
-                        child: const Icon(Icons.account_tree_outlined,
-                            size: 15, color: _green),
-                      ),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                          child: Text('Type a message',
-                              style: TextStyle(fontSize: 12, color: _textDim))),
-                      const Icon(Icons.send, size: 16, color: _textDim),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  bottom: 40,
-                  child: Container(
-                    width: 180,
-                    decoration: BoxDecoration(
-                      color: _panel,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0x24FFFFFF)),
-                      boxShadow: const [
-                        BoxShadow(
-                            color: Color(0x73000000),
-                            blurRadius: 16,
-                            offset: Offset(0, 4))
-                      ],
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Padding(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                          child: Text('Continue in',
-                              style: TextStyle(fontSize: 11, color: _textDim)),
-                        ),
-                        _agentRow(_purple, 'C', 'claude code', selected: true),
-                        _agentRow(_green, 'X', 'codex'),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-
-  Widget _agentRow(Color badge, String mono, String name,
-          {bool selected = false}) =>
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+  Widget _receiptCard() => Container(
+        key: const ValueKey('saved'),
+        width: 254,
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: selected ? const Color(0x281F8039) : null,
-          border: selected
-              ? const Border(left: BorderSide(color: _green, width: 2))
-              : null,
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _hairline),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 16,
-              height: 16,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                  color: badge, borderRadius: BorderRadius.circular(4)),
-              child: Text(mono,
-                  style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white)),
-            ),
-            const SizedBox(width: 8),
-            Text(name,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white,
-                    fontFamily: 'monospace')),
+            Row(children: [
+              Container(
+                width: 14,
+                height: 14,
+                decoration: const BoxDecoration(
+                    color: _green, shape: BoxShape.circle),
+                child:
+                    const Icon(Icons.check, size: 9, color: Colors.white),
+              ),
+              const SizedBox(width: 7),
+              const Expanded(
+                child: Text('Saved to memory',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white)),
+              ),
+            ]),
+            const SizedBox(height: 7),
+            _mono('6 facts · 3 agent runs · the cover letter'),
+            const SizedBox(height: 3),
+            _mono('“next” seeds tomorrow’s re-entry', color: _textDim),
+            const SizedBox(height: 9),
+            Row(children: [
+              _CardVerb('Undo',
+                  onTap: () => setState(() => _s = _SaveState.offer)),
+              const SizedBox(width: 8),
+              _mono('30s to change your mind', color: _textDim, size: 8.5),
+            ]),
           ],
+        ),
+      );
+
+  Widget _laterNote() => Container(
+        key: const ValueKey('later'),
+        width: 254,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _hairline),
+        ),
+        child: const Text(
+          'Also fine — walk away and the grace period saves the same '
+          'preview. The tap is offered, never owed.',
+          style: TextStyle(fontSize: 11, height: 1.35, color: _textMuted),
         ),
       );
 }
 
-/// Scene 7 — the actual knowledge web UI (day theme), shown as a browser window
-/// floating in the dark scene area. Header (blue SINAIN logo + search + 📤
-/// Shares), then bookmark cards — matching sinain-core/src/server.ts.
-class _KnowledgeVisual extends StatelessWidget {
-  const _KnowledgeVisual();
+// ── 10 · Knowledge browser (live) ────────────────────────────────────────────
+
+/// The actual knowledge web UI (day theme), shown as a browser window floating
+/// in the dark scene area — with the real "open" action as a button inside the
+/// window, so the live control lives in the slide's own UI.
+class _KnowledgeVisual extends StatefulWidget {
+  const _KnowledgeVisual({required this.onOpen});
+  final VoidCallback onOpen;
+  @override
+  State<_KnowledgeVisual> createState() => _KnowledgeVisualState();
+}
+
+class _KnowledgeVisualState extends State<_KnowledgeVisual> {
+  bool _opened = false;
+
   @override
   Widget build(BuildContext context) => Container(
         color: _visualDark,
@@ -1203,17 +2233,43 @@ class _KnowledgeVisual extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // bookmark cards
+                  // bookmark cards + the live open button
                   Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _entityCard(
-                            'Email style', 'concise · ask-first · warm tone'),
+                        _entityCard('visa application',
+                            'goal met · 6 facts · appointment ✓'),
                         const SizedBox(height: 8),
-                        _entityCard(
-                            'Follow-ups', 'nudge after 2 business days'),
+                        _entityCard('Consulate — visa desk',
+                            'appointment booked · docs checklist'),
+                        const SizedBox(height: 10),
+                        _Highlight(
+                          on: !_opened,
+                          color: _webAccent,
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() => _opened = true);
+                              widget.onOpen();
+                            },
+                            child: Container(
+                              height: 30,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _webAccent,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                  'Open knowledge browser  ↗',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white)),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1248,479 +2304,7 @@ class _KnowledgeVisual extends StatelessWidget {
       );
 }
 
-/// Scene 8 — the real entity page (day theme) with the 📤 Share icon button
-/// (server.ts #actShare). Clicking it mints the privacy-preserving share link.
-class _ShareVisual extends StatelessWidget {
-  const _ShareVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Container(
-              width: 320,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: _webBg,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: const [
-                  BoxShadow(
-                      color: Color(0x40000000),
-                      blurRadius: 20,
-                      offset: Offset(0, 6)),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // page-header: title + page-actions (📤 share icon button)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Text('Email writing style',
-                              style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: _webFg)),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          height: 28,
-                          padding: const EdgeInsets.symmetric(horizontal: 9),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: _webElev,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: _webBorder),
-                          ),
-                          child:
-                              const Text('📤', style: TextStyle(fontSize: 14)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // minted share link
-                  Container(
-                    height: 32,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: _webElev,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: _webBorder),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.link, size: 14, color: _webFgDim),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text('sinain.com/share.html#…',
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: _webFgDim,
-                                  fontFamily: 'monospace')),
-                        ),
-                        Text('📋', style: TextStyle(fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Row(
-                    children: [
-                      Icon(Icons.lock_outline, size: 12, color: _webAccent),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                            'Host logs only “GET /share.html” — never the concept',
-                            style: TextStyle(fontSize: 10, color: _webFgFaint)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-// ── Deliberate-capture scene visuals (tour modes 1/2/4) ─────────────────────
-
-/// Mini chooser-card mock shared by the Save/Call scenes: header + presets +
-/// source checklist + verb buttons, in the tour palette.
-class _MiniChooser extends StatelessWidget {
-  const _MiniChooser({
-    required this.title,
-    required this.accent,
-    required this.consentLabel,
-    required this.buttons,
-  });
-  final String title;
-  final Color accent;
-  final String consentLabel;
-  final Widget buttons;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 250,
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: _cardBg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: accent.withValues(alpha: 0.45)),
-          boxShadow: const [
-            BoxShadow(
-                color: Color(0x40000000), blurRadius: 20, offset: Offset(0, 6)),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(children: [
-              const _EyeGlyph(size: 13, strokeWidth: 3),
-              const SizedBox(width: 7),
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white)),
-              const Spacer(),
-              Text('30 min',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
-                      color: accent)),
-            ]),
-            const SizedBox(height: 8),
-            Row(children: [
-              for (final n in const ['5m', '15m', '30m', '60m']) ...[
-                Expanded(
-                  child: Container(
-                    height: 18,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: n == '30m'
-                          ? accent.withValues(alpha: 0.25)
-                          : _panel,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                          color: n == '30m'
-                              ? accent.withValues(alpha: 0.55)
-                              : _hairline),
-                    ),
-                    child: Text(n,
-                        style: TextStyle(
-                            fontSize: 9,
-                            fontFamily: 'monospace',
-                            color: n == '30m' ? Colors.white : _textMuted)),
-                  ),
-                ),
-                if (n != '60m') const SizedBox(width: 4),
-              ],
-            ]),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _visualDarker,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(children: [
-                    Flexible(
-                      child: Text(consentLabel,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.4,
-                              color: _textDim)),
-                    ),
-                    const SizedBox(width: 6),
-                    const Spacer(),
-                    const Text('2 of 3 sources',
-                        style: TextStyle(
-                            fontSize: 8,
-                            fontFamily: 'monospace',
-                            color: _textDim)),
-                  ]),
-                  const SizedBox(height: 5),
-                  _srcRow(accent, 'IntelliJ IDEA', '26 min', on: true),
-                  _srcRow(accent, 'Chrome', '12 min', on: true),
-                  _srcRow(accent, 'Slack', '4 min', on: false),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            buttons,
-          ],
-        ),
-      );
-
-  static Widget _srcRow(Color accent, String name, String mins,
-          {required bool on}) =>
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(children: [
-          Container(
-            width: 10,
-            height: 10,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: on ? accent : Colors.transparent,
-              border:
-                  Border.all(color: on ? accent : const Color(0x40FFFFFF)),
-              borderRadius: BorderRadius.circular(2),
-            ),
-            child: on
-                ? const Text('✓',
-                    style: TextStyle(
-                        fontSize: 7, height: 1, color: Colors.white))
-                : null,
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(name,
-                style: TextStyle(
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    color: on ? const Color(0xFFD6DAE3) : _textDim)),
-          ),
-          Text(mins,
-              style: const TextStyle(
-                  fontSize: 8, fontFamily: 'monospace', color: _textDim)),
-        ]),
-      );
-
-  static Widget verb(String label, Color color, {bool outline = false}) =>
-      Expanded(
-        child: Container(
-          height: 24,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: outline ? Colors.transparent : color,
-            border: outline ? Border.all(color: const Color(0x2EFFFFFF)) : null,
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: outline ? _textMuted : Colors.white)),
-        ),
-      );
-}
-
-class _SaveContextVisual extends StatelessWidget {
-  const _SaveContextVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: _MiniChooser(
-              title: 'Save context…',
-              accent: _green,
-              consentLabel: 'COVERS · CLICK TO EXCLUDE',
-              buttons: Row(children: [
-                _MiniChooser.verb('Save 30 min', _green),
-                const SizedBox(width: 6),
-                _MiniChooser.verb('Cancel', _green, outline: true),
-              ]),
-            ),
-          ),
-        ),
-      );
-}
-
-class _CallAiVisual extends StatelessWidget {
-  const _CallAiVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: _MiniChooser(
-              title: 'Call AI on…',
-              accent: _blue,
-              consentLabel: 'AI WILL KNOW · CLICK TO EXCLUDE',
-              buttons: Row(children: [
-                _MiniChooser.verb('Call AI', _blue),
-                const SizedBox(width: 6),
-                _MiniChooser.verb('Call sinain', _textDim),
-              ]),
-            ),
-          ),
-        ),
-      );
-}
-
-/// Mode 4 — the enrich card: clipboard snippet + composed CONTEXT + handoff.
-class _ClipboardVisual extends StatelessWidget {
-  const _ClipboardVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Container(
-              width: 260,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: _cardBg,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0x731F8039)),
-                boxShadow: const [
-                  BoxShadow(
-                      color: Color(0x40000000),
-                      blurRadius: 20,
-                      offset: Offset(0, 6)),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Row(children: [
-                    _EyeGlyph(size: 13, strokeWidth: 3),
-                    SizedBox(width: 7),
-                    Text('Context from clipboard',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white)),
-                  ]),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _visualDarker,
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: const Text('"x-ratelimit-remaining-tokens"',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                            color: Color(0xFFD6DAE3))),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('CONTEXT',
-                      style: TextStyle(
-                          fontSize: 8,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.4,
-                          color: _textDim)),
-                  const SizedBox(height: 5),
-                  Container(height: 8, decoration: _bar(_panel)),
-                  const SizedBox(height: 5),
-                  FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: 0.72,
-                      child: Container(height: 8, decoration: _bar(_panel))),
-                  const SizedBox(height: 10),
-                  Row(children: [
-                    _MiniChooser.verb('Handoff to Claude Code', _blue),
-                    const SizedBox(width: 6),
-                    _MiniChooser.verb('Copy for agent', _blue, outline: true),
-                  ]),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-
-  static BoxDecoration _bar(Color c) =>
-      BoxDecoration(color: c, borderRadius: BorderRadius.circular(3));
-}
-
-class _CaptureVisual extends StatelessWidget {
-  const _CaptureVisual();
-  @override
-  Widget build(BuildContext context) => Container(
-        color: _visualDark,
-        child: Center(
-          child: SizedBox(
-            width: 300,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Real in-app control glyphs (overlay_shell.dart): screen =
-                // desktop_windows, audio = volume_up_rounded.
-                _toggleRow(Icons.desktop_windows, 'Screen & video',
-                    "What's on your display"),
-                const SizedBox(height: 10),
-                _toggleRow(
-                    Icons.volume_up_rounded, 'Audio', 'Mic and system sound'),
-              ],
-            ),
-          ),
-        ),
-      );
-
-  Widget _toggleRow(IconData icon, String title, String sub) => Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: _panel,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0x1FFFFFFF)),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: _green),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white)),
-                  Text(sub,
-                      style: const TextStyle(fontSize: 11, color: _textDim)),
-                ],
-              ),
-            ),
-            // on toggle
-            Container(
-              width: 36,
-              height: 20,
-              decoration: BoxDecoration(
-                  color: _green, borderRadius: BorderRadius.circular(10)),
-              child: Stack(children: [
-                Positioned(
-                  top: 2,
-                  left: 18,
-                  child: Container(
-                    width: 16,
-                    height: 16,
-                    decoration: const BoxDecoration(
-                        color: Colors.white, shape: BoxShape.circle),
-                  ),
-                ),
-              ]),
-            ),
-          ],
-        ),
-      );
-}
+// ── 11 · Privacy ─────────────────────────────────────────────────────────────
 
 class _PrivacyVisual extends StatelessWidget {
   const _PrivacyVisual();
@@ -1806,6 +2390,9 @@ class _ScreenEyePainter extends CustomPainter {
       old.color != color || old.struck != struck;
 }
 
+// ── 12 · Done ────────────────────────────────────────────────────────────────
+
+/// The parked island at the notch — where Sinain lives from here on.
 class _DoneVisual extends StatelessWidget {
   const _DoneVisual();
   @override
@@ -1813,50 +2400,38 @@ class _DoneVisual extends StatelessWidget {
         color: _visualDark,
         child: Stack(
           children: [
-            // top menu-bar strip with the eye anchored top-right
+            // top menu-bar strip with the island hanging from the notch
             Positioned(
               top: 0,
               left: 0,
               right: 0,
-              child: Container(
-                height: 30,
-                color: _panel,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    const Icon(Icons.circle_outlined,
-                        size: 14, color: _textDim),
-                    const SizedBox(width: 10),
-                    const Icon(Icons.settings, size: 14, color: _textDim),
-                    const SizedBox(width: 10),
-                    Container(
-                      width: 24,
-                      height: 24,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _cardBg,
-                        border: Border.all(color: const Color(0x991F8039)),
-                      ),
-                      child: const _EyeGlyph(size: 16, strokeWidth: 3),
-                    ),
-                  ],
-                ),
+              child: Container(height: 22, color: _panel),
+            ),
+            Positioned(
+              top: 22,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: _IslandBar(children: [
+                  const _HaloDot(color: _blue, size: 12, dotSize: 6),
+                  const SizedBox(width: 6),
+                  _mono('3 working', size: 10),
+                ]),
               ),
             ),
             const Center(
               child: Padding(
-                padding: EdgeInsets.only(top: 18),
+                padding: EdgeInsets.only(top: 34),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.keyboard_arrow_up, size: 22, color: _green),
                     SizedBox(height: 8),
                     SizedBox(
-                      width: 200,
+                      width: 220,
                       child: Text(
-                        'Sinain lives up here. Tap the eye to collapse the HUD, anytime.',
+                        'Sinain lives up here. Glance for the counts — '
+                        'click for the stack.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: _textMuted),
                       ),
