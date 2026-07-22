@@ -2108,6 +2108,9 @@ async function main() {
     voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
     voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),
     voiceStop: () => localVoice ? guide.stop() : voiceManager.stop(),
+    // Attach + scenario swap are guided-lane concepts — the bridge has neither.
+    voiceAttach: localVoice ? (sessionId) => guide.attachSession(sessionId) : undefined,
+    voiceContext: localVoice ? (text) => guide.setContext(text) : undefined,
     voiceStatus: () => localVoice ? guide.status() : voiceManager.status(),
     voiceSeed: () => voiceManager.seed(),
     voiceOffer: (body) => voiceManager.proxyOffer(body),

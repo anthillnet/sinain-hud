@@ -53,6 +53,13 @@ export class LocalGuideSession {
   private minutes = 0;
   private coverage = "";
   private systemPrompt = "";
+  // Prompt parts kept separate so a mid-session scenario swap (setContext)
+  // recomposes without losing the intent or the seed brief.
+  private intent = "";
+  private scenario = "";
+  private seed = "";
+  /** Tracked session the call is attached to (drag gesture; null = none). */
+  private attachedSessionId: string | null = null;
   private turns: GuideTurn[] = [];
   /** Raw shown lines (last MAX_SHOWN) fed back to the model each tick. */
   private shownHints: string[] = [];
@@ -115,9 +122,10 @@ export class LocalGuideSession {
     this.shownHints = [];
     this.shownKeys.clear();
     this.tickPending = false;
+    this.attachedSessionId = null;
 
     this.setState("starting", minutes > 0 ? `Composing brief from last ${minutes} min…` : undefined);
-    const seed = await this.composeSeed(minutes, scope);
+    this.seed = await this.composeSeed(minutes, scope);
     let scenario = (context ?? "").trim();
     let scenarioSource = scenario ? "request" : "";
     if (!scenario && existsSync(CONTEXT_DOC)) {
@@ -127,16 +135,48 @@ export class LocalGuideSession {
       } catch { /* unreadable doc = no scenario */ }
     }
     if (scenario.length > MAX_CONTEXT_CHARS) scenario = scenario.slice(0, MAX_CONTEXT_CHARS);
-    this.systemPrompt = GUIDE_PROMPT
-      + (intent ? `\n\nThe user's stated intent for this session: ${intent}` : "")
-      + (scenario ? `\n\nSession scenario/playbook (ground your hints and SAY lines in this):\n${scenario}` : "")
-      + (seed ? `\n\nContext so far (what the user was doing before the call):\n${seed}` : "");
+    this.intent = intent ?? "";
+    this.scenario = scenario;
+    this.composePrompt();
 
-    log(TAG, `local guided session live: ${minutes} min seed${seed ? "" : " (unseeded)"}, model=${this.analysis.model}`
+    log(TAG, `local guided session live: ${minutes} min seed${this.seed ? "" : " (unseeded)"}, model=${this.analysis.model}`
       + (intent ? `, intent="${intent.slice(0, 60)}"` : "")
       + (scenario ? `, scenario=${scenario.length} chars (${scenarioSource})` : ""));
     this.setState("live", "Listening — hints appear here when they matter.");
     return { ok: true };
+  }
+
+  /** System prompt from its stored parts — rerun whenever one changes. */
+  private composePrompt(): void {
+    this.systemPrompt = GUIDE_PROMPT
+      + (this.intent ? `\n\nThe user's stated intent for this session: ${this.intent}` : "")
+      + (this.scenario ? `\n\nSession scenario/playbook (ground your hints and SAY lines in this):\n${this.scenario}` : "")
+      + (this.seed ? `\n\nContext so far (what the user was doing before the call):\n${this.seed}` : "");
+  }
+
+  /** Attach the call to a tracked session (drag onto a session chip) — the
+   *  id rides every broadcast from here on. Null/empty detaches. False when
+   *  no session is starting/live. */
+  attachSession(sessionId: string | null): boolean {
+    if (this.state !== "starting" && this.state !== "live") return false;
+    const id = sessionId?.trim() || null;
+    this.attachedSessionId = id;
+    log(TAG, id ? `attached to session ${id}` : "detached from session");
+    this.setState(this.state); // broadcast so the overlay updates now
+    return true;
+  }
+
+  /** Mid-session scenario swap (📎 on the live chip): replace the scenario
+   *  part and recompose — intent and seed survive. False when no session is
+   *  starting/live. */
+  setContext(text: string): boolean {
+    if (this.state !== "starting" && this.state !== "live") return false;
+    let scenario = text.trim();
+    if (scenario.length > MAX_CONTEXT_CHARS) scenario = scenario.slice(0, MAX_CONTEXT_CHARS);
+    this.scenario = scenario;
+    this.composePrompt();
+    log(TAG, `scenario updated (${scenario.length} chars)`);
+    return true;
   }
 
   /** Finalized transcript hook (from the transcription pipeline). Mic = the
@@ -160,6 +200,10 @@ export class LocalGuideSession {
     this.shownKeys.clear();
     this.tickPending = false;
     this.systemPrompt = "";
+    this.intent = "";
+    this.scenario = "";
+    this.seed = "";
+    this.attachedSessionId = null;
     return true;
   }
 
@@ -261,7 +305,9 @@ export class LocalGuideSession {
     this.broadcast({
       type: "voice_session", status: "live", mode: "local",
       minutes: this.minutes, coverage: this.coverage,
-      message: line, ts: Date.now(),
+      message: line,
+      ...(this.attachedSessionId ? { attachedSessionId: this.attachedSessionId } : {}),
+      ts: Date.now(),
     });
   }
 
@@ -270,7 +316,9 @@ export class LocalGuideSession {
     this.broadcast({
       type: "voice_session", status, mode: "local",
       minutes: this.minutes, coverage: this.coverage,
-      ...(message ? { message } : {}), ts: Date.now(),
+      ...(message ? { message } : {}),
+      ...(this.attachedSessionId ? { attachedSessionId: this.attachedSessionId } : {}),
+      ts: Date.now(),
     });
   }
 }

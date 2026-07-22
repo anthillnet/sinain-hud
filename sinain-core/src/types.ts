@@ -421,6 +421,9 @@ export interface VoiceSessionMessage {
   coverage: string;
   /** Human line to surface (e.g. "admit Sinain (AI) from the People panel"). */
   message?: string;
+  /** Tracked session the call is attached to (guided lane only — the
+   *  drag-onto-a-session-chip gesture; bridge lane never sets it). */
+  attachedSessionId?: string;
   error?: string;
   ts: number;
 }

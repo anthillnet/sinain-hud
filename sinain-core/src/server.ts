@@ -299,6 +299,12 @@ export interface ServerDeps {
   voiceMeet?: (url: string, minutes: number) => Promise<{ ok: boolean; error?: string }>;
   /** End the running voice session (true if there was one). */
   voiceStop?: () => boolean;
+  /** Attach the live guided session to a tracked session (null = detach);
+   *  false when no session is running. Local lane only. */
+  voiceAttach?: (sessionId: string | null) => boolean;
+  /** Mid-session scenario swap for the guided lane; false when no session
+   *  is running. Local lane only. */
+  voiceContext?: (context: string) => boolean;
   /** Store the pair-flow credential (session cookie or device token). */
   voicePair?: (cookie: string, token: string, email: string) => void;
   /** Current voice session state. */
@@ -817,6 +823,46 @@ export function createAppServer(deps: ServerDeps) {
 
       if (req.method === "POST" && url.pathname === "/voice/stop") {
         res.end(JSON.stringify({ ok: true, stopped: deps.voiceStop?.() ?? false }));
+        return;
+      }
+
+      // Attach the live call to a tracked session (drag onto a session chip).
+      // Empty/absent sessionId detaches. Local guided lane only.
+      if (req.method === "POST" && url.pathname === "/voice/attach") {
+        if (!deps.voiceAttach) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice attach unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const parsed = JSON.parse(body || "{}") as { sessionId?: unknown };
+        const sessionId = typeof parsed.sessionId === "string" && parsed.sessionId.trim()
+          ? parsed.sessionId.trim() : null;
+        if (!deps.voiceAttach(sessionId)) {
+          res.writeHead(409);
+          res.end(JSON.stringify({ ok: false, error: "no live voice session" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // Mid-session scenario swap (📎 on the live chip). Local guided lane only.
+      if (req.method === "POST" && url.pathname === "/voice/context") {
+        if (!deps.voiceContext) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice context unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 65536);
+        const parsed = JSON.parse(body || "{}") as { context?: unknown };
+        const text = typeof parsed.context === "string" ? parsed.context.slice(0, 24000) : "";
+        if (!deps.voiceContext(text)) {
+          res.writeHead(409);
+          res.end(JSON.stringify({ ok: false, error: "no live voice session" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
 
