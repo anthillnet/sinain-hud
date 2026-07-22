@@ -412,9 +412,10 @@ export interface VoiceSessionMessage {
   type: "voice_session";
   status: "starting" | "live" | "ended" | "error";
   /** Transport: hidden-webview engine (browser WebRTC stack), local AR
-   *  bridge (python aiortc), or the deployed meetbot joining a Google
-   *  Meet/Teams call from its container. */
-  mode: "webview" | "bridge" | "meet";
+   *  bridge (python aiortc), the deployed meetbot joining a Google
+   *  Meet/Teams call from its container, or the in-process guided-session
+   *  lane (VOICE_MODE=local — no bridge, no server). */
+  mode: "webview" | "bridge" | "meet" | "local";
   /** Range whose brief seeded the session (0 = unseeded). */
   minutes: number;
   coverage: string;
@@ -813,6 +814,10 @@ export interface SessionSenseConfig {
 /** "Call sinain" voice sessions via the ARSinain bridge (tools/ar-bridge). */
 export interface VoiceConfig {
   enabled: boolean;
+  /** Session lane: "bridge" = the ARSinain transports below; "local" = the
+   *  in-process guided-session lane (teleprompter hints over the analysis
+   *  endpoint — no bridge, no server). */
+  mode: "bridge" | "local";
   /** ARSinain base URL (aiortc signaling) for the local bridge transport. */
   serverUrl: string;
   /** X-Auth-Request-Email for entitlement-gated servers ("" locally). */

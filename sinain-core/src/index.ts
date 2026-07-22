@@ -1405,6 +1405,10 @@ async function main() {
   const recentSystemTranscripts: string[] = [];
   const recentMicTranscripts: string[] = [];
 
+  // Local guided-session lane (VOICE_MODE=local): constructed in the voice
+  // wiring below — the transcript hook registers first, hence the slot.
+  let localGuide: import("./capture/local-guide.js").LocalGuideSession | null = null;
+
   transcription.on("transcript", (result) => {
     const isSystem = result.audioSource === "system";
     const recentSame = isSystem ? recentSystemTranscripts : recentMicTranscripts;
@@ -1438,6 +1442,7 @@ async function main() {
     if (!isSystem) item.audioSource = "mic";
     wsHandler.broadcast(`${tag} ${bufferText}`, "normal");
     recorder.onFeedItem(item); // Collect for recording if active
+    localGuide?.onTranscript(result.text, isSystem ? "system" : "mic"); // Live guided-session hints
 
     // Entity subscription: detect mentions and prefetch knowledge (async, non-blocking)
     const detectedEntities = entityCache.detectEntities(result.text);
@@ -1899,6 +1904,17 @@ async function main() {
     (msg) => wsHandler.broadcastRaw(msg),
   );
 
+  // VOICE_MODE=local: "Call sinain" runs in-process instead — teleprompter
+  // hints from the analysis model over the same live-chip captions, no
+  // bridge/server. The transcript wiring above feeds it turns.
+  const { LocalGuideSession } = await import("./capture/local-guide.js");
+  const guide = new LocalGuideSession(
+    config.agentConfig, config.burstConfig, feedBuffer, senseBuffer,
+    (msg) => wsHandler.broadcastRaw(msg),
+  );
+  localGuide = guide;
+  const localVoice = config.voiceConfig.mode === "local";
+
   // Keyed by the HASH OF THE TAIL actually sent, not by duration: every
   // duration sends slice.text.slice(-12_000), and whenever the newest 12K
   // chars span less than the selected range those tails are byte-identical
@@ -2085,12 +2101,14 @@ async function main() {
       return { minutes, covers, summary };
     },
     voiceStart: config.voiceConfig.enabled
-      ? (minutes, apps) => voiceManager.start(minutes, apps ? { apps } : undefined)
+      ? (minutes, apps) => localVoice
+        ? guide.start(minutes, apps)
+        : voiceManager.start(minutes, apps ? { apps } : undefined)
       : undefined,
     voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
     voicePair: (cookie, token, email) => voiceManager.pair(cookie, token, email),
-    voiceStop: () => voiceManager.stop(),
-    voiceStatus: () => voiceManager.status(),
+    voiceStop: () => localVoice ? guide.stop() : voiceManager.stop(),
+    voiceStatus: () => localVoice ? guide.status() : voiceManager.status(),
     voiceSeed: () => voiceManager.seed(),
     voiceOffer: (body) => voiceManager.proxyOffer(body),
     voiceEngineEvent: (status, error, caption) => voiceManager.engineEvent(status, error, caption),

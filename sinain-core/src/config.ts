@@ -397,6 +397,10 @@ export function loadConfig(): CoreConfig {
   // default: ARSinain on 127.0.0.1:8089 (its AR_HELP_PORT default).
   const voiceConfig: import("./types.js").VoiceConfig = {
     enabled: boolEnv("VOICE_ENABLED", true),
+    // "bridge" = the ARSinain transports below; "local" = the in-process
+    // guided-session lane (teleprompter hints straight from the analysis
+    // endpoint — no ar-bridge, no server, no login).
+    mode: env("VOICE_MODE", "bridge") === "local" ? "local" : "bridge",
     // "Call sinain" dials the DEPLOYED server by default — same session the
     // browser client uses, authenticated with your account via
     // ARSINAIN_COOKIE. Point at http://127.0.0.1:8089 for a local ARSinain.
