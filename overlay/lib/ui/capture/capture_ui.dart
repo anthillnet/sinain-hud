@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants.dart';
@@ -79,6 +80,10 @@ class RangeChooser extends StatefulWidget {
   final VoidCallback? onClearScenario;
   final String? scenarioName;
 
+  /// Finder drop on the card (call kind) → scenario attach: called with the
+  /// first dropped file's path. Null disables the drop target.
+  final ValueChanged<String>? onDropScenario;
+
   const RangeChooser({
     super.key,
     required this.kind,
@@ -99,6 +104,7 @@ class RangeChooser extends StatefulWidget {
     this.onPickScenario,
     this.onClearScenario,
     this.scenarioName,
+    this.onDropScenario,
   });
 
   @override
@@ -120,6 +126,8 @@ class _RangeChooserState extends State<RangeChooser> {
   // 60 — but never outlives the card: the next act starts from everything.
   final Map<int, List<Map<String, dynamic>>> _sourcesCache = {};
   final Set<String> _excluded = {};
+  // A Finder drag is hovering the card (scenario drop) — border highlight.
+  bool _dropHover = false;
 
   @override
   void initState() {
@@ -251,13 +259,13 @@ class _RangeChooserState extends State<RangeChooser> {
   @override
   Widget build(BuildContext context) {
     final t = HudTheme.of(context);
-    return Container(
+    final card = Container(
       width: 300,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: t.panelBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: t.border),
+        border: Border.all(color: _dropHover ? _blue : t.border),
         boxShadow: t.shadow,
       ),
       child: Column(
@@ -499,6 +507,20 @@ class _RangeChooserState extends State<RangeChooser> {
         ],
       ),
     );
+    if (widget.kind != ChooserKind.call || widget.onDropScenario == null) {
+      return card;
+    }
+    // Finder drop before dialing — same stash path as the 📎 picker.
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dropHover = true),
+      onDragExited: (_) => setState(() => _dropHover = false),
+      onDragDone: (details) {
+        setState(() => _dropHover = false);
+        final path = details.files.firstOrNull?.path;
+        if (path != null && path.isNotEmpty) widget.onDropScenario!(path);
+      },
+      child: card,
+    );
   }
 
   String get _sourceCount {
@@ -602,6 +624,11 @@ class VoiceCallChip extends StatefulWidget {
   /// prompts (guided lane). Null hides the action.
   final ValueChanged<String>? onRetract;
 
+  /// Finder drop on the chip → scenario attach: called with the first
+  /// dropped file's path (live = mid-session swap, else stashed for the next
+  /// dial). Null disables the drop target.
+  final ValueChanged<String>? onDropScenario;
+
   const VoiceCallChip({
     super.key,
     required this.session,
@@ -614,6 +641,7 @@ class VoiceCallChip extends StatefulWidget {
     this.onAttachScenario,
     this.scenarioName,
     this.onRetract,
+    this.onDropScenario,
   });
 
   @override
@@ -634,6 +662,8 @@ class _VoiceCallChipState extends State<VoiceCallChip>
   // since, and tapping it jumps back to live.
   int? _browseIndex;
   int _seenLen = 0;
+  // A Finder drag is hovering the chip (scenario drop) — border highlight.
+  bool _dropHover = false;
 
   @override
   void initState() {
@@ -797,7 +827,7 @@ class _VoiceCallChipState extends State<VoiceCallChip>
         border: Border.all(
             color: err
                 ? _orange.withValues(alpha: 0.4)
-                : _blue.withValues(alpha: 0.45)),
+                : _blue.withValues(alpha: _dropHover ? 0.9 : 0.45)),
         boxShadow: t.shadow,
       ),
       child: Column(
@@ -957,17 +987,31 @@ class _VoiceCallChipState extends State<VoiceCallChip>
         ],
       ),
     );
-    if (!live) return chip;
     // Live chip is a drag source: drop it on a session chip to attach the
     // call (mirrors the session list's _dragSource idiom — payload is the
     // [VoiceSession.dragData] marker, never a threadId).
-    return Draggable<String>(
-      data: VoiceSession.dragData,
-      feedback: Material(
-        color: Colors.transparent,
-        child: Opacity(opacity: 0.85, child: SizedBox(width: 300, child: chip)),
-      ),
-      child: chip,
+    final draggable = !live
+        ? chip
+        : Draggable<String>(
+            data: VoiceSession.dragData,
+            feedback: Material(
+              color: Colors.transparent,
+              child: Opacity(
+                  opacity: 0.85, child: SizedBox(width: 300, child: chip)),
+            ),
+            child: chip,
+          );
+    if (widget.onDropScenario == null) return draggable;
+    // Finder drop → scenario attach (complements the 📎 picker).
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dropHover = true),
+      onDragExited: (_) => setState(() => _dropHover = false),
+      onDragDone: (details) {
+        setState(() => _dropHover = false);
+        final path = details.files.firstOrNull?.path;
+        if (path != null && path.isNotEmpty) widget.onDropScenario!(path);
+      },
+      child: draggable,
     );
   }
 }

@@ -2022,13 +2022,40 @@ class OverlayShellState extends State<OverlayShell> {
     try {
       final file = await openFile(acceptedTypeGroups: const [group]);
       if (file == null) return null;
+      return await _readScenarioFile(file);
+    } catch (_) {
+      return null; // panel failure — no scenario
+    }
+  }
+
+  /// Read a scenario file (picker or Finder drop) as UTF-8 with the cap.
+  Future<(String, String)?> _readScenarioFile(XFile file) async {
+    try {
       var text = await file.readAsString();
       if (text.length > _maxScenarioChars) {
         text = text.substring(0, _maxScenarioChars);
       }
       return (file.name, text);
     } catch (_) {
-      return null; // unreadable / non-UTF-8 pick — no scenario
+      return null; // unreadable / non-UTF-8 — no scenario
+    }
+  }
+
+  /// Finder drop (chip or chooser): live session → mid-call swap like the
+  /// chip 📎; otherwise stash as the pending scenario like the chooser 📎.
+  Future<void> _handleScenarioDrop(String path) async {
+    final picked = await _readScenarioFile(XFile(path));
+    if (picked == null || !mounted) return;
+    if (_voiceSession?.status == VoiceStatus.live) {
+      final ok = await context
+          .read<WebSocketService>()
+          .requestVoiceContext(picked.$2);
+      if (ok && mounted) setState(() => _voiceScenarioName = picked.$1);
+    } else {
+      setState(() {
+        _pendingVoiceContextName = picked.$1;
+        _pendingVoiceContext = picked.$2;
+      });
     }
   }
 
@@ -2843,6 +2870,9 @@ class OverlayShellState extends State<OverlayShell> {
               onPickScenario: _chooserFor == 'call'
                   ? () => unawaited(_pickVoiceScenario())
                   : null,
+              onDropScenario: _chooserFor == 'call'
+                  ? (path) => unawaited(_handleScenarioDrop(path))
+                  : null,
               onClearScenario: () => setState(() {
                 _pendingVoiceContext = null;
                 _pendingVoiceContextName = null;
@@ -2874,6 +2904,8 @@ class OverlayShellState extends State<OverlayShell> {
               attachedLabel: _voiceAttachedLabel(),
               scenarioName: _voiceScenarioName,
               onAttachScenario: () => unawaited(_attachScenarioToLiveCall()),
+              onDropScenario: (path) =>
+                  unawaited(_handleScenarioDrop(path)),
               // ✕ irrelevant: retract the visible hint — core drops it from
               // prompt feedback and re-broadcasts the greylist.
               onRetract: (text) =>
