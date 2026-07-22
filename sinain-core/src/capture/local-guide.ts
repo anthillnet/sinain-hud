@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { AnalysisConfig, BurstConfig, VoiceSessionMessage } from "../types.js";
@@ -20,7 +23,12 @@ Output contract — reply with EXACTLY one of:
 - THESIS: <what this conversation is about NOW, <=14 words>   (only when a moment with concrete stakes changes what the conversation is about — 0-2 per session)
 - HINT: "<their words, <=6 words verbatim>" — <one imperative, <=10 words> — SAY: <the exact sentence to say, <=16 words>
 
-Rules: fire only when THEM opened a thread, asked something not being answered, tested trust, or moved a commitment — and only after they finished the thought. Anchor quotes must be THEIR verbatim words, never ME's. Never repeat or rephrase a hint from the already-shown list. If ME is already handling the moment well, stay silent.`;
+Rules: fire only when THEM opened a thread, asked something not being answered, tested trust, or moved a commitment — and only after they finished the thought. Anchor quotes must be THEIR verbatim words, never ME's. Never repeat or rephrase a hint from the already-shown list. If ME is already handling the moment well, stay silent. Write instruction and SAY lines in the language the conversation is being held in.`;
+
+/** Standing scenario/context doc auto-loaded at session start when present —
+ *  the zero-UI attach point for a call script, agenda, or playbook. */
+const CONTEXT_DOC = join(homedir(), ".sinain", "guide-context.md");
+const MAX_CONTEXT_CHARS = 24_000;
 
 interface GuideTurn {
   who: "me" | "them";
@@ -92,9 +100,11 @@ export class LocalGuideSession {
 
   /**
    * Start a guided session seeded with the last N minutes (0 = unseeded).
-   * `intent` is an optional user-stated goal folded into the system prompt.
+   * `intent` (short goal) and `context` (scenario/script/agenda text) fold
+   * into the system prompt; when no explicit context is passed,
+   * ~/.sinain/guide-context.md is auto-loaded if present.
    */
-  async start(minutes: number, apps?: string[], intent?: string): Promise<{ ok: boolean; error?: string; loginUrl?: string }> {
+  async start(minutes: number, apps?: string[], intent?: string, context?: string): Promise<{ ok: boolean; error?: string; loginUrl?: string }> {
     if (this.state === "starting" || this.state === "live") {
       return { ok: false, error: "a voice session is already running" };
     }
@@ -109,11 +119,23 @@ export class LocalGuideSession {
 
     this.setState("starting", minutes > 0 ? `Composing brief from last ${minutes} min…` : undefined);
     const seed = await this.composeSeed(minutes, scope);
+    let scenario = (context ?? "").trim();
+    let scenarioSource = scenario ? "request" : "";
+    if (!scenario && existsSync(CONTEXT_DOC)) {
+      try {
+        scenario = readFileSync(CONTEXT_DOC, "utf-8").trim();
+        scenarioSource = CONTEXT_DOC;
+      } catch { /* unreadable doc = no scenario */ }
+    }
+    if (scenario.length > MAX_CONTEXT_CHARS) scenario = scenario.slice(0, MAX_CONTEXT_CHARS);
     this.systemPrompt = GUIDE_PROMPT
       + (intent ? `\n\nThe user's stated intent for this session: ${intent}` : "")
+      + (scenario ? `\n\nSession scenario/playbook (ground your hints and SAY lines in this):\n${scenario}` : "")
       + (seed ? `\n\nContext so far (what the user was doing before the call):\n${seed}` : "");
 
-    log(TAG, `local guided session live: ${minutes} min seed${seed ? "" : " (unseeded)"}, model=${this.analysis.model}`);
+    log(TAG, `local guided session live: ${minutes} min seed${seed ? "" : " (unseeded)"}, model=${this.analysis.model}`
+      + (intent ? `, intent="${intent.slice(0, 60)}"` : "")
+      + (scenario ? `, scenario=${scenario.length} chars (${scenarioSource})` : ""));
     this.setState("live", "Listening — hints appear here when they matter.");
     return { ok: true };
   }
@@ -177,11 +199,16 @@ export class LocalGuideSession {
       : "(none)";
     const user = `Transcript so far:\n${transcript}\n\nAlready shown:\n${shown}\n\nRespond now.`;
     const reply = await this.callModel(user);
+    let emitted = 0;
     for (const raw of reply.split("\n")) {
       const line = raw.trim();
       // Only the contract lines surface; SILENCE and any chatter are dropped.
       if (!line.startsWith("THESIS:") && !line.startsWith("HINT:")) continue;
       this.emitHint(line);
+      emitted++;
+    }
+    if (emitted === 0) {
+      log(TAG, `tick: silent (turns=${this.turns.length}, reply="${reply.slice(0, 60).replace(/\n/g, " ")}")`);
     }
   }
 

@@ -292,7 +292,7 @@ export interface ServerDeps {
   /** Chooser context card: cached range summary + coverage. */
   windowPreview?: (minutes: number) => Promise<unknown>;
   /** "Call sinain": start a bridge voice session seeded with the last N minutes. */
-  voiceStart?: (minutes: number, apps?: string[]) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
+  voiceStart?: (minutes: number, apps?: string[], guide?: { intent?: string; context?: string }) => Promise<{ ok: boolean; error?: string; loginUrl?: string }>;
   /** Distinct sources (apps + mic) in a range — the chooser's selection chips. */
   windowSources?: (minutes: number) => unknown;
   /** "Call sinain" via the deployed meetbot: bot joins the given Meet/Teams call. */
@@ -755,11 +755,17 @@ export function createAppServer(deps: ServerDeps) {
           res.end(JSON.stringify({ ok: false, error: "voice unavailable" }));
           return;
         }
-        const body = await readBody(req, 8192);
-        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown };
+        const body = await readBody(req, 65536);
+        const parsed = JSON.parse(body || "{}") as { minutes?: number; apps?: unknown; intent?: unknown; context?: unknown };
         // 0 = unseeded session; otherwise clamp like every range gesture.
         const minutes = parsed.minutes === 0 ? 0 : clampMinutes(parsed.minutes);
-        const result = await deps.voiceStart(minutes, parseApps(parsed.apps));
+        // Guided-session extras (local lane): a short stated goal + a scenario
+        // doc (script/agenda). The bridge lane ignores them.
+        const guideExtras = {
+          intent: typeof parsed.intent === "string" ? parsed.intent.slice(0, 500) : undefined,
+          context: typeof parsed.context === "string" ? parsed.context.slice(0, 24000) : undefined,
+        };
+        const result = await deps.voiceStart(minutes, parseApps(parsed.apps), guideExtras);
         if (!result.ok) res.writeHead(409);
         res.end(JSON.stringify(result));
         return;

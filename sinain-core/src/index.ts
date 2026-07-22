@@ -2101,8 +2101,8 @@ async function main() {
       return { minutes, covers, summary };
     },
     voiceStart: config.voiceConfig.enabled
-      ? (minutes, apps) => localVoice
-        ? guide.start(minutes, apps)
+      ? (minutes, apps, extras) => localVoice
+        ? guide.start(minutes, apps, extras?.intent, extras?.context)
         : voiceManager.start(minutes, apps ? { apps } : undefined)
       : undefined,
     voiceMeet: config.voiceConfig.enabled ? (u, minutes) => voiceManager.meet(u, minutes) : undefined,
