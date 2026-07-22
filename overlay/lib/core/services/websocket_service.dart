@@ -108,6 +108,12 @@ class WebSocketService extends ChangeNotifier {
   /// [voiceSessionStream] + notifyListeners.
   VoiceSession? voiceSession;
 
+  /// Hint history for the live call chip — every live caption of the current
+  /// voice session, oldest first (consecutive dupes dropped). Cleared when a
+  /// session starts or ends; bounded to the last [_maxVoiceHints] entries.
+  final List<String> voiceHints = [];
+  static const _maxVoiceHints = 200;
+
   Stream<FeedItem> get feedStream => _feedController.stream;
   Stream<ContextBrief> get briefStream => _briefController.stream;
   Stream<EnrichCard> get enrichStream => _enrichController.stream;
@@ -599,6 +605,15 @@ class WebSocketService extends ChangeNotifier {
         case 'voice_session':
           final session = VoiceSession.fromJson(json);
           voiceSession = session;
+          if (session.status == VoiceStatus.live &&
+              session.message != null &&
+              (voiceHints.isEmpty || voiceHints.last != session.message)) {
+            voiceHints.add(session.message!);
+            if (voiceHints.length > _maxVoiceHints) voiceHints.removeAt(0);
+          } else if (session.status != VoiceStatus.live) {
+            // starting/ended/error — history is scoped to one live session.
+            voiceHints.clear();
+          }
           _voiceController.add(session);
           notifyListeners();
           break;

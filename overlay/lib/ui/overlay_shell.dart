@@ -2790,6 +2790,9 @@ class OverlayShellState extends State<OverlayShell> {
             padding: const EdgeInsets.only(top: 8),
             child: VoiceCallChip(
               session: _voiceSession!,
+              // Hint history accumulates in the service; the chip rebuilds on
+              // every voice_session frame via _voiceSub, so this stays fresh.
+              hints: context.read<WebSocketService>().voiceHints,
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
               onMute: (muted) =>
                   context.read<WebSocketService>().requestVoiceMute(muted),

@@ -539,6 +539,10 @@ class VoiceCallChip extends StatefulWidget {
   /// the normal save/undo lifecycle. Null hides the button.
   final ValueChanged<int>? onSaveCall;
 
+  /// Live-caption history (oldest first) for ‹ › browsing; the newest entry
+  /// mirrors [VoiceSession.message]. Fewer than 2 entries hides the nav row.
+  final List<String> hints;
+
   const VoiceCallChip({
     super.key,
     required this.session,
@@ -546,6 +550,7 @@ class VoiceCallChip extends StatefulWidget {
     required this.onDismiss,
     this.onMute,
     this.onSaveCall,
+    this.hints = const [],
   });
 
   @override
@@ -560,6 +565,12 @@ class _VoiceCallChipState extends State<VoiceCallChip>
   DateTime? _liveSince;
   Timer? _ticker;
   bool _muted = false;
+  // Hint-history browsing: null = live (caption auto-advances with new
+  // hints); otherwise the pinned index the user is reading. _seenLen is the
+  // history length when browsing began — the "+N ⇥" badge counts arrivals
+  // since, and tapping it jumps back to live.
+  int? _browseIndex;
+  int _seenLen = 0;
 
   @override
   void initState() {
@@ -571,6 +582,10 @@ class _VoiceCallChipState extends State<VoiceCallChip>
   void didUpdateWidget(VoiceCallChip old) {
     super.didUpdateWidget(old);
     if (old.session.status != widget.session.status) _syncTimer();
+    // History cleared (session restart) or trimmed past our pin — back to live.
+    if (_browseIndex != null && _browseIndex! >= widget.hints.length) {
+      _browseIndex = null;
+    }
   }
 
   void _syncTimer() {
@@ -596,6 +611,42 @@ class _VoiceCallChipState extends State<VoiceCallChip>
     final s = DateTime.now().difference(_liveSince ?? DateTime.now()).inSeconds;
     return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
   }
+
+  bool get _browsing => _browseIndex != null;
+
+  void _hintBack() {
+    final n = widget.hints.length;
+    setState(() {
+      if (_browseIndex == null) {
+        _seenLen = n; // entering browse — badge counts arrivals from here
+        _browseIndex = math.max(0, n - 2);
+      } else if (_browseIndex! > 0) {
+        _browseIndex = _browseIndex! - 1;
+      }
+    });
+  }
+
+  void _hintForward() {
+    if (_browseIndex == null) return;
+    setState(() {
+      // Stepping past the newest returns to live (auto-advance resumes).
+      _browseIndex =
+          _browseIndex! >= widget.hints.length - 1 ? null : _browseIndex! + 1;
+    });
+  }
+
+  Widget _navButton(HudTheme t, String glyph, VoidCallback? onTap) =>
+      MouseRegion(
+        cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: Text(glyph,
+                style: _mono(12, onTap == null ? t.textDim : t.textMuted)),
+          ),
+        ),
+      );
 
   Widget _chipButton(HudTheme t, String label, VoidCallback onTap,
       {bool active = false}) {
@@ -657,6 +708,12 @@ class _VoiceCallChipState extends State<VoiceCallChip>
     final s = widget.session;
     final live = s.status == VoiceStatus.live;
     final err = s.status == VoiceStatus.error;
+    final hints = widget.hints;
+    // Caption: the pinned history entry while browsing, else the live latest.
+    final caption = _browsing && _browseIndex! < hints.length
+        ? hints[_browseIndex!]
+        : s.message;
+    final unseen = _browsing ? math.max(0, hints.length - _seenLen) : 0;
     return Container(
       width: 300,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -717,11 +774,30 @@ class _VoiceCallChipState extends State<VoiceCallChip>
               child: Text(s.error ?? 'unknown',
                   style: _mono(11, _orange, height: 1.35)),
             ),
-          if (s.message != null && !err)
+          if (caption != null && !err)
             Padding(
               padding: const EdgeInsets.only(top: 7),
               child:
-                  Text(s.message!, style: _mono(11, t.textMuted, height: 1.35)),
+                  Text(caption, style: _mono(11, t.textMuted, height: 1.35)),
+            ),
+          if (live && !err && hints.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(children: [
+                _navButton(t, '‹',
+                    (_browsing ? _browseIndex! > 0 : true) ? _hintBack : null),
+                const SizedBox(width: 6),
+                _navButton(t, '›', _browsing ? _hintForward : null),
+                if (_browsing) ...[
+                  const SizedBox(width: 6),
+                  Text('${_browseIndex! + 1}/${hints.length}',
+                      style: _mono(10, t.textDim)),
+                ],
+                const Spacer(),
+                if (_browsing)
+                  _navButton(t, unseen > 0 ? '+$unseen ⇥' : '⇥',
+                      () => setState(() => _browseIndex = null)),
+              ]),
             ),
           if (s.coverage.isNotEmpty && s.status == VoiceStatus.starting)
             Padding(
