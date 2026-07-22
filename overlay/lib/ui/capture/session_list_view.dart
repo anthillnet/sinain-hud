@@ -266,7 +266,7 @@ class _SessionListViewState extends State<SessionListView> {
     final detail = voice.coverage.trim().isEmpty
         ? 'voice session'
         : 'voice session · ${voice.coverage.trim()}';
-    return Container(
+    final lane = Container(
       key: const ValueKey('live-assist-lane'),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -298,17 +298,27 @@ class _SessionListViewState extends State<SessionListView> {
         ),
       ]),
     );
+    // The lane IS the live call — drag it onto a session row to attach the
+    // call (same payload as the floating chip's drag source).
+    final feedback = Material(
+      color: Colors.transparent,
+      child: Opacity(opacity: 0.85, child: SizedBox(width: 220, child: lane)),
+    );
+    return Draggable<String>(
+        data: VoiceSession.dragData, feedback: feedback, child: lane);
   }
 
   Widget _activeRow(HudTheme t, SessionChipState s) {
     final dot = s.paused ? _violet.withValues(alpha: 0.45) : _violet;
     final agents = _agentsFor(s)..sort(_laneOrder);
     final waiting = agents.any((agent) => agent.state == 'waiting');
-    return Container(
+    Widget row(bool hovering) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        border:
-            Border.all(color: (waiting ? _amber : dot).withValues(alpha: 0.4)),
+        border: Border.all(
+            color: hovering
+                ? _liveRed
+                : (waiting ? _amber : dot).withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(children: [
@@ -374,6 +384,16 @@ class _SessionListViewState extends State<SessionListView> {
           _contextCard(t, s.sessionId, assist, forceExpanded: false),
         for (final agent in agents) _lane(t, agent),
       ]),
+    );
+    // Drop target for the live call (chip or lane drag): dropping attaches
+    // the call to this session via POST /voice/attach. Armed only while a
+    // voice session is live; hover paints the row border live-red.
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          details.data == VoiceSession.dragData &&
+          (widget.ws.voiceSession?.isActive ?? false),
+      onAcceptWithDetails: (_) => widget.ws.requestVoiceAttach(s.sessionId),
+      builder: (context, candidates, rejected) => row(candidates.isNotEmpty),
     );
   }
 
@@ -593,7 +613,9 @@ class _SessionListViewState extends State<SessionListView> {
     final color = _violet.withValues(alpha: 0.48);
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) =>
-          details.data.isNotEmpty && details.data != threadId,
+          details.data.isNotEmpty &&
+          details.data != threadId &&
+          details.data != VoiceSession.dragData,
       onAcceptWithDetails: (details) => widget.ws.sendCommand(
           'merge_candidate', {'candidate': threadId, 'target': details.data}),
       builder: (context, candidates, rejected) {

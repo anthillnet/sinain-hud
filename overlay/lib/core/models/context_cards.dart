@@ -416,11 +416,17 @@ enum VoiceMode { webview, bridge, meet }
 
 /// "Call sinain" session state (WS `voice_session`).
 class VoiceSession {
+  /// Draggable payload marking "the live call" (chip → session chip attach).
+  static const dragData = 'voice:live';
+
   final VoiceStatus status;
   final VoiceMode mode;
   final int minutes;
   final String coverage;
   final String? message;
+
+  /// Tracked session the call is attached to (guided lane drag gesture).
+  final String? attachedSessionId;
   final String? error;
 
   const VoiceSession({
@@ -429,6 +435,7 @@ class VoiceSession {
     required this.minutes,
     required this.coverage,
     this.message,
+    this.attachedSessionId,
     this.error,
   });
 
@@ -447,6 +454,7 @@ class VoiceSession {
         minutes: (json['minutes'] as num?)?.toInt() ?? 0,
         coverage: json['coverage'] as String? ?? '',
         message: json['message'] as String?,
+        attachedSessionId: json['attachedSessionId'] as String?,
         error: json['error'] as String?,
       );
 

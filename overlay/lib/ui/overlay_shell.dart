@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -208,6 +209,12 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<SaveReceipt>? _receiptSub;
   StreamSubscription<VoiceSession>? _voiceSub;
   VoiceSession? _voiceSession;
+  // 📎 scenario doc: picked in the chooser it rides the next voice/start as
+  // `context`; picked on the live chip it swaps mid-session (/voice/context).
+  // The name shows on the chip while the call is live.
+  String? _pendingVoiceContext;
+  String? _pendingVoiceContextName;
+  String? _voiceScenarioName;
   // Breakpoint save offer (DESIGN-SAVE-OFFER.md, arrival A): the card just
   // appears — evidence and actions visible at once — and morphs into the
   // receipt on accept. Untouched, it fades silently after ~45 s.
@@ -599,7 +606,10 @@ class OverlayShellState extends State<OverlayShell> {
       if (s.status == VoiceStatus.ended) {
         Timer(const Duration(seconds: 3), () {
           if (mounted && _voiceSession?.status == VoiceStatus.ended) {
-            setState(() => _voiceSession = null);
+            setState(() {
+              _voiceSession = null;
+              _voiceScenarioName = null;
+            });
             _maybeExitCardMode();
           }
         });
@@ -2002,6 +2012,53 @@ class OverlayShellState extends State<OverlayShell> {
     }
   }
 
+  /// 📎 file pick shared by the chooser and the live chip: NSOpenPanel via
+  /// file_selector, read as UTF-8, capped to core's 24000-char scenario limit.
+  static const _maxScenarioChars = 24000;
+
+  Future<(String, String)?> _pickScenarioFile() async {
+    const group =
+        XTypeGroup(label: 'scenario', extensions: ['md', 'txt', 'text']);
+    try {
+      final file = await openFile(acceptedTypeGroups: const [group]);
+      if (file == null) return null;
+      var text = await file.readAsString();
+      if (text.length > _maxScenarioChars) {
+        text = text.substring(0, _maxScenarioChars);
+      }
+      return (file.name, text);
+    } catch (_) {
+      return null; // unreadable / non-UTF-8 pick — no scenario
+    }
+  }
+
+  /// Chooser 📎: stash the scenario for the next voice/start.
+  Future<void> _pickVoiceScenario() async {
+    final picked = await _pickScenarioFile();
+    if (picked == null || !mounted) return;
+    setState(() {
+      _pendingVoiceContextName = picked.$1;
+      _pendingVoiceContext = picked.$2;
+    });
+  }
+
+  /// Live-chip 📎: mid-session scenario swap via POST /voice/context.
+  Future<void> _attachScenarioToLiveCall() async {
+    final picked = await _pickScenarioFile();
+    if (picked == null || !mounted) return;
+    final ok =
+        await context.read<WebSocketService>().requestVoiceContext(picked.$2);
+    if (ok && mounted) setState(() => _voiceScenarioName = picked.$1);
+  }
+
+  /// Label for the session the live call is attached to (chip row) — falls
+  /// back to the raw id until the session's chip state arrives.
+  String? _voiceAttachedLabel() {
+    final id = _voiceSession?.attachedSessionId;
+    if (id == null) return null;
+    return context.read<WebSocketService>().sessionChips[id]?.label ?? id;
+  }
+
   /// "Call sinain": a live call FROM THIS MACHINE — screen + mic over WebRTC
   /// to the sinain server (mechanics like a meeting, nothing to do with Meet).
   /// If the server wants a session, login happens in the user's DEFAULT
@@ -2012,11 +2069,21 @@ class OverlayShellState extends State<OverlayShell> {
   Future<void> _callSinain(int minutes,
       {List<String>? apps, bool retried = false}) async {
     final ws = context.read<WebSocketService>();
-    final resp = await ws.requestVoiceStart(minutes, apps: apps);
+    final resp = await ws.requestVoiceStart(minutes,
+        apps: apps, context: _pendingVoiceContext);
     final error = resp == null
         ? 'Sinain backend isn\'t responding — try again in a moment'
         : (resp['ok'] == true ? null : (resp['error'] as String? ?? 'failed'));
     if (error == null) {
+      // A chooser-picked scenario rode this start — consumed; its name now
+      // labels the live chip.
+      if (_pendingVoiceContext != null && mounted) {
+        setState(() {
+          _voiceScenarioName = _pendingVoiceContextName;
+          _pendingVoiceContext = null;
+          _pendingVoiceContextName = null;
+        });
+      }
       // Webview engine: core owns the session; we host the invisible
       // WKWebView that runs the browser WebRTC stack on core's call page.
       if (resp?['engine'] == 'webview') {
@@ -2769,6 +2836,17 @@ class OverlayShellState extends State<OverlayShell> {
                       _callSinain(minutes, apps: apps);
                     }
                   : null,
+              // 📎 scenario for the voice leg — picked here, sent as
+              // `context` on voice/start when the call dials.
+              scenarioName:
+                  _chooserFor == 'call' ? _pendingVoiceContextName : null,
+              onPickScenario: _chooserFor == 'call'
+                  ? () => unawaited(_pickVoiceScenario())
+                  : null,
+              onClearScenario: () => setState(() {
+                _pendingVoiceContext = null;
+                _pendingVoiceContextName = null;
+              }),
               previewAt: (m) =>
                   context.read<WebSocketService>().fetchWindowPreview(m),
               onClose: () {
@@ -2793,6 +2871,9 @@ class OverlayShellState extends State<OverlayShell> {
               // Hint history accumulates in the service; the chip rebuilds on
               // every voice_session frame via _voiceSub, so this stays fresh.
               hints: context.read<WebSocketService>().voiceHints,
+              attachedLabel: _voiceAttachedLabel(),
+              scenarioName: _voiceScenarioName,
+              onAttachScenario: () => unawaited(_attachScenarioToLiveCall()),
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
               onMute: (muted) =>
                   context.read<WebSocketService>().requestVoiceMute(muted),
@@ -2803,7 +2884,10 @@ class OverlayShellState extends State<OverlayShell> {
                   .read<WebSocketService>()
                   .requestSave(minutes.clamp(1, 480)),
               onDismiss: () {
-                setState(() => _voiceSession = null);
+                setState(() {
+                  _voiceSession = null;
+                  _voiceScenarioName = null;
+                });
                 _maybeExitCardMode();
               },
             ),

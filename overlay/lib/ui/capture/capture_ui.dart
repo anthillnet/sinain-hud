@@ -73,6 +73,12 @@ class RangeChooser extends StatefulWidget {
   /// ticked — everything else (incl. mic) begins excluded. Null = all ticked.
   final List<String>? preselectedApps;
 
+  /// 📎 scenario for the "Call sinain" leg — the shell owns the file pick and
+  /// the picked text; the chooser shows [scenarioName] and fires these.
+  final VoidCallback? onPickScenario;
+  final VoidCallback? onClearScenario;
+  final String? scenarioName;
+
   const RangeChooser({
     super.key,
     required this.kind,
@@ -90,6 +96,9 @@ class RangeChooser extends StatefulWidget {
     this.previewAt,
     this.sourcesAt,
     this.preselectedApps,
+    this.onPickScenario,
+    this.onClearScenario,
+    this.scenarioName,
   });
 
   @override
@@ -406,6 +415,42 @@ class _RangeChooserState extends State<RangeChooser> {
               ],
             ),
           ),
+          // 📎 scenario row (call kind): pick a script/agenda file before
+          // dialing — sent as `context` on voice/start (guided lane).
+          if (widget.kind == ChooserKind.call && widget.onPickScenario != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
+              child: Row(children: [
+                Flexible(
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: widget.onPickScenario,
+                      child: Text(
+                          widget.scenarioName == null
+                              ? '📎 attach scenario'
+                              : '📎 ${widget.scenarioName}',
+                          overflow: TextOverflow.ellipsis,
+                          style: _mono(
+                              9,
+                              widget.scenarioName == null
+                                  ? t.textDim
+                                  : t.textMuted)),
+                    ),
+                  ),
+                ),
+                if (widget.scenarioName != null &&
+                    widget.onClearScenario != null) ...[
+                  const SizedBox(width: 6),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                        onTap: widget.onClearScenario,
+                        child: Text('✕', style: _mono(9, t.textDim))),
+                  ),
+                ],
+              ]),
+            ),
           // Verb button(s) + cancel — `call` puts both destinations side by
           // side: Call AI (text handoff, blue) / Call sinain (voice, green).
           Padding(
@@ -543,6 +588,16 @@ class VoiceCallChip extends StatefulWidget {
   /// mirrors [VoiceSession.message]. Fewer than 2 entries hides the nav row.
   final List<String> hints;
 
+  /// Label of the session the call is attached to (drag gesture) — the chip
+  /// has no ws access, so the shell resolves the id to a label. Null hides it.
+  final String? attachedLabel;
+
+  /// 📎 mid-session scenario swap (guided lane). Null hides the button.
+  final VoidCallback? onAttachScenario;
+
+  /// Attached scenario's filename (shown small + dim).
+  final String? scenarioName;
+
   const VoiceCallChip({
     super.key,
     required this.session,
@@ -551,6 +606,9 @@ class VoiceCallChip extends StatefulWidget {
     this.onMute,
     this.onSaveCall,
     this.hints = const [],
+    this.attachedLabel,
+    this.onAttachScenario,
+    this.scenarioName,
   });
 
   @override
@@ -709,12 +767,13 @@ class _VoiceCallChipState extends State<VoiceCallChip>
     final live = s.status == VoiceStatus.live;
     final err = s.status == VoiceStatus.error;
     final hints = widget.hints;
-    // Caption: the pinned history entry while browsing, else the live latest.
+    // Caption: the pinned history entry while browsing, else the live latest
+    // (message-less frames — e.g. an attach broadcast — fall back to history).
     final caption = _browsing && _browseIndex! < hints.length
         ? hints[_browseIndex!]
-        : s.message;
+        : s.message ?? (hints.isNotEmpty ? hints.last : null);
     final unseen = _browsing ? math.max(0, hints.length - _seenLen) : 0;
-    return Container(
+    final chip = Container(
       width: 300,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
@@ -799,6 +858,23 @@ class _VoiceCallChipState extends State<VoiceCallChip>
                       () => setState(() => _browseIndex = null)),
               ]),
             ),
+          // Attached session + scenario doc — small dim rows, drag/📎 results.
+          if (widget.attachedLabel != null && !err)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('⧉ ${widget.attachedLabel}',
+                  style: _mono(9, t.textDim),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+          if (widget.scenarioName != null && !err)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('📎 ${widget.scenarioName}',
+                  style: _mono(9, t.textDim),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
           if (s.coverage.isNotEmpty && s.status == VoiceStatus.starting)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -821,6 +897,10 @@ class _VoiceCallChipState extends State<VoiceCallChip>
                       .inMinutes;
                   widget.onSaveCall!(s.minutes + elapsed + 1);
                 }),
+              if (widget.onAttachScenario != null) ...[
+                const SizedBox(width: 6),
+                _chipButton(t, '📎', widget.onAttachScenario!),
+              ],
               const Spacer(),
               MouseRegion(
                 cursor: SystemMouseCursors.click,
@@ -844,6 +924,18 @@ class _VoiceCallChipState extends State<VoiceCallChip>
           ],
         ],
       ),
+    );
+    if (!live) return chip;
+    // Live chip is a drag source: drop it on a session chip to attach the
+    // call (mirrors the session list's _dragSource idiom — payload is the
+    // [VoiceSession.dragData] marker, never a threadId).
+    return Draggable<String>(
+      data: VoiceSession.dragData,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(opacity: 0.85, child: SizedBox(width: 300, child: chip)),
+      ),
+      child: chip,
     );
   }
 }

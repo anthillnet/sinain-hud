@@ -960,12 +960,25 @@ class WebSocketService extends ChangeNotifier {
   /// "Call sinain" — start a voice session seeded with the last N minutes
   /// (0 = unseeded). Lifecycle arrives on [voiceSessionStream]. Returns the
   /// raw response so callers can react to `loginUrl` ("login required").
+  /// [context] is a scenario/script doc for the guided lane (📎 in the
+  /// chooser); the bridge lane ignores it.
   Future<Map<String, dynamic>?> requestVoiceStart(int minutes,
-          {List<String>? apps}) async =>
+          {List<String>? apps, String? context}) async =>
       _postJson('/voice/start', {
         'minutes': minutes,
         if (apps != null) 'apps': apps,
+        if (context != null && context.isNotEmpty) 'context': context,
       });
+
+  /// Attach the live call to a tracked session (drag onto a session chip);
+  /// null/empty detaches. The id rides subsequent [voiceSessionStream] frames.
+  Future<bool> requestVoiceAttach(String? sessionId) async =>
+      (await _postJson('/voice/attach', {'sessionId': sessionId ?? ''}))?['ok'] ==
+      true;
+
+  /// Mid-session scenario swap for the guided lane (📎 on the live chip).
+  Future<bool> requestVoiceContext(String context) async =>
+      (await _postJson('/voice/context', {'context': context}))?['ok'] == true;
 
   /// Hand the login window's captured session cookie to core.
   Future<bool> requestVoicePair(String cookie) async =>
