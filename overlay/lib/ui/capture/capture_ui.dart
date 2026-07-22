@@ -598,6 +598,10 @@ class VoiceCallChip extends StatefulWidget {
   /// Attached scenario's filename (shown small + dim).
   final String? scenarioName;
 
+  /// "✕ irrelevant" on the visible hint — retracts it from all follow-up
+  /// prompts (guided lane). Null hides the action.
+  final ValueChanged<String>? onRetract;
+
   const VoiceCallChip({
     super.key,
     required this.session,
@@ -609,6 +613,7 @@ class VoiceCallChip extends StatefulWidget {
     this.attachedLabel,
     this.onAttachScenario,
     this.scenarioName,
+    this.onRetract,
   });
 
   @override
@@ -706,6 +711,10 @@ class _VoiceCallChipState extends State<VoiceCallChip>
         ),
       );
 
+  /// Same normalization core uses for hint dedup/retraction keys.
+  String _normHint(String line) =>
+      line.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+
   Widget _chipButton(HudTheme t, String label, VoidCallback onTap,
       {bool active = false}) {
     return MouseRegion(
@@ -773,6 +782,12 @@ class _VoiceCallChipState extends State<VoiceCallChip>
         ? hints[_browseIndex!]
         : s.message ?? (hints.isNotEmpty ? hints.last : null);
     final unseen = _browsing ? math.max(0, hints.length - _seenLen) : 0;
+    // Retraction state of the visible caption (broadcast list = truth).
+    final retractedKeys = s.retracted.map(_normHint).toSet();
+    final captionRetracted =
+        caption != null && retractedKeys.contains(_normHint(caption));
+    final canRetract =
+        widget.onRetract != null && caption != null && !captionRetracted;
     final chip = Container(
       width: 300,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -836,21 +851,38 @@ class _VoiceCallChipState extends State<VoiceCallChip>
           if (caption != null && !err)
             Padding(
               padding: const EdgeInsets.only(top: 7),
-              child:
-                  Text(caption, style: _mono(11, t.textMuted, height: 1.35)),
+              // Retracted (✕ irrelevant) entries stay in history, greyed and
+              // struck through.
+              child: Text(caption,
+                  style: captionRetracted
+                      ? _mono(11, t.textDim, height: 1.35).copyWith(
+                          decoration: TextDecoration.lineThrough,
+                          decorationColor: t.textDim)
+                      : _mono(11, t.textMuted, height: 1.35)),
             ),
-          if (live && !err && hints.length > 1)
+          if (live && !err && (hints.length > 1 || canRetract))
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(children: [
-                _navButton(t, '‹',
-                    (_browsing ? _browseIndex! > 0 : true) ? _hintBack : null),
-                const SizedBox(width: 6),
-                _navButton(t, '›', _browsing ? _hintForward : null),
-                if (_browsing) ...[
+                if (hints.length > 1) ...[
+                  _navButton(
+                      t,
+                      '‹',
+                      (_browsing ? _browseIndex! > 0 : true)
+                          ? _hintBack
+                          : null),
                   const SizedBox(width: 6),
-                  Text('${_browseIndex! + 1}/${hints.length}',
-                      style: _mono(10, t.textDim)),
+                  _navButton(t, '›', _browsing ? _hintForward : null),
+                  if (_browsing) ...[
+                    const SizedBox(width: 6),
+                    Text('${_browseIndex! + 1}/${hints.length}',
+                        style: _mono(10, t.textDim)),
+                  ],
+                ],
+                if (canRetract) ...[
+                  if (hints.length > 1) const SizedBox(width: 10),
+                  _navButton(
+                      t, '✕ irrelevant', () => widget.onRetract!(caption)),
                 ],
                 const Spacer(),
                 if (_browsing)

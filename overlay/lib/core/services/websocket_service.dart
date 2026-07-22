@@ -980,6 +980,11 @@ class WebSocketService extends ChangeNotifier {
   Future<bool> requestVoiceContext(String context) async =>
       (await _postJson('/voice/context', {'context': context}))?['ok'] == true;
 
+  /// Retract a hint/topic as irrelevant (✕ irrelevant on the live chip) —
+  /// excluded from all follow-up prompts; greyed via the broadcast list.
+  Future<bool> requestVoiceRetract(String text) async =>
+      (await _postJson('/voice/retract', {'text': text}))?['ok'] == true;
+
   /// Hand the login window's captured session cookie to core.
   Future<bool> requestVoicePair(String cookie) async =>
       (await _postJson('/voice/pair', {'cookie': cookie}))?['ok'] == true;

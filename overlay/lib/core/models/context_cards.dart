@@ -427,6 +427,10 @@ class VoiceSession {
 
   /// Tracked session the call is attached to (guided lane drag gesture).
   final String? attachedSessionId;
+
+  /// Hints/topics the user retracted as irrelevant (✕ on the chip) — the
+  /// chip greys matching history entries.
+  final List<String> retracted;
   final String? error;
 
   const VoiceSession({
@@ -436,6 +440,7 @@ class VoiceSession {
     required this.coverage,
     this.message,
     this.attachedSessionId,
+    this.retracted = const [],
     this.error,
   });
 
@@ -455,6 +460,8 @@ class VoiceSession {
         coverage: json['coverage'] as String? ?? '',
         message: json['message'] as String?,
         attachedSessionId: json['attachedSessionId'] as String?,
+        retracted:
+            (json['retracted'] as List?)?.cast<String>() ?? const [],
         error: json['error'] as String?,
       );
 

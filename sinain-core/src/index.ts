@@ -2111,6 +2111,7 @@ async function main() {
     // Attach + scenario swap are guided-lane concepts — the bridge has neither.
     voiceAttach: localVoice ? (sessionId) => guide.attachSession(sessionId) : undefined,
     voiceContext: localVoice ? (text) => guide.setContext(text) : undefined,
+    voiceRetract: localVoice ? (text) => guide.retract(text) : undefined,
     voiceStatus: () => localVoice ? guide.status() : voiceManager.status(),
     voiceSeed: () => voiceManager.seed(),
     voiceOffer: (body) => voiceManager.proxyOffer(body),

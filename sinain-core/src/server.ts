@@ -305,6 +305,9 @@ export interface ServerDeps {
   /** Mid-session scenario swap for the guided lane; false when no session
    *  is running. Local lane only. */
   voiceContext?: (context: string) => boolean;
+  /** Retract a hint/topic as irrelevant (prompt exclusion); false when no
+   *  session is running. Local lane only. */
+  voiceRetract?: (text: string) => boolean;
   /** Store the pair-flow credential (session cookie or device token). */
   voicePair?: (cookie: string, token: string, email: string) => void;
   /** Current voice session state. */
@@ -839,6 +842,26 @@ export function createAppServer(deps: ServerDeps) {
         const sessionId = typeof parsed.sessionId === "string" && parsed.sessionId.trim()
           ? parsed.sessionId.trim() : null;
         if (!deps.voiceAttach(sessionId)) {
+          res.writeHead(409);
+          res.end(JSON.stringify({ ok: false, error: "no live voice session" }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // Retract a hint/topic as irrelevant (✕ on the chip, or a free-text
+      // topic) — excluded from all follow-up prompts. Local guided lane only.
+      if (req.method === "POST" && url.pathname === "/voice/retract") {
+        if (!deps.voiceRetract) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ ok: false, error: "voice retract unavailable" }));
+          return;
+        }
+        const body = await readBody(req, 4096);
+        const parsed = JSON.parse(body || "{}") as { text?: unknown };
+        const text = typeof parsed.text === "string" ? parsed.text.trim().slice(0, 500) : "";
+        if (!deps.voiceRetract(text)) {
           res.writeHead(409);
           res.end(JSON.stringify({ ok: false, error: "no live voice session" }));
           return;

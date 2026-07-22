@@ -15,6 +15,8 @@ const TAG = "guide";
 const MAX_TURNS = 80;
 /** Already-shown lines fed back to the model for its own dedup. */
 const MAX_SHOWN = 12;
+/** User-retracted hints/topics carried as prompt exclusions. */
+const MAX_RETRACTED = 20;
 
 const GUIDE_PROMPT = `You are a live teleprompter for the user's real conversation. MIC turns (ME) are the user speaking; SYSTEM turns (THEM) are the other parties. A glanceable side display shows your latest lines — keep it CURRENT: every tick, refresh it with the most useful guidance for this exact moment. Do not wait for special moments.
 
@@ -65,6 +67,8 @@ export class LocalGuideSession {
   private shownHints: string[] = [];
   /** Session-lifetime dedup keys (normalized lines) — never re-emit. */
   private shownKeys = new Set<string>();
+  /** User-retracted hints/topics (✕ irrelevant) — prompt exclusions. */
+  private retracted: string[] = [];
   /** One LLM call in flight at a time; a tick requested while busy coalesces
    *  into exactly one follow-up run (never a queue). */
   private busy = false;
@@ -121,6 +125,7 @@ export class LocalGuideSession {
     this.turns = [];
     this.shownHints = [];
     this.shownKeys.clear();
+    this.retracted = [];
     this.tickPending = false;
     this.attachedSessionId = null;
 
@@ -151,7 +156,28 @@ export class LocalGuideSession {
     this.systemPrompt = GUIDE_PROMPT
       + (this.intent ? `\n\nThe user's stated intent for this session: ${this.intent}` : "")
       + (this.scenario ? `\n\nSession scenario/playbook (ground your hints and SAY lines in this):\n${this.scenario}` : "")
-      + (this.seed ? `\n\nContext so far (what the user was doing before the call):\n${this.seed}` : "");
+      + (this.seed ? `\n\nContext so far (what the user was doing before the call):\n${this.seed}` : "")
+      + (this.retracted.length > 0
+        ? `\n\nThe user marked these as IRRELEVANT — never mention, reference, or build on these topics again:\n${this.retracted.map((r) => `- ${r}`).join("\n")}`
+        : "");
+  }
+
+  /** Retract a hint/topic as irrelevant (✕ on the chip, or free text): the
+   *  entry joins the prompt's exclusion list, any matching shown hint stops
+   *  being fed back, and the current state re-broadcasts so the overlay can
+   *  grey it. False when no session is starting/live. */
+  retract(text: string): boolean {
+    if (this.state !== "starting" && this.state !== "live") return false;
+    const entry = text.trim();
+    if (!entry) return true; // nothing to retract — not a session error
+    const key = this.normKey(entry);
+    this.retracted.push(entry);
+    if (this.retracted.length > MAX_RETRACTED) this.retracted.splice(0, this.retracted.length - MAX_RETRACTED);
+    this.shownHints = this.shownHints.filter((h) => this.normKey(h) !== key);
+    this.composePrompt();
+    log(TAG, `retracted (${entry.length} chars), exclusions=${this.retracted.length}`);
+    this.setState(this.state); // re-broadcast with the retracted list
+    return true;
   }
 
   /** Attach the call to a tracked session (drag onto a session chip) — the
@@ -198,6 +224,7 @@ export class LocalGuideSession {
     this.turns = [];
     this.shownHints = [];
     this.shownKeys.clear();
+    this.retracted = [];
     this.tickPending = false;
     this.systemPrompt = "";
     this.intent = "";
@@ -291,12 +318,17 @@ export class LocalGuideSession {
     throw lastErr;
   }
 
+  /** Normalized dedup/retraction key for a hint line. */
+  private normKey(line: string): string {
+    return line.toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
   /** Surface one hint line through the SAME live-caption path a webview
    *  bridge caption takes: a `voice_session` message with status "live" and
    *  the line in `message` — the existing call chip renders it unchanged. */
   private emitHint(line: string): void {
     if (this.state !== "live") return;
-    const key = line.toLowerCase().replace(/\s+/g, " ").trim();
+    const key = this.normKey(line);
     if (this.shownKeys.has(key)) return;
     this.shownKeys.add(key);
     this.shownHints.push(line);
@@ -307,6 +339,7 @@ export class LocalGuideSession {
       minutes: this.minutes, coverage: this.coverage,
       message: line,
       ...(this.attachedSessionId ? { attachedSessionId: this.attachedSessionId } : {}),
+      ...(this.retracted.length > 0 ? { retracted: [...this.retracted] } : {}),
       ts: Date.now(),
     });
   }
@@ -318,6 +351,7 @@ export class LocalGuideSession {
       minutes: this.minutes, coverage: this.coverage,
       ...(message ? { message } : {}),
       ...(this.attachedSessionId ? { attachedSessionId: this.attachedSessionId } : {}),
+      ...(this.retracted.length > 0 ? { retracted: [...this.retracted] } : {}),
       ts: Date.now(),
     });
   }

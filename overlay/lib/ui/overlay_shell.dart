@@ -2874,6 +2874,10 @@ class OverlayShellState extends State<OverlayShell> {
               attachedLabel: _voiceAttachedLabel(),
               scenarioName: _voiceScenarioName,
               onAttachScenario: () => unawaited(_attachScenarioToLiveCall()),
+              // ✕ irrelevant: retract the visible hint — core drops it from
+              // prompt feedback and re-broadcasts the greylist.
+              onRetract: (text) =>
+                  context.read<WebSocketService>().requestVoiceRetract(text),
               onEnd: () => context.read<WebSocketService>().requestVoiceStop(),
               onMute: (muted) =>
                   context.read<WebSocketService>().requestVoiceMute(muted),

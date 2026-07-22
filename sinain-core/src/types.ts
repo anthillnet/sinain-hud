@@ -424,6 +424,9 @@ export interface VoiceSessionMessage {
   /** Tracked session the call is attached to (guided lane only — the
    *  drag-onto-a-session-chip gesture; bridge lane never sets it). */
   attachedSessionId?: string;
+  /** Hints/topics the user retracted as irrelevant (guided lane only —
+   *  the overlay greys matching history entries; bridge never sets it). */
+  retracted?: string[];
   error?: string;
   ts: number;
 }
