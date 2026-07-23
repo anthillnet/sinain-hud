@@ -5,6 +5,7 @@ import type { FeedBuffer } from "../buffers/feed-buffer.js";
 import type { SenseBuffer } from "../buffers/sense-buffer.js";
 import type { AnalysisConfig, BurstConfig, VoiceSessionMessage } from "../types.js";
 import { assembleWindow, describeCoverage, flattenBrief, summonBrief, type WindowScope } from "./window-ops.js";
+import { EmbeddingService } from "../embedding/service.js";
 import { burstMetrics } from "./burst-metrics.js";
 import { log, warn } from "../log.js";
 
@@ -15,6 +16,12 @@ const TAG = "guide";
 const MAX_TURNS = 80;
 /** Already-shown lines fed back to the model for its own dedup. */
 const MAX_SHOWN = 12;
+/** Semantic dedup: a candidate whose gist (instruction+SAY — the anchor
+ *  legitimately drifts with the conversation) embeds within this cosine of a
+ *  recently displayed or retracted hint is a reworded duplicate — suppress it.
+ *  Threshold sweepable on the fmg replay bench via GUIDE_DEDUP_SIM. */
+const SIM_THRESHOLD = Number(process.env.GUIDE_DEDUP_SIM || "0.88");
+const MAX_SHOWN_VECS = 10;
 /** User-retracted hints/topics carried as prompt exclusions. */
 const MAX_RETRACTED = 20;
 
@@ -74,12 +81,19 @@ export class LocalGuideSession {
   private busy = false;
   private tickPending = false;
 
+  /** Embedding vectors of displayed / retracted hint gists (semantic dedup). */
+  private shownVecs: Float32Array[] = [];
+  private retractedVecs: Float32Array[] = [];
+
   constructor(
     private analysis: AnalysisConfig,
     private burst: BurstConfig,
     private feedBuffer: FeedBuffer,
     private senseBuffer: SenseBuffer,
     private broadcast: (msg: VoiceSessionMessage) => void,
+    // Lazy: the embedding service loads after construction; null/not-ready
+    // degrades to the lexical dedup only.
+    private getEmbedder: () => EmbeddingService | null = () => null,
   ) {}
 
   status(): { status: string; mode: string; minutes: number; coverage: string; paired: boolean } {
@@ -126,6 +140,8 @@ export class LocalGuideSession {
     this.shownHints = [];
     this.shownKeys.clear();
     this.retracted = [];
+    this.shownVecs = [];
+    this.retractedVecs = [];
     this.tickPending = false;
     this.attachedSessionId = null;
 
@@ -174,6 +190,15 @@ export class LocalGuideSession {
     this.retracted.push(entry);
     if (this.retracted.length > MAX_RETRACTED) this.retracted.splice(0, this.retracted.length - MAX_RETRACTED);
     this.shownHints = this.shownHints.filter((h) => this.normKey(h) !== key);
+    // Fire-and-forget: the retracted gist's vector joins the suppression set,
+    // so REWORDINGS of a retracted theme are caught even when the model
+    // ignores the prompt exclusion.
+    void this.embedGist(entry).then((vec) => {
+      if (vec) {
+        this.retractedVecs.push(vec);
+        if (this.retractedVecs.length > MAX_RETRACTED) this.retractedVecs.splice(0, this.retractedVecs.length - MAX_RETRACTED);
+      }
+    });
     this.composePrompt();
     log(TAG, `retracted (${entry.length} chars), exclusions=${this.retracted.length}`);
     this.setState(this.state); // re-broadcast with the retracted list
@@ -225,6 +250,8 @@ export class LocalGuideSession {
     this.shownHints = [];
     this.shownKeys.clear();
     this.retracted = [];
+    this.shownVecs = [];
+    this.retractedVecs = [];
     this.tickPending = false;
     this.systemPrompt = "";
     this.intent = "";
@@ -274,8 +301,7 @@ export class LocalGuideSession {
       const line = raw.trim();
       // Only the contract lines surface; SILENCE and any chatter are dropped.
       if (!line.startsWith("THESIS:") && !line.startsWith("HINT:")) continue;
-      this.emitHint(line);
-      emitted++;
+      if (await this.emitHint(line)) emitted++;
     }
     if (emitted === 0) {
       log(TAG, `tick: silent (turns=${this.turns.length}, reply="${reply.slice(0, 60).replace(/\n/g, " ")}")`);
@@ -323,13 +349,51 @@ export class LocalGuideSession {
     return line.toLowerCase().replace(/\s+/g, " ").trim();
   }
 
+  /** The part of a hint that carries its MEANING for dedup: instruction+SAY.
+   *  The anchor (customer quote) legitimately changes as the conversation
+   *  moves, so it must not shield a reworded duplicate from suppression. */
+  private hintGist(line: string): string {
+    if (line.startsWith("HINT:")) {
+      const dash = line.indexOf("—");
+      if (dash > 0) return line.slice(dash + 1).trim();
+    }
+    return line.replace(/^(THESIS|HINT):\s*/, "").trim();
+  }
+
+  /** Embed a hint gist — null when the service is absent/not ready/errors
+   *  (semantic dedup degrades to lexical, never blocks the hint path). */
+  private async embedGist(line: string): Promise<Float32Array | null> {
+    const embedder = this.getEmbedder();
+    if (!embedder?.ready) return null;
+    try {
+      const [vec] = await embedder.embed([this.hintGist(line)]);
+      return vec ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Surface one hint line through the SAME live-caption path a webview
    *  bridge caption takes: a `voice_session` message with status "live" and
    *  the line in `message` — the existing call chip renders it unchanged. */
-  private emitHint(line: string): void {
-    if (this.state !== "live") return;
+  private async emitHint(line: string): Promise<boolean> {
+    if (this.state !== "live") return false;
     const key = this.normKey(line);
-    if (this.shownKeys.has(key)) return;
+    if (this.shownKeys.has(key)) return false;
+    // Semantic dedup: a reworded duplicate of a displayed or retracted hint
+    // embeds close to it even when no words match.
+    const vec = await this.embedGist(line);
+    if (vec) {
+      for (const prior of [...this.shownVecs, ...this.retractedVecs]) {
+        const sim = EmbeddingService.cosine(vec, prior);
+        if (sim >= SIM_THRESHOLD) {
+          log(TAG, `tick: near-dup suppressed (sim=${sim.toFixed(2)}): ${line.slice(0, 80)}`);
+          return false;
+        }
+      }
+      this.shownVecs.push(vec);
+      if (this.shownVecs.length > MAX_SHOWN_VECS) this.shownVecs.splice(0, this.shownVecs.length - MAX_SHOWN_VECS);
+    }
     this.shownKeys.add(key);
     this.shownHints.push(line);
     if (this.shownHints.length > MAX_SHOWN) this.shownHints.splice(0, this.shownHints.length - MAX_SHOWN);
@@ -342,6 +406,7 @@ export class LocalGuideSession {
       ...(this.retracted.length > 0 ? { retracted: [...this.retracted] } : {}),
       ts: Date.now(),
     });
+    return true;
   }
 
   private setState(status: VoiceSessionMessage["status"], message?: string): void {

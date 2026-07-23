@@ -1911,6 +1911,7 @@ async function main() {
   const guide = new LocalGuideSession(
     config.agentConfig, config.burstConfig, feedBuffer, senseBuffer,
     (msg) => wsHandler.broadcastRaw(msg),
+    () => embeddingService,   // semantic hint dedup (lazy — loads after boot)
   );
   localGuide = guide;
   const localVoice = config.voiceConfig.mode === "local";
