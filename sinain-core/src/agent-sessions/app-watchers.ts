@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AgentEventFrame, AppSessionsConfig } from "../types.js";
 import type { AgentSessionRegistry } from "./registry.js";
-import { warn } from "../log.js";
+import { debug, log, warn } from "../log.js";
 
 const TAG = "app-sessions";
 
@@ -250,9 +250,13 @@ export class ChatGptConversationsWatcher {
 const execFileAsync = promisify(execFile);
 
 /** One poll's worth of traffic that counts as user activity. Idle background
- * noise measures ~0.6KB per 15s; even a short message exchange (POST + SSE
- * stream) lands in the tens of KB. */
-const CHATGPT_NET_ACTIVE_BYTES = 16 * 1024;
+ * noise measures well under 1KB per 15s; even a short message exchange
+ * (POST + SSE stream) lands in the tens of KB. */
+const CHATGPT_NET_ACTIVE_BYTES = 8 * 1024;
+
+/** Transient nettop failures (timeouts under load) shouldn't kill the lane;
+ * this many consecutive errors means it genuinely can't work here. */
+const NETTOP_MAX_CONSECUTIVE_ERRORS = 5;
 
 /** Detect active use of the current (Chromium-based) ChatGPT app via nettop
  * byte-counter deltas on its network-service process. The modern build keeps
@@ -263,9 +267,11 @@ export class ChatGptAppNetworkWatcher {
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
   private pid: number | null = null;
-  private lastBytes: number | null = null;
+  private connBytes = new Map<string, number>();
+  private baselined = false;
   private lastActiveAt = 0;
   private sessionActive = false;
+  private errorStreak = 0;
   private unavailable = false;
 
   constructor(
@@ -289,13 +295,11 @@ export class ChatGptAppNetworkWatcher {
     if (this.polling || this.unavailable) return;
     this.polling = true;
     try {
-      const bytes = await this.readBytes();
+      const delta = await this.readDelta();
+      this.errorStreak = 0;
       const now = Date.now();
-      // Counter went backwards = network service restarted; skip that delta.
-      const delta = bytes !== null && this.lastBytes !== null && bytes >= this.lastBytes
-        ? bytes - this.lastBytes
-        : 0;
       if (delta >= CHATGPT_NET_ACTIVE_BYTES) {
+        if (!this.sessionActive) log(TAG, `chatgpt app active (${Math.round(delta / 1024)}KB in ${Math.round(this.pollMs / 1000)}s)`);
         this.lastActiveAt = now;
         this.sessionActive = true;
         // Aggregate id: nettop can't attribute traffic to a conversation.
@@ -307,6 +311,7 @@ export class ChatGptAppNetworkWatcher {
           message: "app active",
         });
       } else if (this.sessionActive && now - this.lastActiveAt > this.idleMs) {
+        log(TAG, "chatgpt app idle");
         this.sessionActive = false;
         this.registry.handleEvent({
           session_id: "app",
@@ -316,34 +321,55 @@ export class ChatGptAppNetworkWatcher {
           message: "app idle",
         });
       }
-      this.lastBytes = bytes;
     } catch (err) {
-      // nettop missing or denied: this lane can't work — stop burning cycles.
-      this.unavailable = true;
-      warn(TAG, `chatgpt nettop lane disabled: ${err instanceof Error ? err.message : String(err)}`);
+      if (++this.errorStreak >= NETTOP_MAX_CONSECUTIVE_ERRORS) {
+        this.unavailable = true;
+        warn(TAG, `chatgpt nettop lane disabled: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
       this.polling = false;
     }
   }
 
-  /** Cumulative bytes_in+bytes_out of the ChatGPT app's Chromium network
-   * service, or null when the app isn't running. */
-  private async readBytes(): Promise<number | null> {
+  /** Bytes transferred since the previous poll by the ChatGPT app's Chromium
+   * network service. nettop's per-process totals cover only *live* sockets —
+   * closing a connection silently drops its bytes from the sum, masking real
+   * traffic — so track per-connection counters instead: a new connection
+   * contributes its full count, a persisting one its positive delta. */
+  private async readDelta(): Promise<number> {
     const pid = await this.resolvePid();
-    if (pid === null) return null;
+    if (pid === null) {
+      this.connBytes.clear();
+      this.baselined = false;
+      return 0;
+    }
     const { stdout } = await execFileAsync(
       "nettop",
       ["-x", "-L", "1", "-p", String(pid)],
       { timeout: 10_000 },
     );
+    const next = new Map<string, number>();
+    let delta = 0;
     for (const row of stdout.split("\n")) {
+      // Connection row: time, "tcp4 a:p<->b:q", interface, state, bytes_in, bytes_out, …
       const cols = row.split(",");
-      // Process summary row: time, "name.pid", interface, state, bytes_in, bytes_out, …
-      if (cols.length < 6 || !cols[1]?.endsWith(`.${pid}`)) continue;
-      const total = Number(cols[4]) + Number(cols[5]);
-      return Number.isFinite(total) ? total : null;
+      if (cols.length < 6 || !cols[1]?.includes("<->")) continue;
+      const bytes = Number(cols[4]) + Number(cols[5]);
+      if (!Number.isFinite(bytes)) continue;
+      const tuple = cols[1];
+      next.set(tuple, bytes);
+      const previous = this.connBytes.get(tuple);
+      delta += previous === undefined ? bytes : Math.max(0, bytes - previous);
     }
-    return null;
+    this.connBytes = next;
+    if (!this.baselined) {
+      // First read after start/app-launch sees every connection as new;
+      // don't count pre-existing traffic as activity.
+      this.baselined = true;
+      return 0;
+    }
+    if (delta > 0) debug(TAG, `chatgpt net delta ${delta}B across ${next.size} connections`);
+    return delta;
   }
 
   private async resolvePid(): Promise<number | null> {
