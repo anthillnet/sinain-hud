@@ -299,6 +299,13 @@ export interface AgentApprovalResolvedMessage {
   behavior: "allow" | "deny" | "always" | "ask";
 }
 
+/** Desktop-app session watchers (Claude app log tail, ChatGPT store mtimes). */
+export interface AppSessionsConfig {
+  enabled: boolean;
+  claudeAppLogPath: string;
+  chatgptDataDir: string;
+}
+
 export interface AgentApprovalReplyMessage {
   type: "agent_approval_reply";
   id: string;
@@ -1090,6 +1097,7 @@ export interface CoreConfig {
   agentLlmBriefEnabled: boolean;
   claudeUsageEnabled: boolean;
   claudeUsagePollMs: number;
+  appSessionsConfig: AppSessionsConfig;
   regionSlmConfig: RegionSlmConfig;
   burstConfig: BurstConfig;
   saveOfferConfig: SaveOfferConfig;
