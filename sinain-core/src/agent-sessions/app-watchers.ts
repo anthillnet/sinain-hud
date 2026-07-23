@@ -197,8 +197,11 @@ export class ChatGptConversationsWatcher {
         // surface as active on core startup.
         if (!this.baselined || previous === mtime) continue;
         this.active.set(id, now);
+        // Bare uuid as session id: the registry labels sessions from the id's
+        // first 8 chars when there is no cwd, so a "chatgpt:" prefix would
+        // render every conversation as "chatgpt — chatgpt:".
         this.registry.handleEvent({
-          session_id: `chatgpt:${id}`,
+          session_id: id,
           hook_event_name: "Notification",
           source: "chatgpt",
           ts: now,
@@ -211,7 +214,7 @@ export class ChatGptConversationsWatcher {
         if (lastActive >= cutoff) continue;
         this.active.delete(id);
         this.registry.handleEvent({
-          session_id: `chatgpt:${id}`,
+          session_id: id,
           hook_event_name: "SessionEnd",
           source: "chatgpt",
           ts: now,
