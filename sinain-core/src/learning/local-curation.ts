@@ -162,6 +162,9 @@ export class LocalCurationService {
    *  workstate-prior.json on mtime change, so threads track the KG without a
    *  manual rebuild. */
   async refreshWorkStatePrior(force = false): Promise<void> {
+    // prior_builder.py ships with the WSM lane, not every bundle — skip
+    // silently instead of warn-spamming each refresh (QA flagged the noise).
+    if (!existsSync(resolve(this.scriptsDir, "prior_builder.py"))) return;
     const now = Date.now();
     if (!force && now - this._lastPriorRefreshTs < 10 * 60 * 1000) return;
     this._lastPriorRefreshTs = now;

@@ -11,7 +11,11 @@ set -uo pipefail
 
 PYROOT="${1:-$HOME/.sinain/python}"
 PYBIN="$PYROOT/bin/python3"
-DEPS="numpy scikit-image pillow pytesseract requests pyobjc-framework-Quartz pyobjc-framework-Vision"
+# Vision/OCR deps + the knowledge-graph lane (pyoxigraph for rdf_store,
+# jellyfish/rapidfuzz for entity canonicalization — all small arm64 wheels).
+# sinain-memory/requirements.txt's sentence-transformers is deliberately NOT
+# provisioned: embeddings ride sinain-core's /embed endpoint instead.
+DEPS="numpy scikit-image pillow pytesseract requests pyobjc-framework-Quartz pyobjc-framework-Vision pyoxigraph jellyfish rapidfuzz"
 
 # Progress status the overlay reads (~/.sinain/provisioning/<comp>.status →
 # "state|pct|label"). The overlay polls the file directly, so progress shows
@@ -55,7 +59,7 @@ if ! "$PYBIN" -m pip install --quiet --disable-pip-version-check --prefer-binary
   echo "[provision-python] ✗ pip install failed"; fail_status "Package install failed"; exit 1
 fi
 
-if "$PYBIN" -c "import numpy, Quartz, skimage, PIL, requests" >/dev/null 2>&1; then
+if "$PYBIN" -c "import numpy, Quartz, skimage, PIL, requests, pyoxigraph" >/dev/null 2>&1; then
   echo "[provision-python] ✓ ready: $PYBIN"
   pstatus done 100 "Python ready"
   exit 0
