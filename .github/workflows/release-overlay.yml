@@ -35,6 +35,11 @@ jobs:
 
       - run: flutter pub get
 
+      # pubspec is the source of CFBundleShortVersionString — stamp it from
+      # RELEASE_VERSIONS.json so the .app reports the released version.
+      - name: Sync pubspec version
+        run: ../tools/release/sync-overlay-version.sh
+
       - name: Build macOS release
         run: flutter build macos --release
 
@@ -66,6 +71,10 @@ jobs:
           cache: true
 
       - run: flutter pub get
+
+      - name: Sync pubspec version
+        shell: bash
+        run: ../tools/release/sync-overlay-version.sh
 
       - name: Build Windows release
         run: flutter build windows --release

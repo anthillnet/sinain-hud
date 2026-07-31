@@ -103,6 +103,12 @@ jobs:
           python-version: '3.12'
 
       # ── Build all components (mirrors the local build chain) ────────────────
+      # pubspec is the source of CFBundleShortVersionString — stamp it from
+      # RELEASE_VERSIONS.json so the DMG's .app reports the released version.
+      - name: Sync overlay pubspec version
+        if: steps.preflight.outputs.ready == 'true'
+        run: ./tools/release/sync-overlay-version.sh
+
       - name: Build overlay (Flutter, release)
         if: steps.preflight.outputs.ready == 'true'
         working-directory: overlay
