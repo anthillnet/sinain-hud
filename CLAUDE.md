@@ -11,7 +11,7 @@ SinainHUD is a privacy-first AI overlay system for macOS. It captures screen and
 Three main processes communicate over localhost:
 
 - **sinain-core** (Node.js/TypeScript, port 9500) — Central hub. HTTP + WebSocket server, agent analysis loop, escalation orchestrator, ring buffers (feed: 100 items, sense: 30 events). ES modules (`"type": "module"`).
-- **overlay** (Flutter/Dart, macOS) — Private overlay UI. NSPanel with `sharingType = .none` (invisible to screen capture). 4 display modes: Feed, Alert, Ticker, Hidden. Connects via WebSocket to sinain-core.
+- **overlay** (Flutter/Dart, macOS) — Private overlay UI. NSPanel with `sharingType = .none` (invisible to screen capture). 2 display modes: Eye (notch-parked agent island or detached) and Chat — no hidden mode. Connects via WebSocket to sinain-core.
 - **sense_client** (Python) — Reads screen frames from sck-capture IPC (`~/.sinain/capture/frame.jpg`), SSIM change detection, OCR via OpenRouter vision API, privacy stripping. POSTs to sinain-core `/sense`.
 - **sck-capture** (Swift, `tools/sck-capture/`) — Unified ScreenCaptureKit binary. Single `SCStream` captures both system audio (raw PCM → stdout → sinain-core AudioPipeline) and screen frames (JPEG → IPC → sense_client). Replaces separate Python SCKCapture + old sck-audio.
 
