@@ -78,10 +78,12 @@ CI (`ci.yml`) — two jobs:
 Release — **read [docs/RELEASING.md](docs/RELEASING.md) before releasing anything.**
 Unified flow (`release.yml`): merge a `RELEASE_VERSIONS.json` bump (per-component
 series) to main → overlay zips + npm + sck-capture + signed DMG all build in one
-run (merge-driven; no tags needed). A release is NOT done until the sinain.com download CTA
-(`docs/index.html`, pinned to `macos-v<ver>`) is bumped and merged — merging to
-main deploys the site via Firebase. Per-component tags (`overlay-v*` etc.) still
-work for one-off releases.
+run (merge-driven; no tags needed). The sinain.com download CTA needs no bump: it
+points at `https://sinain.com/download`, a Cloudflare Worker
+(`tools/download-redirect/`) that resolves the DMG version from
+`RELEASE_VERSIONS.json` at request time and logs bot-vs-human download stats.
+Merging to main deploys the site via Firebase. Per-component tags (`overlay-v*`
+etc.) still work for one-off releases.
 
 ## Key Source Locations
 
