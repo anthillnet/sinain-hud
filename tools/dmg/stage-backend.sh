@@ -59,7 +59,13 @@ bold "3c · Staging Python pipelines (sense_client + sinain-memory knowledge)"
 # PyInstaller build for consumer Macs without the deps is future work (Q3).
 cp -R "$REPO/sense_client" "$RES/sense_client"
 cp -R "$REPO/sinain-hud-plugin/sinain-memory" "$RES/sinain-memory"
-find "$RES/sense_client" "$RES/sinain-memory" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+# Shared python packages — sense_client/_pkg_boot.py resolves them as a
+# packages/ sibling (QA BUG: the v0.13.0 DMG shipped without packages/ and
+# sense_client died on ImportError at startup).
+cp -R "$REPO/packages" "$RES/packages"
+[ -f "$RES/packages/sinain-llm/sinain_llm/__init__.py" ] || fail "packages/sinain-llm missing from stage"
+[ -f "$RES/packages/sinain-sense/sinain_sense/__init__.py" ] || fail "packages/sinain-sense missing from stage"
+find "$RES/sense_client" "$RES/sinain-memory" "$RES/packages" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 bold "3d · Staging whisper-cli + whisper-server (local transcription, T1/T2)"
 # Self-contained arm64 whisper.cpp binaries (system frameworks only). The model
@@ -243,7 +249,11 @@ if [ -f "$BUILD_ID_FILE" ]; then
   if [ "$NEW_BUILD" != "$OLD_BUILD" ]; then
     echo "[launch] bundle updated (${OLD_BUILD:-fresh install} → $NEW_BUILD) — refreshing provisioned deps"
     if [ -x "$PROVISIONED_PY" ] && [ -f "$RES/sense_client/requirements.txt" ]; then
-      "$PROVISIONED_PY" -m pip install -q --upgrade -r "$RES/sense_client/requirements.txt" \
+      # Keep the extra list in sync with provision-python.sh DEPS: kg lane
+      # (pyoxigraph + entity canonicalization) — a python provisioned by an
+      # older DMG predates them, and only this refresh path reaches it.
+      "$PROVISIONED_PY" -m pip install -q --upgrade --prefer-binary \
+          -r "$RES/sense_client/requirements.txt" pyoxigraph jellyfish rapidfuzz \
         && echo "[launch] python deps refreshed" \
         || echo "[launch] python dep refresh failed — continuing with existing env"
     fi

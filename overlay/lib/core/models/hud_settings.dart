@@ -1,5 +1,7 @@
-/// The 3 visible states of the overlay widget (plus hidden).
-enum HudState { eye, controls, chat, hidden }
+/// The visible states of the overlay widget. There is no hidden state — the
+/// overlay always has an on-screen affordance (QA: a persisted hidden boot
+/// rendered an invisible app with no way back; removed 2026-07-31).
+enum HudState { eye, controls, chat }
 
 enum HudTab { agent, tasks }
 

@@ -105,7 +105,6 @@ class OverlayShellState extends State<OverlayShell> {
   }
 
   late HudState _state;
-  late HudState _lastVisibleState;
 
   late final WindowService _windowService;
   late final SettingsService _settingsService;
@@ -137,8 +136,6 @@ class OverlayShellState extends State<OverlayShell> {
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
-  // Hidden state intentionally ignores this: explicit user hide outranks
-  // agent's "I need attention". Agent will time out into deny.
   // NOTE: no auto-switch to Tasks tab — permissions are handled via the
   // PermissionBanner above the chat input only.
   int _pendingAttention = 0;
@@ -272,7 +269,6 @@ class OverlayShellState extends State<OverlayShell> {
 
     // Restore persisted state (defaults to chat for new installs)
     _state = _settingsService.settings.overlayState;
-    _lastVisibleState = _state == HudState.hidden ? HudState.chat : _state;
 
     // Ensure window size matches restored state (may differ from native default)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -302,8 +298,7 @@ class OverlayShellState extends State<OverlayShell> {
     // agent — keep refreshing the ambient-escalation quiet window (core
     // holds it ~3 min per ping; chat messages refresh it server-side).
     _busyTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_terminalThreads.contains(_activeTabKey) &&
-          _state != HudState.hidden) {
+      if (_terminalThreads.contains(_activeTabKey)) {
         context.read<WebSocketService>().sendUserBusy();
       }
     });
@@ -1121,33 +1116,6 @@ class OverlayShellState extends State<OverlayShell> {
     _setIslandView(_IslandView.bar);
   }
 
-  void toggleVisibility(bool visible) {
-    if (visible) {
-      // Restore to last visible state and resize window accordingly
-      setState(() => _state = _lastVisibleState);
-      _settingsService.setHudState(_lastVisibleState);
-      _windowService.showWindow();
-      _resizeWindowForState(_lastVisibleState);
-      if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
-        _showDetachedEye();
-      }
-      _syncIslandFromWs(context.read<WebSocketService>());
-    } else {
-      if (_parked) {
-        _unparkIsland().then((_) {
-          if (mounted) toggleVisibility(false);
-        });
-        return;
-      }
-      _lastVisibleState = _state;
-      setState(() => _state = HudState.hidden);
-      _settingsService.setHudState(HudState.hidden);
-      _windowService.hideWindow();
-      // Explicit hide outranks everything — the detached eye vanishes too.
-      if (_isMacOS) _windowService.hideDetachedEye();
-    }
-  }
-
   void toggleChat() {
     if (_state == HudState.chat) {
       _transitionTo(HudState.eye);
@@ -1159,10 +1127,6 @@ class OverlayShellState extends State<OverlayShell> {
   /// Two-state toggle: Eye ⇄ Chat. There's no middle controls mode — the
   /// eye simply collapses/uncollapses the chat. (Hotkey-driven.)
   void cycleState() {
-    if (_state == HudState.hidden) {
-      toggleVisibility(true); // unhide first
-      return;
-    }
     toggleChat();
   }
 
@@ -1269,9 +1233,7 @@ class OverlayShellState extends State<OverlayShell> {
       // (product call 2026-07-16); programmatic handoffs into the chat go
       // through _leaveCardModeFor, which selects the conversation instead.
       if (target == HudState.chat &&
-          (_state == HudState.eye ||
-              _state == HudState.hidden ||
-              _state == HudState.controls)) {
+          (_state == HudState.eye || _state == HudState.controls)) {
         _sessionsTab = true;
       }
       _state = target;
@@ -1287,9 +1249,7 @@ class OverlayShellState extends State<OverlayShell> {
       }
     });
 
-    if (target == HudState.hidden) {
-      if (_isMacOS) _windowService.hideDetachedEye();
-    } else if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
+    if (_isMacOS && _settingsService.settings.detachedEyeVisible) {
       _showDetachedEye();
     }
 
@@ -1326,8 +1286,6 @@ class OverlayShellState extends State<OverlayShell> {
           _settingsService.settings.chatWidth,
           _settingsService.settings.chatHeight,
         );
-      case HudState.hidden:
-        break;
     }
   }
 
@@ -1457,7 +1415,7 @@ class OverlayShellState extends State<OverlayShell> {
   /// returning to chat doesn't leave a stale ~3 min suppression tail.
   void _syncBusyState() {
     final ws = context.read<WebSocketService>();
-    if (_terminalThreads.contains(_activeTabKey) && _state != HudState.hidden) {
+    if (_terminalThreads.contains(_activeTabKey)) {
       ws.sendUserBusy();
     } else {
       ws.sendUserBusy(0);
@@ -1923,8 +1881,6 @@ class OverlayShellState extends State<OverlayShell> {
   /// viewport for that region's conversation.
   Future<void> _openChatNearRegion(double x, double y,
       [int display = 0]) async {
-    if (_state == HudState.hidden) toggleVisibility(true);
-
     final chatW = _settingsService.settings.chatWidth;
     final chatH = _settingsService.settings.chatHeight;
 
@@ -2326,7 +2282,7 @@ class OverlayShellState extends State<OverlayShell> {
     setState(() => _saveOffer = o);
     if (_parked) _scheduleIslandResize();
     _offerExpiryTimer = Timer(Duration(seconds: o.expirySeconds), _expireOffer);
-    if (_state != HudState.hidden && !_parked) {
+    if (!_parked) {
       _enterCardMode(); // no-op in chat
     }
   }
@@ -2393,7 +2349,7 @@ class OverlayShellState extends State<OverlayShell> {
     setState(() => _sessionNudge = n);
     _nudgeExpiryTimer =
         Timer(Duration(seconds: n.expirySeconds), _expireSessionNudge);
-    if (_state != HudState.hidden) _enterCardMode();
+    _enterCardMode();
   }
 
   /// Track: one tap, retroactive credit pinned — the chip arrives on
@@ -2971,10 +2927,6 @@ class OverlayShellState extends State<OverlayShell> {
     // screen that trapped users after the wizard.
     context
         .watch<SettingsService>(); // rebuild on privacy mode change (eye color)
-    if (_state == HudState.hidden) {
-      return const SizedBox.shrink();
-    }
-
     if (_parked) return _buildAgentIsland();
 
     // Compact card mode: capture cards without the full HUD (any non-chat
@@ -2996,7 +2948,6 @@ class OverlayShellState extends State<OverlayShell> {
               // Double-tap the eye → instantly grab a screen region (same flow as
               // the ⊕ tab pill). macOS only — the drag selector is native.
               onDoubleTap: _isMacOS ? _startManualRoi : null,
-              onLongPress: () => toggleVisibility(false),
               onSecondaryTap: _isMacOS ? _showEyeContextMenu : null,
               onDragEnd: _onEyeDragEnd,
               pupilDilation: _pupilDilation,
@@ -3021,8 +2972,6 @@ class OverlayShellState extends State<OverlayShell> {
         return _buildControlsBar();
       case HudState.chat:
         return _buildChatPanel();
-      case HudState.hidden:
-        return const SizedBox.shrink();
     }
   }
 

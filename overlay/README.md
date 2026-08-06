@@ -31,25 +31,17 @@ macos/Runner/
 ## Features
 
 - **Invisible overlay** — transparent, click-through, invisible to screen capture
-- **4 display modes** — Feed (scrolling), Alert (urgent card), Minimal (ticker), Hidden
+- **2 display modes** — Eye (parked in the notch as the agent island, or
+  detached) and Chat. There is no hidden mode — the overlay always keeps an
+  on-screen affordance.
 - **Privacy mode** — `sharingType = .none` hides from screen recording
-- **Global hotkeys:**
-  - `⌘⇧Space` — Toggle visibility
-  - `⌘⇧C` — Toggle click-through
-  - `⌘⇧M` — Cycle display mode
-  - `⌘⇧H` — Panic hide (instant stealth)
-  - `⌘⇧T` — Toggle audio capture
-  - `⌘⇧D` — Switch audio device
-  - `⌘⇧A` — Toggle audio feed on HUD
-  - `⌘⇧↑` — Scroll feed up
-  - `⌘⇧↓` — Scroll feed down
-  - `⌘⇧S` — Toggle screen capture pipeline
-  - `⌘⇧V` — Toggle screen feed on HUD
-  - `⌘⇧E` — Cycle HUD tab (Agent ↔ Tasks)
-  - `⌘⇧P` — Toggle position (bottom-right ↔ top-right)
-  - `⌘⇧Y` — Copy target message to clipboard
+- **Global hotkeys** (the overlay is mouse-driven; everything else has a
+  clickable affordance in the HUD or the eye's right-click menu):
+  - `⌘⇧P` — Reset window position (eye returns to the notch)
+  - `⌃⌥⌘C` — Context from Clipboard (enrich the clipboard with Sinain context)
 - **WebSocket bridge** — Connects to `ws://localhost:9500` with auto-reconnect
-- **LSUIElement** — Hidden from Dock and Cmd+Tab
+- **Dock icon** — shown by default; optional accessory/LSUIElement mode via the
+  "Show in Dock" setting
 
 ## Setup
 
