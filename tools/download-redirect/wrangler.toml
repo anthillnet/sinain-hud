@@ -1,0 +1,17 @@
+name = "sinain-download-redirect"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+routes = [
+  { pattern = "sinain.com/download*", zone_name = "sinain.com" },
+]
+
+[observability]
+enabled = true
+
+[[analytics_engine_datasets]]
+binding = "DOWNLOADS"
+dataset = "sinain_downloads"
+
+[vars]
+FALLBACK_TAG = "macos-v0.13.0"

@@ -24,11 +24,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # Render the DMG download CTA from RELEASE_VERSIONS.json (with a
-      # fallback to the newest published macos-v* release) — the committed
-      # URL in docs/index.html is never authoritative.
-      - name: Render download link
-        run: ./tools/site/set-dmg-link.sh
+      # The DMG download CTA points at sinain.com/download — a Cloudflare
+      # Worker (tools/download-redirect) that resolves the version from
+      # RELEASE_VERSIONS.json at request time. No deploy-time rendering.
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

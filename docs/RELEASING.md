@@ -46,19 +46,24 @@ gh api repos/anthillnet/sinain-hud/releases/tags/macos-v<ver> --jq '.assets[].na
 
 ### 4. sinain.com updates itself
 
-The download CTA is rendered at deploy time by `tools/site/set-dmg-link.sh`
-from `RELEASE_VERSIONS.json` (falling back to the newest *published*
-`macos-v*` release, so the live link never 404s mid-build). It runs in both
-deploy paths: the merge-triggered Firebase deploy and release.yml's `site`
-job, which re-deploys right after the DMG publishes. The committed URL in
-`docs/index.html` is not authoritative — no manual link bump.
+The download CTA points at `https://sinain.com/download` — a Cloudflare
+Worker (`tools/download-redirect/`) that resolves the version *at request
+time* from `RELEASE_VERSIONS.json` on main (falling back to the newest
+*published* `macos-v*` release, so the link never 404s mid-build; resolution
+cached 5 min). No deploy-time rendering, no site re-deploy after a DMG
+release, no manual link bump. The worker also logs every hit (user-agent,
+country, bot/human) to Workers Analytics Engine — unlike GitHub's raw
+`download_count`, which bots and range requests inflate several-fold.
 
 ### 5. Verify live
 
 ```bash
-curl -s https://sinain.com | grep -o 'releases/download/[^"]*'   # new tag?
-curl -sIL <that dmg url> | head -1                                # HTTP 200?
+curl -s -o /dev/null -w '%{redirect_url}\n' https://sinain.com/download  # new tag?
+curl -sI https://sinain.com/download | head -1                           # HTTP 302?
 ```
+
+Note: within ~5 min of the release the worker may still serve the previous
+tag from cache.
 
 ## What updates itself (no site step)
 
