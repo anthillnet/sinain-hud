@@ -69,12 +69,17 @@ export class ChatSidecarSupervisor {
     const dir = process.env.SINAIN_CHAT_DIR || resolve(this.root, "sinain-chat-agent");
     const script = resolve(dir, "sidecar.py");
     if (!existsSync(script)) {
-      this.park("chat sidecar not found: " + script);
+      this.park("Chat isn't available — the sinain-chat component is missing from this install. Reinstalling the latest Sinain restores it.");
       return;
     }
+    // Dev venv sits next to sidecar.py; packaged installs bootstrap it in user
+    // home instead (SINAIN_CHAT_VENV — the signed bundle is read-only).
     const venv = resolve(dir, ".venv", "bin", "python");
+    const homeVenv = process.env.SINAIN_CHAT_VENV
+      ? resolve(process.env.SINAIN_CHAT_VENV, "bin", "python")
+      : null;
     const py = process.env.SINAIN_CHAT_PY || process.env.SINAIN_CHAT_PYTHON ||
-      (existsSync(venv) ? venv : "python3");
+      (existsSync(venv) ? venv : homeVenv && existsSync(homeVenv) ? homeVenv : "python3");
     this.startedAt = Date.now();
     this.emit(this.failures ? "restarting" : "starting");
     const child = spawn(py, [script], { cwd: dir, env: process.env, stdio: ["ignore", "pipe", "pipe"] });

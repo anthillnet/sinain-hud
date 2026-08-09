@@ -931,14 +931,14 @@ class WebSocketService extends ChangeNotifier {
       'minutes': minutes,
       if (apps != null) 'apps': apps,
     });
-    if (data == null) return 'core unreachable';
+    if (data == null) return 'Sinain backend isn\'t responding — try again in a moment';
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
 
   /// "Build context" for clipboard text — card arrives on [enrichStream].
   Future<String?> requestEnrich(String text) async {
     final data = await _postJson('/context/enrich', {'text': text});
-    if (data == null) return 'core unreachable';
+    if (data == null) return 'Sinain backend isn\'t responding — try again in a moment';
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
 
@@ -989,7 +989,7 @@ class WebSocketService extends ChangeNotifier {
   Future<String?> requestVoiceMeet(String url, int minutes) async {
     final data =
         await _postJson('/voice/meet', {'url': url, 'minutes': minutes});
-    if (data == null) return 'core unreachable';
+    if (data == null) return 'Sinain backend isn\'t responding — try again in a moment';
     return data['ok'] == true ? null : (data['error'] as String? ?? 'failed');
   }
 

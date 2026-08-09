@@ -35,6 +35,10 @@ via deferred MCP loading, not eager load.
 `OPENROUTER_API_KEY` · `SINAIN_CHAT_MODEL` (default `qwen/qwen3.5-flash-02-23`) ·
 `SINAIN_CHAT_REASONING` (`off` fast / `on` slower) · `SINAIN_CORE_URL` · `SINAIN_CHAT_WS_PORT` (9610).
 
+`SINAIN_CHAT_VENV` / `SINAIN_CHAT_WORKSPACE` relocate the self-bootstrapped venv and scratch
+workspace (packaged installs point them at `~/.sinain/chat-venv` / `~/.sinain/chat-workspace`
+because the signed .app bundle must not be written to).
+
 ## Status
 Prototype (Phase 0→1). Next: sinain-core `ChatService` WS client + overlay wiring; lifecycle
 supervision in `launch-backend.sh`; DMG bundling. Terminal mode keeps the roster agent unchanged.
