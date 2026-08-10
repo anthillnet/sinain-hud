@@ -518,6 +518,13 @@ export function loadConfig(): CoreConfig {
     agentLlmBriefEnabled: boolEnv("AGENT_ENRICH_LLM", true),
     claudeUsageEnabled: boolEnv("CLAUDE_USAGE_ENABLED", true),
     claudeUsagePollMs: intEnv("CLAUDE_USAGE_POLL_MS", 60_000),
+    // Desktop-app session tracking reads macOS paths (Claude app log, ChatGPT
+    // store), so it defaults on only where those exist.
+    appSessionsConfig: {
+      enabled: boolEnv("APP_SESSIONS_ENABLED", process.platform === "darwin"),
+      claudeAppLogPath: resolvePath(env("CLAUDE_APP_LOG", resolve(os.homedir(), "Library", "Logs", "Claude", "main.log"))),
+      chatgptDataDir: resolvePath(env("CHATGPT_DATA_DIR", resolve(os.homedir(), "Library", "Application Support", "com.openai.chat"))),
+    },
     regionSlmConfig,
     burstConfig,
     saveOfferConfig,

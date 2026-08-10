@@ -18,6 +18,7 @@ import { AgentSessionRegistry } from "./agent-sessions/registry.js";
 import { AttachmentCoordinator } from "./agent-sessions/attachment.js";
 import { ApprovalManager } from "./agent-sessions/approvals.js";
 import { ClaudeUsageTracker } from "./agent-sessions/usage.js";
+import { AppSessionWatchers } from "./agent-sessions/app-watchers.js";
 import { setupCommands } from "./overlay/commands.js";
 import { AudioPipeline } from "./audio/pipeline.js";
 import type { CaptureSpawner } from "./audio/capture-spawner.js";
@@ -989,6 +990,10 @@ async function main() {
   });
   wsHandler.setAgentApprovalSupplier(() => approvalManager.pending());
   const claudeUsageTracker = new ClaudeUsageTracker((snapshot) => wsHandler.broadcastUsage({ type: "usage", ...snapshot }));
+  const appSessionWatchers = config.appSessionsConfig.enabled
+    ? new AppSessionWatchers(agentSessionRegistry, config.appSessionsConfig)
+    : null;
+  appSessionWatchers?.start();
   let agentSessionsFlushScheduled = false;
   agentSessionRegistry.onChange(() => {
     attachmentCoordinator?.sync();
@@ -2925,6 +2930,7 @@ async function main() {
     clearInterval(bufferGaugeTimer);
     if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
     costTracker.stop();
+    appSessionWatchers?.stop();
     profiler.stop();
     recorder.forceStop(); // Stop any active recording
     agentLoop.stop();
