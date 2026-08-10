@@ -1,0 +1,25 @@
+{
+  "name": "sinain-chat-agent-js",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Resident sinain chat sidecar on the Vercel AI SDK — same WS protocol as sidecar.py, no Python runtime",
+  "scripts": {
+    "dev": "tsx src/sidecar.ts",
+    "build": "tsc",
+    "start": "node dist/sidecar.js",
+    "smoke": "tsx src/smoke-client.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^1.0.0",
+    "ai": "^5.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

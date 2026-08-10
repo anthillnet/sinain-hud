@@ -66,23 +66,48 @@ export class ChatSidecarSupervisor {
 
   private spawn(): void {
     if (this.stopping || this.child) return;
-    const dir = process.env.SINAIN_CHAT_DIR || resolve(this.root, "sinain-chat-agent");
-    const script = resolve(dir, "sidecar.py");
-    if (!existsSync(script)) {
-      this.park("Chat isn't available — the sinain-chat component is missing from this install. Reinstalling the latest Sinain restores it.");
-      return;
+    // SINAIN_CHAT_IMPL=js selects the AI-SDK sidecar (sinain-chat-agent-js) —
+    // same WS protocol, no Python runtime; runs on this process's own Node.
+    // Default stays the OpenHands (Python) sidecar until the A/B settles.
+    const impl = (process.env.SINAIN_CHAT_IMPL || "python").toLowerCase();
+    let cmd: string;
+    let args: string[];
+    let dir: string;
+    if (impl === "js") {
+      dir = process.env.SINAIN_CHAT_DIR || resolve(this.root, "sinain-chat-agent-js");
+      const dist = resolve(dir, "dist", "sidecar.js");
+      const src = resolve(dir, "src", "sidecar.ts");
+      const tsx = resolve(this.root, "sinain-core", "node_modules", ".bin", "tsx");
+      if (existsSync(dist)) {
+        cmd = process.execPath;
+        args = [dist];
+      } else if (existsSync(src) && existsSync(tsx)) {
+        cmd = tsx; // dev checkout: run the TS entry directly
+        args = [src];
+      } else {
+        this.park("Chat (js impl) isn't available — sinain-chat-agent-js is missing or not built (npm run build).");
+        return;
+      }
+    } else {
+      dir = process.env.SINAIN_CHAT_DIR || resolve(this.root, "sinain-chat-agent");
+      const script = resolve(dir, "sidecar.py");
+      if (!existsSync(script)) {
+        this.park("Chat isn't available — the sinain-chat component is missing from this install. Reinstalling the latest Sinain restores it.");
+        return;
+      }
+      // Dev venv sits next to sidecar.py; packaged installs bootstrap it in user
+      // home instead (SINAIN_CHAT_VENV — the signed bundle is read-only).
+      const venv = resolve(dir, ".venv", "bin", "python");
+      const homeVenv = process.env.SINAIN_CHAT_VENV
+        ? resolve(process.env.SINAIN_CHAT_VENV, "bin", "python")
+        : null;
+      cmd = process.env.SINAIN_CHAT_PY || process.env.SINAIN_CHAT_PYTHON ||
+        (existsSync(venv) ? venv : homeVenv && existsSync(homeVenv) ? homeVenv : "python3");
+      args = [script];
     }
-    // Dev venv sits next to sidecar.py; packaged installs bootstrap it in user
-    // home instead (SINAIN_CHAT_VENV — the signed bundle is read-only).
-    const venv = resolve(dir, ".venv", "bin", "python");
-    const homeVenv = process.env.SINAIN_CHAT_VENV
-      ? resolve(process.env.SINAIN_CHAT_VENV, "bin", "python")
-      : null;
-    const py = process.env.SINAIN_CHAT_PY || process.env.SINAIN_CHAT_PYTHON ||
-      (existsSync(venv) ? venv : homeVenv && existsSync(homeVenv) ? homeVenv : "python3");
     this.startedAt = Date.now();
     this.emit(this.failures ? "restarting" : "starting");
-    const child = spawn(py, [script], { cwd: dir, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { cwd: dir, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     this.child = child;
     const capture = (chunk: unknown) => {
       for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) {
