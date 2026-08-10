@@ -53,11 +53,14 @@ def _ensure_venv() -> None:
     from pathlib import Path
     import subprocess
     here = Path(__file__).resolve().parent
-    venv_py = here / ".venv" / "bin" / "python"
+    # Packaged installs point SINAIN_CHAT_VENV at ~/.sinain/chat-venv — the
+    # signed .app bundle must never be written to (breaks its code signature).
+    venv_dir = Path(os.environ.get("SINAIN_CHAT_VENV") or (here / ".venv"))
+    venv_py = venv_dir / "bin" / "python"
     if not venv_py.exists():
         print("[sinain-chat] venv missing — bootstrapping (one-time, ~2 min)…",
               flush=True)
-        subprocess.run([sys.executable, "-m", "venv", str(here / ".venv")],
+        subprocess.run([sys.executable, "-m", "venv", str(venv_dir)],
                        check=True)
         subprocess.run(
             [str(venv_py), "-m", "pip", "install", "--quiet",
@@ -185,7 +188,10 @@ class ChatAgent:
         self._llm = llm  # kept so each turn can read OpenHands usage metrics
         agent = Agent(llm=llm, tools=[Tool(name=n) for n, _, _ in tools.SPECS],
                       system_prompt_kwargs={}, system_prompt=SYSTEM)
-        ws = os.path.join(os.path.dirname(__file__), ".workspace")
+        # Packaged installs redirect the scratch workspace to user home — the
+        # signed .app bundle is not writable (see SINAIN_CHAT_VENV note above).
+        ws = (os.environ.get("SINAIN_CHAT_WORKSPACE")
+              or os.path.join(os.path.dirname(__file__), ".workspace"))
         os.makedirs(ws, exist_ok=True)
         self._loop = asyncio.get_running_loop()
 

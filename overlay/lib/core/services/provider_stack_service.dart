@@ -87,9 +87,24 @@ class ProviderStackService extends ChangeNotifier {
       status = ProviderStatus.fromJson(jsonDecode(body) as Map<String, dynamic>);
       lastError = null;
     } catch (e) {
-      lastError = 'core unreachable: $e';
+      debugPrint('[provider-stack] refresh failed: $e');
+      lastError =
+          'Sinain backend isn\'t responding — it may still be starting up. Retrying…';
     }
     notifyListeners();
+  }
+
+  /// Poll [refresh] until the backend answers (used right after a backend
+  /// restart, which takes several seconds — a single refresh would flash a
+  /// scary error and never recover).
+  Future<void> refreshUntilReady(
+      {Duration timeout = const Duration(seconds: 45)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      await refresh();
+      if (lastError == null || DateTime.now().isAfter(deadline)) return;
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
   }
 
   /// Kick off background model downloads (Ollama models + whisper).
@@ -105,7 +120,9 @@ class ProviderStackService extends ChangeNotifier {
       notifyListeners();
       return ok;
     } catch (e) {
-      lastError = 'provisioning failed to start: $e';
+      debugPrint('[provider-stack] provisioning start failed: $e');
+      lastError =
+          'Couldn\'t start the model download — is the Sinain backend running?';
       notifyListeners();
       return false;
     }
@@ -215,7 +232,8 @@ class ProviderStackService extends ChangeNotifier {
       await restartBackend();
       return true;
     } catch (e) {
-      lastError = 'switch failed: $e';
+      debugPrint('[provider-stack] switch failed: $e');
+      lastError = 'Couldn\'t save the provider settings — please try again.';
       return false;
     } finally {
       switching = false;

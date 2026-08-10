@@ -2014,7 +2014,7 @@ class OverlayShellState extends State<OverlayShell> {
     final ws = context.read<WebSocketService>();
     final resp = await ws.requestVoiceStart(minutes, apps: apps);
     final error = resp == null
-        ? 'core unreachable'
+        ? 'Sinain backend isn\'t responding — try again in a moment'
         : (resp['ok'] == true ? null : (resp['error'] as String? ?? 'failed'));
     if (error == null) {
       // Webview engine: core owns the session; we host the invisible

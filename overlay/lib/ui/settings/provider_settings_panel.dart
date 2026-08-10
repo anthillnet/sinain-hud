@@ -41,9 +41,12 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
     _service.addListener(_onService);
     _service.refresh();
     // Provisioning progress updates land in status files — poll while open.
+    // Also keep polling while the backend is unreachable (e.g. it's restarting)
+    // so the panel recovers on its own instead of pinning a stale error.
     _poll = Timer.periodic(const Duration(seconds: 3), (_) {
       if (_service.status?.provisioningActive == true ||
-          _service.status == null) {
+          _service.status == null ||
+          _service.lastError != null) {
         _service.refresh();
       }
     });
@@ -108,7 +111,9 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
     );
     if (ok && mounted) {
       setState(() => _pending = null);
-      unawaited(_service.refresh());
+      // The backend restart we just triggered takes several seconds — poll
+      // until it's back instead of flashing "unreachable" from one attempt.
+      unawaited(_service.refreshUntilReady());
     }
   }
 

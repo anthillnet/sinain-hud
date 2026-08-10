@@ -53,6 +53,17 @@ rm -rf "$RES/sinain-mcp-server/node_modules"
 ( cd "$RES/sinain-mcp-server" && "$RES/node/bin/node" "$(command -v npm)" install --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
   || fail "prod npm install failed in sinain-mcp-server stage"
 
+bold "3b2 · Staging sinain-chat-agent (resident chat sidecar)"
+# ChatSidecarSupervisor resolves PACKAGE_ROOT/sinain-chat-agent/sidecar.py —
+# without this the packaged app has no chat lane ("chat sidecar not found").
+# Strip dev-only state: the venv is rebuilt on the user's machine
+# (SINAIN_CHAT_VENV points it at ~/.sinain — the signed bundle is never
+# written to), and a build machine's .env must never ship.
+cp -R "$REPO/sinain-chat-agent" "$RES/sinain-chat-agent"
+rm -rf "$RES/sinain-chat-agent/.venv" "$RES/sinain-chat-agent/.workspace" \
+       "$RES/sinain-chat-agent/.env"
+[ -f "$RES/sinain-chat-agent/sidecar.py" ] || fail "sinain-chat-agent missing from stage"
+
 bold "3c · Staging Python pipelines (sense_client + sinain-memory knowledge)"
 # Screen capture/OCR (sense_client) and the knowledge-graph distillation
 # scripts (sinain-memory) run on the user's system python3. A self-contained
@@ -65,7 +76,7 @@ cp -R "$REPO/sinain-hud-plugin/sinain-memory" "$RES/sinain-memory"
 cp -R "$REPO/packages" "$RES/packages"
 [ -f "$RES/packages/sinain-llm/sinain_llm/__init__.py" ] || fail "packages/sinain-llm missing from stage"
 [ -f "$RES/packages/sinain-sense/sinain_sense/__init__.py" ] || fail "packages/sinain-sense missing from stage"
-find "$RES/sense_client" "$RES/sinain-memory" "$RES/packages" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+find "$RES/sense_client" "$RES/sinain-memory" "$RES/packages" "$RES/sinain-chat-agent" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 bold "3d · Staging whisper-cli + whisper-server (local transcription, T1/T2)"
 # Self-contained arm64 whisper.cpp binaries (system frameworks only). The model
@@ -229,6 +240,11 @@ if [ -n "$SENSE_PY" ]; then
   export SINAIN_PYTHON="$SINAIN_BIN/sinain-knowledge"
   export SINAIN_CHAT_PYTHON="$SINAIN_BIN/sinain-chat"
   export SINAIN_SENSE_PYTHON="$SINAIN_BIN/sinain-sense"
+  # The chat sidecar self-bootstraps a venv + scratch workspace. In the signed
+  # bundle those must land in user home, not next to sidecar.py (writing inside
+  # the .app breaks its code signature).
+  export SINAIN_CHAT_VENV="$HOME/.sinain/chat-venv"
+  export SINAIN_CHAT_WORKSPACE="$HOME/.sinain/chat-workspace"
   echo "[launch] python (sense + knowledge): $SENSE_PY (as sinain-sense / sinain-knowledge)"
 else
   echo "[launch] python provisioning failed — sense_client + knowledge pages degraded"
@@ -256,6 +272,14 @@ if [ -f "$BUILD_ID_FILE" ]; then
           -r "$RES/sense_client/requirements.txt" pyoxigraph jellyfish rapidfuzz \
         && echo "[launch] python deps refreshed" \
         || echo "[launch] python dep refresh failed — continuing with existing env"
+    fi
+    # Chat sidecar venv (bootstrapped on first chat start) — keep its deps in
+    # step with the new bundle's requirements.
+    if [ -x "$HOME/.sinain/chat-venv/bin/python" ] && [ -f "$RES/sinain-chat-agent/requirements.txt" ]; then
+      "$HOME/.sinain/chat-venv/bin/python" -m pip install -q --upgrade --prefer-binary \
+        -r "$RES/sinain-chat-agent/requirements.txt" \
+        && echo "[launch] chat sidecar deps refreshed" \
+        || echo "[launch] chat dep refresh failed — sidecar will rebuild its venv if needed"
     fi
     echo "$NEW_BUILD" > "$BUILD_STAMP"
   fi
