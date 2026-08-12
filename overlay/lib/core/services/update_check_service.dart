@@ -148,15 +148,20 @@ class UpdateCheckService extends ChangeNotifier {
   /// Download the DMG to a temp file. In background mode it only stages
   /// (restart applies it); otherwise the caller continues into the install.
   Future<File?> _downloadDmg(String version, {required bool background}) async {
-    final url = 'https://github.com/anthillnet/sinain-hud/releases/download/'
-        'macos-v$version/Sinain.dmg';
+    // Fetch through sinain.com/download (302 → GitHub) rather than GitHub
+    // directly, so updater traffic lands in the download-stats funnel
+    // (tools/download-redirect) instead of silently inflating GitHub's
+    // asset counter. ?tag pins the exact release this check validated; the
+    // versioned user-agent lets the worker classify updater vs human.
+    final url = 'https://sinain.com/download?tag=macos-v$version';
     final client = HttpClient();
     File? dmg;
     try {
       final dir = Directory.systemTemp.createTempSync('sinain-update');
       dmg = File('${dir.path}/Sinain.dmg');
       final req = await client.getUrl(Uri.parse(url));
-      req.headers.set(HttpHeaders.userAgentHeader, 'sinain-hud-update');
+      req.headers.set(HttpHeaders.userAgentHeader,
+          'sinain-hud-updater/${installedVersion ?? 'unknown'}');
       final res = await req.close().timeout(const Duration(seconds: 30));
       if (res.statusCode != 200) throw HttpException('HTTP ${res.statusCode}');
       final total = res.contentLength; // −1 if unknown
