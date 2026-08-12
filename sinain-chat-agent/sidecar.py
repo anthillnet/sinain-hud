@@ -181,8 +181,11 @@ class ChatAgent:
             llm_kwargs = dict(model=model_id, base_url=cfg["base_url"],
                               api_key=SecretStr(cfg["api_key"]),
                               service_id="sinain-chat", stream=True)
-            # reasoning:{enabled:false} is an OpenRouter-only param — cloud only.
-            if os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on":
+            # reasoning:{enabled:false} is an OpenRouter-ONLY param. Other
+            # OpenAI-compatible endpoints reject it — Cerebras 400s the whole
+            # turn with "property 'reasoning' is unsupported".
+            if (provider == "openrouter"
+                    and os.environ.get("SINAIN_CHAT_REASONING", "off").lower() != "on"):
                 llm_kwargs["litellm_extra_body"] = {"reasoning": {"enabled": False}}
         llm = LLM(**llm_kwargs)
         self._llm = llm  # kept so each turn can read OpenHands usage metrics
