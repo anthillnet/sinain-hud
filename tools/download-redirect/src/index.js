@@ -83,20 +83,27 @@ export default {
     const ua = request.headers.get('user-agent') || '(none)';
     const referer = request.headers.get('referer') || '(none)';
     const country = request.cf?.country || '??';
-    const isBot = BOT_UA.test(ua) || request.method === 'HEAD';
+    const kind = ua.startsWith('sinain-hud-updater/') ? 'updater'
+      : (BOT_UA.test(ua) || request.method === 'HEAD') ? 'bot'
+      : 'human';
 
-    const tag = await resolveTag(env);
+    // The in-app updater pins the exact release its version check validated
+    // via ?tag=macos-vX.Y.Z — honor any well-formed pin, resolve otherwise.
+    const pinParam = new URL(request.url).searchParams.get('tag');
+    const tag = /^macos-v\d+\.\d+\.\d+$/.test(pinParam || '')
+      ? pinParam
+      : await resolveTag(env);
     const target = `https://github.com/${REPO}/releases/download/${tag}/Sinain.dmg`;
 
-    // One row per request: [ua, referer, country, tag], double1 = isBot.
+    // One row per request: [ua, referer, country, tag], double1 = non-human.
     if (env.DOWNLOADS) {
       env.DOWNLOADS.writeDataPoint({
         blobs: [ua.slice(0, 256), referer.slice(0, 256), country, tag],
-        doubles: [isBot ? 1 : 0],
-        indexes: [isBot ? 'bot' : 'human'],
+        doubles: [kind === 'human' ? 0 : 1],
+        indexes: [kind],
       });
     }
-    console.log(JSON.stringify({ kind: isBot ? 'bot' : 'human', country, ua, referer, tag }));
+    console.log(JSON.stringify({ kind, country, ua, referer, tag }));
 
     return Response.redirect(target, 302);
   },

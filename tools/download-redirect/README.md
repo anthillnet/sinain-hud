@@ -20,7 +20,13 @@ inflation on FB-campaign traffic: ~3–4 counted fetches per real human click.
   `tools/site/set-dmg-link.sh`). Cached 5 min. Releases need no site
   re-deploy and no CTA bump.
 - Logs one Workers Analytics Engine row per request: user-agent, referer,
-  country, resolved tag, bot/human classification. **No IPs stored.**
+  country, resolved tag, and a kind classification — `human`, `bot`, or
+  `updater` (the in-app self-update, UA `sinain-hud-updater/<ver>`).
+  **No IPs stored.**
+- `?tag=macos-vX.Y.Z` pins the redirect to an exact release (used by the
+  updater so a stale pin or API fallback can never hand it a different
+  version than its check validated). Malformed tags fall back to normal
+  resolution.
 - Version-check uses the releases *metadata* API, never the asset URL, so
   resolution can't inflate GitHub's counter.
 
@@ -46,5 +52,5 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_en
 ```
 
 Columns: `blob1` ua, `blob2` referer, `blob3` country, `blob4` tag,
-`double1`/`index1` bot flag. Live debugging: `npx wrangler tail
-sinain-download-redirect`.
+`index1` kind (`human`/`bot`/`updater`), `double1` non-human flag.
+Live debugging: `npx wrangler tail sinain-download-redirect`.
