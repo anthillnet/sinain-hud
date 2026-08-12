@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FeedBuffer } from "../buffers/feed-buffer.js";
@@ -37,6 +37,14 @@ Rules: always produce the best current HINT for what was just said. Evolve with 
  *  the zero-UI attach point for a call script, agenda, or playbook. */
 const CONTEXT_DOC = join(homedir(), ".sinain", "guide-context.md");
 const MAX_CONTEXT_CHARS = 24_000;
+
+/** Opt-in structured session log (GUIDE_EVENT_LOG=1): one JSONL file per
+ *  session under ~/.sinain/logs/guide-sessions/ with every turn, emission,
+ *  suppression and retraction — for post-factum evaluation runs. OFF by
+ *  default: it persists transcripts to disk, which the privacy design
+ *  otherwise forbids. */
+const EVENT_LOG_ENABLED = process.env.GUIDE_EVENT_LOG === "1";
+const EVENT_LOG_DIR = join(homedir(), ".sinain", "logs", "guide-sessions");
 
 interface GuideTurn {
   who: "me" | "them";
@@ -84,6 +92,8 @@ export class LocalGuideSession {
   /** Embedding vectors of displayed / retracted hint gists (semantic dedup). */
   private shownVecs: Float32Array[] = [];
   private retractedVecs: Float32Array[] = [];
+  /** Structured event-log path for this session (null = logging off). */
+  private eventLog: string | null = null;
 
   constructor(
     private analysis: AnalysisConfig,
@@ -144,6 +154,16 @@ export class LocalGuideSession {
     this.retractedVecs = [];
     this.tickPending = false;
     this.attachedSessionId = null;
+    this.eventLog = null;
+    if (EVENT_LOG_ENABLED) {
+      try {
+        mkdirSync(EVENT_LOG_DIR, { recursive: true });
+        this.eventLog = join(EVENT_LOG_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
+        log(TAG, `event log: ${this.eventLog}`);
+      } catch (err) {
+        warn(TAG, `event log unavailable (session continues unlogged): ${String(err).slice(0, 120)}`);
+      }
+    }
 
     this.setState("starting", minutes > 0 ? `Composing brief from last ${minutes} min…` : undefined);
     this.seed = await this.composeSeed(minutes, scope);
@@ -163,6 +183,11 @@ export class LocalGuideSession {
     log(TAG, `local guided session live: ${minutes} min seed${this.seed ? "" : " (unseeded)"}, model=${this.analysis.model}`
       + (intent ? `, intent="${intent.slice(0, 60)}"` : "")
       + (scenario ? `, scenario=${scenario.length} chars (${scenarioSource})` : ""));
+    this.logEvent({
+      event: "start", minutes, model: this.analysis.model,
+      intent: this.intent, scenarioSource, scenarioChars: scenario.length,
+      seedChars: this.seed.length, dedupSim: SIM_THRESHOLD,
+    });
     this.setState("live", "Listening — hints appear here when they matter.");
     return { ok: true };
   }
@@ -201,6 +226,7 @@ export class LocalGuideSession {
     });
     this.composePrompt();
     log(TAG, `retracted (${entry.length} chars), exclusions=${this.retracted.length}`);
+    this.logEvent({ event: "retract", text: entry });
     this.setState(this.state); // re-broadcast with the retracted list
     return true;
   }
@@ -227,6 +253,7 @@ export class LocalGuideSession {
     this.scenario = scenario;
     this.composePrompt();
     log(TAG, `scenario updated (${scenario.length} chars)`);
+    this.logEvent({ event: "scenario", chars: scenario.length });
     return true;
   }
 
@@ -239,12 +266,15 @@ export class LocalGuideSession {
     if (!trimmed) return;
     this.turns.push({ who: source === "mic" ? "me" : "them", text: trimmed, ts: Date.now() });
     if (this.turns.length > MAX_TURNS) this.turns.splice(0, this.turns.length - MAX_TURNS);
+    this.logEvent({ event: "turn", who: source === "mic" ? "me" : "them", text: trimmed });
     if (source === "system") this.requestTick();
   }
 
   /** End the session (true if one was starting/live). */
   stop(): boolean {
     if (this.state !== "starting" && this.state !== "live") return false;
+    this.logEvent({ event: "end", turns: this.turns.length, shown: this.shownHints.length, retracted: this.retracted.length });
+    this.eventLog = null;
     this.setState("ended");
     this.turns = [];
     this.shownHints = [];
@@ -295,6 +325,7 @@ export class LocalGuideSession {
       ? this.shownHints.map((h) => `- ${h}`).join("\n")
       : "(none)";
     const user = `Transcript so far:\n${transcript}\n\nAlready shown:\n${shown}\n\nRespond now.`;
+    const t0 = Date.now();
     const reply = await this.callModel(user);
     let emitted = 0;
     for (const raw of reply.split("\n")) {
@@ -303,6 +334,9 @@ export class LocalGuideSession {
       if (!line.startsWith("THESIS:") && !line.startsWith("HINT:")) continue;
       if (await this.emitHint(line)) emitted++;
     }
+    // The raw reply is the primary post-factum eval signal — it shows what
+    // the model produced BEFORE dedup/suppression shaped the display.
+    this.logEvent({ event: "tick", turns: this.turns.length, latencyMs: Date.now() - t0, emitted, reply });
     if (emitted === 0) {
       log(TAG, `tick: silent (turns=${this.turns.length}, reply="${reply.slice(0, 60).replace(/\n/g, " ")}")`);
     }
@@ -379,7 +413,10 @@ export class LocalGuideSession {
   private async emitHint(line: string): Promise<boolean> {
     if (this.state !== "live") return false;
     const key = this.normKey(line);
-    if (this.shownKeys.has(key)) return false;
+    if (this.shownKeys.has(key)) {
+      this.logEvent({ event: "suppress", reason: "lexical", line });
+      return false;
+    }
     // Semantic dedup: a reworded duplicate of a displayed or retracted hint
     // embeds close to it even when no words match.
     const vec = await this.embedGist(line);
@@ -388,6 +425,7 @@ export class LocalGuideSession {
         const sim = EmbeddingService.cosine(vec, prior);
         if (sim >= SIM_THRESHOLD) {
           log(TAG, `tick: near-dup suppressed (sim=${sim.toFixed(2)}): ${line.slice(0, 80)}`);
+          this.logEvent({ event: "suppress", reason: "semantic", sim: Number(sim.toFixed(3)), line });
           return false;
         }
       }
@@ -398,6 +436,7 @@ export class LocalGuideSession {
     this.shownHints.push(line);
     if (this.shownHints.length > MAX_SHOWN) this.shownHints.splice(0, this.shownHints.length - MAX_SHOWN);
     log(TAG, `hint: ${line.slice(0, 160)}`);
+    this.logEvent({ event: "hint", line });
     this.broadcast({
       type: "voice_session", status: "live", mode: "local",
       minutes: this.minutes, coverage: this.coverage,
@@ -407,6 +446,15 @@ export class LocalGuideSession {
       ts: Date.now(),
     });
     return true;
+  }
+
+  /** Append one event to the session JSONL — best-effort, never throws into
+   *  the hint path. No-op unless GUIDE_EVENT_LOG=1 armed a file at start. */
+  private logEvent(ev: Record<string, unknown>): void {
+    if (!this.eventLog) return;
+    try {
+      appendFileSync(this.eventLog, JSON.stringify({ ts: Date.now(), ...ev }) + "\n");
+    } catch { /* a failed log line must never cost a hint */ }
   }
 
   private setState(status: VoiceSessionMessage["status"], message?: string): void {
