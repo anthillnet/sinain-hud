@@ -31,6 +31,23 @@ class UpdateCheckService extends ChangeNotifier {
   /// Newer DMG version available for download (null = up to date / unknown).
   String? availableVersion;
 
+  /// Wall-clock of the last completed check against the releases API — lets
+  /// the settings row distinguish "up to date" from "never managed to check".
+  DateTime? lastChecked;
+
+  /// True while a manual checkNow() is in flight (drives the settings row).
+  bool checkingNow = false;
+
+  String? _bundleVersionCache;
+
+  /// Version to show in settings at all times: the DMG release version for
+  /// packaged installs (the number update checks compare), else the app
+  /// bundle's short version (dev / npx-prebuilt runs).
+  String? get displayVersion {
+    installedVersion ??= _readInstalledVersion();
+    return installedVersion ?? (_bundleVersionCache ??= _readBundleVersion());
+  }
+
   /// Update fully downloaded and waiting for a restart to apply. The swap is
   /// quit-then-replace, so the background flow stops here — the app never
   /// yanks itself out from under the user.
@@ -72,6 +89,7 @@ class UpdateCheckService extends ChangeNotifier {
 
       final latest = await _fetchLatestDmgVersion();
       if (latest == null) return;
+      lastChecked = DateTime.now();
 
       final newer = _isNewer(latest, installedVersion!);
       final next = newer ? latest : null;
@@ -94,7 +112,16 @@ class UpdateCheckService extends ChangeNotifier {
   }
 
   /// Settings-row "check now" — works even when auto-check is off.
-  Future<void> checkNow() => _check(manual: true);
+  Future<void> checkNow() async {
+    checkingNow = true;
+    notifyListeners();
+    try {
+      await _check(manual: true);
+    } finally {
+      checkingNow = false;
+      notifyListeners();
+    }
+  }
 
   /// Restart into a staged update (no-op when nothing is staged).
   Future<void> restartToApply() async {
@@ -228,6 +255,23 @@ class UpdateCheckService extends ChangeNotifier {
     if (!f.existsSync()) return null;
     final v = f.readAsStringSync().trim();
     return v.isEmpty ? null : v;
+  }
+
+  /// Overlay version from the app bundle's Info.plist — the settings-row
+  /// fallback for runs without a DMG_VERSION (flutter run, npx prebuilt).
+  String? _readBundleVersion() {
+    if (!Platform.isMacOS) return null;
+    try {
+      final macosDir = File(Platform.resolvedExecutable).parent;
+      final plist = File('${macosDir.parent.path}/Info.plist');
+      if (!plist.existsSync()) return null;
+      return RegExp(
+              r'<key>CFBundleShortVersionString</key>\s*<string>([^<]+)</string>')
+          .firstMatch(plist.readAsStringSync())
+          ?.group(1);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _fetchLatestDmgVersion() async {
