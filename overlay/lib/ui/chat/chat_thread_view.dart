@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/feed_item.dart';
 import '../../core/services/websocket_service.dart';
@@ -161,6 +163,11 @@ class _ChatThreadViewState extends State<ChatThreadView> {
         // Empty state: the HUD's idle eye animation instead of flyer's
         // "No messages" placeholder — same vibe as the old makeshift chat.
         emptyChatListBuilder: (context) => const Center(child: IdleAnimation()),
+        // Flyer's default SimpleTextMessage renders plain Text; agent replies
+        // arrive as markdown, so render bubbles through MarkdownBody instead.
+        textMessageBuilder: (context, message, index,
+                {required bool isSentByMe, MessageGroupStatus? groupStatus}) =>
+            _markdownBubble(message, accent, theme, isSentByMe: isSentByMe),
         // Desktop chat controls: Enter sends, Shift+Enter inserts a newline.
         // Composer surfaces forced to black — the default theme drew a white
         // frame around the input on our translucent panel.
@@ -238,6 +245,84 @@ class _ChatThreadViewState extends State<ChatThreadView> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Message bubble that renders markdown (the flyer default is plain text).
+  /// Mirrors SimpleTextMessage's look: 12px-radius bubble, accent-tinted for
+  /// sent, [HudTheme.bubbleBg] for received, HH:mm timestamp bottom-right.
+  Widget _markdownBubble(
+    TextMessage message,
+    Color accent,
+    HudTheme theme, {
+    required bool isSentByMe,
+  }) {
+    final time = message.createdAt?.toLocal();
+    return ClipRRect(
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
+      child: Container(
+        color: isSentByMe ? accent.withValues(alpha: 0.25) : theme.bubbleBg,
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MarkdownBody(
+              data: message.text,
+              shrinkWrap: true,
+              softLineBreak: true,
+              onTapLink: (text, href, title) async {
+                if (href == null) return;
+                final uri = Uri.tryParse(href);
+                if (uri == null) return;
+                const allowed = {'http', 'https', 'mailto'};
+                if (!allowed.contains(uri.scheme)) return;
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              styleSheet: MarkdownStyleSheet(
+                p: TextStyle(
+                    fontSize: 14, color: theme.textPrimary, height: 1.35),
+                listBullet: TextStyle(fontSize: 14, color: theme.textPrimary),
+                code: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 12.5,
+                  color: theme.textPrimary,
+                  backgroundColor: Colors.white.withValues(alpha: 0.1),
+                ),
+                codeblockDecoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                blockquoteDecoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border(
+                      left: BorderSide(
+                          color: accent.withValues(alpha: 0.6), width: 3)),
+                ),
+                a: TextStyle(
+                  fontSize: 14,
+                  color: accent,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+            if (time != null) ...[
+              const SizedBox(height: 2),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${time.hour.toString().padLeft(2, '0')}:'
+                  '${time.minute.toString().padLeft(2, '0')}',
+                  style: TextStyle(fontSize: 10, color: theme.textDim),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
