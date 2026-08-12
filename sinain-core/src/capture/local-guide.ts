@@ -259,15 +259,26 @@ export class LocalGuideSession {
 
   /** Finalized transcript hook (from the transcription pipeline). Mic = the
    *  user speaking (ME), system audio = the other parties (THEM). A THEM turn
-   *  is the trigger: that's when a hint could change what ME says next. */
-  onTranscript(text: string, source: "mic" | "system"): void {
+   *  is the trigger: that's when a hint could change what ME says next.
+   *  `tick=false` accumulates the turn without scheduling a tick — the offline
+   *  replay eval uses it to backfill long prefixes it can't afford to tick. */
+  onTranscript(text: string, source: "mic" | "system", tick = true): void {
     if (this.state !== "live") return;
     const trimmed = text.trim();
     if (!trimmed) return;
     this.turns.push({ who: source === "mic" ? "me" : "them", text: trimmed, ts: Date.now() });
     if (this.turns.length > MAX_TURNS) this.turns.splice(0, this.turns.length - MAX_TURNS);
     this.logEvent({ event: "turn", who: source === "mic" ? "me" : "them", text: trimmed });
-    if (source === "system") this.requestTick();
+    if (source === "system" && tick) this.requestTick();
+  }
+
+  /** Resolve once the tick pipeline is quiet (no run in flight, none pending).
+   *  Offline replay awaits this after each ticking turn so emissions attribute
+   *  deterministically; live callers never need it. */
+  async flush(): Promise<void> {
+    while (this.busy || this.tickPending) {
+      await new Promise((res) => setTimeout(res, 25));
+    }
   }
 
   /** End the session (true if one was starting/live). */
