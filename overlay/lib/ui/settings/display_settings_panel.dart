@@ -861,9 +861,54 @@ class _UpdateRow extends StatelessWidget {
         ),
       ],
     );
+    // Current version — always visible, so "do I need to update?" never
+    // requires waiting for (or trusting) the daily check. DMG installs show
+    // the DMG release version (what update checks compare) + an explicit
+    // status; dev/npx runs show the overlay bundle version.
+    final installed = update.displayVersion;
+    final isDmg = update.installedVersion != null;
+    final upToDate = isDmg && version == null && update.lastChecked != null;
+    final versionRow = Row(
+      children: [
+        Expanded(
+          child: Text(
+              installed == null
+                  ? 'Sinain · version unknown'
+                  : 'Sinain v$installed${isDmg ? '' : ' · dev'}',
+              style: _mono(0.8, 10)),
+        ),
+        if (upToDate)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text('up to date', style: _mono(0.35, 9)),
+          ),
+        if (isDmg)
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: update.checkingNow
+                  ? null
+                  : () => context.read<UpdateCheckService>().checkNow(),
+              child: Text(update.checkingNow ? 'CHECKING…' : 'CHECK NOW',
+                  style: _mono(update.checkingNow ? 0.35 : 0.6, 9,
+                      w: FontWeight.bold)),
+            ),
+          ),
+      ],
+    );
+
     if (version == null) {
       return Padding(
-          padding: const EdgeInsets.only(top: 10), child: toggleRow);
+        padding: const EdgeInsets.only(top: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            versionRow,
+            const SizedBox(height: 8),
+            toggleRow,
+          ],
+        ),
+      );
     }
 
     final Widget action;
@@ -945,6 +990,8 @@ class _UpdateRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Padding(
+            padding: const EdgeInsets.only(bottom: 8), child: versionRow),
         Padding(
             padding: const EdgeInsets.only(bottom: 8), child: toggleRow),
         Row(
