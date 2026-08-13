@@ -110,6 +110,12 @@ function resolveScriptsDir(): string {
   return candidates[candidates.length - 1]; // Return user-local path as sentinel
 }
 
+/** Python interpreter for the sinain-memory scripts. The packaged launcher
+ *  sets SINAIN_PYTHON to the one interpreter that has the deps — bare
+ *  "python3" can resolve to a dep-less install (e.g. homebrew without
+ *  `requests`) and fail every save distillation. Mirrors index.ts. */
+const PYTHON_BIN = process.env.SINAIN_PYTHON || "python3";
+
 /** Resolve the local memory directory. */
 function resolveMemoryDir(): string {
   const raw = process.env.SINAIN_MEMORY_DIR
@@ -179,7 +185,7 @@ export class LocalCurationService {
       return "";
     }
     try {
-      const { stdout } = await execFileAsync("python3", [scriptPath, ...args], {
+      const { stdout } = await execFileAsync(PYTHON_BIN, [scriptPath, ...args], {
         timeout: 60_000,
         encoding: "utf-8",
         env: { ...process.env, PYTHONPATH: this.scriptsDir },
@@ -328,7 +334,7 @@ export class LocalCurationService {
       // A user-save can span hours of transcript — far bigger than the
       // incremental batches. 30s here killed every 60-min save mid-distill
       // ("distillation produced nothing" receipts); the LLM needs real time.
-      const { stdout: digestJson } = await execFileAsync("python3", [
+      const { stdout: digestJson } = await execFileAsync(PYTHON_BIN, [
         resolve(this.scriptsDir, "session_distiller.py"),
         "--memory-dir", this.memoryDir,
         "--transcript-file", transcriptFile,
@@ -349,9 +355,12 @@ export class LocalCurationService {
     } catch (err: any) {
       // Rethrow so the save receipt reports the real failure — a timeout is
       // not "nothing to save in that range".
+      // err.message leads with the full command line — the useful part is the
+      // Python stderr (traceback), so surface that when present.
+      const detail = (err.stderr?.trim() || err.message || "").slice(-300);
       const reason = err.killed
         ? "distiller timed out (120s) — range too large?"
-        : `distiller failed: ${err.message?.slice(0, 200)}`;
+        : `distiller failed: ${detail}`;
       warn(TAG, `save distillation failed: ${reason}`);
       throw new Error(reason);
     } finally {
@@ -370,7 +379,7 @@ export class LocalCurationService {
     try {
       writeFileSync(digestFile, JSON.stringify(digest), { encoding: "utf-8", mode: 0o600 });
       writeFileSync(transcriptFile, JSON.stringify(digest._rawItems ?? []), { encoding: "utf-8", mode: 0o600 });
-      const { stdout } = await execFileAsync("python3", [
+      const { stdout } = await execFileAsync(PYTHON_BIN, [
         resolve(this.scriptsDir, "knowledge_integrator.py"),
         "--memory-dir", this.memoryDir,
         "--digest-file", digestFile,
@@ -385,7 +394,7 @@ export class LocalCurationService {
       await this.refreshWorkStatePrior();
       return true;
     } catch (err: any) {
-      warn(TAG, `save integration failed: ${err.message?.slice(0, 200)}`);
+      warn(TAG, `save integration failed: ${(err.stderr?.trim() || err.message || "").slice(-300)}`);
       return false;
     } finally {
       for (const f of [digestFile, transcriptFile]) {
