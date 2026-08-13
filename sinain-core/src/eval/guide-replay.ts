@@ -113,7 +113,18 @@ async function main(): Promise<void> {
     if (tick) await session.flush();
   }
   await session.flush();
+  const stats = session.tickStats();
   session.stop();
+  // A dead endpoint (quota, auth, outage) makes every tick fail, and the live
+  // lane's "log it and carry on" policy turns that into silence — which scores
+  // exactly like a well-behaved silent engine. Refuse to let a broken run look
+  // like a result: fail the case so the harness counts an adapter failure.
+  if (stats.run > 0 && stats.errors === stats.run) {
+    fail(`every tick failed (${stats.errors}/${stats.run}) — model endpoint unusable; refusing to report silence as a result`);
+  }
+  if (stats.errors > 0) {
+    process.stderr.write(`[guide-replay] warning: ${stats.errors}/${stats.run} ticks failed\n`);
+  }
 }
 
 void main().then(() => process.exit(0), (err) => fail(String(err).slice(0, 300)));

@@ -92,6 +92,12 @@ export class LocalGuideSession {
   /** Embedding vectors of displayed / retracted hint gists (semantic dedup). */
   private shownVecs: Float32Array[] = [];
   private retractedVecs: Float32Array[] = [];
+  /** Ticks attempted / ticks that died in the LLM call. A live session only
+   *  logs these (the call must go on), but offline eval MUST be able to tell
+   *  "the engine chose silence" from "every model call failed" — scoring the
+   *  latter as silence produces a plausible-looking but meaningless number. */
+  private ticksRun = 0;
+  private tickErrors = 0;
   /** Structured event-log path for this session (null = logging off). */
   private eventLog: string | null = null;
 
@@ -153,6 +159,8 @@ export class LocalGuideSession {
     this.shownVecs = [];
     this.retractedVecs = [];
     this.tickPending = false;
+    this.ticksRun = 0;
+    this.tickErrors = 0;
     this.attachedSessionId = null;
     this.eventLog = null;
     if (EVENT_LOG_ENABLED) {
@@ -281,6 +289,11 @@ export class LocalGuideSession {
     }
   }
 
+  /** Tick health for the offline eval driver (see the tickErrors note). */
+  tickStats(): { run: number; errors: number } {
+    return { run: this.ticksRun, errors: this.tickErrors };
+  }
+
   /** End the session (true if one was starting/live). */
   stop(): boolean {
     if (this.state !== "starting" && this.state !== "live") return false;
@@ -314,11 +327,14 @@ export class LocalGuideSession {
 
   private async runTick(): Promise<void> {
     this.busy = true;
+    this.ticksRun++;
     try {
       await this.tick();
     } catch (err) {
       // LLM failures skip the tick, never kill the session.
+      this.tickErrors++;
       warn(TAG, `tick failed (session continues): ${String(err).slice(0, 200)}`);
+      this.logEvent({ event: "tick_error", error: String(err).slice(0, 300) });
     } finally {
       this.busy = false;
       const rerun = this.tickPending && this.state === "live";
@@ -340,7 +356,10 @@ export class LocalGuideSession {
     const reply = await this.callModel(user);
     let emitted = 0;
     for (const raw of reply.split("\n")) {
-      const line = raw.trim();
+      // Strip list/emphasis decoration some models wrap the contract lines in
+      // ("- **HINT:** …") — the line is still a valid hint, and dropping it
+      // costs a whole tick.
+      const line = raw.trim().replace(/^[-*>\s]+/, "").replace(/\*\*/g, "").trim();
       // Only the contract lines surface; SILENCE and any chatter are dropped.
       if (!line.startsWith("THESIS:") && !line.startsWith("HINT:")) continue;
       if (await this.emitHint(line)) emitted++;
@@ -373,6 +392,14 @@ export class LocalGuideSession {
             ],
             max_tokens: 300,
             temperature: 0.2,
+            // Reasoning models spend the whole 300-token budget on a
+            // "Thinking Process:" preamble and never reach the THESIS/HINT
+            // contract lines — every tick goes silent. The switch is an
+            // OpenRouter-only body param (Cerebras 400s the request), so it
+            // must be gated on the endpoint, not sent to every cloud lane.
+            ...(this.analysis.endpoint.includes("openrouter.ai")
+              ? { reasoning: { enabled: false } }
+              : {}),
           }),
           signal: AbortSignal.timeout(20_000),
         });
