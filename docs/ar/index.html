@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Sinain AR — point your phone, ask anything</title>
-<meta name="description" content="Point your phone at something, ask a question out loud, and get step-by-step help from an AI that can see what you see." />
+<meta name="description" content="Point your phone, ask out loud, and get spoken help from an AI that sees what you see. Works with screen readers: describe the scene, read text, find an object." />
 <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
 <!-- Cookieless analytics (self-hosted Umami, no cookies/PII) -->
 <script defer src="https://analytics.sinain.com/script.js" data-domains="sinain.com" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
@@ -12,7 +12,7 @@
   /* ─── Design tokens (shared with the main Sinain site) ─── */
   :root{
     --bg:#ffffff; --bg-elev:#f8fafc; --bg-hover:#f1f5f9; --bg-deep:#0f172a;
-    --fg:#0f172a; --fg-dim:#475569; --fg-faint:#94a3b8;
+    --fg:#0f172a; --fg-dim:#475569; --fg-faint:#64748b;
     --accent:#2563eb; --accent-dim:#1d4ed8; --accent-soft:rgba(37,99,235,0.10);
     --good:#15803d; --good-soft:rgba(21,128,61,0.10);
     --amber:#f59e0b;   /* AR marker accent, echoes the in-product yellow */
@@ -25,8 +25,13 @@
   html{overflow-x:hidden} html,body{margin:0}
   body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  a:focus-visible,button:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+  .cta-card .btn:focus-visible{outline-color:#fff}
   code,.mono{font-family:var(--mono);font-size:.92em}
   .container{max-width:1180px;margin:0 auto;padding:0 24px}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .skip{position:absolute;left:16px;top:10px;z-index:200;background:#fff;color:var(--fg);border:1px solid var(--border-strong);border-radius:8px;padding:8px 12px;transform:translateY(-160%)}
+  .skip:focus-visible{transform:translateY(0)}
 
   .btn{display:inline-flex;align-items:center;gap:8px;background:var(--bg-elev);color:var(--fg);border:1px solid var(--border);padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit;font-weight:500;line-height:1;transition:background .15s,border-color .15s;white-space:nowrap}
   .btn:hover{background:var(--bg-hover);border-color:var(--border-strong);text-decoration:none}
@@ -40,7 +45,7 @@
   .logo{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--accent);font-size:16px;letter-spacing:.02em}
   .logo .mark{width:22px;height:22px;display:block;flex-shrink:0}
   .logo .sub{color:var(--fg-faint);font-weight:500;font-size:12px;margin-left:2px;white-space:nowrap}
-  nav.primary{display:flex;gap:20px;color:var(--fg-dim);font-size:13.5px}
+  nav.primary{display:flex;gap:20px;color:var(--fg-dim);font-size:13.5px;flex-wrap:wrap}
   nav.primary a{color:var(--fg-dim)} nav.primary a:hover{color:var(--fg);text-decoration:none}
   .spacer{flex:1}
   .pill{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
@@ -57,8 +62,8 @@
   .hero-sub{font-size:19px;color:var(--fg-dim);max-width:56ch;text-wrap:pretty;margin:0}
   .hero-sub strong{color:var(--fg);font-weight:600}
   .cta{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap}
-  .fineprint{margin-top:14px;font-size:12.5px;color:var(--fg-dim);max-width:54ch}
-  .meta{margin-top:30px;display:flex;flex-wrap:wrap;gap:18px 28px;color:var(--fg-dim);font-size:13px}
+  .fineprint{margin-top:14px;font-size:12.5px;color:var(--fg-dim);max-width:60ch}
+  .meta{margin-top:30px;display:flex;flex-wrap:wrap;gap:18px 28px;color:var(--fg-dim);font-size:13px;list-style:none;padding:0}
   .meta .k{color:var(--fg-faint);margin-right:8px;text-transform:uppercase;font-size:11px;letter-spacing:.05em;font-weight:600}
   .meta b{color:var(--fg);font-weight:600}
 
@@ -150,6 +155,7 @@
     background-image:radial-gradient(circle at 8% 0%,rgba(37,99,235,.30),transparent 55%),radial-gradient(circle at 100% 100%,rgba(245,158,11,.14),transparent 50%)}
   .cta-card h2{margin:12px 0 12px;font-size:34px;font-weight:700;letter-spacing:-0.02em;line-height:1.1;color:#fff}
   .cta-card p{margin:0;color:#cbd5e1;max-width:52ch;font-size:15px}
+  .cta-card .follow{margin-top:12px;font-size:14px;color:#cbd5e1}
   .cta-card .eyebrow{color:#93c5fd}
   .cta-card .eyebrow .bar{background:#93c5fd}
   .cta-card .right{display:flex;flex-direction:column;gap:10px;align-items:stretch}
@@ -161,7 +167,7 @@
   /* ─── Footer ─── */
   footer{padding:56px 0 40px;border-top:1px solid var(--border);background:var(--bg-elev)}
   .ft{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:36px;align-items:start}
-  .ft h5{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.06em;margin:0 0 12px;font-weight:700;text-transform:uppercase}
+  .ft-h{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.06em;margin:0 0 12px;font-weight:700;text-transform:uppercase;line-height:1.4}
   .ft ul{margin:0;padding:0;list-style:none} .ft li{padding:5px 0;font-size:14px}
   .ft li a{color:var(--fg-dim)} .ft li a:hover{color:var(--accent)}
   .ft .blurb{margin:0;color:var(--fg-dim);max-width:42ch;font-size:14px}
@@ -178,7 +184,9 @@
     .pillars,.modes{grid-template-columns:1fr 1fr}
     .tour-grid{grid-template-columns:1fr 1fr}
     .ft{grid-template-columns:1fr 1fr}
-    nav.primary,.top-inner .spacer{display:none}
+    .top-inner{height:auto;min-height:60px;flex-wrap:wrap;padding:10px 0}
+    .top-inner .spacer{display:none}
+    nav.primary{order:3;flex-basis:100%;display:flex;gap:16px 20px;padding:3px 0 2px}
     /* headline leads on mobile; the phone sits below and shrinks */
     .phone{width:264px;height:536px}
   }
@@ -208,6 +216,10 @@
     .meta{gap:12px 20px}
     .ft-meta{flex-direction:column;gap:8px;align-items:flex-start}
   }
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation:none !important;transition:none !important}
+  }
 </style>
 <!-- Meta Pixel Code -->
 <script>
@@ -229,12 +241,13 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
 <!-- End Meta Pixel Code -->
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 
 <!-- ───────────── TOP BAR ───────────── -->
 <header class="top">
   <div class="container top-inner">
     <div class="logo">
-      <svg class="mark" viewBox="0 0 32 32" aria-label="Sinain logo">
+      <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Sinain">
         <rect width="32" height="32" rx="8.7" fill="#2563eb"/>
         <g stroke="#fff" fill="#fff" stroke-linecap="round">
           <circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/>
@@ -247,22 +260,24 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
     <nav class="primary" aria-label="primary">
       <a href="#flow">How it works</a>
       <a href="#capabilities">What you can do</a>
+      <a href="#access">Accessibility</a>
       <a href="#meetings">Meetings</a>
       <a href="#privacy">Privacy</a>
     </nav>
     <div class="spacer"></div>
-    <span class="pill pill-good">● live · ar.sinain.com</span>
-    <a class="btn primary" href="#demo" data-umami-event="ar-nav-demo">Request a demo <span class="arr">→</span></a>
+    <span class="pill pill-good"><span aria-hidden="true">●</span> Live at ar.sinain.com</span>
+    <a class="btn primary" href="#demo" data-umami-event="ar-nav-demo">Request a demo <span class="arr" aria-hidden="true">→</span></a>
   </div>
 </header>
 
+<main id="main">
 <!-- ───────────── HERO ───────────── -->
-<section class="hero">
+<section class="hero" aria-labelledby="hero-title">
   <div class="container">
     <div class="hero-grid">
       <div>
         <span class="eyebrow"><span class="bar"></span> Your camera, with an AI helper</span>
-        <h1 class="hero-title">Show it what you see.<br/><em>Ask what to do.</em></h1>
+        <h1 class="hero-title" id="hero-title">Show it what you see.<br/><em>Ask what to do.</em></h1>
         <p class="hero-sub">
           Point your phone at something you don’t recognize or can’t fix. Ask a question out loud
           and Sinain explains <strong>what you’re looking at and what to do next</strong> — like a
@@ -270,24 +285,24 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
         </p>
 
         <div class="cta">
-          <a class="btn primary btn-lg" href="#demo" data-umami-event="ar-hero-demo">Request a demo <span class="arr">→</span></a>
-          <a class="btn btn-lg" href="https://ar.sinain.com" target="_blank" rel="noopener" data-umami-event="ar-hero-try">Try it now</a>
+          <a class="btn primary btn-lg" href="#demo" data-umami-event="ar-hero-demo">Request a demo <span class="arr" aria-hidden="true">→</span></a>
+          <a class="btn btn-lg" href="https://ar.sinain.com" target="_blank" rel="noopener" data-umami-event="ar-hero-try">Open Sinain AR <span class="sr-only">(needs an invitation; opens in a new tab)</span></a>
         </div>
-        <p class="fineprint">Nothing to download — it opens right in your phone's browser. Free while we're in preview.</p>
+        <p class="fineprint">Nothing to download — it opens in your phone's browser. You sign in with Google, and access is by invitation while we're in preview.</p>
 
-        <div class="meta" aria-label="What it's like">
-          <span><span class="k">how</span><b>point &amp; ask</b></span>
-          <span><span class="k">talk to it</span><b>out loud</b></span>
-          <span><span class="k">to start</span><b>one tap</b></span>
-          <span><span class="k">app</span><b>none needed</b></span>
-        </div>
+        <ul class="meta" aria-label="At a glance">
+          <li><span class="k">how</span><b>point &amp; ask</b></li>
+          <li><span class="k">talk to it</span><b>out loud</b></li>
+          <li><span class="k">to start</span><b>sign in</b></li>
+          <li><span class="k">app</span><b>none needed</b></li>
+        </ul>
       </div>
 
       <!-- Phone mockup -->
       <div class="phone-col">
-        <div class="phone" aria-label="Sinain AR on a phone">
+        <div class="phone" role="img" aria-label="Illustration: a phone showing the camera view with a red mug highlighted and Sinain's spoken tip below it">
           <div class="notch"></div>
-          <div class="screen">
+          <div class="screen" aria-hidden="true">
             <div class="scene">
               <div class="plant"></div>
               <div class="desk"></div>
@@ -311,12 +326,12 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
 </section>
 
 <!-- ───────────── FLOW ───────────── -->
-<section class="s" id="flow">
+<section class="s" id="flow" aria-labelledby="flow-title">
   <div class="container">
     <div class="sec-head">
       <div class="sec-num">§ 01 — How it works</div>
       <div>
-        <h2 class="sec-title">Open it. Point. Ask.</h2>
+        <h2 class="sec-title" id="flow-title">Open it. Point. Ask.</h2>
         <p class="sec-lede">
           There’s no app to install and no new controls to learn. Open the link on your phone,
           point the camera, and speak naturally. Sinain answers out loud.
@@ -327,38 +342,38 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
     <div class="tour-grid">
       <article class="tour-card">
         <div class="tour-vis"><div class="glyph">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.7"><path d="M4 8l2-3h12l2 3v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><circle cx="12" cy="13" r="3.4"/></svg>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.7" aria-hidden="true"><path d="M4 8l2-3h12l2 3v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><circle cx="12" cy="13" r="3.4"/></svg>
         </div></div>
         <div class="tour-body"><span class="tour-step">Step 1</span><h3>Open your camera</h3>
-          <p>Tap once to start. It opens right in your phone's browser — no app, no sign-up hoops.</p></div>
+          <p>Open the link on your phone and sign in. It runs in the browser — no app to install.</p></div>
       </article>
 
       <article class="tour-card">
         <div class="tour-vis"><div class="glyph amber">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="1.7"><path d="M8 3l11 7-5 1.5L11 17z" stroke-linejoin="round"/></svg>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="1.7" aria-hidden="true"><path d="M8 3l11 7-5 1.5L11 17z" stroke-linejoin="round"/></svg>
         </div></div>
         <div class="tour-body"><span class="tour-step">Step 2</span><h3>Point or tap</h3>
-          <p>Aim at whatever you're curious about — or tap it on the screen. Sinain highlights it and keeps it in its sights.</p></div>
+          <p>Aim at whatever you're curious about — or tap it on the screen. Sinain highlights it and keeps it in its sights. If you can't see the screen, the buttons and voice do the same job.</p></div>
       </article>
 
       <article class="tour-card">
         <div class="tour-vis"><div class="glyph">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.7"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" stroke-linecap="round"/></svg>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.7" aria-hidden="true"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" stroke-linecap="round"/></svg>
         </div></div>
         <div class="tour-body"><span class="tour-step">Step 3</span><h3>Just ask</h3>
-          <p>Talk to it like a person — "what is this?", "how do I fix it?" — and it answers out loud. Cut in any time.</p></div>
+          <p>Talk to it like a person — "what is this?", "how do I fix it?" — and it answers out loud. Cut in any time. Say stop to interrupt, or ask it to repeat.</p></div>
       </article>
     </div>
   </div>
 </section>
 
 <!-- ───────────── CAPABILITIES ───────────── -->
-<section class="s" id="capabilities">
+<section class="s" id="capabilities" aria-labelledby="capabilities-title">
   <div class="container">
     <div class="sec-head">
       <div class="sec-num">§ 02 — What you can do</div>
       <div>
-        <h2 class="sec-title">Here are a few ways it can help.</h2>
+        <h2 class="sec-title" id="capabilities-title">Here are a few ways it can help.</h2>
         <p class="sec-lede">
           Identify unfamiliar things, troubleshoot a problem, translate a label, get cooking
           ideas, or follow instructions while keeping your hands free.
@@ -381,7 +396,7 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
       </div>
       <div class="pillar">
         <h3>“What does this say?”</h3>
-        <p>A menu, a sign, a label in another language. Aim your phone and Sinain reads and explains it.</p>
+        <p>A menu, a sign, a label, a letter. Sinain reads it out word for word and tells you if part of it is cut off or too blurry to read.</p>
       </div>
       <div class="pillar">
         <h3>“Walk me through it.”</h3>
@@ -395,14 +410,39 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
   </div>
 </section>
 
-<!-- ───────────── MEETINGS ───────────── -->
-<section class="s" id="meetings">
+<!-- ───────────── ACCESSIBILITY ───────────── -->
+<section class="s" id="access" aria-labelledby="access-title">
   <div class="container">
+    <div class="sec-head">
+      <div class="sec-num">§ 03 — Works without seeing the screen</div>
+      <div>
+        <h2 class="sec-title" id="access-title">Built for ears first.</h2>
+        <p class="sec-lede">Every answer is spoken and also written down, every control is an ordinary button that works with VoiceOver and TalkBack, and Sinain says when it can't see well enough instead of guessing.</p>
+      </div>
+    </div>
+    <div class="pillars">
+      <div class="pillar"><h3>Describe the scene</h3><p>"What's in front of me?" A few sentences: the setting, the main things and where they are in the camera view — left, right, centre.</p></div>
+      <div class="pillar"><h3>Read text</h3><p>Labels, letters, menus, screens, read out word for word. If part is cut off or blurry, it tells you which part.</p></div>
+      <div class="pillar"><h3>Find an object</h3><p>Name it and Sinain says where it is in the camera view. If it isn't there, it says so and suggests where to turn.</p></div>
+      <div class="pillar"><h3>Stay in control</h3><p>Stop, repeat, mute the microphone, pause, or end the session with one button each. Nothing happens silently.</p></div>
+    </div>
+    <p class="fineprint">Not for safety-critical decisions: it is a helper for everyday things, not a guide for crossing streets or reading medication.</p>
+  </div>
+</section>
+
+<!-- ───────────── MEETINGS ───────────── -->
+<section class="s" id="meetings" aria-labelledby="meetings-title">
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-num">§ 04 — Meetings</div>
+      <div>
+        <h2 class="sec-title" id="meetings-title">It comes to meetings too.</h2>
+        <p class="sec-lede">Paste a <strong>Teams</strong> or <strong>Google Meet</strong> link and Sinain joins like a guest. It follows along and takes notes — so afterward you can just ask "what did we decide?"</p>
+      </div>
+    </div>
     <div class="feat">
       <div class="feat-text">
-        <div class="sec-num" style="margin-bottom:14px">§ 03 — It comes to meetings too</div>
         <h3>Send it to your video calls.</h3>
-        <p>Paste a <strong>Teams</strong> or <strong>Google Meet</strong> link and Sinain joins like a guest. It follows along and takes notes — so afterward you can just ask "what did we decide?"</p>
         <ul>
           <li><strong>Joins with a link</strong> — let "Sinain (AI)" in and it's there.</li>
           <li><strong>Takes the notes</strong> — so you can stay in the conversation.</li>
@@ -421,36 +461,35 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
 </section>
 
 <!-- ───────────── PRIVACY ───────────── -->
-<section class="s" id="privacy">
+<section class="s" id="privacy" aria-labelledby="privacy-title">
   <div class="container">
     <div class="sec-head">
-      <div class="sec-num">§ 04 — Privacy</div>
+      <div class="sec-num">§ 05 — Privacy</div>
       <div>
-        <h2 class="sec-title">Your camera stays yours.</h2>
+        <h2 class="sec-title" id="privacy-title">Your camera stays yours.</h2>
         <p class="sec-lede">
-          It only looks when there's something worth looking at, your video is encrypted end-to-end,
-          and sensitive details are scrubbed before anything is saved. Only you can get into your Sinain.
+          It only looks when the scene changes, your video is encrypted on its way to Sinain and analysed live rather than stored, and sensitive details are scrubbed before anything is remembered. Only you can get into your Sinain.
         </p>
       </div>
     </div>
     <div class="modes">
       <div class="mode">
-        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-        <div class="nm">Encrypted</div>
-        <div class="desc">Your video and voice are scrambled end-to-end — no one in between can see them.</div>
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <div class="nm">Encrypted in transit</div>
+        <div class="desc">Your video and voice are encrypted between your phone and Sinain. Frames are analysed by our AI provider to answer you and are not stored.</div>
       </div>
       <div class="mode">
-        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <div class="nm">Only when needed</div>
         <div class="desc">It looks when something actually changes — it isn't recording your whole day.</div>
       </div>
       <div class="mode">
-        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7" stroke-linecap="round"/><path d="M15 15l5 5M20 15l-5 5" stroke-linecap="round"/></svg></div>
-        <div class="nm">Nothing private saved</div>
-        <div class="desc">Emails, card numbers and passwords are wiped before anything is remembered.</div>
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7" stroke-linecap="round"/><path d="M15 15l5 5M20 15l-5 5" stroke-linecap="round"/></svg></div>
+        <div class="nm">Memory you can delete</div>
+        <div class="desc">Sinain keeps the conversation and durable facts so it remembers you next time. Emails, card numbers and passwords are wiped first, and you can ask us to delete everything.</div>
       </div>
       <div class="mode">
-        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0" stroke-linecap="round"/></svg></div>
+        <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0" stroke-linecap="round"/></svg></div>
         <div class="nm">Just you</div>
         <div class="desc">You sign in to get in — no shared logins, no one else in your Sinain.</div>
       </div>
@@ -459,50 +498,52 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
 </section>
 
 <!-- ───────────── REQUEST A DEMO ───────────── -->
-<section class="s" id="demo">
+<section class="s" id="demo" aria-labelledby="demo-title">
   <div class="container">
     <div class="cta-card">
       <div>
         <span class="eyebrow"><span class="bar"></span> Preview access</span>
-        <h2>See Sinain AR on your own desk.</h2>
-        <p>We're onboarding early users one at a time. Tell us a little about your use case and we'll
-          send you an invite link — open it on your phone and you're live in seconds.</p>
+        <h2 id="demo-title">See Sinain AR on your own desk.</h2>
+        <p>We're onboarding early users one at a time. Tell us a little about your use case and we'll invite your Google account — open the link on your phone, sign in, and you're live.</p>
       </div>
       <div class="right">
-        <a class="btn primary btn-lg" href="mailto:sinain-hud@protonmail.com?subject=Sinain%20AR%20demo%20request&body=Hi%20Sinain%20team%2C%0A%0AI%27d%20like%20a%20demo%20of%20Sinain%20AR.%0A%0AWhat%20I%27d%20use%20it%20for%3A%20%0AName%2Fcompany%3A%20" data-umami-event="ar-demo-email">Request a demo <span class="arr">→</span></a>
-        <a class="btn btn-lg" href="https://ar.sinain.com" target="_blank" rel="noopener" data-umami-event="ar-demo-try">Have a link? Open it</a>
+        <a class="btn primary btn-lg" href="mailto:sinain-hud@protonmail.com?subject=Sinain%20AR%20demo%20request&body=Hi%20Sinain%20team%2C%0A%0AI%27d%20like%20a%20demo%20of%20Sinain%20AR.%0A%0AWhat%20I%27d%20use%20it%20for%3A%20%0AName%2Fcompany%3A%20" data-umami-event="ar-demo-email">Request a demo <span class="arr" aria-hidden="true">→</span></a>
+        <a class="btn btn-lg" href="https://ar.sinain.com" target="_blank" rel="noopener" data-umami-event="ar-demo-try">Open Sinain AR <span class="sr-only">(needs an invitation; opens in a new tab)</span></a>
+        <p class="follow">Blind or losing your sight? We're preparing a small pilot and would like to hear from you — same email.</p>
       </div>
     </div>
   </div>
 </section>
+</main>
 
 <!-- ───────────── FOOTER ───────────── -->
 <footer>
   <div class="container">
     <div class="ft">
       <div>
-        <div class="logo" style="margin-bottom:12px"><svg class="mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8.7" fill="#2563eb"/><g stroke="#fff" fill="#fff"><circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/><path d="M 16 9.5 Q 18 16 16 22.5 Q 14 16 16 9.5 Z" stroke="none"/></g></svg><span>SINAIN</span><span class="sub mono">/ ar</span></div>
-        <p class="blurb">An AI helper that sees through your phone camera and talks with you in real time.</p>
+        <div class="logo" style="margin-bottom:12px"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8.7" fill="#2563eb"/><g stroke="#fff" fill="#fff"><circle cx="16" cy="16" r="9" fill="none" stroke-width="1.8"/><path d="M 16 9.5 Q 18 16 16 22.5 Q 14 16 16 9.5 Z" stroke="none"/></g></svg><span>SINAIN</span><span class="sub mono">/ ar</span></div>
+        <p class="blurb">An AI helper that sees through your phone camera and talks with you — built to be used with or without seeing the screen.</p>
       </div>
       <div>
-        <h5>Product</h5>
+        <h2 class="ft-h">Product</h2>
         <ul>
           <li><a href="#flow">How it works</a></li>
           <li><a href="#capabilities">Capabilities</a></li>
+          <li><a href="#access">Accessibility</a></li>
           <li><a href="#meetings">Meetings</a></li>
           <li><a href="#privacy">Privacy</a></li>
         </ul>
       </div>
       <div>
-        <h5>Sinain</h5>
+        <h2 class="ft-h">Sinain</h2>
         <ul>
           <li><a href="/">Sinain for Mac</a></li>
-          <li><a href="https://ar.sinain.com" target="_blank" rel="noopener">Open AR</a></li>
-          <li><a href="https://github.com/anthillnet/sinain-hud" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://ar.sinain.com" target="_blank" rel="noopener">Open AR<span class="sr-only"> (opens in a new tab)</span></a></li>
+          <li><a href="https://github.com/anthillnet/sinain-hud" target="_blank" rel="noopener">GitHub<span class="sr-only"> (opens in a new tab)</span></a></li>
         </ul>
       </div>
       <div>
-        <h5>Get started</h5>
+        <h2 class="ft-h">Get started</h2>
         <ul>
           <li><a href="#demo">Request a demo</a></li>
           <li><a href="mailto:sinain-hud@protonmail.com">sinain-hud@protonmail.com</a></li>

@@ -6,7 +6,7 @@
 <title>Create your Sinain account</title>
 <meta name="description" content="Create your Sinain account and join the Sinain Pro waitlist." />
 <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
-<script defer src="https://analytics.sinain.duckdns.org/script.js" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
+<script defer src="https://analytics.sinain.com/script.js" data-domains="sinain.com" data-website-id="f8e8bd72-1ba1-4993-966b-f7d588a9b40f"></script>
 <style>
   :root{
     --bg:#ffffff; --bg-elev:#f8fafc; --bg-hover:#f1f5f9; --fg:#0f172a; --fg-dim:#475569; --fg-faint:#94a3b8;
@@ -18,6 +18,9 @@
   .wrap{max-width:48rem;margin:0 auto;padding:3.5rem 1.4rem 5rem}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
+  .skip{position:absolute;left:-999px}
+  .skip:focus{left:16px;top:16px;background:#fff;padding:8px 12px;z-index:100}
+  a:focus-visible,button:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
   header{margin-bottom:3rem}
   .logo{display:inline-flex;align-items:center;gap:.7rem;color:var(--fg)}
   .logo:hover{text-decoration:none}
@@ -74,6 +77,7 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
 <!-- End Meta Pixel Code -->
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <div class="wrap">
   <header>
     <a class="logo" href="/">
@@ -82,7 +86,7 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
     </a>
   </header>
 
-  <main>
+  <main id="main">
     <h1>Create your Sinain account</h1>
     <p class="hero-sub">Registering creates your Sinain account and puts you on the <strong>Pro waitlist</strong> — you’ll be first in line when Pro opens up.</p>
 
@@ -92,11 +96,11 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
       <p>It links your devices and carries your Pro waitlist spot. When Pro opens, it is how the Sinain agent knows it’s you.</p>
 
       <div class="actions">
-        <a id="signup" class="btn disabled" href="https://auth.sinain.com/signup" aria-disabled="true" tabindex="-1" data-umami-event="register-oauth-signup">Create Sinain account →</a>
+        <a id="signup" class="btn disabled" href="https://auth.sinain.com/signup" aria-disabled="true" aria-describedby="consent-hint" tabindex="-1" data-umami-event="register-oauth-signup">Create Sinain account →</a>
       </div>
 
       <div class="consent">
-        <div class="consent-row">
+        <div class="consent-row" id="consent-hint">
           <input type="checkbox" id="data-terms" />
           <label for="data-terms">I agree to the Sinain data terms.</label>
         </div>
