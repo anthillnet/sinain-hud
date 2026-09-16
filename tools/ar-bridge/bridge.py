@@ -268,7 +268,9 @@ async def run(args: argparse.Namespace) -> int:
         async with http_session() as session:
             async with session.post(
                 f"{args.server.rstrip('/')}/offer",
-                json={"sdp": pc.localDescription.sdp, "type": pc.localDescription.type},
+                # ARSinain requires the continuous-analysis acknowledgment (DP-07).
+                json={"sdp": pc.localDescription.sdp, "type": pc.localDescription.type,
+                      "camera_analysis_ack": True},
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
