@@ -147,7 +147,11 @@ async function start() {
   const r = await fetch("/voice/offer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
+    // ARSinain requires an explicit acknowledgment of continuous camera analysis
+    // with every session start (DP-07). The HUD user acknowledges it in the HUD's
+    // own voice setup; the call page just carries the flag.
+    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type,
+                           camera_analysis_ack: true }),
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
