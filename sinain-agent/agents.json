@@ -1,0 +1,65 @@
+{
+  "_doc": [
+    "Local working copy — gitignored. Edit freely.",
+    "If you delete this file, run.sh will re-create it from agents.example.json.",
+    "Field reference: see agents.example.json's _doc."
+  ],
+
+  "default": "openclaude",
+  "pollIntervalSec": 5,
+  "agentMaxTurns": 8,
+  "spawnMaxTurns": 25,
+
+  "allowedTools": "mcp__sinain mcp__glean_default",
+  "escAllowedTools": "${allowedTools} Bash(git:*) Edit Write Read Glob Grep LS",
+  "spawnAllowedTools": "${allowedTools} Bash(git:*) Edit Write Read Glob Grep LS",
+  "autoApproveTools": "Read Glob Grep Ls Cat mcp__sinain*",
+
+  "analyzer": {
+    "debounceMs": 6000,
+    "maxIntervalMs": 60000
+  },
+
+  "escalation": {
+    "mode": "rich",
+    "cooldownMs": 30000,
+    "staleMs": 90000
+  },
+
+  "profiles": {
+    "claude":     { "type": "claude" },
+    "openclaude": {
+      "type": "openclaude",
+      "model": "deepseek/deepseek-v4-flash",
+      "env": {
+        "CLAUDE_CODE_USE_OPENAI": "1",
+        "OPENAI_BASE_URL": "http://localhost:11435/api/v1",
+        "OPENAI_API_KEY": "${OPENROUTER_API_KEY}"
+      }
+    },
+    "openclaw": {
+      "_comment": "Production gateway. To swap to local nanoclaw: change wsUrl/httpUrl to ws://localhost:18789 / http://localhost:18789/hooks/agent and update tokens in .env.",
+      "type": "openclaw",
+      "wsUrl": "ws://85.214.180.247:18789",
+      "wsToken": "${OPENCLAW_WS_TOKEN}",
+      "httpUrl": "http://85.214.180.247:18789/hooks/agent",
+      "httpToken": "${OPENCLAW_HTTP_TOKEN}",
+      "sessionKey": "agent:main:sinain",
+      "phase1TimeoutMs": 30000,
+      "phase2TimeoutMs": 120000,
+      "pingIntervalMs": 30000
+    },
+    "codex":      { "type": "codex" },
+    "goose":      { "type": "goose" },
+    "junie":      { "type": "junie" },
+    "aider":      { "type": "aider" },
+    "pclaude": {
+      "_comment": "Personal claude — replicates `pclaude=CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude` zsh alias.",
+      "type": "claude",
+      "bin": "claude",
+      "env": {
+        "CLAUDE_CONFIG_DIR": "${HOME}/.claude-personal"
+      }
+    }
+  }
+}

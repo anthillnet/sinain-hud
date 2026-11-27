@@ -1,0 +1,384 @@
+# Spec: Sinain — macOS DMG Distribution with Tiered Local-Mode Install
+
+**Status:** Draft, not yet sequenced into a milestone. Forward-looking design doc.
+**Supersedes:** `.planning/archive/v1.0-launch/phases/11-macos-dmg-distribution/00-PLAN.md` — that PLAN remains the implementation reference for the cloud-mode (T0) build/sign/notarize/Sparkle pipeline; this SPEC adds the local-mode (T1/T2) install flow that was missing there.
+**Productizes:** the existing CLI-only flows `start-local.sh` (T1 — local Whisper) and `start.sh --paranoid` / `.env.paranoid` (T2 — full local with `phi4-mini` + `qwen2.5vl:7b` + whisper.cpp `large-v3-turbo`). The DMG wizard's job is to make these reachable without a terminal — no new model stack is being invented.
+**Audience:** Mac users who expect "install means installed" — designers, marketers, AI-curious non-developers, and developers who want the local-mode option without a `npx`/`brew` chain.
+**Out of scope:** Mac App Store (sandbox would gut features), Windows DMG-equivalent, Linux, iOS companion.
+
+---
+
+## 1. Goal
+
+A non-developer Mac user can:
+
+1. Download a notarized `Sinain.dmg` from a website link.
+2. Drag `Sinain.app` to `/Applications`.
+3. Launch it, follow a first-run wizard that — depending on their privacy/cost preference — either runs cloud-mode immediately, or downloads + sets up local Whisper, or downloads + sets up local Whisper + local LLM via Ollama.
+4. Reach a working "say something, see HUD respond" state without ever opening a terminal.
+
+The DMG bundle stays small enough to download casually (target ≤ 350 MB). Anything large or optional is fetched at first run with progress UI, integrity-checked, and resumable.
+
+---
+
+## 2. Pre-Requisites (Must Complete Before Phase Kickoff)
+
+Code-cleanup work in the *current* repository that the DMG wizard depends on. These are **not** part of the DMG distribution phase itself — they are entry conditions for it. Each is small enough to ship as its own commit / quick-phase PR on `main`, independent of any future v2.X distribution milestone. The DMG phase should refuse to start until both are done.
+
+### PR-1 — Consolidate local-mode env-var namespace
+
+**Current state (two parallel schemes coexist):**
+- `.env` ships legacy defaults: `LOCAL_VISION_ENABLED=false`, `LOCAL_VISION_MODEL=llava`.
+- `.env.paranoid` ships canonical defaults: `SINAIN_LOCAL_MODE=true`, `SINAIN_LOCAL_LLM=phi4-mini`, `SINAIN_LOCAL_VISION=qwen2.5vl:7b`.
+- `sense_client/config.py` defaults to `{"model": "llava"}` — stale.
+- `sense_client/ollama_vision.py` defaults its `model` parameter to `"llava"`; docstring lists `llava` as primary.
+- `start-local.sh` reads `LOCAL_VISION_ENABLED` / `LOCAL_VISION_MODEL`, never `SINAIN_LOCAL_VISION` — stale.
+- `docs/INSTALL-LOCAL.md` still recommends `LOCAL_VISION_ENABLED=true`, `LOCAL_VISION_MODEL=llava`.
+
+**Required end-state:**
+- One canonical namespace: `SINAIN_LOCAL_MODE`, `SINAIN_LOCAL_LLM`, `SINAIN_LOCAL_VISION`.
+- All code reads new vars first; falls back to legacy vars with a `[deprecated]` warning at startup. Legacy names removed in the next major version of `sinain-core`.
+- `sense_client/config.py` default model → `qwen2.5vl:7b`.
+- `sense_client/ollama_vision.py` default parameter + docstring updated.
+- `start-local.sh` reads `SINAIN_LOCAL_VISION` (with legacy fallback during the deprecation window).
+- `.env.example` lists the new namespace as primary; legacy vars commented out with `# DEPRECATED — use SINAIN_LOCAL_VISION instead`.
+- `docs/INSTALL-LOCAL.md` rewritten around the new vars; legacy mentioned only in a "Legacy environment variables" footnote.
+
+**Why this is a pre-req, not a DMG task:** The DMG wizard's job is to *write* config files. Writing two parallel schemes invites drift the moment a user edits `.env` by hand. The consolidation must happen once, inside `sinain-core` + `sense_client`, *before* the wizard learns to write any config. Otherwise the wizard either ships with the bug baked in or has to know both schemes — both worse than fixing the source.
+
+### PR-2 — Standardize Whisper model on-disk path
+
+**Current state (two parallel locations):**
+- `start-local.sh` defaults `MODEL_DIR=$HOME/models` → `~/models/ggml-large-v3-turbo.bin`.
+- `.env.paranoid` pins `LOCAL_WHISPER_MODEL=~/models/ggml-large-v3-turbo.bin`.
+- All other Sinain on-disk data lives under `~/.sinain/` (capture IPC, memory graph, embeddings cache).
+- The DMG Download Manager (FR-3) is designed around `~/.sinain/models/whisper/`.
+
+**Required end-state:**
+- Canonical path: `~/.sinain/models/whisper/<model>.bin`. Mirrors the existing `~/.sinain/` convention.
+- On first launch, if legacy `~/models/ggml-*.bin` files exist, Sinain symlinks them into `~/.sinain/models/whisper/` and logs a one-line migration notice. **Symlink, not move** — the user may have their own setup pointing at `~/models/`.
+- `setup-local-stt.sh` and `start-local.sh` default to the new path.
+- `.env.paranoid` and `docs/local-mode.md` updated.
+
+**Why this is a pre-req:** Without this, a user who installs the DMG *after* using the CLI version would orphan their existing 1.6 GB Whisper download at `~/models/` and re-download it into `~/.sinain/models/whisper/`. That's a 1.6 GB worst-case footgun, and the fix belongs in the CLI scripts (which are stable, well-understood code) rather than in the new wizard logic.
+
+---
+
+## 3. User Stories
+
+### US-1 — Cloud Sinain User (Default, T0)
+> *As a Mac user with an OpenRouter API key, I want to install Sinain by dragging an icon and pasting my key, and have the overlay working in under 2 minutes.*
+
+- Bundle ships with everything cloud-mode needs (sinain-core, sense_client, sck-capture, overlay, embedding model).
+- Zero post-install downloads.
+- Wizard collects: API key, screen-recording permission, microphone permission, accessibility permission for hotkeys.
+
+### US-2 — Privacy-Conscious User (T1)
+> *As a Mac user who doesn't want my voice going to a cloud provider, I want local transcription but I'm fine with my screen + text going to an LLM for analysis.*
+
+- Wizard offers "local transcription" toggle. Selecting it triggers a Whisper model download (~244 MB `small.en` default, with `tiny.en` 75 MB / `medium.en` 769 MB options).
+- Cloud LLM (OpenRouter) still used for analysis + vision.
+- `whisper.cpp` binary is bundled in the .app; only the model `.bin` is downloaded.
+- User can change Whisper model later in Settings without reinstalling.
+
+### US-3 — Full Local User (T2)
+> *As a Mac user who wants Sinain to work fully offline / fully private, I want a guided flow to get Ollama running with a model that works well for my hardware.*
+
+- Wizard detects whether Ollama is already installed. If not, opens `https://ollama.com/download` (or runs an embedded checksum-pinned installer) and waits for completion.
+- Wizard verifies Ollama is reachable at `localhost:11434`.
+- Wizard offers **two** model picks (analyzer + vision) — local mode runs both concurrently. Recommended defaults match `.env.paranoid`:
+  - **Analyzer**: `phi4-mini` (~2.5 GB) on 16 GB Macs; `gemma3:4b` as alternative; `llama3.2:3b` for 8 GB low-end.
+  - **Vision OCR**: `qwen2.5vl:7b` (~4.7 GB) recommended; `moondream` (~1.7 GB) for 8 GB Macs; `llama3.2-vision:11b` for 24 GB+ Macs.
+  - **Total VRAM budget** ≈ phi4-mini + qwen2.5vl + whisper.cpp `large-v3-turbo` + embedding = **~8.8 GB** — sets the floor at 16 GB RAM, recommends 24 GB.
+- Sinain pulls both models via Ollama API (`POST /api/pull`) with progress streamed to the overlay (two parallel progress bars, total bytes ≈ 7.2 GB Ollama + 1.6 GB Whisper).
+- After completion, Sinain writes config matching `.env.paranoid`: `SINAIN_LOCAL_MODE=true`, `SINAIN_LOCAL_LLM=phi4-mini`, `SINAIN_LOCAL_VISION=qwen2.5vl:7b`, `TRANSCRIPTION_BACKEND=local`, `LOCAL_WHISPER_MODEL=...`.
+
+### US-4 — Power User Switching Tiers
+> *As a user who installed in T0 (cloud) and now wants to switch to T1 or T2, I want to upgrade in-app without reinstalling.*
+
+- Settings → "Mode" panel shows the same three tiers + per-tier setup state.
+- Switching tier opens the same Download Manager UI as the first-run wizard.
+- No reinstall, no terminal.
+
+### US-5 — Updates
+> *As any user, I want Sinain to update itself in the background.*
+
+- Sparkle framework checks for updates daily; user can also "Check for updates" manually.
+- Update applies the .app binary diff only; downloaded models in `~/.sinain/models/` are preserved across updates.
+- If a model becomes incompatible (manifest `min_app_version`), Sinain prompts to re-download on next launch.
+
+---
+
+## 4. Functional Requirements
+
+### FR-1 — Bundle (in the .app)
+
+| Component | Source | Approx size | Notes |
+|---|---|---|---|
+| Overlay (Flutter macOS) | `overlay/build/macos/Build/Products/Release/` | ~40 MB | Universal binary (arm64 + x86_64) for 6 months, then arm64-only |
+| sinain-core (compiled JS) | `sinain-core/dist/` + production `node_modules/` | ~80 MB | Bundled Node 22 runtime |
+| sense_client | PyInstaller `--onedir` from `sense_client/` | ~60 MB | Includes Python 3.11 standalone runtime |
+| sck-capture | `tools/sck-capture/build/sck-capture` | ~2 MB | Swift, universal binary |
+| whisper.cpp binary | `tools/whisper-cpp/build/whisper` | ~5 MB | New — universal binary, no model |
+| Embedding model cache | all-MiniLM-L6-v2 (transformers.js cache) | ~90 MB | **Pre-warmed during CI build** so first session has no model-load latency |
+| Sparkle framework | Vendored | ~3 MB | Auto-update |
+| **Total target** | | **≤ 350 MB** | |
+
+The `.app` must be code-signed with Developer ID Application, have hardened runtime enabled, and be notarized + stapled.
+
+### FR-2 — Tiered Install (selectable at first run + in Settings)
+
+| Tier | Description | First-run downloads | Works offline |
+|---|---|---|---|
+| **T0 — Cloud** | OpenRouter for analysis + vision + transcription | None | No |
+| **T1 — Local Whisper** | OpenRouter for analysis + vision; local Whisper for transcription | Whisper model `.bin` (74 MB – 1.5 GB depending on choice) | Partial — transcription is offline; analysis still needs network |
+| **T2 — Full Local** (matches existing `--paranoid` mode) | `phi4-mini` analyzer + `qwen2.5vl:7b` vision (via Ollama) + local Whisper transcription | Whisper model `large-v3-turbo` (1.6 GB) + Ollama installer (if missing) + phi4-mini (2.5 GB) + qwen2.5vl:7b (4.7 GB) ≈ **8.8 GB total** | Yes |
+
+Tier selection is persisted in `~/Library/Application Support/SinainHUD/config.json`. Switching tier in Settings re-opens the relevant download flow.
+
+### FR-3 — Download Manager (in `sinain-core`)
+
+A new module `sinain-core/src/distribution/download-manager.ts` provides:
+
+- **Manifest fetch**: signed JSON from a CDN URL (initial: GitHub Pages at `https://anthillnet.github.io/sinain-hud/manifests/models.json`) listing each downloadable artifact with `url`, `sha256`, `size_bytes`, `version`, `min_app_version`.
+- **Resumable downloads** via HTTP `Range` requests; tolerates network drops; emits `progress` events (bytes / total) over WebSocket so overlay can render a progress bar.
+- **Integrity check**: streaming SHA-256, compared to manifest. Mismatch → fail-clean (delete partial, surface error in UI).
+- **Atomic install**: write to `~/.sinain/models/<name>.partial`, rename to `<name>.bin` on success. Same pattern as `SITUATION.md`.
+- **Pre-flight disk space check**: refuse to start a download if `volumeAvailableCapacityKey` < `size_bytes × 1.5`. Surface a clear error with required vs available bytes.
+- **Cancel**: user can abort a download from the wizard; partial files cleaned up.
+
+### FR-4 — First-Run Wizard (in overlay)
+
+Sequential modal flow on first launch. State machine; user cannot skip permission steps but can defer download steps to "later" (which reopens wizard on next launch).
+
+| Step | UI | Acceptance signal |
+|---|---|---|
+| 1. Welcome + tier picker | Three cards (T0/T1/T2) with size + privacy summary | User picks tier |
+| 2. API key (T0/T1 only) | OpenRouter key field with paste + validate button | Key validates against OpenRouter `/auth/key` or user explicitly skips with "I'll add later" |
+| 3. Screen Recording permission | Trigger TCC prompt via dummy capture call; show fallback "Open System Settings" if denied | Permission granted (re-checked via `CGPreflightScreenCaptureAccess`) |
+| 4. Microphone permission | `AVCaptureDevice.requestAccess(for: .audio)` | Permission granted |
+| 5. Accessibility permission (hotkeys) | `AXIsProcessTrustedWithOptions` prompt | Permission granted, or user skips (hotkeys disabled, in-app HUD still works) |
+| 6. Downloads (T1/T2 only) | Progress bars per artifact; pause/cancel/retry | All required artifacts present + integrity-verified |
+| 7. Ollama setup (T2 only) | Detect installed → if missing, open Ollama download page → wait for `localhost:11434` → pull model | `GET localhost:11434/api/tags` shows the chosen model |
+| 8. Smoke test | "Say 'hello sinain' to confirm capture works" — show transcript echo and an analyzer response | Both events visible in HUD within 10 s |
+
+### FR-5 — Ollama Integration Surface
+
+Two distinct concerns: the **daemon** (Sinain does not manage) and the **models served by the daemon** (Sinain does manage).
+
+#### FR-5a — Ollama daemon (out of scope for Sinain to manage)
+
+- **Detection**: `which ollama` or check for `~/.ollama/` + `GET localhost:11434/api/version`.
+- **Install handoff** (when missing): open `https://ollama.com/download` in browser. Wizard polls `localhost:11434/api/version` every 2 s with a "Waiting for Ollama…" UI. Times out after 5 min → user can retry or abort.
+- **Reachability check on every sinain-core launch in T2**: if `localhost:11434` is unreachable, surface a clear "Ollama not running" banner in the overlay with a "How to start Ollama" link. Do not crash the agent loop; degrade gracefully.
+- **Out of scope**: Sinain never `launchctl load`s Ollama, never spawns its binary, never auto-updates Ollama itself, never reads/writes `~/.ollama/` directly.
+
+#### FR-5b — Models served by Ollama (Sinain manages — see also FR-9)
+
+- **Inference endpoints**: use OpenAI-compatible `/v1/chat/completions` (analyzer + vision) and Ollama-native `/api/embeddings` (if local embedding is ever needed) — keeps `sinain-core`'s provider switch minimal. Builds on the existing `LOCAL_VISION_ENABLED` + `LOCAL_VISION_MODEL` wiring in `sense_client/` (already supports `llava` and friends).
+- **Model operations** (full lifecycle in FR-9):
+  - Pull: `POST /api/pull` with streamed progress → overlay progress bar.
+  - List: `GET /api/tags` — used to verify configured model is present at launch.
+  - Delete: `DELETE /api/delete` — user-initiated only, from Settings → "Free up space."
+- **Manifest-driven recommended models** per tier and per hardware class (see FR-9). Sinain reads the manifest, presents recommendations, but the user makes the final pick.
+
+### FR-6 — Settings: Mode & Model Switching
+
+Settings panel (in overlay) exposes:
+- Current tier with "Change tier…" button → reopens wizard at step 1.
+- Per-component model picker (Whisper model size, Ollama model name) with "Download" / "Switch" actions.
+- Disk usage row: total bytes in `~/.sinain/models/` with "Show in Finder" + "Free up space" actions.
+- "Verify integrity" button — re-hashes installed artifacts against manifest.
+
+### FR-9 — Model Lifecycle Management
+
+Applies to **all** model artifacts the user depends on: bundled (embedding), Sinain-managed disk (Whisper `.bin` files), and Ollama-managed (LLM + vision models). Three artifact classes, shared lifecycle vocabulary.
+
+| Artifact class | Storage owner | Pull mechanism | Update mechanism |
+|---|---|---|---|
+| **Embedding model** (all-MiniLM-L6-v2, ~90 MB) | Inside `Sinain.app/Contents/Resources/` | Bundled at build time (pre-warmed transformers.js cache) | Ships with new app version via Sparkle |
+| **Whisper models** (e.g., `ggml-small.en.bin`, `ggml-large-v3-turbo.bin`) | `~/.sinain/models/whisper/` | Download Manager (FR-3) from HuggingFace mirror | Manifest-driven; user-initiated re-download |
+| **Ollama models** (e.g., `qwen2.5:7b`, `llava`) | `~/.ollama/models/` — Ollama's own directory, not ours | `POST /api/pull` via Ollama API | Same — user-initiated re-pull through Sinain UI; Ollama may auto-detect tag changes |
+
+#### FR-9a — Manifest (source of truth for "what should I have?")
+
+A signed JSON manifest at `https://anthillnet.github.io/sinain-hud/manifests/models.json` describes:
+
+```json
+{
+  "version": "2026-05-27",
+  "min_app_version": "1.25.0",
+  "whisper": {
+    "models": [
+      { "id": "tiny.en", "size_mb": 75, "sha256": "...", "url": "https://huggingface.co/.../ggml-tiny.en.bin", "recommended_for": ["8GB"] },
+      { "id": "small.en", "size_mb": 244, "sha256": "...", "url": "https://huggingface.co/.../ggml-small.en.bin", "recommended_for": ["16GB"] },
+      { "id": "medium.en", "size_mb": 769, "sha256": "...", "url": "...", "recommended_for": ["16GB+"] },
+      { "id": "large-v3-turbo", "size_mb": 1620, "sha256": "...", "url": "...", "recommended_for": ["24GB+"] }
+    ],
+    "defaults_by_tier": {
+      "T1": "small.en",
+      "T2": "large-v3-turbo"
+    }
+  },
+  "ollama": {
+    "models": [
+      { "tag": "phi4-mini", "size_gb": 2.5, "ram_min_gb": 16, "role": ["analyzer", "distillation"] },
+      { "tag": "gemma3:4b", "size_gb": 2.5, "ram_min_gb": 16, "role": ["analyzer", "distillation"] },
+      { "tag": "llama3.2:3b", "size_gb": 2.0, "ram_min_gb": 16, "role": ["analyzer", "distillation"] },
+      { "tag": "qwen2.5vl:7b", "size_gb": 4.7, "ram_min_gb": 16, "role": ["vision"] },
+      { "tag": "llama3.2-vision:11b", "size_gb": 7.9, "ram_min_gb": 24, "role": ["vision"] },
+      { "tag": "moondream", "size_gb": 1.7, "ram_min_gb": 8, "role": ["vision"] }
+    ],
+    "defaults": { "analyzer": "phi4-mini", "vision": "qwen2.5vl:7b" },
+    "fallback_chain": {
+      "phi4-mini": ["gemma3:4b", "llama3.2:3b"],
+      "qwen2.5vl:7b": ["llama3.2-vision:11b", "moondream"]
+    }
+  }
+}
+```
+
+The manifest is **the** source of truth for recommended versions. App reads it on every launch (cached locally; offline-tolerant).
+
+#### FR-9b — Launch-time verification
+
+On every `sinain-core` startup in T1 or T2:
+
+1. **Whisper (T1/T2)**: read configured Whisper model from `~/.sinain/models/whisper/<id>.bin`. If missing → block startup, surface "Whisper model missing — re-download?" wizard step. If present but SHA256 mismatch vs manifest → flag in Settings as "integrity warning" but continue (user can repair via Settings → Verify Integrity).
+2. **Ollama models (T2)**: `GET /api/tags` and check configured analyzer + vision tags are listed. If missing → block agent loop, surface "Required model missing from Ollama — pull now?" overlay banner with one-click action. Common cause: user ran `ollama rm` to free space.
+3. **Reachability** (T2): if `/api/version` unreachable → "Ollama not running" banner (per FR-5a).
+
+#### FR-9c — Update flow
+
+User-driven, never silent:
+
+- **Manifest bump** (e.g., new recommended Whisper model): Sinain shows a non-blocking banner "A better-quality Whisper model is available (`large-v3-turbo`, 1.6 GB). Switch?" → opens Download Manager flow. Dismissal sticks until next manifest version.
+- **Ollama tag updates** (e.g., `qwen2.5:7b` digest changes upstream): manifest can specify an `expected_digest` per tag. On launch, if `GET /api/show` returns a different digest, prompt "Newer build of `qwen2.5:7b` is available. Re-pull (4.7 GB)?" with skip + later options.
+- **App version + min_app_version**: if Sparkle updates Sinain to a version where current model's `min_app_version` is too low, force re-download on next launch.
+
+#### FR-9d — Fallback chain
+
+If the configured model fails to pull (404 from Ollama hub, network corrupted), Sinain walks the manifest's `fallback_chain` and presents the next option to the user — never silent-substitute. UI: "qwen2.5:7b unavailable. Try llama3.1:8b instead? (4.9 GB)" — explicit consent required because licenses and capabilities differ across models.
+
+#### FR-9e — Deletion + disk-space hygiene
+
+- Settings → Storage shows model list with size, last-used timestamp, "Delete" button.
+- "Free up space" sweeps models that haven't been the active analyzer/vision/transcription model for ≥ 30 days, **with confirmation**.
+- Whisper models in `~/.sinain/models/whisper/` are managed by Sinain directly (rm).
+- Ollama models are deleted via `DELETE /api/delete` — Sinain never touches `~/.ollama/` files directly.
+
+#### FR-9f — Cost transparency (T2 acceptance hook)
+
+In T2 mode, `CostTracker` accumulates $0.00 from cloud calls. Settings → Cost should display "0.00 USD this session (local mode)" — a green checkmark, not an empty value. This is how users *verify* local mode is actually local.
+
+---
+
+### FR-7 — Auto-Update (Sparkle)
+
+Per archived Phase 11 PLAN — EdDSA-signed appcast served from GitHub Pages, daily check + manual check. New requirement on top:
+- Update process must **not** delete `~/.sinain/` or `~/Library/Application Support/SinainHUD/`. Models survive updates.
+- If a downloaded model's `min_app_version` is now above current after update, prompt re-download on next launch.
+
+### FR-8 — Homebrew Cask (secondary channel)
+
+Per archived Phase 11 PLAN — submitted after DMG is stable. No tier-specific behavior; Cask installs the same .app and the first-run wizard runs normally on first launch.
+
+---
+
+## 5. Non-Functional Requirements
+
+- **NFR-1 — Bundle size**: notarized `Sinain.dmg` ≤ 350 MB.
+- **NFR-2 — First-launch time (T0 path)**: from double-click to wizard step 1 ≤ 3 s on M-series Macs.
+- **NFR-3 — Smoke-test time (T0 path)**: from wizard start to overlay echoing a spoken phrase ≤ 90 s, assuming user has API key ready.
+- **NFR-4 — Download resumability**: a Whisper model download interrupted at 80% must resume from byte ~80%, not restart, on the next attempt within the same install session.
+- **NFR-5 — Offline fallback**: T0 user with API key configured but no network at launch must see a clear "no network" indicator and *no* error dialog spam; reconnection auto-recovers.
+- **NFR-6 — Build reproducibility**: a CI run on a clean macOS runner from the same git ref must produce a `.dmg` with byte-identical contents (modulo signing timestamps).
+- **NFR-7 — Notarization SLA**: full release pipeline (build → sign → notarize → staple → upload) completes within 30 min p95.
+
+---
+
+## 6. Success Criteria (Acceptance Tests)
+
+This phase is **done** when all of the following pass on a fresh Mac without dev tools installed:
+
+- [ ] **T0 path**: A user with no Homebrew, no Node, no Python, no Xcode CLT downloads `Sinain.dmg`, drags to `/Applications`, double-clicks. Gatekeeper allows launch with no warnings. Wizard appears. User pastes an OpenRouter key, grants permissions, completes smoke test. Total elapsed time ≤ 5 min.
+- [ ] **T1 path**: Same as T0 except user selects "local transcription" at step 1. After permissions, Whisper `small.en` downloads with visible progress, resumes from a `kill -9` mid-download, completes, and smoke test transcribes spoken input without an OpenRouter STT call (verified by checking `sinain-core` logs show only chat completions, no `/transcriptions` calls).
+- [ ] **T2 path**: Same as T1 except user selects "full local" at step 1. If Ollama not installed, wizard opens browser, user installs Ollama, returns to wizard. Wizard pulls `qwen2.5:7b`, completes, smoke test runs end-to-end with **network disabled** after setup completes.
+- [ ] **Switching**: A user installed at T0 can switch to T2 from Settings, complete the same flow, and have the analyzer route to Ollama on the next agent tick (verified via `sinain-core` request logs showing `localhost:11434` calls).
+- [ ] **Update**: A user on `app-v1.25.0` (T2 with `qwen2.5:7b` installed) receives a Sparkle prompt for `app-v1.26.0`, accepts, restarts. After restart, the model is still on disk, configured tier is still T2, no re-download required.
+- [ ] **Homebrew Cask**: `brew install --cask sinain` produces an installation indistinguishable from the DMG path. `brew uninstall --cask sinain` + `brew install --cask sinain --zap` removes all sinain data including `~/.sinain/`.
+- [ ] **Integrity failure handling**: A user with a corrupted Whisper model file (simulate by overwriting first byte) sees a clear error in Settings → "Verify integrity"; clicking "Re-download" fetches a fresh copy and the smoke test recovers.
+- [ ] **Disk-space refusal**: A user with 3 GB free disk attempting to install a `qwen2.5:14b` (~9 GB) sees a clear refusal message naming required vs available bytes, and the wizard does not get stuck or partially download.
+
+---
+
+## 7. Anti-Success (Things That Must NOT Happen)
+
+Inherited from archived Phase 11 (unsigned DMG, unnotarized DMG, auto-launch by default, roll-your-own updater) plus:
+
+- ❌ **Silent network calls in T2 after setup completes.** Once a user picks T2, no LLM/STT request may go to a cloud endpoint. Cloud cost tracker should show $0.00 accruing in T2 mode.
+- ❌ **Daemon-managing Ollama.** Sinain must not start, stop, restart, or auto-update Ollama. That is Ollama's job and the user's choice.
+- ❌ **Blocking the overlay UI during downloads.** Downloads are background; user can use the HUD in whatever capacity their current tier supports while a larger model is fetching.
+- ❌ **Hidden model storage.** All downloaded artifacts live under `~/.sinain/models/`. No quiet writes to `/private/`, `/tmp/`, or `~/Library/Caches/` for model data.
+- ❌ **Coupling Whisper model choice to overlay version.** A user must be able to keep a 244 MB `small.en` across app updates indefinitely until they choose otherwise.
+
+---
+
+## 8. Constraints
+
+- **Apple Developer Program** ($99/yr, already enrolled per archived Phase 11 — Igor Gerasimov individual enrollment 2026-05-15).
+- **macOS deployment target**: 12.3+ (ScreenCaptureKit requirement). Bundle's `LSMinimumSystemVersion` matches.
+- **Entitlements**: hardened runtime; microphone; screen recording (TCC, not entitlement); accessibility (TCC); `com.apple.security.cs.allow-jit` for Node V8; `com.apple.security.network.client` for OpenRouter + Ollama localhost.
+- **No App Sandbox.** MAS-style sandbox blocks system audio capture, `localhost:9500` HTTP server, and writes to `~/.sinain/`. Distribution is direct-download + Cask; MAS is explicitly out of scope.
+- **Ollama license** (MIT) permits redirect to download, not redistribution; we ship a link, not the binary.
+- **Whisper.cpp license** (MIT) permits binary bundling; we ship the binary in `Resources/`.
+- **CI runner**: `macos-14` (Apple Silicon) for arm64 + cross-compile for x86_64 via Flutter universal build.
+
+---
+
+## 9. Open Questions to Resolve Before Phase Kickoff
+
+| # | Question | Default if undecided |
+|---|---|---|
+| Q1 | Bundle `whisper.cpp` binary, or fetch alongside model? | **Bundle** (only ~5 MB, simplifies first T1 download to model-only) |
+| Q2 | Should the wizard offer a "no-AI smoke test" path for users without an API key and without local-mode bandwidth? | **No** — Sinain without an LLM is not a meaningful experience; better to surface a clear "you need either an API key or local mode" message |
+| Q3 | Where does the model manifest live? GitHub Pages, S3, or both with failover? | **GitHub Pages only** for v1; add S3 mirror only if Pages reliability becomes an issue |
+| Q4 | Universal binary or arm64-only at launch? | **Universal for 6 months**, then arm64-only (matches archived Phase 11 recommendation) |
+| Q5 | Telemetry for download success/failure rates? | **None** — conflicts with privacy positioning; rely on user-reported bug reports |
+| Q6 | Should T2 setup fail closed (refuse to proceed) or fail open (let user proceed with cloud) if Ollama install times out? | **Fail closed** — surface error, let user retry or pick T0/T1 explicitly |
+| Q7 | What's the rollback path if a Sparkle update breaks a user's install? | Need a "previous version" download link on GitHub Releases + a documented `Applications/Sinain.app` reinstall procedure |
+| Q8 | Pre-warming the embedding model cache in CI — which transformers.js cache directory needs copying? | Verify at implementation time; likely `~/.cache/transformers/` or `node_modules/@xenova/transformers/.cache/` |
+
+---
+
+## 10. Dependencies on Existing Code
+
+| Existing | What changes |
+|---|---|
+| `overlay/lib/main.dart` | Add bundle-path resolution (Contents/Resources/), first-run wizard router |
+| `overlay/macos/Runner/Info.plist` | Add `SUFeedURL`, `SUPublicEDKey`, update bundle ID to `com.anthillnet.sinain` |
+| `overlay/macos/Runner/Release.entitlements` | Confirm hardened-runtime entitlements (per Constraints section) |
+| `sinain-core/src/index.ts` | Detect bundle mode; resolve `sinain-core`, `sense_client`, `sck-capture` paths from bundle Resources |
+| `sinain-core/src/config.ts` | Add `LLM_PROVIDER=ollama` branch with `OLLAMA_ENDPOINT=http://localhost:11434/v1` default |
+| `sinain-core/src/distribution/download-manager.ts` | **NEW** — described in FR-3 |
+| `sinain-core/src/distribution/manifest.ts` | **NEW** — fetch + verify signed manifest |
+| `sinain-core/src/transcription/whisper-local.ts` | **NEW** — spawn bundled `whisper.cpp` binary with downloaded model |
+| `sinain-core/src/llm/ollama-provider.ts` | **NEW** — OpenAI-compatible adapter pointing at `localhost:11434/v1` |
+| `tools/whisper-cpp/build-universal.sh` | **NEW** — universal binary build for whisper.cpp |
+| `scripts/prewarm-embedding-cache.sh` | **NEW** — runs in CI before bundle staging to populate transformers.js cache |
+| Archived Phase 11 PLAN items (sign, notarize, Sparkle, Cask) | Adopt verbatim; this SPEC adds requirements rather than replacing them |
+
+---
+
+## 11. References
+
+- Archived Phase 11 PLAN — `.planning/archive/v1.0-launch/phases/11-macos-dmg-distribution/00-PLAN.md` (cloud-mode pipeline)
+- Existing setup spec pattern — `docs/nemoclaw-setup-spec.md`
+- macOS gatekeeping & notarization — Apple Notary Service docs
+- Sparkle — https://sparkle-project.org
+- Ollama API — https://github.com/ollama/ollama/blob/main/docs/api.md
+- whisper.cpp — https://github.com/ggerganov/whisper.cpp
+
+---
+
+*Last updated: 2026-05-27. Status: draft awaiting sequencing into a future distribution-focused milestone (post-v2.0).*

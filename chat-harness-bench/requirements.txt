@@ -1,0 +1,7 @@
+# Baseline adapter + runner only need requests. Each candidate harness brings its
+# own deps (install per adapter, see adapters/<name>.py header):
+#   openhands-sdk        # OpenHands adapter
+#   smolagents           # smolagents adapter
+#   gptme                # gptme adapter (or run its REST server)
+#   hermes-agent         # Hermes adapter (from NousResearch/hermes-agent)
+requests>=2.31
