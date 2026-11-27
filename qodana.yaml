@@ -1,0 +1,15 @@
+version: "1.0"
+# Default profile enables ~all inspections including the security (SAST) ones.
+profile:
+  name: qodana.recommended
+# Fail the pipeline when the finding count crosses this threshold — this is the
+# "quality gate" that blocks promotion in a real governance setup.
+failThreshold: 10
+# Keep the demo fast and focused on first-party code (skip vendored deps).
+exclude:
+  - name: All
+    paths:
+      - node_modules
+      - dist
+      - build
+      - "**/.venv"

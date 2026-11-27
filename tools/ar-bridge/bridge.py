@@ -24,6 +24,8 @@ import json
 import os
 import signal
 import sys
+import time
+from datetime import datetime, timezone
 from io import BytesIO
 
 import ssl
@@ -33,6 +35,7 @@ import certifi
 import av
 import numpy as np
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from aiortc.contrib.media import MediaPlayer, MediaRecorder
 from aiortc.mediastreams import MediaStreamError
 from PIL import Image
 
@@ -48,6 +51,24 @@ VIDEO_CLOCK = 90000
 
 def emit(line: str) -> None:
     print(f"AR-BRIDGE {line}", flush=True)
+
+
+def meta_log(path: str, msg) -> None:
+    """Append one untruncated datachannel message as timestamped JSONL.
+
+    Best-effort — a logging failure must never disturb the live session."""
+    if not path:
+        return
+    try:
+        rec = {
+            "ts_iso": datetime.now(timezone.utc).isoformat(),
+            "ts_mono": time.monotonic(),
+            "msg": msg if isinstance(msg, str) else str(msg),
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class ScreenTrack(MediaStreamTrack):
@@ -209,7 +230,13 @@ async def run(args: argparse.Namespace) -> int:
                                    headers=auth_headers,
                                    allow_redirects=False,
                                    timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                if resp.status in (301, 302, 303, 307, 308, 401, 403):
+                # A device token gates /offer (X-Sinain-Device), NOT the bare /,
+                # which oauth2-proxy always 302s to its login. So when we hold a
+                # token, a 302 here is expected and reachable — only a hard
+                # 401/403 means the token itself was rejected.
+                blocking = ((301, 302, 303, 307, 308, 401, 403) if not args.device_token
+                            else (401, 403))
+                if resp.status in blocking:
                     emit("error: the server wants a login — set ARSINAIN_COOKIE "
                          "to your browser's _oauth2_proxy cookie")
                     return 1
@@ -233,14 +260,25 @@ async def run(args: argparse.Namespace) -> int:
 
     @channel.on("message")
     def on_message(msg):
-        # Proactive markers etc. — plumbing logs them; a future UI may render
-        # them as region eyes.
+        # Proactive markers / guide say-lines etc. The full, untruncated message
+        # is the primary eval signal — persist it to the meta log; stdout keeps
+        # a short preview for live supervision.
+        meta_log(args.meta_log, msg)
         emit(f"meta {str(msg)[:160]}")
+
+    # In record mode, the inbound TTS is written to a wav instead of played to a
+    # local speaker (batch eval has no listener; the wav is the audio-guide
+    # capture). MediaRecorder is started once the first audio track arrives.
+    recorder = MediaRecorder(args.record_audio) if args.record_audio else None
 
     @pc.on("track")
     def on_track(track):
         if track.kind == "audio":
-            asyncio.ensure_future(play_remote_audio(track))
+            if recorder is not None:
+                recorder.addTrack(track)
+                asyncio.ensure_future(recorder.start())
+            else:
+                asyncio.ensure_future(play_remote_audio(track))
 
     @pc.on("connectionstatechange")
     def on_state():
@@ -250,9 +288,25 @@ async def run(args: argparse.Namespace) -> int:
             stop.set()
 
     mic = None
+    player = None
     pc.addTrack(ScreenTrack(args.frame, args.fps))
     if args.no_audio:
         emit("audio disabled (--no-audio)")
+    elif args.audio_file:
+        # Offline replay: play a recorded file (mp3/wav) as the published audio
+        # track at realtime. EOF ends the session so the batch driver can move
+        # on; a MediaStreamError on the sender track surfaces as track "ended".
+        try:
+            player = MediaPlayer(args.audio_file)
+            if player.audio is None:
+                emit(f"error: no audio stream in {args.audio_file}")
+                return 1
+            pc.addTrack(player.audio)
+            player.audio.on("ended", stop.set)
+            emit(f"replay {os.path.basename(args.audio_file)}")
+        except Exception as e:  # noqa: BLE001
+            emit(f"error: cannot open audio file {args.audio_file}: {e}")
+            return 1
     elif sd is not None:
         try:
             mic = MicTrack()
@@ -287,9 +341,28 @@ async def run(args: argparse.Namespace) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
+    # Hard ceiling so a stalled replay (track never emits EOF, server hangs)
+    # cannot pin a session open forever in an unattended batch.
+    if args.max_seconds > 0:
+        async def _deadline():
+            await asyncio.sleep(args.max_seconds)
+            emit(f"error: max-seconds ({args.max_seconds}s) reached — ending")
+            stop.set()
+        loop.create_task(_deadline())
+
     await stop.wait()
     if mic is not None:
         mic.stop()
+    if player is not None:
+        try:
+            player.audio.stop()
+        except Exception:  # noqa: BLE001
+            pass
+    if recorder is not None:
+        try:
+            await recorder.stop()
+        except Exception:  # noqa: BLE001
+            pass
     await pc.close()
     emit("ended")
     return 0
@@ -309,6 +382,17 @@ def main() -> None:
                    help="browser-paired HUD device token (X-Sinain-Device)")
     p.add_argument("--no-audio", action="store_true",
                    help="publish screen only (no mic, no speaker) — smoke tests")
+    p.add_argument("--audio-file", default="",
+                   help="offline replay: play this mp3/wav as the audio track "
+                        "instead of the live mic; EOF ends the session")
+    p.add_argument("--meta-log", default="",
+                   help="append every datachannel message (untruncated) as "
+                        "timestamped JSONL to this file")
+    p.add_argument("--record-audio", default="",
+                   help="record the inbound TTS/guide audio track to this wav "
+                        "instead of playing it to a speaker")
+    p.add_argument("--max-seconds", type=float, default=0.0,
+                   help="hard session ceiling in seconds (0 = no limit)")
     args = p.parse_args()
     sys.exit(asyncio.run(run(args)))
 

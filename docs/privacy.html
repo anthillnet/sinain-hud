@@ -17,6 +17,9 @@
   .wrap{max-width:44rem;margin:0 auto;padding:3.5rem 1.4rem 5rem}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
+  .skip{position:absolute;left:-999px}
+  .skip:focus{left:16px;top:16px;background:#fff;padding:8px 12px;z-index:100}
+  a:focus-visible,button:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
   header{display:flex;align-items:center;gap:.7rem;margin-bottom:2.2rem}
   header img{width:34px;height:34px;border-radius:8px}
   header .name{font-weight:700;font-size:1.15rem}
@@ -50,14 +53,16 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
 <!-- End Meta Pixel Code -->
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <div class="wrap">
   <header>
     <img src="logo-240.png" alt="Sinain" />
     <span class="name">Sinain</span>
   </header>
 
+  <main id="main">
   <h1>Privacy Policy</h1>
-  <div class="updated">Last updated: 20 July 2026</div>
+  <div class="updated">Last updated: 15 September 2026</div>
 
   <p>Sinain is a privacy-first context layer that runs on your own computer. This policy
   explains what Sinain collects and, more importantly, what it does <strong>not</strong>.</p>
@@ -99,6 +104,10 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
     <li>Sinain does <strong>not</strong> collect or process government IDs, health information, or payment data, and never returns authentication secrets.</li>
   </ul>
 
+  <!-- DRAFT 2026-09-15: owner to confirm against the AI provider's data terms before publishing -->
+<h2>Sinain AR (ar.sinain.com)</h2>
+<p>Sinain AR is a separate, browser-based service. When you use it, your phone's camera and microphone stream to Sinain's server, which analyses frames live with our AI inference provider to answer you; frames are not stored. Sinain AR keeps, per account, the text of your conversations and durable facts you tell it (your name, preferences), after automatic redaction of emails, card numbers, passwords and similar, so it can remember you between sessions. It also keeps usage counts for quota. Email sinain-hud@protonmail.com to have this memory and your access record deleted.</p>
+
   <h2>Third parties</h2>
   <ul>
     <li><strong>Auth0 (identity):</strong> handles sign-in. It receives your email/login to authenticate you.</li>
@@ -125,6 +134,7 @@ src="https://www.facebook.com/tr?id=2999820930220522&ev=PageView&noscript=1"/>
   <p>Questions or deletion requests: <a href="mailto:contact@sinain.com">contact@sinain.com</a>.</p>
 
   <footer>© 2026 Sinain · <a href="/">sinain.com</a></footer>
+</main>
 </div>
 </body>
 </html>

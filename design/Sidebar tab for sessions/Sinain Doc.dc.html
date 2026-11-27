@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body { margin: 0; background: #101014; }
+a { color: #a8b6ff; text-decoration: none; }
+a:hover { color: #c9d2ff; }
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; font-family: Helvetica, Arial, sans-serif; background: #101014; color: #f2f2f0;">
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-bottom: 1px solid #26262e;">
+    <div style="display: flex; align-items: baseline; gap: 12px;">
+      <span style="font-size: 18px; font-weight: 700; letter-spacing: 0.04em;">SINAIN</span>
+      <span style="font-size: 13px; color: #8c8c96;">strategy doc — quick access</span>
+    </div>
+    <a href="{{ docUrl }}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 8px; background: #4f6bff; color: #ffffff; padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;" style-hover="background: #667fff; color: #ffffff;">Open in Google Docs ↗</a>
+  </div>
+  <div style="flex: 1; display: flex;">
+    <sc-if value="{{ showEmbed }}" hint-placeholder-val="{{ true }}">
+      <iframe src="{{ embedUrl }}" style="flex: 1; border: none; background: #ffffff;" title="Sinain doc"></iframe>
+    </sc-if>
+    <sc-if value="{{ showFallback }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 40px;">
+        <div style="font-size: 13px; letter-spacing: 0.12em; color: #8c8c96;">SINAIN — STRATEGY DOC</div>
+        <a href="{{ docUrl }}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 10px; background: #4f6bff; color: #ffffff; padding: 16px 32px; border-radius: 10px; font-size: 18px; font-weight: 700;" style-hover="background: #667fff; color: #ffffff;">Open in Google Docs ↗</a>
+        <a href="{{ docUrl }}" target="_blank" rel="noopener" style="font-size: 13px; color: #8c8c96; max-width: 640px; text-align: center; word-break: break-all;">{{ docUrl }}</a>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;docUrl&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;https://docs.google.com/document/d/1FwBRMwMi0g6w1tJ5o59_ptweeVNcvWAUQfmsdnhpqhM/edit?tab=t.0&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;tryEmbed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { embedFailed: false };
+  componentDidMount() {
+    // If Google refuses the iframe (login wall / X-Frame-Options), it stays blank; we can't detect reliably, so keep embed but offer fallback toggle via prop.
+  }
+  renderVals() {
+    const docUrl = this.props.docUrl ?? 'https://docs.google.com/document/d/1FwBRMwMi0g6w1tJ5o59_ptweeVNcvWAUQfmsdnhpqhM/edit?tab=t.0';
+    const tryEmbed = this.props.tryEmbed ?? false;
+    return {
+      docUrl,
+      embedUrl: docUrl,
+      showEmbed: tryEmbed,
+      showFallback: !tryEmbed,
+    };
+  }
+}
+</script>
+</body>
+</html>

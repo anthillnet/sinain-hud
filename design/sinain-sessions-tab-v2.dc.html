@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  @keyframes ssHalo { 0% { transform: scale(0.6); opacity: 0.5; } 70% { transform: scale(2.2); opacity: 0; } 100% { opacity: 0; } }
+  @keyframes ssPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  body { margin: 0; }
+  a { color: #3369D6; } a:hover { color: #27282E; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <!-- TITLE -->
+  <div style="margin-bottom:40px; max-width:920px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · Agent Sessions · blueprint §6.3</div>
+    <div style="font-size:24px; font-weight:600; line-height:28px; margin-bottom:10px; color:#27282E;">Every agent on the desk, one glance — approve from the corner.</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">The Vibe-Island spine (<a href="{{ docUrl }}" target="_blank" rel="noopener">teardown + blueprint ↗</a>) mapped onto sinain's own idiom: sessions arrive as <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;">/agent/event</span> frames, approvals resolve the held <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;">/agent/approve</span>. Same card anatomy as Session Sense — header dot · claim · ✕, evidence panel, verb row. Agent accent (blue) marks agent-scoped state, distinct from Save green and track violet.</div>
+  </div>
+
+  <!-- SECTION 5 — SURFACE STATES PER STEP -->
+  <div data-screen-label="5 Surface states" style="margin-bottom:52px;">
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">5 · Surface states, step by step — island · tab · what agents get fed</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:900px;">Every §4 step rendered across the three surfaces. Third column is new: agents with a hook adapter (Claude Code, Codex, Cursor) get <span style="color:#27282E; font-weight:500;">situational context injected via hook — zero taps, no user interaction</span>. The verb-row and Enrich flows remain for AIs that can’t be hooked; hooked lanes are simply already enriched.</div>
+
+  <!-- step illustrations -->
+  <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:24px; width:1100px;">
+    <sc-for list="{{ stepViz }}" as="v" hint-placeholder-count="12">
+      <div style="flex:none; width:262px;">
+        <div style="display:flex; align-items:baseline; gap:6px; margin-bottom:5px;">
+          <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ v.time }}</span>
+          <span style="font-size:11px; font-weight:600; color:#27282E;">{{ v.step }}</span>
+        </div>
+        <div style="position:relative; width:262px; height:168px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+          <div style="padding:34px 14px 0;">
+            <div style="height:6px; width:44%; background:#DFE1E5; border-radius:3px; margin-bottom:8px;"></div>
+            <div style="height:5px; width:82%; background:#EBECF0; border-radius:3px; margin-bottom:6px;"></div>
+            <div style="height:5px; width:70%; background:#EBECF0; border-radius:3px; margin-bottom:6px;"></div>
+            <div style="height:5px; width:58%; background:#EBECF0; border-radius:3px;"></div>
+          </div>
+          <sc-if value="{{ v.dim }}" hint-placeholder-val="{{ false }}"><div style="position:absolute; inset:0; background:rgba(30,31,34,.28);"></div></sc-if>
+          <!-- island -->
+          <div style="position:absolute; left:50%; top:0; transform:translateX(-50%); display:flex; align-items:center; gap:6px; padding:4px 9px 4px 6px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:0 0 8px 8px; box-shadow:0 4px 14px rgba(0,28,54,.25); max-width:230px;">
+            <svg width="10" height="10" viewBox="0 0 30 30" style="flex:none;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <span style="flex:none; width:5px; height:5px; border-radius:50%; background:{{ v.dot }}; animation:{{ v.anim }};"></span>
+            <span style="font-size:8px; color:{{ v.pillFg }}; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ v.pill }}</span>
+          </div>
+          <sc-if value="{{ v.chip }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; left:50%; top:0; transform:translateX(52px); display:flex; align-items:center; gap:4px; padding:3px 8px; background:#1E1F22; border:1px solid rgba(255,255,255,.14); border-top:none; border-radius:0 0 7px 7px; box-shadow:0 4px 14px rgba(0,28,54,.25);">
+              <span style="font-size:8px; color:#CDE8D4; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap;">{{ v.chip }}</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ v.roi }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; left:16px; top:52px; width:118px; height:54px; border:1.5px dashed {{ agentHex }}; border-radius:4px; background:rgba(51,105,214,.06);"></div>
+            <div style="position:absolute; left:16px; top:110px; display:flex; gap:4px; align-items:center;">
+              <span style="display:inline-flex; align-items:center; background:#1E1F22; border-radius:5px; overflow:hidden;">
+                <span style="font-size:8px; color:#fff; padding:2px 6px; background:#1F8039;">▶</span>
+                <span style="font-size:8px; color:#E8EAEE; padding:2px 6px;">codex — bridge</span>
+                <span style="font-size:8px; color:#6C707E; padding:2px 5px; border-left:1px solid rgba(255,255,255,.14);">▾</span>
+              </span>
+              <span title="Save" style="font-size:8px; color:#E8EAEE; background:#1E1F22; border-radius:5px; padding:2px 7px; opacity:.75;">⤓</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ v.sub }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; left:50%; top:24px; transform:translateX(-50%); width:200px; display:flex; align-items:center; gap:6px; padding:4px 8px; background:rgba(14,15,17,.92); border-radius:0 0 7px 7px; box-shadow:0 4px 14px rgba(0,28,54,.25);">
+              <span style="flex:none; width:4px; height:4px; border-radius:50%; background:#E06C5B; animation:ssPulse 1.4s ease-in-out infinite;"></span>
+              <span style="flex:1; font-size:7.5px; line-height:10px; color:#E8EAEE; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ v.sub }}</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ v.card }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; right:10px; bottom:{{ v.cardBottom }}; width:168px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:8px; box-shadow:0 6px 20px rgba(0,28,54,.3); padding:8px 9px; box-sizing:border-box;">
+              <div style="display:flex; align-items:center; gap:5px; margin-bottom:4px;">
+                <span style="flex:none; width:5px; height:5px; border-radius:50%; background:{{ v.cardDot }};"></span>
+                <span style="flex:1; font-size:8.5px; font-weight:600; color:#fff; line-height:11px;">{{ v.card }}</span>
+                <span style="flex:none; font-size:8px; color:#6C707E;">✕</span>
+              </div>
+              <sc-for list="{{ v.cardLines }}" as="ln" hint-placeholder-count="2">
+                <div style="font-size:7.5px; line-height:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace; margin-bottom:2px;">{{ ln }}</div>
+              </sc-for>
+              <div style="display:flex; align-items:center; gap:5px; margin-top:5px;">
+                <sc-for list="{{ v.verbs }}" as="vb" hint-placeholder-count="2">
+                  <span style="font-size:8px; color:{{ vb.fg }}; background:{{ vb.bg }}; border:1px solid {{ vb.bd }}; border-radius:4px; padding:2px 7px; white-space:nowrap;">{{ vb.t }}</span>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start;">
+    <div style="flex:none; width:1100px;">
+      <div style="background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:12px; box-shadow:0 12px 36px rgba(0,28,54,.32); padding:6px 16px 12px; box-sizing:border-box;">
+        <div style="display:flex; gap:12px; padding:10px 0 6px; border-bottom:1px solid rgba(255,255,255,.12);">
+          <span style="flex:none; width:96px; font-size:9px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">step</span>
+          <span style="flex:none; width:160px; font-size:9px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">island</span>
+          <span style="flex:none; width:170px; font-size:9px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">HUD / eye</span>
+          <span style="flex:none; width:180px; font-size:9px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">context card</span>
+          <span style="flex:1; font-size:9px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">sessions tab</span>
+          <span style="flex:none; width:180px; font-size:9px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">→ agents, via hook · 0 taps</span>
+        </div>
+        <sc-for list="{{ surfaceRows }}" as="r" hint-placeholder-count="10">
+          <div style="display:flex; gap:12px; padding:9px 0; border-top:1px solid rgba(255,255,255,.07); align-items:flex-start;">
+            <div style="flex:none; width:96px;">
+              <div style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ r.time }}</div>
+              <div style="font-size:11px; font-weight:600; color:#E8EAEE; line-height:14px;">{{ r.step }}</div>
+            </div>
+            <div style="flex:none; width:160px;">
+              <span style="display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:4px 9px; background:#0E0F11; border:1px solid rgba(255,255,255,.12); border-radius:9px; box-sizing:border-box;">
+                <span style="flex:none; width:6px; height:6px; border-radius:50%; background:{{ r.dot }}; animation:{{ r.anim }};"></span>
+                <span style="font-size:9px; color:{{ r.pillFg }}; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ r.pill }}</span>
+              </span>
+            </div>
+            <div style="flex:none; width:170px; font-size:9.5px; line-height:13px; color:#A8ADBD;">{{ r.eye }}</div>
+            <div style="flex:none; width:180px; font-size:9.5px; line-height:13px; color:{{ r.cardColor }};">{{ r.cardWhere }}</div>
+            <div style="flex:1; font-size:10px; line-height:14px; color:#A8ADBD;">{{ r.tab }}</div>
+            <div style="flex:none; width:180px; font-size:9.5px; line-height:13px; color:{{ r.hookColor }}; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ r.hook }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="flex:none; width:330px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Coherence rules across surfaces</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ surfaceNotes }}" as="r" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- SECTION 4 — DEFAULT JOURNEY E2E -->
+  <div data-screen-label="4 Default journey" style="margin-bottom:52px;">
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">4 · The default journey, end to end — one session, five hours, {{ dayTapTotal }} taps</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:900px;">Chrome research → Cowork task → Design → IDE (Claude Code + Codex) → manual test + ROI → Design tweaks → CI on GitHub. To sinain this is <span style="color:#27282E; font-weight:500;">one thread that changes rooms</span> — the session follows the work, not the app. The context card is the only state the user ever needs; every switch away and back is free.</div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start;">
+    <!-- phase ledger -->
+    <div style="flex:none; width:680px;">
+      <div style="background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:12px; box-shadow:0 12px 36px rgba(0,28,54,.32); padding:14px 16px; box-sizing:border-box;">
+        <sc-for list="{{ phases }}" as="p" hint-placeholder-count="10">
+          <div style="display:flex; gap:12px; padding:10px 0; border-top:1px solid rgba(255,255,255,.07);">
+            <div style="flex:none; width:44px; text-align:right;">
+              <div style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ p.time }}</div>
+            </div>
+            <div style="flex:none; width:8px; display:flex; flex-direction:column; align-items:center;">
+              <span style="flex:none; width:8px; height:8px; border-radius:50%; background:{{ p.dot }}; margin-top:3px;"></span>
+              <span style="flex:1; width:1px; background:rgba(255,255,255,.08); margin-top:3px;"></span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                <span style="font-size:12px; font-weight:600; color:#E8EAEE;">{{ p.name }}</span>
+                <span style="font-size:9px; color:{{ p.stateColor }}; font-family:ui-monospace,Menlo,Consolas,monospace; border:1px solid {{ p.stateBorder }}; border-radius:4px; padding:1px 5px; white-space:nowrap;">{{ p.state }}</span>
+                <span style="flex:1;"></span>
+                <span style="font-size:9px; font-weight:600; color:{{ p.tapColor }}; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap;">{{ p.taps }}</span>
+              </div>
+              <div style="font-size:10.5px; line-height:15px; color:#A8ADBD;">{{ p.sinain }}</div>
+              <sc-if value="{{ p.card }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:6px; padding:7px 10px; background:#232427; border-radius:6px; border-left:2px solid {{ agentHex }};">
+                  <div style="font-size:10px; line-height:14px; color:#E8EAEE; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ p.card }}</div>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- states + guarantees -->
+    <div style="flex:none; width:340px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">The states underneath</div>
+      <div style="width:340px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:6px 16px 10px; box-sizing:border-box; margin-bottom:16px;">
+        <sc-for list="{{ stateRows }}" as="t" hint-placeholder-count="6">
+          <div style="display:flex; align-items:flex-start; gap:10px; padding:8px 0; border-top:1px solid #E4E2DC;">
+            <span style="flex:none; width:88px; font-size:10px; font-weight:600; color:#27282E; font-family:ui-monospace,Menlo,Consolas,monospace; line-height:14px;">{{ t.s }}</span>
+            <span style="flex:1; font-size:10px; line-height:14px; color:#6C707E;">{{ t.d }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">What the journey proves</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ journeyNotes }}" as="r" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- SECTION 3 — FRICTION BUDGETS -->
+  <div data-screen-label="3 Friction budgets" style="margin-bottom:52px;">
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">3 · Least-friction flows — the journey’s parts, each budgeted</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:880px;">The flows below are the moves inside section 4’s journey. They come in three kinds: <span style="color:#27282E; font-weight:500;">once per session</span> (open, close), <span style="color:#27282E; font-weight:500;">in the flow</span> (the moves you repeat), and <span style="color:#27282E; font-weight:500;">parallel — always running</span> (things sinain keeps true underneath, interruptible only by a consent tap). Cards come to you; a tap is consent, never navigation.</div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start;">
+    <!-- journey strips -->
+    <div style="flex:none; width:640px; display:flex; flex-direction:column; gap:12px;">
+      <sc-for list="{{ journeys }}" as="j" hint-placeholder-count="5">
+        <sc-if value="{{ j.groupHeader }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+            <span style="font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E;">{{ j.groupHeader }}</span>
+            <span style="flex:1; height:1px; background:#D8D5CD;"></span>
+            <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ j.groupNote }}</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ j.isFlow }}" hint-placeholder-val="{{ true }}">
+        <div style="background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:13px 15px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+            <span style="flex:none; min-width:52px; text-align:center; font-size:10px; font-weight:600; font-family:ui-monospace,Menlo,Consolas,monospace; color:{{ j.costColor }}; border:1px solid {{ j.costBorder }}; border-radius:5px; padding:2px 7px;">{{ j.cost }}</span>
+            <span style="font-size:12px; font-weight:600; color:#E8EAEE;">{{ j.name }}</span>
+            <span style="flex:1;"></span>
+            <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ j.wire }}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:7px; flex-wrap:wrap;">
+            <sc-for list="{{ j.steps }}" as="st" hint-placeholder-count="4">
+              <span style="display:inline-flex; align-items:center; gap:6px;">
+                <span style="font-size:10px; line-height:14px; color:{{ st.fg }}; background:{{ st.bg }}; border:1px solid {{ st.bd }}; border-radius:5px; padding:3px 8px; white-space:nowrap;">{{ st.t }}</span>
+                <sc-if value="{{ st.arrow }}" hint-placeholder-val="{{ true }}"><span style="font-size:9px; color:#6C707E;">→</span></sc-if>
+              </span>
+            </sc-for>
+          </div>
+          <div style="font-size:10.5px; line-height:15px; color:#A8ADBD; margin-top:9px;">{{ j.note }}</div>
+        </div>
+        </sc-if>
+      </sc-for>
+    </div>
+
+    <!-- rules that keep taps low -->
+    <div style="flex:none; width:330px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">What keeps the budget honest</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ frictionRules }}" as="r" hint-placeholder-count="5">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- SECTION 0 — IN SITU -->
+  <div data-screen-label="0 In situ" style="margin-bottom:52px;">
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">0 · The moment — Codex asks to publish, from the corner</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:820px;">The collapsed bar sits parked at the notch; a PermissionRequest raises the card in the usual corner. <span style="color:#27282E; font-weight:500;">Try it — Allow / Always / Deny.</span></div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start;">
+    <div style="flex:none; width:560px;">
+      <div style="position:relative; width:560px; height:380px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:18px;">
+          <div style="height:9px; width:42%; background:#DFE1E5; border-radius:3px; margin-bottom:13px;"></div>
+          <div style="height:8px; width:86%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div>
+          <div style="height:8px; width:78%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div>
+          <div style="height:8px; width:64%; background:#EBECF0; border-radius:3px;"></div>
+        </div>
+        <!-- collapsed notch island — the eye is parked here (drag the little eye to unpark) -->
+        <div style="position:absolute; left:50%; top:20px; transform:translateX(-50%); display:flex; align-items:center; gap:9px; padding:5px 12px 5px 8px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:0 0 10px 10px; box-shadow:0 6px 20px rgba(0,28,54,.28);">
+          <span title="Drag to unpark" style="flex:none; display:flex; cursor:grab;"><svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg></span>
+          <span style="width:1px; height:10px; background:rgba(255,255,255,.12);"></span>
+          <span style="position:relative; flex:none; width:12px; height:12px; display:flex; align-items:center; justify-content:center;">
+            <span style="position:absolute; inset:0; border-radius:50%; border:1px solid {{ agentDim }}; animation:ssHalo 2.4s ease-out infinite;"></span>
+            <span style="width:7px; height:7px; border-radius:50%; background:{{ agentHex }};"></span>
+          </span>
+          <span style="font-size:10px; font-weight:500; color:#E8EAEE; font-family:ui-monospace,Menlo,Consolas,monospace;">3 working</span>
+          <sc-if value="{{ approvalPending }}" hint-placeholder-val="{{ true }}">
+            <span style="width:2px; height:2px; border-radius:50%; background:#6C707E;"></span>
+            <span style="font-size:10px; font-weight:500; color:#D9A21B; font-family:ui-monospace,Menlo,Consolas,monospace; animation:ssPulse 2s ease-in-out infinite;">1 waiting</span>
+          </sc-if>
+        </div>
+        <!-- permission card in situ -->
+        <sc-if value="{{ approvalPending }}" hint-placeholder-val="{{ true }}">
+          <div style="position:absolute; right:14px; bottom:14px; width:296px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.3); color:#fff; padding:8px; box-sizing:border-box;">
+            <div style="display:flex; align-items:center; gap:9px; padding:6px 8px 7px;">
+              <span style="flex:none; width:8px; height:8px; border-radius:50%; background:#D9A21B; box-shadow:0 0 0 3px rgba(217,162,27,.15);"></span>
+              <span style="flex:1; font-size:12px; font-weight:600;">Codex wants to run a command</span>
+              <span style="flex:none; font-size:12px; color:#6C707E; cursor:pointer; padding:0 2px;">✕</span>
+            </div>
+            <div style="margin:0 8px 8px; padding:9px 11px; background:#232427; border-radius:7px;">
+              <div style="font-size:11px; line-height:15px; color:#E8EAEE; font-family:ui-monospace,Menlo,Consolas,monospace; margin-bottom:8px; word-break:break-all;">npm publish --access public</div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="font-size:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace;">bridge · 14m in</span>
+                <span style="width:2px; height:2px; border-radius:50%; background:#6C707E;"></span>
+                <span style="font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 5px;">codex</span>
+                <span style="font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 5px;">⎇ main</span>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; padding:0 8px 8px;">
+              <button onClick="{{ approve }}" style="flex:none; height:28px; padding:0 12px; background:#1F8039; border:none; border-radius:6px; color:#fff; font-size:12px; font-weight:500; cursor:pointer;">Allow</button>
+              <button onClick="{{ approveAlways }}" style="flex:none; height:28px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#E8EAEE; font-size:12px; cursor:pointer;">Always</button>
+              <div style="flex:1;"></div>
+              <span onClick="{{ deny }}" style="font-size:11px; color:#6C707E; cursor:pointer; text-decoration:underline; text-decoration-color:rgba(255,255,255,.2); text-underline-offset:3px;">Deny</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:7px; margin:0 8px 8px; padding:6px 9px; background:#232427; border:1px dashed rgba(255,255,255,.14); border-radius:6px;">
+              <span style="flex:1; font-size:10px; color:#6C707E;">Answer instead — type a note…</span>
+              <span title="Snap a region as the answer" style="flex:none; font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.14); border-radius:4px; padding:1px 6px; cursor:pointer;">⌖ snap</span>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ approvalResolved }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; right:14px; bottom:14px; display:flex; align-items:center; gap:8px; padding:6px 10px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 6px 20px rgba(0,28,54,.28);">
+            <span style="width:8px; height:8px; border-radius:50%; background:{{ resolutionDot }};"></span>
+            <span style="font-size:11px; color:#E8EAEE;">{{ resolutionLabel }}</span>
+            <span style="font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">npm publish</span>
+            <span onClick="{{ resetApproval }}" style="font-size:10px; color:#6C707E; cursor:pointer; text-decoration:underline; text-decoration-color:rgba(255,255,255,.2); text-underline-offset:3px;">replay</span>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="flex:none; width:330px;">
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ momentNotes }}" as="w" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:13px 15px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ w.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ w.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- SECTION 2 — MERGE MODEL -->
+  <div data-screen-label="2 Merge model" style="margin-bottom:52px;">
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">2 · Agent sessions × working sessions — attach, don't merge</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:860px;">A working session is <span style="color:#27282E; font-weight:500;">attention</span> (warmth, dwell, a thread). An agent session is a <span style="color:#27282E; font-weight:500;">process</span> (SessionStart → Stop from the bridge). Different substances, so they never merge — an agent session <span style="color:#27282E; font-weight:500;">attaches</span> to the working session whose span it launched inside and whose cwd maps to the same thread. Working : agents = 1→N; agent : working = 0-or-1.</div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start;">
+    <!-- timeline diagram -->
+    <div style="flex:none; width:560px;">
+      <div style="width:560px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.3); padding:16px 18px 14px; box-sizing:border-box;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+          <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">11:02 — tracked from here</span>
+          <span style="font-size:9px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace;">now</span>
+        </div>
+        <!-- working session lane -->
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="flex:none; width:120px; font-size:10px; color:#E8EAEE; font-family:ui-monospace,Menlo,Consolas,monospace; text-align:right;">working session</span>
+          <div style="position:relative; flex:1; height:12px;">
+            <div style="position:absolute; left:0; right:0; top:5px; height:2px; background:rgba(255,255,255,.1);"></div>
+            <div style="position:absolute; left:8%; width:46%; top:4px; height:5px; border-radius:2px; background:#7A56D6; opacity:.85;"></div>
+            <div style="position:absolute; left:54%; width:12%; top:4px; height:5px; border-radius:2px; background:repeating-linear-gradient(90deg,#7A56D6 0 3px,transparent 3px 6px); opacity:.5;"></div>
+            <div style="position:absolute; left:66%; right:0; top:4px; height:5px; border-radius:2px; background:#7A56D6; opacity:.85;"></div>
+            <div style="position:absolute; left:8%; top:1px; width:2px; height:11px; background:#7A56D6;"></div>
+          </div>
+        </div>
+        <!-- agent lanes -->
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          <span style="flex:none; width:120px; font-size:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace; text-align:right;">claude · core</span>
+          <div style="position:relative; flex:1; height:10px;">
+            <div style="position:absolute; left:14%; width:28%; top:3px; height:4px; border-radius:2px; background:{{ agentHex }}; opacity:.85;"></div>
+            <span style="position:absolute; left:43%; top:-1px; font-size:8px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">▣ stop → fact</span>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          <span style="flex:none; width:120px; font-size:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace; text-align:right;">codex · bridge</span>
+          <div style="position:relative; flex:1; height:10px;">
+            <div style="position:absolute; left:36%; right:0; top:3px; height:4px; border-radius:2px; background:{{ agentHex }}; opacity:.85;"></div>
+            <span style="position:absolute; right:2px; top:-1px; width:6px; height:6px; border-radius:50%; border:1px solid {{ agentDim }}; animation:ssHalo 2.4s ease-out infinite;"></span>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="flex:none; width:120px; font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace; text-align:right;">gemini · docs</span>
+          <div style="position:relative; flex:1; height:10px;">
+            <div style="position:absolute; left:0; width:5%; top:3px; height:4px; border-radius:2px; background:#6C707E; opacity:.6;"></div>
+            <div style="position:absolute; left:0; width:5%; top:2px; height:6px; border:1px dashed rgba(255,255,255,.25); border-radius:3px; box-sizing:border-box;"></div>
+            <span style="position:absolute; left:7%; top:-1px; font-size:8px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">orphan — pre-track · seeds the candidate</span>
+          </div>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,.08); padding-top:9px; display:flex; align-items:center; gap:8px;">
+          <span style="width:7px; height:7px; border-radius:50%; background:#D9A21B;"></span>
+          <span style="font-size:10px; color:#D9A21B; font-family:ui-monospace,Menlo,Consolas,monospace;">12:04–12:11 you were in Slack</span>
+          <span style="font-size:10px; color:#A8ADBD;">— chip reads <span style="font-family:ui-monospace,Menlo,Consolas,monospace;">paused · 2 agents working</span>. Attention pauses; processes don't.</span>
+        </div>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">The violet lane is Session Sense, unchanged — dashes are warmth-decay pause. Agent lanes ride the registry. Attachment key: <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;">launch ts ∈ tracked span && cwd → thread id</span>. In the tab, the violet lane IS the group row — tap it and the session’s context card (goal · done · next) unfolds under the header, agents beneath it (see §1). This diagram is not one step of §5 — it is the whole day seen from underneath: the pre-track orphan is 9:40, lanes attaching are 10:05–11:30, the dashed pause is 12:30 (lunch), stop → fact is what lands at 14:30, and the lane ends feed the 15:00 save preview.</div>
+    </div>
+
+    <!-- rules -->
+    <div style="flex:none; width:330px;">
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ mergeRules }}" as="r" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- cardinality table -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Every case, resolved</div>
+      <div style="width:300px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:14px 16px; box-sizing:border-box;">
+        <sc-for list="{{ caseRows }}" as="t" hint-placeholder-count="4">
+          <div style="display:flex; align-items:flex-start; gap:10px; padding:8px 0; border-top:1px solid #E4E2DC;">
+            <span style="flex:none; width:96px; font-size:11px; font-weight:600; color:#27282E; line-height:14px;">{{ t.c }}</span>
+            <span style="flex:1; font-size:10px; line-height:14px; color:#6C707E;">{{ t.res }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- SECTION 1 — THE SESSIONS TAB -->
+  <div data-screen-label="1 Sessions tab" style="margin-bottom:12px;">
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">1 · The sessions tab — expanded HUD surface</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;">Clicking the collapsed bar (or the HUD's agent tab) opens the stack: one card per session, same anatomy everywhere. Waiting sorts to the top; done decays to a receipt row. <span style="color:#27282E; font-weight:500;">Click ⏵ jump on a card.</span> In §5 terms this is the "sessions tab" column at the 11:45 row — the permission-ask moment, when a waiting lane warms amber and sorts first — generalized to a day with two working sessions running.</div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start;">
+
+    <!-- the stack -->
+    <div style="flex:none; width:320px;">
+      <div style="width:320px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:12px; box-shadow:0 12px 36px rgba(0,28,54,.32); padding:10px; box-sizing:border-box; color:#fff;">
+        <div style="display:flex; align-items:center; gap:6px; padding:2px 4px 10px;">
+          <svg width="16" height="16" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          <span style="font-size:12px; font-weight:600; color:#E8EAEE;">Agents</span>
+          <span style="white-space:nowrap; font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ headline }}</span>
+          <div style="flex:1;"></div>
+          <span style="white-space:nowrap; flex-shrink:0; font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 4px; font-family:ui-monospace,Menlo,Consolas,monospace;" title="Claude usage — 5h window">5h 11%</span>
+          <span style="white-space:nowrap; flex-shrink:0; font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 4px; font-family:ui-monospace,Menlo,Consolas,monospace;" title="Claude usage — 7d window">7d 2%</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <sc-for list="{{ sessionGroups }}" as="g" hint-placeholder-count="2">
+          <div onClick="{{ g.toggle }}" title="Session context — goal, done, next" style="display:flex; align-items:center; gap:7px; padding:7px 4px 3px; cursor:pointer;">
+            <span style="flex:none; width:7px; height:7px; border-radius:50%; background:#7A56D6;"></span>
+            <span style="font-size:11px; font-weight:600; color:#E8EAEE; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ g.label }}</span>
+            <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap;">{{ g.meta }}</span>
+            <span style="flex:1; height:1px; background:rgba(255,255,255,.07);"></span>
+            <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:nowrap;">{{ g.elapsed }}</span>
+            <span style="flex:none; font-size:8px; color:#6C707E;">{{ g.chev }}</span>
+          </div>
+          <sc-if value="{{ g.showCard }}" hint-placeholder-val="{{ false }}">
+            <div style="margin:2px 0 2px 14px; padding:9px 11px; background:#232427; border-left:2px solid #7A56D6; border-radius:0 8px 8px 0;">
+              <div style="display:flex; gap:8px; margin-bottom:5px;"><span style="flex:none; width:34px; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">goal</span><span style="font-size:10.5px; line-height:14px; color:#E8EAEE;">{{ g.goal }}</span></div>
+              <div style="display:flex; gap:8px; margin-bottom:5px;"><span style="flex:none; width:34px; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">done</span><span style="font-size:10.5px; line-height:14px; color:#A8ADBD;">{{ g.done }}</span></div>
+              <div style="display:flex; gap:8px;"><span style="flex:none; width:34px; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">next</span><span style="font-size:10.5px; line-height:14px; color:#E8EAEE;">{{ g.next }}</span></div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:8px; padding-top:7px; border-top:1px solid rgba(255,255,255,.07);">
+                <span style="display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,.15); border-radius:5px; overflow:hidden; cursor:pointer;">
+                  <span style="font-size:10px; color:#fff; background:#1F8039; padding:2px 8px;">▶</span>
+                  <span style="font-size:10px; color:#E8EAEE; padding:2px 8px;">codex — bridge</span>
+                  <span title="Switch lane" style="font-size:9px; color:#6C707E; padding:2px 6px; border-left:1px solid rgba(255,255,255,.12);" style-hover="background:rgba(255,255,255,.08);">▾</span>
+                </span>
+                <span title="Call — voice agent on this session" style="font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.15); border-radius:5px; padding:2px 8px; cursor:pointer;" style-hover="background:rgba(255,255,255,.08);">📞</span>
+                <span title="Save now — distill to memory" style="font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.15); border-radius:5px; padding:2px 8px; cursor:pointer;" style-hover="background:rgba(255,255,255,.08);">⤓</span>
+              </div>
+            </div>
+          </sc-if>
+          <sc-for list="{{ g.sessions }}" as="s" hint-placeholder-count="2">
+            <div style="margin-left:14px; background:#232427; border:1px solid {{ s.border }}; border-radius:8px; padding:9px 10px; opacity:{{ s.opacity }};">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="position:relative; flex:none; width:12px; height:12px; display:flex; align-items:center; justify-content:center;">
+                  <sc-if value="{{ s.halo }}" hint-placeholder-val="{{ false }}"><span style="position:absolute; inset:0; border-radius:50%; border:1px solid {{ s.dotDim }}; animation:ssHalo 2.4s ease-out infinite;"></span></sc-if>
+                  <span style="width:7px; height:7px; border-radius:50%; background:{{ s.dot }};"></span>
+                </span>
+                <span style="flex:1; font-size:12px; font-weight:600; color:#E8EAEE; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ s.name }}</span>
+                <span style="flex:none; font-size:10px; color:{{ s.stateColor }}; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ s.stateLabel }}</span>
+                <span onClick="{{ s.jump }}" title="Jump to terminal" style="flex:none; width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:9px; color:#A8ADBD; border:1px solid rgba(255,255,255,.15); cursor:pointer;" style-hover="background:rgba(255,255,255,.08);">⏵</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; margin-top:7px; padding-left:20px; white-space:nowrap; overflow:hidden;">
+                <span style="font-size:10px; color:{{ s.toolColor }}; font-family:ui-monospace,Menlo,Consolas,monospace; overflow:hidden; text-overflow:ellipsis;">{{ s.toolLine }}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; margin-top:7px; padding-left:20px;">
+                <span style="white-space:nowrap; font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 5px;">{{ s.agent }}</span>
+                <span style="white-space:nowrap; font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 5px;">{{ s.model }}</span>
+                <span style="white-space:nowrap; font-size:10px; color:#A8ADBD; border:1px solid rgba(255,255,255,.12); border-radius:4px; padding:1px 5px;">⎇ {{ s.branch }}</span>
+                <div style="flex:1;"></div>
+                <span style="white-space:nowrap; font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ s.elapsed }}</span>
+              </div>
+            </div>
+          </sc-for>
+          </sc-for>
+          <!-- done receipt row -->
+          <div style="margin-left:14px; display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px dashed rgba(255,255,255,.12); border-radius:8px;">
+            <span style="flex:none; width:7px; height:7px; border-radius:50%; background:#6C707E; margin:0 2.5px;"></span>
+            <span style="flex:1; font-size:11px; color:#A8ADBD; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">gemini — docs · 3 files written</span>
+            <span style="font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">38m ago</span>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px; padding:9px 4px 2px;">
+          <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ jumpStatus }}</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">bridge ok · :9500</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- anatomy notes -->
+    <div style="flex:none; width:330px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Card anatomy — borrowed, not invented</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ anatomyNotes }}" as="r" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- wire map -->
+    <div style="flex:none; width:330px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">What each element rides on</div>
+      <div style="width:330px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:14px 16px; box-sizing:border-box;">
+        <sc-for list="{{ wireRows }}" as="t" hint-placeholder-count="6">
+          <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid #E4E2DC;">
+            <span style="flex:none; width:104px; font-size:11px; font-weight:600; color:#27282E;">{{ t.el }}</span>
+            <span style="flex:1; font-size:10px; line-height:14px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ t.wire }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Decision shape is Claude Code's <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;">hookSpecificOutput.decision.behavior</span> verbatim — the Claude adapter is a passthrough; every other agent maps onto the same frames.</div>
+    </div>
+  </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;agentAccent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#1F8039&quot;,&quot;options&quot;:[&quot;#3369D6&quot;,&quot;#7A56D6&quot;,&quot;#1F8039&quot;,&quot;#B3611C&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;docUrl&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;https://docs.google.com/document/d/1FwBRMwMi0g6w1tJ5o59_ptweeVNcvWAUQfmsdnhpqhM/edit?tab=t.0&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { approval: 'pending', jumped: null, openGroup: 0 };
+  journeys(agentHex) {
+    const S = (t) => ({ t, fg: '#A8ADBD', bg: 'transparent', bd: 'rgba(255,255,255,.14)', arrow: true }); // sinain does it
+    const U = (t) => ({ t, fg: '#0F1A12', bg: '#4CAF6E', bd: '#4CAF6E', arrow: true });                    // user taps
+    const R = (t) => ({ t, fg: '#E8EAEE', bg: 'rgba(255,255,255,.07)', bd: 'transparent', arrow: false }); // result
+    const A = (t) => ({ t, fg: agentHex, bg: 'transparent', bd: agentHex + '55', arrow: true });           // agent-side
+    const amber = '#D9A21B';
+    const H = (groupHeader, groupNote) => ({ groupHeader, groupNote, isFlow: false });
+    const F = (j) => ({ ...j, isFlow: true });
+    return [
+      H('Opening — once per session', '§4 · 9:40–9:52'),
+      F({ name: 'Getting tracked', cost: '1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'qualified hook → nudge → retro credit',
+        steps: [S('8 min engaged in Chrome — candidate, window pinned'), S('"Looks like: building the visa-app tracker" at a breakpoint'), U('Track'), R('context card forms · credit from 9:40')],
+        note: 'The only ask sinain ever initiates. Decline and the day still ends with the rung-1 Save Offer; launching an agent later re-seeds the same nudge (track + adopt in one).' }),
+      H('In the flow — repeated moves', '§4 · 10:05–14:30'),
+      F({ name: 'Changing rooms (Cowork → Design → IDE → GitHub)', cost: '0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'thread identity across apps',
+        steps: [U('just switch apps'), S('same thread recognized — session follows'), R('card and lanes intact in the new room')],
+        note: 'The journey\u2019s backbone. No re-tracking, no "new session?" — rooms are free because thread identity, not the app, is the session key.' }),
+      F({ name: 'Handing work to a lane — ▶ the unified control', cost: '1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'context card → rich seed → selected lane (new or live)',
+        steps: [U('▶ — sends to the selected lane, shown by name'), S('seed = context card: goal · done · next + doc + knowledge'), U('▾ to switch lane inline (optional)'), R('new lane opens — or a LIVE tracked lane gets it mid-run')],
+        note: 'One control instead of Chat + Hand to…: ▶ always hands off to the selected lane — a fresh chat (sidecar, Claude Desktop), a terminal agent, or an agent session already running, injected mid-run via its hook. The button wears the lane\u2019s name so the destination is never a surprise; ▾ switches it inline. One tap because tracking already paid the context cost.' }),
+      F({ name: 'Adding screen context (ROI)', cost: '1 drag + 1 tap', costColor: amber, costBorder: amber + '66', wire: 'ROI select → seed = region + card',
+        steps: [U('drag the broken screen region'), S('verb row on the selection: ▶ [lane] ▾ · Save'), U('▶ — sends to the named lane'), R('agent sees the region AND knows which build it is')],
+        note: 'Mid-journey the drag gets stronger for free: the seed carries the context card, so "this is broken" needs no explanation of what "this" is. ▶ wears the selected lane\u2019s name (a chat app, a terminal agent, or a live tracked session — injected mid-run); ▾ switches inline. The seed mechanic is identical for all of them.' }),
+      F({ name: 'Copy → enriched paste', cost: '0–1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'pasteboard watch → card frame',
+        steps: [U('⌘C an error, a passage, a snippet'), S('quiet "Enrich?" chip by the island'), U('tap (optional)'), R('paste into CC / Codex carries the session state')],
+        note: 'The cheapest handoff between the journey\u2019s AIs — copy was happening anyway; the chip just upgrades the paste. Ignored, it melts. Hooked agents (CC, Codex, Cursor) don\u2019t even need the chip: their hooks inject the situational frame automatically — the chip serves everything else (a web chat, a doc, an email). With two sessions running, the copy\u2019s SOURCE decides: the window you copied from maps to a thread, the thread to its session, and the chip names it — "enrich? · visa-app" — so a wrong guess is visible before the tap (tap the name to switch).' }),
+      F({ name: 'Calling the voice agent', cost: '1 tap · then talk', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'call verb → mic opens → card + lanes + screen',
+        steps: [U('tap Call — on the island or the verb row'), S('mic connects · agent already holds the card, lanes, screen'), U('"what did codex change?"'), R('conversational from here — or "hand it to Claude" out loud')],
+        note: 'Sinain never listens ambiently — the mic opens only on an explicit Call tap, and the island shows it hot until you hang up. One tap buys the whole conversation: once connected, every follow-up and any verb-row verb is free by voice.' }),
+      F({ name: 'AI on the situation happening NOW (call assist)', cost: '1 tap / hotkey', costColor: amber, costBorder: amber + '66', wire: 'live lane → screen + audio stream',
+        steps: [U('hold the eye (or hotkey) during the call'), S('live lane opens: hears the call, sees the screen, knows the card'), R('quiet suggestions ride the corner · voice or chat, your pick')],
+        note: 'Third selector: now. Drag = space, eye-tap = time, eye-hold = the live moment — a streaming lane instead of a seeded one, for situations that are still unfolding (a call, a demo, an interview). Ends the moment you release it from the island.' }),
+      H('Parallel — always running underneath', 'interrupt only for consent'),
+      F({ name: 'Agents working while you do something else', cost: '0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'registry → island counts · tool lines',
+        steps: [A('CC + Codex running through your testing, lunch, CI check'), S('island: "2 working" · tab: working sessions wrapping their agents'), R('finish → queued fact, silent')],
+        note: 'The parallel track never demands attention — it only keeps the glance truthful, from any room, paused or not. The tab is hierarchical: working sessions are the rows, agents nest inside them (2 agents can belong to 1 session) — you read your work first, the machinery second.' }),
+      F({ name: 'Good-to-go from the corner — or an answer', cost: '1 → 0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'PermissionRequest / question → /agent/approve + message',
+        steps: [A('a lane blocks: a permission — or a question'), S('corner card: "Codex wants to publish your package"'), U('Allow / Always — or reply: type · snap a region'), R('lane resumes, carrying your answer')],
+        note: 'The one legitimate interruption of the parallel track — and the only place its cost can shrink to 0 over the session. Not every ask is binary: the card takes a typed note or a region snap as the answer ("use THIS design"), sent down the same approve channel — no switching to the terminal to explain.' }),
+      F({ name: 'Away & coming back', cost: '0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'warmth pause/resume → graded digest',
+        steps: [U('leave — lunch, Slack, hours'), S('paused · island stays live · long away → one digest'), U('come back to any room'), R('card re-raises: what changed, what\u2019s next — or tap Call and ask "where were we?"')],
+        note: 'Leaving is free and so is returning: under ~2 min → nothing (a glance at Slack isn\u2019t a departure), 2–30 min → digest on the card if anything changed, hours → one notification. Never a stack of cards to clear. The zero-reading return costs one tap: Call, then "where were we?" gets the digest spoken, "anyone stuck?" gets the lanes.' }),
+      H('Closing — once per session', '§4 · ~15:00'),
+      F({ name: 'Saving the session', cost: '1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'decay/scene-cut → save → receipt · undo',
+        steps: [S('"Save this session? 4h 50m" — card previews WHAT: goal met · 6 facts · 4 agent runs · the doc · CI ✓'), U('Save'), R('receipt, editable · undo · "next" seeds tomorrow')],
+        note: 'Same verb as everywhere else — Save is the third verb of the row, here applied to the whole session. The offer card shows the distillation before the tap: what goes to memory (facts, decisions, agent outcomes), not a timer total. Walk away instead and the grace period auto-saves the same preview — the tap is offered, never owed.' }),
+    ];
+  }
+  journeysOld(agentHex) {
+    const S = (t) => ({ t, fg: '#A8ADBD', bg: 'transparent', bd: 'rgba(255,255,255,.14)', arrow: true }); // sinain does it
+    const U = (t) => ({ t, fg: '#0F1A12', bg: '#4CAF6E', bd: '#4CAF6E', arrow: true });                    // user taps
+    const R = (t) => ({ t, fg: '#E8EAEE', bg: 'rgba(255,255,255,.07)', bd: 'transparent', arrow: false }); // result
+    const A = (t) => ({ t, fg: agentHex, bg: 'transparent', bd: agentHex + '55', arrow: true });           // agent-side
+    const amber = '#D9A21B';
+    return [
+      { name: 'Detected session → agent launched on it', cost: '2 taps', costColor: amber, costBorder: amber + '66', wire: 'qualified hook → nudge · rich seed → sinain_roi',
+        steps: [S('8 min engaged — "Looks like: visa application" nudge raises'), U('Track'), S('context card forms: goal · done · next steps · seed'), U('Hand to Claude'), R('agent opens pre-loaded, lane attaches')],
+        note: 'The "Looks like you\u2019re doing X" nudge is the entry to this whole path: Track turns the guess into a context card (goal, what\u2019s done, next steps) — and "Hand to…" ships THAT card as the seed, so the agent starts on the next step, not on a description of the screen. No prompt written, no picker.' },
+      { name: 'Parallel agent needs a good-to-go', cost: '1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'PermissionRequest blocks → /agent/approve',
+        steps: [A('agent hits a gate, keeps context'), S('card raises in the corner: "Codex wants to publish your package"'), U('Allow'), R('agent resumes · card melts to receipt')],
+        note: 'Zero navigation — the card comes to the corner, invisible to screen share. The sessions tab is never the unblock path; it\u2019s only the overview. "Always" makes the next identical ask cost 0.' },
+      { name: 'Same ask, after "Always"', cost: '0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'stored rule → auto-resolve',
+        steps: [A('agent hits the same gate'), S('rule matches — auto-allowed'), R('notch flicks · receipt line only')],
+        note: 'The bar shows a brief tick instead of a count change; the wrap receipt lists what was auto-allowed, so trust stays auditable without ever interrupting.' },
+      { name: 'User launches an agent themselves', cost: '0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'SessionStart → registry → attach/seed',
+        steps: [A('SessionStart from the bridge'), S('attaches to tracked session — or seeds the candidate'), R('lane appears · nothing asked')],
+        note: 'Launching an agent is itself a strong session signal: if nothing is tracked yet, the orphan run feeds Session Sense and the one nudge covers both — track the session and adopt the run, together.' },
+      { name: 'Agent finishes while you\u2019re elsewhere', cost: '0 taps', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'Stop → receipt fact → wrap commit',
+        steps: [A('Stop, success'), S('queued as a fact on the session'), R('"codex published bridge v0.3" in the wrap receipt')],
+        note: 'Success never raises a card. Failure is the exception: one amber card with a plain claim and a single "Show me" verb that jumps to the terminal.' },
+      { name: 'Checking in on everything', cost: '0–1 tap', costColor: amber, costBorder: amber + '66', wire: 'registry counts → island / stack',
+        steps: [S('island reads "3 working"'), U('tap the island (optional)'), R('full stack · ⏵ jump per card')],
+        note: 'The glance is the product: counts at the notch answer "is anything stuck?" for free. The stack exists for the 1% of moments the glance isn\u2019t enough.' },
+      { name: 'Region → AI on it, right now', cost: '1 drag + 1 tap', costColor: amber, costBorder: amber + '66', wire: 'ROI select → rich seed → sinain_roi',
+        steps: [U('drag a region'), S('verb row appears on the selection: Chat · Hand to… · Save'), U('Chat'), R('agent opens pre-loaded on the region')],
+        note: 'The drag IS the context statement — no prompt. Same seed mechanic as delegation: region + OCR + situation digest + knowledge under a one-time id; works for the sidecar, Claude Desktop, or a terminal agent alike.' },
+      { name: 'AI on the last 30 minutes', cost: '2 taps', costColor: amber, costBorder: amber + '66', wire: 'T1 buffer → span seed → sinain_roi',
+        steps: [U('tap the eye'), S('same verb row, on time instead of space: Chat · Hand to… · Save — span slider defaults to "since you sat down"'), U('Chat'), R('agent opens holding the episode')],
+        note: 'The buffer was already recording, so "the last 30 minutes" is a selection, not a reconstruction — the temporal twin of the region drag. One verb row, two selectors: drag = space, eye = time.' },
+      { name: 'Coming back after a break', cost: '0–1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'warmth resume → context card re-raise',
+        steps: [S('you return to the thread — session auto-resumes'), S('context card re-raises: goal · where you left off · next step'), U('tap next step (optional)'), R('back in, oriented, nothing re-explained')],
+        note: 'The context card is the payoff of tracking: goals and next steps accrue on it during the session (each wrap distills them forward). Re-entry costs 0 — the card answers "where was I?" before the question forms; its verbs are the standard ones (⏵ jump to the lane, Call to ask), the next step itself is information, not a button.' },
+      { name: 'Just save the last 30 minutes', cost: '1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'span → save-manager → receipt · undo',
+        steps: [U('Save on the eye\u2019s verb row'), S('distills the span in the background'), R('receipt card: facts · entities · undo')],
+        note: 'Same verbs, third choice. No naming, no form — the receipt is editable after the fact, and undo keeps the tap safe. This is the manual twin of the wrap; rung 1\u2019s Save Offer is this exact flow with the tap moved to sinain.' },
+      { name: 'Copy something → enriched paste', cost: '0–1 tap', costColor: '#4CAF6E', costBorder: '#4CAF6E66', wire: 'pasteboard watch → seed on copy → enrich',
+        steps: [U('⌘C anywhere'), S('quiet chip near the island: "Enrich?" — with what sinain knows about the copied thing'), U('tap (optional)'), R('clipboard now carries text + context; paste anywhere')],
+        note: 'Copy is already the gesture — sinain never touches the clipboard without the tap. Enriched = the text plus source, situation, and matching knowledge, formatted for wherever it lands. Ignore the chip and nothing happened.' },
+    ];
+  }
+  phases(agentHex) {
+    const G = '#4CAF6E', AMB = '#D9A21B', N = '#6C707E', W = 'rgba(255,255,255,.25)';
+    const free = { taps: '0 taps', tapColor: G };
+    return [
+      { time: '9:40', name: 'Chrome — research', dot: N, state: 'idle → candidate', stateColor: '#A8ADBD', stateBorder: W, ...free,
+        sinain: 'A few pages on one topic; episode tracker accumulates. At ~8 engaged minutes the thread qualifies — window pinned back to 9:40.' },
+      { time: '9:52', name: 'Nudge', dot: AMB, state: 'prompted', stateColor: AMB, stateBorder: AMB + '66', taps: '1 tap · Track', tapColor: AMB,
+        sinain: 'At a micro-breakpoint: "Looks like: building the visa-app tracker — track this?" Accept = retroactive credit from 9:40.',
+        card: 'goal: ship visa-app MVP · done: research · next: formulate task' },
+      { time: '10:05', name: 'Claude Cowork — formulate, iterate', dot: agentHex, state: 'tracking', stateColor: G, stateBorder: G + '66', ...free,
+        sinain: 'New room, same thread. Cowork lane attaches (SessionStart, cwd→thread). Iterations append to the card\u2019s "done"; task statement becomes the goal.' },
+      { time: '10:40', name: 'Hand off → Claude Design', dot: agentHex, state: 'tracking', stateColor: G, stateBorder: G + '66', ...free,
+        sinain: 'User pastes/opens in Design; sinain witnesses the handoff (same artifacts on screen) — Design lane attaches, card gains "next: visual pass".' },
+      { time: '11:30', name: 'IDE — Claude Code + Codex + a Google Doc', dot: agentHex, state: 'tracking · 2 lanes', stateColor: G, stateBorder: G + '66', taps: '1–2 taps · Allow', tapColor: AMB,
+        sinain: 'Two terminal lanes attach. The doc opened in the room becomes card material — future seeds include it. Permission asks arrive at the corner; "Always" cuts repeats to 0.' },
+      { time: '12:30', name: 'Lunch', dot: N, state: 'paused · agents live', stateColor: '#A8ADBD', stateBorder: W, ...free,
+        sinain: 'Warmth decays → paused, but the island and sessions tab keep reporting live: "paused · 2 agents working". Anyone glancing at the notch — or opening the tab from another room — sees each lane\u2019s current tool line. Codex finishes mid-lunch → queued as a fact, silent.',
+        card: 'island while away: paused · 2 working · 0 waiting' },
+      { time: '13:55', name: '⌘C during the session', dot: agentHex, state: 'tracking', stateColor: G, stateBorder: G + '66', taps: '0–1 tap', tapColor: G,
+        sinain: 'User copies an error string / a doc passage. Quiet "Enrich?" chip slides out from the island\u2019s edge (never at the cursor — one message point): one tap and the clipboard carries the text plus its context-card frame — which build, which step, source app. Pasting into CC or Codex hands off context for free. Ignored, the chip melts away.' },
+      { time: '13:10', name: 'Back — manual testing + ROI', dot: agentHex, state: 'resumed', stateColor: G, stateBorder: G + '66', taps: '1 drag + 1 tap', tapColor: AMB,
+        sinain: 'Return auto-resumes; card re-raises: "codex done · CC editing · next: test the flow". A broken screen gets dragged → ▶ (the selected lane): the seed is the region PLUS the card, so the agent knows which build this is.',
+        card: 'while you were away: codex ✓ published bridge v0.3 · CC still editing' },
+      { time: '14:00', name: 'Design tweaks → another IDE round', dot: agentHex, state: 'tracking', stateColor: G, stateBorder: G + '66', ...free,
+        sinain: 'Same rooms revisited — nothing re-attaches, nothing re-asks. Each iteration folds into "done"; "next" stays current from tool activity.' },
+      { time: '14:30', name: 'GitHub — CI check', dot: agentHex, state: 'tracking', stateColor: G, stateBorder: G + '66', ...free,
+        sinain: 'CI page is a room too. Green run recorded as a fact. If the user walks away now, the away digest leads with it.' },
+      { time: '~15:00', name: 'Save', dot: AMB, state: 'ending → save', stateColor: AMB, stateBorder: AMB + '66', taps: '1 tap · Save', tapColor: AMB,
+        sinain: 'Sustained decay → "Save this session? 4h 50m" — the offer previews what\u2019s kept before the tap. Receipt is editable and undo-able; the card\u2019s "next" seeds tomorrow\u2019s re-entry.',
+        card: 'saving: goal met · 6 facts · 4 agent runs · design doc · CI ✓' },
+    ];
+  }
+  stepViz(agentHex) {
+    const G = '#4CAF6E', AMB = '#D9A21B', N = '#6C707E', V = '#7A56D6';
+    const mono = '#A8ADBD', none = 'none';
+    const fill = (t) => ({ t, fg: '#fff', bg: '#1F8039', bd: '#1F8039' });
+    const line = (t) => ({ t, fg: '#E8EAEE', bg: 'transparent', bd: 'rgba(255,255,255,.2)' });
+    const quiet = (t) => ({ t, fg: '#6C707E', bg: 'transparent', bd: 'transparent' });
+    return [
+      { time: '9:40', step: 'Chrome research', dot: N, anim: none, pill: 'eye', pillFg: mono },
+      { time: '9:52', step: 'Nudge → Track', dot: AMB, anim: 'ssPulse 2s ease-in-out infinite', pill: 'looks like…', pillFg: '#E8DCC0',
+        card: 'Looks like: visa-app tracker', cardDot: AMB, cardLines: ['engaged 12 min · chrome', 'credit starts at 9:40'], verbs: [fill('Track'), quiet('not now')] },
+      { time: '10:05', step: 'Cowork lane', dot: V, anim: none, pill: 'visa-app · 25m', pillFg: mono },
+      { time: '10:40', step: 'Design lane', dot: V, anim: none, pill: 'visa-app · 1 working', pillFg: mono },
+      { time: '11:30', step: 'IDE: CC + Codex', dot: agentHex, anim: 'ssHalo 2.4s ease-out infinite', pill: '2 working', pillFg: mono },
+      { time: '11:45', step: 'Permission ask', dot: AMB, anim: 'ssPulse 2s ease-in-out infinite', pill: '2 working · 1 waiting', pillFg: '#E8DCC0',
+        card: 'Codex wants to run a command', cardDot: AMB, cardLines: ['npm publish --access public', 'visa-app build · bridge · 14m'], verbs: [fill('Allow'), line('Always'), quiet('Deny')] },
+      { time: '12:30', step: 'Lunch', dot: N, anim: none, pill: 'paused · 2 working', pillFg: mono, dim: true },
+      { time: '13:10', step: 'Return', dot: V, anim: none, pill: 'back', pillFg: mono,
+        card: 'While you were away — 40m', cardDot: V, cardLines: ['codex ✓ published bridge v0.3', 'CC still editing · next: test the flow'], verbs: [line('⏵'), line('📞'), quiet('ok')] },
+      { time: '13:10', step: 'ROI drag', dot: V, anim: none, pill: 'visa-app · 2 working', pillFg: mono, roi: true },
+      { time: '13:55', step: '⌘C mid-session', dot: G, anim: none, pill: '2 working', pillFg: mono, chip: 'enrich? · visa-app' },
+      { time: '14:30', step: 'CI green', dot: V, anim: none, pill: 'visa-app · ✓ CI', pillFg: mono },
+      { time: '15:00', step: 'Save', dot: G, anim: none, pill: 'save?', pillFg: '#CDE8D4',
+        card: 'Save this session? 4h 50m', cardDot: G, cardLines: ['goal met · 6 facts · 4 agent runs', 'design doc · CI ✓ · undo after'], verbs: [fill('⤓ Save'), quiet('later')] },
+      { time: 'any', step: 'Live assist (eye-hold)', dot: '#E06C5B', anim: 'ssPulse 1.4s ease-in-out infinite', pill: '● live · call assist', pillFg: '#F2C4BC',
+        card: 'They asked about the timeline', cardDot: '#E06C5B', cardLines: ['your doc: MVP ships in Aug', 'CI went green this morning'], verbs: [line('tell me more'), quiet('end live')],
+        sub: '🗣 "The MVP is on track for August — CI went green this morning…"' },
+    ].map((r) => ({ cardBottom: '10px', ...r }));
+  }
+  surfaceRows(agentHex) {
+    const G = '#4CAF6E', AMB = '#D9A21B', N = '#6C707E', V = '#7A56D6';
+    const mono = '#A8ADBD', none = 'none';
+    const off = { hook: '—', hookColor: '#5A5D68' };
+    const noCard = { cardWhere: '— not yet formed', cardColor: '#5A5D68' };
+    const cardQuiet = { cardWhere: 'folded — under the tab\u2019s group header, one tap away', cardColor: mono };
+    return [
+      { time: '9:40', step: 'Chrome research', dot: N, anim: none, pill: 'eye · quiet', pillFg: mono, eye: 'floating or parked, dim green — watching locally, saying nothing', ...noCard, tab: 'empty state: "nothing tracked" · candidate forms silently underneath', ...off },
+      { time: '9:52', step: 'Nudge → Track', dot: AMB, anim: 'ssPulse 2s ease-in-out infinite', pill: 'looks like: visa-app…', pillFg: '#E8DCC0', eye: 'raises the nudge card at its corner; ✕ or ignore → eye goes quiet again', cardWhere: 'born on Track — appears once under the nudge as confirmation, then folds into the tab', cardColor: '#CDE8D4', tab: 'group row appears on Track: "visa-app tracker · 12m" — context card seeded, no lanes yet', ...off },
+      { time: '10:05', step: 'Cowork lane', dot: V, anim: none, pill: 'visa-app · 25m', pillFg: mono, eye: 'violet tracking ring · hover shows label + elapsed', ...cardQuiet, tab: 'group: 1 lane (cowork) · card "done" grows as iterations land', hook: 'SessionStart → inject card: goal · done · next', hookColor: agentHex },
+      { time: '10:40', step: 'Design lane', dot: V, anim: none, pill: 'visa-app · 1 working', pillFg: mono, eye: 'unchanged — room changes never move the eye', ...cardQuiet, tab: 'group: 2 lanes · handoff witnessed — card gains "next: visual pass"', hook: 'SessionStart → card + Cowork task statement', hookColor: agentHex },
+      { time: '11:30', step: 'IDE: CC + Codex', dot: agentHex, anim: 'ssHalo 2.4s ease-out infinite', pill: '2 working', pillFg: mono, eye: 'agent-blue halo breathes while lanes work · eye-hold = live lane, eye-tap = time verbs', ...cardQuiet, tab: 'group: 2 live lanes with tool lines · Google Doc registered as card material', hook: 'UserPromptSubmit → refresh: situation + doc digest', hookColor: agentHex },
+      { time: '11:45', step: 'Permission ask', dot: AMB, anim: 'ssPulse 2s ease-in-out infinite', pill: '2 working · 1 waiting', pillFg: '#E8DCC0', eye: 'raises the permission card at its corner — the ask comes to the eye, wherever it sits', cardWhere: 'quoted inside the ask ("which build") so the question needs no context read', cardColor: mono, tab: 'waiting lane sorts to top, amber border · corner card raised (Allow / Always / answer)', hook: 'on Allow → resume carries the answer', hookColor: agentHex },
+      { time: '12:30', step: 'Lunch', dot: N, anim: none, pill: 'paused · 2 working', pillFg: mono, eye: 'dims with the pause · keeps the working count in its ring', ...cardQuiet, tab: 'group dims to paused; lanes stay live with tool lines · codex finish → queued fact', ...off },
+      { time: '13:10', step: 'Return + ROI', dot: V, anim: none, pill: 'back · what changed ↓', pillFg: mono, eye: 'raises the re-entry card once · then the ROI drag\u2019s verb row on selection', cardWhere: 'RAISED at the eye\u2019s corner: away digest + next step as information — verbs are the real ones: ⏵ jump, Call, ✕', cardColor: '#CDE8D4', tab: 'card re-raises atop the group: away digest + next step', hook: 'ROI chat: seed = region + card (any AI, hooked or not)', hookColor: agentHex },
+      { time: '13:55', step: '⌘C mid-session', dot: G, anim: none, pill: 'enrich? · 2 working', pillFg: mono, eye: 'nothing — the chip rides the island, the eye stays quiet', cardWhere: 'is the enrichment: the chip wraps the copied text in the frame of the SOURCE window\u2019s session — and names it ("· visa-app"); tap the name to switch if two run in parallel', cardColor: mono, tab: 'unchanged — the chip rides the island only', hook: 'hooked lanes: paste already framed — chip is for the rest', hookColor: agentHex },
+      { time: '14:30', step: 'CI green', dot: V, anim: none, pill: 'visa-app · 4h 32m', pillFg: mono, eye: 'quiet violet · a small ✓ tick when the fact lands', ...cardQuiet, tab: 'CI result lands as a fact on the card · lanes idle out to receipts', hook: 'PreToolUse → next prompt carries "CI ✓ on main"', hookColor: agentHex },
+      { time: '15:00', step: 'Save', dot: G, anim: none, pill: 'save? goal met · 6 facts', pillFg: '#CDE8D4', eye: 'raises the save offer at its corner · after Save, back to quiet green', cardWhere: 'becomes the save preview — its goal/done/next distilled into what\u2019s kept; "next" survives for tomorrow', cardColor: '#CDE8D4', tab: 'save preview replaces the card: what\u2019s kept, editable · then group folds to a receipt', hook: 'Stop hooks close lanes → runs become receipt facts', hookColor: agentHex },
+      { time: 'any', step: 'Live assist', dot: '#E06C5B', anim: 'ssPulse 1.4s ease-in-out infinite', pill: '● live · call assist', pillFg: '#F2C4BC', eye: 'HELD → streaming lane opens; ring burns live-red until released · subtitles hang UNDER the island (one message point) captioning everything the agent speaks', cardWhere: 'streams as grounding — the agent hears the call, sees the screen, and knows the card', cardColor: mono, tab: 'live lane pins to the top of its group with a ● live badge · tool line becomes the live transcript · ends the moment you release', hook: 'streaming: audio + screen + card frames until hang-up', hookColor: agentHex },
+    ];
+  }
+  renderVals() {
+    const agentHex = this.props.agentAccent ?? '#3369D6';
+    const agentDim = agentHex + '80';
+    const G = '#1F8039', AMB = '#D9A21B', N = '#6C707E';
+    const a = this.state.approval;
+    const waiting = a === 'pending';
+    const mk = (name, agent, model, branch, toolLine, state, elapsed) => {
+      const isW = state === 'working', isWait = state === 'waiting';
+      return {
+        name, agent, model, branch, toolLine, elapsed,
+        stateLabel: state, stateColor: isW ? agentHex : isWait ? AMB : N,
+        dot: isW ? agentHex : isWait ? AMB : N, dotDim: agentDim, halo: isW,
+        toolColor: isWait ? '#E8DCC0' : '#A8ADBD',
+        border: isWait ? 'rgba(217,162,27,.4)' : 'rgba(255,255,255,.08)',
+        opacity: state === 'done' ? '.55' : '1',
+        jump: () => this.setState({ jumped: name }),
+      };
+    };
+    const sessions = [
+      waiting
+        ? mk('codex — bridge', 'codex', 'gpt-5.2', 'main', 'PermissionRequest · npm publish --access public', 'waiting', '14m')
+        : mk('codex — bridge', 'codex', 'gpt-5.2', 'main', 'Shell · npm publish --access public', 'working', '14m'),
+      mk('claude — sinain-core', 'claude', 'opus-4.5', 'agent-ingest', 'Edit · src/server.ts — /agent/approve', 'working', '26m'),
+      mk('claude — overlay', 'claude', 'sonnet-4.5', 'notch-bar', 'Edit · permission_banner.dart', 'working', '4m'),
+      mk('cursor — win-overlay', 'cursor', 'composer-2', 'win-port', 'beforeShellExecution · flutter build windows', 'working', '9m'),
+    ];
+    const momentNotes = [
+      { title: 'Same corner, same budget', body: 'A PermissionRequest raises the existing permission-banner anatomy — header dot, claim, ✕, evidence panel, verb row. Nothing new to learn; the tap resolves the held /agent/approve.' },
+      { title: 'The island IS the parked eye', body: 'Island mode exists only while the eye is parked at the notch — the little eye lives inside the bar (drag it out to unpark, and the counts fold back onto the floating eye\u2019s ring). Never both at once.' },
+      { title: 'Invisible to screen-share', body: 'The overlay window is sharingType .none — approval cards never appear in a recording or call. The event hub can\u2019t do this; the overlay can.' },
+      { title: 'Deny is quiet, Allow is loud', body: 'Allow is the one filled verb (Save green — it commits an action). Always is bordered; Deny is the quiet text affordance. Below the verbs, a dashed answer slot: type a note or ⌖ snap a region — for asks that aren\u2019t yes/no, the reply rides the same approve channel.' },
+    ];
+    const anatomyNotes = [
+      { title: 'Working sessions wrap agents', body: 'The stack is grouped by working session (violet dot — the thing YOU are doing), agent lanes nested inside; two agents can belong to one session. Within a group, waiting sorts first and warms its border amber; done decays to a dashed receipt row, then leaves.' },
+      { title: 'The context card lives under the header', body: 'Tap a working-session row and its context card unfolds right there — goal · done · next, with the verb row (▶ [lane] ▾ · 📞 call · ⤓ save). "Know more about a session" is one tap, in place; no separate detail screen.' },
+      { title: '⏵ jump, best-effort', body: 'Terminal jump keys off env captured at SessionStart (ITERM_SESSION_ID, TMUX_PANE, …). iTerm2 / Terminal / tmux first; the long tail falls back to app activation.' },
+      { title: 'Usage chips, not a gauge', body: '5h / 7d Claude windows as plain mono chips in the header — read from the OAuth usage endpoint, broadcast next to CostTracker. A number, not a dashboard.' },
+      { title: 'Agent accent is a state color', body: 'Blue marks agent-scoped liveness, as violet marks tracking and green marks saving. It never appears on anything the user can\u2019t act on.' },
+    ];
+    const wireRows = [
+      { el: 'session card', wire: 'POST /agent/event · SessionStart → registry → WS' },
+      { el: 'tool line', wire: 'PreToolUse / PostToolUse frames, normalized' },
+      { el: 'waiting state', wire: 'PermissionRequest · bridge blocks on /agent/approve' },
+      { el: 'Allow / Deny', wire: 'resolves approve → {behavior: allow|deny|always}' },
+      { el: 'collapsed bar', wire: 'registry counts over existing overlay WS' },
+      { el: 'usage chips', wire: 'api.anthropic.com/api/oauth/usage · keychain token' },
+      { el: '⏵ jump', wire: 'env at SessionStart → AppleScript / tmux / AX' },
+    ];
+    const groupsData = [
+      { label: 'agent ingest — sinain-core', meta: 'working session · 2 agents', elapsed: '2h 14m', sessions: [sessions[0], sessions[1]],
+        goal: 'ship /agent/event ingest + approve loop', done: 'event schema · registry · CC hook adapter', next: 'publish bridge, then end-to-end approve test' },
+      { label: 'overlay — notch bar', meta: 'working session · 2 agents', elapsed: '48m', sessions: [sessions[2], sessions[3]],
+        goal: 'island counts + permission card in the corner', done: 'collapsed bar renders live counts', next: 'wire banner verbs to /agent/approve' },
+    ];
+    const sessionGroups = groupsData.map((g, i) => ({
+      ...g,
+      showCard: this.state.openGroup === i,
+      chev: this.state.openGroup === i ? '▾' : '▸',
+      toggle: () => this.setState({ openGroup: this.state.openGroup === i ? -1 : i }),
+    }));
+    return {
+      sessionGroups,
+      docUrl: this.props.docUrl ?? 'https://docs.google.com/document/d/1FwBRMwMi0g6w1tJ5o59_ptweeVNcvWAUQfmsdnhpqhM/edit?tab=t.0',
+      agentHex, agentDim,
+      approvalPending: waiting,
+      approvalResolved: !waiting,
+      resolutionLabel: a === 'allow' ? 'Allowed' : a === 'always' ? 'Always allowed' : 'Denied',
+      resolutionDot: a === 'deny' ? '#B3361C' : G,
+      approve: () => this.setState({ approval: 'allow' }),
+      approveAlways: () => this.setState({ approval: 'always' }),
+      deny: () => this.setState({ approval: 'deny' }),
+      resetApproval: () => this.setState({ approval: 'pending' }),
+      sessions,
+      headline: waiting ? '3 working · 1 waiting' : '4 working',
+      jumpStatus: this.state.jumped ? '⏵ jumped to ' + this.state.jumped : '4 sessions',
+      momentNotes, anatomyNotes, wireRows,
+      journeys: this.journeys(agentHex),
+      dayTapTotal: '6',
+      surfaceRows: this.surfaceRows(agentHex),
+      stepViz: this.stepViz(agentHex),
+      surfaceNotes: [
+        { title: 'One state, three renderings', body: 'Island, tab, and hook payload all derive from the same session record. The island compresses it to a count, the tab unfolds it to lanes, the hook serializes it for the agent — never three sources of truth.' },
+        { title: 'Hooked agents skip the handoff flows', body: 'SessionStart hook injects the context card; UserPromptSubmit / PreToolUse hooks refresh it with the live situation (what\u2019s on screen, latest CI, the doc). The Enrich chip and verb row exist for un-hookable AIs — for hooked lanes the same payload arrives silently.' },
+        { title: 'The island only escalates for consent', body: 'Its states are: quiet eye → violet tracking → blue working counts → amber waiting/pulse → green save preview. Amber is the only state that wants a tap; everything else is glanceable and ignorable.' },
+        { title: 'The eye raises; the card has one home', body: 'The eye is the messenger: all cards (nudge, permission, re-entry, save) raise at ITS corner, wherever it\u2019s parked. The context card\u2019s home is the tab — folded under its group header, one tap away. It surfaces proactively exactly once per pattern: at birth, quoted in asks, on long-away return, and as the save preview.' },
+        { title: 'The tab never surprises', body: 'Its structure is constant all day: working-session groups, context card under the header, lanes inside. Steps only change values (counts, tool lines, amber borders) — the user never meets a new layout mid-journey.' },
+      ],
+      phases: this.phases(agentHex),
+      stateRows: [
+        { s: 'candidate', d: 'thread engaged 8 min — window pinned retroactively; nothing shown yet' },
+        { s: 'tracking', d: 'Track tapped. Context card exists: goal · done · next. All later rooms inherit it' },
+        { s: 'paused', d: 'attention left (Slack, lunch). Warmth decays; agents keep running through it' },
+        { s: 'resumed', d: 'attention back on any room of the thread — auto, card re-raises if enough changed' },
+        { s: 'away', d: 'paused > reminder threshold with agents still live → one digest ping, never a stack' },
+        { s: 'waiting', d: 'an attached agent blocks on a permission — session-level state, amber everywhere' },
+        { s: 'wrap', d: 'sustained decay or scene-cut → "Wrap up? 4h 50m" → receipt: facts, agent runs, undo' },
+      ],
+      journeyNotes: [
+        { title: 'The session follows the work', body: 'Chrome, Cowork, Design, IDE, GitHub are rooms of one thread — same projectKey family, so switching apps never splits the session or re-asks anything.' },
+        { title: 'Handoffs are witnessed, not performed', body: 'User hands artifacts between AIs inside their own apps; sinain\u2019s job is that each lane attaches and each output lands on the context card — so the NEXT handoff (the ROI, the doc) can ship the card instead of an explanation.' },
+        { title: 'State of all AIs = one glance', body: 'Island counts answer "anyone stuck?"; the stack answers "who\u2019s doing what"; the context card answers "where are WE". Three questions, three surfaces, zero digging.' },
+        { title: 'Away-ness is graded, status never sleeps', body: 'While paused, the island and sessions tab stay live — "paused · 2 working" with each lane\u2019s tool line. Under ~2 min → nothing. Past ~2 min the focus has shifted — return gets the digest if anything changed. Hours → one notification: "codex done, CC waiting on you, CI green". Never a pile of cards.' },
+        { title: 'Copy is a handoff gesture', body: 'A ⌘C inside a tracked session is probably headed to another AI. The Enrich chip rides the session: one optional tap wraps the copied text in the context-card frame, so pasting into any lane carries the state across for free.' },
+      ],
+      frictionRules: [
+        { title: 'A tap is consent, never navigation', body: 'The only things a user ever presses are Track, a delegation verb, Allow/Deny, and Wrap. Opening panels, finding sessions, composing prompts — all zero-tap, done by sinain or skipped entirely.' },
+        { title: 'The context is already composed', body: 'Delegation reuses the ROI rich-seed mechanic: episode digest + on-screen text + knowledge stored under a one-time id, pulled by the agent via MCP. The user never writes a prompt or pastes anything.' },
+        { title: 'Plain claims, evidence demoted', body: 'The card headline is a verb a non-tech user can judge: "Codex wants to publish your package". The raw command lives in the evidence panel below — glanceable, ignorable, never required reading.' },
+        { title: '"Always" converts taps to zero', body: 'Every Allow offers Always. Each Always permanently removes one interruption class — the budget shrinks with use. Deny stays quiet and costs the same single tap.' },
+        { title: 'Failure is the only loud ending', body: 'Success commits silently into the wrap receipt. Only a failed or stuck agent raises a card — so raised cards stay rare enough to always deserve the glance.' },
+        { title: 'One verb row, two selectors, one ▶', body: 'Everything the user initiates is select-then-verb: drag selects space (a region), the eye selects time (a span). Both surface the same row: ▶ [lane] ▾ · 📞 · ⤓ (pictograms; ▶ keeps the lane name — the one thing that must stay legible). ▶ always hands the seed to the selected lane — a chat app, a terminal agent, or a tracked session already running (injected mid-run via hook); it wears the lane\u2019s name, and ▾ switches it inline without leaving the selection. Same control, same seed, any AI. Voice is entered by an explicit Call tap (never ambient listening); eye-hold streams the live moment for situations still unfolding.' },
+        { title: 'Existing gestures, never new ones', body: 'Copy, drag, glance — flows attach to gestures the user already makes. Sinain adds a quiet verb at the moment of the gesture, never a new ritual to memorize.' },
+        { title: 'The context card is the session', body: 'Track doesn\u2019t start a timer, it starts a card: goal, done, next steps — updated as the session runs. Every path reuses it: delegation ships it as the seed, re-entry re-raises it, the wrap distills it into the receipt. One artifact, four flows.' },
+      ],
+      mergeRules: [
+        { title: 'Attention vs. process', body: 'A working session is warmth and dwell on a thread; an agent session is a SessionStart→Stop lifecycle. They never merge into one record — the agent run attaches as a lane on the working session.' },
+        { title: 'Attachment is inferred, never asked', body: 'Launch timestamp inside the tracked span + cwd resolving to the same thread id. No extra nudge, no picker — the agent run is evidence, not a question.' },
+        { title: 'Orphans seed, they don\u2019t force', body: 'An agent run with no tracked session still has its episode (T1 stream). It doesn\u2019t auto-track — launching an agent is a strong signal, so it feeds the candidate detector; the usual nudge decides.' },
+        { title: 'Credit stays honest', body: 'Agent runtime is not user attention. The violet span credits your time; agent lanes run through your pauses. At wrap, each finished run commits as a receipt fact — "codex published bridge v0.3".' },
+      ],
+      caseRows: [
+        { c: 'Agent inside tracked span', res: 'attaches as a lane; Stop → receipt fact; approvals count to this session' },
+        { c: 'Agent, nothing tracked', res: 'orphan run · registry only; seeds a Session Sense candidate on the cwd\u2019s thread' },
+        { c: 'Working, no agents', res: 'plain Session Sense — nothing changes, no agent lane rendered' },
+        { c: 'Agent outlives the wrap', res: 'lane detaches at commit; remainder becomes an orphan run (may seed the next session)' },
+        { c: 'Two sessions, same cwd', res: 'impossible — thread id is the session key; the second launch joins the first' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
+

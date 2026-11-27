@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  @keyframes dcShimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  @keyframes dcHalo { 0% { transform: scale(0.7); opacity: 0.45; } 70% { transform: scale(2.4); opacity: 0; } 100% { opacity: 0; } }
+  @keyframes dcWave { 0%,100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <!-- ===================== TITLE ===================== -->
+  <div style="margin-bottom:40px; max-width:920px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · Deliberate capture · v2 wireframes</div>
+    <div style="font-size:24px; font-weight:600; line-height:28px; margin-bottom:10px; color:#27282E;">The actions move into the eye. One button remains: Call sinain.</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">v2 replaces the v1 action row: <span style="color:#27282E; font-weight:500;">Save · Call AI · Enrich</span> live in the eye's existing right-click menu, keeping the overlay at its calmest. The single always-visible control is <span style="color:#27282E; font-weight:500;">Call sinain</span> — a live voice call with the agent (ARSinain call-bridge), seeded with your last N minutes. The minutes chooser gains a <span style="color:#27282E; font-weight:500;">slider</span> alongside the presets. Companion to <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;">Deliberate Capture.dc.html</span> — everything not shown here (Timeline, nudges, forgetting, edge states) is unchanged from v1.</div>
+  </div>
+
+  <!-- ===================== SECTION 0 — CALL AI, SPLIT ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">0 · New — "Call AI" has two meanings</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;"><span style="color:#27282E; font-weight:500;">Hand off</span> — the brief goes to an agent of your choice (Claude Code, ChatGPT, …) as text, via the MCP facade. <span style="color:#27282E; font-weight:500;">Voice call</span> — the same brief seeds a live call with sinain's voice agent. Same range, same brief composer, same redaction pass — only the transport differs. And the destination picker is <span style="color:#27282E; font-weight:500;">one shared control</span>: the same SEND TO row appears in every gesture's card — Call, Enrich, and any future story — so choosing a target is learned once. Two ways to surface it:</div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:26px;">
+
+    <!-- Option A: split at the menu -->
+    <div style="flex:none; width:440px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">A · Split in the menu — two verbs</div>
+      <div style="position:relative; width:440px; height:300px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <!-- eye -->
+        <div style="position:absolute; right:16px; top:34px;">
+          <svg width="22" height="22" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+        </div>
+        <!-- menu -->
+        <div style="position:absolute; right:196px; top:68px; width:198px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 12px 36px rgba(0,28,54,.32); color:#fff; padding:5px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px;"><span style="flex:1; font-size:12px; color:#E8EAEE; font-weight:500;">Save last…</span><span style="font-size:11px; color:#6C707E;">›</span></div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px; background:rgba(255,255,255,.06);"><span style="flex:1; font-size:12px; color:#fff; font-weight:500;">Hand off to…</span><span style="font-size:11px; color:#6C707E;">›</span></div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px;">
+            <span style="flex:1; font-size:12px; color:#E8EAEE; font-weight:500;">Call sinain</span>
+            <span style="display:flex; align-items:center; gap:2px; height:10px;">
+              <span style="width:2px; height:10px; border-radius:1px; background:#3369D6;"></span><span style="width:2px; height:6px; border-radius:1px; background:#3369D6;"></span><span style="width:2px; height:9px; border-radius:1px; background:#3369D6;"></span>
+            </span>
+            <span style="font-size:11px; color:#6C707E;">›</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px;"><span style="flex:1; font-size:12px; color:#E8EAEE; font-weight:500;">Enrich clipboard</span><span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">"x-ratelim…"</span></div>
+          <div style="height:1px; background:rgba(255,255,255,.07); margin:4px 6px;"></div>
+          <div style="display:flex; align-items:center; gap:9px; padding:7px 10px;"><span style="flex:1; font-size:12px; color:#6C707E;">Feed mode · Ticker · …</span></div>
+        </div>
+        <!-- submenu: agents -->
+        <div style="position:absolute; right:14px; top:96px; width:176px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 12px 36px rgba(0,28,54,.32); color:#fff; padding:5px; box-sizing:border-box;">
+          <sc-for list="{{ agentTargets }}" as="a" hint-placeholder-count="4">
+            <div style="display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px; background:{{ a.bg }};">
+              <span style="flex:none; width:14px; height:14px; border-radius:4px; background:{{ a.chip }}; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:#1E1F22;">{{ a.glyph }}</span>
+              <span style="flex:1; font-size:12px; color:#E8EAEE;">{{ a.label }}</span>
+              <sc-if value="{{ a.hint }}" hint-placeholder-val="{{ true }}"><span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ a.hint }}</span></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">Two honest verbs.</span> "Hand off to…" opens the agent list (last used remembered, MCP-registered agents auto-listed); "Call sinain" — with the waveform mark — is unmistakably a voice call. Both then open the same range chooser. Cost: the menu grows by one item.</div></sc-if>
+    </div>
+
+    <!-- Option B: destination inside the chooser -->
+    <div style="flex:none; width:310px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">B · One item, destination in the chooser</div>
+      <div style="width:310px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.26); color:#fff; padding:8px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px 9px;">
+          <svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#3369D6" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#3369D6"></path></svg>
+          <span style="font-size:12px; font-weight:600;">Call AI on…</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:15px; font-weight:600; color:#3369D6; font-family:ui-monospace,Menlo,Consolas,monospace;">30 min</span>
+        </div>
+        <!-- mini slider (static) -->
+        <div style="padding:0 10px 6px;">
+          <div style="position:relative; height:18px;">
+            <div style="position:absolute; left:0; right:0; top:7px; height:4px; border-radius:2px; background:rgba(255,255,255,.09);"></div>
+            <div style="position:absolute; left:0; top:7px; height:4px; border-radius:2px; background:#3369D6; width:22%; opacity:.75;"></div>
+            <div style="position:absolute; top:2px; left:calc(22% - 3px); width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.5);"></div>
+          </div>
+        </div>
+        <!-- destination picker -->
+        <div style="padding:2px 10px 4px;">
+          <div style="font-size:9px; letter-spacing:.05em; color:#6C707E; font-weight:600; margin-bottom:6px;">SEND TO</div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <sc-for list="{{ destRows }}" as="d" hint-placeholder-count="3">
+              <div style="display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:7px; background:{{ d.bg }}; border:1px solid {{ d.border }};">
+                <span style="flex:none; width:14px; height:14px; border-radius:4px; background:{{ d.chip }}; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:#1E1F22;">{{ d.glyph }}</span>
+                <span style="flex:1; font-size:11px; color:{{ d.color }};">{{ d.label }}</span>
+                <span style="flex:none; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ d.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="margin:8px 10px 4px; padding:8px 11px; background:#232427; border-radius:7px;">
+          <div style="font-size:9px; letter-spacing:.05em; color:#6C707E; font-weight:600; margin-bottom:3px;">SINAIN WILL KNOW</div>
+          <div style="font-size:11px; line-height:15px; color:#D6DAE3;">IntelliJ, Chrome, mic · redacted before it leaves</div>
+        </div>
+        <div style="display:flex; gap:7px; padding:6px 10px 8px;">
+          <button style="flex:1; height:28px; background:#3369D6; border:none; border-radius:6px; color:#fff; font-size:12px; font-weight:500; cursor:pointer;">Call on 30 min</button>
+          <button style="height:28px; padding:0 11px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#A8ADBD; font-size:12px; cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">One entry point, richer card.</span> Range + destination in one gesture; the confirm verb follows the pick ("Call on 30 min" vs "Hand off 30 min"). The same row anatomy recurs in every card (see Enrich, right) — remembered per gesture, so Enrich can default to sinain-fast while Call AI defaults to your last agent.</div></sc-if>
+    </div>
+
+    <!-- enrich with same destination row -->
+    <div style="flex:none; width:290px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Enrich — same SEND TO row</div>
+      <div style="width:290px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.26); color:#fff; padding:8px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px 6px;">
+          <svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          <span style="font-size:12px; font-weight:600;">Enrich clipboard</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">last 10 min</span>
+        </div>
+        <div style="margin:0 10px 8px; padding:6px 9px; background:#232427; border-radius:6px;">
+          <span style="font-size:10px; color:#D6DAE3; font-family:ui-monospace,Menlo,Consolas,monospace;">"x-ratelimit-remaining-tokens"</span>
+        </div>
+        <div style="padding:0 10px 4px;">
+          <div style="font-size:9px; letter-spacing:.05em; color:#6C707E; font-weight:600; margin-bottom:6px;">SEND TO</div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <sc-for list="{{ enrichDests }}" as="d" hint-placeholder-count="3">
+              <div style="display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:7px; background:{{ d.bg }}; border:1px solid {{ d.border }};">
+                <span style="flex:none; width:14px; height:14px; border-radius:4px; background:{{ d.chip }}; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:#1E1F22;">{{ d.glyph }}</span>
+                <span style="flex:1; font-size:11px; color:{{ d.color }};">{{ d.label }}</span>
+                <span style="flex:none; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ d.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex; gap:7px; padding:8px 10px 8px;">
+          <button style="flex:1; height:28px; background:{{ accentHex }}; border:none; border-radius:6px; color:#fff; font-size:12px; font-weight:500; cursor:pointer;">Enrich</button>
+          <button style="height:28px; padding:0 11px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#A8ADBD; font-size:12px; cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Identical row anatomy, different defaults: Enrich defaults to <span style="color:#27282E; font-weight:500;">sinain-fast</span> (the ≤1s burst path — picking an external agent trades the latency budget for your agent's context). Default is remembered per gesture.</div></sc-if>
+    </div>
+
+    <!-- shared brief strip -->
+    <div style="flex:none; width:250px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Same brief, two transports</div>
+      <div style="width:250px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:14px 16px; box-sizing:border-box;">
+        <sc-for list="{{ transportSteps }}" as="t" hint-placeholder-count="4">
+          <div style="display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid #E4E2DC;">
+            <span style="flex:none; width:8px; height:8px; border-radius:{{ t.r }}; background:{{ t.color }};"></span>
+            <span style="flex:1; font-size:11px; line-height:14px; color:#27282E;">{{ t.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">The fork happens <span style="color:#27282E; font-weight:500;">after</span> composition and redaction — the consent story is identical whichever way the brief travels. Recommendation: <span style="color:#27282E; font-weight:500;">A</span> — a voice call is a big enough act to deserve its own verb.</div></sc-if>
+    </div>
+
+  </div>
+
+  <!-- ===================== SECTION 1 — WHAT MOVED ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">1 · What moved, and why</div>
+  <div style="display:flex; gap:22px; align-items:stretch; margin-bottom:52px;">
+    <div style="flex:none; width:400px; background:#F7F8FA; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:18px 20px; box-sizing:border-box;">
+      <div style="font-size:11px; font-weight:600; letter-spacing:.06em; color:#6C707E; margin-bottom:12px;">V1 · ACTION ROW ON THE HUD</div>
+      <sc-for list="{{ movedFrom }}" as="s" hint-placeholder-count="3">
+        <div style="display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid #E4E2DC;">
+          <span style="flex:none; width:8px; height:8px; border-radius:2px; background:{{ s.color }};"></span>
+          <span style="flex:1; font-size:12px; color:#27282E;">{{ s.label }}</span>
+          <span style="flex:none; font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:#6C707E;">{{ s.tag }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="flex:none; align-self:center; color:#6C707E;">
+      <svg width="34" height="18" viewBox="0 0 34 18" fill="none" stroke="#6C707E" stroke-width="1.5"><path d="M2 9h28M24 3l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="flex:none; width:400px; background:#1E1F22; border-radius:10px; box-shadow:0 4px 24px rgba(0,28,54,.18); padding:18px 20px; box-sizing:border-box; color:#fff;">
+      <div style="font-size:11px; font-weight:600; letter-spacing:.06em; color:#6C707E; margin-bottom:12px;">V2 · EYE MENU + ONE BUTTON</div>
+      <sc-for list="{{ movedTo }}" as="s" hint-placeholder-count="3">
+        <div style="display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid rgba(255,255,255,.07);">
+          <span style="flex:none; width:8px; height:8px; border-radius:2px; background:{{ s.color }};"></span>
+          <span style="flex:1; font-size:12px; color:#E8EAEE;">{{ s.label }}</span>
+          <span style="flex:none; font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:#6C707E;">{{ s.tag }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ===================== SECTION 2 — THE EYE MENU ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">2 · The eye's context menu</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:800px;">Right-click on the eye — the menu that already exists gains one new group. Save and Call AI open the chooser (§3); Enrich fires immediately on the clipboard, fixed 10-min context. No new gesture to learn.</div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:52px;">
+
+    <!-- context on desktop -->
+    <div style="flex:none; width:430px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">In place — right-click the eye</div>
+      <div style="position:relative; width:430px; height:370px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:18px;"><div style="height:9px; width:50%; background:#DFE1E5; border-radius:3px; margin-bottom:13px;"></div><div style="height:8px; width:86%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div><div style="height:8px; width:74%; background:#EBECF0; border-radius:3px;"></div></div>
+        <!-- the eye, top-right -->
+        <div style="position:absolute; right:16px; top:36px; width:30px; height:30px; display:flex; align-items:center; justify-content:center;">
+          <svg width="22" height="22" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+        </div>
+        <!-- the menu -->
+        <div style="position:absolute; right:20px; top:72px; width:224px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 12px 36px rgba(0,28,54,.32); color:#fff; padding:5px; box-sizing:border-box;">
+          <sc-for list="{{ eyeMenu }}" as="m" hint-placeholder-count="8">
+            <div style="display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:6px; background:{{ m.bg }};">
+              <span style="flex:1; font-size:12px; color:{{ m.color }}; font-weight:{{ m.weight }};">{{ m.label }}</span>
+              <sc-if value="{{ m.hint }}" hint-placeholder-val="{{ true }}"><span style="flex:none; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ m.hint }}</span></sc-if>
+              <sc-if value="{{ m.chev }}" hint-placeholder-val="{{ true }}"><span style="flex:none; font-size:11px; color:#6C707E;">›</span></sc-if>
+            </div>
+            <sc-if value="{{ m.divider }}" hint-placeholder-val="{{ true }}"><div style="height:1px; background:rgba(255,255,255,.07); margin:4px 6px;"></div></sc-if>
+          </sc-for>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">The new group sits above the existing controls. <span style="color:#27282E; font-weight:500;">Enrich shows the clipboard's head</span> inline so the target is unambiguous before firing. Save last… / Call AI on… carry the ›, meaning "opens the chooser".</div></sc-if>
+    </div>
+
+    <!-- menu anatomy -->
+    <div style="flex:none; width:330px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Why the menu, not a row</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ menuWhy }}" as="w" hint-placeholder-count="3">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:13px 15px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ w.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ w.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===================== SECTION 3 — CHOOSER + SLIDER ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">3 · The chooser — presets + slider, shared by Save and Call AI</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:820px;">One card, opened from either menu item. Preset chips are the fast path; the slider underneath picks any N in 5-min steps. Coverage, latency, and cost update live from free window data. The confirm button says what it does: <span style="color:#27282E; font-weight:500;">Save 45 min</span> or <span style="color:#27282E; font-weight:500;">Call on 45 min</span>. Try the slider —</div>
+
+  <div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:52px;">
+
+    <!-- interactive chooser -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Save variant <span style="font-weight:400; color:#6C707E; font-size:11px; font-family:ui-monospace,Menlo,Consolas,monospace;">interactive</span></div>
+      <div style="width:300px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.26); color:#fff; padding:8px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px 9px;">
+          <svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          <span style="font-size:12px; font-weight:600;">Save last…</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:15px; font-weight:600; color:{{ sliderColor }}; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ sliderLabel }}</span>
+        </div>
+        <div style="display:flex; gap:5px; padding:0 10px 10px;">
+          <sc-for list="{{ sliderChips }}" as="c" hint-placeholder-count="4">
+            <span onClick="{{ c.pick }}" style="flex:1; text-align:center; font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:{{ c.color }}; background:{{ c.bg }}; border:1px solid {{ c.border }}; border-radius:5px; padding:4px 0; cursor:pointer;">{{ c.label }}</span>
+          </sc-for>
+        </div>
+        <div style="padding:2px 10px 4px; position:relative;">
+          <div style="position:relative; height:22px;">
+            <div style="position:absolute; left:0; right:0; top:9px; height:4px; border-radius:2px; background:rgba(255,255,255,.09);"></div>
+            <div style="position:absolute; right:0; width:17%; top:9px; height:4px; border-radius:0 2px 2px 0; background:rgba(229,109,23,.3);"></div>
+            <div style="position:absolute; left:0; top:9px; height:4px; border-radius:2px; background:{{ sliderColor }}; width:{{ sliderPct }}; opacity:.75;"></div>
+            <sc-for list="{{ sliderTicks }}" as="t" hint-placeholder-count="4">
+              <div style="position:absolute; top:7px; width:2px; height:8px; border-radius:1px; background:rgba(255,255,255,.25); left:{{ t }};"></div>
+            </sc-for>
+            <input type="range" min="5" max="120" step="5" value="{{ sliderN }}" onChange="{{ onSlider }}" style="position:absolute; inset:0; width:100%; margin:0; opacity:0.011; cursor:pointer;">
+            <div style="position:absolute; top:4px; width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.5); left:{{ sliderThumb }}; pointer-events:none;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:2px;">
+            <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">5 min</span>
+            <span style="font-size:9px; color:#E56D17; font-family:ui-monospace,Menlo,Consolas,monospace;">quota edge</span>
+          </div>
+        </div>
+        <div style="margin:6px 10px 4px; padding:9px 11px; background:#232427; border-radius:7px;">
+          <div style="font-size:9px; letter-spacing:.05em; color:#6C707E; font-weight:600; margin-bottom:4px;">COVERS</div>
+          <div style="font-size:11px; line-height:15px; color:#D6DAE3; margin-bottom:8px;">{{ sliderCovers }}</div>
+          <div style="display:flex; gap:14px;">
+            <span style="font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">~{{ sliderLat }}</span>
+            <span style="font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">~{{ sliderCost }}</span>
+            <sc-if value="{{ sliderWarn }}" hint-placeholder-val="{{ false }}"><span style="font-size:10px; color:#E56D17; font-family:ui-monospace,Menlo,Consolas,monospace;">⚠ splits into 2 calls</span></sc-if>
+          </div>
+        </div>
+        <div style="display:flex; gap:7px; padding:6px 10px 8px;">
+          <button style="flex:1; height:28px; background:{{ accentHex }}; border:none; border-radius:6px; color:#fff; font-size:12px; font-weight:500; cursor:pointer;">Save {{ sliderLabel }}</button>
+          <button style="height:28px; padding:0 11px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#A8ADBD; font-size:12px; cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- call variant -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Call AI variant — same card</div>
+      <div style="width:300px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.26); color:#fff; padding:8px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px 9px;">
+          <svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#3369D6" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#3369D6"></path></svg>
+          <span style="font-size:12px; font-weight:600;">Call AI on…</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:15px; font-weight:600; color:#3369D6; font-family:ui-monospace,Menlo,Consolas,monospace;">30 min</span>
+        </div>
+        <div style="display:flex; gap:5px; padding:0 10px 10px;">
+          <sc-for list="{{ callChips }}" as="c" hint-placeholder-count="4">
+            <span style="flex:1; text-align:center; font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:{{ c.color }}; background:{{ c.bg }}; border:1px solid {{ c.border }}; border-radius:5px; padding:4px 0;">{{ c.label }}</span>
+          </sc-for>
+        </div>
+        <div style="padding:2px 10px 4px;">
+          <div style="position:relative; height:22px;">
+            <div style="position:absolute; left:0; right:0; top:9px; height:4px; border-radius:2px; background:rgba(255,255,255,.09);"></div>
+            <div style="position:absolute; left:0; top:9px; height:4px; border-radius:2px; background:#3369D6; width:22%; opacity:.75;"></div>
+            <div style="position:absolute; top:4px; left:calc(22% - 3px); width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.5);"></div>
+          </div>
+        </div>
+        <div style="margin:6px 10px 4px; padding:9px 11px; background:#232427; border-radius:7px;">
+          <div style="font-size:9px; letter-spacing:.05em; color:#6C707E; font-weight:600; margin-bottom:4px;">SINAIN WILL KNOW</div>
+          <div style="font-size:11px; line-height:15px; color:#D6DAE3; margin-bottom:8px;">IntelliJ, Chrome, mic · brief composed &amp; redacted before the call connects</div>
+          <div style="display:flex; gap:14px;">
+            <span style="font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">~1.5s to brief</span>
+            <span style="font-size:10px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">~$0.03</span>
+          </div>
+        </div>
+        <div style="display:flex; gap:7px; padding:6px 10px 8px;">
+          <button style="flex:1; height:28px; background:#3369D6; border:none; border-radius:6px; color:#fff; font-size:12px; font-weight:500; cursor:pointer;">Call on 30 min</button>
+          <button style="height:28px; padding:0 11px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#A8ADBD; font-size:12px; cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Identical anatomy, blue accent, one honest difference: instead of COVERS it says <span style="color:#27282E; font-weight:500;">SINAIN WILL KNOW</span> — this range becomes the call's seeded context, so the label is a consent statement.</div></sc-if>
+    </div>
+
+    <!-- slider rationale -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Slider rules</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ sliderRules }}" as="r" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===================== SECTION 4 — CALL SINAIN ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">4 · Call sinain — the one button</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;">A live voice conversation with the agent (ARSinain call-bridge, WebRTC), hands-free with barge-in. The button is the only always-visible action on the HUD. Click → chooser (how much context) → brief composed &amp; redacted → connected. Nothing from the call persists unless followed by a save — same consent boundary.</div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start; margin-bottom:52px;">
+
+    <!-- resting -->
+    <div style="flex:none; width:320px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Resting — on the HUD</div>
+      <div style="position:relative; width:320px; height:200px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:16px;"><div style="height:9px; width:50%; background:#DFE1E5; border-radius:3px; margin-bottom:12px;"></div><div style="height:8px; width:84%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div><div style="height:8px; width:72%; background:#EBECF0; border-radius:3px;"></div></div>
+        <div style="position:absolute; right:12px; bottom:12px; display:flex; align-items:center; gap:8px; padding:7px 12px 7px 9px; background:#2B2D30; border:1px solid rgba(255,255,255,.12); border-radius:10px; box-shadow:0 6px 20px rgba(0,28,54,.28); cursor:pointer;">
+          <svg width="16" height="16" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          <span style="font-size:12px; font-weight:500; color:#E8EAEE;">Call sinain</span>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">One labeled button earns its persistent footprint because it's the product's front door. Everything else waits in the eye's menu.</div></sc-if>
+    </div>
+
+    <!-- connecting -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Connecting — brief first, then audio</div>
+      <div style="width:300px; background:#1E1F22; border:1px solid rgba(51,105,214,.4); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.24); color:#fff; padding:14px 16px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px;">
+          <div style="position:relative; width:16px; height:16px; flex:none; display:flex; align-items:center; justify-content:center;">
+            <div style="position:absolute; inset:0; border-radius:50%; border:1px solid rgba(51,105,214,.5); animation:dcHalo 2.2s ease-out infinite;"></div>
+            <svg width="16" height="16" viewBox="0 0 30 30" style="position:relative;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#3369D6" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#3369D6"></path></svg>
+          </div>
+          <span style="font-size:12px; font-weight:600;">Calling sinain · 30 min of context</span>
+        </div>
+        <sc-for list="{{ connectSteps }}" as="s" hint-placeholder-count="3">
+          <div style="display:flex; align-items:center; gap:9px; padding:6px 0;">
+            <span style="flex:none; width:14px; text-align:center; font-size:10px; color:{{ s.color }};">{{ s.mark }}</span>
+            <span style="flex:1; font-size:11px; color:{{ s.textColor }};">{{ s.label }}</span>
+            <span style="flex:none; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ s.time }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">The brief is composed and redacted <span style="color:#27282E; font-weight:500;">before</span> audio connects — the checklist makes the privacy order visible, not just fast.</div></sc-if>
+    </div>
+
+    <!-- live call chip -->
+    <div style="flex:none; width:320px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Live — a call chip, not a window</div>
+      <div style="position:relative; width:320px; height:200px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:16px;"><div style="height:9px; width:50%; background:#DFE1E5; border-radius:3px; margin-bottom:12px;"></div><div style="height:8px; width:84%; background:#EBECF0; border-radius:3px;"></div></div>
+        <div style="position:absolute; right:12px; bottom:12px; width:250px; background:#1E1F22; border:1px solid rgba(51,105,214,.45); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.34); padding:10px 12px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:8px;">
+            <svg width="15" height="15" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#3369D6" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#3369D6"></path></svg>
+            <!-- waveform -->
+            <div style="display:flex; align-items:center; gap:2px; height:14px;">
+              <div style="width:3px; height:14px; border-radius:1px; background:#3369D6; animation:dcWave 0.9s ease-in-out infinite;"></div>
+              <div style="width:3px; height:14px; border-radius:1px; background:#3369D6; animation:dcWave 0.9s ease-in-out 0.15s infinite;"></div>
+              <div style="width:3px; height:14px; border-radius:1px; background:#3369D6; animation:dcWave 0.9s ease-in-out 0.3s infinite;"></div>
+              <div style="width:3px; height:14px; border-radius:1px; background:#3369D6; animation:dcWave 0.9s ease-in-out 0.45s infinite;"></div>
+            </div>
+            <div style="flex:1;"></div>
+            <span style="font-size:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace;">02:41</span>
+          </div>
+          <div style="font-size:11px; line-height:15px; color:#D6DAE3; margin-bottom:9px;">"…the quota edge you hit is per-minute, so capping the range at 100 solves it without map-reduce."</div>
+          <div style="display:flex; gap:6px;">
+            <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:5px; color:#A8ADBD; font-size:11px; cursor:pointer;">Mute</button>
+            <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:5px; color:#A8ADBD; font-size:11px; cursor:pointer;">Save call</button>
+            <div style="flex:1;"></div>
+            <button style="flex:none; height:24px; padding:0 12px; background:#B3361C; border:none; border-radius:5px; color:#fff; font-size:11px; font-weight:500; cursor:pointer;">End</button>
+          </div>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Stays in the HUD idiom — a chip with live captions, barge-in implied by the waveform. <span style="color:#27282E; font-weight:500;">Save call</span> promotes the conversation + its range to memory; End discards, same as a summon.</div></sc-if>
+    </div>
+
+  </div>
+
+  <!-- ===================== SECTION 5 — CALL EDGES ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">5 · Call edge states</div>
+  <div style="display:flex; gap:16px; flex-wrap:wrap; max-width:1000px;">
+    <sc-for list="{{ callEdges }}" as="e" hint-placeholder-count="4">
+      <div style="flex:none; width:312px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:14px 16px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;"><span style="font-size:11px; color:{{ e.color }};">{{ e.glyph }}</span><span style="font-size:13px; font-weight:600; color:#27282E;">{{ e.title }}</span></div>
+        <div style="font-size:12px; line-height:16px; color:#6C707E;">{{ e.body }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;showAnnotations&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot; },
+  &quot;accent&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;Ring green&quot;, &quot;options&quot;: [&quot;Ring green&quot;, &quot;Ring blue&quot;, &quot;Amber&quot;], &quot;tsType&quot;: &quot;string&quot; }
+}">
+class Component extends DCLogic {
+  state = { sliderN: 45 };
+  renderVals() {
+    const accentName = this.props.accent ?? 'Ring green';
+    const accMap = { 'Ring green': '#1F8039', 'Ring blue': '#3369D6', 'Amber': '#E56D17' };
+    const borderMap = { 'Ring green': 'rgba(31,128,57,0.5)', 'Ring blue': 'rgba(51,105,214,0.5)', 'Amber': 'rgba(229,109,23,0.5)' };
+    const accentHex = accMap[accentName] || '#1F8039';
+    const accentBorder = borderMap[accentName] || 'rgba(31,128,57,0.5)';
+    const G = '#1F8039', A = '#E56D17', B = '#3369D6', N = '#6C707E';
+
+    // §0 call-ai split
+    const agentTargets = [
+      { label: 'Claude Code', glyph: 'C', chip: '#D97757', bg: 'rgba(255,255,255,.06)', hint: 'last used' },
+      { label: 'ChatGPT', glyph: 'G', chip: '#8FC9A8', bg: 'transparent' },
+      { label: 'Cursor', glyph: 'Cu', chip: '#A8ADBD', bg: 'transparent' },
+      { label: 'Copy brief', glyph: '⧉', chip: '#CDD0D6', bg: 'transparent', hint: 'any agent' },
+    ];
+    const destRows = [
+      { label: 'Sinain — voice call', glyph: '◉', chip: '#7FA7E8', bg: 'rgba(51,105,214,0.14)', border: 'rgba(51,105,214,0.5)', color: '#fff', note: 'live' },
+      { label: 'Claude Code', glyph: 'C', chip: '#D97757', bg: 'transparent', border: 'rgba(255,255,255,0.08)', color: '#A8ADBD', note: 'MCP' },
+      { label: 'ChatGPT', glyph: 'G', chip: '#8FC9A8', bg: 'transparent', border: 'rgba(255,255,255,0.08)', color: '#A8ADBD', note: 'MCP' },
+    ];
+    const enrichDests = [
+      { label: 'Sinain — instant answer', glyph: '◉', chip: '#8FC9A8', bg: 'rgba(31,128,57,0.14)', border: 'rgba(31,128,57,0.5)', color: '#fff', note: '≤1s' },
+      { label: 'Claude Code', glyph: 'C', chip: '#D97757', bg: 'transparent', border: 'rgba(255,255,255,0.08)', color: '#A8ADBD', note: 'MCP' },
+      { label: 'ChatGPT', glyph: 'G', chip: '#8FC9A8', bg: 'transparent', border: 'rgba(255,255,255,0.08)', color: '#A8ADBD', note: 'MCP' },
+    ];
+    const transportSteps = [
+      { label: 'Range picked (chooser / slider)', color: G, r: '2px' },
+      { label: 'Brief composed from the window', color: G, r: '2px' },
+      { label: 'Redaction pass — before anything leaves', color: G, r: '2px' },
+      { label: 'Hand off → agent, as text (MCP)', color: '#D97757', r: '50%' },
+      { label: 'Call → sinain voice agent (WebRTC)', color: B, r: '50%' },
+    ];
+
+    // §1 what moved
+    const movedFrom = [
+      { label: 'Save · Call AI · Build context — chip on the HUD', color: A, tag: 'retired' },
+      { label: 'Three placements debated (Q1)', color: A, tag: 'resolved' },
+      { label: 'Chip competes with content for glance space', color: A, tag: 'cost' },
+    ];
+    const movedTo = [
+      { label: 'Save / Call AI / Enrich → eye right-click menu', color: G, tag: 'existing gesture' },
+      { label: 'One visible button: Call sinain', color: G, tag: 'front door' },
+      { label: 'Minutes slider inside the chooser card', color: G, tag: 'new' },
+    ];
+
+    // §2 eye menu
+    const item = (label, o = {}) => ({ label, color: '#E8EAEE', weight: 400, bg: 'transparent', ...o });
+    const eyeMenu = [
+      item('Save last…', { weight: 500, chev: true }),
+      item('Call AI on…', { weight: 500, chev: true }),
+      item('Enrich clipboard', { weight: 500, hint: '"x-ratelimit-rem…"', divider: true }),
+      item('Feed mode', { hint: '✓' }),
+      item('Ticker mode'),
+      item('Hide overlay', { divider: true }),
+      item('Open Timeline', { chev: true }),
+      item('Pause capture'),
+    ];
+    const menuWhy = [
+      { title: 'Zero new footprint', body: 'The overlay stays exactly as glanceable as today — the menu gesture already exists; v1\u2019s Q1 (row placement) dissolves.' },
+      { title: 'Labels can breathe', body: 'Menu items afford full verbs and live hints (the clipboard head on Enrich, ✓ on the active mode) that a chip row never could.' },
+      { title: 'The trade: discoverability', body: 'Right-click is hidden knowledge. Mitigation: onboarding points at the eye, and the Call button anchors attention on the same corner.' },
+    ];
+
+    // §3 slider (interactive, same math as v1)
+    const sliderN = this.state.sliderN;
+    const warn = sliderN > 100;
+    const near = sliderN > 90;
+    const sliderColor = warn ? '#E56D17' : (near ? '#D9A21B' : G);
+    const pctOf = (n) => ((n - 5) / 115 * 100);
+    const sliderThumb = 'calc(' + pctOf(sliderN).toFixed(1) + '% - ' + (pctOf(sliderN) / 100 * 14).toFixed(1) + 'px)';
+    const coverSteps = [
+      [5, 'IntelliJ'],
+      [12, 'IntelliJ, Chrome'],
+      [25, 'IntelliJ, Chrome, mic'],
+      [50, 'IntelliJ, Chrome, mic, Slack'],
+      [80, 'IntelliJ, Chrome, mic, Slack, Figma'],
+      [999, 'IntelliJ, Chrome, mic, Slack, Figma, Zoom'],
+    ];
+    const sliderCovers = coverSteps.find(([cap]) => sliderN <= cap)[1];
+    const sliderLat = (0.75 + sliderN * 0.026).toFixed(1) + 's';
+    const sliderCost = '$' + (0.004 + sliderN * 0.00075).toFixed(2);
+    const presetNs = [5, 15, 30, 60];
+    const sliderChips = presetNs.map(n => {
+      const on = n === sliderN;
+      return {
+        label: n + 'm',
+        color: on ? '#fff' : '#A8ADBD',
+        bg: on ? 'rgba(31,128,57,0.25)' : '#232427',
+        border: on ? accentBorder : 'rgba(255,255,255,0.08)',
+        pick: () => this.setState({ sliderN: n }),
+      };
+    });
+    const sliderTicks = presetNs.map(n => pctOf(n).toFixed(1) + '%');
+    const callChips = presetNs.map(n => {
+      const on = n === 30;
+      return {
+        label: n + 'm',
+        color: on ? '#fff' : '#A8ADBD',
+        bg: on ? 'rgba(51,105,214,0.28)' : '#232427',
+        border: on ? 'rgba(51,105,214,0.55)' : 'rgba(255,255,255,0.08)',
+      };
+    });
+    const sliderRules = [
+      { title: 'Presets stay the fast path', body: 'Chips are one click; the slider is the escape hatch in the same card — no extra surface.' },
+      { title: '5-min steps, detents at presets', body: 'Ticks mark 5/15/30/60; the thumb snaps to steps so the coverage string stays honest.' },
+      { title: 'Live, free estimates', body: 'Coverage from window titles, latency and cost extrapolated from the benchmark curve — no LLM call to render.' },
+      { title: 'Amber warns, never blocks', body: 'Past ~90 min the readout turns amber; past 100 it says "splits into 2 calls". The quota edge is information, not a wall.' },
+    ];
+
+    // §4 connect steps
+    const connectSteps = [
+      { mark: '✓', color: G, textColor: '#D6DAE3', label: 'Brief composed from last 30 min', time: '1.4s' },
+      { mark: '✓', color: G, textColor: '#D6DAE3', label: 'Redaction pass · 2 items masked', time: '0.1s' },
+      { mark: '◌', color: B, textColor: '#A8ADBD', label: 'Connecting audio (WebRTC)…', time: '' },
+    ];
+
+    // §5 call edges
+    const callEdges = [
+      { glyph: '🎙', color: A, title: 'Mic already in use (meeting)', body: 'Call starts text-first: captions and typed input in the chip; audio joins when the mic frees up. Never grabs a device mid-meeting.' },
+      { glyph: '⇅', color: B, title: 'Offline / bridge unreachable', body: 'Falls back to the local text agent with the same seeded brief; the button label says "Chat with sinain" while degraded.' },
+      { glyph: '◔', color: N, title: 'Less history than requested', body: 'Chooser caps at what exists — "only 8 min so far" — and the call is seeded with exactly that.' },
+      { glyph: '⊘', color: N, title: 'Hidden mode', body: 'The button hides with the HUD; Call AI on… stays reachable from the eye in the menu bar, same chooser.' },
+    ];
+
+    return {
+      showAnnotations: this.props.showAnnotations !== false,
+      accentHex, accentBorder,
+      agentTargets, destRows, transportSteps, enrichDests,
+      movedFrom, movedTo,
+      eyeMenu, menuWhy,
+      sliderN,
+      sliderLabel: sliderN + ' min',
+      sliderColor,
+      sliderPct: pctOf(sliderN).toFixed(1) + '%',
+      sliderThumb,
+      sliderChips, sliderTicks, sliderCovers, sliderLat, sliderCost,
+      sliderWarn: warn,
+      onSlider: (e) => this.setState({ sliderN: parseInt(e.target.value, 10) }),
+      callChips, sliderRules,
+      connectSteps, callEdges,
+    };
+  }
+}
+</script>
+</body>
+</html>

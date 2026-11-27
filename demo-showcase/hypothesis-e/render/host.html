@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;background:#0a0a0a;overflow:hidden}#root{position:fixed;inset:0}</style>
+<script src="./vendor/react.production.min.js"></script>
+<script src="./vendor/react-dom.production.min.js"></script>
+<script src="./vendor/babel.min.js"></script>
+</head><body><div id="root"></div><script>
+window.__ready=false; window.__err=null;
+async function boot(){try{
+  const load=async(f)=>{const src=await(await fetch(f)).text();const out=Babel.transform(src,{presets:['react'],filename:f}).code;(0,eval)(out)};
+  await load('/engine/animations.jsx'); await load('../sinain-hp-e-video.jsx');
+  const cut=new URLSearchParams(location.search).get('cut')==='20'?'20':'60';
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(window.SinainHPEVideo,{cut}));
+  window.__ready=true;
+}catch(e){window.__err=String(e&&e.stack||e);document.body.innerText=window.__err}}
+boot();
+window.__seek=(t)=>{const svg=document.querySelector('[data-om-exportable-video-with-duration-secs]');if(!svg)return false;svg.dispatchEvent(new CustomEvent('data-om-seek-to-time-frame',{detail:{time:t,sync:true}}));return true};
+</script></body></html>
+

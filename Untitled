@@ -1,0 +1,1417 @@
+sofia.kolchanova@DE-UNIT-2050 PycharmProjects % npx @geravant/sinain@latest start
+Need to install the following packages:
+@geravant/sinain@1.29.9
+Ok to proceed? (y) y
+
+[start] Preflight checks...
+[start] ✓ node v25.2.1
+[start] ✓ python3 3.13.5
+[start] ✓ overlay: pre-built app
+[start] ✓ port 9500 free
+
+[start] Existing config found at /Users/sofia.kolchanova/.sinain/.env — skipping wizard. (Use --setup to re-configure.)
+[start] Installing sinain-core dependencies...
+npm warn config production Use `--omit=dev` instead.
+npm warn deprecated prebuild-install@7.1.3: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+
+added 97 packages, and audited 98 packages in 15s
+
+22 packages are looking for funding
+ run `npm fund` for details
+
+4 vulnerabilities (1 low, 1 moderate, 1 high, 1 critical)
+
+To address all issues, run:
+ npm audit fix
+
+Run `npm audit` for details.
+[start] ✓ sinain-core dependencies installed
+[start] Installing sinain-mcp-server dependencies...
+npm warn config production Use `--omit=dev` instead.
+
+added 93 packages, and audited 94 packages in 3s
+
+30 packages are looking for funding
+ run `npm fund` for details
+
+found 0 vulnerabilities
+[start] ✓ sinain-mcp-server dependencies installed
+[start] Starting sinain-core...
+[core]    [config] loaded /Users/sofia.kolchanova/.sinain/.env
+[core]    [2026-06-24T08:34:37.288Z] [core] sinain-core starting...
+[core]    [2026-06-24T08:34:37.288Z] [core] versions: core=1.0.0 dmg=source build=source node=v25.2.1
+[core]    [config] loaded agents config from /Users/sofia.kolchanova/.sinain/agents.json
+[core]    [2026-06-24T08:34:37.290Z] [core] port: 9500
+[core]    [2026-06-24T08:34:37.290Z] [core] audio: device=BlackHole 2ch cmd=screencapturekit chunk=5000ms
+[core]    [2026-06-24T08:34:37.290Z] [core] mic: enabled=false device=default cmd=sox
+[core]    [2026-06-24T08:34:37.290Z] [core] transcription: model=google/gemini-2.5-flash
+[core]    [2026-06-24T08:34:37.290Z] [core] agent: model=openai/gpt-oss-120b:free debounce=6000ms max=60000ms
+[core]    [2026-06-24T08:34:37.290Z] [core] escalation: mode=rich cooldown=30000ms stale=90000ms
+[core]    [2026-06-24T08:34:37.290Z] [core] ⚠ idle messages ON (ESCALATION_STALE_MS=90000) — proactive chat turns on silence CONSUME API TOKENS each tick; set ESCALATION_STALE_MS=0 to disable
+[core]    [2026-06-24T08:34:37.290Z] [core] openclaw: ws= http=
+[core]    [2026-06-24T08:34:37.290Z] [core] situation: /Users/sofia.kolchanova/.openclaw/workspace/SITUATION.md
+[core]    [2026-06-24T08:34:37.290Z] [core] tracing: enabled=true dir=/Users/sofia.kolchanova/.sinain-core/traces
+[core]    [2026-06-24T08:34:37.290Z] [core] learning: enabled=true dir=/Users/sofia.kolchanova/.sinain-core/feedback
+[core]    [2026-06-24T08:34:37.290Z] [core] privacy: mode=standard
+[core]    [2026-06-24T08:34:37.290Z] [embedding] loading Xenova/all-MiniLM-L6-v2 (background)...
+[core]    [2026-06-24T08:34:37.538Z] [web-db] web.db ready at /Users/sofia.kolchanova/.sinain/memory/web.db (schema v2)
+[core]    [2026-06-24T08:34:37.539Z] [local-curation] memory: /Users/sofia.kolchanova/.sinain/memory
+[core]    [2026-06-24T08:34:37.539Z] [local-curation] scripts: /Users/sofia.kolchanova/.npm/_npx/e08dc53e3c4b23f9/node_modules/@geravant/sinain/sinain-memory
+[core]    [2026-06-24T08:34:37.539Z] [local-curation] scripts available: true
+[core]    [2026-06-24T08:34:37.628Z] [entity-cache] loaded 0 entity names
+[core]    [2026-06-24T08:34:37.628Z] [local-curation] periodic curation started (every 30 min)
+[core]    [2026-06-24T08:34:37.630Z] [openclaw] device identity: afd492767db7…
+[core]    [2026-06-24T08:34:37.630Z] [core] region-slm lane ON: model=qwen2.5:3b debounce=500ms endpoint=http://localhost:11434
+[core]    [2026-06-24T08:34:37.658Z] [transcribe] initialized: backend=openrouter model=google/gemini-2.5-flash language=auto
+[core]    [2026-06-24T08:34:37.658Z] [core] bareagent register: chat=[sinain] terminal=[claude,openclaude,codex,goose,junie,aider] current=sinain → lanes esc=sinain term=openclaude
+[core]    [2026-06-24T08:34:37.658Z] [core] roster pre-populated from agents.json: sinain,claude,openclaude,codex,goose,junie,aider
+[core]    [2026-06-24T08:34:37.658Z] [core] starting KG daemon: python3 /Users/sofia.kolchanova/.npm/_npx/e08dc53e3c4b23f9/node_modules/@geravant/sinain/sinain-core/src/../../sinain-memory/kg_daemon.py
+[core]    [2026-06-24T08:34:37.663Z] [server] listening on http://127.0.0.1:9500 (HTTP + WS, epoch=mqrtht1x-llch)
+[core]    [2026-06-24T08:34:37.664Z] [agent] loop started (debounce=6000ms, max=60000ms, cooldown=10000ms, model=openai/gpt-oss-120b:free)
+[core]    [2026-06-24T08:34:37.664Z] [core] auto-starting system audio pipeline...
+[core]    [2026-06-24T08:34:37.664Z] [audio] starting capture: device=BlackHole 2ch cmd=screencapturekit rate=16000 gain=20dB
+[core]    [2026-06-24T08:34:37.664Z] [audio] spawning: /Users/sofia.kolchanova/.sinain/sck-capture/sck-capture --sample-rate 16000 --channels 1 --screen-dir /Users/sofia.kolchanova/.sinain/capture --fps 4 --scale 1 --pin-display
+[core]    [2026-06-24T08:34:37.667Z] [core] system audio pipeline started
+[core]    [2026-06-24T08:34:37.667Z] [audio] capture started
+[core]    [2026-06-24T08:34:37.667Z] [core] ✓ sinain-core running
+[core]    [2026-06-24T08:34:37.667Z] [core]  http+ws: http://0.0.0.0:9500
+[core]    [2026-06-24T08:34:37.667Z] [core]  audio:  active (screencapturekit)
+[core]    [2026-06-24T08:34:37.667Z] [core]  mic:   disabled
+[core]    [2026-06-24T08:34:37.667Z] [core]  agent:  enabled
+[core]    [2026-06-24T08:34:37.667Z] [core]  escal:  rich
+[core]    [2026-06-24T08:34:37.667Z] [core]  cost:  display=off (always logged)
+[core]    [2026-06-24T08:34:37.742Z] [embedding] model ready in 452ms (384 dims)
+[core]    [2026-06-24T08:34:37.743Z] [kg] [sinain-kg] ready · /tmp/sinain-kg.sock (refresh=60s)
+[core]    [2026-06-24T08:34:37.743Z] [audio] sck-capture stderr: Unknown arg: --pin-display
+[core]    [2026-06-24T08:34:37.743Z] [audio] sck-capture exited: code=1 signal=null
+[core]    [2026-06-24T08:34:37.743Z] [audio] ⚠ sck-capture exited unexpectedly, stopping pipeline
+[core]    [2026-06-24T08:34:37.743Z] [audio] stopping capture...
+[core]    [2026-06-24T08:34:37.743Z] [core] system audio pipeline stopped
+[core]    [2026-06-24T08:34:37.743Z] [audio] capture stopped
+[start] ✓ sinain-core healthy on :9500
+[start] Starting sense_client...
+[sense]    [sense] initializing capture...
+[start] ✓ sense_client running (pid:79655)
+[start] Starting sinain chat sidecar...
+[core]    [2026-06-24T08:34:42.668Z] [local-curation] distilling pending session: 100 items from 2026-06-24T08:33:52.988Z
+[core]    [2026-06-24T08:34:42.668Z] [local-curation] distilling session: 100 items, 1135 min
+[start] ✓ sinain chat sidecar running (pid:79676)
+[setup-overlay] Checking for latest overlay release...
+[chat]    +----------------------------------------------------------------------+
+[chat]    | OpenHands SDK v1.28.1                        |
+[chat]    |                                   |
+[chat]    | Report a bug: github.com/OpenHands/software-agent-sdk/issues    |
+[chat]    | Get help: openhands.dev/joinslack                  |
+[chat]    | Scale up: openhands.dev/product/sdk                 |
+[chat]    |                                   |
+[chat]    | Set OPENHANDS_SUPPRESS_BANNER=1 to hide this message        |
+[chat]    +----------------------------------------------------------------------+
+[chat]     
+[chat]    [sinain-chat] warming OpenHands (nvidia/nemotron-3-super-120b-a12b:free, reasoning=on)…
+[chat]    [06/24/26 10:34:43] WARNING No persistence_dir provided; falling  state.py:397
+[chat]                   back to InMemoryFileStore. EventLog         
+[chat]                   data will not persist across requests.       
+[chat]    [06/24/26 10:34:43] INFO   Created new conversation        state.py:468
+[chat]                   6ad9074e-75a2-4967-bc5e-ea3133b204d6        
+[chat]    [sinain-chat] ready · ws://127.0.0.1:9610
+[setup-overlay] ✓ Overlay already up-to-date (2.26.0)
+[start] Starting overlay (pre-built)...
+[overlay]   2026-06-24 10:34:44.023 sinain_hud[79700:23445122] Running with merged UI and platform thread. Experimental.
+[overlay]   2026-06-24 10:34:44.081 sinain_hud[79700:23445122] [SinainHUD] BackendLauncher: no bundled backend — assuming core started externally (dev mode)
+[overlay]   flutter: [overlay] settings loaded: state=chat fontSize=10.198049872122766 accentColor=0xffff6b9d
+[overlay]   flutter: [overlay] versions: dmg=source build=source mode=release
+[core]    [coref] disabled (non-fatal): No module named 'fastcoref'
+[core]    [retry] attempt 1 failed: LLM call failed (HTTPError): 402 Client Error: Payment Required for url: https://openrouter.ai/api/v1/chat/completions — retrying in 1s
+[core]    [retry] all 2 attempts failed: LLM call failed (HTTPError): 402 Client Error: Payment Required for url: https://openrouter.ai/api/v1/chat/completions
+[core]    LLM distillation failed: LLM call failed (HTTPError): 402 Client Error: Payment Required for url: https://openrouter.ai/api/v1/chat/completions
+[core]    [2026-06-24T08:34:44.318Z] [local-curation] distillation skipped: LLM call failed (HTTPError): 402 Client Error: Payment Required for url: https://openrouter.ai/api/v1/chat/completions
+[core]    [2026-06-24T08:34:44.319Z] [local-curation] daily notes (fallback) written: /Users/sofia.kolchanova/.sinain/memory/2026-06-24.md
+[core]    [2026-06-24T08:34:44.320Z] [ws] client connected from 127.0.0.1
+[core]    [2026-06-24T08:34:44.321Z] [ws] ← command: set_auto_detect
+[core]    [2026-06-24T08:34:44.321Z] [cmd] auto-detect issues enabled
+[core]    [2026-06-24T08:34:44.321Z] [cmd] command processed: set_auto_detect
+[start] ✓ overlay running (pid:79700)
+[start] Starting agent (claude)...
+[sense]    [capture] Using CoreGraphics (CGDisplayCreateImage)
+[sense]    [capture] WARNING: CGDisplayCreateImage may cause camera conflicts on macOS 14+
+[sense]    [capture] NOTE: legacy backend reports no display id — multi-display ROI placement falls back to the primary screen until sck-capture appears
+[sense]    [sense] initializing OCR...
+[core]    [2026-06-24T08:34:47.077Z] [core] bareagent register: chat=[sinain] terminal=[claude,junie] current=claude → lanes esc=sinain term=claude
+[agent]     Agents available: claude junie sinain
+[agent]     Lanes: chat=claude (region/thread tasks run on the chat lane)
+[sense]    [ocr] using Vision backend (languages=['en', 'ru'])
+[sense]    [sense]  vision: openrouter (google/gemini-2.5-flash-lite)
+[sense]    [sense] sense_client started
+[sense]    [sense] versions: dmg=source build=source python=3.13.5
+[sense]    [sense]  relay: http://localhost:9500
+[sense]    [sense]  fps: 4.0, scale: 0.5
+[sense]    [sense]  ocr backend: auto
+[sense]    [sense]  privacy: ocr_openrouter=full images_openrouter=full
+[sense]    [sense]  control: /tmp/sinain-sense-control.json
+[agent]    Starting OpenRouter proxy (mode=preserve)...
+[sense]    [sense] first frame: 1512x982 (scale=0.5)
+[start] ✓ agent running (pid:79722)
+
+── SinainHUD ──────────────────────────
+ core   :9500  ✓ (http+ws)
+ sense       ✓ running
+ chat        ✓ running
+ overlay      ✓ running
+ agent       ✓ running
+───────────────────────────────────────
+ Press Ctrl+C to stop all services
+───────────────────────────────────────
+
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[agent]     ✓ proxy listening (pid=80372, logs=/tmp/openrouter-proxy.log)
+[agent]    sinain bare agent started
+[agent]     Agent: claude (MCP)
+[agent]     Core: http://localhost:9500
+[agent]     Allowed: mcp__sinain ToolSearch
+[agent]     Poll: every 5s
+[agent]     Press Ctrl+C to stop
+[agent]    
+[agent]    [10:34:47] chat agent: claude → sinain
+[core]    [2026-06-24T08:34:48.635Z] [agent] recap tick (10971ms, 573in+171out tok) hud="Viewing Metabase SQL query editor in Chrome"
+[sense]    [sense] ocr: 1979 chars, 330 words
+[core]    [2026-06-24T08:34:48.771Z] [server] [sense] #1 (context): app=Slack ssim=0.000
+[sense]    [sense] -> context sent (app=Slack, ssim=n/a, latency=13ms)
+[core]    [2026-06-24T08:34:48.779Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] first ssim sample: 0.9842 (threshold=0.85)
+[sense]    [sense] SSIM threshold restored to 0.92 (stable)
+[core]    [2026-06-24T08:34:57.858Z] [agent] #1 (8885ms, 1167in+236out tok, model=openai/gpt-oss-120b:free, richness=rich, images=1) hud="Viewing Slack workspace, no active conversation"
+[core]    [2026-06-24T08:34:57.859Z] [agent] analyzer emitted 1 region(s): "User viewing Slack inbox" src=-
+[core]    [2026-06-24T08:34:57.859Z] [regions] region set changed: 1 active [r-877c3aec83]
+[core]    [2026-06-24T08:34:57.860Z] [escalation] tick #1: ambient escalation suppressed (idle messages off)
+[core]    [2026-06-24T08:34:57.860Z] [trace-store] writing to /Users/sofia.kolchanova/.sinain-core/traces/2026-06-24.jsonl
+[sense]    [sense] heartbeat: 112 frames, 1 sent, 0 gated, threshold=0.92
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 1938 chars, 323 words
+[core]    [2026-06-24T08:35:40.906Z] [server] [sense] #2 (context): app=Google Chrome ssim=0.000
+[core]    [2026-06-24T08:35:40.906Z] [regions] app focus → Google Chrome: region set changed: 0 active []
+[sense]    [sense] -> context sent (app=Google Chrome, ssim=n/a, latency=10ms)
+[core]    [2026-06-24T08:35:40.910Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] change detected: ssim=0.1612 contours=2
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] ocr: 968 chars, 186 words
+[core]    [2026-06-24T08:35:41.501Z] [server] [sense] #3 (text): app=Google Chrome ssim=0.161
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.161, latency=9ms)
+[core]    [2026-06-24T08:35:41.504Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Google Chrome
+[core]    [2026-06-24T08:35:47.198Z] [agent] #2 (9534ms, 1167in+197out tok, model=openai/gpt-oss-120b:free, richness=rich, images=0) hud="Viewing Slack workspace"
+[core]    [2026-06-24T08:35:47.198Z] [agent] analyzer emitted 1 region(s): "Reviewing Slack messages" src=-
+[core]    [2026-06-24T08:35:47.198Z] [regions] region set changed: 1 active [r-877c3aec83]
+[core]    [2026-06-24T08:35:47.199Z] [escalation] tick #2: ambient escalation suppressed (idle messages off)
+[sense]    [capture] stats: 220 ok, 0 fail (100% success, 220 total)
+[sense]    [sense] heartbeat: 223 frames, 3 sent, 0 gated, threshold=0.85
+[sense]    [sense] SSIM threshold restored to 0.92 (stable)
+[sense]    [sense] motion: dx=-171.0 dy=-0.0 changed=5 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.2434 contours=11
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] ocr: 1456 chars, 257 words
+[core]    [2026-06-24T08:35:54.102Z] [server] [sense] #4 (text): app=Google Chrome ssim=0.243
+[core]    [2026-06-24T08:35:54.102Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sender] relay latency: p50=3ms p95=5ms (n=4)
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.243, latency=11ms)
+[sense]    [sense] stats: captures=244ok/0fail events=4sent/0fail/0gated latency_p50=11ms p95=13ms detect=50.5ms ocr=704.2ms send=3.6ms
+[core]    [2026-06-24T08:35:54.109Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5671 contours=155
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 1857 chars, 323 words
+[core]    [2026-06-24T08:35:54.943Z] [server] [sense] #5 (context): app=Slack ssim=0.000
+[sense]    [sense] -> context sent (app=Slack, ssim=0.567, latency=8ms)
+[core]    [2026-06-24T08:35:54.945Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Slack
+[core]    [2026-06-24T08:35:59.870Z] [agent] #3 (5565ms, 1923in+215out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Viewing Slack messages in Chrome"
+[core]    [2026-06-24T08:35:59.870Z] [agent] analyzer emitted 1 region(s): "Draft reply to Igor about new version te" src=-
+[core]    [2026-06-24T08:35:59.870Z] [regions] region set changed: 1 active [r-2d8bffb931]
+[core]    [2026-06-24T08:35:59.870Z] [escalation] tick #3: ambient escalation suppressed (idle messages off)
+[sense]    [sense] SSIM threshold restored to 0.92 (stable)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-168.0 dy=-0.0 changed=0 app=Slack
+[sense]    [sense] change detected: ssim=0.5948 contours=159
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] ocr: 1862 chars, 316 words
+[core]    [2026-06-24T08:36:08.916Z] [server] [sense] #6 (text): app=Slack ssim=0.595
+[core]    [2026-06-24T08:36:08.916Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Slack, ssim=0.595, latency=14ms)
+[core]    [2026-06-24T08:36:08.920Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.6260 contours=134
+[sense]    [sense] rois: 3 regions (1022x982, 1043x940, 367x126)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[core]    [2026-06-24T08:36:09.656Z] [regions] fast restore for Slack: 2 active [r-2d8bffb931, r-877c3aec83]
+[sense]    [sense] ocr: 1630 chars, 270 words
+[core]    [2026-06-24T08:36:09.721Z] [server] [sense] #7 (context): app=Google Chrome ssim=0.000
+[core]    [2026-06-24T08:36:09.722Z] [regions] app focus → Google Chrome: region set changed: 1 active [r-2d8bffb931]
+[sense]    [sense] -> context sent (app=Google Chrome, ssim=0.626, latency=9ms)
+[core]    [2026-06-24T08:36:09.724Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5199 contours=135
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 2026 chars, 342 words
+[core]    [2026-06-24T08:36:10.616Z] [server] [sense] #8 (context): app=Slack ssim=0.000
+[core]    [2026-06-24T08:36:10.616Z] [regions] app focus → Slack: region set changed: 1 active [r-877c3aec83]
+[sense]    [sense] -> context sent (app=Slack, ssim=0.520, latency=9ms)
+[core]    [2026-06-24T08:36:10.617Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=508.0 dy=-0.0 changed=8 app=Slack
+[sense]    [sense] change detected: ssim=0.2923 contours=38
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] ocr: 894 chars, 145 words
+[core]    [2026-06-24T08:36:12.171Z] [server] [sense] #9 (text): app=Slack ssim=0.292
+[sense]    [sense] -> text sent (app=Slack, ssim=0.292, latency=11ms)
+[core]    [2026-06-24T08:36:12.173Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:36:12.253Z] [regions] fast restore for Google Chrome: 2 active [r-877c3aec83, r-2d8bffb931]
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.6432 contours=31
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 500 chars, 95 words
+[core]    [2026-06-24T08:36:12.668Z] [server] [sense] #10 (context): app=Google Chrome ssim=0.000
+[core]    [2026-06-24T08:36:12.668Z] [regions] app focus → Google Chrome: region set changed: 1 active [r-2d8bffb931]
+[sense]    [sense] -> context sent (app=Google Chrome, ssim=0.643, latency=9ms)
+[core]    [2026-06-24T08:36:12.671Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-283.0 dy=-0.0 changed=5 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.3081 contours=10
+[sense]    [sense] rois: 1 regions (1512x982)
+[core]    [2026-06-24T08:36:16.288Z] [regions] fast restore for Slack: 2 active [r-2d8bffb931, r-877c3aec83]
+[sense]    [sense] ocr: 1488 chars, 255 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5043 contours=128
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 2030 chars, 342 words
+[core]    [2026-06-24T08:36:17.389Z] [server] [sense] #11 (context): app=Slack ssim=0.000
+[core]    [2026-06-24T08:36:17.390Z] [regions] app focus → Slack: region set changed: 1 active [r-877c3aec83]
+[sense]    [sense] -> context sent (app=Slack, ssim=0.504, latency=10ms)
+[core]    [2026-06-24T08:36:17.394Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] heartbeat: 315 frames, 11 sent, 1 gated, threshold=0.85
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.2423 contours=12
+[sense]    [sense] rois: 1 regions (1512x886)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 4116 chars, 493 words
+[core]    [2026-06-24T08:36:19.142Z] [server] [sense] #12 (context): app=Terminal ssim=0.000
+[core]    [2026-06-24T08:36:19.142Z] [regions] app focus → Terminal: region set changed: 0 active []
+[sense]    [sense] -> context sent (app=Terminal, ssim=0.242, latency=9ms)
+[core]    [2026-06-24T08:36:19.144Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] change detected: ssim=0.7069 contours=67
+[sense]    [sense] rois: 1 regions (1498x912)
+[core]    [2026-06-24T08:36:19.574Z] [agent] #4 (10457ms, 2632in+223out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Reading Slack messages in a channel"
+[core]    [2026-06-24T08:36:19.574Z] [agent] analyzer emitted 1 region(s): "Respond to Igor's request to test new ve" src=-
+[core]    [2026-06-24T08:36:19.574Z] [regions] region set changed: 1 active [r-e3b0c44298]
+[core]    [2026-06-24T08:36:19.574Z] [escalation] tick #4: ambient escalation suppressed (idle messages off)
+[sense]    [sense] ocr: 4276 chars, 532 words
+[core]    [2026-06-24T08:36:20.341Z] [server] [sense] #13 (text): app=Terminal ssim=0.707
+[core]    [2026-06-24T08:36:20.341Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.707, latency=17ms)
+[core]    [2026-06-24T08:36:20.344Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:36:20.383Z] [kg] ⚠ [warn] Graph query failed: IO error: No such file or directory: while stat a file for size: /Users/sofia.kolchanova/.sinain/memory/knowledge-graph.db/026906.log: No such file or directory
+[sense]    [sense] motion: dx=-0.0 dy=-154.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7918 contours=69
+[sense]    [sense] rois: 3 regions (834x658, 828x140, 646x140)
+[sense]    [sense] ocr: 2983 chars, 359 words
+[core]    [2026-06-24T08:36:21.660Z] [server] [sense] #14 (text): app=Terminal ssim=0.792
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.792, latency=15ms)
+[sense]    [sense] motion: dx=-0.0 dy=-140.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7581 contours=66
+[sense]    [sense] rois: 3 regions (1443x895, 99x153, 83x167)
+[core]    [2026-06-24T08:36:22.162Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 3905 chars, 471 words
+[core]    [2026-06-24T08:36:22.899Z] [server] [sense] #15 (text): app=Terminal ssim=0.758
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.758, latency=26ms)
+[core]    [2026-06-24T08:36:22.902Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-98.0 changed=2 app=Terminal
+[sense]    [sense] change detected: ssim=0.7475 contours=87
+[sense]    [sense] rois: 2 regions (939x869, 540x85)
+[sense]    [sense] ocr: 3617 chars, 432 words
+[core]    [2026-06-24T08:36:24.127Z] [server] [sense] #16 (text): app=Terminal ssim=0.747
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.747, latency=27ms)
+[core]    [2026-06-24T08:36:24.129Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-154.0 changed=2 app=Terminal
+[sense]    [sense] change detected: ssim=0.7862 contours=101
+[sense]    [sense] rois: 3 regions (871x419, 686x266, 828x152)
+[sense]    [sense] ocr: 1517 chars, 169 words
+[core]    [2026-06-24T08:36:25.289Z] [server] [sense] #17 (text): app=Terminal ssim=0.786
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.786, latency=16ms)
+[sense]    [sense] motion: dx=-0.0 dy=-42.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7565 contours=92
+[sense]    [sense] rois: 3 regions (1443x895, 83x279, 99x97)
+[core]    [2026-06-24T08:36:25.792Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 3589 chars, 430 words
+[core]    [2026-06-24T08:36:26.528Z] [server] [sense] #18 (text): app=Terminal ssim=0.756
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.756, latency=35ms)
+[core]    [2026-06-24T08:36:26.530Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-112.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7615 contours=88
+[sense]    [sense] rois: 3 regions (1443x895, 99x167, 83x125)
+[sense]    [sense] ocr: 4266 chars, 501 words
+[core]    [2026-06-24T08:36:27.828Z] [server] [sense] #19 (text): app=Terminal ssim=0.761
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.761, latency=42ms)
+[core]    [2026-06-24T08:36:27.830Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-98.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7981 contours=128
+[sense]    [sense] rois: 3 regions (939x573, 462x260, 288x138)
+[sense]    [sense] ocr: 2565 chars, 303 words
+[core]    [2026-06-24T08:36:28.989Z] [server] [sense] #20 (text): app=Terminal ssim=0.798
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.798, latency=30ms)
+[sense]    [sense] motion: dx=-0.0 dy=56.0 changed=3 app=Terminal
+[sense]    [sense] SSIM threshold restored to 0.92 (stable)
+[sense]    [sense] change detected: ssim=0.7501 contours=82
+[sense]    [sense] rois: 1 regions (939x908)
+[core]    [2026-06-24T08:36:29.492Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 4056 chars, 467 words
+[core]    [2026-06-24T08:36:30.232Z] [server] [sense] #21 (text): app=Terminal ssim=0.750
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.750, latency=33ms)
+[core]    [2026-06-24T08:36:30.234Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=168.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7571 contours=91
+[sense]    [sense] rois: 3 regions (1443x908, 83x251, 83x153)
+[sense]    [sense] ocr: 3862 chars, 456 words
+[core]    [2026-06-24T08:36:31.453Z] [server] [sense] #22 (text): app=Terminal ssim=0.757
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.757, latency=39ms)
+[core]    [2026-06-24T08:36:31.455Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=56.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7491 contours=83
+[sense]    [sense] rois: 3 regions (1443x901, 83x195, 99x125)
+[sense]    [sense] ocr: 3446 chars, 397 words
+[core]    [2026-06-24T08:36:33.129Z] [server] [sense] #23 (text): app=Terminal ssim=0.749
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.749, latency=38ms)
+[core]    [2026-06-24T08:36:33.132Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=196.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7722 contours=81
+[sense]    [sense] rois: 3 regions (1443x907, 83x125, 83x125)
+[sense]    [sense] ocr: 3427 chars, 424 words
+[core]    [2026-06-24T08:36:34.263Z] [agent] #5 (13720ms, 4737in+227out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Terminal showing PycharmProjects directory, errors from ollama model calls"
+[core]    [2026-06-24T08:36:34.263Z] [agent] analyzer emitted 1 region(s): "ollama model not found" src=-
+[core]    [2026-06-24T08:36:34.263Z] [regions] region set changed: 1 active [r-9a71123616]
+[core]    [2026-06-24T08:36:34.264Z] [escalation] tick #5: ambient escalation suppressed (idle messages off)
+[core]    [2026-06-24T08:36:34.294Z] [server] [sense] #24 (text): app=Terminal ssim=0.772
+[core]    [2026-06-24T08:36:34.294Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.772, latency=45ms)
+[core]    [2026-06-24T08:36:34.296Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=252.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7541 contours=65
+[sense]    [sense] rois: 3 regions (1497x908, 83x125, 83x125)
+[sense]    [sense] ocr: 4013 chars, 500 words
+[core]    [2026-06-24T08:36:35.594Z] [server] [sense] #25 (text): app=Terminal ssim=0.754
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.754, latency=40ms)
+[core]    [2026-06-24T08:36:35.595Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=280.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7685 contours=66
+[sense]    [sense] rois: 3 regions (1163x908, 83x223, 83x139)
+[sense]    [sense] ocr: 4125 chars, 495 words
+[core]    [2026-06-24T08:36:36.788Z] [server] [sense] #26 (text): app=Terminal ssim=0.769
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.769, latency=42ms)
+[core]    [2026-06-24T08:36:36.790Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=56.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7319 contours=74
+[sense]    [sense] rois: 3 regions (1163x908, 83x629, 83x139)
+[sense]    [sense] ocr: 3593 chars, 432 words
+[core]    [2026-06-24T08:36:37.991Z] [server] [sense] #27 (text): app=Terminal ssim=0.732
+[core]    [2026-06-24T08:36:37.991Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.732, latency=37ms)
+[core]    [2026-06-24T08:36:37.993Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=112.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7800 contours=66
+[sense]    [sense] rois: 3 regions (1163x908, 83x181, 83x139)
+[sense]    [sense] ocr: 3960 chars, 466 words
+[core]    [2026-06-24T08:36:39.138Z] [server] [sense] #28 (text): app=Terminal ssim=0.780
+[core]    [2026-06-24T08:36:39.138Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.780, latency=33ms)
+[core]    [2026-06-24T08:36:39.140Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=14.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7685 contours=26
+[sense]    [sense] rois: 3 regions (904x908, 310x71, 83x139)
+[sense]    [sense] ocr: 3931 chars, 460 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=126.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7820 contours=59
+[sense]    [sense] rois: 3 regions (904x671, 778x154, 589x112)
+[sense]    [sense] ocr: 3231 chars, 374 words
+[core]    [2026-06-24T08:36:42.496Z] [server] [sense] #29 (text): app=Terminal ssim=0.782
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.782, latency=27ms)
+[core]    [2026-06-24T08:36:42.999Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=70.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7417 contours=83
+[sense]    [sense] rois: 3 regions (1163x908, 83x209, 83x181)
+[sense]    [sense] ocr: 3871 chars, 458 words
+[core]    [2026-06-24T08:36:44.440Z] [server] [sense] #30 (text): app=Terminal ssim=0.742
+[core]    [2026-06-24T08:36:44.440Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.742, latency=34ms)
+[core]    [2026-06-24T08:36:44.442Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=224.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7543 contours=74
+[sense]    [sense] rois: 3 regions (1163x908, 83x237, 83x139)
+[sense]    [sense] ocr: 4030 chars, 472 words
+[core]    [2026-06-24T08:36:45.649Z] [server] [sense] #31 (text): app=Terminal ssim=0.754
+[core]    [2026-06-24T08:36:45.649Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.754, latency=27ms)
+[core]    [2026-06-24T08:36:45.651Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [capture] stats: 351 ok, 0 fail (100% success, 351 total)
+[sense]    [sense] heartbeat: 354 frames, 31 sent, 2 gated, threshold=0.92
+[core]    [2026-06-24T08:36:49.360Z] [agent] #6 (14864ms, 19482in+257out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="In Terminal, viewing project directory and shell prompt"
+[core]    [2026-06-24T08:36:49.361Z] [agent] analyzer emitted 1 region(s): "Preparing to run a command with -mcp and" src=-
+[core]    [2026-06-24T08:36:49.361Z] [regions] region set changed: 2 active [r-9a71123616, r-168196863e]
+[core]    [2026-06-24T08:36:49.361Z] [escalation] tick #6: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=404.0 changed=2 app=Terminal
+[sense]    [sense] change detected: ssim=0.7607 contours=62
+[sense]    [sense] rois: 2 regions (904x797, 904x113)
+[sense]    [sense] ocr: 3729 chars, 431 words
+[core]    [2026-06-24T08:36:55.603Z] [server] [sense] #32 (text): app=Terminal ssim=0.761
+[sense]    [sender] relay latency: p50=2ms p95=4ms (n=28)
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.761, latency=31ms)
+[sense]    [sense] stats: captures=378ok/0fail events=32sent/0fail/2gated latency_p50=27ms p95=42ms detect=55.2ms ocr=748.8ms send=2.4ms
+[sense]    [sense] motion: dx=-0.0 dy=434.0 changed=1 app=Terminal
+[sense]    [sense] change detected: ssim=0.7320 contours=77
+[sense]    [sense] rois: 2 regions (904x882, 83x377)
+[core]    [2026-06-24T08:36:56.107Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 4079 chars, 476 words
+[core]    [2026-06-24T08:36:56.783Z] [server] [sense] #33 (text): app=Terminal ssim=0.732
+[core]    [2026-06-24T08:36:56.783Z] [regions] recheck after viewport change: 2 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.732, latency=29ms)
+[core]    [2026-06-24T08:36:56.784Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-84.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7347 contours=78
+[sense]    [sense] rois: 3 regions (1401x908, 83x265, 83x153)
+[sense]    [sense] ocr: 4525 chars, 527 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-70.0 changed=3 app=Terminal
+[sense]    [sense] change detected: ssim=0.7616 contours=75
+[sense]    [sense] rois: 1 regions (1506x906)
+[sense]    [sense] ocr: 4184 chars, 487 words
+[core]    [2026-06-24T08:37:01.332Z] [server] [sense] #34 (text): app=Terminal ssim=0.762
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.762, latency=41ms)
+[core]    [2026-06-24T08:37:01.335Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-280.0 changed=0 app=Terminal
+[sense]    [sense] change detected: ssim=0.7709 contours=106
+[sense]    [sense] rois: 3 regions (1401x908, 462x71, 83x167)
+[sense]    [sense] ocr: 3667 chars, 434 words
+[core]    [2026-06-24T08:37:02.596Z] [server] [sense] #35 (text): app=Terminal ssim=0.771
+[sense]    [sense] -> text sent (app=Terminal, ssim=0.771, latency=33ms)
+[core]    [2026-06-24T08:37:02.599Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:37:02.698Z] [regions] fast restore for Google Chrome: 3 active [r-9a71123616, r-168196863e, r-2d8bffb931]
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5547 contours=47
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 643 chars, 119 words
+[core]    [2026-06-24T08:37:03.121Z] [server] [sense] #36 (context): app=Google Chrome ssim=0.000
+[core]    [2026-06-24T08:37:03.121Z] [regions] app focus → Google Chrome: region set changed: 1 active [r-2d8bffb931]
+[sense]    [sense] -> context sent (app=Google Chrome, ssim=0.555, latency=9ms)
+[core]    [2026-06-24T08:37:03.122Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:37:06.138Z] [agent] #7 (9152ms, 33103in+185out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Drafting reply to Igor in Slack"
+[core]    [2026-06-24T08:37:06.139Z] [agent] analyzer emitted 1 region(s): "Replying to Igor about new version test" src=-
+[core]    [2026-06-24T08:37:06.139Z] [regions] region set changed: 1 active [r-3b1d6fcd2f]
+[core]    [2026-06-24T08:37:06.140Z] [escalation] tick #7: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-509.0 dy=-0.0 changed=4 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7341 contours=54
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] ocr: 1560 chars, 206 words
+[core]    [2026-06-24T08:37:08.609Z] [regions] fast restore for Terminal: 3 active [r-3b1d6fcd2f, r-168196863e, r-9a71123616]
+[core]    [2026-06-24T08:37:08.617Z] [server] [sense] #37 (text): app=Google Chrome ssim=0.734
+[core]    [2026-06-24T08:37:08.617Z] [regions] recheck after viewport change: 3 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.734, latency=38ms)
+[core]    [2026-06-24T08:37:08.628Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5525 contours=70
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 4640 chars, 536 words
+[core]    [2026-06-24T08:37:09.910Z] [server] [sense] #38 (context): app=Terminal ssim=0.000
+[sense]    [sense] -> context sent (app=Terminal, ssim=0.553, latency=8ms)
+[core]    [2026-06-24T08:37:09.912Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.7202 contours=74
+[sense]    [sense] rois: 1 regions (1504x910)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 4407 chars, 522 words
+[core]    [2026-06-24T08:37:11.133Z] [server] [sense] #39 (context): app=Slack ssim=0.000
+[core]    [2026-06-24T08:37:11.133Z] [regions] app focus → Slack: region set changed: 2 active [r-e3b0c44298, r-877c3aec83]
+[sense]    [sense] -> context sent (app=Slack, ssim=0.720, latency=9ms)
+[core]    [2026-06-24T08:37:11.135Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] change detected: ssim=0.2368 contours=11
+[sense]    [sense] rois: 1 regions (1512x886)
+[sense]    [sense] ocr: 1983 chars, 321 words
+[core]    [2026-06-24T08:37:12.081Z] [server] [sense] #40 (text): app=Slack ssim=0.237
+[sense]    [sense] -> text sent (app=Slack, ssim=0.237, latency=32ms)
+[core]    [2026-06-24T08:37:12.083Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-22.0 changed=6 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Slack
+[sense]    [sense] motion: dx=-91.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] change detected: ssim=0.6173 contours=101
+[sense]    [sense] rois: 1 regions (1512x982)
+[core]    [2026-06-24T08:37:18.109Z] [regions] fast restore for Google Chrome: 3 active [r-e3b0c44298, r-877c3aec83, r-2d8bffb931]
+[sense]    [sense] ocr: 2110 chars, 346 words
+[core]    [2026-06-24T08:37:18.162Z] [server] [sense] #41 (text): app=Slack ssim=0.617
+[sense]    [sense] -> text sent (app=Slack, ssim=0.617, latency=38ms)
+[core]    [2026-06-24T08:37:18.164Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.1657 contours=6
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 617 chars, 108 words
+[core]    [2026-06-24T08:37:18.682Z] [server] [sense] #42 (context): app=Google Chrome ssim=0.000
+[core]    [2026-06-24T08:37:18.682Z] [regions] app focus → Google Chrome: region set changed: 1 active [r-2d8bffb931]
+[sense]    [sense] -> context sent (app=Google Chrome, ssim=0.166, latency=8ms)
+[core]    [2026-06-24T08:37:18.684Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] heartbeat: 433 frames, 42 sent, 3 gated, threshold=0.85
+[core]    [2026-06-24T08:37:23.824Z] [agent] model openai/gpt-oss-120b:free failed: This operation was aborted, trying next...
+[core]    [2026-06-24T08:37:24.042Z] [agent] model google/gemini-2.5-flash failed: HTTP 402: {"error":{"message":"Insufficient credits. This account never purchased credits. Make sure your key is on the correct account or org, and if so, purchase more at https://openrouter.ai/settings/credits, trying next...
+[core]    [2026-06-24T08:37:24.244Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}, trying next...
+[core]    [2026-06-24T08:37:24.244Z] [agent] ✘ tick error: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}
+[sense]    [sense] motion: dx=-153.0 dy=-0.0 changed=5 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.2310 contours=11
+[sense]    [sense] rois: 1 regions (1512x982)
+[core]    [2026-06-24T08:37:26.374Z] [regions] fast restore for Slack: 3 active [r-2d8bffb931, r-877c3aec83, r-e3b0c44298]
+[sense]    [sense] ocr: 1786 chars, 306 words
+[core]    [2026-06-24T08:37:26.671Z] [server] [sense] #43 (text): app=Google Chrome ssim=0.231
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.231, latency=29ms)
+[core]    [2026-06-24T08:37:26.678Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5570 contours=146
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 2212 chars, 361 words
+[core]    [2026-06-24T08:37:27.591Z] [server] [sense] #44 (context): app=Slack ssim=0.000
+[core]    [2026-06-24T08:37:27.592Z] [regions] app focus → Slack: region set changed: 2 active [r-877c3aec83, r-e3b0c44298]
+[sense]    [sense] -> context sent (app=Slack, ssim=0.557, latency=9ms)
+[core]    [2026-06-24T08:37:27.594Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=4 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=5 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=7 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] SSIM threshold restored to 0.92 (stable)
+[sense]    [sense] change detected: ssim=0.8752 contours=57
+[sense]    [sense] rois: 3 regions (441x754, 644x185, 454x101)
+[sense]    [sense] ocr: 406 chars, 65 words
+[core]    [2026-06-24T08:37:37.339Z] [server] [sense] #45 (text): app=Slack ssim=0.875
+[sense]    [sense] -> text sent (app=Slack, ssim=0.875, latency=11ms)
+[core]    [2026-06-24T08:37:37.827Z] [agent] analyzer emitted 1 region(s): "Replying to Igor about new version" src=-
+[core]    [2026-06-24T08:37:37.827Z] [regions] region set changed: 1 active [r-e3b0c44298]
+[core]    [2026-06-24T08:37:37.828Z] [escalation] tick #8: ambient escalation suppressed (idle messages off)
+[core]    [2026-06-24T08:37:37.843Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=5 app=Slack
+[sense]    [capture] stats: 530 ok, 0 fail (100% success, 530 total)
+[sense]    [sense] change detected: ssim=0.9147 contours=35
+[sense]    [sense] rois: 3 regions (441x190, 397x143, 275x185)
+[sense]    [sense] ocr: 136 chars, 20 words
+[core]    [2026-06-24T08:37:47.654Z] [server] [sense] #46 (text): app=Slack ssim=0.915
+[sense]    [sense] -> text sent (app=Slack, ssim=0.915, latency=8ms)
+[core]    [2026-06-24T08:37:48.159Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=5 app=Slack
+[sense]    [sense] change detected: ssim=0.9063 contours=25
+[sense]    [sense] rois: 3 regions (396x217, 391x165, 441x140)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 85 chars, 11 words
+[core]    [2026-06-24T08:37:48.959Z] [server] [sense] #47 (text): app=Slack ssim=0.906
+[sense]    [sense] -> text sent (app=Slack, ssim=0.906, latency=5ms)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=7 app=Slack
+[sense]    [sense] change detected: ssim=0.9093 contours=33
+[sense]    [sense] rois: 3 regions (396x357, 438x146, 441x129)
+[core]    [2026-06-24T08:37:49.461Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 295 chars, 44 words
+[sense]    [sense] gate dropped: cooldown (686ms < 700ms)
+[sense]    [sense] heartbeat: 536 frames, 47 sent, 4 gated, threshold=0.92
+[core]    [2026-06-24T08:37:58.342Z] [agent] model openai/gpt-oss-120b:free failed: This operation was aborted, trying next...
+[core]    [2026-06-24T08:37:58.602Z] [agent] model google/gemini-2.5-flash failed: HTTP 402: {"error":{"message":"Insufficient credits. This account never purchased credits. Make sure your key is on the correct account or org, and if so, purchase more at https://openrouter.ai/settings/credits, trying next...
+[core]    [2026-06-24T08:37:58.834Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}, trying next...
+[core]    [2026-06-24T08:37:58.834Z] [agent] ✘ tick error: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}
+[sense]    [sense] motion: dx=-0.0 dy=22.0 changed=9 app=Slack
+[sense]    [sense] change detected: ssim=0.8041 contours=66
+[sense]    [sense] rois: 3 regions (1182x821, 595x110, 357x144)
+[sense]    [sense] ocr: 806 chars, 149 words
+[core]    [2026-06-24T08:38:18.231Z] [server] [sense] #48 (text): app=Slack ssim=0.804
+[core]    [2026-06-24T08:38:18.232Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sender] relay latency: p50=2ms p95=4ms (n=16)
+[sense]    [sense] -> text sent (app=Slack, ssim=0.804, latency=11ms)
+[sense]    [sense] stats: captures=640ok/0fail events=48sent/0fail/4gated latency_p50=11ms p95=41ms detect=52.3ms ocr=577.7ms send=2.6ms
+[core]    [2026-06-24T08:38:18.236Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=11 app=Slack
+[sense]    [sense] change detected: ssim=0.8758 contours=40
+[sense]    [sense] rois: 3 regions (1093x383, 1464x188, 1016x224)
+[sense]    [sense] ocr: 315 chars, 53 words
+[core]    [2026-06-24T08:38:19.032Z] [server] [sense] #49 (text): app=Slack ssim=0.876
+[sense]    [sense] -> text sent (app=Slack, ssim=0.876, latency=4ms)
+[core]    [2026-06-24T08:38:19.536Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] heartbeat: 645 frames, 49 sent, 4 gated, threshold=0.92
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=6 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Slack
+[sense]    [sense] change detected: ssim=0.9031 contours=72
+[sense]    [sense] rois: 3 regions (1182x821, 355x113, 372x86)
+[sense]    [sense] ocr: 887 chars, 161 words
+[core]    [2026-06-24T08:38:25.233Z] [server] [sense] #50 (text): app=Slack ssim=0.903
+[sense]    [sense] -> text sent (app=Slack, ssim=0.903, latency=9ms)
+[core]    [2026-06-24T08:38:25.236Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[core]    [2026-06-24T08:38:29.142Z] [agent] #9 (10708ms, 29498in+242out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Reading Slack thread and drafting reply"
+[core]    [2026-06-24T08:38:29.143Z] [agent] analyzer emitted 1 region(s): "Drafting reply to Igor" src=-
+[core]    [2026-06-24T08:38:29.143Z] [regions] region set changed: 1 active [r-e3b0c44298]
+[core]    [2026-06-24T08:38:29.144Z] [escalation] tick #9: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [capture] stats: 746 ok, 0 fail (100% success, 746 total)
+[sense]    [sense] heartbeat: 758 frames, 50 sent, 4 gated, threshold=0.92
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Slack
+[core]    [2026-06-24T08:38:52.168Z] [agent] #10 (14501ms, 18189in+313out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Reading Slack messages, drafting reply"
+[core]    [2026-06-24T08:38:52.169Z] [agent] analyzer emitted 1 region(s): "Drafting reply to Igor about new version" src=-
+[core]    [2026-06-24T08:38:52.169Z] [regions] region set changed: 2 active [r-e3b0c44298, r-2d8bffb931]
+[core]    [2026-06-24T08:38:52.170Z] [escalation] tick #10: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=16 app=Slack
+[sense]    [sense] change detected: ssim=0.7459 contours=75
+[sense]    [sense] rois: 3 regions (1464x822, 314x102, 492x67)
+[sense]    [sense] ocr: 1191 chars, 205 words
+[core]    [2026-06-24T08:38:53.659Z] [server] [sense] #51 (text): app=Slack ssim=0.746
+[core]    [2026-06-24T08:38:53.659Z] [regions] recheck after viewport change: 2 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Slack, ssim=0.746, latency=12ms)
+[core]    [2026-06-24T08:38:53.669Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Slack
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=9 app=Slack
+[sense]    [sense] change detected: ssim=0.8515 contours=52
+[sense]    [sense] rois: 3 regions (1122x628, 1141x136, 332x159)
+[sense]    [sense] ocr: 305 chars, 56 words
+[core]    [2026-06-24T08:38:54.934Z] [server] [sense] #52 (text): app=Slack ssim=0.851
+[sense]    [sense] -> text sent (app=Slack, ssim=0.851, latency=7ms)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=6 app=Slack
+[sense]    [sense] change detected: ssim=0.8866 contours=26
+[sense]    [sense] rois: 3 regions (1141x458, 1141x142, 632x67)
+[core]    [2026-06-24T08:38:55.437Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 262 chars, 49 words
+[sense]    [sense] gate dropped: cooldown (646ms < 700ms)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=16 app=Slack
+[sense]    [sense] change detected: ssim=0.7395 contours=75
+[sense]    [sense] rois: 2 regions (1464x822, 610x67)
+[sense]    [sense] ocr: 1333 chars, 227 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-750.0 dy=-0.0 changed=0 app=Slack
+[sense]    [sense] change detected: ssim=0.3811 contours=75
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] ocr: 846 chars, 143 words
+[core]    [2026-06-24T08:39:00.629Z] [server] [sense] #53 (text): app=Slack ssim=0.381
+[sense]    [sense] -> text sent (app=Slack, ssim=0.381, latency=12ms)
+[core]    [2026-06-24T08:39:00.633Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] SSIM threshold lowered to 0.85 (app change)
+[sense]    [sense] change detected: ssim=0.5095 contours=25
+[sense]    [sense] rois: 1 regions (1512x982)
+[sense]    [sense] app change → full-frame OCR (1512x982)
+[sense]    [sense] ocr: 637 chars, 114 words
+[core]    [2026-06-24T08:39:01.162Z] [server] [sense] #54 (context): app=Google Chrome ssim=0.000
+[core]    [2026-06-24T08:39:01.163Z] [regions] app focus → Google Chrome: region set changed: 0 active []
+[sense]    [sense] -> context sent (app=Google Chrome, ssim=0.509, latency=8ms)
+[core]    [2026-06-24T08:39:01.166Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.4629 contours=41
+[sense]    [sense] rois: 1 regions (1512x968)
+[sense]    [sense] ocr: 445 chars, 90 words
+[core]    [2026-06-24T08:39:02.336Z] [server] [sense] #55 (text): app=Google Chrome ssim=0.463
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.463, latency=10ms)
+[core]    [2026-06-24T08:39:02.338Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=8 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Google Chrome
+[core]    [2026-06-24T08:39:03.252Z] [agent] #11 (9392ms, 11302in+214out tok, model=openai/gpt-oss-120b:free, richness=rich, images=1) hud="Reading Slack messages, drafting reply to Igor"
+[core]    [2026-06-24T08:39:03.252Z] [agent] analyzer emitted 1 region(s): "Drafting reply to Igor about new version" src=-
+[core]    [2026-06-24T08:39:03.252Z] [regions] region set changed: 1 active [r-87dbd921fa]
+[core]    [2026-06-24T08:39:03.253Z] [escalation] tick #11: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=7 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=7 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-40.0 changed=0 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.5052 contours=14
+[sense]    [sense] rois: 3 regions (1512x847, 1209x81, 224x77)
+[sense]    [sense] ocr: 180 chars, 36 words
+[core]    [2026-06-24T08:39:05.616Z] [server] [sense] #56 (text): app=Google Chrome ssim=0.505
+[core]    [2026-06-24T08:39:05.616Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.505, latency=12ms)
+[core]    [2026-06-24T08:39:05.618Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.3175 contours=4
+[sense]    [sense] rois: 1 regions (1512x847)
+[sense]    [sense] ocr: 181 chars, 37 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=547.0 dy=-140.0 changed=5 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.8075 contours=82
+[sense]    [sense] rois: 3 regions (958x509, 394x845, 613x287)
+[sense]    [sense] ocr: 367 chars, 68 words
+[core]    [2026-06-24T08:39:07.346Z] [server] [sense] #57 (text): app=Google Chrome ssim=0.807
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.807, latency=7ms)
+[core]    [2026-06-24T08:39:07.850Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Google Chrome
+[sense]    [sense] SSIM threshold restored to 0.92 (stable)
+[sense]    [sense] change detected: ssim=0.6652 contours=73
+[sense]    [sense] rois: 3 regions (1512x826, 251x111, 251x95)
+[sense]    [sense] ocr: 780 chars, 125 words
+[core]    [2026-06-24T08:39:11.416Z] [server] [sense] #58 (text): app=Google Chrome ssim=0.665
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.665, latency=9ms)
+[core]    [2026-06-24T08:39:11.418Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:39:16.383Z] [agent] #12 (10564ms, 5538in+226out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Reading Slack threads and Chrome tabs"
+[core]    [2026-06-24T08:39:16.383Z] [agent] analyzer emitted 1 region(s): "Drafting reply to Igor about new version" src=-
+[core]    [2026-06-24T08:39:16.384Z] [regions] region set changed: 1 active [r-df4028b452]
+[core]    [2026-06-24T08:39:16.384Z] [escalation] tick #12: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=3 app=Google Chrome
+[sense]    [sense] motion: dx=215.0 dy=-18.0 changed=1 app=Google Chrome
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=9 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7077 contours=57
+[sense]    [sense] rois: 2 regions (1160x618, 349x161)
+[sense]    [sense] ocr: 880 chars, 160 words
+[core]    [2026-06-24T08:39:19.246Z] [server] [sense] #59 (text): app=Google Chrome ssim=0.708
+[sense]    [sender] relay latency: p50=2ms p95=3ms (n=11)
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.708, latency=8ms)
+[sense]    [sense] stats: captures=845ok/0fail events=59sent/0fail/7gated latency_p50=9ms p95=12ms detect=52.8ms ocr=333.3ms send=2.1ms
+[sense]    [sense] motion: dx=-0.0 dy=-0.0 changed=2 app=Google Chrome
+[core]    [2026-06-24T08:39:19.752Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] heartbeat: 849 frames, 59 sent, 7 gated, threshold=0.92
+[sense]    [sense] motion: dx=-0.0 dy=-30.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7275 contours=63
+[sense]    [sense] rois: 1 regions (1174x846)
+[sense]    [sense] ocr: 1264 chars, 228 words
+[core]    [2026-06-24T08:39:25.212Z] [server] [sense] #60 (text): app=Google Chrome ssim=0.727
+[core]    [2026-06-24T08:39:25.212Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.727, latency=12ms)
+[core]    [2026-06-24T08:39:25.215Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-44.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7076 contours=49
+[sense]    [sense] rois: 1 regions (1175x847)
+[sense]    [sense] ocr: 1310 chars, 237 words
+[core]    [2026-06-24T08:39:25.944Z] [server] [sense] #61 (text): app=Google Chrome ssim=0.708
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.708, latency=10ms)
+[core]    [2026-06-24T08:39:25.946Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-72.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6939 contours=55
+[sense]    [sense] rois: 3 regions (1175x497, 597x369, 591x369)
+[sense]    [sense] ocr: 946 chars, 173 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-108.0 changed=4 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6722 contours=43
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1392 chars, 248 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-107.0 changed=5 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6737 contours=45
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1542 chars, 275 words
+[core]    [2026-06-24T08:39:28.357Z] [server] [sense] #62 (text): app=Google Chrome ssim=0.674
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.674, latency=11ms)
+[core]    [2026-06-24T08:39:28.359Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-53.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6811 contours=52
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1438 chars, 256 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-136.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6892 contours=42
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1449 chars, 257 words
+[core]    [2026-06-24T08:39:29.872Z] [server] [sense] #63 (text): app=Google Chrome ssim=0.689
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.689, latency=13ms)
+[core]    [2026-06-24T08:39:29.874Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-349.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7060 contours=57
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1510 chars, 266 words
+[core]    [2026-06-24T08:39:30.616Z] [server] [sense] #64 (text): app=Google Chrome ssim=0.706
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.706, latency=14ms)
+[core]    [2026-06-24T08:39:30.617Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-47.0 changed=4 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6824 contours=43
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 1417 chars, 255 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-4.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7844 contours=111
+[sense]    [sense] rois: 3 regions (358x153, 398x107, 597x71)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 145 chars, 28 words
+[core]    [2026-06-24T08:39:33.437Z] [server] [sense] #65 (text): app=Google Chrome ssim=0.784
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.784, latency=9ms)
+[sense]    [sense] motion: dx=-0.0 dy=-251.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6941 contours=43
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:39:33.939Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1417 chars, 253 words
+[core]    [2026-06-24T08:39:34.185Z] [server] [sense] #66 (text): app=Google Chrome ssim=0.694
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.694, latency=13ms)
+[core]    [2026-06-24T08:39:34.187Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-122.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6877 contours=50
+[sense]    [sense] rois: 1 regions (1159x844)
+[sense]    [sense] ocr: 1422 chars, 255 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[core]    [2026-06-24T08:39:36.652Z] [agent] #13 (11239ms, 4544in+246out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Viewing JetBrains team directory in Chrome, filtering members"
+[core]    [2026-06-24T08:39:36.653Z] [agent] analyzer emitted 1 region(s): "Finding a colleague to message" src=-
+[core]    [2026-06-24T08:39:36.653Z] [regions] region set changed: 2 active [r-df4028b452, r-7cd88c9443]
+[core]    [2026-06-24T08:39:36.653Z] [escalation] tick #13: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-40.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6921 contours=49
+[sense]    [sense] rois: 1 regions (1159x844)
+[sense]    [sense] ocr: 1425 chars, 255 words
+[core]    [2026-06-24T08:39:37.544Z] [server] [sense] #67 (text): app=Google Chrome ssim=0.692
+[core]    [2026-06-24T08:39:37.545Z] [regions] recheck after viewport change: 2 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.692, latency=14ms)
+[core]    [2026-06-24T08:39:37.546Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=332.0 changed=10 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7285 contours=63
+[sense]    [sense] rois: 3 regions (591x432, 597x452, 411x158)
+[sense]    [sense] ocr: 336 chars, 63 words
+[sense]    [sense] gate dropped: cooldown (648ms < 700ms)
+[sense]    [sense] motion: dx=-0.0 dy=-12.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7012 contours=35
+[sense]    [sense] rois: 3 regions (591x558, 597x467, 591x247)
+[sense]    [sense] ocr: 493 chars, 86 words
+[core]    [2026-06-24T08:39:38.869Z] [server] [sense] #68 (text): app=Google Chrome ssim=0.701
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.701, latency=7ms)
+[core]    [2026-06-24T08:39:39.373Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-118.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6853 contours=39
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1447 chars, 260 words
+[core]    [2026-06-24T08:39:40.703Z] [server] [sense] #69 (text): app=Google Chrome ssim=0.685
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.685, latency=12ms)
+[core]    [2026-06-24T08:39:40.708Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-224.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6768 contours=39
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1423 chars, 258 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-154.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7036 contours=41
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1398 chars, 253 words
+[core]    [2026-06-24T08:39:42.162Z] [server] [sense] #70 (text): app=Google Chrome ssim=0.704
+[core]    [2026-06-24T08:39:42.162Z] [regions] recheck after viewport change: 2 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.704, latency=11ms)
+[core]    [2026-06-24T08:39:42.164Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-138.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6971 contours=45
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1417 chars, 259 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-136.0 changed=4 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6932 contours=46
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1373 chars, 250 words
+[core]    [2026-06-24T08:39:43.660Z] [server] [sense] #71 (text): app=Google Chrome ssim=0.693
+[core]    [2026-06-24T08:39:43.660Z] [regions] recheck after viewport change: 2 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.693, latency=15ms)
+[core]    [2026-06-24T08:39:43.663Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-63.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6865 contours=45
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1389 chars, 255 words
+[core]    [2026-06-24T08:39:44.405Z] [server] [sense] #72 (text): app=Google Chrome ssim=0.687
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.687, latency=14ms)
+[core]    [2026-06-24T08:39:44.408Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-7.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7356 contours=71
+[sense]    [sense] rois: 3 regions (591x423, 597x261, 597x225)
+[sense]    [sense] ocr: 257 chars, 47 words
+[core]    [2026-06-24T08:39:45.505Z] [server] [sense] #73 (text): app=Google Chrome ssim=0.736
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.736, latency=6ms)
+[sense]    [sense] motion: dx=-0.0 dy=-12.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7108 contours=31
+[sense]    [sense] rois: 3 regions (591x458, 597x433, 597x380)
+[core]    [2026-06-24T08:39:46.008Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 376 chars, 71 words
+[sense]    [sense] gate dropped: cooldown (666ms < 700ms)
+[sense]    [sense] motion: dx=-0.0 dy=-18.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7266 contours=38
+[sense]    [sense] rois: 3 regions (597x514, 591x464, 597x384)
+[sense]    [sense] ocr: 406 chars, 76 words
+[core]    [2026-06-24T08:39:46.876Z] [server] [sense] #74 (text): app=Google Chrome ssim=0.727
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.727, latency=6ms)
+[sense]    [sense] motion: dx=-0.0 dy=-78.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7028 contours=45
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:39:47.379Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1388 chars, 248 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [capture] stats: 909 ok, 0 fail (100% success, 909 total)
+[sense]    [sense] motion: dx=-0.0 dy=-88.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7081 contours=52
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1391 chars, 251 words
+[core]    [2026-06-24T08:39:48.338Z] [server] [sense] #75 (text): app=Google Chrome ssim=0.708
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.708, latency=11ms)
+[core]    [2026-06-24T08:39:48.340Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:39:48.486Z] [agent] #14 (10740ms, 6113in+207out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Viewing JetBrains internal inbox list in Chrome"
+[core]    [2026-06-24T08:39:48.486Z] [agent] analyzer emitted 1 region(s): "Filtering inbox entries" src=-
+[core]    [2026-06-24T08:39:48.486Z] [regions] region set changed: 2 active [r-7cd88c9443, r-7ac74b79e9]
+[core]    [2026-06-24T08:39:48.487Z] [escalation] tick #14: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-87.0 changed=5 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6956 contours=45
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1435 chars, 259 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-201.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6892 contours=45
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1474 chars, 267 words
+[core]    [2026-06-24T08:39:49.855Z] [server] [sense] #76 (text): app=Google Chrome ssim=0.689
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.689, latency=12ms)
+[core]    [2026-06-24T08:39:49.857Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-191.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7059 contours=51
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1430 chars, 261 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-141.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6999 contours=54
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1467 chars, 263 words
+[core]    [2026-06-24T08:39:51.399Z] [server] [sense] #77 (text): app=Google Chrome ssim=0.700
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.700, latency=11ms)
+[core]    [2026-06-24T08:39:51.401Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-97.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6868 contours=47
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1450 chars, 263 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-69.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6934 contours=47
+[sense]    [sense] rois: 3 regions (591x783, 597x620, 597x180)
+[sense]    [sense] ocr: 753 chars, 135 words
+[core]    [2026-06-24T08:39:52.952Z] [server] [sense] #78 (text): app=Google Chrome ssim=0.693
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.693, latency=8ms)
+[sense]    [sense] motion: dx=-0.0 dy=-86.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6843 contours=46
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:39:53.454Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1425 chars, 256 words
+[core]    [2026-06-24T08:39:53.717Z] [server] [sense] #79 (text): app=Google Chrome ssim=0.684
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.684, latency=13ms)
+[core]    [2026-06-24T08:39:53.718Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-305.0 changed=4 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7009 contours=40
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1488 chars, 264 words
+[core]    [2026-06-24T08:39:54.490Z] [server] [sense] #80 (text): app=Google Chrome ssim=0.701
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.701, latency=13ms)
+[core]    [2026-06-24T08:39:54.491Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-148.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6959 contours=27
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1499 chars, 263 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-151.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6966 contours=32
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1550 chars, 272 words
+[core]    [2026-06-24T08:39:56.052Z] [server] [sense] #81 (text): app=Google Chrome ssim=0.697
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.697, latency=15ms)
+[core]    [2026-06-24T08:39:56.055Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:39:56.154Z] [agent] #15 (7615ms, 8151in+214out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Viewing team inbox in Chrome"
+[core]    [2026-06-24T08:39:56.154Z] [agent] analyzer emitted 1 region(s): "Scrolling contact list" src=-
+[core]    [2026-06-24T08:39:56.154Z] [regions] region set changed: 1 active [r-7ac74b79e9]
+[core]    [2026-06-24T08:39:56.155Z] [escalation] tick #15: ambient escalation suppressed (idle messages off)
+[sense]    [sense] motion: dx=-0.0 dy=-55.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6731 contours=41
+[sense]    [sense] rois: 1 regions (1159x840)
+[sense]    [sense] ocr: 1441 chars, 248 words
+[core]    [2026-06-24T08:39:56.833Z] [server] [sense] #82 (text): app=Google Chrome ssim=0.673
+[core]    [2026-06-24T08:39:56.833Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.673, latency=12ms)
+[core]    [2026-06-24T08:39:56.835Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-94.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6845 contours=46
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1607 chars, 281 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-41.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6747 contours=40
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1567 chars, 276 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-217.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6709 contours=43
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1531 chars, 271 words
+[core]    [2026-06-24T08:39:59.168Z] [server] [sense] #83 (text): app=Google Chrome ssim=0.671
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.671, latency=14ms)
+[core]    [2026-06-24T08:39:59.174Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-138.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6776 contours=55
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1423 chars, 254 words
+[core]    [2026-06-24T08:39:59.955Z] [server] [sense] #84 (text): app=Google Chrome ssim=0.678
+[core]    [2026-06-24T08:39:59.955Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.678, latency=14ms)
+[core]    [2026-06-24T08:39:59.956Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-93.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6905 contours=56
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1512 chars, 271 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-124.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6683 contours=91
+[sense]    [sense] rois: 3 regions (1206x846, 159x121, 140x92)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 1526 chars, 282 words
+[core]    [2026-06-24T08:40:01.569Z] [server] [sense] #85 (text): app=Google Chrome ssim=0.668
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.668, latency=16ms)
+[core]    [2026-06-24T08:40:01.571Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-86.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6632 contours=85
+[sense]    [sense] rois: 3 regions (1206x847, 243x67, 159x121)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 1557 chars, 288 words
+[core]    [2026-06-24T08:40:02.410Z] [server] [sense] #86 (text): app=Google Chrome ssim=0.663
+[core]    [2026-06-24T08:40:02.410Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.663, latency=15ms)
+[core]    [2026-06-24T08:40:02.412Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-26.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6998 contours=60
+[sense]    [sense] rois: 3 regions (591x677, 597x506, 591x204)
+[sense]    [sense] ocr: 556 chars, 103 words
+[core]    [2026-06-24T08:40:03.166Z] [server] [sense] #87 (text): app=Google Chrome ssim=0.700
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.700, latency=8ms)
+[sense]    [sense] motion: dx=-0.0 dy=-37.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6819 contours=42
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:40:03.668Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1504 chars, 275 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-204.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6833 contours=42
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1536 chars, 282 words
+[core]    [2026-06-24T08:40:04.703Z] [server] [sense] #88 (text): app=Google Chrome ssim=0.683
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.683, latency=13ms)
+[core]    [2026-06-24T08:40:04.708Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-117.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6800 contours=40
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1453 chars, 265 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-110.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6676 contours=47
+[sense]    [sense] rois: 3 regions (591x847, 597x672, 597x193)
+[sense]    [sense] ocr: 739 chars, 134 words
+[core]    [2026-06-24T08:40:06.290Z] [server] [sense] #89 (text): app=Google Chrome ssim=0.668
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.668, latency=10ms)
+[sense]    [sense] motion: dx=-0.0 dy=-19.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7061 contours=36
+[sense]    [sense] rois: 1 regions (1159x846)
+[core]    [2026-06-24T08:40:06.794Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1507 chars, 276 words
+[core]    [2026-06-24T08:40:07.059Z] [server] [sense] #90 (text): app=Google Chrome ssim=0.706
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.706, latency=14ms)
+[core]    [2026-06-24T08:40:07.060Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-11.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6994 contours=38
+[sense]    [sense] rois: 3 regions (591x702, 597x605, 591x173)
+[core]    [2026-06-24T08:40:07.563Z] [agent] #16 (11310ms, 9320in+225out tok, model=openai/gpt-oss-120b:free, richness=rich, images=2) hud="Viewing JetBrains Teams inbox list"
+[core]    [2026-06-24T08:40:07.563Z] [agent] analyzer emitted 1 region(s): "Scrolling through large inbox list" src=-
+[core]    [2026-06-24T08:40:07.563Z] [regions] region set changed: 1 active [r-7ac74b79e9]
+[core]    [2026-06-24T08:40:07.564Z] [escalation] tick #16: ambient escalation suppressed (idle messages off)
+[sense]    [sense] ocr: 569 chars, 102 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-51.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6859 contours=45
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1532 chars, 282 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-14.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6956 contours=15
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1533 chars, 281 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-1.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.8903 contours=162
+[sense]    [sense] rois: 3 regions (597x67, 597x67, 597x67)
+[sense]    [sense] ocr: empty (rois=3)
+[sense]    [sense] gate dropped: too_few_chars (0 < 20)
+[sense]    [sense] motion: dx=-0.0 dy=-17.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7324 contours=25
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1569 chars, 288 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-33.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6791 contours=40
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1554 chars, 284 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-58.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6728 contours=43
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1448 chars, 266 words
+[core]    [2026-06-24T08:40:12.017Z] [server] [sense] #91 (text): app=Google Chrome ssim=0.673
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.673, latency=13ms)
+[core]    [2026-06-24T08:40:12.020Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-25.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7052 contours=63
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1422 chars, 258 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-69.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6819 contours=54
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1542 chars, 281 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-93.0 changed=4 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6816 contours=102
+[sense]    [sense] rois: 3 regions (1206x847, 159x121, 140x92)
+[sense]    [sense] ocr: 1425 chars, 267 words
+[core]    [2026-06-24T08:40:14.393Z] [server] [sense] #92 (text): app=Google Chrome ssim=0.682
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.682, latency=15ms)
+[core]    [2026-06-24T08:40:14.394Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=1.0 dy=-62.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6481 contours=91
+[sense]    [sense] rois: 3 regions (1205x847, 276x67, 200x92)
+[sense]    [sense] ocr: 1591 chars, 298 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-1.0 dy=-58.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6515 contours=94
+[sense]    [sense] rois: 3 regions (1205x846, 140x92, 120x89)
+[sense]    [sense] ocr: 1563 chars, 293 words
+[core]    [2026-06-24T08:40:16.168Z] [server] [sense] #93 (text): app=Google Chrome ssim=0.651
+[core]    [2026-06-24T08:40:16.168Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.651, latency=15ms)
+[core]    [2026-06-24T08:40:16.170Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-168.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7089 contours=126
+[sense]    [sense] rois: 3 regions (592x846, 599x663, 644x204)
+[sense]    [sense] ocr: 781 chars, 142 words
+[core]    [2026-06-24T08:40:17.040Z] [server] [sense] #94 (text): app=Google Chrome ssim=0.709
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.709, latency=10ms)
+[sense]    [sense] motion: dx=-0.0 dy=-134.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6659 contours=42
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:40:17.544Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1586 chars, 288 words
+[core]    [2026-06-24T08:40:17.809Z] [server] [sense] #95 (text): app=Google Chrome ssim=0.666
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.666, latency=12ms)
+[core]    [2026-06-24T08:40:17.811Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-144.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6861 contours=46
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1581 chars, 283 words
+[core]    [2026-06-24T08:40:18.575Z] [server] [sense] #96 (text): app=Google Chrome ssim=0.686
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.686, latency=12ms)
+[core]    [2026-06-24T08:40:18.577Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-60.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6522 contours=45
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1551 chars, 279 words
+[core]    [2026-06-24T08:40:19.335Z] [server] [sense] #97 (text): app=Google Chrome ssim=0.652
+[core]    [2026-06-24T08:40:19.335Z] [regions] recheck after viewport change: 1 eyes pending re-confirm
+[sense]    [sender] relay latency: p50=2ms p95=3ms (n=38)
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.652, latency=13ms)
+[sense]    [sense] stats: captures=950ok/0fail events=97sent/0fail/35gated latency_p50=13ms p95=15ms detect=61.9ms ocr=378.8ms send=2.2ms
+[core]    [2026-06-24T08:40:19.337Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-53.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6659 contours=46
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1600 chars, 284 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-79.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6715 contours=36
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1605 chars, 286 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-121.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6666 contours=38
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1575 chars, 281 words
+[core]    [2026-06-24T08:40:21.717Z] [server] [sense] #98 (text): app=Google Chrome ssim=0.667
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.667, latency=16ms)
+[core]    [2026-06-24T08:40:21.719Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-113.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6587 contours=40
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1600 chars, 281 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-42.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6705 contours=45
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1579 chars, 281 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] heartbeat: 956 frames, 98 sent, 39 gated, threshold=0.92
+[sense]    [sense] motion: dx=-0.0 dy=-23.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6968 contours=74
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:40:27.220Z] [agent] model openai/gpt-oss-120b:free failed: This operation was aborted, trying next...
+[sense]    [sense] ocr: 1543 chars, 274 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[core]    [2026-06-24T08:40:27.439Z] [agent] model google/gemini-2.5-flash failed: HTTP 402: {"error":{"message":"Insufficient credits. This account never purchased credits. Make sure your key is on the correct account or org, and if so, purchase more at https://openrouter.ai/settings/credits, trying next...
+[core]    [2026-06-24T08:40:27.607Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}, trying next...
+[core]    [2026-06-24T08:40:27.607Z] [agent] ✘ tick error: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}
+[sense]    [sense] motion: dx=-0.0 dy=-139.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6777 contours=55
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1576 chars, 281 words
+[core]    [2026-06-24T08:40:28.156Z] [server] [sense] #99 (text): app=Google Chrome ssim=0.678
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.678, latency=14ms)
+[core]    [2026-06-24T08:40:28.158Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-135.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6660 contours=46
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1560 chars, 280 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-221.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6577 contours=46
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 1540 chars, 276 words
+[core]    [2026-06-24T08:40:29.777Z] [server] [sense] #100 (text): app=Google Chrome ssim=0.658
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.658, latency=15ms)
+[core]    [2026-06-24T08:40:29.779Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-14.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6785 contours=12
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    Context leak detected, msgtracer returned -1
+[sense]    [sense] ocr: 1541 chars, 277 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-71.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6868 contours=47
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1542 chars, 279 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-70.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6804 contours=48
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1536 chars, 278 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-41.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6711 contours=49
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1538 chars, 277 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-54.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6643 contours=45
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1530 chars, 277 words
+[core]    [2026-06-24T08:40:34.970Z] [server] [sense] #101 (text): app=Google Chrome ssim=0.664
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.664, latency=16ms)
+[core]    [2026-06-24T08:40:34.973Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-215.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6698 contours=43
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1438 chars, 257 words
+[core]    [2026-06-24T08:40:35.743Z] [server] [sense] #102 (text): app=Google Chrome ssim=0.670
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.670, latency=14ms)
+[core]    [2026-06-24T08:40:35.745Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-184.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7046 contours=49
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1515 chars, 272 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-12.0 changed=2 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6851 contours=25
+[sense]    [sense] rois: 3 regions (591x847, 597x593, 597x283)
+[sense]    [sense] ocr: 718 chars, 129 words
+[core]    [2026-06-24T08:40:37.311Z] [server] [sense] #103 (text): app=Google Chrome ssim=0.685
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.685, latency=10ms)
+[core]    [2026-06-24T08:40:37.814Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-23.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7026 contours=74
+[sense]    [sense] rois: 3 regions (591x846, 597x616, 597x263)
+[sense]    [sense] ocr: 736 chars, 133 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-4.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7608 contours=114
+[sense]    [sense] rois: 3 regions (592x837, 599x695, 644x175)
+[sense]    [sense] ocr: 673 chars, 122 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-58.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6655 contours=35
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:40:43.357Z] [agent] model openai/gpt-oss-120b:free failed: This operation was aborted, trying next...
+[core]    [2026-06-24T08:40:43.553Z] [agent] model google/gemini-2.5-flash failed: HTTP 402: {"error":{"message":"Insufficient credits. This account never purchased credits. Make sure your key is on the correct account or org, and if so, purchase more at https://openrouter.ai/settings/credits, trying next...
+[sense]    [sense] ocr: 1521 chars, 271 words
+[core]    [2026-06-24T08:40:43.675Z] [server] [sense] #104 (text): app=Google Chrome ssim=0.666
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.666, latency=15ms)
+[core]    [2026-06-24T08:40:43.678Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[core]    [2026-06-24T08:40:43.723Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}, trying next...
+[core]    [2026-06-24T08:40:43.723Z] [agent] ✘ tick error: HTTP 404: {"error":{"message":"No endpoints found for anthropic/claude-3.5-haiku.","code":404},"user_id":"user_3FHMKb9cBn3LAZtrqd5sxEIlr4m"}
+[sense]    [sense] motion: dx=-0.0 dy=-249.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6631 contours=92
+[sense]    [sense] rois: 3 regions (1206x846, 159x121, 140x92)
+[sense]    [sense] ocr: 1572 chars, 281 words
+[core]    [2026-06-24T08:40:44.536Z] [server] [sense] #105 (text): app=Google Chrome ssim=0.663
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.663, latency=14ms)
+[core]    [2026-06-24T08:40:44.538Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [capture] stats: 1015 ok, 0 fail (100% success, 1015 total)
+[sense]    [sense] motion: dx=-0.0 dy=-15.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6813 contours=7
+[sense]    [sense] rois: 1 regions (1159x844)
+[sense]    [sense] ocr: 1556 chars, 273 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-163.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7153 contours=84
+[sense]    [sense] rois: 3 regions (404x166, 411x158, 404x158)
+[sense]    [sense] ocr: 168 chars, 28 words
+[core]    [2026-06-24T08:40:50.408Z] [server] [sense] #106 (text): app=Google Chrome ssim=0.715
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.715, latency=12ms)
+[sense]    [sense] motion: dx=-0.0 dy=-68.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6687 contours=49
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:40:50.912Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1555 chars, 278 words
+[core]    [2026-06-24T08:40:51.192Z] [server] [sense] #107 (text): app=Google Chrome ssim=0.669
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.669, latency=11ms)
+[core]    [2026-06-24T08:40:51.194Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-96.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6834 contours=47
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1575 chars, 280 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-4.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.7656 contours=92
+[sense]    [sense] rois: 3 regions (597x308, 402x153, 324x164)
+[sense]    [sense] ocr: 278 chars, 52 words
+[core]    [2026-06-24T08:40:52.510Z] [server] [sense] #108 (text): app=Google Chrome ssim=0.766
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.766, latency=5ms)
+[sense]    [sense] motion: dx=-0.0 dy=-111.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6589 contours=38
+[sense]    [sense] rois: 1 regions (1159x847)
+[core]    [2026-06-24T08:40:53.012Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] ocr: 1551 chars, 271 words
+[core]    [2026-06-24T08:40:53.322Z] [server] [sense] #109 (text): app=Google Chrome ssim=0.659
+[sense]    [sense] -> text sent (app=Google Chrome, ssim=0.659, latency=11ms)
+[core]    [2026-06-24T08:40:53.324Z] [region-slm] ✘ ollama call failed: ollama 404: {"error":"model 'qwen2.5:3b' not found"}
+[sense]    [sense] motion: dx=-0.0 dy=-88.0 changed=0 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6680 contours=42
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1612 chars, 284 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-67.0 changed=1 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6659 contours=51
+[sense]    [sense] rois: 1 regions (1159x847)
+[sense]    [sense] ocr: 1620 chars, 280 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] motion: dx=-0.0 dy=-27.0 changed=3 app=Google Chrome
+[sense]    [sense] change detected: ssim=0.6812 contours=58
+[sense]    [sense] rois: 1 regions (1159x846)
+[sense]    [sense] ocr: 1567 chars, 275 words
+[sense]    [sense] gate dropped: duplicate (similar to recent text)
+[sense]    [sense] heartbeat: 1030 frames, 109 sent, 53 gated, threshold=0.92
+[sense]    [sense] change detected: ssim=0.8855 contours=166
+[sense]    [sense] rois: 3 regions (384x98, 597x68, 597x68)
+[sense]    [sense] ocr: 149 chars, 26 words

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0b0b0e; }
+a { color: #9db4ff; text-decoration: none; }
+a:hover { color: #c3d1ff; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+</style>
+</helmet>
+<div style="width: 400px; min-height: 100vh; margin: 0 auto; display: flex; flex-direction: column; font-family: 'IBM Plex Sans', Helvetica, sans-serif; background: #101014; color: #ececf1; border-left: 1px solid #1e1e26; border-right: 1px solid #1e1e26;">
+
+  <!-- header -->
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #1e1e26;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 14px; font-weight: 700; letter-spacing: 0.08em;">SESSIONS</span>
+      <span style="font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">:9500</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <a href="{{ docUrl }}" target="_blank" rel="noopener" title="Blueprint doc" style="font-size: 12px; color: #6d6d7a;" style-hover="color: #c3d1ff;">docs ↗</a>
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #59d999; display: inline-block;"></span>
+    </div>
+  </div>
+
+  <!-- collapsed notch bar preview -->
+  <div style="padding: 12px 16px 0 16px;">
+    <div style="display: flex; align-items: center; justify-content: center; gap: 14px; background: #000000; border: 1px solid #23232c; border-radius: 20px; padding: 8px 18px;">
+      <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #59d999;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #59d999; animation: pulse 1.6s infinite;"></span>{{ workingCount }} working</span>
+      <span style="width: 1px; height: 12px; background: #2a2a34;"></span>
+      <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #f0b429;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #f0b429;"></span>{{ waitingCount }} waiting</span>
+    </div>
+  </div>
+
+  <!-- usage pill -->
+  <div style="display: flex; gap: 8px; padding: 12px 16px;">
+    <div style="flex: 1; display: flex; align-items: baseline; justify-content: space-between; background: #16161c; border: 1px solid #23232c; border-radius: 8px; padding: 8px 12px;">
+      <span style="font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">5h</span>
+      <span style="font-size: 13px; font-weight: 600; font-family: 'IBM Plex Mono', monospace;">11%</span>
+      <span style="font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">4h01m</span>
+    </div>
+    <div style="flex: 1; display: flex; align-items: baseline; justify-content: space-between; background: #16161c; border: 1px solid #23232c; border-radius: 8px; padding: 8px 12px;">
+      <span style="font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">7d</span>
+      <span style="font-size: 13px; font-weight: 600; font-family: 'IBM Plex Mono', monospace;">2%</span>
+      <span style="font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">6h01m</span>
+    </div>
+  </div>
+
+  <!-- approval banner -->
+  <sc-if value="{{ approvalPending }}" hint-placeholder-val="{{ true }}">
+    <div style="margin: 0 16px 12px 16px; background: #1c1710; border: 1px solid #4a3a14; border-radius: 10px; overflow: hidden;">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px 0 12px;">
+        <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #f0b429;">PERMISSION REQUEST</span>
+        <span style="font-size: 11px; color: #6d6d7a; margin-left: auto; font-family: 'IBM Plex Mono', monospace;">claude · sinain-core</span>
+      </div>
+      <div style="padding: 8px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #e8dcc0; word-break: break-all;">Bash: npm publish --access public</div>
+      <div style="display: flex; gap: 8px; padding: 0 12px 12px 12px;">
+        <button onClick="{{ approve }}" style="flex: 1; background: #59d999; color: #08120c; border: none; border-radius: 7px; padding: 8px 0; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;" style-hover="background: #74e5ab;">Allow</button>
+        <button onClick="{{ approveAlways }}" style="flex: 1; background: #23232c; color: #ececf1; border: 1px solid #33333e; border-radius: 7px; padding: 8px 0; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;" style-hover="background: #2c2c37;">Always</button>
+        <button onClick="{{ deny }}" style="flex: 1; background: #23232c; color: #ff8f8f; border: 1px solid #33333e; border-radius: 7px; padding: 8px 0; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;" style-hover="background: #2c2c37;">Deny</button>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ approvalResolved }}" hint-placeholder-val="{{ false }}">
+    <div style="margin: 0 16px 12px 16px; display: flex; align-items: center; gap: 8px; background: #14171c; border: 1px solid #23232c; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: #6d6d7a;">
+      <span>{{ resolutionLabel }}</span>
+      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace;">npm publish</span>
+    </div>
+  </sc-if>
+
+  <!-- session cards -->
+  <div style="display: flex; flex-direction: column; gap: 8px; padding: 0 16px 16px 16px;">
+    <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="4">
+      <div style="background: #16161c; border: 1px solid #23232c; border-radius: 10px; padding: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="width: 28px; height: 28px; border-radius: 8px; background: {{ s.badgeBg }}; color: {{ s.badgeFg }}; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;">{{ s.badge }}</span>
+          <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0;">
+            <span style="font-size: 13px; font-weight: 600;">{{ s.name }}</span>
+            <span style="font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.cwd }}</span>
+          </div>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: {{ s.stateColor }};"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{ s.stateColor }}; animation: {{ s.dotAnim }};"></span>{{ s.state }}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #a7a7b4; white-space: nowrap; overflow: hidden;">
+          <span style="color: {{ s.stateColor }};">▸</span>
+          <span style="overflow: hidden; text-overflow: ellipsis;">{{ s.toolLine }}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; margin-top: 10px;">
+          <span style="white-space: nowrap; flex-shrink: 0; font-size: 10.5px; font-family: 'IBM Plex Mono', monospace; color: #6d6d7a; background: #101014; border: 1px solid #23232c; border-radius: 5px; padding: 2px 7px;">{{ s.model }}</span>
+          <span style="white-space: nowrap; flex-shrink: 0; font-size: 10.5px; font-family: 'IBM Plex Mono', monospace; color: #6d6d7a; background: #101014; border: 1px solid #23232c; border-radius: 5px; padding: 2px 7px;">⎇ {{ s.branch }}</span>
+          <span style="margin-left: auto; white-space: nowrap; font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">{{ s.elapsed }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="margin-top: auto; display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-top: 1px solid #1e1e26; font-size: 11px; color: #6d6d7a; font-family: 'IBM Plex Mono', monospace;">
+    <span style="white-space: nowrap;">{{ sessionCount }} sessions · bridge ok</span>
+    <a href="{{ docUrl }}" target="_blank" rel="noopener">blueprint ↗</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:400,&quot;height&quot;:860},&quot;docUrl&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;https://docs.google.com/document/d/1FwBRMwMi0g6w1tJ5o59_ptweeVNcvWAUQfmsdnhpqhM/edit?tab=t.0&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { approval: 'pending' };
+  renderVals() {
+    const green = '#59d999', amber = '#f0b429', gray = '#6d6d7a';
+    const sessions = [
+      { badge: 'CC', badgeBg: '#2a2417', badgeFg: '#e8b34b', name: 'claude — sinain-core', cwd: '~/dev/sinain/sinain-core', state: 'waiting', stateColor: amber, dotAnim: 'none', toolLine: 'PermissionRequest · Bash: npm publish', model: 'opus-4.5', branch: 'agent-ingest', elapsed: '12m' },
+      { badge: 'CC', badgeBg: '#2a2417', badgeFg: '#e8b34b', name: 'claude — overlay', cwd: '~/dev/sinain/ui/chat', state: 'working', stateColor: green, dotAnim: 'pulse 1.6s infinite', toolLine: 'Edit · permission_banner.dart', model: 'sonnet-4.5', branch: 'notch-bar', elapsed: '4m' },
+      { badge: 'CX', badgeBg: '#17222a', badgeFg: '#5bb8e8', name: 'codex — bridge', cwd: '~/dev/sinain/bridge', state: 'working', stateColor: green, dotAnim: 'pulse 1.6s infinite', toolLine: 'Shell · go build ./cmd/sinain-bridge', model: 'gpt-5.2-codex', branch: 'main', elapsed: '1m' },
+      { badge: 'GM', badgeBg: '#1a2419', badgeFg: '#7ed07a', name: 'gemini — docs', cwd: '~/dev/sinain/docs', state: 'done', stateColor: gray, dotAnim: 'none', toolLine: 'Stop · 3 files written', model: 'gemini-3-pro', branch: 'main', elapsed: '38m' },
+      { badge: 'CU', badgeBg: '#241726', badgeFg: '#c77ad0', name: 'cursor — win-overlay', cwd: '~/dev/sinain/win', state: 'working', stateColor: green, dotAnim: 'pulse 1.6s infinite', toolLine: 'beforeShellExecution · flutter build windows', model: 'composer-2', branch: 'win-port', elapsed: '9m' },
+    ];
+    const a = this.state.approval;
+    return {
+      docUrl: this.props.docUrl ?? 'https://docs.google.com/document/d/1FwBRMwMi0g6w1tJ5o59_ptweeVNcvWAUQfmsdnhpqhM/edit?tab=t.0',
+      sessions,
+      sessionCount: sessions.length,
+      workingCount: 3,
+      waitingCount: a === 'pending' ? 1 : 0,
+      approvalPending: a === 'pending',
+      approvalResolved: a !== 'pending',
+      resolutionLabel: a === 'allow' ? '✓ Allowed' : a === 'always' ? '✓ Always allowed' : '✕ Denied',
+      approve: () => this.setState({ approval: 'allow' }),
+      approveAlways: () => this.setState({ approval: 'always' }),
+      deny: () => this.setState({ approval: 'deny' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

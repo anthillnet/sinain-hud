@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  @keyframes dcShimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  @keyframes dcHalo { 0% { transform: scale(0.7); opacity: 0.45; } 70% { transform: scale(2.4); opacity: 0; } 100% { opacity: 0; } }
+  @keyframes dcArrive { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: translateY(0); } }
+  body { margin: 0; }
+  a { color: #3369D6; } a:hover { color: #27282E; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <!-- ===================== TITLE ===================== -->
+  <div style="margin-bottom:40px; max-width:920px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · Save offer · wireframes</div>
+    <div style="font-size:24px; font-weight:600; line-height:28px; margin-bottom:10px; color:#27282E;">Sinain proposes, the user disposes. One click replaces five gestures.</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">When the user switches away after a long, engaged episode, a quiet offer appears: <span style="color:#27282E; font-weight:500;">"Save these 47 min? IntelliJ, Chrome"</span>. Accept runs the exact save lifecycle that ships today (receipt → undo → commit); Adjust opens the existing chooser pre-filled; dismissal is one gesture or just waiting. Every response is a training label — the instrument that decides whether autosave ever ships. Zero LLM cost until accepted. Extends <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;">Deliberate Capture v2.dc.html</span> — chooser, receipt, and card mode are reused untouched.</div>
+  </div>
+
+  <!-- ===================== SECTION 1 — THE MOMENT ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">1 · The moment — a breakpoint, not an interruption</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;">The offer fires only when the work-state engine detects a <span style="color:#27282E; font-weight:500;">breakpoint</span> — the user switches away from a thread they've been in for ≥ ~20 engaged minutes with real activity. The user's attention has already moved to a <span style="color:#27282E; font-weight:500;">new</span> context; the offer refers to the previous one. It must be glanceable-and-ignorable: silent arrival, never a modal, never over the new work.</div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start; margin-bottom:52px;">
+    <div style="flex:none; width:640px;">
+      <div style="width:640px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:18px 20px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; height:34px; border-radius:6px; overflow:hidden; margin-bottom:8px;">
+          <div style="flex:47; height:100%; background:rgba(31,128,57,.28); display:flex; align-items:center; justify-content:center;"><span style="font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:#1F8039; font-weight:600;">47 min engaged · IntelliJ + Chrome</span></div>
+          <div style="flex:none; width:3px; height:100%; background:#27282E;"></div>
+          <div style="flex:18; height:100%; background:#ECEDF1; display:flex; align-items:center; justify-content:center;"><span style="font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:#6C707E;">Slack — new context</span></div>
+        </div>
+        <div style="display:flex;">
+          <div style="flex:47;"></div>
+          <div style="flex:none; width:3px; display:flex; justify-content:center;"><div style="width:1px;"></div></div>
+          <div style="flex:18; padding-left:8px;">
+            <div style="font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:#27282E; font-weight:600;">↑ breakpoint</div>
+            <div style="font-size:10px; line-height:14px; color:#6C707E; margin-top:2px;">engine: switched-away · policy gate: offer-at-breakpoint → the offer composes here, free (range + apps + duration already held)</div>
+          </div>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">Most breakpoints produce no offer.</span> Long AND loud is the bar — edits, errors worked through, calls; not idle dwell. The thresholds are tuned, not designed.</div></sc-if>
+    </div>
+    <div style="flex:none; width:300px;">
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ momentRules }}" as="r" hint-placeholder-count="3">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SECTION 2 — ARRIVAL ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">2 · Arrival — three candidates, exploring loudness</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;">The open question that matters most: how does a proactive nudge appear without stealing the new context's attention? Three candidates, quietest to loudest footprint. <span style="color:#27282E; font-weight:500;">B is interactive — click the chip.</span></div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start; margin-bottom:52px;">
+
+    <!-- A: full card -->
+    <div style="flex:none; width:380px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">A · The card just appears</div>
+      <div style="position:relative; width:380px; height:300px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:16px;"><div style="height:9px; width:44%; background:#DFE1E5; border-radius:3px; margin-bottom:12px;"></div><div style="height:8px; width:82%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div><div style="height:8px; width:70%; background:#EBECF0; border-radius:3px;"></div></div>
+        <div style="position:absolute; right:14px; top:32px;"><svg width="22" height="22" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg></div>
+        <div style="position:absolute; right:12px; bottom:12px; width:272px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.3); padding:10px 12px; box-sizing:border-box; animation:dcArrive .5s ease-out;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;">
+            <span style="flex:none; width:8px; height:8px; border-radius:50%; background:#1F8039; box-shadow:0 0 0 2px rgba(31,128,57,.3);"></span>
+            <span style="font-size:12px; font-weight:600; color:#fff;">Save this session?</span>
+            <div style="flex:1;"></div>
+            <span style="font-size:12px; color:#6C707E; cursor:pointer;">✕</span>
+          </div>
+          <div style="font-size:11px; color:#D6DAE3; margin-bottom:9px;"><span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-weight:600; color:#8FC9A8;">47 min</span> · IntelliJ, Chrome · ended just now</div>
+          <div style="display:flex; gap:6px;">
+            <button style="flex:none; height:24px; padding:0 12px; background:#1F8039; border:none; border-radius:5px; color:#fff; font-size:11px; font-weight:500; cursor:pointer;">Save 47 min</button>
+            <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:5px; color:#A8ADBD; font-size:11px; cursor:pointer;">Adjust…</button>
+          </div>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">Zero extra gestures</span> — evidence and actions visible at once. Cost: a self-opening panel in the card corner is the loudest option; for a nudge most users will ignore, that's a lot of pixels asking for nothing.</div></sc-if>
+    </div>
+
+    <!-- B: chip, interactive -->
+    <div style="flex:none; width:380px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">B · Chip first, card on intent <span style="font-weight:400; color:#6C707E; font-size:11px; font-family:ui-monospace,Menlo,Consolas,monospace;">interactive</span></div>
+      <div style="position:relative; width:380px; height:300px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:16px;"><div style="height:9px; width:44%; background:#DFE1E5; border-radius:3px; margin-bottom:12px;"></div><div style="height:8px; width:82%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div><div style="height:8px; width:70%; background:#EBECF0; border-radius:3px;"></div></div>
+        <div style="position:absolute; right:14px; top:32px;"><svg width="22" height="22" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg></div>
+        <sc-if value="{{ chipClosed }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ openChip }}" style="position:absolute; right:14px; top:64px; display:flex; align-items:center; gap:7px; padding:5px 11px 5px 8px; background:#1E1F22; border:1px solid rgba(31,128,57,.45); border-radius:9px; box-shadow:0 4px 14px rgba(0,28,54,.24); cursor:pointer; animation:dcArrive .5s ease-out;" style-hover="border-color:rgba(31,128,57,.8);">
+            <span style="flex:none; width:7px; height:7px; border-radius:50%; background:#1F8039;"></span>
+            <span style="font-size:11px; font-weight:500; color:#E8EAEE;">Save 47 min?</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ chipOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; right:14px; top:64px; width:272px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.3); padding:10px 12px; box-sizing:border-box; animation:dcArrive .25s ease-out;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;">
+              <span style="flex:none; width:8px; height:8px; border-radius:50%; background:#1F8039; box-shadow:0 0 0 2px rgba(31,128,57,.3);"></span>
+              <span style="font-size:12px; font-weight:600; color:#fff;">Save this session?</span>
+              <div style="flex:1;"></div>
+              <span onClick="{{ closeChip }}" style="font-size:12px; color:#6C707E; cursor:pointer;">✕</span>
+            </div>
+            <div style="font-size:11px; color:#D6DAE3; margin-bottom:5px;"><span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-weight:600; color:#8FC9A8;">47 min</span> · IntelliJ, Chrome · ended just now</div>
+            <div style="font-size:10px; color:#6C707E; margin-bottom:9px;">mostly: sinain-hud — websocket reconnect</div>
+            <div style="display:flex; gap:6px;">
+              <button style="flex:none; height:24px; padding:0 12px; background:#1F8039; border:none; border-radius:5px; color:#fff; font-size:11px; font-weight:500; cursor:pointer;">Save 47 min</button>
+              <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:5px; color:#A8ADBD; font-size:11px; cursor:pointer;">Adjust…</button>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">The spec's recommendation, and ours.</span> One line of footprint until the user shows intent; the chip itself carries the verb + value, so ignoring costs nothing and accepting is two clicks. Expiry fades the chip, not a panel.</div></sc-if>
+    </div>
+
+    <!-- C: eye pulse -->
+    <div style="flex:none; width:380px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">C · The eye pulses save-green</div>
+      <div style="position:relative; width:380px; height:300px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <div style="height:20px; background:#ECEDF1; display:flex; align-items:center; gap:5px; padding:0 9px;"><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span><span style="width:6px; height:6px; border-radius:50%; background:#CDD0D6;"></span></div>
+        <div style="padding:16px;"><div style="height:9px; width:44%; background:#DFE1E5; border-radius:3px; margin-bottom:12px;"></div><div style="height:8px; width:82%; background:#EBECF0; border-radius:3px; margin-bottom:9px;"></div><div style="height:8px; width:70%; background:#EBECF0; border-radius:3px;"></div></div>
+        <div style="position:absolute; right:14px; top:32px; width:22px; height:22px;">
+          <div style="position:absolute; inset:0; border-radius:50%; border:1.5px solid rgba(31,128,57,.55); animation:dcHalo 2.2s ease-out infinite;"></div>
+          <svg width="22" height="22" viewBox="0 0 30 30" style="position:relative;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">Quietest, but mute.</span> No evidence visible — the user must click to even learn what's offered, and a pulse can't say "47 min". Also overloads the eye's ambient language, which today means capture state, not requests. Kept as the fallback for hidden mode.</div></sc-if>
+    </div>
+
+  </div>
+
+  <!-- ===================== SECTION 3 — THE CARD / EVIDENCE ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">3 · The card — how much evidence?</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;">Anatomy is fixed: accent dot · question · ✕, then the claim, then verbs. Every token is checkable — duration, sources, recency; never psychological framing, never urgency. The open question is density: three candidates for the claim.</div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start; margin-bottom:52px;">
+
+    <sc-for list="{{ evidenceVariants }}" as="v" hint-placeholder-count="3">
+      <div style="flex:none; width:300px;">
+        <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">{{ v.title }}</div>
+        <div style="width:300px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.26); padding:11px 13px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <span style="flex:none; width:8px; height:8px; border-radius:50%; background:#1F8039; box-shadow:0 0 0 2px rgba(31,128,57,.3);"></span>
+            <span style="font-size:12px; font-weight:600; color:#fff;">Save this session?</span>
+            <div style="flex:1;"></div>
+            <span style="font-size:12px; color:#6C707E; cursor:pointer;">✕</span>
+          </div>
+          <div style="font-size:11px; color:#D6DAE3; margin-bottom:{{ v.gapAfterClaim }};"><span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-weight:600; color:{{ v.durColor }};">{{ v.duration }}</span> · IntelliJ, Chrome · {{ v.recency }}</div>
+          <sc-if value="{{ v.detail }}" hint-placeholder-val="{{ false }}"><div style="font-size:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace; margin-bottom:6px;">{{ v.detail }}</div></sc-if>
+          <sc-if value="{{ v.context }}" hint-placeholder-val="{{ true }}"><div style="font-size:10px; color:#6C707E; margin-bottom:9px;">{{ v.context }}</div></sc-if>
+          <div style="display:flex; gap:6px;">
+            <button style="flex:none; height:24px; padding:0 12px; background:#1F8039; border:none; border-radius:5px; color:#fff; font-size:11px; font-weight:500; cursor:pointer;">Save 47 min</button>
+            <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:5px; color:#A8ADBD; font-size:11px; cursor:pointer;">Adjust…</button>
+          </div>
+        </div>
+        <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">{{ v.note }}</div></sc-if>
+      </div>
+    </sc-for>
+
+  </div>
+
+  <!-- ===================== SECTION 4 — LIFECYCLE ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">4 · Lifecycle — the card morphs into the receipt</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:860px;">One card for one save: accept and the offer <span style="color:#27282E; font-weight:500;">morphs in place</span> into the shipped receipt (Saving… → Saved · undo window → Committed) — the user never sees two cards. Adjust jumps to the standard chooser pre-filled. ✕ fades immediately; ignoring fades after ~45 s with no countdown bar (that idiom is reserved for undo). <span style="color:#27282E; font-weight:500;">Try it — every path works; the undo window is sped up for the demo.</span></div>
+
+  <div style="display:flex; gap:28px; align-items:flex-start; margin-bottom:52px;">
+
+    <!-- interactive lifecycle -->
+    <div style="flex:none; width:320px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">The card <span style="font-weight:400; color:#6C707E; font-size:11px; font-family:ui-monospace,Menlo,Consolas,monospace;">interactive</span></div>
+
+      <!-- phase track -->
+      <div style="display:flex; gap:4px; margin-bottom:10px; flex-wrap:wrap;">
+        <sc-for list="{{ phaseChips }}" as="p" hint-placeholder-count="4">
+          <span style="font-size:9px; font-family:ui-monospace,Menlo,Consolas,monospace; padding:3px 8px; border-radius:5px; background:{{ p.bg }}; color:{{ p.color }}; border:1px solid {{ p.border }};">{{ p.label }}</span>
+        </sc-for>
+      </div>
+
+      <div style="width:300px; min-height:118px;">
+        <!-- offered -->
+        <sc-if value="{{ isOffered }}" hint-placeholder-val="{{ true }}">
+          <div style="width:300px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.26); padding:11px 13px; box-sizing:border-box; animation:dcArrive .4s ease-out;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span style="flex:none; width:8px; height:8px; border-radius:50%; background:#1F8039; box-shadow:0 0 0 2px rgba(31,128,57,.3);"></span>
+              <span style="font-size:12px; font-weight:600; color:#fff;">Save this session?</span>
+              <div style="flex:1;"></div>
+              <span onClick="{{ dismiss }}" style="font-size:12px; color:#6C707E; cursor:pointer;" style-hover="color:#fff;">✕</span>
+            </div>
+            <div style="font-size:11px; color:#D6DAE3; margin-bottom:5px;"><span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-weight:600; color:#8FC9A8;">47 min</span> · IntelliJ, Chrome · ended just now</div>
+            <div style="font-size:10px; color:#6C707E; margin-bottom:9px;">mostly: sinain-hud — websocket reconnect</div>
+            <div style="display:flex; gap:6px;">
+              <button onClick="{{ accept }}" style="flex:none; height:24px; padding:0 12px; background:#1F8039; border:none; border-radius:5px; color:#fff; font-size:11px; font-weight:500; cursor:pointer;">Save 47 min</button>
+              <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:5px; color:#A8ADBD; font-size:11px; cursor:pointer;">Adjust…</button>
+            </div>
+          </div>
+        </sc-if>
+        <!-- saving -->
+        <sc-if value="{{ isSaving }}" hint-placeholder-val="{{ false }}">
+          <div style="width:300px; background:#1E1F22; border:1px solid rgba(31,128,57,.4); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.26); padding:11px 13px; box-sizing:border-box;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span style="flex:none; width:8px; height:8px; border-radius:50%; background:#1F8039;"></span>
+              <span style="font-size:12px; font-weight:600; color:#fff;">Saving 47 min…</span>
+            </div>
+            <div style="height:8px; border-radius:3px; margin-bottom:6px; background:linear-gradient(90deg, #232427 25%, #2E3033 50%, #232427 75%); background-size:200px 100%; animation:dcShimmer 1.1s linear infinite;"></div>
+            <div style="height:8px; width:70%; border-radius:3px; background:linear-gradient(90deg, #232427 25%, #2E3033 50%, #232427 75%); background-size:200px 100%; animation:dcShimmer 1.1s linear infinite;"></div>
+          </div>
+        </sc-if>
+        <!-- saved / undo window -->
+        <sc-if value="{{ isSaved }}" hint-placeholder-val="{{ false }}">
+          <div style="width:300px; background:#1E1F22; border:1px solid rgba(31,128,57,.4); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.26); padding:11px 13px; box-sizing:border-box;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;">
+              <span style="flex:none; font-size:11px; color:#1F8039;">✓</span>
+              <span style="font-size:12px; font-weight:600; color:#fff;">Saved · 12 facts</span>
+              <div style="flex:1;"></div>
+              <span style="font-size:10px; color:#A8ADBD; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ undoLabel }}</span>
+            </div>
+            <div style="font-size:10px; color:#6C707E; margin-bottom:8px;">47 min · IntelliJ, Chrome · source: offered_save</div>
+            <div style="position:relative; height:3px; border-radius:2px; background:rgba(255,255,255,.08); margin-bottom:9px; overflow:hidden;">
+              <div style="position:absolute; left:0; top:0; bottom:0; border-radius:2px; background:#1F8039; width:{{ undoPct }}; transition:width .3s linear;"></div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button onClick="{{ undo }}" style="flex:none; height:24px; padding:0 12px; background:transparent; border:1px solid rgba(255,255,255,.22); border-radius:5px; color:#E8EAEE; font-size:11px; cursor:pointer;" style-hover="border-color:#fff;">Undo</button>
+              <button style="flex:none; height:24px; padding:0 10px; background:transparent; border:none; color:#6C707E; font-size:11px; cursor:pointer;">View facts</button>
+            </div>
+          </div>
+        </sc-if>
+        <!-- committed -->
+        <sc-if value="{{ isCommitted }}" hint-placeholder-val="{{ false }}">
+          <div style="width:300px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 26px rgba(0,28,54,.26); padding:11px 13px; box-sizing:border-box; opacity:.92;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="flex:none; font-size:11px; color:#1F8039;">✓</span>
+              <span style="font-size:12px; font-weight:500; color:#D6DAE3;">Committed · 12 facts in memory</span>
+              <div style="flex:1;"></div>
+              <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">offered_save</span>
+            </div>
+          </div>
+        </sc-if>
+        <!-- terminal ghosts -->
+        <sc-if value="{{ isGhost }}" hint-placeholder-val="{{ false }}">
+          <div style="width:300px; border:1px dashed #CDCBC4; border-radius:10px; padding:14px 13px; box-sizing:border-box;">
+            <div style="font-size:11px; color:#6C707E; line-height:15px;">{{ ghostText }}</div>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <sc-if value="{{ isOffered }}" hint-placeholder-val="{{ true }}"><span onClick="{{ expire }}" style="font-size:11px; color:#6C707E; cursor:pointer; text-decoration:underline;">simulate ~45 s expiry</span></sc-if>
+        <sc-if value="{{ canReset }}" hint-placeholder-val="{{ false }}"><span onClick="{{ reset }}" style="font-size:11px; color:#3369D6; cursor:pointer; text-decoration:underline;">reset — new offer</span></sc-if>
+      </div>
+    </div>
+
+    <!-- adjust: prefilled chooser -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Adjust… → the shipped chooser, pre-filled</div>
+      <div style="width:300px; background:#1E1F22; border:1px solid rgba(255,255,255,.1); border-radius:10px; box-shadow:0 8px 32px rgba(0,28,54,.26); color:#fff; padding:8px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px 9px;">
+          <svg width="14" height="14" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          <span style="font-size:12px; font-weight:600;">Save last…</span>
+          <div style="flex:1;"></div>
+          <span style="font-size:15px; font-weight:600; color:#1F8039; font-family:ui-monospace,Menlo,Consolas,monospace;">47 min</span>
+        </div>
+        <div style="padding:0 10px 6px;">
+          <div style="position:relative; height:18px;">
+            <div style="position:absolute; left:0; right:0; top:7px; height:4px; border-radius:2px; background:rgba(255,255,255,.09);"></div>
+            <div style="position:absolute; left:0; top:7px; height:4px; border-radius:2px; background:#1F8039; width:36.5%; opacity:.75;"></div>
+            <div style="position:absolute; top:2px; left:calc(36.5% - 5px); width:14px; height:14px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.5);"></div>
+          </div>
+        </div>
+        <div style="margin:2px 10px 4px; padding:9px 11px; background:#232427; border-radius:7px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <span style="font-size:9px; letter-spacing:.05em; color:#6C707E; font-weight:600;">COVERS · CLICK TO EXCLUDE</span>
+            <div style="flex:1;"></div>
+            <span style="font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">2 of 3 sources</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:1px; margin:0 -5px 2px;">
+            <sc-for list="{{ adjustSources }}" as="s" hint-placeholder-count="3">
+              <div style="display:flex; align-items:center; gap:8px; padding:4px 5px; border-radius:5px;">
+                <span style="flex:none; width:12px; height:12px; box-sizing:border-box; border-radius:3px; border:1px solid {{ s.boxBorder }}; background:{{ s.boxBg }}; display:flex; align-items:center; justify-content:center; font-size:8px; line-height:1; color:#fff;">{{ s.mark }}</span>
+                <span style="flex:1; font-size:11px; color:{{ s.color }};">{{ s.label }}</span>
+                <span style="flex:none; font-size:9px; color:#6C707E; font-family:ui-monospace,Menlo,Consolas,monospace;">{{ s.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex; gap:7px; padding:6px 10px 8px;">
+          <button style="flex:1; height:28px; background:#1F8039; border:none; border-radius:6px; color:#fff; font-size:12px; font-weight:500; cursor:pointer;">Save 47 min</button>
+          <button style="height:28px; padding:0 11px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#A8ADBD; font-size:12px; cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;"><span style="color:#27282E; font-weight:500;">Nothing new to learn.</span> Same chooser, N pre-set to 47, offered sources ticked. Unticking Slack here is recorded as a correction — future offers on this thread stop proposing Slack, and once excluded it is <span style="color:#27282E; font-weight:500;">never</span> proposed again.</div></sc-if>
+    </div>
+
+    <!-- lifecycle rules -->
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Lifecycle rules</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <sc-for list="{{ lifecycleRules }}" as="r" hint-placeholder-count="4">
+          <div style="background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:12px 14px;">
+            <div style="font-size:12px; font-weight:600; color:#27282E; margin-bottom:3px;">{{ r.title }}</div>
+            <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ r.body }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===================== SECTION 5 — LABELS ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">5 · Why this card exists — every response is a label</div>
+  <div style="font-size:13px; line-height:18px; color:#6C707E; margin-bottom:20px; max-width:840px;">Offer-acceptance over ≥ 30 offers is the published gate (&gt; 70 %) for graduating to autosave-with-receipt. The card is the instrument.</div>
+  <div style="display:flex; gap:16px; flex-wrap:wrap; max-width:1000px; margin-bottom:52px;">
+    <sc-for list="{{ labelCards }}" as="l" hint-placeholder-count="4">
+      <div style="flex:none; width:232px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:14px 16px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <span style="flex:none; width:8px; height:8px; border-radius:2px; background:{{ l.color }};"></span>
+          <span style="font-size:13px; font-weight:600; color:#27282E;">{{ l.response }}</span>
+        </div>
+        <div style="font-size:10px; font-family:ui-monospace,Menlo,Consolas,monospace; color:{{ l.color }}; margin-bottom:5px;">{{ l.label }}</div>
+        <div style="font-size:11px; line-height:15px; color:#6C707E;">{{ l.effect }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- ===================== SECTION 6 — GUARDRAILS ===================== -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:6px;">6 · Guardrails — binding, not tunable</div>
+  <div style="display:flex; gap:16px; flex-wrap:wrap; max-width:1000px;">
+    <sc-for list="{{ guardrails }}" as="g" hint-placeholder-count="4">
+      <div style="flex:none; width:312px; background:#F7F8FA; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,.12); padding:14px 16px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:7px;"><span style="font-size:11px; color:{{ g.color }};">{{ g.glyph }}</span><span style="font-size:13px; font-weight:600; color:#27282E;">{{ g.title }}</span></div>
+        <div style="font-size:12px; line-height:16px; color:#6C707E;">{{ g.body }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;showAnnotations&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot; }
+}">
+class Component extends DCLogic {
+  state = { phase: 'offered', undoLeft: 12, chipOpen: false };
+
+  componentWillUnmount() { this._clear(); }
+  _clear() {
+    if (this._t) { clearInterval(this._t); this._t = null; }
+    if (this._to) { clearTimeout(this._to); this._to = null; }
+  }
+
+  renderVals() {
+    const G = '#1F8039', B = '#3369D6', A = '#E56D17', R = '#B3361C', N = '#6C707E';
+    const phase = this.state.phase;
+    const UNDO_TOTAL = 12;
+
+    const accept = () => {
+      this._clear();
+      this.setState({ phase: 'saving' });
+      this._to = setTimeout(() => {
+        this.setState({ phase: 'saved', undoLeft: UNDO_TOTAL });
+        this._t = setInterval(() => {
+          this.setState(s => {
+            if (s.phase !== 'saved') return null;
+            const n = s.undoLeft - 1;
+            if (n <= 0) { this._clear(); return { phase: 'committed', undoLeft: 0 }; }
+            return { undoLeft: n };
+          });
+        }, 1000);
+      }, 1100);
+    };
+    const undo = () => { this._clear(); this.setState({ phase: 'undone' }); };
+    const dismiss = () => { this._clear(); this.setState({ phase: 'dismissed' }); };
+    const expire = () => { this._clear(); this.setState({ phase: 'expired' }); };
+    const reset = () => { this._clear(); this.setState({ phase: 'offered', undoLeft: UNDO_TOTAL }); };
+
+    const phaseDefs = [
+      ['offered', 'offered'],
+      ['saving', 'saving…'],
+      ['saved', 'saved · undo'],
+      ['committed', 'committed'],
+    ];
+    const terminal = { undone: 'undone', dismissed: 'dismissed', expired: 'expired' };
+    const chips = phaseDefs.map(([key, label]) => {
+      const on = phase === key;
+      return {
+        label,
+        color: on ? '#fff' : '#6C707E',
+        bg: on ? G : 'transparent',
+        border: on ? G : '#CDCBC4',
+      };
+    });
+    if (terminal[phase]) {
+      chips.push({ label: terminal[phase], color: '#fff', bg: N, border: N });
+    }
+
+    const ghostTexts = {
+      dismissed: '✕ — the card faded immediately. Recorded as an explicit "not save-worthy". Two of these in a day and offers stop until tomorrow.',
+      expired: 'Ignored for ~45 s — a slow, silent fade. Logged as a weak "no", lighter than an explicit ✕. No badge, no pending count, no guilt.',
+      undone: 'Undone — a true cancel: nothing was written yet, so nothing is deleted. Identical to undoing a manual save.',
+    };
+
+    const momentRules = [
+      { title: 'Silent arrival', body: 'No sound, no dock bounce, no notification center. The offer enters with a quiet fade — the new context keeps the user\u2019s focus.' },
+      { title: 'Composed for free', body: 'Range, apps, and duration come from the work-state engine\u2019s existing data. The LLM runs only after acceptance — the normal save distillation.' },
+      { title: 'Offered at most once', body: 'An episode never re-offers. Missing one costs nothing: the manual menu path (Save last…) is always there.' },
+    ];
+
+    const evidenceVariants = [
+      {
+        title: 'Lean — duration · sources · recency',
+        duration: '47 min', durColor: '#8FC9A8', recency: 'ended just now',
+        detail: null, context: 'mostly: sinain-hud — websocket reconnect',
+        gapAfterClaim: '5px',
+        note: 'The baseline. Three checkable tokens answer "what am I being asked to save?" in one glance. The context line appears only when the engine is confident — never hedged filler.',
+      },
+      {
+        title: 'Evidence-rich — two strong details',
+        duration: '47 min', durColor: '#8FC9A8', recency: 'ended just now',
+        detail: '3 errors resolved · 1 call', context: 'mostly: sinain-hud — websocket reconnect',
+        gapAfterClaim: '4px',
+        note: 'Adds the two strongest activity signals when available. Argument for: "3 errors resolved" is a better save-worthiness argument than duration alone. Against: more to read for a card most users ignore.',
+      },
+      {
+        title: 'Honest — the idle tail is named',
+        duration: '47 min', durColor: '#D9A21B', recency: '12 min idle at the end',
+        detail: null, context: null,
+        gapAfterClaim: '9px',
+        note: 'Not a variant — a binding rule shown in card form. When coverage is partial or the tail was idle, the evidence line says so. Honesty costs a few words and buys the trust the whole offer runs on.',
+      },
+    ];
+
+    const adjustSources = [
+      { label: 'IntelliJ', note: '47 min', mark: '\u2713', boxBg: G, boxBorder: G, color: '#D6DAE3' },
+      { label: 'Chrome', note: '41 min', mark: '\u2713', boxBg: G, boxBorder: G, color: '#D6DAE3' },
+      { label: 'Slack', note: '9 min', mark: '', boxBg: 'transparent', boxBorder: 'rgba(255,255,255,0.25)', color: '#6C707E' },
+    ];
+
+    const lifecycleRules = [
+      { title: 'Morph, never stack', body: 'Accept transforms the offer into the receipt in place — one card per save, so the receipt\u2019s undo bar is the first countdown the user ever sees.' },
+      { title: 'The countdown idiom is sacred', body: 'A draining bar means "undo window" on the receipt. The offer\u2019s own expiry is visually silent — no bar, no timer, just a slow fade.' },
+      { title: 'No "Not now" button', body: 'Dismissal must not need a decision. The ✕ and the fade both mean it; a third button would make ignoring feel like a choice owed.' },
+      { title: 'Provenance is permanent', body: 'An accepted offer saves as source: offered_save — distinguishable from user_save forever, in the KG and in any "why do you know this?" answer.' },
+    ];
+
+    const labelCards = [
+      { response: 'Save', label: 'strong positive', color: G, effect: 'This episode shape — duration, sources, activity mix — is save-worthy. The core signal autosave graduation is built on.' },
+      { response: 'Adjust → save', label: 'positive + correction', color: B, effect: 'The edited scope and range are supervision for thread membership and duration. The most valuable label of the four.' },
+      { response: '✕ dismiss', label: 'explicit negative', color: R, effect: 'This episode shape is not save-worthy. Weighted fully; two in a day silences offers until tomorrow.' },
+      { response: 'Expiry (ignored)', label: 'weak negative', color: N, effect: 'Counted, but lighter than an explicit ✕ — the user may simply never have looked.' },
+    ];
+
+    const guardrails = [
+      { glyph: '⊘', color: R, title: 'Privacy floor', body: 'A source ever excluded for a thread is never proposed for it again. Mic is never proposed unless the user\u2019s manual saves on that thread consistently include it.' },
+      { glyph: '≤3', color: A, title: 'Frequency caps', body: '≤ 3 offers/day · ≥ 45 min between offers · 2 consecutive dismissals end offers for the day · an episode is offered at most once.' },
+      { glyph: '◔', color: N, title: 'Honesty', body: 'Partial coverage and idle tails are named in the evidence line ("47 min · 12 min idle at the end"). Loading is shimmer, never a spinner.' },
+      { glyph: '✎', color: B, title: 'Copy rules', body: 'Always name the evidence. Never "you seemed focused", never "this looks important", never "last chance". The verb carries the value: Save 47 min, not OK.' },
+    ];
+
+    return {
+      showAnnotations: this.props.showAnnotations !== false,
+      momentRules,
+      chipClosed: !this.state.chipOpen,
+      chipOpen: this.state.chipOpen,
+      openChip: () => this.setState({ chipOpen: true }),
+      closeChip: () => this.setState({ chipOpen: false }),
+      evidenceVariants,
+      phaseChips: chips,
+      isOffered: phase === 'offered',
+      isSaving: phase === 'saving',
+      isSaved: phase === 'saved',
+      isCommitted: phase === 'committed',
+      isGhost: !!ghostTexts[phase],
+      ghostText: ghostTexts[phase] || '',
+      undoLabel: 'Undo · ' + this.state.undoLeft + 's',
+      undoPct: (this.state.undoLeft / UNDO_TOTAL * 100).toFixed(0) + '%',
+      canReset: phase !== 'offered',
+      accept, undo, dismiss, expire, reset,
+      adjustSources,
+      lifecycleRules, labelCards, guardrails,
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1019 @@
+[1m[start][0m [0;33m⚠[0m killed stale processes from previous run
+[1m[start][0m Preflight checks...
+[1m[start][0m [0;32m✓[0m session log: /Users/Igor.Gerasimov/.sinain/logs/backend.log
+[1m[start][0m [0;32m✓[0m node v22.22.0
+[1m[start][0m [0;32m✓[0m python3 3.13.7
+[1m[start][0m [0;33m⚠[0m flutter not found — overlay will be skipped
+[1m[start][0m [0;32m✓[0m sinain-core/node_modules present
+[1m[start][0m [0;32m✓[0m port 9500 free
+
+[1m[start][0m [0;32m✓[0m sck-capture binary up to date
+[1m[start][0m [0;32m✓[0m region-SLM model present: qwen2.5:3b
+[1m[start][0m Starting sinain-core...
+[0;36m[core][0m     
+[0;36m[core][0m     > sinain-core@1.0.0 dev
+[0;36m[core][0m     > tsx watch src/index.ts
+[0;36m[core][0m     
+[0;36m[core][0m     [config] loaded /Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/.env
+[0;36m[core][0m     [2026-07-21T19:22:17.332Z] [core] sinain-core starting...
+[0;36m[core][0m     [2026-07-21T19:22:18.139Z] [perms] tightened on-device data permissions (dirs 0700, files 0600)
+[0;36m[core][0m     [2026-07-21T19:22:18.140Z] [core] versions: core=1.0.0 dmg=source build=source node=v22.22.0
+[0;36m[core][0m     [config] loaded agents config from /Users/Igor.Gerasimov/.sinain/agents.json
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] port: 9500
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] audio: device=BlackHole 2ch cmd=screencapturekit chunk=5000ms
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] mic: enabled=true device=default cmd=sox
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] transcription: model=google/gemini-2.5-flash
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] agent: model=gemma-4-31b debounce=6000ms max=60000ms
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] escalation: mode=off cooldown=30000ms stale=0ms
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] openclaw: ws= http=
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] situation: /Users/Igor.Gerasimov/.openclaw/workspace/SITUATION.md
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] tracing: enabled=true dir=/Users/Igor.Gerasimov/.sinain-core/traces
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] learning: enabled=true dir=/Users/Igor.Gerasimov/.sinain-core/feedback
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [core] privacy: mode=off
+[0;36m[core][0m     [2026-07-21T19:22:18.142Z] [embedding] loading Xenova/all-MiniLM-L6-v2 (background)...
+[0;36m[core][0m     [2026-07-21T19:22:18.146Z] [web-db] web.db ready at /Users/Igor.Gerasimov/.sinain/memory/web.db (schema v2)
+[0;36m[core][0m     [2026-07-21T19:22:18.147Z] [local-curation] memory: /Users/Igor.Gerasimov/.sinain/memory
+[0;36m[core][0m     [2026-07-21T19:22:18.147Z] [local-curation] scripts: /Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-hud-plugin/sinain-memory
+[0;36m[core][0m     [2026-07-21T19:22:18.147Z] [local-curation] scripts available: true
+[0;36m[core][0m     [2026-07-21T19:22:18.332Z] [entity-cache] loaded 38 entity names
+[0;36m[core][0m     [2026-07-21T19:22:18.334Z] [openclaw] device identity: 85c1b46758fc…
+[0;36m[core][0m     [2026-07-21T19:22:18.335Z] [task-store] loaded 0 pending task(s) from disk
+[0;36m[core][0m     [2026-07-21T19:22:18.335Z] [core] region-slm lane ON: model=qwen2.5:3b debounce=500ms endpoint=http://localhost:11434
+[0;36m[core][0m     [2026-07-21T19:22:18.345Z] [transcribe-server] init: bin=whisper-server model=/Users/Igor.Gerasimov/.sinain/models/whisper/ggml-large-v3-turbo.bin port=8910 lang=auto
+[0;36m[core][0m     [2026-07-21T19:22:18.348Z] [transcribe] initialized: backend=local model=google/gemini-2.5-flash language=auto
+[0;36m[core][0m     [2026-07-21T19:22:18.348Z] [core] bareagent register: chat=[sinain,claude-desktop] terminal=[claude,gclaude,openclaude,codex,goose,junie,aider] current=sinain → lanes esc=sinain term=openclaude
+[0;36m[core][0m     [2026-07-21T19:22:18.348Z] [escalation] mode changed to: rich
+[0;36m[core][0m     [2026-07-21T19:22:18.348Z] [core] escalation resumed (mode: rich)
+[0;36m[core][0m     [2026-07-21T19:22:18.348Z] [core] roster pre-populated from agents.json: claude,gclaude,openclaude,codex,goose,junie,aider,sinain,claude-desktop,chatgpt-desktop
+[0;36m[core][0m     [2026-07-21T19:22:18.350Z] [core] starting memory daemon: python3 /Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-core/src/../../sinain-hud-plugin/sinain-memory/memoryd.py
+[0;36m[core][0m     [2026-07-21T19:22:18.357Z] [transcribe-server] ⚠ server process error: spawn whisper-server ENOENT
+[0;36m[core][0m     [2026-07-21T19:22:18.509Z] [embedding] model ready in 367ms (384 dims)
+[0;36m[core][0m     [2026-07-21T19:22:18.510Z] [kg] [memoryd] episode store: 3839 episodes (/Users/Igor.Gerasimov/.sinain/memory/episodes.jsonl)
+[0;36m[core][0m     [2026-07-21T19:22:18.511Z] [kg] [memoryd] ready · /tmp/sinain-kg.sock
+[0;36m[core][0m     [2026-07-21T19:22:18.513Z] [save-offer] armed: ≥10m episodes · ≤3/day · 45m cooldown · 45s expiry
+[0;36m[core][0m     [2026-07-21T19:22:18.515Z] [session-sense] armed: episode ≥2m qualifies · wrap after 6m quiet + 10m grace
+[0;36m[core][0m     [2026-07-21T19:22:18.521Z] [server] listening on http://127.0.0.1:9500 (HTTP + WS, epoch=mrv1ipnq-jri0)
+[0;36m[core][0m     [2026-07-21T19:22:18.521Z] [core] auto-starting system audio pipeline...
+[0;36m[core][0m     [2026-07-21T19:22:18.521Z] [audio] starting capture: device=BlackHole 2ch cmd=screencapturekit rate=16000 gain=20dB
+[0;36m[core][0m     [2026-07-21T19:22:18.521Z] [audio] spawning: /Users/Igor.Gerasimov/.sinain/sck-capture/sck-capture --sample-rate 16000 --channels 1 --screen-dir /Users/Igor.Gerasimov/.sinain/capture --fps 4 --scale 1 --pin-display
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core] system audio pipeline started
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [audio] capture started
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core] mic pipeline ready (not auto-started — send toggle_mic or set MIC_AUTO_START=true)
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core] ✓ sinain-core running
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core]   http+ws: http://0.0.0.0:9500
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core]   audio:   active (screencapturekit)
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core]   mic:     standby
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core]   agent:   disabled
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core]   escal:   rich
+[0;36m[core][0m     [2026-07-21T19:22:18.522Z] [core]   cost:    display=off (always logged)
+[0;36m[core][0m     [2026-07-21T19:22:18.529Z] [audio] sck-capture stderr: [sck-capture] sample_rate=16000 channels=1 fps=4.0 scale=1.0 audio=true mic=false
+[0;36m[core][0m     [2026-07-21T19:22:18.590Z] [audio] sck-capture stderr: [sck-capture] active display 1: 1512x982 @ 4.0 fps → /Users/Igor.Gerasimov/.sinain/capture
+[0;36m[core][0m     [2026-07-21T19:22:18.629Z] [audio] sck-capture stderr: [sck-capture] starting capture...
+[0;36m[core][0m     [2026-07-21T19:22:18.730Z] [audio] sck-capture stderr: [sck-capture] capturing (Ctrl+C to stop)
+[0;36m[core][0m     [2026-07-21T19:22:18.787Z] [audio] sck-capture stderr: [sck-capture] audio format: 16000.0Hz, 1ch, 32bit, flags=0x29
+[1m[start][0m [0;32m✓[0m sinain-core healthy on :9500
+[1m[start][0m Privacy: mode=off ocr_openrouter=full images_openrouter=full
+[1m[start][0m [0;33m⚠[0m sense_client skipped
+[1m[start][0m [0;33m⚠[0m overlay skipped
+
+[1m── SinainHUD (sinain-core) ────────────[0m
+  [0;36mcore[0m     :9500   [0;32m✓[0m  (http+ws)
+  [0;33msense[0m    [2m—       skipped[0m
+  [0;35moverlay[0m  [2m—       skipped[0m
+[1m───────────────────────────────────────[0m
+  Press [1mCtrl+C[0m to stop all services
+[1m───────────────────────────────────────[0m
+
+[0;36m[core][0m     [2026-07-21T19:22:21.451Z] [claude-usage] ⚠ Claude OAuth access token not found
+[0;36m[core][0m     [2026-07-21T19:22:37.551Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-21T19:22:38.430Z] [transcribe-server] ⚠ whisper-server did not become ready in 20s
+[0;36m[core][0m     [2026-07-21T19:22:38.430Z] [transcribe-server] ⚠ falling back to per-chunk whisper-cli (set LOCAL_WHISPER_SERVER=false to silence)
+[0;36m[core][0m     [2026-07-21T19:22:38.430Z] [transcribe-local] initialized: bin=whisper-cli model=/Users/Igor.Gerasimov/.sinain/models/whisper/ggml-large-v3-turbo.bin lang=auto
+[0;36m[core][0m     [2026-07-21T19:24:42.473Z] [ws] ← command: set_agent_llm_brief
+[0;36m[core][0m     [2026-07-21T19:24:42.473Z] [cmd] agent LLM brief enabled
+[0;36m[core][0m     [2026-07-21T19:24:42.473Z] [cmd] command processed: set_agent_llm_brief
+[0;36m[core][0m     [2026-07-21T19:24:42.474Z] [ws] ← command: set_auto_detect
+[0;36m[core][0m     [2026-07-21T19:24:42.474Z] [cmd] auto-detect issues disabled
+[0;36m[core][0m     [2026-07-21T19:24:42.474Z] [cmd] command processed: set_auto_detect
+[0;36m[core][0m     [2026-07-21T19:24:44.353Z] [ws] ← agent approval reply: id=apr_3 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:25:33.864Z] [ws] ← agent approval reply: id=apr_4 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:25:38.830Z] [ws] ← agent approval reply: id=apr_5 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:25:39.027Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-21T19:25:49.500Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-21T19:27:31.648Z] [ws] ← command: set_agent_llm_brief
+[0;36m[core][0m     [2026-07-21T19:27:31.649Z] [cmd] agent LLM brief enabled
+[0;36m[core][0m     [2026-07-21T19:27:31.649Z] [cmd] command processed: set_agent_llm_brief
+[0;36m[core][0m     [2026-07-21T19:27:31.649Z] [ws] ← command: set_auto_detect
+[0;36m[core][0m     [2026-07-21T19:27:31.649Z] [cmd] auto-detect issues disabled
+[0;36m[core][0m     [2026-07-21T19:27:31.649Z] [cmd] command processed: set_auto_detect
+[0;36m[core][0m     [2026-07-21T19:29:08.605Z] [ws] ← agent approval reply: id=apr_6 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:30:32.900Z] [ws] ← agent approval reply: id=apr_7 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:43:49.582Z] [ws] ← agent approval reply: id=apr_10 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:43:57.427Z] [ws] ← agent approval reply: id=apr_11 behavior=allow
+[0;36m[core][0m     [2026-07-21T19:54:05.854Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-21T19:57:14.280Z] [transcribe-local] ✘ local transcription failed: whisper-cpp spawn error: spawn whisper-cli ENOENT
+[0;36m[core][0m     [2026-07-21T19:57:14.281Z] [transcribe] ✘ transcription failed: whisper-cpp spawn error: spawn whisper-cli ENOENT
+[0;36m[core][0m     [2026-07-21T19:59:18.141Z] [cost] $0.000000 total (1 calls, 37.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:00:18.141Z] [cost] $0.000000 total (2 calls, 38.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:01:18.141Z] [cost] $0.000000 total (2 calls, 39.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:02:18.141Z] [cost] $0.000000 total (2 calls, 40.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:03:18.140Z] [cost] $0.000000 total (2 calls, 41.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:04:18.141Z] [cost] $0.000000 total (2 calls, 42.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:05:18.140Z] [cost] $0.000000 total (2 calls, 43.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:06:18.140Z] [cost] $0.000000 total (2 calls, 44.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:07:18.140Z] [cost] $0.000000 total (2 calls, 45.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:08:18.140Z] [cost] $0.000000 total (2 calls, 46.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:09:18.140Z] [cost] $0.000000 total (2 calls, 47.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:10:18.140Z] [cost] $0.000000 total (2 calls, 48.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:11:18.140Z] [cost] $0.000000 total (2 calls, 49.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:12:18.140Z] [cost] $0.000000 total (2 calls, 50.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:13:18.139Z] [cost] $0.000000 total (2 calls, 51.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:14:18.139Z] [cost] $0.000000 total (2 calls, 52.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:15:18.163Z] [cost] $0.000000 total (2 calls, 53.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:16:18.179Z] [cost] $0.000000 total (2 calls, 54.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:17:18.180Z] [cost] $0.000000 total (2 calls, 55.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:18:18.181Z] [cost] $0.000000 total (2 calls, 56.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:19:18.181Z] [cost] $0.000000 total (2 calls, 57.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:20:18.182Z] [cost] $0.000000 total (2 calls, 58.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:21:18.183Z] [cost] $0.000000 total (2 calls, 59.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:22:18.184Z] [cost] $0.000000 total (2 calls, 60.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:23:18.184Z] [cost] $0.000000 total (2 calls, 61.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:24:18.185Z] [cost] $0.000000 total (2 calls, 62.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:25:18.186Z] [cost] $0.000000 total (2 calls, 63.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:26:18.186Z] [cost] $0.000000 total (2 calls, 64.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:27:18.187Z] [cost] $0.000000 total (2 calls, 65.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:28:18.188Z] [cost] $0.000000 total (2 calls, 66.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:29:18.189Z] [cost] $0.000000 total (2 calls, 67.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:30:18.189Z] [cost] $0.000000 total (2 calls, 68.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:31:18.190Z] [cost] $0.000000 total (2 calls, 69.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:32:18.191Z] [cost] $0.000000 total (2 calls, 70.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:33:18.196Z] [cost] $0.000000 total (2 calls, 71.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:34:18.198Z] [cost] $0.000000 total (2 calls, 72.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:35:18.199Z] [cost] $0.000000 total (2 calls, 73.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:36:18.201Z] [cost] $0.000000 total (2 calls, 74.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:37:18.203Z] [cost] $0.000000 total (2 calls, 75.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:38:18.205Z] [cost] $0.000000 total (2 calls, 76.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:39:18.205Z] [cost] $0.000000 total (2 calls, 77.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:40:18.206Z] [cost] $0.000000 total (2 calls, 78.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:41:18.208Z] [cost] $0.000000 total (2 calls, 79.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:42:18.209Z] [cost] $0.000000 total (2 calls, 80.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:43:18.211Z] [cost] $0.000000 total (2 calls, 81.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:44:18.212Z] [cost] $0.000000 total (2 calls, 82.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:45:18.214Z] [cost] $0.000000 total (2 calls, 83.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:46:18.216Z] [cost] $0.000000 total (2 calls, 84.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:47:18.217Z] [cost] $0.000000 total (2 calls, 85.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:48:18.207Z] [cost] $0.000000 total (2 calls, 86.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:49:18.208Z] [cost] $0.000000 total (2 calls, 87.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:50:18.208Z] [cost] $0.000000 total (2 calls, 88.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:51:18.210Z] [cost] $0.000000 total (2 calls, 89.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:52:18.212Z] [cost] $0.000000 total (2 calls, 90.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:53:18.213Z] [cost] $0.000000 total (2 calls, 91.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:54:18.215Z] [cost] $0.000000 total (2 calls, 92.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:55:18.215Z] [cost] $0.000000 total (2 calls, 93.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:56:18.217Z] [cost] $0.000000 total (2 calls, 94.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:57:18.217Z] [cost] $0.000000 total (2 calls, 95.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:58:18.219Z] [cost] $0.000000 total (2 calls, 96.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T20:59:18.220Z] [cost] $0.000000 total (2 calls, 97.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:00:18.221Z] [cost] $0.000000 total (2 calls, 98.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:01:18.221Z] [cost] $0.000000 total (2 calls, 99.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:02:18.223Z] [cost] $0.000000 total (2 calls, 100.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:03:18.224Z] [cost] $0.000000 total (2 calls, 101.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:04:18.225Z] [cost] $0.000000 total (2 calls, 102.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:05:18.227Z] [cost] $0.000000 total (2 calls, 103.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:06:18.228Z] [cost] $0.000000 total (2 calls, 104.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:07:18.230Z] [cost] $0.000000 total (2 calls, 105.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:08:18.230Z] [cost] $0.000000 total (2 calls, 106.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:09:18.231Z] [cost] $0.000000 total (2 calls, 107.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:10:18.232Z] [cost] $0.000000 total (2 calls, 108.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:11:18.234Z] [cost] $0.000000 total (2 calls, 109.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:12:18.236Z] [cost] $0.000000 total (2 calls, 110.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:13:18.237Z] [cost] $0.000000 total (2 calls, 111.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:14:18.239Z] [cost] $0.000000 total (2 calls, 112.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:15:18.240Z] [cost] $0.000000 total (2 calls, 113.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:16:18.242Z] [cost] $0.000000 total (2 calls, 114.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:17:18.243Z] [cost] $0.000000 total (2 calls, 115.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:18:18.244Z] [cost] $0.000000 total (2 calls, 116.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:19:18.246Z] [cost] $0.000000 total (2 calls, 117.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:20:18.248Z] [cost] $0.000000 total (2 calls, 118.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:21:18.249Z] [cost] $0.000000 total (2 calls, 119.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:22:18.250Z] [cost] $0.000000 total (2 calls, 120.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:23:18.251Z] [cost] $0.000000 total (2 calls, 121.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:24:18.254Z] [cost] $0.000000 total (2 calls, 122.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:25:18.254Z] [cost] $0.000000 total (2 calls, 123.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:26:18.256Z] [cost] $0.000000 total (2 calls, 124.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:27:18.257Z] [cost] $0.000000 total (2 calls, 125.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:28:18.259Z] [cost] $0.000000 total (2 calls, 126.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:29:18.259Z] [cost] $0.000000 total (2 calls, 127.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:30:18.261Z] [cost] $0.000000 total (2 calls, 128.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:31:18.262Z] [cost] $0.000000 total (2 calls, 129.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:32:18.263Z] [cost] $0.000000 total (2 calls, 130.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:33:18.265Z] [cost] $0.000000 total (2 calls, 131.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:34:18.265Z] [cost] $0.000000 total (2 calls, 132.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:35:18.267Z] [cost] $0.000000 total (2 calls, 133.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:36:18.268Z] [cost] $0.000000 total (2 calls, 134.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:37:18.269Z] [cost] $0.000000 total (2 calls, 135.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:38:18.269Z] [cost] $0.000000 total (2 calls, 136.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:39:18.236Z] [cost] $0.000000 total (2 calls, 137.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:40:18.235Z] [cost] $0.000000 total (2 calls, 138.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:41:18.235Z] [cost] $0.000000 total (2 calls, 139.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:42:18.237Z] [cost] $0.000000 total (2 calls, 140.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:43:18.238Z] [cost] $0.000000 total (2 calls, 141.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:44:18.239Z] [cost] $0.000000 total (2 calls, 142.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:45:18.239Z] [cost] $0.000000 total (2 calls, 143.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:46:18.239Z] [cost] $0.000000 total (2 calls, 144.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:47:18.239Z] [cost] $0.000000 total (2 calls, 145.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:48:18.239Z] [cost] $0.000000 total (2 calls, 146.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:49:18.239Z] [cost] $0.000000 total (2 calls, 147.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:50:18.239Z] [cost] $0.000000 total (2 calls, 148.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:51:18.239Z] [cost] $0.000000 total (2 calls, 149.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:52:18.238Z] [cost] $0.000000 total (2 calls, 150.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:53:18.238Z] [cost] $0.000000 total (2 calls, 151.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:54:18.238Z] [cost] $0.000000 total (2 calls, 152.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:55:18.238Z] [cost] $0.000000 total (2 calls, 153.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:56:18.238Z] [cost] $0.000000 total (2 calls, 154.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:57:18.237Z] [cost] $0.000000 total (2 calls, 155.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:58:18.237Z] [cost] $0.000000 total (2 calls, 156.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T21:59:18.238Z] [cost] $0.000000 total (2 calls, 157.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:00:18.238Z] [cost] $0.000000 total (2 calls, 158.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:01:18.238Z] [cost] $0.000000 total (2 calls, 159.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:02:18.239Z] [cost] $0.000000 total (2 calls, 160.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:03:18.239Z] [cost] $0.000000 total (2 calls, 161.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:04:18.239Z] [cost] $0.000000 total (2 calls, 162.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:05:18.240Z] [cost] $0.000000 total (2 calls, 163.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:06:18.240Z] [cost] $0.000000 total (2 calls, 164.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:07:18.241Z] [cost] $0.000000 total (2 calls, 165.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:08:18.241Z] [cost] $0.000000 total (2 calls, 166.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:09:18.242Z] [cost] $0.000000 total (2 calls, 167.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:10:18.270Z] [cost] $0.000000 total (2 calls, 168.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:11:18.273Z] [cost] $0.000000 total (2 calls, 169.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:12:18.274Z] [cost] $0.000000 total (2 calls, 170.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:13:18.276Z] [cost] $0.000000 total (2 calls, 171.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:14:18.277Z] [cost] $0.000000 total (2 calls, 172.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:15:18.279Z] [cost] $0.000000 total (2 calls, 173.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:16:18.281Z] [cost] $0.000000 total (2 calls, 174.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:17:18.282Z] [cost] $0.000000 total (2 calls, 175.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:18:18.284Z] [cost] $0.000000 total (2 calls, 176.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:19:18.284Z] [cost] $0.000000 total (2 calls, 177.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:20:18.286Z] [cost] $0.000000 total (2 calls, 178.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:21:18.287Z] [cost] $0.000000 total (2 calls, 179.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:22:18.289Z] [cost] $0.000000 total (2 calls, 180.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:23:18.289Z] [cost] $0.000000 total (2 calls, 181.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:24:18.290Z] [cost] $0.000000 total (2 calls, 182.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:25:18.292Z] [cost] $0.000000 total (2 calls, 183.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:26:18.293Z] [cost] $0.000000 total (2 calls, 184.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:27:18.294Z] [cost] $0.000000 total (2 calls, 185.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:28:18.295Z] [cost] $0.000000 total (2 calls, 186.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:29:18.297Z] [cost] $0.000000 total (2 calls, 187.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:30:18.297Z] [cost] $0.000000 total (2 calls, 188.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:31:18.300Z] [cost] $0.000000 total (2 calls, 189.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:32:18.301Z] [cost] $0.000000 total (2 calls, 190.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:33:18.303Z] [cost] $0.000000 total (2 calls, 191.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:34:18.304Z] [cost] $0.000000 total (2 calls, 192.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:35:18.306Z] [cost] $0.000000 total (2 calls, 193.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:36:18.307Z] [cost] $0.000000 total (2 calls, 194.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:37:18.307Z] [cost] $0.000000 total (2 calls, 195.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:38:18.309Z] [cost] $0.000000 total (2 calls, 196.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:39:18.311Z] [cost] $0.000000 total (2 calls, 197.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:40:18.312Z] [cost] $0.000000 total (2 calls, 198.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:41:18.313Z] [cost] $0.000000 total (2 calls, 199.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:42:18.309Z] [cost] $0.000000 total (2 calls, 200.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:43:18.307Z] [cost] $0.000000 total (2 calls, 201.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:44:18.308Z] [cost] $0.000000 total (2 calls, 202.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:45:18.310Z] [cost] $0.000000 total (2 calls, 203.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:46:18.311Z] [cost] $0.000000 total (2 calls, 204.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:47:18.312Z] [cost] $0.000000 total (2 calls, 205.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:48:18.313Z] [cost] $0.000000 total (2 calls, 206.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:49:18.315Z] [cost] $0.000000 total (2 calls, 207.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:50:18.316Z] [cost] $0.000000 total (2 calls, 208.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:51:18.316Z] [cost] $0.000000 total (2 calls, 209.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:52:18.318Z] [cost] $0.000000 total (2 calls, 210.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:53:18.317Z] [cost] $0.000000 total (2 calls, 211.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:54:18.319Z] [cost] $0.000000 total (2 calls, 212.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:55:18.319Z] [cost] $0.000000 total (2 calls, 213.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:56:18.321Z] [cost] $0.000000 total (2 calls, 214.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:57:18.321Z] [cost] $0.000000 total (2 calls, 215.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:58:18.323Z] [cost] $0.000000 total (2 calls, 216.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T22:59:18.324Z] [cost] $0.000000 total (2 calls, 217.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:00:18.325Z] [cost] $0.000000 total (2 calls, 218.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:01:18.326Z] [cost] $0.000000 total (2 calls, 219.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:02:18.327Z] [cost] $0.000000 total (2 calls, 220.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:03:18.329Z] [cost] $0.000000 total (2 calls, 221.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:04:18.330Z] [cost] $0.000000 total (2 calls, 222.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:05:18.331Z] [cost] $0.000000 total (2 calls, 223.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:06:18.332Z] [cost] $0.000000 total (2 calls, 224.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:07:18.332Z] [cost] $0.000000 total (2 calls, 225.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:08:18.333Z] [cost] $0.000000 total (2 calls, 226.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:09:18.334Z] [cost] $0.000000 total (2 calls, 227.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:10:18.334Z] [cost] $0.000000 total (2 calls, 228.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:11:18.334Z] [cost] $0.000000 total (2 calls, 229.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:12:18.335Z] [cost] $0.000000 total (2 calls, 230.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:13:18.336Z] [cost] $0.000000 total (2 calls, 231.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:14:18.338Z] [cost] $0.000000 total (2 calls, 232.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:15:18.366Z] [cost] $0.000000 total (2 calls, 233.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:16:18.369Z] [cost] $0.000000 total (2 calls, 234.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:17:18.369Z] [cost] $0.000000 total (2 calls, 235.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:18:18.371Z] [cost] $0.000000 total (2 calls, 236.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:19:18.373Z] [cost] $0.000000 total (2 calls, 237.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:20:18.374Z] [cost] $0.000000 total (2 calls, 238.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:21:18.375Z] [cost] $0.000000 total (2 calls, 239.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:22:18.375Z] [cost] $0.000000 total (2 calls, 240.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:23:18.376Z] [cost] $0.000000 total (2 calls, 241.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:24:18.377Z] [cost] $0.000000 total (2 calls, 242.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:25:18.378Z] [cost] $0.000000 total (2 calls, 243.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:26:18.379Z] [cost] $0.000000 total (2 calls, 244.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:27:18.379Z] [cost] $0.000000 total (2 calls, 245.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:28:18.380Z] [cost] $0.000000 total (2 calls, 246.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:29:18.381Z] [cost] $0.000000 total (2 calls, 247.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:30:18.382Z] [cost] $0.000000 total (2 calls, 248.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:31:18.383Z] [cost] $0.000000 total (2 calls, 249.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:32:18.383Z] [cost] $0.000000 total (2 calls, 250.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:33:18.385Z] [cost] $0.000000 total (2 calls, 251.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:34:18.386Z] [cost] $0.000000 total (2 calls, 252.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:35:18.388Z] [cost] $0.000000 total (2 calls, 253.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:36:18.389Z] [cost] $0.000000 total (2 calls, 254.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:37:18.390Z] [cost] $0.000000 total (2 calls, 255.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:38:18.391Z] [cost] $0.000000 total (2 calls, 256.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:39:18.393Z] [cost] $0.000000 total (2 calls, 257.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:40:18.394Z] [cost] $0.000000 total (2 calls, 258.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:41:18.397Z] [cost] $0.000000 total (2 calls, 259.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:42:18.402Z] [cost] $0.000000 total (2 calls, 260.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:43:18.405Z] [cost] $0.000000 total (2 calls, 261.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:44:18.406Z] [cost] $0.000000 total (2 calls, 262.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:45:18.408Z] [cost] $0.000000 total (2 calls, 263.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:46:18.409Z] [cost] $0.000000 total (2 calls, 264.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:47:18.398Z] [cost] $0.000000 total (2 calls, 265.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:48:18.399Z] [cost] $0.000000 total (2 calls, 266.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:49:18.400Z] [cost] $0.000000 total (2 calls, 267.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:50:18.402Z] [cost] $0.000000 total (2 calls, 268.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:51:18.404Z] [cost] $0.000000 total (2 calls, 269.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:52:18.404Z] [cost] $0.000000 total (2 calls, 270.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:53:18.406Z] [cost] $0.000000 total (2 calls, 271.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:54:18.407Z] [cost] $0.000000 total (2 calls, 272.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:55:18.408Z] [cost] $0.000000 total (2 calls, 273.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:56:18.410Z] [cost] $0.000000 total (2 calls, 274.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:57:18.411Z] [cost] $0.000000 total (2 calls, 275.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:58:18.413Z] [cost] $0.000000 total (2 calls, 276.0 min) |  | 
+[0;36m[core][0m     [2026-07-21T23:59:18.414Z] [cost] $0.000000 total (2 calls, 277.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:00:18.416Z] [cost] $0.000000 total (2 calls, 278.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:01:18.417Z] [cost] $0.000000 total (2 calls, 279.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:02:18.417Z] [cost] $0.000000 total (2 calls, 280.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:03:18.418Z] [cost] $0.000000 total (2 calls, 281.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:04:18.419Z] [cost] $0.000000 total (2 calls, 282.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:05:18.420Z] [cost] $0.000000 total (2 calls, 283.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:06:18.422Z] [cost] $0.000000 total (2 calls, 284.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:07:18.424Z] [cost] $0.000000 total (2 calls, 285.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:08:18.426Z] [cost] $0.000000 total (2 calls, 286.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:09:18.427Z] [cost] $0.000000 total (2 calls, 287.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:10:18.428Z] [cost] $0.000000 total (2 calls, 288.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:11:18.430Z] [cost] $0.000000 total (2 calls, 289.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:12:18.432Z] [cost] $0.000000 total (2 calls, 290.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:13:18.432Z] [cost] $0.000000 total (2 calls, 291.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:14:18.434Z] [cost] $0.000000 total (2 calls, 292.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:15:18.435Z] [cost] $0.000000 total (2 calls, 293.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:16:18.436Z] [cost] $0.000000 total (2 calls, 294.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:17:18.438Z] [cost] $0.000000 total (2 calls, 295.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:18:18.440Z] [cost] $0.000000 total (2 calls, 296.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:19:18.431Z] [cost] $0.000000 total (2 calls, 297.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:20:18.424Z] [cost] $0.000000 total (2 calls, 298.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:21:18.424Z] [cost] $0.000000 total (2 calls, 299.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:22:18.425Z] [cost] $0.000000 total (2 calls, 300.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:23:18.426Z] [cost] $0.000000 total (2 calls, 301.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:24:18.427Z] [cost] $0.000000 total (2 calls, 302.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:25:18.429Z] [cost] $0.000000 total (2 calls, 303.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:26:18.431Z] [cost] $0.000000 total (2 calls, 304.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:27:18.432Z] [cost] $0.000000 total (2 calls, 305.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:28:18.433Z] [cost] $0.000000 total (2 calls, 306.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:29:18.434Z] [cost] $0.000000 total (2 calls, 307.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:30:18.436Z] [cost] $0.000000 total (2 calls, 308.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:31:18.435Z] [cost] $0.000000 total (2 calls, 309.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:32:18.436Z] [cost] $0.000000 total (2 calls, 310.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:33:18.437Z] [cost] $0.000000 total (2 calls, 311.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:34:18.437Z] [cost] $0.000000 total (2 calls, 312.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:35:18.438Z] [cost] $0.000000 total (2 calls, 313.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:36:18.439Z] [cost] $0.000000 total (2 calls, 314.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:37:18.440Z] [cost] $0.000000 total (2 calls, 315.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:38:18.441Z] [cost] $0.000000 total (2 calls, 316.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:39:18.442Z] [cost] $0.000000 total (2 calls, 317.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:40:18.443Z] [cost] $0.000000 total (2 calls, 318.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:41:18.445Z] [cost] $0.000000 total (2 calls, 319.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:42:18.445Z] [cost] $0.000000 total (2 calls, 320.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:43:18.445Z] [cost] $0.000000 total (2 calls, 321.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:44:18.446Z] [cost] $0.000000 total (2 calls, 322.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:45:18.447Z] [cost] $0.000000 total (2 calls, 323.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:46:18.447Z] [cost] $0.000000 total (2 calls, 324.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:47:18.449Z] [cost] $0.000000 total (2 calls, 325.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:48:18.449Z] [cost] $0.000000 total (2 calls, 326.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:49:18.450Z] [cost] $0.000000 total (2 calls, 327.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:50:18.451Z] [cost] $0.000000 total (2 calls, 328.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:51:18.451Z] [cost] $0.000000 total (2 calls, 329.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:52:18.479Z] [cost] $0.000000 total (2 calls, 330.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:53:18.482Z] [cost] $0.000000 total (2 calls, 331.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:54:18.483Z] [cost] $0.000000 total (2 calls, 332.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:55:18.484Z] [cost] $0.000000 total (2 calls, 333.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:56:18.486Z] [cost] $0.000000 total (2 calls, 334.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:57:18.487Z] [cost] $0.000000 total (2 calls, 335.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:58:18.489Z] [cost] $0.000000 total (2 calls, 336.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T00:59:18.491Z] [cost] $0.000000 total (2 calls, 337.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:00:18.492Z] [cost] $0.000000 total (2 calls, 338.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:01:18.493Z] [cost] $0.000000 total (2 calls, 339.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:02:18.495Z] [cost] $0.000000 total (2 calls, 340.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:03:18.495Z] [cost] $0.000000 total (2 calls, 341.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:04:18.497Z] [cost] $0.000000 total (2 calls, 342.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:05:18.498Z] [cost] $0.000000 total (2 calls, 343.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:06:18.501Z] [cost] $0.000000 total (2 calls, 344.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:07:18.502Z] [cost] $0.000000 total (2 calls, 345.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:08:18.504Z] [cost] $0.000000 total (2 calls, 346.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:09:18.505Z] [cost] $0.000000 total (2 calls, 347.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:10:18.507Z] [cost] $0.000000 total (2 calls, 348.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:11:18.509Z] [cost] $0.000000 total (2 calls, 349.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:12:18.511Z] [cost] $0.000000 total (2 calls, 350.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:13:18.512Z] [cost] $0.000000 total (2 calls, 351.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:14:18.513Z] [cost] $0.000000 total (2 calls, 352.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:15:18.514Z] [cost] $0.000000 total (2 calls, 353.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:16:18.516Z] [cost] $0.000000 total (2 calls, 354.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:17:18.518Z] [cost] $0.000000 total (2 calls, 355.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:18:18.520Z] [cost] $0.000000 total (2 calls, 356.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:19:18.521Z] [cost] $0.000000 total (2 calls, 357.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:20:18.523Z] [cost] $0.000000 total (2 calls, 358.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:21:18.524Z] [cost] $0.000000 total (2 calls, 359.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:22:18.526Z] [cost] $0.000000 total (2 calls, 360.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:23:18.527Z] [cost] $0.000000 total (2 calls, 361.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:24:18.427Z] [cost] $0.000000 total (2 calls, 362.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:25:18.427Z] [cost] $0.000000 total (2 calls, 363.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:26:18.427Z] [cost] $0.000000 total (2 calls, 364.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:27:18.426Z] [cost] $0.000000 total (2 calls, 365.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:28:18.425Z] [cost] $0.000000 total (2 calls, 366.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:29:18.425Z] [cost] $0.000000 total (2 calls, 367.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:30:18.423Z] [cost] $0.000000 total (2 calls, 368.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:31:18.423Z] [cost] $0.000000 total (2 calls, 369.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:32:18.423Z] [cost] $0.000000 total (2 calls, 370.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:33:18.422Z] [cost] $0.000000 total (2 calls, 371.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:34:18.421Z] [cost] $0.000000 total (2 calls, 372.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:35:18.420Z] [cost] $0.000000 total (2 calls, 373.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:36:18.420Z] [cost] $0.000000 total (2 calls, 374.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:37:18.418Z] [cost] $0.000000 total (2 calls, 375.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:38:18.417Z] [cost] $0.000000 total (2 calls, 376.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:39:18.417Z] [cost] $0.000000 total (2 calls, 377.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:40:18.417Z] [cost] $0.000000 total (2 calls, 378.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:41:18.416Z] [cost] $0.000000 total (2 calls, 379.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:42:18.416Z] [cost] $0.000000 total (2 calls, 380.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:43:18.415Z] [cost] $0.000000 total (2 calls, 381.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:44:18.415Z] [cost] $0.000000 total (2 calls, 382.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:45:18.414Z] [cost] $0.000000 total (2 calls, 383.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:46:18.414Z] [cost] $0.000000 total (2 calls, 384.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:47:18.414Z] [cost] $0.000000 total (2 calls, 385.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:48:18.413Z] [cost] $0.000000 total (2 calls, 386.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:49:18.413Z] [cost] $0.000000 total (2 calls, 387.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:50:18.412Z] [cost] $0.000000 total (2 calls, 388.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:51:18.413Z] [cost] $0.000000 total (2 calls, 389.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:52:18.413Z] [cost] $0.000000 total (2 calls, 390.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:53:18.413Z] [cost] $0.000000 total (2 calls, 391.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:54:18.412Z] [cost] $0.000000 total (2 calls, 392.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:55:18.411Z] [cost] $0.000000 total (2 calls, 393.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:56:18.410Z] [cost] $0.000000 total (2 calls, 394.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:57:18.520Z] [cost] $0.000000 total (2 calls, 395.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:58:18.521Z] [cost] $0.000000 total (2 calls, 396.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T01:59:18.524Z] [cost] $0.000000 total (2 calls, 397.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:00:18.525Z] [cost] $0.000000 total (2 calls, 398.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:01:18.527Z] [cost] $0.000000 total (2 calls, 399.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:02:18.528Z] [cost] $0.000000 total (2 calls, 400.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:03:18.529Z] [cost] $0.000000 total (2 calls, 401.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:04:18.532Z] [cost] $0.000000 total (2 calls, 402.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:05:18.533Z] [cost] $0.000000 total (2 calls, 403.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:06:18.535Z] [cost] $0.000000 total (2 calls, 404.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:07:18.537Z] [cost] $0.000000 total (2 calls, 405.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:08:18.539Z] [cost] $0.000000 total (2 calls, 406.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:09:18.540Z] [cost] $0.000000 total (2 calls, 407.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:10:18.541Z] [cost] $0.000000 total (2 calls, 408.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:11:18.542Z] [cost] $0.000000 total (2 calls, 409.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:12:18.544Z] [cost] $0.000000 total (2 calls, 410.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:13:18.545Z] [cost] $0.000000 total (2 calls, 411.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:14:18.546Z] [cost] $0.000000 total (2 calls, 412.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:15:18.547Z] [cost] $0.000000 total (2 calls, 413.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:16:18.548Z] [cost] $0.000000 total (2 calls, 414.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:17:18.549Z] [cost] $0.000000 total (2 calls, 415.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:18:18.550Z] [cost] $0.000000 total (2 calls, 416.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:19:18.551Z] [cost] $0.000000 total (2 calls, 417.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:20:18.551Z] [cost] $0.000000 total (2 calls, 418.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:21:18.552Z] [cost] $0.000000 total (2 calls, 419.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:22:18.553Z] [cost] $0.000000 total (2 calls, 420.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:23:18.554Z] [cost] $0.000000 total (2 calls, 421.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:24:18.555Z] [cost] $0.000000 total (2 calls, 422.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:25:18.556Z] [cost] $0.000000 total (2 calls, 423.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:26:18.557Z] [cost] $0.000000 total (2 calls, 424.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:27:18.558Z] [cost] $0.000000 total (2 calls, 425.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:28:18.559Z] [cost] $0.000000 total (2 calls, 426.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:29:18.560Z] [cost] $0.000000 total (2 calls, 427.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:30:18.572Z] [cost] $0.000000 total (2 calls, 428.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:31:18.574Z] [cost] $0.000000 total (2 calls, 429.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:32:18.576Z] [cost] $0.000000 total (2 calls, 430.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:33:18.576Z] [cost] $0.000000 total (2 calls, 431.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:34:18.579Z] [cost] $0.000000 total (2 calls, 432.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:35:18.581Z] [cost] $0.000000 total (2 calls, 433.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:36:18.582Z] [cost] $0.000000 total (2 calls, 434.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:37:18.583Z] [cost] $0.000000 total (2 calls, 435.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:38:18.585Z] [cost] $0.000000 total (2 calls, 436.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:39:18.586Z] [cost] $0.000000 total (2 calls, 437.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:40:18.587Z] [cost] $0.000000 total (2 calls, 438.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:41:18.589Z] [cost] $0.000000 total (2 calls, 439.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:42:18.590Z] [cost] $0.000000 total (2 calls, 440.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:43:18.592Z] [cost] $0.000000 total (2 calls, 441.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:44:18.594Z] [cost] $0.000000 total (2 calls, 442.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:45:18.596Z] [cost] $0.000000 total (2 calls, 443.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:46:18.598Z] [cost] $0.000000 total (2 calls, 444.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:47:18.601Z] [cost] $0.000000 total (2 calls, 445.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:48:18.603Z] [cost] $0.000000 total (2 calls, 446.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:49:18.605Z] [cost] $0.000000 total (2 calls, 447.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:50:18.607Z] [cost] $0.000000 total (2 calls, 448.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:51:18.609Z] [cost] $0.000000 total (2 calls, 449.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:52:18.611Z] [cost] $0.000000 total (2 calls, 450.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:53:18.613Z] [cost] $0.000000 total (2 calls, 451.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:54:18.615Z] [cost] $0.000000 total (2 calls, 452.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:55:18.617Z] [cost] $0.000000 total (2 calls, 453.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:56:18.620Z] [cost] $0.000000 total (2 calls, 454.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:57:18.622Z] [cost] $0.000000 total (2 calls, 455.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:58:18.624Z] [cost] $0.000000 total (2 calls, 456.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T02:59:18.626Z] [cost] $0.000000 total (2 calls, 457.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:00:18.627Z] [cost] $0.000000 total (2 calls, 458.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:01:18.630Z] [cost] $0.000000 total (2 calls, 459.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:02:18.611Z] [cost] $0.000000 total (2 calls, 460.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:03:18.600Z] [cost] $0.000000 total (2 calls, 461.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:04:18.601Z] [cost] $0.000000 total (2 calls, 462.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:05:18.603Z] [cost] $0.000000 total (2 calls, 463.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:06:18.604Z] [cost] $0.000000 total (2 calls, 464.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:07:18.605Z] [cost] $0.000000 total (2 calls, 465.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:08:18.607Z] [cost] $0.000000 total (2 calls, 466.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:09:18.608Z] [cost] $0.000000 total (2 calls, 467.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:10:18.608Z] [cost] $0.000000 total (2 calls, 468.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:11:18.610Z] [cost] $0.000000 total (2 calls, 469.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:12:18.611Z] [cost] $0.000000 total (2 calls, 470.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:13:18.612Z] [cost] $0.000000 total (2 calls, 471.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:14:18.613Z] [cost] $0.000000 total (2 calls, 472.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:15:18.615Z] [cost] $0.000000 total (2 calls, 473.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:16:18.616Z] [cost] $0.000000 total (2 calls, 474.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:17:18.617Z] [cost] $0.000000 total (2 calls, 475.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:18:18.618Z] [cost] $0.000000 total (2 calls, 476.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:19:18.619Z] [cost] $0.000000 total (2 calls, 477.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:20:18.620Z] [cost] $0.000000 total (2 calls, 478.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:21:18.620Z] [cost] $0.000000 total (2 calls, 479.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:22:18.621Z] [cost] $0.000000 total (2 calls, 480.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:23:18.622Z] [cost] $0.000000 total (2 calls, 481.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:24:18.623Z] [cost] $0.000000 total (2 calls, 482.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:25:18.625Z] [cost] $0.000000 total (2 calls, 483.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:26:18.626Z] [cost] $0.000000 total (2 calls, 484.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:27:18.628Z] [cost] $0.000000 total (2 calls, 485.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:28:18.630Z] [cost] $0.000000 total (2 calls, 486.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:29:18.630Z] [cost] $0.000000 total (2 calls, 487.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:30:18.632Z] [cost] $0.000000 total (2 calls, 488.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:31:18.633Z] [cost] $0.000000 total (2 calls, 489.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:32:18.634Z] [cost] $0.000000 total (2 calls, 490.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:33:18.636Z] [cost] $0.000000 total (2 calls, 491.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:34:18.639Z] [cost] $0.000000 total (2 calls, 492.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:35:18.649Z] [cost] $0.000000 total (2 calls, 493.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:36:18.649Z] [cost] $0.000000 total (2 calls, 494.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:37:18.651Z] [cost] $0.000000 total (2 calls, 495.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:38:18.653Z] [cost] $0.000000 total (2 calls, 496.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:39:18.655Z] [cost] $0.000000 total (2 calls, 497.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:40:18.656Z] [cost] $0.000000 total (2 calls, 498.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:41:18.657Z] [cost] $0.000000 total (2 calls, 499.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:42:18.659Z] [cost] $0.000000 total (2 calls, 500.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:43:18.660Z] [cost] $0.000000 total (2 calls, 501.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:44:18.661Z] [cost] $0.000000 total (2 calls, 502.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:45:18.662Z] [cost] $0.000000 total (2 calls, 503.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:46:18.664Z] [cost] $0.000000 total (2 calls, 504.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:47:18.666Z] [cost] $0.000000 total (2 calls, 505.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:48:18.666Z] [cost] $0.000000 total (2 calls, 506.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:49:18.668Z] [cost] $0.000000 total (2 calls, 507.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:50:18.669Z] [cost] $0.000000 total (2 calls, 508.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:51:18.670Z] [cost] $0.000000 total (2 calls, 509.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:52:18.671Z] [cost] $0.000000 total (2 calls, 510.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:53:18.673Z] [cost] $0.000000 total (2 calls, 511.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:54:18.675Z] [cost] $0.000000 total (2 calls, 512.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:55:18.676Z] [cost] $0.000000 total (2 calls, 513.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:56:18.678Z] [cost] $0.000000 total (2 calls, 514.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:57:18.679Z] [cost] $0.000000 total (2 calls, 515.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:58:18.680Z] [cost] $0.000000 total (2 calls, 516.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T03:59:18.680Z] [cost] $0.000000 total (2 calls, 517.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:00:18.681Z] [cost] $0.000000 total (2 calls, 518.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:01:18.682Z] [cost] $0.000000 total (2 calls, 519.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:02:18.684Z] [cost] $0.000000 total (2 calls, 520.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:03:18.686Z] [cost] $0.000000 total (2 calls, 521.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:04:18.687Z] [cost] $0.000000 total (2 calls, 522.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:05:18.687Z] [cost] $0.000000 total (2 calls, 523.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:06:18.688Z] [cost] $0.000000 total (2 calls, 524.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:07:18.697Z] [cost] $0.000000 total (2 calls, 525.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:08:18.703Z] [cost] $0.000000 total (2 calls, 526.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:09:18.704Z] [cost] $0.000000 total (2 calls, 527.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:10:18.707Z] [cost] $0.000000 total (2 calls, 528.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:11:18.709Z] [cost] $0.000000 total (2 calls, 529.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:12:18.710Z] [cost] $0.000000 total (2 calls, 530.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:13:18.712Z] [cost] $0.000000 total (2 calls, 531.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:14:18.713Z] [cost] $0.000000 total (2 calls, 532.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:15:18.714Z] [cost] $0.000000 total (2 calls, 533.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:16:18.715Z] [cost] $0.000000 total (2 calls, 534.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:17:18.716Z] [cost] $0.000000 total (2 calls, 535.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:18:18.718Z] [cost] $0.000000 total (2 calls, 536.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:19:18.719Z] [cost] $0.000000 total (2 calls, 537.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:20:18.721Z] [cost] $0.000000 total (2 calls, 538.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:21:18.722Z] [cost] $0.000000 total (2 calls, 539.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:22:18.724Z] [cost] $0.000000 total (2 calls, 540.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:23:18.725Z] [cost] $0.000000 total (2 calls, 541.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:24:18.726Z] [cost] $0.000000 total (2 calls, 542.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:25:18.728Z] [cost] $0.000000 total (2 calls, 543.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:26:18.730Z] [cost] $0.000000 total (2 calls, 544.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:27:18.732Z] [cost] $0.000000 total (2 calls, 545.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:28:18.734Z] [cost] $0.000000 total (2 calls, 546.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:29:18.735Z] [cost] $0.000000 total (2 calls, 547.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:30:18.737Z] [cost] $0.000000 total (2 calls, 548.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:31:18.739Z] [cost] $0.000000 total (2 calls, 549.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:32:18.740Z] [cost] $0.000000 total (2 calls, 550.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:33:18.743Z] [cost] $0.000000 total (2 calls, 551.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:34:18.745Z] [cost] $0.000000 total (2 calls, 552.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:35:18.747Z] [cost] $0.000000 total (2 calls, 553.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:36:18.749Z] [cost] $0.000000 total (2 calls, 554.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:37:18.751Z] [cost] $0.000000 total (2 calls, 555.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:38:18.753Z] [cost] $0.000000 total (2 calls, 556.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:39:18.754Z] [cost] $0.000000 total (2 calls, 557.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:40:18.732Z] [cost] $0.000000 total (2 calls, 558.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:41:18.732Z] [cost] $0.000000 total (2 calls, 559.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:42:18.734Z] [cost] $0.000000 total (2 calls, 560.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:43:18.735Z] [cost] $0.000000 total (2 calls, 561.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:44:18.736Z] [cost] $0.000000 total (2 calls, 562.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:45:18.736Z] [cost] $0.000000 total (2 calls, 563.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:46:18.737Z] [cost] $0.000000 total (2 calls, 564.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:47:18.737Z] [cost] $0.000000 total (2 calls, 565.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:48:18.738Z] [cost] $0.000000 total (2 calls, 566.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:49:18.739Z] [cost] $0.000000 total (2 calls, 567.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:50:18.740Z] [cost] $0.000000 total (2 calls, 568.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:51:18.742Z] [cost] $0.000000 total (2 calls, 569.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:52:18.743Z] [cost] $0.000000 total (2 calls, 570.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:53:18.743Z] [cost] $0.000000 total (2 calls, 571.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:54:18.744Z] [cost] $0.000000 total (2 calls, 572.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:55:18.745Z] [cost] $0.000000 total (2 calls, 573.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:56:18.746Z] [cost] $0.000000 total (2 calls, 574.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:57:18.747Z] [cost] $0.000000 total (2 calls, 575.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:58:18.748Z] [cost] $0.000000 total (2 calls, 576.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T04:59:18.748Z] [cost] $0.000000 total (2 calls, 577.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:00:18.749Z] [cost] $0.000000 total (2 calls, 578.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:01:18.750Z] [cost] $0.000000 total (2 calls, 579.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:02:18.751Z] [cost] $0.000000 total (2 calls, 580.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:03:18.754Z] [cost] $0.000000 total (2 calls, 581.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:04:18.755Z] [cost] $0.000000 total (2 calls, 582.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:05:18.757Z] [cost] $0.000000 total (2 calls, 583.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:06:18.758Z] [cost] $0.000000 total (2 calls, 584.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:07:18.759Z] [cost] $0.000000 total (2 calls, 585.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:08:18.760Z] [cost] $0.000000 total (2 calls, 586.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:09:18.762Z] [cost] $0.000000 total (2 calls, 587.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:10:18.763Z] [cost] $0.000000 total (2 calls, 588.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:11:18.765Z] [cost] $0.000000 total (2 calls, 589.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:12:18.758Z] [cost] $0.000000 total (2 calls, 590.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:13:18.758Z] [cost] $0.000000 total (2 calls, 591.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:14:18.759Z] [cost] $0.000000 total (2 calls, 592.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:15:18.761Z] [cost] $0.000000 total (2 calls, 593.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:16:18.762Z] [cost] $0.000000 total (2 calls, 594.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:17:18.762Z] [cost] $0.000000 total (2 calls, 595.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:18:18.763Z] [cost] $0.000000 total (2 calls, 596.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:19:18.763Z] [cost] $0.000000 total (2 calls, 597.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:20:18.765Z] [cost] $0.000000 total (2 calls, 598.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:21:18.765Z] [cost] $0.000000 total (2 calls, 599.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:22:18.765Z] [cost] $0.000000 total (2 calls, 600.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:23:18.766Z] [cost] $0.000000 total (2 calls, 601.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:24:18.768Z] [cost] $0.000000 total (2 calls, 602.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:25:18.768Z] [cost] $0.000000 total (2 calls, 603.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:26:18.769Z] [cost] $0.000000 total (2 calls, 604.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:27:18.769Z] [cost] $0.000000 total (2 calls, 605.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:28:18.770Z] [cost] $0.000000 total (2 calls, 606.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:29:18.770Z] [cost] $0.000000 total (2 calls, 607.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:30:18.776Z] [cost] $0.000000 total (2 calls, 608.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:31:18.776Z] [cost] $0.000000 total (2 calls, 609.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:32:18.777Z] [cost] $0.000000 total (2 calls, 610.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:33:18.777Z] [cost] $0.000000 total (2 calls, 611.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:34:18.777Z] [cost] $0.000000 total (2 calls, 612.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:35:18.778Z] [cost] $0.000000 total (2 calls, 613.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:36:18.778Z] [cost] $0.000000 total (2 calls, 614.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:37:18.779Z] [cost] $0.000000 total (2 calls, 615.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:38:18.779Z] [cost] $0.000000 total (2 calls, 616.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:39:18.779Z] [cost] $0.000000 total (2 calls, 617.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:40:18.780Z] [cost] $0.000000 total (2 calls, 618.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:41:18.781Z] [cost] $0.000000 total (2 calls, 619.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:42:18.780Z] [cost] $0.000000 total (2 calls, 620.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:43:18.781Z] [cost] $0.000000 total (2 calls, 621.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:44:18.783Z] [cost] $0.000000 total (2 calls, 622.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:45:18.784Z] [cost] $0.000000 total (2 calls, 623.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:46:18.786Z] [cost] $0.000000 total (2 calls, 624.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:47:18.786Z] [cost] $0.000000 total (2 calls, 625.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:48:18.787Z] [cost] $0.000000 total (2 calls, 626.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:49:18.787Z] [cost] $0.000000 total (2 calls, 627.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:50:18.789Z] [cost] $0.000000 total (2 calls, 628.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:51:18.789Z] [cost] $0.000000 total (2 calls, 629.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:52:18.789Z] [cost] $0.000000 total (2 calls, 630.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:53:18.790Z] [cost] $0.000000 total (2 calls, 631.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:54:18.792Z] [cost] $0.000000 total (2 calls, 632.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:55:18.793Z] [cost] $0.000000 total (2 calls, 633.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:56:18.794Z] [cost] $0.000000 total (2 calls, 634.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:57:18.795Z] [cost] $0.000000 total (2 calls, 635.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:58:18.825Z] [cost] $0.000000 total (2 calls, 636.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T05:59:18.827Z] [cost] $0.000000 total (2 calls, 637.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:00:18.828Z] [cost] $0.000000 total (2 calls, 638.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:01:18.831Z] [cost] $0.000000 total (2 calls, 639.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:02:18.832Z] [cost] $0.000000 total (2 calls, 640.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:03:18.834Z] [cost] $0.000000 total (2 calls, 641.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:04:18.835Z] [cost] $0.000000 total (2 calls, 642.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:05:18.836Z] [cost] $0.000000 total (2 calls, 643.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:06:18.838Z] [cost] $0.000000 total (2 calls, 644.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:07:18.840Z] [cost] $0.000000 total (2 calls, 645.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:08:18.843Z] [cost] $0.000000 total (2 calls, 646.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:09:18.844Z] [cost] $0.000000 total (2 calls, 647.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:10:18.845Z] [cost] $0.000000 total (2 calls, 648.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:11:18.846Z] [cost] $0.000000 total (2 calls, 649.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:12:18.848Z] [cost] $0.000000 total (2 calls, 650.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:13:18.850Z] [cost] $0.000000 total (2 calls, 651.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:14:18.851Z] [cost] $0.000000 total (2 calls, 652.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:15:18.853Z] [cost] $0.000000 total (2 calls, 653.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:16:18.855Z] [cost] $0.000000 total (2 calls, 654.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:17:18.858Z] [cost] $0.000000 total (2 calls, 655.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:18:18.858Z] [cost] $0.000000 total (2 calls, 656.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:19:18.860Z] [cost] $0.000000 total (2 calls, 657.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:20:18.862Z] [cost] $0.000000 total (2 calls, 658.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:21:18.863Z] [cost] $0.000000 total (2 calls, 659.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:22:18.865Z] [cost] $0.000000 total (2 calls, 660.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:23:18.867Z] [cost] $0.000000 total (2 calls, 661.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:24:18.868Z] [cost] $0.000000 total (2 calls, 662.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:25:18.870Z] [cost] $0.000000 total (2 calls, 663.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:26:18.871Z] [cost] $0.000000 total (2 calls, 664.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:27:18.872Z] [cost] $0.000000 total (2 calls, 665.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:28:18.873Z] [cost] $0.000000 total (2 calls, 666.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:29:18.874Z] [cost] $0.000000 total (2 calls, 667.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:30:18.871Z] [cost] $0.000000 total (2 calls, 668.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:31:18.872Z] [cost] $0.000000 total (2 calls, 669.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:32:18.873Z] [cost] $0.000000 total (2 calls, 670.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:33:18.874Z] [cost] $0.000000 total (2 calls, 671.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:34:18.877Z] [cost] $0.000000 total (2 calls, 672.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:35:18.877Z] [cost] $0.000000 total (2 calls, 673.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:36:18.879Z] [cost] $0.000000 total (2 calls, 674.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:37:18.880Z] [cost] $0.000000 total (2 calls, 675.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:38:18.882Z] [cost] $0.000000 total (2 calls, 676.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:39:18.884Z] [cost] $0.000000 total (2 calls, 677.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:40:18.886Z] [cost] $0.000000 total (2 calls, 678.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:41:18.888Z] [cost] $0.000000 total (2 calls, 679.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:42:18.889Z] [cost] $0.000000 total (2 calls, 680.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:43:18.891Z] [cost] $0.000000 total (2 calls, 681.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:44:18.893Z] [cost] $0.000000 total (2 calls, 682.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:45:18.894Z] [cost] $0.000000 total (2 calls, 683.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:46:18.895Z] [cost] $0.000000 total (2 calls, 684.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:47:18.896Z] [cost] $0.000000 total (2 calls, 685.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:48:18.897Z] [cost] $0.000000 total (2 calls, 686.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:49:18.899Z] [cost] $0.000000 total (2 calls, 687.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:50:18.901Z] [cost] $0.000000 total (2 calls, 688.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:51:18.902Z] [cost] $0.000000 total (2 calls, 689.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:52:18.904Z] [cost] $0.000000 total (2 calls, 690.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:53:18.904Z] [cost] $0.000000 total (2 calls, 691.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:54:18.905Z] [cost] $0.000000 total (2 calls, 692.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:55:18.906Z] [cost] $0.000000 total (2 calls, 693.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:56:18.906Z] [cost] $0.000000 total (2 calls, 694.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:57:18.907Z] [cost] $0.000000 total (2 calls, 695.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:58:18.907Z] [cost] $0.000000 total (2 calls, 696.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T06:59:18.908Z] [cost] $0.000000 total (2 calls, 697.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:00:18.910Z] [cost] $0.000000 total (2 calls, 698.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:01:18.910Z] [cost] $0.000000 total (2 calls, 699.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:02:18.871Z] [cost] $0.000000 total (2 calls, 700.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:03:18.869Z] [cost] $0.000000 total (2 calls, 701.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:04:18.868Z] [cost] $0.000000 total (2 calls, 702.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:05:18.869Z] [cost] $0.000000 total (2 calls, 703.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:06:18.868Z] [cost] $0.000000 total (2 calls, 704.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:07:18.868Z] [cost] $0.000000 total (2 calls, 705.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:08:18.868Z] [cost] $0.000000 total (2 calls, 706.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:09:18.867Z] [cost] $0.000000 total (2 calls, 707.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:10:18.867Z] [cost] $0.000000 total (2 calls, 708.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:11:18.867Z] [cost] $0.000000 total (2 calls, 709.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:12:18.868Z] [cost] $0.000000 total (2 calls, 710.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:13:18.867Z] [cost] $0.000000 total (2 calls, 711.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:14:18.867Z] [cost] $0.000000 total (2 calls, 712.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:15:18.867Z] [cost] $0.000000 total (2 calls, 713.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:16:18.867Z] [cost] $0.000000 total (2 calls, 714.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:17:18.867Z] [cost] $0.000000 total (2 calls, 715.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:18:18.867Z] [cost] $0.000000 total (2 calls, 716.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:19:18.867Z] [cost] $0.000000 total (2 calls, 717.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:20:18.867Z] [cost] $0.000000 total (2 calls, 718.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:21:18.866Z] [cost] $0.000000 total (2 calls, 719.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:22:18.866Z] [cost] $0.000000 total (2 calls, 720.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:23:18.866Z] [cost] $0.000000 total (2 calls, 721.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:24:18.866Z] [cost] $0.000000 total (2 calls, 722.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:25:18.867Z] [cost] $0.000000 total (2 calls, 723.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:26:18.868Z] [cost] $0.000000 total (2 calls, 724.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:27:18.869Z] [cost] $0.000000 total (2 calls, 725.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:28:18.869Z] [cost] $0.000000 total (2 calls, 726.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:29:18.870Z] [cost] $0.000000 total (2 calls, 727.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:30:18.871Z] [cost] $0.000000 total (2 calls, 728.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:31:18.871Z] [cost] $0.000000 total (2 calls, 729.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:32:18.872Z] [cost] $0.000000 total (2 calls, 730.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:33:18.872Z] [cost] $0.000000 total (2 calls, 731.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:34:18.913Z] [cost] $0.000000 total (2 calls, 732.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:35:18.917Z] [cost] $0.000000 total (2 calls, 733.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:36:18.918Z] [cost] $0.000000 total (2 calls, 734.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:37:18.921Z] [cost] $0.000000 total (2 calls, 735.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:40:11.471Z] [cost] $0.000000 total (2 calls, 737.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:41:11.478Z] [cost] $0.000000 total (2 calls, 738.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:42:11.481Z] [cost] $0.000000 total (2 calls, 739.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:43:11.482Z] [cost] $0.000000 total (2 calls, 740.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:44:11.485Z] [cost] $0.000000 total (2 calls, 741.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:45:11.488Z] [cost] $0.000000 total (2 calls, 742.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:46:11.491Z] [cost] $0.000000 total (2 calls, 743.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:47:11.493Z] [cost] $0.000000 total (2 calls, 744.9 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:48:17.598Z] [cost] $0.000000 total (2 calls, 746.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:49:17.602Z] [cost] $0.000000 total (2 calls, 747.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:50:17.604Z] [cost] $0.000000 total (2 calls, 748.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:51:17.605Z] [cost] $0.000000 total (2 calls, 749.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:52:17.607Z] [cost] $0.000000 total (2 calls, 750.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:53:17.610Z] [cost] $0.000000 total (2 calls, 751.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:54:17.613Z] [cost] $0.000000 total (2 calls, 752.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:55:17.615Z] [cost] $0.000000 total (2 calls, 753.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:56:19.645Z] [cost] $0.000000 total (2 calls, 754.0 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:57:55.231Z] [cost] $0.000000 total (2 calls, 755.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:58:55.233Z] [cost] $0.000000 total (2 calls, 756.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T07:59:55.234Z] [cost] $0.000000 total (2 calls, 757.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:00:55.235Z] [cost] $0.000000 total (2 calls, 758.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:01:55.236Z] [cost] $0.000000 total (2 calls, 759.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:02:55.237Z] [cost] $0.000000 total (2 calls, 760.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:03:55.239Z] [cost] $0.000000 total (2 calls, 761.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:04:55.240Z] [cost] $0.000000 total (2 calls, 762.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:05:55.242Z] [cost] $0.000000 total (2 calls, 763.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:06:47.110Z] [save-offer] proj:worldmonitor: episode ended (1m) — no offer: short (< 10m)
+[0;36m[core][0m     [2026-07-22T08:06:55.244Z] [cost] $0.000000 total (3 calls, 764.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:07:55.245Z] [cost] $0.000000 total (3 calls, 765.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:08:55.246Z] [cost] $0.000000 total (3 calls, 766.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:09:55.248Z] [cost] $0.000000 total (3 calls, 767.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:10:55.249Z] [cost] $0.000000 total (3 calls, 768.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:11:55.250Z] [cost] $0.000000 total (3 calls, 769.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:12:55.251Z] [cost] $0.000000 total (3 calls, 770.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:13:55.252Z] [cost] $0.000000 total (4 calls, 771.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:14:55.254Z] [cost] $0.000000 total (5 calls, 772.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:15:55.255Z] [cost] $0.000000 total (5 calls, 773.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:16:55.257Z] [cost] $0.000000 total (5 calls, 774.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:17:55.258Z] [cost] $0.000000 total (5 calls, 775.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:18:55.260Z] [cost] $0.000000 total (5 calls, 776.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:19:55.262Z] [cost] $0.000000 total (5 calls, 777.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:20:55.263Z] [cost] $0.000000 total (5 calls, 778.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:21:55.263Z] [cost] $0.000000 total (5 calls, 779.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:22:55.265Z] [cost] $0.000000 total (5 calls, 780.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:23:55.267Z] [cost] $0.000000 total (5 calls, 781.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:24:55.268Z] [cost] $0.000000 total (5 calls, 782.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:25:55.270Z] [cost] $0.000000 total (5 calls, 783.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:26:55.271Z] [cost] $0.000000 total (5 calls, 784.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:27:55.231Z] [cost] $0.000000 total (5 calls, 785.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:28:50.371Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-22T08:28:51.816Z] [save-offer] proj:sinain-hud-2: episode ended (1m) — no offer: short (< 10m)
+[0;36m[core][0m     [2026-07-22T08:28:55.230Z] [cost] $0.000000 total (6 calls, 786.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:29:32.724Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-22T08:29:55.230Z] [cost] $0.000000 total (6 calls, 787.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:30:03.993Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-22T08:30:04.967Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-22T08:30:14.992Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-22T08:30:17.021Z] [ws] ← agent approval reply: id=apr_13 behavior=allow
+[0;36m[core][0m     [2026-07-22T08:30:17.028Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-22T08:30:55.230Z] [cost] $0.000000 total (6 calls, 788.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:31:00.391Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-22T08:31:01.858Z] [core] session assist: empty window slice (2m, apps=[]) — skipping composition
+[0;36m[core][0m     [2026-07-22T08:31:01.859Z] [session-sense] nudge-mrvtp1ia-c7ba4e: nudging "permtest" on proj:permtest — credited from 2026-07-22T08:28:51.774Z
+[0;36m[core][0m     [2026-07-22T08:31:12.400Z] [ws] ← agent approval reply: id=apr_14 behavior=allow
+[0;36m[core][0m     [2026-07-22T08:31:16.536Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-22T08:31:55.231Z] [cost] $0.000000 total (7 calls, 789.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:32:22.262Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-22T08:32:31.333Z] [ws] ← agent approval reply: id=apr_15 behavior=allow
+[0;36m[core][0m     [2026-07-22T08:32:44.808Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-22T08:32:55.233Z] [cost] $0.000000 total (8 calls, 790.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:33:55.234Z] [cost] $0.000000 total (8 calls, 791.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:34:55.233Z] [cost] $0.000000 total (8 calls, 792.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:35:55.235Z] [cost] $0.000000 total (8 calls, 793.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:36:55.234Z] [cost] $0.000000 total (8 calls, 794.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:37:55.235Z] [cost] $0.000000 total (8 calls, 795.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:38:55.236Z] [cost] $0.000000 total (8 calls, 796.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:39:55.236Z] [cost] $0.000000 total (8 calls, 797.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:40:55.238Z] [cost] $0.000000 total (8 calls, 798.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:41:55.239Z] [cost] $0.000000 total (8 calls, 799.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:42:55.239Z] [cost] $0.000000 total (8 calls, 800.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:43:55.240Z] [cost] $0.000000 total (8 calls, 801.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:44:55.241Z] [cost] $0.000000 total (8 calls, 802.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:45:55.241Z] [cost] $0.000000 total (8 calls, 803.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:46:55.242Z] [cost] $0.000000 total (8 calls, 804.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:47:55.242Z] [cost] $0.000000 total (8 calls, 805.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:48:55.242Z] [cost] $0.000000 total (8 calls, 806.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:49:55.242Z] [cost] $0.000000 total (8 calls, 807.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:50:55.242Z] [cost] $0.000000 total (8 calls, 808.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:51:55.242Z] [cost] $0.000000 total (8 calls, 809.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:52:55.243Z] [cost] $0.000000 total (8 calls, 810.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:53:55.244Z] [cost] $0.000000 total (8 calls, 811.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:54:55.245Z] [cost] $0.000000 total (8 calls, 812.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:55:55.245Z] [cost] $0.000000 total (8 calls, 813.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:56:55.246Z] [cost] $0.000000 total (8 calls, 814.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:57:55.247Z] [cost] $0.000000 total (8 calls, 815.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T08:58:55.272Z] [cost] $0.000000 total (8 calls, 816.6 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:03:33.920Z] [cost] $0.000000 total (8 calls, 821.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:04:33.930Z] [cost] $0.000000 total (8 calls, 822.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:05:33.932Z] [cost] $0.000000 total (8 calls, 823.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:06:33.933Z] [cost] $0.000000 total (8 calls, 824.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:07:33.936Z] [cost] $0.000000 total (8 calls, 825.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:08:33.936Z] [cost] $0.000000 total (8 calls, 826.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:09:33.937Z] [cost] $0.000000 total (8 calls, 827.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:10:33.939Z] [cost] $0.000000 total (8 calls, 828.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:11:33.940Z] [cost] $0.000000 total (8 calls, 829.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:12:33.942Z] [cost] $0.000000 total (8 calls, 830.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:13:33.944Z] [cost] $0.000000 total (8 calls, 831.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:14:33.946Z] [cost] $0.000000 total (8 calls, 832.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:15:33.947Z] [cost] $0.000000 total (8 calls, 833.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:16:33.948Z] [cost] $0.000000 total (8 calls, 834.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:17:33.951Z] [cost] $0.000000 total (8 calls, 835.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:18:33.952Z] [cost] $0.000000 total (8 calls, 836.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:19:33.953Z] [cost] $0.000000 total (8 calls, 837.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:20:33.955Z] [cost] $0.000000 total (8 calls, 838.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:21:33.956Z] [cost] $0.000000 total (8 calls, 839.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:22:33.958Z] [cost] $0.000000 total (8 calls, 840.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:23:33.959Z] [cost] $0.000000 total (8 calls, 841.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:24:33.960Z] [cost] $0.000000 total (8 calls, 842.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:25:33.962Z] [cost] $0.000000 total (8 calls, 843.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:26:33.964Z] [cost] $0.000000 total (8 calls, 844.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:27:33.966Z] [cost] $0.000000 total (8 calls, 845.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:28:33.966Z] [cost] $0.000000 total (8 calls, 846.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:29:33.968Z] [cost] $0.000000 total (8 calls, 847.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:30:33.969Z] [cost] $0.000000 total (8 calls, 848.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:31:33.970Z] [cost] $0.000000 total (8 calls, 849.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:32:33.972Z] [cost] $0.000000 total (8 calls, 850.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:33:33.973Z] [cost] $0.000000 total (8 calls, 851.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:34:33.973Z] [cost] $0.000000 total (8 calls, 852.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:35:33.975Z] [cost] $0.000000 total (8 calls, 853.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:36:33.976Z] [cost] $0.000000 total (8 calls, 854.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:37:33.978Z] [cost] $0.000000 total (8 calls, 855.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:38:33.973Z] [cost] $0.000000 total (8 calls, 856.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:39:33.971Z] [cost] $0.000000 total (8 calls, 857.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:40:33.972Z] [cost] $0.000000 total (8 calls, 858.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:41:33.973Z] [cost] $0.000000 total (8 calls, 859.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:42:33.975Z] [cost] $0.000000 total (8 calls, 860.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:43:33.976Z] [cost] $0.000000 total (8 calls, 861.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:44:33.977Z] [cost] $0.000000 total (8 calls, 862.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:45:33.979Z] [cost] $0.000000 total (8 calls, 863.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:46:33.979Z] [cost] $0.000000 total (8 calls, 864.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:47:33.979Z] [cost] $0.000000 total (8 calls, 865.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:48:33.981Z] [cost] $0.000000 total (8 calls, 866.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:49:33.982Z] [cost] $0.000000 total (8 calls, 867.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:50:33.983Z] [cost] $0.000000 total (8 calls, 868.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:51:33.985Z] [cost] $0.000000 total (8 calls, 869.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:52:33.986Z] [cost] $0.000000 total (8 calls, 870.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:53:33.988Z] [cost] $0.000000 total (8 calls, 871.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:54:33.989Z] [cost] $0.000000 total (8 calls, 872.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:55:33.990Z] [cost] $0.000000 total (8 calls, 873.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:56:33.992Z] [cost] $0.000000 total (8 calls, 874.3 min) |  | 
+[0;36m[core][0m     [2026-07-22T09:58:45.895Z] [cost] $0.000000 total (8 calls, 876.5 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:00:03.529Z] [cost] $0.000000 total (8 calls, 877.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:01:03.528Z] [cost] $0.000000 total (8 calls, 878.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:02:03.529Z] [cost] $0.000000 total (8 calls, 879.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:03:03.529Z] [cost] $0.000000 total (8 calls, 880.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:04:03.530Z] [cost] $0.000000 total (8 calls, 881.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:05:03.531Z] [cost] $0.000000 total (8 calls, 882.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:05:48.276Z] [save-offer] proj:permtest: episode ended (4m) — no offer: short (< 10m)
+[0;36m[core][0m     [2026-07-22T10:06:03.531Z] [cost] $0.000000 total (9 calls, 883.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:07:03.532Z] [cost] $0.000000 total (9 calls, 884.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:08:03.531Z] [cost] $0.000000 total (9 calls, 885.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:09:03.532Z] [cost] $0.000000 total (9 calls, 886.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:10:03.533Z] [cost] $0.000000 total (9 calls, 887.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:11:03.532Z] [cost] $0.000000 total (9 calls, 888.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:12:03.534Z] [cost] $0.000000 total (9 calls, 889.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:13:03.535Z] [cost] $0.000000 total (9 calls, 890.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:14:03.535Z] [cost] $0.000000 total (9 calls, 891.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:15:03.536Z] [cost] $0.000000 total (9 calls, 892.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:16:03.537Z] [cost] $0.000000 total (9 calls, 893.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:17:03.538Z] [cost] $0.000000 total (9 calls, 894.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:18:03.539Z] [cost] $0.000000 total (9 calls, 895.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:19:03.539Z] [cost] $0.000000 total (9 calls, 896.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:20:03.539Z] [cost] $0.000000 total (10 calls, 897.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:21:03.540Z] [cost] $0.000000 total (10 calls, 898.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:22:03.541Z] [cost] $0.000000 total (10 calls, 899.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:23:03.541Z] [cost] $0.000000 total (11 calls, 900.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:24:03.542Z] [cost] $0.000000 total (11 calls, 901.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:25:03.543Z] [cost] $0.000000 total (11 calls, 902.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:26:03.544Z] [cost] $0.000000 total (11 calls, 903.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:27:03.545Z] [cost] $0.000000 total (11 calls, 904.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:28:03.545Z] [cost] $0.000000 total (11 calls, 905.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:28:57.943Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-22T10:29:03.546Z] [cost] $0.000000 total (12 calls, 906.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:29:05.903Z] [ws] ← agent approval reply: id=apr_37 behavior=always
+[0;36m[core][0m     [2026-07-22T10:29:13.051Z] [ws] client disconnected: 1006 
+[0;36m[core][0m     [2026-07-22T10:30:03.556Z] [cost] $0.000000 total (12 calls, 907.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:31:03.561Z] [cost] $0.000000 total (12 calls, 908.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:32:03.560Z] [cost] $0.000000 total (12 calls, 909.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:33:03.561Z] [cost] $0.000000 total (12 calls, 910.8 min) |  | 
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [core] SIGTERM received, shutting down...
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [audio] stopping capture...
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [core] system audio pipeline stopped
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [audio] capture stopped
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [transcribe-local] destroyed
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [transcribe-server] destroyed
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [transcribe] destroyed
+[0;36m[core][0m     [2026-07-22T10:33:32.062Z] [openclaw] disconnect: stopping (pending=0, pendingFinal=0)
+[0;36m[core][0m     [2026-07-22T10:33:32.063Z] [mcp-tunnel] tunnel down
+[0;36m[core][0m     [2026-07-22T10:33:32.063Z] [audio] sck-capture stderr: [sck-capture] stopping...
+[0;36m[core][0m     [2026-07-22T10:33:32.067Z] [core] ⚠ KG daemon exited (null); KG retrieval falls back to one-shot spawn
+[0;36m[core][0m     12:33:32 PM [tsx] Previous process hasn't exited yet. Force killing...
+
+[1m[start][0m Shutting down services...
+./start.sh: line 249: 36659 Killed: 9               wait
+[1m[start][0m All services stopped.

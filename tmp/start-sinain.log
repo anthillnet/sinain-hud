@@ -1,0 +1,416 @@
+[1m[start][0m Preflight checks...
+[1m[start][0m [0;32m✓[0m session log: /Users/Igor.Gerasimov/.sinain/logs/backend.log
+[1m[start][0m [0;32m✓[0m node v22.22.0
+[1m[start][0m [0;32m✓[0m python3 3.14.6
+[1m[start][0m [0;32m✓[0m flutter 3.38.9
+[1m[start][0m [0;32m✓[0m sinain-core/node_modules present
+[1m[start][0m [0;32m✓[0m port 9500 free
+
+[1m[start][0m [0;32m✓[0m sck-capture binary up to date
+[1m[start][0m [0;32m✓[0m region-SLM model present: qwen2.5:3b
+[1m[start][0m Starting sinain-core...
+[0;36m[core][0m     
+[0;36m[core][0m     > sinain-core@1.0.0 dev
+[0;36m[core][0m     > tsx watch src/index.ts
+[0;36m[core][0m     
+[0;36m[core][0m     [config] loaded /Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/.env
+[0;36m[core][0m     [2026-07-21T15:10:26.744Z] [core] sinain-core starting...
+[0;36m[core][0m     [2026-07-21T15:10:27.223Z] [perms] tightened on-device data permissions (dirs 0700, files 0600)
+[0;36m[core][0m     [2026-07-21T15:10:27.224Z] [core] versions: core=1.0.0 dmg=source build=source node=v22.22.0
+[0;36m[core][0m     [config] loaded agents config from /Users/Igor.Gerasimov/.sinain/agents.json
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] port: 9500
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] audio: device=BlackHole 2ch cmd=screencapturekit chunk=5000ms
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] mic: enabled=true device=default cmd=sox
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] transcription: model=google/gemini-2.5-flash
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] agent: model=gemma-4-31b debounce=6000ms max=60000ms
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] escalation: mode=off cooldown=30000ms stale=0ms
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] openclaw: ws= http=
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] situation: /Users/Igor.Gerasimov/.openclaw/workspace/SITUATION.md
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] tracing: enabled=true dir=/Users/Igor.Gerasimov/.sinain-core/traces
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] learning: enabled=true dir=/Users/Igor.Gerasimov/.sinain-core/feedback
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [core] privacy: mode=off
+[0;36m[core][0m     [2026-07-21T15:10:27.226Z] [embedding] loading Xenova/all-MiniLM-L6-v2 (background)...
+[0;36m[core][0m     [2026-07-21T15:10:27.232Z] [web-db] web.db ready at /Users/Igor.Gerasimov/.sinain/memory/web.db (schema v2)
+[0;36m[core][0m     [2026-07-21T15:10:27.232Z] [local-curation] memory: /Users/Igor.Gerasimov/.sinain/memory
+[0;36m[core][0m     [2026-07-21T15:10:27.232Z] [local-curation] scripts: /Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-hud-plugin/sinain-memory
+[0;36m[core][0m     [2026-07-21T15:10:27.232Z] [local-curation] scripts available: true
+[0;36m[core][0m     Traceback (most recent call last):
+[0;36m[core][0m       File "<string>", line 1, in <module>
+[0;36m[core][0m         import sys; sys.path.insert(0, sys.argv[1]); from triplestore import TripleStore; store = TripleStore(sys.argv[2]); [print(n) for _, n in store.entities_with_attr("name") if _.startswith("entity:")]
+[0;36m[core][0m                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m[core][0m       File "/Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-hud-plugin/sinain-memory/triplestore.py", line 17, in <module>
+[0;36m[core][0m         from rdf_store import (  # noqa: F401 — re-exported for back-compat
+[0;36m[core][0m         ...<3 lines>...
+[0;36m[core][0m         )
+[0;36m[core][0m       File "/Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-hud-plugin/sinain-memory/rdf_store.py", line 43, in <module>
+[0;36m[core][0m         import pyoxigraph as ox
+[0;36m[core][0m     ModuleNotFoundError: No module named 'pyoxigraph'
+[0;36m[core][0m     [2026-07-21T15:10:27.512Z] [entity-cache] loaded 0 entity names
+[0;36m[core][0m     [2026-07-21T15:10:27.514Z] [openclaw] device identity: 85c1b46758fc…
+[0;36m[core][0m     [2026-07-21T15:10:27.515Z] [task-store] loaded 0 pending task(s) from disk
+[0;36m[core][0m     [2026-07-21T15:10:27.515Z] [core] region-slm lane ON: model=qwen2.5:3b debounce=500ms endpoint=http://localhost:11434
+[0;36m[core][0m     [2026-07-21T15:10:27.529Z] [transcribe-server] init: bin=whisper-server model=/Users/Igor.Gerasimov/.sinain/models/whisper/ggml-large-v3-turbo.bin port=8910 lang=auto
+[0;36m[core][0m     [2026-07-21T15:10:27.533Z] [transcribe] initialized: backend=local model=google/gemini-2.5-flash language=auto
+[0;36m[core][0m     [2026-07-21T15:10:27.533Z] [core] bareagent register: chat=[sinain,claude-desktop] terminal=[claude,gclaude,openclaude,codex,goose,junie,aider] current=sinain → lanes esc=sinain term=openclaude
+[0;36m[core][0m     [2026-07-21T15:10:27.533Z] [escalation] mode changed to: rich
+[0;36m[core][0m     [2026-07-21T15:10:27.533Z] [core] escalation resumed (mode: rich)
+[0;36m[core][0m     [2026-07-21T15:10:27.533Z] [core] roster pre-populated from agents.json: claude,gclaude,openclaude,codex,goose,junie,aider,sinain,claude-desktop,chatgpt-desktop
+[0;36m[core][0m     [2026-07-21T15:10:27.535Z] [core] starting memory daemon: python3 /Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-core/src/../../sinain-hud-plugin/sinain-memory/memoryd.py
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠ Traceback (most recent call last):
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠   File "/Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-core/src/../../sinain-hud-plugin/sinain-memory/memoryd.py", line 47, in <module>
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠     import kg_daemon as kd  # noqa: E402 — sets SINAIN_KG_READONLY for the process
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠     ^^^^^^^^^^^^^^^^^^^^^^
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠   File "/Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-hud-plugin/sinain-memory/kg_daemon.py", line 50, in <module>
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠     from rdf_store import RdfStore  # noqa: E402
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠   File "/Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sinain-hud-plugin/sinain-memory/rdf_store.py", line 43, in <module>
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠     import pyoxigraph as ox
+[0;36m[core][0m     [2026-07-21T15:10:27.683Z] [kg] ⚠ ModuleNotFoundError: No module named 'pyoxigraph'
+[0;36m[core][0m     [2026-07-21T15:10:27.684Z] [core] ⚠ KG daemon exited (1); KG retrieval falls back to one-shot spawn
+[0;36m[core][0m     [2026-07-21T15:10:27.698Z] [embedding] model ready in 472ms (384 dims)
+[0;36m[core][0m     [2026-07-21T15:10:27.702Z] [save-offer] armed: ≥10m episodes · ≤3/day · 45m cooldown · 45s expiry
+[0;36m[core][0m     [2026-07-21T15:10:27.707Z] [session-sense] armed: episode ≥2m qualifies · wrap after 6m quiet + 10m grace
+[0;36m[core][0m     [2026-07-21T15:10:27.713Z] [server] listening on http://127.0.0.1:9500 (HTTP + WS, epoch=mrusiu92-g3yo)
+[0;36m[core][0m     [2026-07-21T15:10:27.714Z] [core] auto-starting system audio pipeline...
+[0;36m[core][0m     [2026-07-21T15:10:27.714Z] [audio] starting capture: device=BlackHole 2ch cmd=screencapturekit rate=16000 gain=20dB
+[0;36m[core][0m     [2026-07-21T15:10:27.714Z] [audio] spawning: /Users/Igor.Gerasimov/.sinain/sck-capture/sck-capture --sample-rate 16000 --channels 1 --screen-dir /Users/Igor.Gerasimov/.sinain/capture --fps 4 --scale 1 --pin-display
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core] system audio pipeline started
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [audio] capture started
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core] mic pipeline ready (not auto-started — send toggle_mic or set MIC_AUTO_START=true)
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core] ✓ sinain-core running
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core]   http+ws: http://0.0.0.0:9500
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core]   audio:   active (screencapturekit)
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core]   mic:     standby
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core]   agent:   disabled
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core]   escal:   rich
+[0;36m[core][0m     [2026-07-21T15:10:27.717Z] [core]   cost:    display=off (always logged)
+[0;36m[core][0m     [2026-07-21T15:10:27.729Z] [audio] sck-capture stderr: [sck-capture] sample_rate=16000 channels=1 fps=4.0 scale=1.0 audio=true mic=false
+[0;36m[core][0m     [2026-07-21T15:10:27.903Z] [audio] sck-capture stderr: [sck-capture] active display 1: 1512x982 @ 4.0 fps → /Users/Igor.Gerasimov/.sinain/capture
+[0;36m[core][0m     [2026-07-21T15:10:27.978Z] [audio] sck-capture stderr: [sck-capture] starting capture...
+[0;36m[core][0m     [2026-07-21T15:10:28.199Z] [audio] sck-capture stderr: [sck-capture] capturing (Ctrl+C to stop)
+[0;36m[core][0m     [2026-07-21T15:10:28.314Z] [audio] sck-capture stderr: [sck-capture] audio format: 16000.0Hz, 1ch, 32bit, flags=0x29
+[1m[start][0m [0;32m✓[0m sinain-core healthy on :9500
+[1m[start][0m Privacy: mode=off ocr_openrouter=full images_openrouter=full
+[1m[start][0m Starting sense_client...
+[1m[start][0m Starting overlay...
+[0;33m[sense][0m    Traceback (most recent call last):
+[0;33m[sense][0m      File "<frozen runpy>", line 203, in _run_module_as_main
+[0;33m[sense][0m      File "<frozen runpy>", line 88, in _run_code
+[0;33m[sense][0m      File "/Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/sense_client/__main__.py", line 21, in <module>
+[0;33m[sense][0m        import numpy as np
+[0;33m[sense][0m    ModuleNotFoundError: No module named 'numpy'
+[0;36m[core][0m     [2026-07-21T15:10:28.755Z] [transcribe-server] whisper-server ready on http://127.0.0.1:8910
+[0;35m[overlay][0m  Resolving dependencies...
+[0;35m[overlay][0m  Downloading packages...
+[1m[start][0m [0;33m⚠[0m sense_client exited early — check logs above
+[1m[start][0m [0;32m✓[0m overlay running (pid:84659)
+
+[1m── SinainHUD (sinain-core) ────────────[0m
+  [0;36mcore[0m     :9500   [0;32m✓[0m  (http+ws)
+  [0;33msense[0m    [0;31m✗[0m       (failed)
+  [0;35moverlay[0m  pid:84659  [0;32m✓[0m  (running)
+[1m───────────────────────────────────────[0m
+  Press [1mCtrl+C[0m to stop all services
+[1m───────────────────────────────────────[0m
+
+[0;35m[overlay][0m    characters 1.4.0 (1.4.1 available)
+[0;35m[overlay][0m    cross_file 0.3.5+2 (0.3.5+4 available)
+[0;35m[overlay][0m    diffutil_dart 4.0.1 (5.0.0 available)
+[0;35m[overlay][0m    dio 5.9.2 (5.10.0 available)
+[0;35m[overlay][0m    dio_web_adapter 2.1.2 (2.2.0 available)
+[0;35m[overlay][0m    equatable 2.0.8 (2.1.0 available)
+[0;35m[overlay][0m    flutter_lints 3.0.2 (6.0.0 available)
+[0;35m[overlay][0m    flutter_markdown_plus 1.0.7 (1.0.12 available)
+[0;35m[overlay][0m    hooks 2.0.2 (2.1.0 available)
+[0;35m[overlay][0m    idb_shim 2.9.2 (2.9.6+2 available)
+[0;35m[overlay][0m    intl 0.20.2 (0.20.3 available)
+[0;35m[overlay][0m    lints 3.0.0 (6.1.0 available)
+[0;35m[overlay][0m    matcher 0.12.17 (0.12.20 available)
+[0;35m[overlay][0m    material_color_utilities 0.11.1 (0.13.0 available)
+[0;35m[overlay][0m    meta 1.17.0 (1.19.0 available)
+[0;35m[overlay][0m    package_config 2.2.0 (3.0.0 available)
+[0;35m[overlay][0m    path_provider 2.1.5 (2.1.6 available)
+[0;35m[overlay][0m    path_provider_linux 2.2.1 (2.2.2 available)
+[0;35m[overlay][0m    path_provider_platform_interface 2.1.2 (2.1.3 available)
+[0;35m[overlay][0m    record_use 0.6.0 (1.0.0 available)
+[0;35m[overlay][0m    screen_retriever 0.1.9 (0.2.2 available)
+[0;35m[overlay][0m    sembast 3.8.6 (3.8.9+1 available)
+[0;35m[overlay][0m    shared_preferences_android 2.4.23 (2.4.27 available)
+[0;35m[overlay][0m    synchronized 3.4.0 (3.4.1 available)
+[0;35m[overlay][0m    test_api 0.7.7 (0.7.13 available)
+[0;35m[overlay][0m    url_launcher_android 6.3.30 (6.3.32 available)
+[0;35m[overlay][0m    uuid 4.5.3 (4.6.0 available)
+[0;35m[overlay][0m    vector_math 2.2.0 (2.4.0 available)
+[0;35m[overlay][0m    web 0.5.1 (1.1.1 available)
+[0;35m[overlay][0m    web_socket_channel 2.4.5 (3.0.3 available)
+[0;35m[overlay][0m    window_manager 0.3.9 (0.5.2 available)
+[0;35m[overlay][0m  Got dependencies!
+[0;35m[overlay][0m  31 packages have newer versions incompatible with dependency constraints.
+[0;35m[overlay][0m  Try `flutter pub outdated` for more information.
+[0;35m[overlay][0m  Launching lib/main.dart on macOS in debug mode...
+[0;35m[overlay][0m  macos/Runner/AppDelegate.swift has been modified and cannot be automatically migrated.
+[0;35m[overlay][0m  We recommend developers override applicationSupportsSecureRestorableState in AppDelegate.swift as follows:
+[0;35m[overlay][0m  override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+[0;35m[overlay][0m    return true
+[0;35m[overlay][0m  }
+[0;35m[overlay][0m  
+[0;36m[core][0m     [2026-07-21T15:10:35.201Z] [claude-usage] ⚠ Claude OAuth access token not found
+[0;35m[overlay][0m  Building macOS application...                                   
+[0;35m[overlay][0m  ✓ Built build/macos/Build/Products/Debug/sinain_hud.app
+[0;35m[overlay][0m  2026-07-21 17:10:54.081 sinain_hud[93460:224491] Running with merged UI and platform thread. Experimental.
+[0;35m[overlay][0m  Failed to foreground app; open returned 1
+[0;35m[overlay][0m  Syncing files to device macOS...                                
+[0;35m[overlay][0m  2026-07-21 17:10:54.364 sinain_hud[93460:224491] [SinainHUD] BackendLauncher: no bundled backend — assuming core started externally (dev mode)
+[0;35m[overlay][0m  flutter: [overlay] settings loaded: state=eye fontSize=9.312630208333331 accentColor=0xff00ff88
+[0;35m[overlay][0m  flutter: [overlay] versions: dmg=source build=source mode=debug
+[0;35m[overlay][0m  Syncing files to device macOS...                                    28ms
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  Flutter run key commands.
+[0;35m[overlay][0m  r Hot reload. 🔥🔥🔥
+[0;35m[overlay][0m  R Hot restart.
+[0;35m[overlay][0m  h List all available interactive commands.
+[0;35m[overlay][0m  d Detach (terminate "flutter run" but leave application running).
+[0;35m[overlay][0m  c Clear the screen
+[0;35m[overlay][0m  q Quit (terminate the application on the device).
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  A Dart VM Service on macOS is available at: http://127.0.0.1:52019/ivcmalMM0EQ=/
+[0;35m[overlay][0m  The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:52019/ivcmalMM0EQ=/devtools/?uri=ws://127.0.0.1:52019/ivcmalMM0EQ=/ws
+[0;36m[core][0m     [2026-07-21T15:10:54.686Z] [ws] client connected from 127.0.0.1
+[0;36m[core][0m     [2026-07-21T15:10:54.708Z] [ws] ← command: set_agent_llm_brief
+[0;35m[overlay][0m  flutter: [WebSocketService] Connected to ws://localhost:9500
+[0;36m[core][0m     [2026-07-21T15:10:54.709Z] [cmd] agent LLM brief enabled
+[0;36m[core][0m     [2026-07-21T15:10:54.709Z] [cmd] command processed: set_agent_llm_brief
+[0;36m[core][0m     [2026-07-21T15:10:54.709Z] [ws] ← command: set_auto_detect
+[0;36m[core][0m     [2026-07-21T15:10:54.709Z] [cmd] auto-detect issues disabled
+[0;36m[core][0m     [2026-07-21T15:10:54.709Z] [cmd] command processed: set_auto_detect
+[0;35m[overlay][0m  flutter: [WebSocketService] REGION_HIGHLIGHT: 0 regions []
+[0;35m[overlay][0m  Resize timed out
+[0;35m[overlay][0m  flutter: [overlay] ⚠ FlutterError: A RenderFlex overflowed by 183 pixels on the right.
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  ══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
+[0;35m[overlay][0m  The following assertion was thrown during layout:
+[0;35m[overlay][0m  A RenderFlex overflowed by 183 pixels on the right.
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  The relevant error-causing widget was:
+[0;35m[overlay][0m    Row
+[0;35m[overlay][0m    Row:file:///Users/Igor.Gerasimov/IdeaProjects/sinain-hud-2/overlay/lib/ui/agents/agent_island_bar.dart:229:14
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  To inspect this widget in Flutter DevTools, visit:
+[0;35m[overlay][0m  http://127.0.0.1:52019/ivcmalMM0EQ=/devtools//#/inspector?uri=http%3A%2F%2F127.0.0.1%3A52019%2FivcmalMM0EQ%3D%2F&inspectorRef=inspector-0
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  The overflowing RenderFlex has an orientation of Axis.horizontal.
+[0;35m[overlay][0m  The edge of the RenderFlex that is overflowing has been marked in the rendering with a yellow and
+[0;35m[overlay][0m  black striped pattern. This is usually caused by the contents being too big for the RenderFlex.
+[0;35m[overlay][0m  Consider applying a flex factor (e.g. using an Expanded widget) to force the children of the
+[0;35m[overlay][0m  RenderFlex to fit within the available space instead of being sized to their natural size.
+[0;35m[overlay][0m  This is considered an error condition because it indicates that there is content that cannot be
+[0;35m[overlay][0m  seen. If the content is legitimately bigger than the available space, consider clipping it with a
+[0;35m[overlay][0m  ClipRect widget before putting it in the flex, or using a scrollable container rather than a Flex,
+[0;35m[overlay][0m  like a ListView.
+[0;35m[overlay][0m  The specific RenderFlex in question is: RenderFlex#9582e OVERFLOWING:
+[0;35m[overlay][0m    needs compositing
+[0;35m[overlay][0m    creator: Row ← Padding ← DecoratedBox ← ConstrainedBox ← Container ← Listener ← _GestureSemantics ←
+[0;35m[overlay][0m      RawGestureDetector ← GestureDetector ← AgentIslandBar ← SizedBox ← Align ← ⋯
+[0;35m[overlay][0m    parentData: offset=Offset(0.0, 0.0) (can use size)
+[0;35m[overlay][0m    constraints: BoxConstraints(w=48.0, h=32.0)
+[0;35m[overlay][0m    size: Size(48.0, 32.0)
+[0;35m[overlay][0m    direction: horizontal
+[0;35m[overlay][0m    mainAxisAlignment: start
+[0;35m[overlay][0m    mainAxisSize: max
+[0;35m[overlay][0m    crossAxisAlignment: center
+[0;35m[overlay][0m    textDirection: ltr
+[0;35m[overlay][0m    verticalDirection: down
+[0;35m[overlay][0m    spacing: 0.0
+[0;35m[overlay][0m  ◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤
+[0;35m[overlay][0m  ════════════════════════════════════════════════════════════════════════════════════════════════════
+[0;35m[overlay][0m  
+[0;35m[overlay][0m  flutter: [overlay] ⚠ FlutterError: A RenderFlex overflowed by 6.9 pixels on the right.
+[0;35m[overlay][0m  Another exception was thrown: A RenderFlex overflowed by 6.9 pixels on the right.
+[0;35m[overlay][0m  flutter: [overlay] ⚠ FlutterError: A RenderFlex overflowed by 152 pixels on the right.
+[0;35m[overlay][0m  Another exception was thrown: A RenderFlex overflowed by 152 pixels on the right.
+[0;35m[overlay][0m  flutter: [overlay] ⚠ FlutterError: A RenderFlex overflowed by 8.4 pixels on the right.
+[0;35m[overlay][0m  Another exception was thrown: A RenderFlex overflowed by 8.4 pixels on the right.
+[0;36m[core][0m     [2026-07-21T15:10:59.503Z] [ws] ← agent approval reply: id=apr_1 behavior=allow
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;35m[overlay][0m  [ERROR:flutter/lib/ui/window/platform_configuration.cc(436)] Reported frame time is older than the last one; clamping. 1744023111 < 1744039778 ~= 16667
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;36m[core][0m     search_entities error: No module named 'pyoxigraph'
+[0;35m[overlay][0m  [ERROR:flutter/lib/ui/window/platform_configuration.cc(436)] Reported frame time is older than the last one; clamping. 1752106391 < 1752114724 ~= 8333
+[0;36m[core][0m     [2026-07-21T15:11:42.583Z] [ws] ← agent approval reply: id=apr_2 behavior=allow
+[0;36m[core][0m     [2026-07-21T15:11:49.583Z] [ws] ← agent approval reply: id=apr_3 behavior=allow
+
+[1m[start][0m Shutting down services...
+[1m[start][0m All services stopped.

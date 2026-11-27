@@ -1,0 +1,2228 @@
+===== backend launch 2026-06-09 20:42:42 =====
+/Users/macbook/.sinain/.env: line 48: 2ch: command not found
+[launch] python (sense + knowledge): /usr/bin/python3
+[2026-06-09T18:42:43.060Z] [core] sinain-core starting...
+[2026-06-09T18:42:43.063Z] [core] port: 9500
+[2026-06-09T18:42:43.063Z] [core] audio: device=BlackHole 2ch cmd=screencapturekit chunk=5000ms
+[2026-06-09T18:42:43.063Z] [core] mic: enabled=false device=default cmd=sox
+[2026-06-09T18:42:43.063Z] [core] transcription: model=google/gemini-2.5-flash
+[2026-06-09T18:42:43.063Z] [core] agent: model=google/gemini-2.5-flash-lite debounce=3000ms max=30000ms
+[2026-06-09T18:42:43.063Z] [core] escalation: mode=rich cooldown=30000ms stale=90000ms
+[2026-06-09T18:42:43.063Z] [core] openclaw: ws=ws://localhost:18789 http=http://localhost:18789/hooks/agent
+[2026-06-09T18:42:43.063Z] [core] situation: /Users/macbook/.openclaw/workspace/SITUATION.md
+[2026-06-09T18:42:43.063Z] [core] tracing: enabled=true dir=/Users/macbook/.sinain-core/traces
+[2026-06-09T18:42:43.063Z] [core] learning: enabled=true dir=/Users/macbook/.sinain-core/feedback
+[2026-06-09T18:42:43.063Z] [core] privacy: mode=standard
+[2026-06-09T18:42:43.064Z] [embedding] loading Xenova/all-MiniLM-L6-v2 (background)...
+[2026-06-09T18:42:43.073Z] [web-db] web.db ready at /Users/macbook/.sinain/memory/web.db (schema v2)
+[2026-06-09T18:42:43.073Z] [local-curation] memory: /Users/macbook/.sinain/memory
+[2026-06-09T18:42:43.073Z] [local-curation] scripts: /Applications/Sinain.app/Contents/Resources/sinain-memory
+[2026-06-09T18:42:43.073Z] [local-curation] scripts available: true
+[2026-06-09T18:42:43.096Z] [entity-cache] no knowledge-graph.db found — entity detection disabled
+[2026-06-09T18:42:43.096Z] [local-curation] periodic curation started (every 30 min)
+[2026-06-09T18:42:43.098Z] [openclaw] device identity: 5c9ff10758b6…
+[2026-06-09T18:42:43.099Z] [task-store] loaded 0 pending task(s) from disk
+[2026-06-09T18:42:43.173Z] [transcribe] initialized: backend=openrouter model=google/gemini-2.5-flash language=en-US
+[2026-06-09T18:42:43.176Z] [server] listening on http://0.0.0.0:9500 (HTTP + WS, epoch=mq6zm1o2-6tb0)
+[2026-06-09T18:42:43.183Z] [agent] loop started (debounce=3000ms, max=30000ms, cooldown=10000ms, model=google/gemini-2.5-flash-lite)
+[2026-06-09T18:42:43.183Z] [core] auto-starting system audio pipeline...
+[2026-06-09T18:42:43.187Z] [audio] starting capture: device=BlackHole 2ch cmd=screencapturekit rate=16000 gain=20dB
+[2026-06-09T18:42:43.187Z] [audio] spawning: /Users/macbook/.sinain/sck-capture/sck-capture --sample-rate 16000 --channels 1 --screen-dir /Users/macbook/.sinain/capture --fps 1 --scale 0.5
+[2026-06-09T18:42:43.192Z] [core] system audio pipeline started
+[2026-06-09T18:42:43.196Z] [audio] capture started
+[2026-06-09T18:42:43.196Z] [core] ✓ sinain-core running
+[2026-06-09T18:42:43.196Z] [core]   http+ws: http://0.0.0.0:9500
+[2026-06-09T18:42:43.196Z] [core]   audio:   active (screencapturekit)
+[2026-06-09T18:42:43.196Z] [core]   mic:     disabled
+[2026-06-09T18:42:43.196Z] [core]   agent:   enabled
+[2026-06-09T18:42:43.196Z] [core]   escal:   rich
+[2026-06-09T18:42:43.196Z] [core]   cost:    display=off (always logged)
+[2026-06-09T18:42:43.203Z] [audio] sck-capture stderr: dyld[36894]: Library not loaded: /usr/lib/swift/libswift_DarwinFoundation2.dylib
+  Referenced from: <624EDC47-FC4C-3B9B-AB94-358B4D38CA14> /Applications/Sinain.app/Contents/Resources/sck-capture/sck-c
+[2026-06-09T18:42:43.203Z] [audio] sck-capture exited: code=null signal=SIGABRT
+[2026-06-09T18:42:43.203Z] [audio] ⚠ sck-capture exited unexpectedly, stopping pipeline
+[2026-06-09T18:42:43.203Z] [audio] stopping capture...
+[2026-06-09T18:42:43.203Z] [core] system audio pipeline stopped
+[2026-06-09T18:42:43.203Z] [audio] capture stopped
+[launch] sense_client started (/usr/bin/python3)
+  Creating /Users/macbook/.sinain/agents.json from agents.example.json (first-run bootstrap)
+/Users/macbook/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+[2026-06-09T18:42:44.666Z] [core] bareagent register: available=[claude,codex,openclaw] current=codex → lanes esc=codex spawn=codex
+  Agents available: claude codex
+  Lanes:  escalation=codex  spawn=codex
+Starting OpenRouter proxy (mode=preserve)...
+  ✓ proxy listening (pid=37350, logs=/tmp/openrouter-proxy.log)
+sinain bare agent started
+  Agent: codex (MCP)
+  Core: http://localhost:9500
+  Allowed: mcp__sinain ToolSearch
+  Poll: every 5s
+  Press Ctrl+C to stop
+
+[sense] initializing capture...
+[capture] Using CoreGraphics (CGDisplayCreateImage)
+[capture] WARNING: CGDisplayCreateImage may cause camera conflicts on macOS 14+
+[sense] initializing OCR...
+[2026-06-09T18:42:46.332Z] [ws] client connected from 127.0.0.1
+[ocr] using Vision backend (languages=['en', 'ru'])
+[sense]   vision: openrouter (google/gemini-2.5-flash-lite)
+[sense] sense_client started
+[sense]   relay: http://localhost:9500
+[sense]   fps: 2.0, scale: 0.5
+[sense]   ocr backend: auto
+[sense]   privacy: ocr_openrouter=full images_openrouter=full
+[sense]   control: /tmp/sinain-sense-control.json
+[sense] first frame: 1728x1117 (scale=0.5)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T18:42:49.292Z] [server] [sense] #1 (context): app=unknown ssim=0.000
+[sense] -> context sent (app=, ssim=n/a, latency=47ms)
+[2026-06-09T18:42:49.923Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:42:50.059Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:42:50.114Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:42:50.115Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[2026-06-09T18:42:50.117Z] [trace-store] writing to /Users/macbook/.sinain-core/traces/2026-06-09.jsonl
+[2026-06-09T18:42:50.634Z] [embedding] model ready in 7570ms (384 dims)
+[sense] first ssim sample: 1.0000 (threshold=0.85)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: no_change
+[sense] change detected: ssim=0.1689 contours=21
+[sense] rois: 1 regions (1728x1117)
+Terminated: 15
+
+Agent stopped. Escalations handled: 0
+  stopped OpenRouter proxy (pid=37350)
+[2026-06-09T18:43:04.713Z] [core] SIGTERM received, shutting down...
+[2026-06-09T18:43:04.713Z] [agent] loop stopped
+[2026-06-09T18:43:04.713Z] [transcribe] destroyed
+[2026-06-09T18:43:04.713Z] [openclaw] disconnect: stopping (pending=0, pendingFinal=0)
+[2026-06-09T18:43:04.713Z] [local-curation] skipping save — only 0 feed items
+[2026-06-09T18:43:04.714Z] [core] SIGTERM received, shutting down...
+[2026-06-09T18:43:04.714Z] [transcribe] destroyed
+[2026-06-09T18:43:04.714Z] [openclaw] disconnect: stopping (pending=0, pendingFinal=0)
+[2026-06-09T18:43:04.714Z] [local-curation] skipping save — only 0 feed items
+[2026-06-09T18:43:04.720Z] [server] server closed
+[2026-06-09T18:43:04.720Z] [server] server closed
+[2026-06-09T18:43:04.720Z] [core] goodbye
+===== backend launch 2026-06-09 20:43:08 =====
+/Users/macbook/.sinain/.env: line 48: 2ch: command not found
+[launch] python (sense + knowledge): /usr/bin/python3
+[2026-06-09T18:43:08.473Z] [core] sinain-core starting...
+[config] loaded agents config from /Users/macbook/.sinain/agents.json
+[2026-06-09T18:43:08.475Z] [core] port: 9500
+[2026-06-09T18:43:08.475Z] [core] audio: device=BlackHole 2ch cmd=screencapturekit chunk=5000ms
+[2026-06-09T18:43:08.475Z] [core] mic: enabled=false device=default cmd=sox
+[2026-06-09T18:43:08.475Z] [core] transcription: model=google/gemini-2.5-flash
+[2026-06-09T18:43:08.475Z] [core] agent: model=google/gemini-2.5-flash-lite debounce=6000ms max=60000ms
+[2026-06-09T18:43:08.475Z] [core] escalation: mode=rich cooldown=30000ms stale=90000ms
+[2026-06-09T18:43:08.475Z] [core] openclaw: ws=ws://localhost:18789 http=http://localhost:18789/hooks/agent
+[2026-06-09T18:43:08.476Z] [core] situation: /Users/macbook/.openclaw/workspace/SITUATION.md
+[2026-06-09T18:43:08.476Z] [core] tracing: enabled=true dir=/Users/macbook/.sinain-core/traces
+[2026-06-09T18:43:08.476Z] [core] learning: enabled=true dir=/Users/macbook/.sinain-core/feedback
+[2026-06-09T18:43:08.476Z] [core] privacy: mode=standard
+[2026-06-09T18:43:08.476Z] [embedding] loading Xenova/all-MiniLM-L6-v2 (background)...
+[2026-06-09T18:43:08.481Z] [web-db] web.db ready at /Users/macbook/.sinain/memory/web.db (schema v2)
+[2026-06-09T18:43:08.481Z] [local-curation] memory: /Users/macbook/.sinain/memory
+[2026-06-09T18:43:08.481Z] [local-curation] scripts: /Applications/Sinain.app/Contents/Resources/sinain-memory
+[2026-06-09T18:43:08.481Z] [local-curation] scripts available: true
+[2026-06-09T18:43:08.506Z] [entity-cache] no knowledge-graph.db found — entity detection disabled
+[2026-06-09T18:43:08.506Z] [local-curation] periodic curation started (every 30 min)
+[2026-06-09T18:43:08.508Z] [openclaw] device identity: 5c9ff10758b6…
+[2026-06-09T18:43:08.508Z] [task-store] loaded 0 pending task(s) from disk
+[2026-06-09T18:43:08.551Z] [transcribe] initialized: backend=openrouter model=google/gemini-2.5-flash language=en-US
+[2026-06-09T18:43:08.551Z] [core] bareagent register: available=[claude,openclaude,codex,goose,junie,aider,openclaw] current=openclaude → lanes esc=openclaude spawn=openclaude
+[2026-06-09T18:43:08.551Z] [core] roster pre-populated from agents.json: claude,openclaude,codex,goose,junie,aider
+[2026-06-09T18:43:08.556Z] [server] listening on http://0.0.0.0:9500 (HTTP + WS, epoch=mq6zml9y-icck)
+[2026-06-09T18:43:08.557Z] [agent] loop started (debounce=6000ms, max=60000ms, cooldown=10000ms, model=google/gemini-2.5-flash-lite)
+[2026-06-09T18:43:08.557Z] [core] auto-starting system audio pipeline...
+[2026-06-09T18:43:08.557Z] [audio] starting capture: device=BlackHole 2ch cmd=screencapturekit rate=16000 gain=20dB
+[2026-06-09T18:43:08.557Z] [audio] spawning: /Users/macbook/.sinain/sck-capture/sck-capture --sample-rate 16000 --channels 1 --screen-dir /Users/macbook/.sinain/capture --fps 1 --scale 0.5
+[2026-06-09T18:43:08.559Z] [core] system audio pipeline started
+[2026-06-09T18:43:08.560Z] [audio] capture started
+[2026-06-09T18:43:08.560Z] [core] ✓ sinain-core running
+[2026-06-09T18:43:08.560Z] [core]   http+ws: http://0.0.0.0:9500
+[2026-06-09T18:43:08.560Z] [core]   audio:   active (screencapturekit)
+[2026-06-09T18:43:08.560Z] [core]   mic:     disabled
+[2026-06-09T18:43:08.560Z] [core]   agent:   enabled
+[2026-06-09T18:43:08.560Z] [core]   escal:   rich
+[2026-06-09T18:43:08.560Z] [core]   cost:    display=off (always logged)
+[2026-06-09T18:43:08.561Z] [audio] sck-capture stderr: dyld[37611]: Library not loaded: /usr/lib/swift/libswift_DarwinFoundation2.dylib
+  Referenced from: <624EDC47-FC4C-3B9B-AB94-358B4D38CA14> /Applications/Sinain.app/Contents/Resources/sck-capture/sck-c
+[2026-06-09T18:43:08.562Z] [audio] sck-capture exited: code=null signal=SIGABRT
+[2026-06-09T18:43:08.562Z] [audio] ⚠ sck-capture exited unexpectedly, stopping pipeline
+[2026-06-09T18:43:08.562Z] [audio] stopping capture...
+[2026-06-09T18:43:08.562Z] [core] system audio pipeline stopped
+[2026-06-09T18:43:08.562Z] [audio] capture stopped
+[2026-06-09T18:43:08.682Z] [embedding] model ready in 206ms (384 dims)
+[launch] sense_client started (/usr/bin/python3)
+/Users/macbook/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+[sense] initializing capture...
+[capture] Using CoreGraphics (CGDisplayCreateImage)
+[capture] WARNING: CGDisplayCreateImage may cause camera conflicts on macOS 14+
+[sense] initializing OCR...
+[2026-06-09T18:43:10.134Z] [core] bareagent register: available=[claude,codex,openclaw] current=codex → lanes esc=codex spawn=codex
+  Agents available: claude codex
+  Lanes:  escalation=codex  spawn=codex
+Starting OpenRouter proxy (mode=preserve)...
+  ✓ proxy listening (pid=38065, logs=/tmp/openrouter-proxy.log)
+sinain bare agent started
+  Agent: codex (MCP)
+  Core: http://localhost:9500
+  Allowed: mcp__sinain ToolSearch
+  Poll: every 5s
+  Press Ctrl+C to stop
+
+[ocr] using Vision backend (languages=['en', 'ru'])
+[sense]   vision: openrouter (google/gemini-2.5-flash-lite)
+[sense] sense_client started
+[sense]   relay: http://localhost:9500
+[sense]   fps: 2.0, scale: 0.5
+[sense]   ocr backend: auto
+[sense]   privacy: ocr_openrouter=full images_openrouter=full
+[sense]   control: /tmp/sinain-sense-control.json
+[sense] first frame: 1728x1117 (scale=0.5)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T18:43:11.233Z] [server] [sense] #1 (context): app=zed ssim=0.000
+[sense] -> context sent (app=zed, ssim=n/a, latency=38ms)
+[2026-06-09T18:43:11.813Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:11.872Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:11.898Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:11.898Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] first ssim sample: 0.9727 (threshold=0.85)
+[2026-06-09T18:43:11.898Z] [trace-store] writing to /Users/macbook/.sinain-core/traces/2026-06-09.jsonl
+[2026-06-09T18:43:12.154Z] [ws] client connected from 127.0.0.1
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9096 contours=107
+[sense] rois: 3 regions (1416x121, 811x165, 1416x72)
+[sense] ocr: 327 chars, 56 words
+[2026-06-09T18:43:22.630Z] [server] [sense] #2 (text): app=zed ssim=0.910
+[sense] -> text sent (app=zed, ssim=0.910, latency=9ms)
+[2026-06-09T18:43:28.689Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:28.784Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:28.819Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:28.819Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9048 contours=92
+[sense] rois: 3 regions (1416x148, 456x181, 812x104)
+[sense] ocr: 212 chars, 35 words
+[2026-06-09T18:43:31.001Z] [server] [sense] #3 (text): app=zed ssim=0.905
+[sense] -> text sent (app=zed, ssim=0.905, latency=8ms)
+[sense] change detected: ssim=0.9032 contours=94
+[sense] rois: 3 regions (1416x182, 456x181, 812x104)
+[sense] ocr: 255 chars, 46 words
+[sense] gate dropped: cooldown (1989ms < 5000ms)
+[sense] change detected: ssim=0.9013 contours=97
+[sense] rois: 3 regions (1416x182, 456x181, 812x104)
+[sense] ocr: 212 chars, 35 words
+[sense] gate dropped: cooldown (4369ms < 5000ms)
+[sense] change detected: ssim=0.9004 contours=94
+[sense] rois: 3 regions (1416x163, 812x247, 456x265)
+[sense] ocr: 465 chars, 78 words
+[2026-06-09T18:43:36.767Z] [server] [sense] #4 (text): app=zed ssim=0.900
+[sense] -> text sent (app=zed, ssim=0.900, latency=7ms)
+[sense] heartbeat: 55 frames, 4 sent, 2 gated, threshold=0.92
+[2026-06-09T18:43:42.834Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:42.903Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:42.947Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:43:42.947Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9092 contours=93
+[sense] rois: 3 regions (1416x142, 534x245, 591x145)
+[sense] ocr: 355 chars, 58 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.9055 contours=138
+[sense] rois: 3 regions (1416x104, 502x101, 254x146)
+[sense] ocr: 153 chars, 25 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8395 contours=63
+[sense] rois: 3 regions (1417x271, 1416x145, 332x82)
+[sense] ocr: 420 chars, 61 words
+[2026-06-09T18:44:00.806Z] [server] [sense] #5 (text): app=zed ssim=0.840
+[sense] -> text sent (app=zed, ssim=0.840, latency=9ms)
+[sense] change detected: ssim=0.8398 contours=49
+[sense] rois: 1 regions (1417x437)
+[sense] ocr: 614 chars, 105 words
+[sense] gate dropped: cooldown (773ms < 5000ms)
+[sense] change detected: ssim=0.8813 contours=91
+[sense] rois: 3 regions (1033x312, 890x133, 875x131)
+[sense] ocr: 416 chars, 73 words
+[sense] gate dropped: cooldown (2545ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5764 contours=86
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2615 chars, 393 words
+[2026-06-09T18:44:04.925Z] [server] [sense] #6 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=0.576, latency=16ms)
+[sense] change detected: ssim=0.7489 contours=34
+[sense] rois: 2 regions (1727x888, 80x87)
+[sense] ocr: 2094 chars, 335 words
+[2026-06-09T18:44:08.310Z] [server] [sense] #7 (text): app=Telegram ssim=0.749
+[sense] -> text sent (app=Telegram, ssim=0.749, latency=20ms)
+[capture] stats: 104 ok, 0 fail (100% success, 104 total)
+[sense] heartbeat: 106 frames, 7 sent, 6 gated, threshold=0.85
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9110 contours=21
+[sense] rois: 2 regions (1670x758, 223x131)
+[2026-06-09T18:44:14.390Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[sense] ocr: 1585 chars, 253 words
+[2026-06-09T18:44:14.494Z] [server] [sense] #8 (text): app=Telegram ssim=0.911
+[sender] relay latency: p50=4ms p95=8ms (n=8)
+[sense] -> text sent (app=Telegram, ssim=0.911, latency=22ms)
+[sense] stats: captures=111ok/0fail events=8sent/0fail/6gated latency_p50=16ms p95=38ms detect=122.5ms ocr=565.3ms send=4.6ms
+[2026-06-09T18:44:14.501Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:44:14.558Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:44:14.558Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.5910 contours=51
+[sense] rois: 2 regions (1728x1103, 77x94)
+[sense] ocr: 2454 chars, 429 words
+[2026-06-09T18:44:40.487Z] [server] [sense] #9 (text): app=Telegram ssim=0.591
+[sense] -> text sent (app=Telegram, ssim=0.591, latency=33ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5141 contours=48
+[sense] rois: 1 regions (1728x1095)
+[sense] ocr: 1590 chars, 268 words
+[2026-06-09T18:44:41.866Z] [server] [sense] #10 (context): app=Brave Browser ssim=0.000
+[sense] -> context sent (app=Brave Browser, ssim=0.514, latency=17ms)
+[sense] change detected: ssim=0.3681 contours=37
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 61 chars, 12 words
+[sense] gate dropped: cooldown (1182ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4017 contours=28
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1413 chars, 239 words
+[2026-06-09T18:44:44.458Z] [server] [sense] #11 (text): app=Passwords ssim=0.402
+[sense] -> text sent (app=Passwords, ssim=0.402, latency=35ms)
+[sense] heartbeat: 163 frames, 11 sent, 7 gated, threshold=0.85
+[sense] change detected: ssim=0.6960 contours=25
+[sense] rois: 1 regions (1728x1064)
+[sense] ocr: 1376 chars, 234 words
+[sense] gate dropped: cooldown (1701ms < 2000ms)
+[sense] change detected: ssim=0.4092 contours=33
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 45 chars, 10 words
+[2026-06-09T18:44:47.009Z] [server] [sense] #12 (text): app=Passwords ssim=0.409
+[sense] -> text sent (app=Passwords, ssim=0.409, latency=25ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.3777 contours=34
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1569 chars, 264 words
+[sense] gate dropped: cooldown (1215ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: cooldown (1624ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5805 contours=43
+[sense] rois: 3 regions (1728x1019, 684x104, 306x96)
+[sense] ocr: 811 chars, 128 words
+[2026-06-09T18:44:52.395Z] [server] [sense] #13 (context): app=Brave Browser ssim=0.000
+[sense] -> context sent (app=Brave Browser, ssim=0.580, latency=18ms)
+[sense] change detected: ssim=0.4158 contours=12
+[sense] rois: 2 regions (1728x908, 354x109)
+[sense] ocr: 888 chars, 146 words
+[sense] gate dropped: cooldown (967ms < 2000ms)
+[sense] change detected: ssim=0.6586 contours=12
+[sense] rois: 2 regions (1728x908, 351x72)
+[sense] ocr: 678 chars, 121 words
+[2026-06-09T18:44:56.266Z] [server] [sense] #14 (text): app=Brave Browser ssim=0.659
+[sense] -> text sent (app=Brave Browser, ssim=0.659, latency=22ms)
+[sense] change detected: ssim=0.7816 contours=40
+[sense] rois: 2 regions (1728x906, 121x135)
+[sense] ocr: 361 chars, 69 words
+[sense] gate dropped: cooldown (828ms < 2000ms)
+[sense] change detected: ssim=0.8368 contours=77
+[sense] rois: 3 regions (961x868, 465x682, 269x894)
+[sense] ocr: empty (rois=3)
+[2026-06-09T18:44:59.237Z] [server] [sense] #15 (visual): app=Brave Browser ssim=0.837
+[sense] -> visual sent (app=Brave Browser, ssim=0.837, latency=15ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8460 contours=92
+[sense] rois: 3 regions (1324x756, 1274x418, 269x894)
+[sense] ocr: 257 chars, 60 words
+[2026-06-09T18:45:02.332Z] [server] [sense] #16 (text): app=Brave Browser ssim=0.846
+[sense] -> text sent (app=Brave Browser, ssim=0.846, latency=17ms)
+[sense] change detected: ssim=0.8979 contours=36
+[sense] rois: 1 regions (1324x849)
+[sense] ocr: 103 chars, 14 words
+[sense] gate dropped: cooldown (649ms < 5000ms)
+[sense] change detected: ssim=0.8847 contours=95
+[sense] rois: 1 regions (1324x716)
+[sense] ocr: 137 chars, 32 words
+[sense] gate dropped: cooldown (1346ms < 5000ms)
+[sense] change detected: ssim=0.8672 contours=81
+[sense] rois: 2 regions (1391x888, 246x85)
+[sense] ocr: 275 chars, 54 words
+[sense] gate dropped: cooldown (2023ms < 5000ms)
+[sense] change detected: ssim=0.9002 contours=41
+[sense] rois: 3 regions (1324x846, 636x118, 246x128)
+[sense] ocr: 25 chars, 3 words
+[sense] gate dropped: cooldown (3171ms < 5000ms)
+[sense] change detected: ssim=0.8942 contours=36
+[sense] rois: 3 regions (1324x629, 1274x417, 1279x92)
+[sense] ocr: 183 chars, 43 words
+[sense] gate dropped: cooldown (3978ms < 5000ms)
+[sense] change detected: ssim=0.8642 contours=38
+[sense] rois: 3 regions (1391x521, 1278x308, 1272x103)
+[sense] ocr: 131 chars, 29 words
+[sense] gate dropped: cooldown (4741ms < 5000ms)
+[sense] change detected: ssim=0.8853 contours=56
+[sense] rois: 3 regions (1273x205, 1269x96, 357x226)
+[sense] ocr: 30 chars, 6 words
+[2026-06-09T18:45:07.917Z] [server] [sense] #17 (text): app=Brave Browser ssim=0.885
+[sense] -> text sent (app=Brave Browser, ssim=0.885, latency=12ms)
+[sense] change detected: ssim=0.4742 contours=19
+[sense] rois: 2 regions (1728x910, 777x109)
+[sense] ocr: 1894 chars, 216 words
+[sense] gate dropped: cooldown (1184ms < 5000ms)
+[2026-06-09T18:45:14.121Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:14.368Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:14.426Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:14.426Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 201 ok, 0 fail (100% success, 201 total)
+[sense] heartbeat: 210 frames, 17 sent, 19 gated, threshold=0.92
+[sense] change detected: ssim=0.9131 contours=36
+[sense] rois: 3 regions (444x430, 493x214, 328x124)
+[sense] ocr: 236 chars, 25 words
+[2026-06-09T18:45:16.373Z] [server] [sense] #18 (text): app=Brave Browser ssim=0.913
+[sender] relay latency: p50=4ms p95=6ms (n=10)
+[sense] -> text sent (app=Brave Browser, ssim=0.913, latency=12ms)
+[sense] stats: captures=212ok/0fail events=18sent/0fail/19gated latency_p50=18ms p95=35ms detect=130.4ms ocr=466.2ms send=4.4ms
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T18:45:22.386Z] [server] [sense] #19 (context): app=Finder ssim=0.000
+[sense] -> context sent (app=Finder, ssim=n/a, latency=21ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: cooldown (975ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: no_change
+[2026-06-09T18:45:28.576Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:28.925Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:28.983Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:28.983Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4685 contours=85
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1929 chars, 266 words
+[2026-06-09T18:45:30.250Z] [server] [sense] #20 (text): app=zed ssim=0.469
+[sense] -> text sent (app=zed, ssim=0.469, latency=24ms)
+[sense] change detected: ssim=0.7564 contours=231
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2052 chars, 279 words
+[sense] gate dropped: cooldown (1481ms < 2000ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8852 contours=145
+[sense] rois: 3 regions (618x227, 608x229, 416x124)
+[sense] ocr: 257 chars, 39 words
+[2026-06-09T18:45:39.630Z] [server] [sense] #21 (text): app=zed ssim=0.885
+[sense] -> text sent (app=zed, ssim=0.885, latency=11ms)
+[sense] heartbeat: 264 frames, 21 sent, 22 gated, threshold=0.92
+[2026-06-09T18:45:45.834Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:46.079Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:46.178Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:45:46.178Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8852 contours=145
+[sense] rois: 3 regions (618x227, 608x229, 416x124)
+[sense] ocr: 397 chars, 56 words
+[2026-06-09T18:45:49.030Z] [server] [sense] #22 (text): app=zed ssim=0.885
+[sense] -> text sent (app=zed, ssim=0.885, latency=9ms)
+[sense] change detected: ssim=0.8977 contours=123
+[sense] rois: 3 regions (1416x182, 628x312, 312x82)
+[sense] ocr: 364 chars, 61 words
+[sense] gate dropped: cooldown (827ms < 5000ms)
+[sense] change detected: ssim=0.8909 contours=23
+[sense] rois: 1 regions (1417x309)
+[sense] ocr: 235 chars, 40 words
+[sense] gate dropped: cooldown (2480ms < 5000ms)
+[sense] change detected: ssim=0.8263 contours=11
+[sense] rois: 1 regions (1417x418)
+[sense] ocr: 659 chars, 95 words
+[sense] gate dropped: cooldown (3720ms < 5000ms)
+[sense] change detected: ssim=0.9196 contours=91
+[sense] rois: 2 regions (1361x267, 1417x221)
+[sense] ocr: 579 chars, 93 words
+[2026-06-09T18:45:54.094Z] [server] [sense] #23 (text): app=zed ssim=0.920
+[sense] -> text sent (app=zed, ssim=0.920, latency=11ms)
+[sense] change detected: ssim=0.8193 contours=35
+[sense] rois: 1 regions (1417x438)
+[sense] ocr: 477 chars, 76 words
+[sense] gate dropped: cooldown (758ms < 5000ms)
+[sense] change detected: ssim=0.8512 contours=55
+[sense] rois: 3 regions (1417x365, 380x104, 195x124)
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+[sense] ocr: 854 chars, 122 words
+[sense] gate dropped: cooldown (1668ms < 5000ms)
+[sense] change detected: ssim=0.8974 contours=151
+[sense] rois: 1 regions (1389x433)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 946 chars, 141 words
+[sense] gate dropped: cooldown (4586ms < 5000ms)
+[sense] change detected: ssim=0.8975 contours=149
+[sense] rois: 1 regions (1389x433)
+[sense] ocr: 957 chars, 146 words
+[2026-06-09T18:45:59.534Z] [server] [sense] #24 (text): app=zed ssim=0.897
+[sense] -> text sent (app=zed, ssim=0.897, latency=15ms)
+[sense] change detected: ssim=0.8595 contours=40
+[sense] rois: 1 regions (1417x416)
+[sense] ocr: 343 chars, 58 words
+[sense] gate dropped: cooldown (705ms < 5000ms)
+[sense] change detected: ssim=0.7064 contours=126
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1605 chars, 224 words
+[sense] gate dropped: cooldown (2009ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4641 contours=73
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1996 chars, 263 words
+[2026-06-09T18:46:02.867Z] [server] [sense] #25 (context): app=Brave Browser ssim=0.000
+[sense] -> context sent (app=Brave Browser, ssim=0.464, latency=17ms)
+[2026-06-09T18:46:11.139Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[capture] stats: 306 ok, 0 fail (100% success, 306 total)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8852 contours=69
+[sense] rois: 3 regions (444x310, 515x219, 307x269)
+[sense] ocr: 374 chars, 39 words
+[2026-06-09T18:46:13.129Z] [server] [sense] #26 (text): app=Brave Browser ssim=0.885
+[sense] -> text sent (app=Brave Browser, ssim=0.885, latency=12ms)
+[2026-06-09T18:46:13.975Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:46:14.124Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:46:14.124Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] heartbeat: 314 frames, 26 sent, 30 gated, threshold=0.92
+[sense] change detected: ssim=0.8395 contours=31
+[sense] rois: 3 regions (820x409, 823x382, 352x124)
+[sense] ocr: 1038 chars, 106 words
+[2026-06-09T18:46:25.342Z] [server] [sense] #27 (text): app=Brave Browser ssim=0.839
+[sender] relay latency: p50=4ms p95=12ms (n=9)
+[sense] -> text sent (app=Brave Browser, ssim=0.839, latency=22ms)
+[sense] stats: captures=331ok/0fail events=27sent/0fail/30gated latency_p50=15ms p95=24ms detect=125.0ms ocr=449.3ms send=5.1ms
+[sense] change detected: ssim=0.8713 contours=71
+[sense] rois: 3 regions (823x380, 321x124, 446x84)
+[sense] ocr: 1028 chars, 118 words
+[sense] gate dropped: cooldown (1244ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4908 contours=29
+[sense] rois: 1 regions (1728x1095)
+[sense] ocr: 3250 chars, 503 words
+[2026-06-09T18:46:28.750Z] [server] [sense] #28 (context): app=Finder ssim=0.000
+[sense] -> context sent (app=Finder, ssim=0.491, latency=23ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4483 contours=63
+[sense] rois: 1 regions (1728x1095)
+[sense] ocr: 2531 chars, 309 words
+[sense] gate dropped: cooldown (1682ms < 2000ms)
+[sense] change detected: ssim=0.8453 contours=121
+[sense] rois: 3 regions (1331x246, 1072x291, 1388x72)
+[sense] ocr: 529 chars, 63 words
+[2026-06-09T18:46:31.444Z] [server] [sense] #29 (text): app=zed ssim=0.845
+[sense] -> text sent (app=zed, ssim=0.845, latency=19ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: no_change
+[sense] change detected: ssim=0.6421 contours=93
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 1926 chars, 320 words
+[2026-06-09T18:46:35.808Z] [server] [sense] #30 (text): app=Telegram ssim=0.642
+[sense] -> text sent (app=Telegram, ssim=0.642, latency=25ms)
+[sense] change detected: ssim=0.3120 contours=5
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1277 chars, 204 words
+[2026-06-09T18:46:38.206Z] [server] [sense] #31 (text): app=Telegram ssim=0.312
+[sense] -> text sent (app=Telegram, ssim=0.312, latency=30ms)
+[sense] change detected: ssim=0.5411 contours=18
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1544 chars, 257 words
+[2026-06-09T18:46:42.049Z] [server] [sense] #32 (text): app=Telegram ssim=0.541
+[sense] -> text sent (app=Telegram, ssim=0.541, latency=25ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.2701 contours=4
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 153 chars, 31 words
+[2026-06-09T18:46:42.927Z] [server] [sense] #33 (context): app=Brave Browser ssim=0.000
+[sense] -> context sent (app=Brave Browser, ssim=0.270, latency=16ms)
+[sense] change detected: ssim=0.3406 contours=36
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2613 chars, 387 words
+[sense] gate dropped: cooldown (1606ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4527 contours=37
+[sense] rois: 1 regions (1728x1048)
+[sense] ocr: 1958 chars, 266 words
+[2026-06-09T18:46:45.793Z] [server] [sense] #34 (text): app=zed ssim=0.453
+[sense] -> text sent (app=zed, ssim=0.453, latency=38ms)
+[sense] heartbeat: 355 frames, 34 sent, 34 gated, threshold=0.85
+[2026-06-09T18:46:52.040Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:46:52.303Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:46:54.318Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:46:54.318Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8607 contours=49
+[sense] rois: 2 regions (1417x272, 1360x208)
+[sense] ocr: 521 chars, 82 words
+[2026-06-09T18:46:55.767Z] [server] [sense] #35 (text): app=zed ssim=0.861
+[sense] -> text sent (app=zed, ssim=0.861, latency=18ms)
+[2026-06-09T18:47:08.842Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:47:09.133Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:47:09.228Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:47:09.228Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 404 ok, 0 fail (100% success, 404 total)
+[sense] heartbeat: 414 frames, 35 sent, 34 gated, threshold=0.92
+[sense] change detected: ssim=0.9053 contours=108
+[sense] rois: 3 regions (1382x125, 505x271, 603x127)
+[sense] ocr: 402 chars, 61 words
+[2026-06-09T18:47:40.794Z] [server] [sense] #36 (text): app=zed ssim=0.905
+[sender] relay latency: p50=5ms p95=10ms (n=9)
+[sense] -> text sent (app=zed, ssim=0.905, latency=14ms)
+[sense] stats: captures=461ok/0fail events=36sent/0fail/34gated latency_p50=23ms p95=38ms detect=123.4ms ocr=715.7ms send=5.5ms
+[sense] heartbeat: 473 frames, 36 sent, 34 gated, threshold=0.92
+[2026-06-09T18:47:46.884Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:47:46.953Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:47:46.985Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:47:46.985Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9162 contours=77
+[sense] rois: 3 regions (1015x146, 628x166, 1382x84)
+[sense] ocr: 357 chars, 54 words
+[2026-06-09T18:47:56.600Z] [server] [sense] #37 (text): app=zed ssim=0.916
+[sense] -> text sent (app=zed, ssim=0.916, latency=10ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T18:47:59.654Z] [server] [sense] #38 (context): app=Brave Browser ssim=0.000
+[sense] -> context sent (app=Brave Browser, ssim=n/a, latency=18ms)
+[sense] change detected: ssim=0.4462 contours=38
+[sense] rois: 1 regions (1728x1048)
+[sense] ocr: 2541 chars, 378 words
+[sense] gate dropped: cooldown (1415ms < 2000ms)
+[sense] change detected: ssim=0.4091 contours=29
+[sense] rois: 3 regions (1728x910, 970x110, 268x109)
+[sense] ocr: 1264 chars, 203 words
+[2026-06-09T18:48:04.370Z] [server] [sense] #39 (text): app=Brave Browser ssim=0.409
+[sense] -> text sent (app=Brave Browser, ssim=0.409, latency=27ms)
+[sense] change detected: ssim=0.5593 contours=84
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1467 chars, 240 words
+[2026-06-09T18:48:07.615Z] [server] [sense] #40 (text): app=Brave Browser ssim=0.559
+[sense] -> text sent (app=Brave Browser, ssim=0.559, latency=26ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6228 contours=195
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1856 chars, 266 words
+[sense] gate dropped: cooldown (1314ms < 2000ms)
+[capture] stats: 514 ok, 0 fail (100% success, 514 total)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6052 contours=227
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2105 chars, 326 words
+[2026-06-09T18:48:12.776Z] [server] [sense] #41 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=0.605, latency=19ms)
+[sense] change detected: ssim=0.5376 contours=92
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1743 chars, 293 words
+[sense] gate dropped: cooldown (1332ms < 2000ms)
+[sense] change detected: ssim=0.8128 contours=100
+[sense] rois: 3 regions (1183x755, 1394x129, 563x186)
+[sense] ocr: 575 chars, 96 words
+[2026-06-09T18:48:16.151Z] [server] [sense] #42 (text): app=Telegram ssim=0.813
+[sense] -> text sent (app=Telegram, ssim=0.813, latency=16ms)
+[sense] change detected: ssim=0.7190 contours=65
+[sense] rois: 2 regions (1112x969, 1017x118)
+[sense] ocr: 558 chars, 81 words
+[sense] gate dropped: cooldown (1444ms < 2000ms)
+[sense] heartbeat: 522 frames, 42 sent, 38 gated, threshold=0.85
+[sense] change detected: ssim=0.7309 contours=53
+[sense] rois: 3 regions (310x929, 269x418, 163x546)
+[sense] ocr: 143 chars, 20 words
+[2026-06-09T18:48:19.893Z] [server] [sense] #43 (text): app=Telegram ssim=0.731
+[sense] -> text sent (app=Telegram, ssim=0.731, latency=15ms)
+[sense] change detected: ssim=0.7658 contours=14
+[sense] rois: 2 regions (689x815, 404x815)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 342 chars, 46 words
+[sense] gate dropped: cooldown (870ms < 2000ms)
+[sense] change detected: ssim=0.7118 contours=22
+[sense] rois: 3 regions (530x814, 307x938, 280x815)
+[sense] ocr: 266 chars, 37 words
+[sense] gate dropped: cooldown (1760ms < 2000ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.7286 contours=68
+[sense] rois: 3 regions (1105x869, 1394x128, 144x385)
+[sense] ocr: 815 chars, 138 words
+[2026-06-09T18:48:22.617Z] [server] [sense] #44 (text): app=Telegram ssim=0.729
+[sense] -> text sent (app=Telegram, ssim=0.729, latency=16ms)
+[2026-06-09T18:48:28.840Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:48:29.082Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:48:29.136Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:48:29.137Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9117 contours=32
+[sense] rois: 3 regions (529x346, 349x523, 484x178)
+[sense] ocr: 331 chars, 60 words
+[2026-06-09T18:48:36.503Z] [server] [sense] #45 (text): app=Telegram ssim=0.912
+[sense] -> text sent (app=Telegram, ssim=0.912, latency=12ms)
+[sense] change detected: ssim=0.7622 contours=56
+[sense] rois: 1 regions (1728x1025)
+[sense] ocr: 371 chars, 61 words
+[sense] gate dropped: cooldown (3813ms < 5000ms)
+[2026-06-09T18:48:42.644Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:48:42.722Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:48:42.845Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:48:42.846Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T18:48:46.349Z] [server] [sense] #46 (context): app=Calendar ssim=0.000
+[sender] relay latency: p50=4ms p95=5ms (n=10)
+[sense] -> context sent (app=Calendar, ssim=n/a, latency=21ms)
+[sense] stats: captures=573ok/0fail events=46sent/0fail/41gated latency_p50=18ms p95=27ms detect=126.7ms ocr=520.6ms send=4.2ms
+[sense] heartbeat: 577 frames, 46 sent, 41 gated, threshold=0.85
+[sense] change detected: ssim=0.8327 contours=82
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 1247 chars, 263 words
+[2026-06-09T18:48:52.441Z] [server] [sense] #47 (text): app=Calendar ssim=0.833
+[sense] -> text sent (app=Calendar, ssim=0.833, latency=25ms)
+[sense] change detected: ssim=0.7060 contours=68
+[sense] rois: 1 regions (1728x1076)
+[sense] ocr: 1989 chars, 340 words
+[sense] gate dropped: cooldown (1348ms < 2000ms)
+[sense] change detected: ssim=0.6272 contours=37
+[sense] rois: 1 regions (1728x1100)
+[sense] ocr: 2471 chars, 412 words
+[2026-06-09T18:48:55.877Z] [server] [sense] #48 (text): app=Calendar ssim=0.627
+[sense] -> text sent (app=Calendar, ssim=0.627, latency=31ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5776 contours=63
+[sense] rois: 1 regions (1728x1044)
+[sense] ocr: 2560 chars, 322 words
+[2026-06-09T18:48:57.316Z] [server] [sense] #49 (context): app=zed ssim=0.000
+[sense] -> context sent (app=zed, ssim=0.578, latency=16ms)
+[sense] change detected: ssim=0.6185 contours=120
+[sense] rois: 1 regions (1728x1088)
+[sense] ocr: 2460 chars, 290 words
+[sense] gate dropped: cooldown (1359ms < 2000ms)
+[sense] change detected: ssim=0.8064 contours=89
+[sense] rois: 3 regions (1305x290, 1388x163, 1388x81)
+[sense] ocr: 454 chars, 58 words
+[2026-06-09T18:49:00.097Z] [server] [sense] #50 (text): app=zed ssim=0.806
+[sense] -> text sent (app=zed, ssim=0.806, latency=14ms)
+[sense] change detected: ssim=0.6905 contours=143
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1661 chars, 227 words
+[2026-06-09T18:49:02.830Z] [server] [sense] #51 (text): app=zed ssim=0.691
+[sense] -> text sent (app=zed, ssim=0.691, latency=28ms)
+[sense] change detected: ssim=0.8371 contours=112
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1731 chars, 249 words
+[sense] gate dropped: cooldown (1271ms < 2000ms)
+[sense] change detected: ssim=0.8036 contours=304
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1996 chars, 286 words
+[2026-06-09T18:49:05.460Z] [server] [sense] #52 (text): app=zed ssim=0.804
+[sense] -> text sent (app=zed, ssim=0.804, latency=36ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[2026-06-09T18:49:11.584Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:49:11.660Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:49:11.702Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:49:11.703Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 608 ok, 0 fail (100% success, 608 total)
+[sense] heartbeat: 622 frames, 52 sent, 44 gated, threshold=0.92
+[sense] heartbeat: 682 frames, 52 sent, 44 gated, threshold=0.92
+[capture] stats: 728 ok, 0 fail (100% success, 728 total)
+[sense] heartbeat: 742 frames, 52 sent, 44 gated, threshold=0.92
+[sense] heartbeat: 802 frames, 52 sent, 44 gated, threshold=0.92
+[capture] stats: 847 ok, 0 fail (100% success, 847 total)
+[sense] heartbeat: 862 frames, 52 sent, 44 gated, threshold=0.92
+[sense] heartbeat: 922 frames, 52 sent, 44 gated, threshold=0.92
+[capture] stats: 967 ok, 0 fail (100% success, 967 total)
+[sense] heartbeat: 982 frames, 52 sent, 44 gated, threshold=0.92
+[sense] heartbeat: 1042 frames, 52 sent, 44 gated, threshold=0.92
+[sense] change detected: ssim=0.8855 contours=106
+[sense] rois: 3 regions (1417x246, 1415x120, 974x122)
+[sense] ocr: 488 chars, 65 words
+[2026-06-09T18:53:09.439Z] [server] [sense] #53 (text): app=zed ssim=0.886
+[sender] relay latency: p50=5ms p95=9ms (n=7)
+[sense] -> text sent (app=zed, ssim=0.886, latency=16ms)
+[sense] stats: captures=1078ok/0fail events=53sent/0fail/44gated latency_p50=25ms p95=36ms detect=122.4ms ocr=829.0ms send=4.8ms
+[2026-06-09T18:53:15.500Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:15.754Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:15.801Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:15.801Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 1085 ok, 0 fail (100% success, 1085 total)
+[sense] change detected: ssim=0.8917 contours=85
+[sense] rois: 3 regions (1415x142, 1416x117, 1004x104)
+[sense] ocr: 406 chars, 51 words
+[2026-06-09T18:53:17.920Z] [server] [sense] #54 (text): app=zed ssim=0.892
+[sense] -> text sent (app=zed, ssim=0.892, latency=16ms)
+[sense] change detected: ssim=0.9128 contours=69
+[sense] rois: 3 regions (1416x165, 747x164, 669x163)
+[sense] ocr: 491 chars, 66 words
+[sense] gate dropped: cooldown (895ms < 5000ms)
+[sense] change detected: ssim=0.9037 contours=90
+[sense] rois: 3 regions (1025x291, 800x162, 371x100)
+[sense] ocr: 636 chars, 74 words
+[sense] gate dropped: cooldown (1827ms < 5000ms)
+[sense] change detected: ssim=0.9079 contours=83
+[sense] rois: 1 regions (1396x436)
+[sense] ocr: 1054 chars, 149 words
+[sense] gate dropped: cooldown (2707ms < 5000ms)
+[sense] change detected: ssim=0.9161 contours=81
+[sense] rois: 3 regions (838x141, 426x207, 399x162)
+[sense] ocr: 441 chars, 68 words
+[sense] gate dropped: cooldown (3618ms < 5000ms)
+[sense] change detected: ssim=0.9119 contours=112
+[sense] rois: 1 regions (900x436)
+[sense] ocr: 1156 chars, 177 words
+[sense] gate dropped: cooldown (4499ms < 5000ms)
+[sense] change detected: ssim=0.8905 contours=99
+[sense] rois: 3 regions (1415x350, 493x163, 530x123)
+[sense] ocr: 852 chars, 118 words
+[2026-06-09T18:53:23.430Z] [server] [sense] #55 (text): app=zed ssim=0.890
+[sense] -> text sent (app=zed, ssim=0.890, latency=13ms)
+[sense] change detected: ssim=0.9132 contours=51
+[sense] rois: 3 regions (687x332, 707x183, 669x99)
+[sense] ocr: 635 chars, 83 words
+[sense] gate dropped: cooldown (932ms < 5000ms)
+[sense] heartbeat: 1102 frames, 55 sent, 50 gated, threshold=0.92
+[sense] change detected: ssim=0.9158 contours=58
+[sense] rois: 3 regions (1415x290, 1416x117, 1416x83)
+[sense] ocr: 358 chars, 49 words
+[sense] gate dropped: cooldown (2315ms < 5000ms)
+[sense] change detected: ssim=0.9116 contours=85
+[sense] rois: 3 regions (1416x185, 1416x83, 410x104)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 439 chars, 60 words
+[sense] gate dropped: cooldown (3185ms < 5000ms)
+[sense] change detected: ssim=0.8854 contours=148
+[sense] rois: 3 regions (620x309, 1416x140, 525x100)
+[sense] ocr: 597 chars, 83 words
+[sense] gate dropped: cooldown (4231ms < 5000ms)
+[2026-06-09T18:53:29.495Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:29.557Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:29.586Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:29.586Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8809 contours=132
+[sense] rois: 3 regions (716x268, 733x166, 411x122)
+[sense] ocr: 661 chars, 95 words
+[2026-06-09T18:53:30.077Z] [server] [sense] #56 (text): app=zed ssim=0.881
+[sense] -> text sent (app=zed, ssim=0.881, latency=18ms)
+[sense] change detected: ssim=0.8899 contours=130
+[sense] rois: 3 regions (707x312, 460x144, 330x123)
+[sense] ocr: 743 chars, 110 words
+[sense] gate dropped: cooldown (936ms < 5000ms)
+[sense] change detected: ssim=0.8916 contours=144
+[sense] rois: 1 regions (1386x437)
+[sense] ocr: 1254 chars, 186 words
+[sense] gate dropped: cooldown (1843ms < 5000ms)
+[sense] change detected: ssim=0.8914 contours=145
+[sense] rois: 1 regions (1396x437)
+[sense] ocr: 1243 chars, 183 words
+[2026-06-09T18:53:35.352Z] [server] [sense] #57 (text): app=zed ssim=0.891
+[sense] -> text sent (app=zed, ssim=0.891, latency=18ms)
+[sense] change detected: ssim=0.8908 contours=150
+[sense] rois: 1 regions (1396x437)
+[sense] ocr: 1191 chars, 174 words
+[sense] gate dropped: cooldown (1401ms < 5000ms)
+[sense] change detected: ssim=0.8971 contours=97
+[sense] rois: 3 regions (781x249, 573x145, 657x125)
+[sense] ocr: 576 chars, 78 words
+[sense] gate dropped: cooldown (2318ms < 5000ms)
+[sense] change detected: ssim=0.8819 contours=132
+[sense] rois: 1 regions (1386x435)
+[sense] ocr: 1211 chars, 171 words
+[sense] gate dropped: cooldown (3223ms < 5000ms)
+[sense] change detected: ssim=0.8977 contours=113
+[sense] rois: 1 regions (1386x439)
+[sense] ocr: 1219 chars, 175 words
+[sense] gate dropped: cooldown (4173ms < 5000ms)
+[2026-06-09T18:53:41.428Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:41.509Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[sense] change detected: ssim=0.8941 contours=112
+[sense] rois: 1 regions (1386x439)
+[2026-06-09T18:53:41.549Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:53:41.549Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] ocr: 1321 chars, 191 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8903 contours=116
+[sense] rois: 1 regions (1386x435)
+[sense] ocr: 1277 chars, 182 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8887 contours=122
+[sense] rois: 1 regions (1386x415)
+[sense] ocr: 1221 chars, 181 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8865 contours=141
+[sense] rois: 3 regions (890x392, 804x165, 409x144)
+[sense] ocr: 969 chars, 139 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8765 contours=160
+[sense] rois: 3 regions (351x287, 585x143, 562x144)
+[sense] ocr: 268 chars, 43 words
+[2026-06-09T18:53:50.363Z] [server] [sense] #58 (text): app=zed ssim=0.876
+[sense] -> text sent (app=zed, ssim=0.876, latency=9ms)
+[sense] change detected: ssim=0.9062 contours=127
+[sense] rois: 1 regions (1386x437)
+[sense] ocr: 969 chars, 150 words
+[sense] gate dropped: cooldown (903ms < 5000ms)
+[sense] change detected: ssim=0.9061 contours=128
+[sense] rois: 1 regions (1396x437)
+[sense] ocr: 980 chars, 146 words
+[sense] gate dropped: cooldown (4309ms < 5000ms)
+[sense] change detected: ssim=0.8986 contours=131
+[sense] rois: 3 regions (611x310, 783x208, 405x167)
+[sense] ocr: 569 chars, 75 words
+[2026-06-09T18:53:55.671Z] [server] [sense] #59 (text): app=zed ssim=0.899
+[sense] -> text sent (app=zed, ssim=0.899, latency=10ms)
+[sense] change detected: ssim=0.8918 contours=111
+[sense] rois: 3 regions (851x352, 676x103, 330x123)
+[sense] ocr: 857 chars, 120 words
+[sense] gate dropped: cooldown (1120ms < 5000ms)
+[sense] change detected: ssim=0.8887 contours=122
+[sense] rois: 1 regions (1386x415)
+[sense] ocr: 1221 chars, 181 words
+[sense] gate dropped: cooldown (2051ms < 5000ms)
+[sense] heartbeat: 1150 frames, 59 sent, 67 gated, threshold=0.92
+[sense] change detected: ssim=0.8935 contours=95
+[sense] rois: 1 regions (1406x437)
+[sense] ocr: 1171 chars, 160 words
+[sense] gate dropped: cooldown (4956ms < 5000ms)
+[sense] change detected: ssim=0.8997 contours=77
+[sense] rois: 1 regions (1416x437)
+[sense] ocr: 934 chars, 139 words
+[2026-06-09T18:54:01.421Z] [server] [sense] #60 (text): app=zed ssim=0.900
+[sense] -> text sent (app=zed, ssim=0.900, latency=14ms)
+[2026-06-09T18:54:07.487Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:07.578Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:07.616Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:07.616Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8972 contours=65
+[sense] rois: 1 regions (1416x443)
+[sense] ocr: 928 chars, 137 words
+[2026-06-09T18:54:12.665Z] [server] [sense] #61 (text): app=zed ssim=0.897
+[sender] relay latency: p50=4ms p95=5ms (n=8)
+[sense] -> text sent (app=zed, ssim=0.897, latency=15ms)
+[sense] stats: captures=1176ok/0fail events=61sent/0fail/68gated latency_p50=15ms p95=18ms detect=128.9ms ocr=456.4ms send=4.2ms
+[2026-06-09T18:54:18.741Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:18.803Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:18.841Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:18.841Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 1177 ok, 0 fail (100% success, 1177 total)
+[sense] heartbeat: 1207 frames, 61 sent, 68 gated, threshold=0.92
+[sense] change detected: ssim=0.9196 contours=74
+[sense] rois: 1 regions (1414x312)
+[sense] ocr: 772 chars, 120 words
+[2026-06-09T18:54:48.628Z] [server] [sense] #62 (text): app=zed ssim=0.920
+[sense] -> text sent (app=zed, ssim=0.920, latency=14ms)
+[2026-06-09T18:54:54.696Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:54.783Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:54.818Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:54:54.819Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9187 contours=94
+[sense] rois: 3 regions (1395x211, 448x103, 269x124)
+[sense] ocr: 443 chars, 78 words
+[2026-06-09T18:54:58.003Z] [server] [sense] #63 (text): app=zed ssim=0.919
+[sense] -> text sent (app=zed, ssim=0.919, latency=14ms)
+[sense] heartbeat: 1265 frames, 63 sent, 68 gated, threshold=0.92
+[sense] change detected: ssim=0.8874 contours=113
+[sense] rois: 3 regions (1416x158, 1024x169, 235x125)
+[sense] ocr: 573 chars, 80 words
+[sense] gate dropped: cooldown (3372ms < 5000ms)
+[2026-06-09T18:55:08.679Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:55:08.780Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:55:08.818Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:55:08.818Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 1294 ok, 0 fail (100% success, 1294 total)
+[sense] heartbeat: 1324 frames, 63 sent, 69 gated, threshold=0.92
+[sense] heartbeat: 1384 frames, 63 sent, 69 gated, threshold=0.92
+[capture] stats: 1413 ok, 0 fail (100% success, 1413 total)
+[sense] heartbeat: 1444 frames, 63 sent, 69 gated, threshold=0.92
+[sense] heartbeat: 1504 frames, 63 sent, 69 gated, threshold=0.92
+[capture] stats: 1532 ok, 0 fail (100% success, 1532 total)
+[sense] heartbeat: 1564 frames, 63 sent, 69 gated, threshold=0.92
+[sense] change detected: ssim=0.9051 contours=75
+[sense] rois: 3 regions (1416x289, 453x140, 466x103)
+[sense] ocr: 968 chars, 124 words
+[2026-06-09T18:57:38.996Z] [server] [sense] #64 (text): app=zed ssim=0.905
+[sender] relay latency: p50=3ms p95=4ms (n=3)
+[sense] -> text sent (app=zed, ssim=0.905, latency=13ms)
+[sense] stats: captures=1581ok/0fail events=64sent/0fail/69gated latency_p50=14ms p95=14ms detect=111.8ms ocr=542.4ms send=3.5ms
+[sense] change detected: ssim=0.9021 contours=76
+[sense] rois: 1 regions (1416x437)
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+[sense] ocr: 705 chars, 113 words
+[sense] gate dropped: cooldown (782ms < 5000ms)
+[sense] change detected: ssim=0.9064 contours=111
+[sense] rois: 3 regions (1415x228, 1416x96, 266x102)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 298 chars, 40 words
+[sense] gate dropped: cooldown (1489ms < 5000ms)
+[sense] change detected: ssim=0.8926 contours=146
+[sense] rois: 3 regions (1415x144, 1416x79, 784x99)
+[sense] ocr: 615 chars, 104 words
+[sense] gate dropped: cooldown (2513ms < 5000ms)
+[sense] change detected: ssim=0.8781 contours=196
+[sense] rois: 2 regions (1388x435, 266x82)
+[sense] ocr: 1234 chars, 207 words
+[sense] gate dropped: cooldown (3957ms < 5000ms)
+[2026-06-09T18:57:45.639Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:57:45.737Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:57:45.776Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:57:45.776Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8779 contours=197
+[sense] rois: 2 regions (1396x435, 266x82)
+[sense] ocr: 1215 chars, 207 words
+[2026-06-09T18:57:46.399Z] [server] [sense] #65 (text): app=zed ssim=0.878
+[sense] -> text sent (app=zed, ssim=0.878, latency=20ms)
+[sense] change detected: ssim=0.8821 contours=180
+[sense] rois: 1 regions (1396x436)
+[sense] ocr: 1087 chars, 185 words
+[sense] gate dropped: cooldown (904ms < 5000ms)
+[sense] change detected: ssim=0.8873 contours=159
+[sense] rois: 1 regions (1388x430)
+[sense] ocr: 1036 chars, 176 words
+[sense] gate dropped: cooldown (2293ms < 5000ms)
+[sense] change detected: ssim=0.8948 contours=126
+[sense] rois: 3 regions (832x269, 777x127, 399x99)
+[sense] ocr: 292 chars, 48 words
+[sense] gate dropped: cooldown (3217ms < 5000ms)
+[sense] change detected: ssim=0.9074 contours=95
+[sense] rois: 3 regions (771x165, 832x123, 823x121)
+[sense] ocr: 84 chars, 12 words
+[sense] gate dropped: cooldown (4989ms < 5000ms)
+[sense] change detected: ssim=0.9173 contours=58
+[sense] rois: 3 regions (823x226, 832x148, 771x123)
+[sense] ocr: 307 chars, 57 words
+[2026-06-09T18:57:53.185Z] [server] [sense] #66 (text): app=zed ssim=0.917
+[sense] -> text sent (app=zed, ssim=0.917, latency=14ms)
+[sense] change detected: ssim=0.9106 contours=123
+[sense] rois: 3 regions (771x207, 399x186, 452x121)
+[sense] ocr: 195 chars, 41 words
+[sense] gate dropped: cooldown (1718ms < 5000ms)
+[sense] change detected: ssim=0.9106 contours=123
+[sense] rois: 3 regions (771x207, 399x186, 452x121)
+[sense] ocr: 182 chars, 38 words
+[sense] gate dropped: cooldown (2944ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6319 contours=238
+[sense] rois: 1 regions (1728x1117)
+[2026-06-09T18:57:59.283Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:57:59.376Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:57:59.409Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:57:59.409Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] ocr: 1605 chars, 257 words
+[2026-06-09T18:57:59.573Z] [server] [sense] #67 (context): app=Brave Browser ssim=0.000
+[sense] -> context sent (app=Brave Browser, ssim=0.632, latency=21ms)
+[sense] change detected: ssim=0.4992 contours=85
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1581 chars, 264 words
+[sense] gate dropped: cooldown (1273ms < 2000ms)
+[sense] change detected: ssim=0.6978 contours=62
+[sense] rois: 2 regions (1728x907, 212x107)
+[sense] ocr: 681 chars, 120 words
+[2026-06-09T18:58:01.732Z] [server] [sense] #68 (text): app=Brave Browser ssim=0.698
+[sense] -> text sent (app=Brave Browser, ssim=0.698, latency=18ms)
+[sense] heartbeat: 1615 frames, 68 sent, 80 gated, threshold=0.85
+[sense] change detected: ssim=0.8393 contours=33
+[sense] rois: 3 regions (1469x586, 765x130, 623x130)
+[sense] ocr: 436 chars, 69 words
+[sense] gate dropped: cooldown (1361ms < 2000ms)
+[sense] change detected: ssim=0.8478 contours=39
+[sense] rois: 3 regions (1486x590, 765x130, 623x130)
+[sense] ocr: 261 chars, 49 words
+[2026-06-09T18:58:06.435Z] [server] [sense] #69 (text): app=Brave Browser ssim=0.848
+[sense] -> text sent (app=Brave Browser, ssim=0.848, latency=14ms)
+[sense] change detected: ssim=0.8206 contours=27
+[sense] rois: 2 regions (1527x803, 897x449)
+[sense] ocr: 638 chars, 104 words
+[sense] gate dropped: cooldown (971ms < 2000ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9169 contours=59
+[sense] rois: 3 regions (1718x512, 1485x90, 148x184)
+[sense] ocr: 204 chars, 22 words
+[2026-06-09T18:58:09.063Z] [server] [sense] #70 (text): app=Brave Browser ssim=0.917
+[sense] -> text sent (app=Brave Browser, ssim=0.917, latency=12ms)
+[sense] change detected: ssim=0.8855 contours=27
+[sense] rois: 3 regions (1331x182, 1336x174, 1485x102)
+[sense] ocr: 28 chars, 6 words
+[sense] gate dropped: cooldown (697ms < 5000ms)
+[sense] change detected: ssim=0.8609 contours=25
+[sense] rois: 3 regions (1331x210, 1359x179, 1485x77)
+[sense] ocr: 87 chars, 14 words
+[sense] gate dropped: cooldown (1352ms < 5000ms)
+[sense] change detected: ssim=0.7873 contours=35
+[sense] rois: 1 regions (1527x894)
+[sense] ocr: 298 chars, 56 words
+[sense] gate dropped: cooldown (2620ms < 5000ms)
+[sense] change detected: ssim=0.9045 contours=30
+[sense] rois: 3 regions (1359x174, 1331x174, 1331x79)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 26 chars, 7 words
+[sense] gate dropped: cooldown (3336ms < 5000ms)
+[sense] change detected: ssim=0.7843 contours=33
+[sense] rois: 3 regions (1527x722, 1485x188, 624x117)
+[sense] ocr: 299 chars, 47 words
+[sense] gate dropped: cooldown (4272ms < 5000ms)
+[sense] change detected: ssim=0.5078 contours=10
+[sense] rois: 2 regions (1728x908, 200x72)
+[sense] ocr: 886 chars, 145 words
+[2026-06-09T18:58:14.272Z] [server] [sense] #71 (text): app=Brave Browser ssim=0.508
+[sense] -> text sent (app=Brave Browser, ssim=0.508, latency=19ms)
+[capture] stats: 1633 ok, 0 fail (100% success, 1633 total)
+[sense] change detected: ssim=0.7831 contours=91
+[sense] rois: 3 regions (1578x892, 1302x649, 685x109)
+[sense] ocr: 366 chars, 58 words
+[sense] gate dropped: cooldown (1011ms < 5000ms)
+[sense] change detected: ssim=0.5170 contours=7
+[sense] rois: 2 regions (1728x908, 660x109)
+[sense] ocr: 614 chars, 96 words
+[sense] gate dropped: cooldown (1950ms < 5000ms)
+[sense] change detected: ssim=0.5555 contours=10
+[sense] rois: 3 regions (1728x909, 368x109, 67x66)
+[sense] ocr: 2294 chars, 327 words
+[sense] gate dropped: cooldown (3465ms < 5000ms)
+[sense] change detected: ssim=0.9134 contours=79
+[sense] rois: 3 regions (823x155, 457x219, 303x124)
+[sense] ocr: 504 chars, 64 words
+[sense] gate dropped: cooldown (4248ms < 5000ms)
+[sense] change detected: ssim=0.8474 contours=82
+[sense] rois: 3 regions (823x334, 457x219, 275x291)
+[sense] ocr: 671 chars, 67 words
+[2026-06-09T18:58:19.899Z] [server] [sense] #72 (text): app=Brave Browser ssim=0.847
+[sense] -> text sent (app=Brave Browser, ssim=0.847, latency=10ms)
+[sense] change detected: ssim=0.8455 contours=77
+[sense] rois: 3 regions (823x375, 457x219, 275x291)
+[sense] ocr: 1039 chars, 122 words
+[sense] gate dropped: cooldown (1154ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4259 contours=44
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1658 chars, 251 words
+[2026-06-09T18:58:24.463Z] [server] [sense] #73 (context): app=zed ssim=0.000
+[sense] -> context sent (app=zed, ssim=0.426, latency=16ms)
+[sense] change detected: ssim=0.7816 contours=207
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1879 chars, 281 words
+[sense] gate dropped: cooldown (1434ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.4448 contours=49
+[sense] rois: 1 regions (1728x1040)
+[sense] ocr: 2746 chars, 391 words
+[2026-06-09T18:58:27.422Z] [server] [sense] #74 (text): app=Brave Browser ssim=0.445
+[sense] -> text sent (app=Brave Browser, ssim=0.445, latency=39ms)
+[sense] change detected: ssim=0.4767 contours=8
+[sense] rois: 2 regions (1728x910, 622x109)
+[sense] ocr: 679 chars, 110 words
+[sense] gate dropped: cooldown (993ms < 2000ms)
+[sense] change detected: ssim=0.8057 contours=40
+[sense] rois: 3 regions (1527x589, 1485x289, 624x117)
+[sense] ocr: 341 chars, 55 words
+[2026-06-09T18:58:30.270Z] [server] [sense] #75 (text): app=Brave Browser ssim=0.806
+[sense] -> text sent (app=Brave Browser, ssim=0.806, latency=16ms)
+[sense] change detected: ssim=0.8427 contours=25
+[sense] rois: 3 regions (1331x206, 1331x206, 1485x166)
+[sense] ocr: 104 chars, 15 words
+[sense] gate dropped: cooldown (885ms < 2000ms)
+[sense] change detected: ssim=0.7949 contours=30
+[sense] rois: 3 regions (1527x462, 1485x456, 624x117)
+[sense] ocr: 279 chars, 42 words
+[sense] gate dropped: cooldown (1765ms < 2000ms)
+[sense] heartbeat: 1654 frames, 75 sent, 96 gated, threshold=0.85
+[sense] change detected: ssim=0.7829 contours=34
+[sense] rois: 3 regions (1527x464, 1485x454, 624x117)
+[sense] ocr: 226 chars, 37 words
+[2026-06-09T18:58:33.901Z] [server] [sense] #76 (text): app=Brave Browser ssim=0.783
+[sense] -> text sent (app=Brave Browser, ssim=0.783, latency=14ms)
+[sense] change detected: ssim=0.8323 contours=19
+[sense] rois: 3 regions (1331x218, 1332x216, 1331x98)
+[sense] ocr: 15 chars, 2 words
+[sense] gate dropped: cooldown (697ms < 2000ms)
+[sense] change detected: ssim=0.8281 contours=24
+[sense] rois: 3 regions (1332x206, 1332x205, 1485x175)
+[sense] ocr: 117 chars, 16 words
+[sense] gate dropped: cooldown (1449ms < 2000ms)
+[sense] change detected: ssim=0.8440 contours=22
+[sense] rois: 3 regions (1485x283, 1485x261, 1485x139)
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+[sense] ocr: 213 chars, 26 words
+[2026-06-09T18:58:36.191Z] [server] [sense] #77 (text): app=Brave Browser ssim=0.844
+[sense] -> text sent (app=Brave Browser, ssim=0.844, latency=12ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8061 contours=22
+[sense] rois: 3 regions (1485x305, 1485x299, 1485x164)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 167 chars, 23 words
+[sense] gate dropped: cooldown (844ms < 2000ms)
+[sense] change detected: ssim=0.8152 contours=32
+[sense] rois: 2 regions (1485x732, 1359x188)
+[sense] ocr: 190 chars, 33 words
+[sense] gate dropped: cooldown (1543ms < 5000ms)
+[sense] change detected: ssim=0.7859 contours=35
+[sense] rois: 3 regions (1485x306, 1527x240, 1359x188)
+[sense] ocr: 136 chars, 18 words
+[sense] gate dropped: cooldown (2316ms < 5000ms)
+[sense] change detected: ssim=0.8923 contours=51
+[sense] rois: 3 regions (1331x174, 1331x167, 1483x71)
+[sense] ocr: 89 chars, 13 words
+[sense] gate dropped: cooldown (2956ms < 5000ms)
+[2026-06-09T18:58:42.294Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:58:42.389Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:58:42.429Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:58:42.429Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9174 contours=16
+[sense] rois: 1 regions (1455x524)
+[sense] ocr: 103 chars, 24 words
+[2026-06-09T18:58:43.834Z] [server] [sense] #78 (text): app=Brave Browser ssim=0.917
+[sender] relay latency: p50=4ms p95=10ms (n=14)
+[sense] -> text sent (app=Brave Browser, ssim=0.917, latency=18ms)
+[sense] stats: captures=1672ok/0fail events=78sent/0fail/102gated latency_p50=16ms p95=39ms detect=145.5ms ocr=411.6ms send=4.6ms
+[sense] change detected: ssim=0.9190 contours=19
+[sense] rois: 1 regions (1455x524)
+[sense] ocr: 95 chars, 22 words
+[sense] gate dropped: cooldown (1674ms < 5000ms)
+[sense] change detected: ssim=0.9140 contours=44
+[sense] rois: 3 regions (1532x342, 303x133, 312x100)
+[sense] ocr: 137 chars, 26 words
+[sense] gate dropped: cooldown (4392ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5928 contours=124
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 2618 chars, 344 words
+[2026-06-09T18:58:49.610Z] [server] [sense] #79 (context): app=zed ssim=0.000
+[sense] -> context sent (app=zed, ssim=0.593, latency=19ms)
+[sense] change detected: ssim=0.8119 contours=177
+[sense] rois: 3 regions (1306x398, 1388x142, 831x187)
+[sense] ocr: 1110 chars, 196 words
+[sense] gate dropped: cooldown (1185ms < 2000ms)
+[sense] change detected: ssim=0.6574 contours=319
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1755 chars, 260 words
+[2026-06-09T18:58:55.725Z] [server] [sense] #80 (text): app=zed ssim=0.657
+[sense] -> text sent (app=zed, ssim=0.657, latency=30ms)
+[2026-06-09T18:58:55.772Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:58:55.845Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:58:55.880Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:58:55.880Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.7737 contours=218
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2027 chars, 285 words
+[sense] gate dropped: cooldown (1341ms < 2000ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9018 contours=93
+[sense] rois: 3 regions (1415x203, 353x270, 398x165)
+[sense] ocr: 552 chars, 71 words
+[2026-06-09T18:58:59.439Z] [server] [sense] #81 (text): app=zed ssim=0.902
+[sense] -> text sent (app=zed, ssim=0.902, latency=9ms)
+[sense] change detected: ssim=0.9012 contours=72
+[sense] rois: 3 regions (1415x228, 747x223, 495x165)
+[sense] ocr: 779 chars, 101 words
+[sense] gate dropped: cooldown (1067ms < 5000ms)
+[sense] heartbeat: 1701 frames, 81 sent, 107 gated, threshold=0.92
+[sense] change detected: ssim=0.9006 contours=93
+[sense] rois: 1 regions (1377x437)
+[sense] ocr: 1007 chars, 142 words
+[2026-06-09T18:59:04.856Z] [server] [sense] #82 (text): app=zed ssim=0.901
+[sense] -> text sent (app=zed, ssim=0.901, latency=14ms)
+[sense] change detected: ssim=0.9058 contours=80
+[sense] rois: 3 regions (580x225, 554x183, 540x163)
+[sense] ocr: 537 chars, 64 words
+[sense] gate dropped: cooldown (1450ms < 5000ms)
+[sense] change detected: ssim=0.9031 contours=79
+[sense] rois: 1 regions (1370x437)
+[sense] ocr: 1169 chars, 149 words
+[sense] gate dropped: cooldown (3821ms < 5000ms)
+[sense] change detected: ssim=0.8965 contours=86
+[sense] rois: 1 regions (1396x437)
+[sense] ocr: 1093 chars, 141 words
+[2026-06-09T18:59:10.020Z] [server] [sense] #83 (text): app=zed ssim=0.896
+[sense] -> text sent (app=zed, ssim=0.896, latency=14ms)
+[sense] change detected: ssim=0.8939 contours=84
+[sense] rois: 1 regions (1396x436)
+[sense] ocr: 1243 chars, 166 words
+[sense] gate dropped: cooldown (928ms < 5000ms)
+[sense] change detected: ssim=0.8982 contours=92
+[sense] rois: 1 regions (1396x436)
+[sense] ocr: 1092 chars, 153 words
+[sense] gate dropped: cooldown (2295ms < 5000ms)
+[sense] change detected: ssim=0.9058 contours=105
+[sense] rois: 1 regions (1396x436)
+[sense] ocr: 1005 chars, 149 words
+[sense] gate dropped: cooldown (3159ms < 5000ms)
+[2026-06-09T18:59:16.123Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[capture] stats: 1719 ok, 0 fail (100% success, 1719 total)
+[sense] change detected: ssim=0.9102 contours=106
+[2026-06-09T18:59:16.178Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[sense] rois: 1 regions (1396x436)
+[2026-06-09T18:59:16.256Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:59:16.256Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] ocr: 945 chars, 140 words
+[2026-06-09T18:59:16.559Z] [server] [sense] #84 (text): app=zed ssim=0.910
+[sense] -> text sent (app=zed, ssim=0.910, latency=14ms)
+[sense] change detected: ssim=0.9111 contours=121
+[sense] rois: 3 regions (448x229, 437x125, 427x103)
+[sense] ocr: 325 chars, 47 words
+[sense] gate dropped: cooldown (788ms < 5000ms)
+[sense] change detected: ssim=0.9127 contours=81
+[sense] rois: 3 regions (1416x249, 303x123, 247x102)
+[sense] ocr: 682 chars, 98 words
+[sense] gate dropped: cooldown (2118ms < 5000ms)
+[sense] change detected: ssim=0.8982 contours=72
+[sense] rois: 1 regions (1416x416)
+[sense] ocr: 1004 chars, 154 words
+[sense] gate dropped: cooldown (2976ms < 5000ms)
+[sense] change detected: ssim=0.8897 contours=105
+[sense] rois: 3 regions (1416x184, 963x180, 369x162)
+[sense] ocr: 619 chars, 84 words
+[sense] gate dropped: cooldown (3978ms < 5000ms)
+[sense] change detected: ssim=0.9060 contours=110
+[sense] rois: 3 regions (655x249, 356x269, 572x123)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 463 chars, 67 words
+[sense] gate dropped: cooldown (4900ms < 5000ms)
+[sense] change detected: ssim=0.9037 contours=95
+[sense] rois: 1 regions (1415x437)
+[sense] ocr: 982 chars, 139 words
+[2026-06-09T18:59:22.325Z] [server] [sense] #85 (text): app=zed ssim=0.904
+[sense] -> text sent (app=zed, ssim=0.904, latency=16ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T18:59:23.353Z] [server] [sense] #86 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=n/a, latency=18ms)
+[sense] change detected: ssim=0.6554 contours=73
+[sense] rois: 1 regions (1728x1080)
+[sense] ocr: 2070 chars, 351 words
+[sense] gate dropped: cooldown (1333ms < 2000ms)
+[sense] change detected: ssim=0.5960 contours=132
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2143 chars, 362 words
+[2026-06-09T18:59:28.622Z] [server] [sense] #87 (text): app=Telegram ssim=0.596
+[sense] -> text sent (app=Telegram, ssim=0.596, latency=31ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6093 contours=226
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1786 chars, 240 words
+[sense] gate dropped: cooldown (1353ms < 2000ms)
+[sense] change detected: ssim=0.8038 contours=75
+[sense] rois: 2 regions (1416x555, 643x131)
+[sense] ocr: 691 chars, 118 words
+[2026-06-09T18:59:30.803Z] [server] [sense] #88 (text): app=zed ssim=0.804
+[sense] -> text sent (app=zed, ssim=0.804, latency=17ms)
+[sense] heartbeat: 1745 frames, 88 sent, 119 gated, threshold=0.85
+[sense] change detected: ssim=0.8093 contours=72
+[sense] rois: 3 regions (1369x248, 1416x146, 1117x134)
+[sense] ocr: 627 chars, 84 words
+[2026-06-09T18:59:36.254Z] [server] [sense] #89 (text): app=zed ssim=0.809
+[sense] -> text sent (app=zed, ssim=0.809, latency=13ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8730 contours=66
+[sense] rois: 3 regions (1349x211, 1416x146, 1416x79)
+[sense] ocr: 388 chars, 59 words
+[2026-06-09T18:59:39.632Z] [server] [sense] #90 (text): app=zed ssim=0.873
+[sense] -> text sent (app=zed, ssim=0.873, latency=12ms)
+[2026-06-09T18:59:45.756Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:59:46.081Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:59:46.118Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:59:46.118Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8870 contours=28
+[sense] rois: 3 regions (1351x186, 1641x118, 744x133)
+[sense] ocr: 208 chars, 29 words
+[2026-06-09T18:59:47.945Z] [server] [sense] #91 (text): app=zed ssim=0.887
+[sender] relay latency: p50=4ms p95=5ms (n=13)
+[sense] -> text sent (app=zed, ssim=0.887, latency=12ms)
+[sense] stats: captures=1772ok/0fail events=91sent/0fail/119gated latency_p50=14ms p95=31ms detect=131.0ms ocr=474.2ms send=4.0ms
+[sense] change detected: ssim=0.9128 contours=21
+[sense] rois: 1 regions (1351x268)
+[sense] ocr: 309 chars, 46 words
+[sense] gate dropped: cooldown (3206ms < 5000ms)
+[sense] change detected: ssim=0.8238 contours=14
+[sense] rois: 1 regions (1416x437)
+[sense] ocr: 582 chars, 106 words
+[sense] gate dropped: cooldown (4003ms < 5000ms)
+[sense] change detected: ssim=0.8846 contours=93
+[sense] rois: 3 regions (888x434, 1641x118, 64x223)
+[sense] ocr: 614 chars, 88 words
+[2026-06-09T18:59:53.264Z] [server] [sense] #92 (text): app=zed ssim=0.885
+[sense] -> text sent (app=zed, ssim=0.885, latency=14ms)
+[sense] change detected: ssim=0.9040 contours=83
+[sense] rois: 1 regions (1305x439)
+[sense] ocr: 790 chars, 127 words
+[sense] gate dropped: cooldown (3319ms < 5000ms)
+[sense] change detected: ssim=0.9054 contours=72
+[sense] rois: 3 regions (908x361, 1305x146, 64x161)
+[sense] ocr: 354 chars, 51 words
+[sense] gate dropped: cooldown (4171ms < 5000ms)
+[sense] change detected: ssim=0.7968 contours=10
+[sense] rois: 1 regions (1416x445)
+[sense] ocr: 552 chars, 82 words
+[sense] gate dropped: cooldown (4940ms < 5000ms)
+[sense] change detected: ssim=0.4260 contours=74
+[sense] rois: 1 regions (1728x1117)
+[2026-06-09T18:59:59.339Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[sense] ocr: 1341 chars, 179 words
+[2026-06-09T18:59:59.452Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:59:59.454Z] [server] [sense] #93 (text): app=zed ssim=0.426
+[sense] -> text sent (app=zed, ssim=0.426, latency=38ms)
+[2026-06-09T18:59:59.498Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T18:59:59.498Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.6812 contours=42
+[sense] rois: 1 regions (1728x1048)
+[sense] ocr: 1166 chars, 183 words
+[sense] gate dropped: cooldown (1321ms < 5000ms)
+[sense] change detected: ssim=0.4325 contours=67
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2352 chars, 316 words
+[sense] gate dropped: cooldown (2680ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T19:00:03.103Z] [server] [sense] #94 (context): app=System Settings ssim=0.000
+[sense] -> context sent (app=System Settings, ssim=n/a, latency=19ms)
+[sense] heartbeat: 1795 frames, 94 sent, 126 gated, threshold=0.85
+[sense] change detected: ssim=0.6281 contours=99
+[sense] rois: 1 regions (1728x1042)
+[sense] ocr: 1660 chars, 266 words
+[sense] gate dropped: cooldown (1775ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.8363 contours=12
+[sense] rois: 1 regions (770x1024)
+[sense] ocr: 1178 chars, 199 words
+[2026-06-09T19:00:12.433Z] [server] [sense] #95 (text): app=zed ssim=0.836
+[sense] -> text sent (app=zed, ssim=0.836, latency=19ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: cooldown (474ms < 2000ms)
+[2026-06-09T19:00:18.551Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:00:18.701Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:00:18.748Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:00:18.748Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 1815 ok, 0 fail (100% success, 1815 total)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T19:00:22.540Z] [server] [sense] #96 (context): app=zed ssim=0.000
+[sense] -> context sent (app=zed, ssim=n/a, latency=25ms)
+[sense] change detected: ssim=0.5572 contours=176
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2855 chars, 438 words
+[sense] gate dropped: cooldown (1950ms < 2000ms)
+[sense] change detected: ssim=0.7713 contours=271
+[sense] rois: 3 regions (939x453, 961x130, 685x124)
+[sense] ocr: 1042 chars, 151 words
+[2026-06-09T19:00:25.918Z] [server] [sense] #97 (text): app=zed ssim=0.771
+[sense] -> text sent (app=zed, ssim=0.771, latency=16ms)
+[2026-06-09T19:00:32.031Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:00:32.101Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:00:32.140Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:00:32.140Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8797 contours=199
+[sense] rois: 2 regions (812x83, 387x92)
+[sense] ocr: 34 chars, 7 words
+[2026-06-09T19:00:32.982Z] [server] [sense] #98 (text): app=zed ssim=0.880
+[sense] -> text sent (app=zed, ssim=0.880, latency=10ms)
+[sense] heartbeat: 1849 frames, 98 sent, 129 gated, threshold=0.92
+[sense] heartbeat: 1909 frames, 98 sent, 129 gated, threshold=0.92
+[sense] change detected: ssim=0.9175 contours=113
+[sense] rois: 3 regions (1388x90, 1389x68, 323x142)
+[sense] ocr: 140 chars, 20 words
+[2026-06-09T19:01:07.751Z] [server] [sense] #99 (text): app=zed ssim=0.918
+[sender] relay latency: p50=5ms p95=20ms (n=8)
+[sense] -> text sent (app=zed, ssim=0.918, latency=15ms)
+[sense] stats: captures=1915ok/0fail events=99sent/0fail/129gated latency_p50=19ms p95=38ms detect=121.5ms ocr=443.7ms send=6.8ms
+[sense] change detected: ssim=0.8539 contours=104
+[sense] rois: 3 regions (1389x640, 551x123, 362x102)
+[sense] ocr: 773 chars, 114 words
+[sense] gate dropped: cooldown (1437ms < 5000ms)
+[sense] change detected: ssim=0.8001 contours=156
+[sense] rois: 3 regions (1389x602, 1389x109, 707x81)
+[sense] ocr: 1667 chars, 234 words
+[sense] gate dropped: cooldown (2673ms < 5000ms)
+[sense] change detected: ssim=0.7962 contours=160
+[sense] rois: 3 regions (1389x602, 1389x109, 707x81)
+[sense] ocr: 793 chars, 117 words
+[sense] gate dropped: cooldown (3655ms < 5000ms)
+[sense] change detected: ssim=0.7963 contours=161
+[sense] rois: 3 regions (1389x602, 1389x109, 707x81)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 1667 chars, 234 words
+[2026-06-09T19:01:13.155Z] [server] [sense] #100 (text): app=zed ssim=0.796
+[sense] -> text sent (app=zed, ssim=0.796, latency=20ms)
+[sense] change detected: ssim=0.7842 contours=146
+[sense] rois: 3 regions (1389x602, 1389x109, 707x81)
+[sense] ocr: 823 chars, 123 words
+[sense] gate dropped: cooldown (1015ms < 5000ms)
+[capture] stats: 1924 ok, 0 fail (100% success, 1924 total)
+[sense] change detected: ssim=0.8051 contours=103
+[sense] rois: 3 regions (1389x457, 1353x108, 341x143)
+[sense] ocr: 1147 chars, 158 words
+[sense] gate dropped: cooldown (3007ms < 5000ms)
+[2026-06-09T19:01:19.294Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:19.407Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:19.444Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:19.444Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.7854 contours=116
+[sense] rois: 3 regions (1389x376, 1389x352, 524x103)
+[sense] ocr: 1025 chars, 139 words
+[2026-06-09T19:01:20.223Z] [server] [sense] #101 (text): app=zed ssim=0.785
+[sense] -> text sent (app=zed, ssim=0.785, latency=16ms)
+[sense] change detected: ssim=0.7858 contours=121
+[sense] rois: 3 regions (1389x376, 1389x352, 524x103)
+[sense] ocr: 834 chars, 124 words
+[sense] gate dropped: cooldown (1155ms < 5000ms)
+[sense] change detected: ssim=0.6586 contours=168
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1573 chars, 210 words
+[sense] gate dropped: cooldown (2375ms < 5000ms)
+[sense] change detected: ssim=0.7724 contours=193
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1950 chars, 261 words
+[sense] gate dropped: cooldown (3666ms < 5000ms)
+[sense] change detected: ssim=0.9113 contours=130
+[sense] rois: 3 regions (778x204, 1416x122, 380x98)
+[sense] ocr: 366 chars, 49 words
+[sense] gate dropped: cooldown (4507ms < 5000ms)
+[sense] change detected: ssim=0.8348 contours=106
+[sense] rois: 3 regions (1333x294, 638x186, 350x186)
+[sense] ocr: 1600 chars, 221 words
+[2026-06-09T19:01:25.934Z] [server] [sense] #102 (text): app=zed ssim=0.835
+[sense] -> text sent (app=zed, ssim=0.835, latency=15ms)
+[sense] change detected: ssim=0.7978 contours=92
+[sense] rois: 1 regions (1351x441)
+[sense] ocr: 1058 chars, 159 words
+[sense] gate dropped: cooldown (920ms < 5000ms)
+[sense] change detected: ssim=0.8761 contours=47
+[sense] rois: 3 regions (1333x186, 1305x108, 563x106)
+[sense] ocr: 166 chars, 33 words
+[sense] gate dropped: cooldown (1736ms < 5000ms)
+[sense] change detected: ssim=0.8715 contours=21
+[sense] rois: 1 regions (1351x436)
+[sense] ocr: 562 chars, 99 words
+[sense] gate dropped: cooldown (2480ms < 5000ms)
+[sense] change detected: ssim=0.9108 contours=58
+[sense] rois: 2 regions (1351x310, 465x207)
+[sense] ocr: 306 chars, 58 words
+[sense] gate dropped: cooldown (3272ms < 5000ms)
+[sense] change detected: ssim=0.9165 contours=52
+[sense] rois: 3 regions (888x310, 1351x205, 65x347)
+[sense] ocr: 425 chars, 52 words
+[sense] gate dropped: cooldown (4132ms < 5000ms)
+[sense] change detected: ssim=0.7949 contours=8
+[sense] rois: 1 regions (1351x442)
+[sense] ocr: 822 chars, 112 words
+[sense] gate dropped: cooldown (4950ms < 5000ms)
+[sense] change detected: ssim=0.9119 contours=101
+[sense] rois: 3 regions (701x267, 639x187, 234x120)
+[2026-06-09T19:01:31.994Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:32.053Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:32.085Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:32.085Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] ocr: 409 chars, 59 words
+[2026-06-09T19:01:32.208Z] [server] [sense] #103 (text): app=zed ssim=0.912
+[sense] -> text sent (app=zed, ssim=0.912, latency=14ms)
+[sense] change detected: ssim=0.9117 contours=98
+[sense] rois: 3 regions (676x329, 1416x101, 266x122)
+[sense] ocr: 435 chars, 66 words
+[sense] gate dropped: cooldown (837ms < 5000ms)
+[sense] change detected: ssim=0.9180 contours=105
+[sense] rois: 3 regions (1416x103, 1416x101, 361x259)
+[sense] ocr: 280 chars, 48 words
+[sense] gate dropped: cooldown (1642ms < 5000ms)
+[sense] heartbeat: 1948 frames, 103 sent, 146 gated, threshold=0.92
+[sense] change detected: ssim=0.9180 contours=105
+[sense] rois: 3 regions (1416x103, 1416x101, 361x259)
+[sense] ocr: 170 chars, 30 words
+[2026-06-09T19:01:49.497Z] [server] [sense] #104 (text): app=zed ssim=0.918
+[sense] -> text sent (app=zed, ssim=0.918, latency=15ms)
+[2026-06-09T19:01:55.603Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:55.704Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:55.751Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:01:55.751Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9125 contours=77
+[sense] rois: 3 regions (1417x185, 522x245, 390x101)
+[sense] ocr: 254 chars, 44 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.9125 contours=60
+[sense] rois: 2 regions (1417x249, 668x240)
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+[sense] ocr: 424 chars, 60 words
+[2026-06-09T19:02:01.500Z] [server] [sense] #105 (text): app=zed ssim=0.913
+[sense] -> text sent (app=zed, ssim=0.913, latency=13ms)
+[sense] change detected: ssim=0.9015 contours=59
+[sense] rois: 3 regions (1417x144, 1417x128, 505x206)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 233 chars, 38 words
+[sense] gate dropped: cooldown (806ms < 5000ms)
+[sense] change detected: ssim=0.9068 contours=58
+[sense] rois: 3 regions (1417x226, 563x208, 310x120)
+[sense] ocr: 254 chars, 40 words
+[sense] gate dropped: cooldown (1636ms < 5000ms)
+[sense] change detected: ssim=0.8937 contours=39
+[sense] rois: 1 regions (1728x944)
+[sense] ocr: 1646 chars, 234 words
+[sense] gate dropped: cooldown (3288ms < 5000ms)
+[sense] heartbeat: 2004 frames, 105 sent, 150 gated, threshold=0.92
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6140 contours=91
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2046 chars, 340 words
+[2026-06-09T19:02:06.632Z] [server] [sense] #106 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=0.614, latency=22ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6535 contours=68
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2158 chars, 362 words
+[sense] gate dropped: cooldown (1432ms < 2000ms)
+[sense] change detected: ssim=0.5932 contours=47
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1122 chars, 173 words
+[2026-06-09T19:02:09.174Z] [server] [sense] #107 (text): app=Brave Browser ssim=0.593
+[sender] relay latency: p50=4ms p95=7ms (n=8)
+[sense] -> text sent (app=Brave Browser, ssim=0.593, latency=22ms)
+[sense] stats: captures=2007ok/0fail events=107sent/0fail/151gated latency_p50=16ms p95=22ms detect=130.7ms ocr=525.1ms send=4.4ms
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[sense] gate dropped: cooldown (522ms < 2000ms)
+[sense] change detected: ssim=0.6496 contours=46
+[sense] rois: 1 regions (1728x1037)
+[sense] ocr: 2175 chars, 364 words
+[sense] gate dropped: cooldown (1906ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6541 contours=60
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 1727 chars, 247 words
+[2026-06-09T19:02:12.353Z] [server] [sense] #108 (text): app=zed ssim=0.654
+[sense] -> text sent (app=zed, ssim=0.654, latency=26ms)
+[2026-06-09T19:02:18.450Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:18.543Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:18.582Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:18.582Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 2016 ok, 0 fail (100% success, 2016 total)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9091 contours=54
+[sense] rois: 3 regions (1417x248, 538x176, 398x99)
+[sense] ocr: 271 chars, 41 words
+[2026-06-09T19:02:22.222Z] [server] [sense] #109 (text): app=zed ssim=0.909
+[sense] -> text sent (app=zed, ssim=0.909, latency=15ms)
+[sense] change detected: ssim=0.9196 contours=38
+[sense] rois: 1 regions (1416x439)
+[sense] ocr: 703 chars, 73 words
+[2026-06-09T19:02:29.013Z] [server] [sense] #110 (text): app=zed ssim=0.920
+[sense] -> text sent (app=zed, ssim=0.920, latency=13ms)
+[sense] change detected: ssim=0.8815 contours=90
+[sense] rois: 3 regions (1416x374, 338x112, 350x80)
+[sense] ocr: 828 chars, 132 words
+[sense] gate dropped: cooldown (3443ms < 5000ms)
+[sense] change detected: ssim=0.8900 contours=157
+[sense] rois: 3 regions (1416x138, 541x162, 310x123)
+[sense] ocr: 245 chars, 32 words
+[sense] gate dropped: cooldown (4204ms < 5000ms)
+[sense] change detected: ssim=0.9061 contours=111
+[sense] rois: 3 regions (1416x162, 1416x100, 646x83)
+[sense] ocr: 239 chars, 33 words
+[2026-06-09T19:02:34.065Z] [server] [sense] #111 (text): app=zed ssim=0.906
+[sense] -> text sent (app=zed, ssim=0.906, latency=12ms)
+[sense] change detected: ssim=0.8900 contours=128
+[sense] rois: 3 regions (1416x224, 1416x141, 534x245)
+[sense] ocr: 467 chars, 74 words
+[sense] gate dropped: cooldown (1021ms < 5000ms)
+[sense] change detected: ssim=0.8821 contours=121
+[sense] rois: 3 regions (1416x145, 1416x145, 840x100)
+[sense] ocr: 409 chars, 71 words
+[sense] gate dropped: cooldown (1920ms < 5000ms)
+[sense] change detected: ssim=0.8728 contours=143
+[sense] rois: 3 regions (1416x183, 899x124, 541x143)
+[sense] ocr: 576 chars, 90 words
+[sense] gate dropped: cooldown (2941ms < 5000ms)
+[sense] change detected: ssim=0.8518 contours=165
+[sense] rois: 3 regions (1169x332, 524x144, 944x83)
+[sense] ocr: 1264 chars, 184 words
+[sense] gate dropped: cooldown (4130ms < 5000ms)
+[sense] change detected: ssim=0.8618 contours=91
+[sense] rois: 1 regions (1376x438)
+[sense] ocr: 580 chars, 89 words
+[sense] gate dropped: cooldown (4944ms < 5000ms)
+[sense] heartbeat: 2056 frames, 111 sent, 160 gated, threshold=0.92
+[2026-06-09T19:02:40.163Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:40.216Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:40.251Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:40.251Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9129 contours=45
+[sense] rois: 1 regions (1126x414)
+[sense] ocr: 405 chars, 58 words
+[2026-06-09T19:02:41.263Z] [server] [sense] #112 (text): app=zed ssim=0.913
+[sense] -> text sent (app=zed, ssim=0.913, latency=16ms)
+[sense] change detected: ssim=0.9112 contours=64
+[sense] rois: 3 regions (1126x184, 1117x164, 1117x82)
+[sense] ocr: 256 chars, 43 words
+[sense] gate dropped: cooldown (1408ms < 5000ms)
+[sense] change detected: ssim=0.9112 contours=64
+[sense] rois: 3 regions (1126x184, 1117x164, 1117x82)
+[sense] ocr: 193 chars, 27 words
+[sense] gate dropped: cooldown (2727ms < 5000ms)
+[sense] change detected: ssim=0.9152 contours=73
+[sense] rois: 3 regions (1117x227, 1128x199, 236x82)
+[sense] ocr: 311 chars, 47 words
+[sense] gate dropped: cooldown (3545ms < 5000ms)
+[sense] change detected: ssim=0.9152 contours=73
+[sense] rois: 3 regions (1117x227, 1128x199, 236x82)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 241 chars, 36 words
+[sense] gate dropped: cooldown (4340ms < 5000ms)
+[sense] change detected: ssim=0.9129 contours=45
+[sense] rois: 1 regions (1126x414)
+[sense] ocr: 476 chars, 70 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.9063 contours=57
+[sense] rois: 1 regions (1124x440)
+[sense] ocr: 594 chars, 90 words
+[2026-06-09T19:02:47.158Z] [server] [sense] #113 (text): app=zed ssim=0.906
+[sense] -> text sent (app=zed, ssim=0.906, latency=17ms)
+[sense] change detected: ssim=0.9020 contours=74
+[sense] rois: 3 regions (1117x331, 1121x100, 236x82)
+[sense] ocr: 363 chars, 54 words
+[sense] gate dropped: cooldown (1402ms < 5000ms)
+[sense] change detected: ssim=0.9012 contours=66
+[sense] rois: 3 regions (1124x168, 1117x164, 1121x84)
+[sense] ocr: 206 chars, 27 words
+[sense] gate dropped: cooldown (4290ms < 5000ms)
+[sense] change detected: ssim=0.9012 contours=66
+[sense] rois: 3 regions (1124x168, 1117x164, 1121x84)
+[sense] ocr: 255 chars, 36 words
+[2026-06-09T19:02:52.787Z] [server] [sense] #114 (text): app=zed ssim=0.901
+[sense] -> text sent (app=zed, ssim=0.901, latency=9ms)
+[sense] change detected: ssim=0.9066 contours=46
+[sense] rois: 1 regions (1124x439)
+[sense] ocr: 557 chars, 86 words
+[sense] gate dropped: cooldown (800ms < 5000ms)
+[sense] change detected: ssim=0.8995 contours=67
+[sense] rois: 3 regions (1117x227, 1124x124, 1117x81)
+[sense] ocr: 231 chars, 29 words
+[sense] gate dropped: cooldown (2701ms < 5000ms)
+[sense] change detected: ssim=0.8995 contours=67
+[sense] rois: 3 regions (1117x227, 1124x124, 1117x81)
+[sense] ocr: 268 chars, 38 words
+[sense] gate dropped: cooldown (4077ms < 5000ms)
+[sense] change detected: ssim=0.8995 contours=67
+[sense] rois: 3 regions (1117x227, 1124x124, 1117x81)
+[sense] ocr: 231 chars, 29 words
+[sense] gate dropped: cooldown (4950ms < 5000ms)
+[2026-06-09T19:02:58.841Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:58.897Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:58.925Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:02:58.926Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9050 contours=50
+[sense] rois: 2 regions (1121x398, 1124x127)
+[sense] ocr: 544 chars, 87 words
+[2026-06-09T19:03:00.085Z] [server] [sense] #115 (text): app=zed ssim=0.905
+[sense] -> text sent (app=zed, ssim=0.905, latency=11ms)
+[sense] change detected: ssim=0.9050 contours=51
+[sense] rois: 2 regions (1121x398, 1124x127)
+[sense] ocr: 559 chars, 86 words
+[sense] gate dropped: cooldown (852ms < 5000ms)
+[sense] change detected: ssim=0.9177 contours=91
+[sense] rois: 3 regions (1117x165, 1117x124, 1117x80)
+[sense] ocr: 218 chars, 42 words
+[sense] gate dropped: cooldown (3244ms < 5000ms)
+[sense] change detected: ssim=0.9058 contours=66
+[sense] rois: 3 regions (1127x222, 1117x122, 1117x80)
+[sense] ocr: 161 chars, 20 words
+[sense] gate dropped: cooldown (4057ms < 5000ms)
+[sense] change detected: ssim=0.9107 contours=71
+[sense] rois: 3 regions (1124x356, 207x96, 198x95)
+[sense] ocr: 486 chars, 77 words
+[2026-06-09T19:03:05.917Z] [server] [sense] #116 (text): app=zed ssim=0.911
+[sense] -> text sent (app=zed, ssim=0.911, latency=11ms)
+[sense] change detected: ssim=0.9013 contours=65
+[sense] rois: 3 regions (1117x206, 1124x159, 1117x80)
+[sense] ocr: 206 chars, 27 words
+[sense] gate dropped: cooldown (863ms < 5000ms)
+[sense] change detected: ssim=0.8995 contours=67
+[sense] rois: 3 regions (1117x227, 1124x124, 1117x81)
+[sense] ocr: 231 chars, 29 words
+[sense] gate dropped: cooldown (1750ms < 5000ms)
+[sense] change detected: ssim=0.9020 contours=74
+[sense] rois: 3 regions (1117x331, 1121x100, 236x82)
+[sense] ocr: 363 chars, 54 words
+[sense] gate dropped: cooldown (2606ms < 5000ms)
+[sense] heartbeat: 2101 frames, 116 sent, 177 gated, threshold=0.92
+[sense] change detected: ssim=0.8932 contours=79
+[sense] rois: 3 regions (1165x272, 1117x101, 166x97)
+[sense] ocr: 820 chars, 103 words
+[2026-06-09T19:03:11.470Z] [server] [sense] #117 (text): app=zed ssim=0.893
+[sender] relay latency: p50=4ms p95=7ms (n=10)
+[sense] -> text sent (app=zed, ssim=0.893, latency=13ms)
+[sense] stats: captures=2104ok/0fail events=117sent/0fail/177gated latency_p50=13ms p95=26ms detect=132.1ms ocr=405.5ms send=4.3ms
+[sense] change detected: ssim=0.8789 contours=83
+[sense] rois: 1 regions (1169x436)
+[sense] ocr: 1387 chars, 190 words
+[sense] gate dropped: cooldown (953ms < 5000ms)
+[2026-06-09T19:03:17.540Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:17.656Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:17.683Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:17.683Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 2111 ok, 0 fail (100% success, 2111 total)
+[sense] change detected: ssim=0.8864 contours=86
+[sense] rois: 3 regions (1062x247, 1124x166, 823x121)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 1061 chars, 143 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8828 contours=94
+[sense] rois: 3 regions (1128x436, 403x124, 423x102)
+[sense] ocr: 1473 chars, 207 words
+[sense] gate dropped: duplicate (similar to recent text)
+[sense] change detected: ssim=0.8625 contours=103
+[sense] rois: 3 regions (1128x364, 1416x128, 322x99)
+[sense] ocr: 930 chars, 137 words
+[2026-06-09T19:03:26.152Z] [server] [sense] #118 (text): app=zed ssim=0.863
+[sense] -> text sent (app=zed, ssim=0.863, latency=16ms)
+[sense] change detected: ssim=0.9102 contours=66
+[sense] rois: 3 regions (1416x187, 531x269, 354x122)
+[sense] ocr: 286 chars, 36 words
+[sense] gate dropped: cooldown (1381ms < 5000ms)
+[sense] change detected: ssim=0.9127 contours=86
+[sense] rois: 3 regions (1416x159, 1416x143, 477x79)
+[sense] ocr: 209 chars, 29 words
+[sense] gate dropped: cooldown (2146ms < 5000ms)
+[sense] change detected: ssim=0.8922 contours=126
+[sense] rois: 3 regions (1416x204, 1416x142, 435x204)
+[sense] ocr: 367 chars, 59 words
+[sense] gate dropped: cooldown (3110ms < 5000ms)
+[sense] change detected: ssim=0.9106 contours=71
+[sense] rois: 3 regions (1416x208, 1416x145, 284x124)
+[sense] ocr: 386 chars, 51 words
+[sense] gate dropped: cooldown (4512ms < 5000ms)
+[sense] change detected: ssim=0.9065 contours=80
+[sense] rois: 1 regions (1728x455)
+[sense] ocr: 785 chars, 107 words
+[2026-06-09T19:03:31.458Z] [server] [sense] #119 (text): app=zed ssim=0.907
+[sense] -> text sent (app=zed, ssim=0.907, latency=15ms)
+[sense] change detected: ssim=0.8982 contours=81
+[sense] rois: 1 regions (1511x783)
+[sense] ocr: 1712 chars, 231 words
+[sense] gate dropped: cooldown (1100ms < 5000ms)
+[sense] change detected: ssim=0.9002 contours=117
+[sense] rois: 1 regions (1438x783)
+[sense] ocr: 1337 chars, 193 words
+[sense] gate dropped: cooldown (2104ms < 5000ms)
+[sense] change detected: ssim=0.9163 contours=104
+[sense] rois: 3 regions (803x246, 1416x83, 447x165)
+[sense] ocr: 410 chars, 61 words
+[sense] gate dropped: cooldown (2972ms < 5000ms)
+[2026-06-09T19:03:37.531Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:37.600Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:37.635Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:37.635Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] heartbeat: 2150 frames, 119 sent, 187 gated, threshold=0.92
+[sense] change detected: ssim=0.9055 contours=114
+[sense] rois: 3 regions (1416x142, 534x286, 187x162)
+[sense] ocr: 355 chars, 46 words
+[2026-06-09T19:03:45.646Z] [server] [sense] #120 (text): app=zed ssim=0.905
+[sense] -> text sent (app=zed, ssim=0.905, latency=10ms)
+[sense] change detected: ssim=0.8948 contours=87
+[sense] rois: 3 regions (1416x294, 619x183, 899x103)
+[sense] ocr: 670 chars, 110 words
+[sense] gate dropped: cooldown (1060ms < 5000ms)
+[sense] change detected: ssim=0.9163 contours=115
+[sense] rois: 1 regions (1417x420)
+[sense] ocr: 280 chars, 52 words
+[sense] gate dropped: cooldown (2213ms < 5000ms)
+[2026-06-09T19:03:51.737Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:51.832Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:51.869Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:03:51.869Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] ocr: empty (rois=0)
+[2026-06-09T19:04:00.953Z] [server] [sense] #121 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=n/a, latency=21ms)
+[sense] change detected: ssim=0.6824 contours=62
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 2177 chars, 364 words
+[sense] gate dropped: cooldown (1770ms < 2000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5985 contours=55
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1037 chars, 164 words
+[2026-06-09T19:04:03.827Z] [server] [sense] #122 (text): app=Brave Browser ssim=0.598
+[sense] -> text sent (app=Brave Browser, ssim=0.598, latency=23ms)
+[sense] change detected: ssim=0.4966 contours=18
+[sense] rois: 3 regions (1728x987, 647x116, 306x118)
+[sense] ocr: 2096 chars, 294 words
+[sense] gate dropped: cooldown (1702ms < 2000ms)
+[sense] change detected: ssim=0.8043 contours=66
+[sense] rois: 3 regions (1263x783, 365x259, 365x102)
+[sense] ocr: 696 chars, 117 words
+[2026-06-09T19:04:08.885Z] [server] [sense] #123 (text): app=Brave Browser ssim=0.804
+[sense] -> text sent (app=Brave Browser, ssim=0.804, latency=18ms)
+[sense] heartbeat: 2202 frames, 123 sent, 191 gated, threshold=0.85
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9099 contours=14
+[sense] rois: 2 regions (1261x444, 267x66)
+[sense] ocr: 706 chars, 111 words
+[2026-06-09T19:04:13.724Z] [server] [sense] #124 (text): app=Brave Browser ssim=0.910
+[sender] relay latency: p50=4ms p95=7ms (n=7)
+[sense] -> text sent (app=Brave Browser, ssim=0.910, latency=16ms)
+[sense] stats: captures=2208ok/0fail events=124sent/0fail/191gated latency_p50=16ms p95=23ms detect=124.7ms ocr=490.4ms send=4.7ms
+[capture] stats: 2212 ok, 0 fail (100% success, 2212 total)
+[sense] change detected: ssim=0.9145 contours=5
+[sense] rois: 1 regions (832x638)
+[sense] ocr: 835 chars, 135 words
+[2026-06-09T19:04:19.606Z] [server] [sense] #125 (text): app=Brave Browser ssim=0.914
+[sense] -> text sent (app=Brave Browser, ssim=0.914, latency=17ms)
+[sense] change detected: ssim=0.7851 contours=54
+[sense] rois: 3 regions (1291x862, 365x289, 365x107)
+[sense] ocr: 1956 chars, 270 words
+[sense] gate dropped: cooldown (2249ms < 5000ms)
+[sense] change detected: ssim=0.7032 contours=48
+[sense] rois: 3 regions (1728x559, 820x383, 365x184)
+[sense] ocr: 1544 chars, 200 words
+[sense] gate dropped: cooldown (3474ms < 5000ms)
+[sense] change detected: ssim=0.7838 contours=55
+[sense] rois: 3 regions (909x594, 365x450, 847x140)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 1051 chars, 159 words
+[sense] gate dropped: cooldown (4489ms < 5000ms)
+[sense] change detected: ssim=0.8406 contours=43
+[sense] rois: 3 regions (1098x823, 87x87, 85x85)
+[sense] ocr: 798 chars, 124 words
+[2026-06-09T19:04:24.945Z] [server] [sense] #126 (text): app=Brave Browser ssim=0.841
+[sense] -> text sent (app=Brave Browser, ssim=0.841, latency=16ms)
+[sense] change detected: ssim=0.8568 contours=49
+[sense] rois: 3 regions (909x448, 1043x198, 853x194)
+[sense] ocr: 706 chars, 106 words
+[sense] gate dropped: cooldown (933ms < 5000ms)
+[sense] change detected: ssim=0.7429 contours=70
+[sense] rois: 3 regions (1728x428, 854x355, 365x451)
+[sense] ocr: 1016 chars, 124 words
+[sense] gate dropped: cooldown (3621ms < 5000ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.5417 contours=30
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 2166 chars, 362 words
+[2026-06-09T19:04:30.940Z] [server] [sense] #127 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=0.542, latency=21ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6674 contours=58
+[sense] rois: 1 regions (1728x1038)
+[sense] ocr: 1416 chars, 198 words
+[sense] gate dropped: cooldown (1144ms < 2000ms)
+[2026-06-09T19:04:37.031Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:04:37.136Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:04:37.173Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:04:37.173Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] heartbeat: 2251 frames, 127 sent, 197 gated, threshold=0.85
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.9086 contours=90
+[sense] rois: 3 regions (1417x166, 482x138, 983x83)
+[sense] ocr: 477 chars, 65 words
+[2026-06-09T19:04:44.383Z] [server] [sense] #128 (text): app=zed ssim=0.909
+[sense] -> text sent (app=zed, ssim=0.909, latency=11ms)
+[sense] change detected: ssim=0.9050 contours=101
+[sense] rois: 3 regions (962x222, 1052x204, 369x141)
+[sense] ocr: 562 chars, 81 words
+[sense] gate dropped: cooldown (1053ms < 5000ms)
+[sense] change detected: ssim=0.8904 contours=81
+[sense] rois: 3 regions (1417x187, 1417x103, 352x121)
+[sense] ocr: 288 chars, 42 words
+[sense] gate dropped: cooldown (2360ms < 5000ms)
+[sense] change detected: ssim=0.9126 contours=35
+[sense] rois: 3 regions (1424x304, 1416x187, 219x73)
+[2026-06-09T19:04:50.482Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:04:50.571Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:04:50.606Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:04:50.607Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] ocr: 337 chars, 49 words
+[2026-06-09T19:04:50.650Z] [server] [sense] #129 (text): app=zed ssim=0.913
+[sense] -> text sent (app=zed, ssim=0.913, latency=12ms)
+[sense] change detected: ssim=0.9115 contours=85
+[sense] rois: 3 regions (1416x228, 1416x158, 301x227)
+[sense] ocr: 282 chars, 43 words
+[sense] gate dropped: cooldown (849ms < 5000ms)
+[sense] change detected: ssim=0.8930 contours=88
+[sense] rois: 3 regions (1416x181, 1416x138, 598x103)
+[sense] ocr: 425 chars, 63 words
+[sense] gate dropped: cooldown (2210ms < 5000ms)
+[sense] change detected: ssim=0.8930 contours=88
+[sense] rois: 3 regions (1416x181, 1416x138, 598x103)
+[sense] ocr: 286 chars, 43 words
+[2026-06-09T19:04:58.769Z] [server] [sense] #130 (text): app=zed ssim=0.893
+[sense] -> text sent (app=zed, ssim=0.893, latency=9ms)
+[sense] change detected: ssim=0.8865 contours=56
+[sense] rois: 2 regions (1417x327, 389x155)
+[sense] ocr: 346 chars, 55 words
+[sense] gate dropped: cooldown (2264ms < 5000ms)
+[sense] change detected: ssim=0.8669 contours=24
+[sense] rois: 1 regions (1417x445)
+[sense] ocr: 434 chars, 73 words
+[sense] gate dropped: cooldown (4492ms < 5000ms)
+[sense] change detected: ssim=0.8786 contours=81
+[sense] rois: 3 regions (1417x214, 1417x103, 235x81)
+[sense] ocr: 521 chars, 72 words
+[2026-06-09T19:05:04.623Z] [server] [sense] #131 (text): app=zed ssim=0.879
+[sense] -> text sent (app=zed, ssim=0.879, latency=12ms)
+[sense] change detected: ssim=0.9089 contours=133
+[sense] rois: 3 regions (711x165, 590x122, 535x100)
+[sense] ocr: 270 chars, 39 words
+[sense] gate dropped: cooldown (820ms < 5000ms)
+[sense] change detected: ssim=0.9007 contours=147
+[sense] rois: 3 regions (595x100, 348x117, 201x159)
+[sense] ocr: 148 chars, 25 words
+[sense] gate dropped: cooldown (1530ms < 5000ms)
+[sense] change detected: ssim=0.8891 contours=94
+[sense] rois: 3 regions (1174x225, 389x165, 255x164)
+[sense] ocr: 397 chars, 50 words
+[sense] gate dropped: cooldown (2312ms < 5000ms)
+[sense] change detected: ssim=0.8905 contours=61
+[sense] rois: 1 regions (1416x444)
+Context leak detected, msgtracer returned -1
+Context leak detected, msgtracer returned -1
+[sense] ocr: 991 chars, 171 words
+[sense] gate dropped: cooldown (3207ms < 5000ms)
+[sense] change detected: ssim=0.8940 contours=98
+[sense] rois: 3 regions (1416x148, 1092x165, 569x103)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 576 chars, 94 words
+[sense] gate dropped: cooldown (4678ms < 5000ms)
+[sense] change detected: ssim=0.8941 contours=98
+[sense] rois: 3 regions (1416x148, 1092x165, 569x103)
+[sense] ocr: 467 chars, 75 words
+[2026-06-09T19:05:10.227Z] [server] [sense] #132 (text): app=zed ssim=0.894
+[sense] -> text sent (app=zed, ssim=0.894, latency=10ms)
+[sense] heartbeat: 2299 frames, 132 sent, 208 gated, threshold=0.92
+[2026-06-09T19:05:16.290Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:16.339Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:16.363Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:16.363Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[capture] stats: 2309 ok, 0 fail (100% success, 2309 total)
+[sense] change detected: ssim=0.8620 contours=29
+[sense] rois: 1 regions (1424x471)
+[sense] ocr: 985 chars, 150 words
+[2026-06-09T19:05:24.021Z] [server] [sense] #133 (text): app=zed ssim=0.862
+[sender] relay latency: p50=4ms p95=6ms (n=9)
+[sense] -> text sent (app=zed, ssim=0.862, latency=16ms)
+[sense] stats: captures=2324ok/0fail events=133sent/0fail/208gated latency_p50=12ms p95=21ms detect=127.5ms ocr=469.4ms send=4.3ms
+[sense] change detected: ssim=0.8653 contours=69
+[sense] rois: 3 regions (1417x249, 889x251, 341x103)
+[sense] ocr: 474 chars, 75 words
+[sense] gate dropped: cooldown (943ms < 5000ms)
+[sense] change detected: ssim=0.8819 contours=73
+[sense] rois: 3 regions (1417x163, 1417x90, 354x145)
+[sense] ocr: 230 chars, 35 words
+[sense] gate dropped: cooldown (1663ms < 5000ms)
+[sense] change detected: ssim=0.8851 contours=54
+[sense] rois: 3 regions (1417x251, 481x187, 310x123)
+[sense] ocr: 308 chars, 53 words
+[sense] gate dropped: cooldown (2547ms < 5000ms)
+[sense] change detected: ssim=0.8744 contours=50
+[sense] rois: 1 regions (1417x445)
+[sense] ocr: 712 chars, 109 words
+[sense] gate dropped: cooldown (3319ms < 5000ms)
+[sense] change detected: ssim=0.8948 contours=43
+[sense] rois: 3 regions (1417x187, 1417x129, 549x125)
+[sense] ocr: 259 chars, 33 words
+[sense] gate dropped: cooldown (4179ms < 5000ms)
+[sense] change detected: ssim=0.9136 contours=50
+[sense] rois: 3 regions (1417x171, 483x183, 582x103)
+[sense] ocr: 184 chars, 26 words
+[sense] gate dropped: cooldown (4993ms < 5000ms)
+[2026-06-09T19:05:30.125Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:30.228Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:30.266Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:30.266Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8921 contours=159
+[sense] rois: 3 regions (1438x782, 177x85, 159x85)
+[sense] ocr: 1405 chars, 216 words
+[2026-06-09T19:05:34.254Z] [server] [sense] #134 (text): app=zed ssim=0.892
+[sense] -> text sent (app=zed, ssim=0.892, latency=27ms)
+[sense] change detected: ssim=0.9063 contours=122
+[sense] rois: 1 regions (1417x782)
+[sense] ocr: 1231 chars, 192 words
+[sense] gate dropped: cooldown (4045ms < 5000ms)
+[sense] change detected: ssim=0.9181 contours=103
+[sense] rois: 3 regions (655x229, 1416x121, 398x104)
+[sense] ocr: 428 chars, 69 words
+[sense] gate dropped: cooldown (4889ms < 5000ms)
+[sense] heartbeat: 2351 frames, 134 sent, 216 gated, threshold=0.92
+[sense] change detected: ssim=0.8068 contours=157
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1756 chars, 261 words
+[2026-06-09T19:05:42.463Z] [server] [sense] #135 (text): app=zed ssim=0.807
+[sense] -> text sent (app=zed, ssim=0.807, latency=30ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6439 contours=109
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2146 chars, 359 words
+[2026-06-09T19:05:43.862Z] [server] [sense] #136 (context): app=Telegram ssim=0.000
+[sense] -> context sent (app=Telegram, ssim=0.644, latency=15ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.6230 contours=166
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2231 chars, 325 words
+[2026-06-09T19:05:48.240Z] [server] [sense] #137 (text): app=Finder ssim=0.623
+[sense] -> text sent (app=Finder, ssim=0.623, latency=32ms)
+[sense] change detected: ssim=0.8031 contours=97
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2180 chars, 317 words
+[sense] gate dropped: cooldown (1354ms < 2000ms)
+[sense] change detected: ssim=0.4089 contours=71
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2034 chars, 299 words
+[2026-06-09T19:05:51.203Z] [server] [sense] #138 (text): app=Finder ssim=0.409
+[sense] -> text sent (app=Finder, ssim=0.409, latency=31ms)
+[sense] SSIM threshold lowered to 0.85 (app change)
+[sense] change detected: ssim=0.3855 contours=81
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2511 chars, 361 words
+[sense] gate dropped: cooldown (1484ms < 2000ms)
+[2026-06-09T19:05:57.571Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[sense] change detected: ssim=0.8340 contours=170
+[sense] rois: 3 regions (1389x144, 1389x141, 1388x79)
+[2026-06-09T19:05:57.678Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:57.714Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:05:57.714Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] ocr: 181 chars, 21 words
+[2026-06-09T19:05:58.016Z] [server] [sense] #139 (text): app=zed ssim=0.834
+[sense] -> text sent (app=zed, ssim=0.834, latency=23ms)
+[sense] change detected: ssim=0.8251 contours=180
+[sense] rois: 3 regions (1389x246, 381x228, 227x227)
+[sense] ocr: 383 chars, 59 words
+[2026-06-09T19:06:01.490Z] [server] [sense] #140 (text): app=zed ssim=0.825
+[sense] -> text sent (app=zed, ssim=0.825, latency=13ms)
+[sense] SSIM threshold restored to 0.92 (stable)
+[sense] change detected: ssim=0.8454 contours=161
+[sense] rois: 3 regions (381x247, 1389x87, 1388x72)
+[sense] ocr: 308 chars, 42 words
+[sense] gate dropped: cooldown (795ms < 2000ms)
+[sense] change detected: ssim=0.8602 contours=165
+[sense] rois: 3 regions (1389x103, 403x166, 382x122)
+[sense] ocr: 168 chars, 20 words
+[sense] gate dropped: cooldown (1638ms < 5000ms)
+[sense] change detected: ssim=0.8605 contours=220
+[sense] rois: 3 regions (381x331, 284x143, 397x103)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 366 chars, 46 words
+[sense] gate dropped: cooldown (2419ms < 5000ms)
+[sense] change detected: ssim=0.8874 contours=151
+[sense] rois: 3 regions (381x185, 390x124, 310x144)
+[sense] ocr: 202 chars, 27 words
+[2026-06-09T19:06:07.180Z] [server] [sense] #141 (text): app=zed ssim=0.887
+[sense] -> text sent (app=zed, ssim=0.887, latency=11ms)
+[sense] change detected: ssim=0.9045 contours=126
+[sense] rois: 3 regions (403x165, 403x165, 258x122)
+[sense] ocr: 169 chars, 20 words
+[sense] gate dropped: cooldown (1220ms < 5000ms)
+[sense] change detected: ssim=0.9096 contours=93
+[sense] rois: 3 regions (403x310, 1078x124, 310x104)
+[sense] ocr: 337 chars, 39 words
+[sense] gate dropped: cooldown (2531ms < 5000ms)
+[sense] change detected: ssim=0.8912 contours=128
+[sense] rois: 3 regions (1092x267, 782x166, 381x143)
+[sense] ocr: 550 chars, 84 words
+[sense] gate dropped: cooldown (3460ms < 5000ms)
+[sense] heartbeat: 2394 frames, 141 sent, 224 gated, threshold=0.92
+[sense] change detected: ssim=0.8860 contours=81
+[sense] rois: 3 regions (1388x336, 1078x311, 650x104)
+[sense] ocr: 483 chars, 69 words
+[2026-06-09T19:06:13.150Z] [server] [sense] #142 (text): app=zed ssim=0.886
+[sense] -> text sent (app=zed, ssim=0.886, latency=14ms)
+[sense] change detected: ssim=0.8612 contours=93
+[sense] rois: 3 regions (1388x415, 1078x205, 362x165)
+[sense] ocr: 619 chars, 89 words
+[sense] gate dropped: cooldown (996ms < 5000ms)
+[sense] change detected: ssim=0.8899 contours=76
+[sense] rois: 3 regions (1388x208, 1078x207, 1388x108)
+[sense] ocr: 291 chars, 39 words
+[sense] gate dropped: cooldown (1861ms < 5000ms)
+[capture] stats: 2400 ok, 0 fail (100% success, 2400 total)
+[sense] change detected: ssim=0.8855 contours=147
+[sense] rois: 3 regions (1388x165, 1388x141, 361x125)
+[sense] ocr: 263 chars, 39 words
+[sense] gate dropped: cooldown (3653ms < 5000ms)
+[sense] change detected: ssim=0.8528 contours=114
+[sense] rois: 3 regions (1388x328, 1389x144, 591x105)
+[sense] ocr: 703 chars, 99 words
+[sense] gate dropped: cooldown (4560ms < 5000ms)
+[2026-06-09T19:06:19.229Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:06:19.331Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:06:19.374Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:06:19.374Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.8107 contours=116
+[sense] rois: 1 regions (1389x731)
+[sense] ocr: 1227 chars, 170 words
+[2026-06-09T19:06:20.653Z] [server] [sense] #143 (text): app=zed ssim=0.811
+[sense] -> text sent (app=zed, ssim=0.811, latency=17ms)
+[sense] change detected: ssim=0.8736 contours=88
+[sense] rois: 3 regions (1388x460, 493x228, 264x78)
+[sense] ocr: 703 chars, 110 words
+[sense] gate dropped: cooldown (915ms < 5000ms)
+[sense] change detected: ssim=0.8719 contours=122
+[sense] rois: 3 regions (1388x204, 1078x224, 381x290)
+[sense] ocr: 369 chars, 61 words
+[sense] gate dropped: cooldown (3327ms < 5000ms)
+[sense] change detected: ssim=0.8395 contours=59
+[sense] rois: 2 regions (1388x316, 1389x315)
+[sense] ocr: 662 chars, 103 words
+[sense] gate dropped: cooldown (4234ms < 5000ms)
+[sense] change detected: ssim=0.8267 contours=98
+[sense] rois: 3 regions (1389x585, 254x104, 351x84)
+[sense] ocr: 1032 chars, 166 words
+[2026-06-09T19:06:33.867Z] [server] [sense] #144 (text): app=zed ssim=0.827
+[sender] relay latency: p50=4ms p95=9ms (n=11)
+[sense] -> text sent (app=zed, ssim=0.827, latency=15ms)
+[sense] stats: captures=2430ok/0fail events=144sent/0fail/231gated latency_p50=17ms p95=32ms detect=133.6ms ocr=482.2ms send=4.5ms
+[sense] change detected: ssim=0.7098 contours=268
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2120 chars, 304 words
+[sense] gate dropped: cooldown (3936ms < 5000ms)
+[sense] change detected: ssim=0.6268 contours=291
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 1852 chars, 267 words
+[2026-06-09T19:06:39.099Z] [server] [sense] #145 (text): app=zed ssim=0.627
+[sense] -> text sent (app=zed, ssim=0.627, latency=33ms)
+[sense] change detected: ssim=0.8685 contours=42
+[sense] rois: 3 regions (1416x309, 1333x162, 230x81)
+[sense] ocr: 576 chars, 75 words
+[sense] gate dropped: cooldown (903ms < 5000ms)
+[sense] change detected: ssim=0.6143 contours=279
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2114 chars, 281 words
+[sense] gate dropped: cooldown (2231ms < 5000ms)
+[sense] change detected: ssim=0.6766 contours=254
+[sense] rois: 1 regions (1728x1117)
+[sense] ocr: 2390 chars, 325 words
+[sense] gate dropped: cooldown (3644ms < 5000ms)
+[sense] change detected: ssim=0.6725 contours=245
+[sense] rois: 1 regions (1728x1005)
+[sense] ocr: 1796 chars, 243 words
+[sense] gate dropped: cooldown (4892ms < 5000ms)
+[sense] change detected: ssim=0.8647 contours=49
+[sense] rois: 3 regions (1351x415, 407x127, 243x135)
+Context leak detected, msgtracer returned -1
+[sense] ocr: 930 chars, 126 words
+[2026-06-09T19:06:44.875Z] [server] [sense] #146 (text): app=zed ssim=0.865
+[sense] -> text sent (app=zed, ssim=0.865, latency=17ms)
+[sense] heartbeat: 2443 frames, 146 sent, 236 gated, threshold=0.92
+[sense] change detected: ssim=0.9074 contours=100
+[sense] rois: 1 regions (1395x437)
+[sense] ocr: 834 chars, 112 words
+[sense] gate dropped: cooldown (1808ms < 5000ms)
+[sense] change detected: ssim=0.9166 contours=80
+[sense] rois: 3 regions (1221x186, 1416x165, 301x79)
+[sense] ocr: 486 chars, 80 words
+[sense] gate dropped: cooldown (2662ms < 5000ms)
+[sense] change detected: ssim=0.8956 contours=74
+[sense] rois: 3 regions (1120x259, 1417x124, 1416x74)
+[sense] ocr: 340 chars, 58 words
+[2026-06-09T19:06:50.889Z] [server] [sense] #147 (text): app=zed ssim=0.896
+[sense] -> text sent (app=zed, ssim=0.896, latency=15ms)
+[2026-06-09T19:06:50.941Z] [agent] model google/gemini-2.5-flash-lite failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:06:51.068Z] [agent] model google/gemini-2.5-flash failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:06:51.105Z] [agent] model anthropic/claude-3.5-haiku failed: HTTP 401: {"error":{"message":"User not found.","code":401}}, trying next...
+[2026-06-09T19:06:51.106Z] [agent] ✘ tick error: HTTP 401: {"error":{"message":"User not found.","code":401}}
+[sense] change detected: ssim=0.9118 contours=87
+[sense] rois: 3 regions (1417x140, 523x164, 285x228)

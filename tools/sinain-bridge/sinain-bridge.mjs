@@ -131,6 +131,12 @@ const baseUrl = `http://${host}:${port}`;
 if (frame.hook_event_name === 'PermissionRequest') {
   let behavior = 'ask';
   let answer;
+  // Under the ACP proxy (acp-proxy.mjs) the proxy already mediates this request
+  // with sinain-core; a second blocking card here would duplicate it.
+  if (process.env.SINAIN_ACP_PROXY === '1') {
+    console.log(JSON.stringify({ decision: 'ask' }));
+    process.exit(0);
+  }
   try {
     const { response, body } = await post(`${baseUrl}/agent/approve`, frame, 130_000, true);
     if (response.ok) {

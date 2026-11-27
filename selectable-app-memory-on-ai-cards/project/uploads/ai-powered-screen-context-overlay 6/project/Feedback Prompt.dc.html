@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @keyframes fpHalo { 0% { transform:scale(0.7); opacity:.4; } 70% { transform:scale(2.2); opacity:0; } 100% { opacity:0; } }
+  body { margin: 0; }
+</style>
+</helmet>
+
+<div style="min-width:100%; min-height:100vh; box-sizing:border-box; padding:48px; background:#e7e5df; width:max-content; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#27282E;">
+
+  <!-- TITLE -->
+  <div style="margin-bottom:14px; max-width:820px;">
+    <div style="font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#6C707E; margin-bottom:8px;">Sinain · feedback prompt · standalone</div>
+    <div style="font-size:24px; font-weight:600; line-height:28px; margin-bottom:10px; color:#27282E;">Asking "is this worth continuing?" — at the right moment</div>
+    <div style="font-size:14px; line-height:20px; color:#6C707E;">A one-time, dismissable nudge that links out to the experience survey (discussion <span style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px;">#231</span>). Not part of attention triage — it's its own surface, fired by a calendar/milestone rule, never by the WSM.</div>
+  </div>
+
+  <!-- TIMING RULE callout -->
+  <div style="display:flex; gap:14px; max-width:820px; margin-bottom:30px; background:#dfe7df; border-left:3px solid #1F8039; border-radius:0 6px 6px 0; padding:12px 16px;">
+    <span style="flex:none; font-size:13px; color:#1F8039; font-weight:700;">⏱</span>
+    <div style="font-size:13px; line-height:18px; color:#3a4a3a;"><span style="font-weight:600; color:#27282E;">The firing rule.</span> Fires <span style="font-weight:600;">once</span>, on the <span style="font-weight:600;">first value-proof moment</span> — whichever comes first: a thread resolved, a context enrichment, or a chat interaction. That's the instant the user has just felt the value, so the question lands while the impression is fresh. Shown at that breakpoint; never during onboarding, never mid-task.</div>
+  </div>
+
+  <!-- ========= 1 · WHERE IT LANDS IN THE JOURNEY ========= -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:18px;">1 · Where it lands in the journey</div>
+
+  <div style="position:relative; width:1180px; margin-bottom:14px; padding:0 6px;">
+    <!-- track -->
+    <div style="position:absolute; left:14px; right:14px; top:13px; height:2px; background:#cfd2d8;"></div>
+    <div style="display:flex; justify-content:space-between; position:relative;">
+      <sc-for list="{{ journey }}" as="j" hint-placeholder-count="6">
+        <div style="display:flex; flex-direction:column; align-items:center; width:180px;">
+          <div style="width:{{ j.dot }}; height:{{ j.dot }}; border-radius:50%; background:{{ j.bg }}; border:2px solid {{ j.ring }}; box-sizing:border-box; display:flex; align-items:center; justify-content:center;"><span style="font-size:11px; color:#fff;">{{ j.glyph }}</span></div>
+          <div style="font-size:12px; font-weight:600; color:{{ j.labelColor }}; margin-top:10px; text-align:center;">{{ j.label }}</div>
+          <div style="font-size:11px; line-height:14px; color:#6C707E; margin-top:3px; text-align:center;">{{ j.sub }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  <div style="font-size:12px; line-height:16px; color:#6C707E; margin-bottom:48px; max-width:820px;">Onboarding sets up; the <span style="font-style:italic;">first value-proof event</span> — a resolved thread, a context enrichment, or a chat reply — is the trigger itself. The prompt rides that breakpoint, so the question arrives the moment the user has just felt Sinain do something useful.</div>
+
+  <!-- ========= 2 · THE PROMPT ITSELF ========= -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:18px;">2 · The prompt — a menu-bar toast by the eye</div>
+
+  <div style="display:flex; gap:36px; align-items:flex-start; margin-bottom:48px;">
+
+    <!-- desktop scene with toast -->
+    <div style="flex:none; width:520px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">In context — drops at a breakpoint</div>
+      <div style="position:relative; width:520px; height:300px; background:#F7F8FA; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.12); overflow:hidden;">
+        <!-- menu bar -->
+        <div style="height:24px; background:#1E1F22; display:flex; align-items:center; justify-content:flex-end; gap:14px; padding:0 12px;">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.4"><circle cx="8" cy="8" r="6"/></svg>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.4"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke-linecap="round"/></svg>
+          <div style="position:relative; width:20px; height:20px; display:flex; align-items:center; justify-content:center;">
+            <div style="position:absolute; inset:0; border-radius:50%; border:1px solid rgba(31,128,57,.5); animation:fpHalo 2.8s ease-out infinite;"></div>
+            <svg width="17" height="17" viewBox="0 0 30 30" style="position:relative;"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+          </div>
+        </div>
+        <!-- dimmed content behind -->
+        <div style="padding:22px; opacity:.5;"><div style="height:10px; width:46%; background:#DFE1E5; border-radius:3px; margin-bottom:16px;"></div><div style="height:8px; width:88%; background:#EBECF0; border-radius:3px; margin-bottom:10px;"></div><div style="height:8px; width:80%; background:#EBECF0; border-radius:3px; margin-bottom:10px;"></div><div style="height:8px; width:62%; background:#EBECF0; border-radius:3px;"></div></div>
+        <!-- toast, anchored under the eye -->
+        <div style="position:absolute; right:12px; top:34px; width:288px; background:#1E1F22; border:1px solid rgba(31,128,57,.4); border-radius:10px; box-shadow:0 12px 32px rgba(0,28,54,.34); padding:16px 16px; box-sizing:border-box; color:#fff;">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:9px;">
+            <svg width="16" height="16" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13.5" fill="#1E1F22" stroke="#1F8039" stroke-width="3"></circle><path d="M15 7.5 C 17.6 11.5, 17.6 18.5, 15 22.5 C 12.4 18.5, 12.4 11.5, 15 7.5 Z" fill="#1F8039"></path></svg>
+            <span style="font-size:14px; font-weight:600;">Was that helpful?</span>
+          </div>
+          <div style="font-size:13px; line-height:18px; color:#A8ADBD; margin-bottom:14px;">Sinain's still early. Now that you've seen it in action — one quick question on whether it's worth keeping around?</div>
+          <div style="display:flex; gap:8px;">
+            <a href="https://github.com/sinain-hud/discussions/231" target="_blank" rel="noopener" style="flex:1; height:32px; display:flex; align-items:center; justify-content:center; background:{{ accentHex }}; border-radius:6px; color:#fff; font-size:13px; font-weight:500; text-decoration:none; cursor:pointer;">Answer the poll</a>
+            <button style="height:32px; padding:0 14px; background:transparent; border:1px solid rgba(255,255,255,.18); border-radius:6px; color:#A8ADBD; font-size:13px; cursor:pointer;">Later</button>
+          </div>
+          <div style="text-align:center; margin-top:9px;"><span style="font-size:11px; color:#6C707E; cursor:pointer;">Don't ask again</span></div>
+          <!-- little pointer to the eye -->
+          <div style="position:absolute; top:-6px; right:18px; width:11px; height:11px; background:#1E1F22; border-left:1px solid rgba(31,128,57,.4); border-top:1px solid rgba(31,128,57,.4); transform:rotate(45deg);"></div>
+        </div>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">Hangs off the eye in the menu bar — clearly Sinain speaking, not an OS notification. Honest about being early-stage. <span style="color:#27282E; font-weight:500;">Answer</span> opens #231 in the browser; <span style="color:#27282E; font-weight:500;">Later</span> re-arms in a few days; <span style="color:#27282E; font-weight:500;">Don't ask again</span> retires it for good.</div></sc-if>
+    </div>
+
+    <!-- anatomy / states stack -->
+    <div style="flex:none; width:300px; display:flex; flex-direction:column; gap:22px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:-8px;">The three outcomes</div>
+
+      <!-- answered -->
+      <div>
+        <div style="width:300px; background:#1E1F22; border-radius:9px; box-shadow:0 2px 10px rgba(0,28,54,.14); color:#fff; padding:13px 14px; box-sizing:border-box; display:flex; align-items:center; gap:11px;">
+          <span style="flex:none; width:24px; height:24px; border-radius:50%; background:rgba(31,128,57,.18); display:flex; align-items:center; justify-content:center;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="2"><path d="M3.5 8.5l3 3 6-6.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div style="flex:1;"><div style="font-size:13px; font-weight:600;">Opened in browser</div><div style="font-size:11px; color:#6C707E;">retired · won't ask again</div></div>
+        </div>
+        <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:15px; color:#6C707E; margin-top:7px;"><span style="color:#27282E; font-weight:500;">Answer →</span> #231 opens; the prompt never returns. (No local rating to fake.)</div></sc-if>
+      </div>
+
+      <!-- later -->
+      <div>
+        <div style="width:300px; background:#1E1F22; border-radius:9px; box-shadow:0 2px 10px rgba(0,28,54,.14); color:#fff; padding:13px 14px; box-sizing:border-box; display:flex; align-items:center; gap:11px;">
+          <span style="flex:none; width:24px; height:24px; border-radius:50%; background:rgba(51,105,214,.18); display:flex; align-items:center; justify-content:center;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#3369D6" stroke-width="1.6"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.2l2 1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div style="flex:1;"><div style="font-size:13px; font-weight:600;">Later</div><div style="font-size:11px; color:#6C707E;">re-arms in ~3 days</div></div>
+        </div>
+        <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:15px; color:#6C707E; margin-top:7px;"><span style="color:#27282E; font-weight:500;">Later →</span> backs off, then re-offers once at the next breakpoint. Max two asks, ever.</div></sc-if>
+      </div>
+
+      <!-- never -->
+      <div>
+        <div style="width:300px; background:#1E1F22; border-radius:9px; box-shadow:0 2px 10px rgba(0,28,54,.14); color:#fff; padding:13px 14px; box-sizing:border-box; display:flex; align-items:center; gap:11px;">
+          <span style="flex:none; width:24px; height:24px; border-radius:50%; background:rgba(108,112,126,.2); display:flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.6"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg></span>
+          <div style="flex:1;"><div style="font-size:13px; font-weight:600;">Don't ask again</div><div style="font-size:11px; color:#6C707E;">retired · respected</div></div>
+        </div>
+        <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:15px; color:#6C707E; margin-top:7px;"><span style="color:#27282E; font-weight:500;">Don't ask again →</span> gone for good. Always reachable from the eye menu if they change their mind.</div></sc-if>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ========= 3 · THE PERMANENT ENTRY ========= -->
+  <div style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#6C707E; margin-bottom:18px;">3 · Always-available fallback — the eye menu</div>
+
+  <div style="display:flex; gap:36px; align-items:flex-start;">
+    <div style="flex:none; width:300px;">
+      <div style="font-size:13px; font-weight:600; color:#27282E; margin-bottom:8px;">Right-click the eye → Send feedback</div>
+      <div style="width:248px; background:#2B2D30; border:1px solid rgba(255,255,255,.14); border-radius:9px; box-shadow:0 8px 28px rgba(0,0,0,.4); overflow:hidden; color:#fff;">
+        <div style="display:flex; align-items:center; gap:9px; padding:9px 13px;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="M2.5 6.5h11" /></svg><span style="font-size:13px;">Attention Board</span></div>
+        <div style="display:flex; align-items:center; gap:9px; padding:9px 13px;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><path d="M8 3v10M3 8h10" stroke-linecap="round"/></svg><span style="font-size:13px;">New region</span></div>
+        <div style="display:flex; align-items:center; gap:9px; padding:9px 13px;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A8ADBD" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke-linecap="round"/></svg><span style="font-size:13px;">Settings</span></div>
+        <div style="height:1px; background:rgba(255,255,255,.08); margin:3px 0;"></div>
+        <a href="https://github.com/sinain-hud/discussions/231" target="_blank" rel="noopener" style="display:flex; align-items:center; gap:9px; padding:9px 13px; text-decoration:none; color:#fff;" style-hover="background:rgba(255,255,255,.05);">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#1F8039" stroke-width="1.5"><path d="M3 4h10v7H8l-3 2v-2H3z" stroke-linejoin="round"/></svg>
+          <span style="font-size:13px; flex:1;">Send feedback</span>
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#6C707E" stroke-width="1.5"><path d="M7 4l4 4-4 4M5 8h6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+      </div>
+      <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}"><div style="font-size:12px; line-height:16px; color:#6C707E; margin-top:10px;">The prompt is opportunistic and may never fire for a given user. So the survey also lives as a permanent, low-key <span style="color:#27282E; font-weight:500;">"Send feedback"</span> item in the eye's context menu — same link, available the moment anyone wants to vent or praise.</div></sc-if>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;showAnnotations&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot; },
+  &quot;accent&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;Ring green&quot;, &quot;options&quot;: [&quot;Ring green&quot;, &quot;Ring blue&quot;, &quot;Amber&quot;], &quot;tsType&quot;: &quot;string&quot; }
+}">
+class Component extends DCLogic {
+  renderVals() {
+    const accMap = { 'Ring green': '#1F8039', 'Ring blue': '#3369D6', 'Amber': '#E56D17' };
+    const accentHex = accMap[this.props.accent ?? 'Ring green'] || '#1F8039';
+
+    const past = { dot: '14px', bg: '#1F8039', ring: '#1F8039', glyph: '', labelColor: '#27282E' };
+    const trigger = { dot: '18px', bg: '#1F8039', ring: '#1F8039', glyph: '✓', labelColor: '#27282E' };
+    const star = { dot: '22px', bg: accentHex, ring: accentHex, glyph: '★', labelColor: '#27282E' };
+    const future = { dot: '14px', bg: '#e7e5df', ring: '#cfd2d8', glyph: '', labelColor: '#6C707E' };
+
+    const journey = [
+      { ...past, label: 'Install', sub: 'first launch' },
+      { ...past, label: 'Onboarding', sub: '9 scenes · setup' },
+      { ...past, label: 'Markers appear', sub: 'Sinain speaks up' },
+      { ...trigger, label: 'First value proof', sub: 'resolved · enriched · chatted' },
+      { ...star, label: 'Feedback prompt', sub: 'rides that breakpoint · once' },
+      { ...future, label: 'Ongoing use', sub: 'never asked again' },
+    ];
+
+    return {
+      showAnnotations: this.props.showAnnotations !== false,
+      accentHex,
+      journey,
+    };
+  }
+}
+</script>
+</body>
+</html>

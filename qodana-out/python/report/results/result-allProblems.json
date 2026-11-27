@@ -1,0 +1,1175 @@
+{
+  "version": "3",
+  "listProblem": [
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Class has no `__init__` method",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Class has no __init__ method",
+      "detailsInfo": "Reports cases in Python 2 when a class has no `__init__` method, neither its parent\nclasses.\n\n**Example:**\n\n\n    class Book():\n        pass\n\nThe quick-fix adds the `__init__` method:\n\n\n    class Book():\n        def __init__(self):\n            pass\n\nInspection ID: PyClassHasNoInitInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "roi_extractor.py",
+          "language": "Python",
+          "line": 10,
+          "offset": 7,
+          "length": 3,
+          "code": {
+            "startLine": 8,
+            "length": 3,
+            "offset": 18,
+            "surroundingCode": "\n@dataclass\nclass ROI:\n    image: Image.Image\n    bbox: tuple[int, int, int, int]  # (x, y, w, h)"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyClassHasNoInitInspection"
+      },
+      "hash": "0039ccc483c4a94aec7f65a2a5ee5e7d565af9692687efd53a18ff1e6d6ee5a3",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Class has no `__init__` method",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Class has no __init__ method",
+      "detailsInfo": "Reports cases in Python 2 when a class has no `__init__` method, neither its parent\nclasses.\n\n**Example:**\n\n\n    class Book():\n        pass\n\nThe quick-fix adds the `__init__` method:\n\n\n    class Book():\n        def __init__(self):\n            pass\n\nInspection ID: PyClassHasNoInitInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ocr.py",
+          "language": "Python",
+          "line": 19,
+          "offset": 7,
+          "length": 9,
+          "code": {
+            "startLine": 17,
+            "length": 9,
+            "offset": 18,
+            "surroundingCode": "\n@dataclass\nclass OCRResult:\n    text: str\n    confidence: float"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyClassHasNoInitInspection"
+      },
+      "hash": "6fdf502a10e1ac04286d1a6a12e64eed6453afb844b7314f9eeac4234122de4d",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Method is not declared static",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Method `_global_frontmost` may be 'static'",
+      "detailsInfo": "Reports any methods that do not require a class instance creation and can be\nmade static.\n\n**Example:**\n\n\n    class MyClass(object):\n        def my_method(self, x):\n            print(x)\n\nIf a **Make function from method** quick-fix is applied, the code changes to:\n\n\n    def my_method(x):\n        print(x)\n\n\n    class MyClass(object):\n        pass\n\nIf you select the **Make method static** quick-fix, the `@staticmethod` decorator is added:\n\n\n    class MyClass(object):\n        @staticmethod\n        def my_method(x):\n            print(x)\n\nInspection ID: PyMethodMayBeStaticInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "app_detector.py",
+          "language": "Python",
+          "line": 57,
+          "offset": 9,
+          "length": 17,
+          "code": {
+            "startLine": 55,
+            "length": 17,
+            "offset": 29,
+            "surroundingCode": "        return None\n\n    def _global_frontmost(self) -> tuple[str, str]:\n        \"\"\"AppleScript fallback — global frontmost app (display-agnostic).\"\"\"\n        try:"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyMethodMayBeStaticInspection"
+      },
+      "hash": "f590ad90f77cf715a633785d44509fdbe697db5b5ec52125d5f9fa48e39f5a20",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "PEP 8 naming convention violation",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Variable in function should be lowercase",
+      "detailsInfo": "No description available",
+      "sources": [
+        {
+          "type": "file",
+          "path": "app_detector.py",
+          "language": "Python",
+          "line": 30,
+          "offset": 9,
+          "length": 1,
+          "code": {
+            "startLine": 28,
+            "length": 1,
+            "offset": 147,
+            "surroundingCode": "        \"\"\"(app, title) of the frontmost normal window whose center is on the\n        given display, or None if it can't be determined.\"\"\"\n        Q = self._quartz\n        if Q is None or not display_id:\n            return None"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyPep8NamingInspection"
+      },
+      "hash": "3d4f14fbb824386d3320fe782f39fedb63503ee4ab6b00973c1dbc3532ef5aac",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "PEP 8 naming convention violation",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Variable in function should be lowercase",
+      "detailsInfo": "No description available",
+      "sources": [
+        {
+          "type": "file",
+          "path": "app_detector_win.py",
+          "language": "Python",
+          "line": 56,
+          "offset": 13,
+          "length": 15,
+          "code": {
+            "startLine": 54,
+            "length": 15,
+            "offset": 72,
+            "surroundingCode": "        try:\n            PROCESS_QUERY_INFORMATION = 0x0400\n            PROCESS_VM_READ = 0x0010\n            handle = self._kernel32.OpenProcess(\n                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyPep8NamingInspection"
+      },
+      "hash": "42e4f65927172d8731d16e159ce00732e75ec0061f84dfa891c7954f41884c9e",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "PEP 8 naming convention violation",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Function name should be lowercase",
+      "detailsInfo": "No description available",
+      "sources": [
+        {
+          "type": "file",
+          "path": "app_detector.py",
+          "language": "Python",
+          "line": 100,
+          "offset": 5,
+          "length": 11,
+          "code": {
+            "startLine": 98,
+            "length": 11,
+            "offset": 6,
+            "surroundingCode": "\n\ndef AppDetector():\n    \"\"\"Factory: returns the platform-appropriate app detector.\"\"\"\n    if sys.platform == \"win32\":"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyPep8NamingInspection"
+      },
+      "hash": "8d6d46fa7b2048d3572fe7820b2352d6e4a111b9934a3b0c79243c5d0cc43614",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "PEP 8 naming convention violation",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Variable in function should be lowercase",
+      "detailsInfo": "No description available",
+      "sources": [
+        {
+          "type": "file",
+          "path": "motion.py",
+          "language": "Python",
+          "line": 37,
+          "offset": 12,
+          "length": 1,
+          "code": {
+            "startLine": 35,
+            "length": 1,
+            "offset": 88,
+            "surroundingCode": "        if prev is None or prev.shape != gray.shape:\n            return None\n        H, W = gray.shape\n\n        # 1. WHERE did pixels change? A global phase correlation is washed out by"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyPep8NamingInspection"
+      },
+      "hash": "9201506f0d9553f7a72cda3586b091b23f9a992a0177df7e187e72d665678377",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "PEP 8 naming convention violation",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Variable in function should be lowercase",
+      "detailsInfo": "No description available",
+      "sources": [
+        {
+          "type": "file",
+          "path": "motion.py",
+          "language": "Python",
+          "line": 37,
+          "offset": 9,
+          "length": 1,
+          "code": {
+            "startLine": 35,
+            "length": 1,
+            "offset": 85,
+            "surroundingCode": "        if prev is None or prev.shape != gray.shape:\n            return None\n        H, W = gray.shape\n\n        # 1. WHERE did pixels change? A global phase correlation is washed out by"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyPep8NamingInspection"
+      },
+      "hash": "cfd9411dd669c495c49b2335c724385d740964577daebfe42501401a646562f5",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "PEP 8 naming convention violation",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Variable in function should be lowercase",
+      "detailsInfo": "No description available",
+      "sources": [
+        {
+          "type": "file",
+          "path": "app_detector_win.py",
+          "language": "Python",
+          "line": 55,
+          "offset": 13,
+          "length": 25,
+          "code": {
+            "startLine": 53,
+            "length": 25,
+            "offset": 78,
+            "surroundingCode": "        # Fallback: OpenProcess + GetModuleBaseNameW\n        try:\n            PROCESS_QUERY_INFORMATION = 0x0400\n            PROCESS_VM_READ = 0x0010\n            handle = self._kernel32.OpenProcess("
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyPep8NamingInspection"
+      },
+      "hash": "d168608f1cde906320a6e24be4a44b48a8693297aaa3a19fbfd99b95893e23eb",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Accessing a protected member of a class or a module",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Access to a protected member _is_duplicate of a class",
+      "detailsInfo": "Reports cases when a protected member is accessed outside the class,\na descendant of the class where it is defined, or a module.\n\n**Example:**\n\n\n    class Foo:\n        def _protected_method(self):\n            pass\n\n\n    class Bar(Foo):\n        def public_method(self):\n            self._protected_method()\n\n\n    foo = Foo()\n    foo._protected_method() # Access to a protected method\n\nInspection ID: PyProtectedMemberInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 81,
+          "offset": 21,
+          "length": 18,
+          "code": {
+            "startLine": 79,
+            "length": 18,
+            "offset": 124,
+            "surroundingCode": "    if ocr_len < gate.min_ocr_chars:\n        return f\"too_few_chars ({ocr_len} < {gate.min_ocr_chars})\"\n    if ocr.text and gate._is_duplicate(ocr.text):\n        return \"duplicate (similar to recent text)\"\n    if ocr.text and not gate._ocr_quality_ok(ocr.text):"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyProtectedMemberInspection"
+      },
+      "hash": "5b6f857224e5cd3ee5d686ffd46cce3fb2a29de241e83352a9f490adecc9a1ab",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Accessing a protected member of a class or a module",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Access to a protected member _available of a class",
+      "detailsInfo": "Reports cases when a protected member is accessed outside the class,\na descendant of the class where it is defined, or a module.\n\n**Example:**\n\n\n    class Foo:\n        def _protected_method(self):\n            pass\n\n\n    class Bar(Foo):\n        def public_method(self):\n            self._protected_method()\n\n\n    foo = Foo()\n    foo._protected_method() # Access to a protected method\n\nInspection ID: PyProtectedMemberInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ocr.py",
+          "language": "Python",
+          "line": 396,
+          "offset": 12,
+          "length": 17,
+          "code": {
+            "startLine": 394,
+            "length": 17,
+            "offset": 50,
+            "surroundingCode": "            enabled=enabled,\n        )\n        if winocr._available:\n            print(\n                f\"[ocr] using WinOCR backend (language={winocr.language})\", flush=True"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyProtectedMemberInspection"
+      },
+      "hash": "7ec37ce79d71271c2bf4e83012b6b9ba5bdf213f1d8892b138ec7c0b52f9eb42",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Accessing a protected member of a class or a module",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Access to a protected member _ocr_quality_ok of a class",
+      "detailsInfo": "Reports cases when a protected member is accessed outside the class,\na descendant of the class where it is defined, or a module.\n\n**Example:**\n\n\n    class Foo:\n        def _protected_method(self):\n            pass\n\n\n    class Bar(Foo):\n        def public_method(self):\n            self._protected_method()\n\n\n    foo = Foo()\n    foo._protected_method() # Access to a protected method\n\nInspection ID: PyProtectedMemberInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 83,
+          "offset": 25,
+          "length": 20,
+          "code": {
+            "startLine": 81,
+            "length": 20,
+            "offset": 126,
+            "surroundingCode": "    if ocr.text and gate._is_duplicate(ocr.text):\n        return \"duplicate (similar to recent text)\"\n    if ocr.text and not gate._ocr_quality_ok(ocr.text):\n        return \"bad_quality (ocr noise)\"\n    if change.ssim_score >= gate.major_change_threshold:"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyProtectedMemberInspection"
+      },
+      "hash": "cacbab59fb0c77d3ea432f9c9ffb9d16481a62e985cbe74e12b1d769a014964b",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Accessing a protected member of a class or a module",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Access to a protected member _available of a class",
+      "detailsInfo": "Reports cases when a protected member is accessed outside the class,\na descendant of the class where it is defined, or a module.\n\n**Example:**\n\n\n    class Foo:\n        def _protected_method(self):\n            pass\n\n\n    class Bar(Foo):\n        def public_method(self):\n            self._protected_method()\n\n\n    foo = Foo()\n    foo._protected_method() # Access to a protected method\n\nInspection ID: PyProtectedMemberInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ocr.py",
+          "language": "Python",
+          "line": 377,
+          "offset": 12,
+          "length": 17,
+          "code": {
+            "startLine": 375,
+            "length": 17,
+            "offset": 50,
+            "surroundingCode": "            enabled=enabled,\n        )\n        if vision._available:\n            print(\n                f\"[ocr] using Vision backend (languages={vision.languages})\", flush=True"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyProtectedMemberInspection"
+      },
+      "hash": "e7c2d55d601c2896f42cd4d1d661434c1d7f0d51b90f104413cf3fa40a903776",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Shadowing names from outer scopes",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Shadows name 'e' from outer scope",
+      "detailsInfo": "Reports shadowing names defined in outer scopes.\n\n**Example:**\n\n\n    def outer(p):\n        def inner(p):\n            pass\n\nAs a quick-fix, the IDE offers to remove a parameter or rename it.\n\nInspection ID: PyShadowingNamesInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 515,
+          "offset": 37,
+          "length": 1,
+          "code": {
+            "startLine": 513,
+            "length": 1,
+            "offset": 132,
+            "surroundingCode": "                        ctx_ev.vision_cost = v_cost\n                        sender.send(ctx_ev)\n                except Exception as e:\n                    log(f\"vision error: {e}\")\n            vision_pool.submit(_do_vision, _v_frame, _v_meta, _v_ts, _v_prompt)"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyShadowingNamesInspection"
+      },
+      "hash": "2c180f54e1a5bc2ac6c17e56e2fb06979b60ed0b7c4076625037d0eaca678f85",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Shadowing names from outer scopes",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Shadows name 'result' from outer scope",
+      "detailsInfo": "Reports shadowing names defined in outer scopes.\n\n**Example:**\n\n\n    def outer(p):\n        def inner(p):\n            pass\n\nAs a quick-fix, the IDE offers to remove a parameter or rename it.\n\nInspection ID: PyShadowingNamesInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ocr.py",
+          "language": "Python",
+          "line": 322,
+          "offset": 13,
+          "length": 6,
+          "code": {
+            "startLine": 320,
+            "length": 6,
+            "offset": 31,
+            "surroundingCode": "                )\n\n            result = await self._engine.recognize_async(bitmap)\n            return result\n"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyShadowingNamesInspection"
+      },
+      "hash": "44fbced739a3a4c491f80eceeccda6c160ca0b7d6ab10d652126373adddd2440",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Shadowing names from outer scopes",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Shadows name 'ts' from outer scope",
+      "detailsInfo": "Reports shadowing names defined in outer scopes.\n\n**Example:**\n\n\n    def outer(p):\n        def inner(p):\n            pass\n\nAs a quick-fix, the IDE offers to remove a parameter or rename it.\n\nInspection ID: PyShadowingNamesInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 492,
+          "offset": 41,
+          "length": 2,
+          "code": {
+            "startLine": 490,
+            "length": 2,
+            "offset": 107,
+            "surroundingCode": "            _v_ts = event.ts\n            _v_prompt = vision_prompt\n            def _do_vision(frame, meta, ts, prompt):\n                try:\n                    from PIL import Image as PILImage"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyShadowingNamesInspection"
+      },
+      "hash": "5379c5def1d2e493b48164a3b272b0e69f5791e0aaa4a7e21f7b79ffb66d6cc1",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Shadowing names from outer scopes",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Shadows name 'frame' from outer scope",
+      "detailsInfo": "Reports shadowing names defined in outer scopes.\n\n**Example:**\n\n\n    def outer(p):\n        def inner(p):\n            pass\n\nAs a quick-fix, the IDE offers to remove a parameter or rename it.\n\nInspection ID: PyShadowingNamesInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 492,
+          "offset": 28,
+          "length": 5,
+          "code": {
+            "startLine": 490,
+            "length": 5,
+            "offset": 94,
+            "surroundingCode": "            _v_ts = event.ts\n            _v_prompt = vision_prompt\n            def _do_vision(frame, meta, ts, prompt):\n                try:\n                    from PIL import Image as PILImage"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyShadowingNamesInspection"
+      },
+      "hash": "cbcc31375ed90a77970899595162d936d4e091a9d806900f43806c97bf46aee9",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "motion.py",
+          "language": "Python",
+          "line": 18,
+          "offset": 20,
+          "length": 17,
+          "code": {
+            "startLine": 16,
+            "length": 17,
+            "offset": 154,
+            "surroundingCode": "    def __init__(self, min_shift: float = 2.0, resid_thresh: int = 45,\n                 min_box_area: int = 600, max_boxes: int = 16):\n        self.prev: np.ndarray | None = None\n        self.min_shift = min_shift\n        self.resid_thresh = resid_thresh"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "1a9bfacb8b2bfe164e7f3ca9dd2af147d642eb51fedd3ab7ef8930359d597d89",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ollama_vision.py",
+          "language": "Python",
+          "line": 147,
+          "offset": 60,
+          "length": 10,
+          "code": {
+            "startLine": 145,
+            "length": 10,
+            "offset": 84,
+            "surroundingCode": "            return None\n\n    def _encode_image(self, image: \"Image.Image\", max_dim: int | None = None, quality: int = 80) -> Optional[str]:\n        \"\"\"Encode PIL Image to base64 JPEG string for Ollama.\"\"\"\n        try:"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "5256d6bd7169978c0ccda1ec7a8654ccb41ad1535c6cb7d420e9945ab0924ed7",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ocr.py",
+          "language": "Python",
+          "line": 26,
+          "offset": 12,
+          "length": 11,
+          "code": {
+            "startLine": 24,
+            "length": 11,
+            "offset": 157,
+            "surroundingCode": "    # [{\"text\": str, \"bbox\": [x, y, w, h]}]. Vision backend only — used by\n    # sinain-core to anchor region eyes at the exact line of an issue.\n    lines: list | None = None\n\n"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "8f28df49bcb0b7f60ff3040e2cb05aaed49361fb15867c84bc255262b61534a2",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "ocr.py",
+          "language": "Python",
+          "line": 102,
+          "offset": 20,
+          "length": 16,
+          "code": {
+            "startLine": 100,
+            "length": 16,
+            "offset": 51,
+            "surroundingCode": "    def __init__(\n        self,\n        languages: list[str] | None = None,\n        min_confidence: float = 0.5,\n        enabled: bool = True,"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "914ca4e90c310437333ad18ade0c538d0e0888bce317d551270086717e2fc0ea",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "gate.py",
+          "language": "Python",
+          "line": 72,
+          "offset": 32,
+          "length": 19,
+          "code": {
+            "startLine": 70,
+            "length": 19,
+            "offset": 52,
+            "surroundingCode": "        return True\n\n    def classify(self, change: ChangeResult | None,\n                 ocr: OCRResult, app_changed: bool,\n                 window_changed: bool = False) -> SenseEvent | None:"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "a0e38534e6c2035b3ab8cd644def66e149ae5a8f80b6c843428051946082bb02",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "capture.py",
+          "language": "Python",
+          "line": 132,
+          "offset": 32,
+          "length": 32,
+          "code": {
+            "startLine": 130,
+            "length": 32,
+            "offset": 57,
+            "surroundingCode": "            return False\n\n    def capture_frame(self) -> tuple[Image.Image, float] | None:\n        \"\"\"Read the latest frame from IPC.\n"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "b02278c1beb069ba91fee7972e8f62fb5da1fda8db1a80f17cf0bebcb4989def",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "config.py",
+          "language": "Python",
+          "line": 66,
+          "offset": 23,
+          "length": 10,
+          "code": {
+            "startLine": 64,
+            "length": 10,
+            "offset": 24,
+            "surroundingCode": "\n\ndef load_config(path: str | None = None) -> dict:\n    \"\"\"Load config from JSON file, merge with defaults.\"\"\"\n    config = json.loads(json.dumps(DEFAULTS))  # deep copy"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "da7e053df9ef6d6a822949446e44572c5f11e9e48fa5cd82926f692525e6323c",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Invalid type hints definitions and usages",
+      "tags": [
+        "Python"
+      ],
+      "severity": "High",
+      "comment": "Invalid type annotation",
+      "detailsInfo": "Reports invalid usages of type hints.\n\n**Example:**\n\n\n    from typing import TypeVar\n\n    T0 = TypeVar('T1') # Argument of 'TypeVar' must be 'T0'\n\n\n    def b(p: int) -> int:  # Type specified both in a comment and annotation\n        # type: (int) -> int\n        pass\n\n\n    def c(p1, p2): # Type signature has too many arguments\n        # type: (int) -> int\n        pass\n\nAvailable quick-fixes offer various actions. You can rename, remove, or move problematic elements. You can also manually modify type\ndeclarations to ensure no warning is shown.\n\nInspection ID: PyTypeHintsInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "gate.py",
+          "language": "Python",
+          "line": 74,
+          "offset": 51,
+          "length": 17,
+          "code": {
+            "startLine": 72,
+            "length": 17,
+            "offset": 154,
+            "surroundingCode": "    def classify(self, change: ChangeResult | None,\n                 ocr: OCRResult, app_changed: bool,\n                 window_changed: bool = False) -> SenseEvent | None:\n        \"\"\"Returns SenseEvent to send, or None to drop.\"\"\"\n        now = time.time() * 1000"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyTypeHintsInspection"
+      },
+      "hash": "ff0de92960a85c9cca1ca0504bd14204d649c1586d043c15a74f23f116a1472d",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Unused local symbols",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Local variable 'W' value is not used",
+      "detailsInfo": "Reports local variables, parameters, and functions that are locally defined, but not used name in a function.\n\nInspection ID: PyUnusedLocalInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "motion.py",
+          "language": "Python",
+          "line": 37,
+          "offset": 12,
+          "length": 1,
+          "code": {
+            "startLine": 35,
+            "length": 1,
+            "offset": 88,
+            "surroundingCode": "        if prev is None or prev.shape != gray.shape:\n            return None\n        H, W = gray.shape\n\n        # 1. WHERE did pixels change? A global phase correlation is washed out by"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyUnusedLocalInspection"
+      },
+      "hash": "6079e362bd765c1f074d49de50c005e3803c4056aa8672d81add1928dbc00e43",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Unused local symbols",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Parameter 'window_changed' value is not used",
+      "detailsInfo": "Reports local variables, parameters, and functions that are locally defined, but not used name in a function.\n\nInspection ID: PyUnusedLocalInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 66,
+          "offset": 50,
+          "length": 14,
+          "code": {
+            "startLine": 64,
+            "length": 14,
+            "offset": 51,
+            "surroundingCode": "\n\ndef _gate_reason(gate, change, ocr, app_changed, window_changed):\n    \"\"\"Diagnose why the gate dropped an event.\"\"\"\n    now = time.time() * 1000"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyUnusedLocalInspection"
+      },
+      "hash": "65b027afff53f03b794dc074a273b2d7cde8c776a34a564be41253550523884b",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Unused local symbols",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Local variable 'H' value is not used",
+      "detailsInfo": "Reports local variables, parameters, and functions that are locally defined, but not used name in a function.\n\nInspection ID: PyUnusedLocalInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "motion.py",
+          "language": "Python",
+          "line": 37,
+          "offset": 9,
+          "length": 1,
+          "code": {
+            "startLine": 35,
+            "length": 1,
+            "offset": 85,
+            "surroundingCode": "        if prev is None or prev.shape != gray.shape:\n            return None\n        H, W = gray.shape\n\n        # 1. WHERE did pixels change? A global phase correlation is washed out by"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyUnusedLocalInspection"
+      },
+      "hash": "89bc8d27802dec660cc5ec535f5619b4327b4bf41904e9b7e0f601900d1cdf07",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Unused local symbols",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Parameter 'app_changed' value is not used",
+      "detailsInfo": "Reports local variables, parameters, and functions that are locally defined, but not used name in a function.\n\nInspection ID: PyUnusedLocalInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "__main__.py",
+          "language": "Python",
+          "line": 66,
+          "offset": 37,
+          "length": 11,
+          "code": {
+            "startLine": 64,
+            "length": 11,
+            "offset": 38,
+            "surroundingCode": "\n\ndef _gate_reason(gate, change, ocr, app_changed, window_changed):\n    \"\"\"Diagnose why the gate dropped an event.\"\"\"\n    now = time.time() * 1000"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyUnusedLocalInspection"
+      },
+      "hash": "b75b80c9a95a390dd303bf80b51560624ea27472ccda6ed14b76ab21bd0fd4c6",
+      "problemType": "REGULAR"
+    },
+    {
+      "tool": "Code Inspection",
+      "category": "Python",
+      "categoryPath": [
+        {
+          "id": "Python",
+          "name": "Python"
+        }
+      ],
+      "type": "Unused local symbols",
+      "tags": [
+        "Python"
+      ],
+      "severity": "Moderate",
+      "comment": "Parameter 'kwargs' value is not used",
+      "detailsInfo": "Reports local variables, parameters, and functions that are locally defined, but not used name in a function.\n\nInspection ID: PyUnusedLocalInspection",
+      "sources": [
+        {
+          "type": "file",
+          "path": "capture.py",
+          "language": "Python",
+          "line": 110,
+          "offset": 60,
+          "length": 8,
+          "code": {
+            "startLine": 108,
+            "length": 8,
+            "offset": 97,
+            "surroundingCode": "    STALE_THRESHOLD = 1.0  # seconds\n\n    def __init__(self, fps: float = 1, scale: float = 1.0, **kwargs):\n        self.fps = fps\n        self.scale = scale"
+          }
+        }
+      ],
+      "attributes": {
+        "module": "project",
+        "inspectionName": "PyUnusedLocalInspection"
+      },
+      "hash": "cade960e5f3b7b782e40e4d0e78b88cf8b1d75675ec8b9cb4c7dae28b85e9a3e",
+      "problemType": "REGULAR"
+    }
+  ]
+}
