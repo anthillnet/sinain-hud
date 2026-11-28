@@ -1134,6 +1134,9 @@ async function main() {
     try { return Number(new URL(chatSidecarUrl).port) || 9610; } catch { return 9610; }
   })();
   let chatSidecarProc: ReturnType<typeof spawn> | null = null;
+  let chatSidecarRestartAttempts = 0;
+  let chatSidecarRestartTimer: ReturnType<typeof setTimeout> | null = null;
+  let chatSidecarCrashBroadcast = false;
 
   // ── Resident memory worker (memoryd.py — DESIGN-MEMORY-V2 P1) ──
   // Supersedes kg_daemon on the SAME socket: warm read-only ROI protocol
@@ -1181,7 +1184,15 @@ async function main() {
   // (Re)start the sidecar on demand — only when it's actually down, so we never
   // double-bind against the launcher's instance. Used by the overlay Run button
   // when the resident chat lane is selected but unreachable.
-  function restartChatSidecar(): { ok: boolean; error?: string } {
+  function restartChatSidecar(manual = true): { ok: boolean; error?: string } {
+    if (manual) {
+      chatSidecarRestartAttempts = 0;
+      chatSidecarCrashBroadcast = false;
+      if (chatSidecarRestartTimer) {
+        clearTimeout(chatSidecarRestartTimer);
+        chatSidecarRestartTimer = null;
+      }
+    }
     if (chatSidecarProc && !chatSidecarProc.killed && chatSidecarProc.exitCode === null) {
       return { ok: true };
     }
@@ -1210,6 +1221,27 @@ async function main() {
       warn(TAG, `chat sidecar failed to start: ${err.message}`);
       wsHandler.broadcast(`⚠ sinain-chat failed to start: ${err.message.slice(0, 120)}`, "high");
     });
+    child.once("exit", (code, signal) => {
+      if (chatSidecarProc !== child) return;
+      chatSidecarProc = null;
+      const exitText = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      warn(TAG, `chat sidecar exited (${exitText})`);
+      if (shuttingDown) return;
+      chatSidecarRestartAttempts += 1;
+      if (chatSidecarRestartAttempts >= 5) {
+        if (!chatSidecarCrashBroadcast) {
+          chatSidecarCrashBroadcast = true;
+          wsHandler.broadcast("⚠ sinain-chat keeps crashing — check backend.log ([chat] lines)", "high");
+        }
+        return;
+      }
+      const delay = Math.min(60_000, 2_000 * (2 ** (chatSidecarRestartAttempts - 1)));
+      warn(TAG, `chat sidecar restart ${chatSidecarRestartAttempts}/5 in ${delay / 1000}s`);
+      chatSidecarRestartTimer = setTimeout(() => {
+        chatSidecarRestartTimer = null;
+        restartChatSidecar(false);
+      }, delay);
+    });
     return { ok: true };
   }
 
@@ -1217,6 +1249,10 @@ async function main() {
   // timer is started later (after bareAgentState is declared) — see below.
   const probeChatLoop = async (): Promise<void> => {
     const up = await probeChatSidecar();
+    if (up) {
+      chatSidecarRestartAttempts = 0;
+      chatSidecarCrashBroadcast = false;
+    }
     if (up !== bareAgentState.chatSidecarUp) {
       bareAgentState.chatSidecarUp = up;
       wsHandler.updateState({ agents: { ...bareAgentState } });
@@ -1867,7 +1903,12 @@ async function main() {
 
   // Start chat-sidecar liveness polling now that bareAgentState exists.
   const chatProbeTimer = setInterval(() => { void probeChatLoop(); }, 5000);
-  void probeChatLoop();
+  void probeChatSidecar().then((up) => {
+    if (!up && resolveChatSidecar() && process.env.SINAIN_CHAT_AUTOSTART !== "false") {
+      restartChatSidecar(false);
+    }
+    void probeChatLoop();
+  });
 
   // Warm the KG retrieval daemon at boot (no-op if the script is missing).
   startKgDaemon();
@@ -2991,6 +3032,8 @@ async function main() {
     log(TAG, `${signal} received, shutting down...`);
     shuttingDown = true;
     burstMetrics.stop();
+    clearInterval(chatProbeTimer);
+    if (chatSidecarRestartTimer) clearTimeout(chatSidecarRestartTimer);
     clearInterval(bufferGaugeTimer);
     if (feedbackSummaryTimer) clearInterval(feedbackSummaryTimer);
     costTracker.stop();
@@ -3004,6 +3047,9 @@ async function main() {
     void tunnelController.stop(); // kill frpc + the HTTP MCP transport
     if (localAgentProcess && localAgentProcess.exitCode === null) {
       localAgentProcess.kill("SIGTERM");
+    }
+    if (chatSidecarProc && chatSidecarProc.exitCode === null) {
+      try { process.kill(-chatSidecarProc.pid!); } catch { try { chatSidecarProc.kill("SIGTERM"); } catch { /* gone */ } }
     }
     if (kgDaemonProc && kgDaemonProc.exitCode === null) {
       try { process.kill(-kgDaemonProc.pid!); } catch { try { kgDaemonProc.kill("SIGTERM"); } catch { /* gone */ } }

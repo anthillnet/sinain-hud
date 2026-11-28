@@ -1548,17 +1548,19 @@ class _SessionNudgeCardState extends State<SessionNudgeCard> {
               Text('${n.elapsedMinutes} min in', style: _mono(10, t.textMuted)),
               const SizedBox(width: 6),
               for (final app in n.apps.take(3)) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: t.border),
-                    borderRadius: BorderRadius.circular(4),
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: t.border),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(app,
+                        style: _mono(10, t.textMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                   ),
-                  child: Text(app,
-                      style: _mono(10, t.textMuted),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
                 ),
                 const SizedBox(width: 4),
               ],

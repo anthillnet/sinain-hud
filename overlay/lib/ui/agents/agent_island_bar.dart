@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../feed/idle_animation.dart';
@@ -226,12 +228,21 @@ class _AgentIslandBarState extends State<AgentIslandBar>
                     offset: Offset(0, 4)),
               ],
       ),
-      child: Row(
+      child: LayoutBuilder(builder: (context, constraints) {
+        // Native frame resize lags notch mode; compress the hidden gap rather
+        // than overflowing while the wing slides under the physical notch.
+        final gap = notchMode
+            ? constraints.maxWidth.isFinite
+                ? math.min(
+                    widget.notchGap, math.max(0.0, constraints.maxWidth - 46))
+                : widget.notchGap
+            : 0.0;
+        return Row(
         mainAxisAlignment:
             notchMode ? MainAxisAlignment.start : MainAxisAlignment.center,
         children: [
           eye,
-          if (notchMode) SizedBox(width: widget.notchGap),
+          if (notchMode) SizedBox(width: gap),
           if (widget.waiting > 0 || primary != null || enrich != null) ...[
             if (!notchMode)
               Container(width: 1, height: 16, color: const Color(0x1FFFFFFF)),
@@ -247,7 +258,8 @@ class _AgentIslandBarState extends State<AgentIslandBar>
               counts,
           ],
         ],
-        ),
+        );
+      }),
       ),
     );
   }

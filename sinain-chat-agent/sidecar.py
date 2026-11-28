@@ -18,7 +18,7 @@ sinain-core's ChatService connects over WS and relays to the overlay. Protocol:
       {"type":"done","text":"<full reply>"}
       {"type":"error","text":"..."}
 
-Env: OPENROUTER_API_KEY (required), SINAIN_CHAT_MODEL (default qwen/qwen3.5-flash-02-23),
+Env: OPENROUTER_API_KEY (optional; missing falls back to Ollama), SINAIN_CHAT_MODEL (default qwen/qwen3.5-flash-02-23),
      SINAIN_CHAT_REASONING (off|on, default off), SINAIN_CORE_URL, SINAIN_CHAT_WS_PORT (9610).
 """
 from __future__ import annotations
@@ -141,6 +141,10 @@ class ChatAgent:
             provider = "ollama"
         if not provider:
             provider = "openrouter"
+        if provider not in ("ollama", "local") and not os.environ.get("OPENROUTER_API_KEY"):
+            print("[sinain-chat] OPENROUTER_API_KEY missing — falling back to local ollama",
+                  flush=True)
+            provider = "ollama"
         if provider in ("ollama", "local"):
             base = (os.environ.get("SINAIN_CHAT_BASE_URL")
                     or os.environ.get("OLLAMA_BASE_URL")
@@ -401,13 +405,15 @@ async def main() -> None:
 
 def _load_env() -> None:
     from pathlib import Path
-    env = Path(__file__).parent / ".env"
-    if env.exists():
-        for ln in env.read_text().splitlines():
-            ln = ln.strip()
-            if ln and not ln.startswith("#") and "=" in ln:
-                k, v = ln.split("=", 1)
-                os.environ.setdefault(k, v)
+    here = Path(__file__).parent
+    # Worktrees don't carry the untracked sidecar .env, so inherit root config.
+    for env in (here / ".env", here.parent / ".env"):
+        if env.exists():
+            for ln in env.read_text().splitlines():
+                ln = ln.strip()
+                if ln and not ln.startswith("#") and "=" in ln:
+                    k, v = ln.split("=", 1)
+                    os.environ.setdefault(k, v)
 
 
 if __name__ == "__main__":

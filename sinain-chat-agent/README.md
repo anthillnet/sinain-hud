@@ -7,6 +7,9 @@ non-reasoning) + **resident** Conversation (warm) + **lean 7-tool** surface + to
 Measured: ~0.6s first token, 1–4s end-to-end with real sinain tool calls (~10× a reasoning model).
 
 ## Run
+sinain-core autostarts and supervises the sidecar by default. Set
+`SINAIN_CHAT_AUTOSTART=false` to opt out. For standalone development:
+
 ```bash
 cd sinain-chat-agent
 python3 -m venv .venv && source .venv/bin/activate
@@ -35,6 +38,8 @@ via deferred MCP loading, not eager load.
 `OPENROUTER_API_KEY` · `SINAIN_CHAT_MODEL` (default `qwen/qwen3.5-flash-02-23`) ·
 `SINAIN_CHAT_REASONING` (`off` fast / `on` slower) · `SINAIN_CORE_URL` · `SINAIN_CHAT_WS_PORT` (9610).
 
+Configuration resolves in this order: process environment, sidecar `.env`, project-root `.env`.
+Without an OpenRouter key and with no explicit provider, the sidecar warns and falls back to local Ollama.
+
 ## Status
-Prototype (Phase 0→1). Next: sinain-core `ChatService` WS client + overlay wiring; lifecycle
-supervision in `launch-backend.sh`; DMG bundling. Terminal mode keeps the roster agent unchanged.
+Prototype (Phase 0→1). sinain-core owns the sidecar lifecycle. Terminal mode keeps the roster agent unchanged.
