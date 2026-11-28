@@ -56,11 +56,13 @@ export class MacOSCaptureSpawner implements CaptureSpawner {
         "--fps", String(fps),
         "--scale", String(scale),
       );
-      // Pin to the primary display by default — multi-display "follow active"
-      // mis-places ROIs (wrong screen). Opt back in with CAPTURE_FOLLOW_DISPLAY=true.
-      // Skipped in compat mode (stale binary that doesn't know the flag) — capture
-      // still works; ROI placement just falls back to the primary screen.
-      if (process.env.CAPTURE_FOLLOW_DISPLAY !== "true" && !opts?.compat) {
+      // Follow the active display by default: sck-capture tracks the display
+      // holding the frontmost window (debounced), so ROIs land on the screen
+      // being worked on. CAPTURE_FOLLOW_DISPLAY=false pins to the primary
+      // display instead (the old default). Compat mode (stale binary that
+      // doesn't know the flag) never gets --pin-display — capture still works;
+      // ROI placement just falls back to the primary screen.
+      if (process.env.CAPTURE_FOLLOW_DISPLAY === "false" && !opts?.compat) {
         args.push("--pin-display");
       }
     }

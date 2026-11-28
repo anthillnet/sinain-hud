@@ -160,6 +160,14 @@ The bare agent (`sinain-agent-runner/run.sh`) polls sinain-core for escalations 
 | `AUDIO_AUTO_START` | `true` | Start capturing on launch |
 | `AUDIO_GAIN_DB` | `20` | Audio gain in dB |
 
+## Screen Capture
+
+| Variable | Default | Description |
+|---|---|---|
+| `CAPTURE_FPS` | `4` | Screen frame rate (caps the whole region pipeline) |
+| `CAPTURE_SCALE` | `1.0` | Frame scale relative to logical resolution (OCR accuracy vs cost) |
+| `CAPTURE_FOLLOW_DISPLAY` | `true` | Follow the display holding the frontmost window (debounced). `false` pins capture to the primary display |
+
 ## Microphone (opt-in)
 
 | Variable | Default | Description |

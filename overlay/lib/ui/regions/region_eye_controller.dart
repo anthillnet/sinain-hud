@@ -60,6 +60,7 @@ class RegionEyeController {
   StreamSubscription<String>? _tapSub;
   StreamSubscription<(String, String)>? _cardActionSub;
   StreamSubscription<ThreadStatusUpdate>? _taskSub;
+  StreamSubscription<void>? _screensSub;
   VoidCallback? _settingsListener;
 
   final Map<String, RegionHighlight> _regions = {};
@@ -93,6 +94,12 @@ class RegionEyeController {
     _cardActionSub =
         windowService.regionCardActionStream.listen(_onCardAction);
     _taskSub = ws.spawnTaskStream.listen(_onSpawnTask);
+    // Display configuration changed — eyes placed against a display that
+    // moved or disappeared must be re-resolved (screenFor falls back to the
+    // primary screen for unknown displays).
+    _screensSub = windowService.screensChangedStream.listen((_) {
+      if (_enabled && ws.regions.isNotEmpty) _onRegions(ws.regions);
+    });
     _lastEnabled = _enabled;
     _settingsListener = () {
       // Re-render eyes when their appearance settings change.
@@ -141,6 +148,7 @@ class RegionEyeController {
     _cardActionSub?.cancel();
     _pendingTapTimer?.cancel();
     _taskSub?.cancel();
+    _screensSub?.cancel();
     if (_settingsListener != null) {
       settingsService.removeListener(_settingsListener!);
     }

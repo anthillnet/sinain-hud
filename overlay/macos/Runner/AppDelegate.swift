@@ -249,8 +249,10 @@ class AppDelegate: FlutterAppDelegate {
             window.sharingType = .none
         }
 
-        // Start at chat size (bottom-right corner) so the feed is immediately visible
-        let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+        // Start at chat size (bottom-right corner) so the feed is immediately
+        // visible — on the screen the user is working on (cursor), not
+        // necessarily the primary one.
+        let screenFrame = WindowControlPlugin.screenUnderCursor().visibleFrame
         let windowX = screenFrame.maxX - HUDConfig.defaultChatWidth - HUDConfig.margin
         let windowY = screenFrame.minY + HUDConfig.margin
 

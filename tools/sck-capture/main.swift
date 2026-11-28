@@ -13,9 +13,10 @@ var screenDir: String = NSString("~/.sinain/capture").expandingTildeInPath
 var fps: Double = 1.0
 var scale: Double = 0.5
 var audioEnabled: Bool = true
-// Pin capture to the main display and never follow the active one. Multi-display
-// follow is the source of wrong-display ROI placement; pinning keeps every frame
-// (and every eye) on one known screen until that's solid.
+// Pin capture to the main display and never follow the active one. Follow mode
+// tracks the display holding the frontmost window (debounced); pinning keeps
+// every frame (and every eye) on one known screen for single-display setups or
+// as an escape hatch.
 var pinDisplay: Bool = false
 // Permission probes for the first-run wizard. The grant that matters belongs to
 // THIS binary (the actual capturer), not the overlay app, so the wizard runs us
@@ -385,17 +386,46 @@ class CaptureOutputHandler: NSObject, SCStreamOutput {
     }
 }
 
-// ── Active-display detection (multi-display prototype) ──
-// The "active display" is the one under the mouse cursor. Simple, robust
-// heuristic for the prototype; can later be upgraded to the display holding
-// the frontmost window. CGEvent location is in global top-left-origin coords;
-// CGGetDisplaysWithPoint maps it to a CGDirectDisplayID.
-func activeDisplayID() -> CGDirectDisplayID {
+// ── Active-display detection ──
+// The "active display" is the one holding the frontmost app window — where the
+// user is actually working. The original prototype followed the CURSOR, which
+// crosses displays constantly and made capture bounce between screens (the
+// jitter that got follow-mode pinned off by default). CGWindowList returns
+// on-screen windows front-to-back; the first layer-0 (normal app) window wins,
+// and its bounds center maps to a display — the same heuristic sense_client's
+// app_detector uses for display-aware app detection. All coords are global
+// top-left-origin; CGGetDisplaysWithPoint maps a point to a CGDirectDisplayID.
+func frontmostWindowDisplayID() -> CGDirectDisplayID? {
+    guard let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        return nil
+    }
+    for w in list {  // front-to-back
+        guard (w[kCGWindowLayer as String] as? Int) == 0,
+              let boundsDict = w[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDict),
+              bounds.width > 1, bounds.height > 1 else { continue }
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        var ids = [CGDirectDisplayID](repeating: 0, count: 8)
+        var count: UInt32 = 0
+        CGGetDisplaysWithPoint(center, 8, &ids, &count)
+        if count > 0 { return ids[0] }
+    }
+    return nil
+}
+
+/// Cursor fallback — used when no layer-0 window exists (all apps hidden,
+/// desktop only). Kept from the original prototype.
+func cursorDisplayID() -> CGDirectDisplayID {
     let loc = CGEvent(source: nil)?.location ?? .zero
     var ids = [CGDirectDisplayID](repeating: 0, count: 8)
     var count: UInt32 = 0
     CGGetDisplaysWithPoint(loc, 8, &ids, &count)
     return count > 0 ? ids[0] : CGMainDisplayID()
+}
+
+func activeDisplayID() -> CGDirectDisplayID {
+    frontmostWindowDisplayID() ?? cursorDisplayID()
 }
 
 // ── Main async entry ──
@@ -412,7 +442,7 @@ func run() async throws {
     }
 
     // Pinned: lock to the main (primary) display. Otherwise follow the display
-    // under the cursor.
+    // holding the frontmost window (cursor fallback).
     var activeID = pinDisplay ? CGMainDisplayID() : activeDisplayID()
     var display = scDisplay(for: activeID)
 
@@ -475,6 +505,13 @@ func run() async throws {
     }
 
     // Poll loop: follow the active display + exit if orphaned (parent died).
+    // Hysteresis: only switch after the same display wins SWITCH_AFTER_POLLS
+    // consecutive 1s polls. Without the debounce a brief focus flicker (or the
+    // cursor fallback) bounced capture between screens — interleaving frames
+    // from different displays and mis-placing ROIs.
+    let switchAfterPolls = 3
+    var candidateID = activeID
+    var candidatePolls = 0
     let parentPid = getppid()
     while true {
         try await Task.sleep(for: .seconds(1))
@@ -489,20 +526,36 @@ func run() async throws {
         // 14+) switch the captured display WITHOUT restarting the stream, so
         // audio keeps flowing. On older systems we stay on the initial display.
         let newID = activeDisplayID()
-        if newID != activeID, content.displays.contains(where: { $0.displayID == newID }) {
+        if newID == activeID {
+            candidateID = activeID
+            candidatePolls = 0
+            continue
+        }
+        guard content.displays.contains(where: { $0.displayID == newID }) else { continue }
+        if newID != candidateID {
+            candidateID = newID
+            candidatePolls = 1
+            continue
+        }
+        candidatePolls += 1
+        guard candidatePolls >= switchAfterPolls else { continue }
+        if #available(macOS 14.0, *) {
             let newDisplay = scDisplay(for: newID)
-            if #available(macOS 14.0, *) {
-                applyDisplay(newDisplay)
-                let newFilter = SCContentFilter(display: newDisplay, excludingWindows: [])
-                do {
-                    try await stream.updateConfiguration(config)
-                    try await stream.updateContentFilter(newFilter)
-                    activeID = newID
-                    display = newDisplay
-                } catch {
-                    fputs("[sck-capture] display switch failed: \(error.localizedDescription)\n", stderr)
-                }
+            applyDisplay(newDisplay)
+            let newFilter = SCContentFilter(display: newDisplay, excludingWindows: [])
+            do {
+                try await stream.updateConfiguration(config)
+                try await stream.updateContentFilter(newFilter)
+                fputs("[sck-capture] display switch \(activeID) → \(newID)\n", stderr)
+                activeID = newID
+                display = newDisplay
+            } catch {
+                // Restore the old display's config + meta.json stamping —
+                // applyDisplay already mutated them for the failed target.
+                applyDisplay(display)
+                fputs("[sck-capture] display switch failed: \(error.localizedDescription)\n", stderr)
             }
+            candidatePolls = 0
         }
     }
 }

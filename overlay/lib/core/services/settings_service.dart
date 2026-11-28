@@ -10,6 +10,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyWsUrl = 'ws_url';
   static const _keyEyeX = 'eye_x';
   static const _keyEyeY = 'eye_y';
+  static const _keyEyeDisplay = 'eye_display';
   static const _keyChatWidth = 'chat_width';
   static const _keyChatHeight = 'chat_height';
   static const _keyFontSize = 'font_size';
@@ -40,6 +41,7 @@ class SettingsService extends ChangeNotifier {
       wsUrl: _prefs.getString(_keyWsUrl) ?? 'ws://localhost:9500',
       eyeX: _prefs.getDouble(_keyEyeX) ?? -1,
       eyeY: _prefs.getDouble(_keyEyeY) ?? -1,
+      eyeDisplay: _prefs.getInt(_keyEyeDisplay) ?? 0,
       chatWidth: _prefs.getDouble(_keyChatWidth) ?? 427,
       chatHeight: _prefs.getDouble(_keyChatHeight) ?? 293,
       fontSize: _prefs.getDouble(_keyFontSize) ?? 12.0,
@@ -119,11 +121,18 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setEyePosition(double x, double y) async {
+  /// [display] is the display the position belongs to (0 = unknown). Pass
+  /// null to keep the stored display — for saves where only the frame moved
+  /// within the same screen (e.g. state-change persists).
+  Future<void> setEyePosition(double x, double y, {int? display}) async {
     _settings.eyeX = x;
     _settings.eyeY = y;
     await _prefs.setDouble(_keyEyeX, x);
     await _prefs.setDouble(_keyEyeY, y);
+    if (display != null) {
+      _settings.eyeDisplay = display;
+      await _prefs.setInt(_keyEyeDisplay, display);
+    }
     // Don't notify — position updates are high frequency during drag
   }
 

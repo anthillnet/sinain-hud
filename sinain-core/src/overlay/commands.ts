@@ -30,8 +30,9 @@ export interface CommandDeps {
   /** Set a per-thread chat-agent override (handoff). key = regionId or "main";
    *  agent="" clears it (thread falls back to the global lane). */
   onSetThreadAgent?: (key: string, agent: string) => void;
-  /** User drag-selected a screen region — create a manual ROI from it. */
-  onRegionSelect?: (sel: { x: number; y: number; w: number; h: number; screenW: number; screenH: number }) => void;
+  /** User drag-selected a screen region — create a manual ROI from it.
+   *  Coordinates are local to `display` (0/undefined → primary). */
+  onRegionSelect?: (sel: { x: number; y: number; w: number; h: number; screenW: number; screenH: number; display?: number }) => void;
   /** Frontmost app changed (fast NSWorkspace signal) — instant ROI restore. */
   onAppFocus?: (app: string) => void;
   /** Toggle screen capture — returns new state */
@@ -130,8 +131,12 @@ export function setupCommands(deps: CommandDeps): void {
       }
       case "region_select": {
         const sel = msg as any;
-        log(TAG, `region select: ${sel.w}x${sel.h} at (${sel.x},${sel.y})`);
-        deps.onRegionSelect?.({ x: sel.x, y: sel.y, w: sel.w, h: sel.h, screenW: sel.screenW, screenH: sel.screenH });
+        log(TAG, `region select: ${sel.w}x${sel.h} at (${sel.x},${sel.y}) display=${sel.display ?? 0}`);
+        deps.onRegionSelect?.({
+          x: sel.x, y: sel.y, w: sel.w, h: sel.h,
+          screenW: sel.screenW, screenH: sel.screenH,
+          ...(sel.display ? { display: Number(sel.display) } : {}),
+        });
         break;
       }
       case "app_focus": {

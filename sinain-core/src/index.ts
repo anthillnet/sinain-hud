@@ -2552,10 +2552,17 @@ async function main() {
           // Tier 1 — reuse: recent sense events already carry per-line OCR
           // with frame-pixel bboxes. Scale each event's lines into screen
           // points and keep the ones whose center falls inside the selection.
+          // Multi-display: the selection's coords are local to sel.display, so
+          // only events captured ON that display can match — a same-position
+          // line on another screen is different content. Events with an
+          // unknown display (0, legacy backend) are kept for compatibility.
+          const selDisplay = sel.display ?? 0;
           const collected: { text: string; bbox: [number, number, number, number] }[] = [];
           const recent = senseBuffer.queryByTime(Date.now() - 5 * 60_000);
           let app: string | undefined;
           for (const ev of recent) {
+            const evDisplay = ev.meta?.screen ?? 0;
+            if (selDisplay && evDisplay && evDisplay !== selDisplay) continue;
             if (ev.meta?.app) app = ev.meta.app;
             const fs = ev.frameSize;
             if (!ev.ocrLines?.length || !fs || fs.length !== 2 || !fs[0] || !fs[1]) continue;
@@ -2610,6 +2617,7 @@ async function main() {
             frameSize: [sel.screenW, sel.screenH],
             app,
             ocr: text || "(no readable text in the selection)",
+            ...(selDisplay ? { display: selDisplay } : {}),
           });
           wsHandler.broadcastRaw({
             type: "region_highlight",

@@ -26,6 +26,7 @@ import sys
 from PIL import Image
 
 FRAME_PATH = os.path.expanduser("~/.sinain/capture/frame.jpg")
+META_PATH = os.path.expanduser("~/.sinain/capture/meta.json")
 
 
 def main() -> int:
@@ -41,6 +42,22 @@ def main() -> int:
     if not os.path.exists(FRAME_PATH):
         print(json.dumps({"ok": False, "error": f"no frame at {FRAME_PATH} — is sck-capture running?"}))
         return 1
+
+    # Multi-display: the live frame is whatever display sck-capture is on right
+    # now. If the selection was drawn on a DIFFERENT display, cropping this
+    # frame would OCR unrelated content — bail instead (0 = unknown, skip the
+    # check for legacy senders/backends).
+    sel_display = int(sel.get("display", 0) or 0)
+    if sel_display:
+        try:
+            with open(META_PATH, encoding="utf-8") as f:
+                frame_display = int(json.load(f).get("display", 0) or 0)
+        except (OSError, ValueError, json.JSONDecodeError):
+            frame_display = 0
+        if frame_display and frame_display != sel_display:
+            print(json.dumps({"ok": False, "error":
+                              f"live frame is display {frame_display}, selection is display {sel_display}"}))
+            return 1
 
     try:
         img = Image.open(FRAME_PATH)

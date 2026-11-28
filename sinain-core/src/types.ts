@@ -199,7 +199,8 @@ export interface ForkMainMessage {
 }
 
 /** Overlay → sinain-core: user drag-selected a screen region (manual ROI).
- *  Rect in screen points, top-left origin. */
+ *  Rect in points, top-left origin, LOCAL to the display the selection was
+ *  drawn on; screenW/H are that display's point size. */
 export interface RegionSelectMessage {
   type: "region_select";
   x: number;
@@ -208,6 +209,9 @@ export interface RegionSelectMessage {
   h: number;
   screenW: number;
   screenH: number;
+  /** CGDirectDisplayID of the selection's display. 0/undefined → primary
+   *  (pre-multi-display overlays). */
+  display?: number;
 }
 
 /** Overlay → sinain-core: reply to a spawn question */

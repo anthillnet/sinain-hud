@@ -18,6 +18,13 @@ class WindowService {
   Stream<(String, String)> get regionCardActionStream =>
       _regionCardActionController.stream;
 
+  final _screensChangedController = StreamController<void>.broadcast();
+
+  /// Display configuration changed (monitor plugged/unplugged, arrangement or
+  /// resolution change). Listeners should re-resolve anything placed against a
+  /// specific display (region eyes, saved positions).
+  Stream<void> get screensChangedStream => _screensChangedController.stream;
+
   Future<void> setTransparent() async {
     try {
       await _channel.invokeMethod('setTransparent');
@@ -261,9 +268,10 @@ class WindowService {
   }
 
   /// Register callbacks for native drag/resize completion (macOS).
-  /// Native sends final position/size on mouse-up.
+  /// Native sends final position/size on mouse-up; drags also report which
+  /// display the window landed on (0 when unknown).
   void setupNativeCallbacks({
-    required void Function(double x, double y) onDragDone,
+    required void Function(double x, double y, int display) onDragDone,
     required void Function(double w, double h) onResizeDone,
   }) {
     _channel.setMethodCallHandler((call) async {
@@ -273,6 +281,7 @@ class WindowService {
           onDragDone(
             (args['x'] as num).toDouble(),
             (args['y'] as num).toDouble(),
+            (args['display'] as num?)?.toInt() ?? 0,
           );
         case 'onNativeResizeComplete':
           final args = call.arguments as Map;
@@ -291,6 +300,8 @@ class WindowService {
           if (id != null && id.isNotEmpty && action != null) {
             _regionCardActionController.add((id, action));
           }
+        case 'onScreensChanged':
+          _screensChangedController.add(null);
       }
     });
   }
@@ -344,8 +355,9 @@ class WindowService {
   /// Screenshot-style drag-select. On release the user picks Chat or Term from
   /// a toolbar under the box — unless [immediate], which skips the toolbar and
   /// resolves on mouse-up (mode 'chat'). Returns the numeric rect ({x,y,w,h,
-  /// screenW,screenH}, top-left-origin) plus a `mode` of 'chat' | 'term', or
-  /// null if the user cancelled (Esc / ✕). `mode` is the only non-numeric entry.
+  /// screenW,screenH,display}, top-left-origin LOCAL to the display the
+  /// selection was drawn on) plus a `mode` of 'chat' | 'term', or null if the
+  /// user cancelled (Esc / ✕). `mode` is the only non-numeric entry.
   Future<Map<String, Object>?> selectRegion({bool immediate = false}) async {
     try {
       final raw =

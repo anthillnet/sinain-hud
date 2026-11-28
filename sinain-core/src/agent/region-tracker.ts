@@ -787,6 +787,8 @@ export class RegionTracker {
     app?: string;
     ocr: string;
     ocrLines?: { text: string; bbox: [number, number, number, number] }[];
+    /** Display the selection was drawn on — the eye renders there. */
+    display?: number;
   }): RegionHighlight {
     const id = `r-man-${Date.now().toString(36)}`;
     const firstLine = input.ocr.split("\n").map((l) => l.trim()).find((l) => l.length > 2);
@@ -798,6 +800,7 @@ export class RegionTracker {
       frameSize: input.frameSize,
       sourceOcr: input.ocr.slice(0, 4000),
       ...(input.app ? { app: input.app } : {}),
+      ...(input.display ? { display: input.display } : {}),
       manual: true,
     };
     this.tracked.set(id, { region, lastSeenTick: this.tick, firstSeenTs: Date.now() });

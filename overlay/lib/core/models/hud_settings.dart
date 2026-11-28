@@ -29,6 +29,11 @@ class HudSettings {
   double eyeX;
   double eyeY;
 
+  /// Display the eye position belongs to (CGDirectDisplayID; 0 = unknown).
+  /// Lets a restore detect that the saved display is gone and fall back to
+  /// the default position instead of landing off-screen.
+  int eyeDisplay;
+
   /// Persisted chat panel size.
   double chatWidth;
   double chatHeight;
@@ -73,6 +78,7 @@ class HudSettings {
     this.wsUrl = 'ws://localhost:9500',
     this.eyeX = -1, // -1 means "use default position"
     this.eyeY = -1,
+    this.eyeDisplay = 0,
     this.chatWidth = 427,
     this.chatHeight = 293,
     this.fontSize = 12.0,
@@ -115,6 +121,7 @@ class HudSettings {
     String? wsUrl,
     double? eyeX,
     double? eyeY,
+    int? eyeDisplay,
     double? chatWidth,
     double? chatHeight,
     double? fontSize,
@@ -135,6 +142,7 @@ class HudSettings {
       wsUrl: wsUrl ?? this.wsUrl,
       eyeX: eyeX ?? this.eyeX,
       eyeY: eyeY ?? this.eyeY,
+      eyeDisplay: eyeDisplay ?? this.eyeDisplay,
       chatWidth: chatWidth ?? this.chatWidth,
       chatHeight: chatHeight ?? this.chatHeight,
       fontSize: fontSize ?? this.fontSize,

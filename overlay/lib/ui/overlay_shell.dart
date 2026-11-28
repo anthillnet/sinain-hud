@@ -61,9 +61,12 @@ class OverlayShellState extends State<OverlayShell> {
   // Destination chosen in the drag-select toolbar ('chat' | 'term') — applied
   // when the freshly-created manual ROI arrives back over regionStream.
   String _pendingManualMode = 'chat';
-  // Top-left-origin screen point to teleport the HUD to for a manual ROI (the
-  // selection's bottom-left, so the chat opens just below the grabbed region).
+  // Top-left-origin point (local to _pendingManualDisplay) to teleport the HUD
+  // to for a manual ROI (the selection's bottom-left, so the chat opens just
+  // below the grabbed region).
   Offset? _pendingManualPos;
+  // Display the manual selection was drawn on (0 = primary).
+  int _pendingManualDisplay = 0;
   StreamSubscription<FeedItem>? _contentSub;
 
   // Pending-permission signal — drives orange eye color and pupil dilation.
@@ -195,7 +198,8 @@ class OverlayShellState extends State<OverlayShell> {
     // Native drag/resize callbacks (macOS only)
     if (_isMacOS) {
       _windowService.setupNativeCallbacks(
-        onDragDone: (x, y) => _settingsService.setEyePosition(x, y),
+        onDragDone: (x, y, display) =>
+            _settingsService.setEyePosition(x, y, display: display),
         onResizeDone: (w, h) => _settingsService.setChatSize(w, h),
       );
     }
@@ -287,7 +291,7 @@ class OverlayShellState extends State<OverlayShell> {
       if (!desktopChat) {
         final p = _pendingManualPos;
         if (p != null) {
-          _openChatNearRegion(p.dx, p.dy, 0);
+          _openChatNearRegion(p.dx, p.dy, _pendingManualDisplay);
         } else {
           _transitionTo(HudState.chat);
         }
@@ -538,7 +542,7 @@ class OverlayShellState extends State<OverlayShell> {
   /// Reset window position to default bottom-right corner.
   /// Clears persisted position so next launch uses native default.
   void resetPosition() {
-    _settingsService.setEyePosition(-1, -1);
+    _settingsService.setEyePosition(-1, -1, display: 0);
     if (_state != HudState.eye) _transitionTo(HudState.eye);
     // The native AppDelegate sets default position on launch.
     // For runtime reset, we ask native to re-position via a special method.
@@ -677,12 +681,14 @@ class OverlayShellState extends State<OverlayShell> {
     // 'copy' (copy the seed to the clipboard).
     final mode = res['mode'] as String?;
     _pendingManualMode = (mode == 'term' || mode == 'copy') ? mode! : 'chat';
-    // Remember where to teleport the HUD: the selection's bottom-left corner
-    // (selector reports main-display, top-left-origin points → display 0).
+    // Remember where to teleport the HUD: the selection's bottom-left corner.
+    // The selector reports top-left-origin points LOCAL to the display the
+    // selection was drawn on, plus that display's id.
     final rx = (res['x'] as num?)?.toDouble() ?? 0;
     final ry = (res['y'] as num?)?.toDouble() ?? 0;
     final rh = (res['h'] as num?)?.toDouble() ?? 0;
     _pendingManualPos = Offset(rx, ry + rh);
+    _pendingManualDisplay = (res['display'] as num?)?.toInt() ?? 0;
     // Snapshot existing manual ROIs so the broadcast handler can tell the new
     // one apart from earlier ones still in the region list.
     _manualIdsBefore = ws.regions

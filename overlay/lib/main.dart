@@ -138,14 +138,32 @@ Future<void> _startApp() async {
   final hudOwnsWindow = !firstRunService.needsSetup && !featureTourService.needsTour;
   if (hudOwnsWindow && settingsService.settings.eyeX >= 0) {
     final s = settingsService.settings;
-    // Size depends on saved state
-    final w = s.overlayState == HudState.chat
-        ? s.chatWidth
-        : s.overlayState == HudState.controls
-            ? 360.0
-            : 48.0;
-    final h = s.overlayState == HudState.chat ? s.chatHeight : 48.0;
-    await windowService.setWindowFrame(s.eyeX, s.eyeY, w, h);
+    // Validate the saved position against the CURRENT display layout: if the
+    // display it was saved on is gone, or the point lands outside every
+    // screen (arrangement changed), skip the restore — the native default
+    // placement keeps the HUD visible instead of stranding it off-screen.
+    final screens = await windowService.getScreens();
+    var restorable = true;
+    if (screens != null && screens.isNotEmpty) {
+      if (s.eyeDisplay != 0 &&
+          !screens.any((scr) => scr['id'] == s.eyeDisplay.toDouble())) {
+        restorable = false;
+      } else {
+        restorable = screens.any((scr) =>
+            s.eyeX >= scr['x']! && s.eyeX < scr['x']! + scr['w']! &&
+            s.eyeY >= scr['y']! && s.eyeY < scr['y']! + scr['h']!);
+      }
+    }
+    if (restorable) {
+      // Size depends on saved state
+      final w = s.overlayState == HudState.chat
+          ? s.chatWidth
+          : s.overlayState == HudState.controls
+              ? 360.0
+              : 48.0;
+      final h = s.overlayState == HudState.chat ? s.chatHeight : 48.0;
+      await windowService.setWindowFrame(s.eyeX, s.eyeY, w, h);
+    }
   }
 
   // Default state is chat — make key window so text input works immediately

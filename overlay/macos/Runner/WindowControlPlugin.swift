@@ -11,6 +11,7 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
     private var channel: FlutterMethodChannel?
     private var dragMonitor: Any?
     private var resizeMonitor: Any?
+    private var screenObserver: Any?
 
     /// Region eye panels (Grammarly mode) — created lazily on first use.
     private lazy var regionEyes = RegionEyePool(channel: channel)
@@ -23,6 +24,28 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         let instance = WindowControlPlugin()
         instance.channel = channel
         registrar.addMethodCallDelegate(instance, channel: channel)
+        instance.observeScreenChanges()
+    }
+
+    /// Display-configuration changes (monitor plugged/unplugged, arrangement
+    /// or resolution changed) can strand the HUD on a screen that no longer
+    /// exists. Re-home it, and let Dart re-place region eyes whose display may
+    /// have disappeared.
+    private func observeScreenChanges() {
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            if let window = NSApplication.shared.windows.first,
+               !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) {
+                let scr = Self.screenUnderCursor().visibleFrame
+                let x = scr.maxX - window.frame.width - HUDConfig.margin
+                let y = scr.minY + HUDConfig.margin
+                window.setFrameOrigin(NSPoint(x: x, y: y))
+            }
+            self.channel?.invokeMethod("onScreensChanged", arguments: nil)
+        }
     }
 
     func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -190,7 +213,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             result(nil)
 
         case "resetToDefaultPosition":
-            let screenFrame = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+            // Rescue gesture (⌘⇧P): bring the HUD to the screen the user is
+            // working on — the one under the cursor — not the primary.
+            let screenFrame = Self.screenUnderCursor().visibleFrame
             let x = screenFrame.maxX - HUDConfig.eyeSize - HUDConfig.margin
             let y = screenFrame.minY + HUDConfig.margin
             window.setFrame(NSRect(x: x, y: y, width: HUDConfig.eyeSize, height: HUDConfig.eyeSize), display: true)
@@ -277,16 +302,19 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                 ctx.duration = 0.15
                 window.animator().alphaValue = 0
             }
-            RegionSelector.begin(privacyEnabled: selectorPrivate, immediate: immediate) { rect, mode in
+            RegionSelector.begin(privacyEnabled: selectorPrivate, immediate: immediate) { rect, mode, display, screenSize in
                 NSAnimationContext.runAnimationGroup { ctx in
                     ctx.duration = 0.15
                     window.animator().alphaValue = prevAlpha
                 }
                 if let r = rect, let m = mode {
+                    // x/y are top-left-origin points LOCAL to the display the
+                    // selection was drawn on; display + screenW/H identify it.
                     result(["x": r.origin.x, "y": r.origin.y,
                             "w": r.size.width, "h": r.size.height,
-                            "screenW": NSScreen.main?.frame.width ?? 0,
-                            "screenH": NSScreen.main?.frame.height ?? 0,
+                            "screenW": screenSize.width,
+                            "screenH": screenSize.height,
+                            "display": Double(display),
                             "mode": m])
                 } else {
                     result(nil)
@@ -460,6 +488,9 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         channel?.invokeMethod("onNativeDragComplete", arguments: [
             "x": frame.origin.x,
             "y": frame.origin.y,
+            // Which display the window landed on — persisted with the position
+            // so a restore can validate the display still exists.
+            "display": Double(Self.screenID(Self.screenContaining(frame))),
         ])
     }
 
@@ -534,8 +565,44 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
         min(max(h, HUDConfig.minChatHeight), HUDConfig.maxChatHeight)
     }
 
+    /// Primary display: the screen at global origin. NOT NSScreen.main — that
+    /// is the *focused* screen, which flips with key focus and would resolve to
+    /// the wrong display (see RegionEyePool.screenFor for the same rule).
+    static func primaryScreen() -> NSScreen {
+        NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main ?? NSScreen.screens.first ?? NSScreen()
+    }
+
+    /// The screen showing (most of) `frame` — largest intersection wins.
+    static func screenContaining(_ frame: NSRect) -> NSScreen {
+        var best: NSScreen?
+        var bestArea: CGFloat = 0
+        for s in NSScreen.screens {
+            let r = s.frame.intersection(frame)
+            let area = r.isNull ? 0 : r.width * r.height
+            if area > bestArea { best = s; bestArea = area }
+        }
+        return best ?? primaryScreen()
+    }
+
+    /// The screen under the mouse cursor — where the user is working. Used by
+    /// rescue paths (⌘⇧P reset, initial placement).
+    static func screenUnderCursor() -> NSScreen {
+        let p = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { NSMouseInRect(p, $0.frame, false) })
+            ?? primaryScreen()
+    }
+
+    /// CGDirectDisplayID of a screen (0 when unavailable).
+    static func screenID(_ s: NSScreen) -> UInt32 {
+        (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+    }
+
     private func snapToEdges(_ origin: NSPoint, windowSize: NSSize) -> NSPoint {
-        let screen = NSScreen.main?.visibleFrame ?? HUDConfig.fallbackScreenRect
+        // Snap against the screen the window is actually on (the proposed
+        // frame's screen) — snapping to NSScreen.main pulled windows dragged
+        // onto a second display back toward the primary display's edges.
+        let screen = Self.screenContaining(NSRect(origin: origin, size: windowSize)).visibleFrame
         let snap = HUDConfig.snapThreshold
         let margin = HUDConfig.margin
         var p = origin
@@ -564,9 +631,12 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 // MARK: - RegionSelector (manual ROI drag-select)
 
 /// Full-screen selection overlay: dark tint, crosshair, drag a rectangle,
-/// Esc or click-without-drag cancels. Completion delivers the rect in
-/// TOP-LEFT-origin screen points (the coordinate space sinain's regions
-/// use), or nil on cancel.
+/// Esc or click-without-drag cancels. Every display gets its own tinted
+/// panel; the first mouseDown locks the selection to that display and
+/// dismisses the others (a selection never spans displays). Completion
+/// delivers the rect in TOP-LEFT-origin points local to the display it was
+/// drawn on (the coordinate space sinain's regions use) plus that display's
+/// id and point size, or nil on cancel.
 ///
 /// Capture visibility mirrors the HUD's demo/privacy mode: private by
 /// default (sharingType = .none, invisible to screen capture), but visible
@@ -574,74 +644,103 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
 class RegionSelector {
     private static var active: RegionSelector?
 
-    private var panel: NSPanel!
+    private var panels: [NSPanel] = []
     private var keyMonitor: Any?
     private var finished = false
-    private let completion: (NSRect?, String?) -> Void
+    private let completion: (NSRect?, String?, UInt32, CGSize) -> Void
 
     static func begin(privacyEnabled: Bool, immediate: Bool = false,
-                      completion: @escaping (NSRect?, String?) -> Void) {
+                      completion: @escaping (NSRect?, String?, UInt32, CGSize) -> Void) {
         // One selection at a time — a second request cancels into the new one.
-        active?.finish(nil, nil)
+        active?.finish(nil, nil, from: nil)
         active = RegionSelector(privacyEnabled: privacyEnabled, immediate: immediate,
                                 completion: completion)
     }
 
     private init(privacyEnabled: Bool, immediate: Bool,
-                 completion: @escaping (NSRect?, String?) -> Void) {
+                 completion: @escaping (NSRect?, String?, UInt32, CGSize) -> Void) {
         self.completion = completion
-        let screen = NSScreen.main?.frame ?? HUDConfig.fallbackScreenRect
-        let view = RegionSelectView(frame: NSRect(origin: .zero, size: screen.size))
-        view.immediate = immediate
-        view.onDone = { [weak self] rect, mode in self?.finish(rect, mode) }
+        let cursorScreen = WindowControlPlugin.screenUnderCursor()
+        for screen in NSScreen.screens {
+            let view = RegionSelectView(frame: NSRect(origin: .zero, size: screen.frame.size))
+            view.immediate = immediate
+            view.displayID = WindowControlPlugin.screenID(screen)
+            view.onBegan = { [weak self] v in self?.lock(to: v) }
+            view.onDone = { [weak self, weak view] rect, mode in
+                self?.finish(rect, mode, from: view)
+            }
 
-        let p = NSPanel(contentRect: screen,
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
-        p.level = .screenSaver           // above everything, incl. the HUD
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.hasShadow = false
-        p.acceptsMouseMovedEvents = true
-        p.becomesKeyOnlyIfNeeded = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        if #available(macOS 12.0, *) {
-            // Demo mode (privacy off) → .readOnly so the selection overlay is
-            // captured in recordings; otherwise .none (invisible to capture).
-            p.sharingType = privacyEnabled ? .none : .readOnly
+            let p = NSPanel(contentRect: screen.frame,
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+            p.level = .screenSaver           // above everything, incl. the HUD
+            p.isOpaque = false
+            p.backgroundColor = .clear
+            p.hasShadow = false
+            p.acceptsMouseMovedEvents = true
+            p.becomesKeyOnlyIfNeeded = false
+            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            if #available(macOS 12.0, *) {
+                // Demo mode (privacy off) → .readOnly so the selection overlay is
+                // captured in recordings; otherwise .none (invisible to capture).
+                p.sharingType = privacyEnabled ? .none : .readOnly
+            }
+            p.contentView = view
+            // The selector starts from the HUD, which is a nonactivating panel — so
+            // the overlay app is usually NOT frontmost and the panel can't receive
+            // key events (mouse still works; it routes by cursor position). Activate
+            // the app and key the cursor's panel so Esc reaches keyDown; the local
+            // monitor below covers the rest.
+            if screen === cursorScreen {
+                p.makeKeyAndOrderFront(nil)
+            } else {
+                p.orderFront(nil)
+            }
+            p.makeFirstResponder(view)
+            panels.append(p)
         }
-        p.contentView = view
-        // The selector starts from the HUD, which is a nonactivating panel — so
-        // the overlay app is usually NOT frontmost and the panel can't receive
-        // key events (mouse still works; it routes by cursor position). Activate
-        // the app and make the view first responder so Esc reaches keyDown.
         NSApp.activate(ignoringOtherApps: true)
-        p.makeKeyAndOrderFront(nil)
-        p.makeFirstResponder(view)
-        panel = p
         // Belt-and-suspenders: a local key monitor catches Esc even if the
         // first-responder chain isn't cooperating (consumes the event so it
         // doesn't leak to whatever is underneath).
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            if e.keyCode == 53 { self?.finish(nil, nil); return nil }  // Esc
+            if e.keyCode == 53 { self?.finish(nil, nil, from: nil); return nil }  // Esc
             return e
         }
     }
 
-    private func finish(_ rect: NSRect?, _ mode: String?) {
+    /// First mouseDown wins: the drag lives on one display — drop the other
+    /// panels so their tint disappears and stray events can't race the drag.
+    private func lock(to view: RegionSelectView) {
+        for p in panels where p.contentView !== view {
+            p.orderOut(nil)
+        }
+        panels.removeAll { $0.contentView !== view }
+    }
+
+    private func finish(_ rect: NSRect?, _ mode: String?, from view: RegionSelectView?) {
         if finished { return }
         finished = true
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
-        panel?.orderOut(nil)
-        panel = nil
+        for p in panels { p.orderOut(nil) }
+        panels = []
         if Self.active === self { Self.active = nil }
-        completion(rect, mode)
+        if let r = rect, let m = mode, let v = view {
+            completion(r, m, v.displayID, v.bounds.size)
+        } else {
+            completion(nil, nil, 0, .zero)
+        }
     }
 }
 
 private class RegionSelectView: NSView {
     // (rect, mode) on confirm — mode is "chat" | "term"; (nil, nil) on cancel.
     var onDone: ((NSRect?, String?) -> Void)?
+    // Fired on the first mouseDown — lets the selector lock the selection to
+    // this view's display and drop the other displays' panels.
+    var onBegan: ((RegionSelectView) -> Void)?
+    // The display this view covers; travels with the selection result.
+    var displayID: UInt32 = 0
     // Resolve on mouse-up instead of surfacing the Chat/Term toolbar — the
     // capture-menu flow shows its context card right after the drop.
     var immediate = false
@@ -681,6 +780,7 @@ private class RegionSelectView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if placed { return }
+        onBegan?(self)
         start = convert(event.locationInWindow, from: nil)
         current = start
         needsDisplay = true
