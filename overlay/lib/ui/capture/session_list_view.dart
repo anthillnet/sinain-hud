@@ -187,6 +187,20 @@ class _SessionListViewState extends State<SessionListView> {
         candidateGroups.putIfAbsent(threadId, () => []).add(agent);
       }
     }
+    final trackedThreadIds = sessions
+        .map((session) => session.threadId)
+        .where((threadId) => threadId.isNotEmpty)
+        .toSet();
+    final standaloneAgents = widget.ws.agentSessions
+        .where((agent) =>
+            !agent.candidate &&
+            (agent.threadId == null ||
+                !trackedThreadIds.contains(agent.threadId)))
+        .toList()
+      ..sort(_laneOrder);
+    final hasSessionRows = sessions.isNotEmpty ||
+        candidateGroups.isNotEmpty ||
+        standaloneAgents.isNotEmpty;
     final liveVoice = widget.ws.voiceSession;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -208,7 +222,7 @@ class _SessionListViewState extends State<SessionListView> {
               child: _liveLane(t, liveVoice!),
             ),
           ],
-          if (sessions.isEmpty && !(liveVoice?.isActive ?? false))
+          if (!hasSessionRows && !(liveVoice?.isActive ?? false))
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
@@ -239,6 +253,14 @@ class _SessionListViewState extends State<SessionListView> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: _candidateGroup(t, entry.key, entry.value),
+              ),
+          ],
+          if (standaloneAgents.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            for (final agent in standaloneAgents)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _standaloneAgentRow(t, agent),
               ),
           ],
           const SizedBox(height: 14),
@@ -392,6 +414,14 @@ class _SessionListViewState extends State<SessionListView> {
     return rank(a.state).compareTo(rank(b.state));
   }
 
+  String? _desktopApplicationName(AgentSession agent) => switch (agent.source) {
+        'claude-app' => 'Claude Desktop',
+        'claude-cowork' => 'Claude Desktop',
+        'codex-app' => 'Codex Desktop',
+        'chatgpt' => 'ChatGPT',
+        _ => null,
+      };
+
   Widget _contextCard(HudTheme t, String sessionId, SessionAssist assist,
       {bool forceExpanded = false}) {
     final expanded = forceExpanded || _expandedCards.contains(sessionId);
@@ -427,6 +457,18 @@ class _SessionListViewState extends State<SessionListView> {
   Widget _lane(HudTheme t, AgentSession agent) {
     final done = agent.state == 'done';
     final live = agent.state == 'working' || agent.state == 'waiting';
+    final toolLine = agent.toolLine?.trim();
+    final agentName = switch (agent.source) {
+      'claude-cowork' when agent.name.startsWith('claude-cowork —') =>
+        'Claude Cowork${agent.name.substring('claude-cowork'.length)}',
+      'claude-app' when agent.name.startsWith('claude-app —') =>
+        'Claude Desktop${agent.name.substring('claude-app'.length)}',
+      'codex-app' when agent.name.startsWith('codex-app —') =>
+        'Codex Desktop${agent.name.substring('codex-app'.length)}',
+      'chatgpt' when agent.name.startsWith('chatgpt —') =>
+        'ChatGPT${agent.name.substring('chatgpt'.length)}',
+      _ => agent.name,
+    };
     final color = agent.state == 'waiting'
         ? _amber
         : done
@@ -435,8 +477,12 @@ class _SessionListViewState extends State<SessionListView> {
     final detail = done
         ? (agent.summary?.trim().isNotEmpty == true
             ? agent.summary!
-            : agent.toolLine ?? 'done')
-        : agent.toolLine ?? agent.state;
+            : toolLine?.isNotEmpty == true
+                ? toolLine!
+                : 'done')
+        : toolLine?.isNotEmpty == true
+            ? toolLine!
+            : agent.state;
     return Opacity(
       opacity: done ? 0.55 : 1,
       child: Padding(
@@ -450,7 +496,7 @@ class _SessionListViewState extends State<SessionListView> {
             ),
             const SizedBox(width: 7),
             Expanded(
-              child: Text('${agent.name} · $detail',
+              child: Text('$agentName · $detail',
                   style: _mono(done ? 9 : 10, t.textMuted),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
@@ -471,6 +517,15 @@ class _SessionListViewState extends State<SessionListView> {
                   'Jump to terminal',
                   () =>
                       context.read<WindowService>().jumpToTerminal(agent.term)),
+            ] else if (_desktopApplicationName(agent) case final appName?) ...[
+              const SizedBox(width: 5),
+              _action(
+                  t,
+                  '⏵',
+                  'Jump to $appName',
+                  () => context
+                      .read<WindowService>()
+                      .jumpToApplication(agent.source)),
             ],
           ]),
           if (_noteEditorFor == agent.sessionId)
@@ -533,6 +588,27 @@ class _SessionListViewState extends State<SessionListView> {
             ),
         ]),
       ),
+    );
+  }
+
+  /// Agent sessions normally nest under a tracked Session Sense row, or under
+  /// a cwd-derived candidate group. Desktop apps expose neither a cwd nor a
+  /// reliable project thread, so they need a first-class fallback row instead
+  /// of existing only in the notch count.
+  Widget _standaloneAgentRow(HudTheme t, AgentSession agent) {
+    final color = agent.state == 'waiting'
+        ? _amber
+        : agent.state == 'done'
+            ? t.textDim
+            : widget.accent;
+    return Container(
+      key: ValueKey('standalone-agent-${agent.sessionId}'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      decoration: BoxDecoration(
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: _lane(t, agent),
     );
   }
 

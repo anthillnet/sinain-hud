@@ -40,6 +40,15 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // Desktop-agent focus is also independent of the overlay window.
+        if call.method == "jumpToApplication" {
+            let args = call.arguments as? [String: Any]
+            let source = args?["source"] as? String ?? ""
+            jumpToApplication(source)
+            result(nil)
+            return
+        }
+
         guard let window = NSApplication.shared.windows.first else {
             result(FlutterError(code: "NO_WINDOW",
                               message: "No window available",
@@ -494,6 +503,64 @@ class WindowControlPlugin: NSObject, FlutterPlugin {
                                                configuration: configuration,
                                                completionHandler: nil)
         }
+    }
+
+    // MARK: - Desktop-agent jump
+
+    private func jumpToApplication(_ source: String) {
+        let bundleIdentifiers: [String]
+        switch source {
+        case "claude-app", "claude-cowork":
+            bundleIdentifiers = ["com.anthropic.claudefordesktop"]
+        case "codex-app":
+            bundleIdentifiers = ["com.openai.codex"]
+        case "chatgpt":
+            bundleIdentifiers = ["com.openai.chat"]
+        default:
+            return
+        }
+
+        // NSRunningApplication.activate can return false when the caller is
+        // our non-activating NSPanel/LSUIElement process. Apple Events target
+        // the exact bundle id and reliably cross that focus boundary.
+        for bundleIdentifier in bundleIdentifiers {
+            var error: NSDictionary?
+            let script = NSAppleScript(
+                source: "tell application id \"\(bundleIdentifier)\" to activate"
+            )
+            script?.executeAndReturnError(&error)
+            if error == nil {
+                NSLog("[SinainHUD] jumped to app \(bundleIdentifier)")
+                return
+            }
+        }
+
+        // Fallback for systems where Apple Events are restricted.
+        for bundleIdentifier in bundleIdentifiers {
+            if let app = NSRunningApplication.runningApplications(
+                withBundleIdentifier: bundleIdentifier
+            ).first {
+                if app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps]) {
+                    NSLog("[SinainHUD] jumped to app \(bundleIdentifier) via NSRunningApplication")
+                    return
+                }
+            }
+        }
+
+        for bundleIdentifier in bundleIdentifiers {
+            guard let appURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: bundleIdentifier
+            ) else { continue }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(
+                at: appURL,
+                configuration: configuration,
+                completionHandler: nil
+            )
+            return
+        }
+        NSLog("[SinainHUD] failed to jump to app source=\(source)")
     }
 
     // MARK: - Right-click context menu

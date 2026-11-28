@@ -216,7 +216,7 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                    TextSpan(text: session.name),
+                    TextSpan(text: _displayName(session)),
                   ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -236,7 +236,7 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                   fontSize: 9,
                 ),
               ),
-              if (session.term.isNotEmpty) ...[
+              if (_canJump(session)) ...[
                 const SizedBox(width: 7),
                 _jumpButton(session),
               ],
@@ -303,7 +303,7 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
             const SizedBox(width: 7),
             Expanded(
               child: Text(
-                '${session.name} · $detail',
+                '${_displayName(session)} · $detail',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 10),
@@ -318,7 +318,7 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
                 fontSize: 9,
               ),
             ),
-            if (session.term.isNotEmpty) ...[
+            if (_canJump(session)) ...[
               const SizedBox(width: 7),
               _jumpButton(session),
             ],
@@ -347,10 +347,13 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
   }
 
   Widget _jumpButton(AgentSession session) {
+    final appName = _desktopApplicationName(session);
     return Tooltip(
-      message: 'Jump to terminal',
+      message: appName == null ? 'Jump to terminal' : 'Jump to $appName',
       child: InkWell(
-        onTap: () => context.read<WindowService>().jumpToTerminal(session.term),
+        onTap: () => appName == null
+            ? context.read<WindowService>().jumpToTerminal(session.term)
+            : context.read<WindowService>().jumpToApplication(session.source),
         borderRadius: BorderRadius.circular(3),
         child: const Padding(
           padding: EdgeInsets.symmetric(horizontal: 3, vertical: 1),
@@ -366,6 +369,30 @@ class _AgentSessionsViewState extends State<AgentSessionsView> {
       ),
     );
   }
+
+  bool _canJump(AgentSession session) =>
+      session.term.isNotEmpty || _desktopApplicationName(session) != null;
+
+  String? _desktopApplicationName(AgentSession session) =>
+      switch (session.source) {
+        'claude-app' => 'Claude Desktop',
+        'claude-cowork' => 'Claude Desktop',
+        'codex-app' => 'Codex Desktop',
+        'chatgpt' => 'ChatGPT',
+        _ => null,
+      };
+
+  String _displayName(AgentSession session) => switch (session.source) {
+        'claude-cowork' when session.name.startsWith('claude-cowork —') =>
+          'Claude Cowork${session.name.substring('claude-cowork'.length)}',
+        'claude-app' when session.name.startsWith('claude-app —') =>
+          'Claude Desktop${session.name.substring('claude-app'.length)}',
+        'codex-app' when session.name.startsWith('codex-app —') =>
+          'Codex Desktop${session.name.substring('codex-app'.length)}',
+        'chatgpt' when session.name.startsWith('chatgpt —') =>
+          'ChatGPT${session.name.substring('chatgpt'.length)}',
+        _ => session.name,
+      };
 
   Widget _dot(Color color) => Container(
         width: 7,

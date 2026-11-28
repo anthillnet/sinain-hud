@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:sinain_hud/core/models/agent_session.dart';
 import 'package:sinain_hud/core/models/context_cards.dart';
 import 'package:sinain_hud/core/services/websocket_service.dart';
 import 'package:sinain_hud/core/services/settings_service.dart';
+import 'package:sinain_hud/core/services/window_service.dart';
 import 'package:sinain_hud/ui/capture/session_list_view.dart';
 
 class _TestWebSocketService extends WebSocketService {
@@ -146,6 +148,91 @@ void main() {
     final candidateY =
         tester.getTopLeft(find.text('candidate · candidate-project')).dy;
     expect(attachedY, lessThan(candidateY));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    ws.dispose();
+  });
+
+  testWidgets('shows ungrouped desktop app sessions in the sessions list',
+      (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    const windowChannel = MethodChannel('sinain_hud/window');
+    final windowCalls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (call) async {
+      windowCalls.add(call);
+      return null;
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, null));
+    final ws = _TestWebSocketService(
+      const SessionList(sessions: [], bookmarks: []),
+    );
+    ws.agentSessions = [
+      AgentSession.fromJson({
+        'sessionId': 'cse_claude-cowork',
+        'source': 'claude-cowork',
+        'name': 'claude-cowork — cse_clau',
+        'state': 'working',
+        'toolLine': 'prompt · investigate the issue',
+        'startedAt': now,
+        'lastEventAt': now,
+      }),
+      AgentSession.fromJson({
+        'sessionId': 'codex-desktop',
+        'source': 'codex-app',
+        'name': 'codex-app — app',
+        'state': 'working',
+        'toolLine': '',
+        'startedAt': now,
+        'lastEventAt': now,
+      }),
+    ];
+
+    await tester.pumpWidget(
+      Provider.value(
+        value: WindowService(),
+        child: ChangeNotifierProvider.value(
+          value: SettingsService(),
+          child: MaterialApp(
+            home: SizedBox(
+              width: 520,
+              height: 700,
+              child: SessionListView(
+                ws: ws,
+                onShare: (_) {},
+                onCallAi: (_) {},
+                onSteerRegion: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('standalone-agent-cse_claude-cowork')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('standalone-agent-codex-desktop')),
+        findsOneWidget);
+    expect(
+        find.text('Claude Cowork — cse_clau · prompt · investigate the issue'),
+        findsOneWidget);
+    expect(find.text('Codex Desktop — app · working'), findsOneWidget);
+    expect(find.textContaining('nothing tracked'), findsNothing);
+
+    await tester.tap(find.byTooltip('Jump to Claude Desktop'));
+    await tester.pump();
+    expect(windowCalls, hasLength(1));
+    expect(windowCalls.single.method, 'jumpToApplication');
+    expect(windowCalls.single.arguments, {'source': 'claude-cowork'});
+
+    await tester.tap(find.byTooltip('Jump to Codex Desktop'));
+    await tester.pump();
+    expect(windowCalls, hasLength(2));
+    expect(windowCalls.last.method, 'jumpToApplication');
+    expect(windowCalls.last.arguments, {'source': 'codex-app'});
 
     await tester.pumpWidget(const SizedBox.shrink());
     ws.dispose();

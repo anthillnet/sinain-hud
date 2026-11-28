@@ -129,6 +129,19 @@ class WindowService {
     }
   }
 
+  /// Bring the desktop application owning an agent session to the foreground.
+  /// [source] is the registry source (`claude-app`, `claude-cowork`,
+  /// `codex-app`, or `chatgpt`);
+  /// native code owns bundle-id resolution so packaging stays platform-local.
+  Future<void> jumpToApplication(String source) async {
+    try {
+      _log('jumpToApplication: $source');
+      await _channel.invokeMethod('jumpToApplication', {'source': source});
+    } catch (e) {
+      _log('jumpToApplication failed: $e');
+    }
+  }
+
   /// Set the window frame (position + size).
   Future<void> setWindowFrame(double x, double y, double w, double h) async {
     try {
@@ -210,7 +223,8 @@ class WindowService {
   }
 
   /// Delta-based resize with anchor control. No async frame fetch needed.
-  Future<void> resizeWindowBy(double dw, double dh, {bool anchorRight = false, bool anchorTop = false}) async {
+  Future<void> resizeWindowBy(double dw, double dh,
+      {bool anchorRight = false, bool anchorTop = false}) async {
     try {
       await _channel.invokeMethod('resizeWindowBy', {
         'dw': dw,
@@ -246,7 +260,8 @@ class WindowService {
   /// selected item's id, or null if dismissed.
   Future<String?> showContextMenu(List<Map<String, dynamic>> items) async {
     try {
-      final id = await _channel.invokeMethod('showContextMenu', {'items': items});
+      final id =
+          await _channel.invokeMethod('showContextMenu', {'items': items});
       return id as String?;
     } catch (e) {
       _log('showContextMenu failed: $e');
@@ -490,7 +505,8 @@ class WindowService {
   /// Update one eye's badge state: 'idle' | 'working' | 'ready' | 'failed'.
   Future<void> updateRegionEye(String id, String state) async {
     try {
-      await _channel.invokeMethod('updateRegionEye', {'id': id, 'state': state});
+      await _channel
+          .invokeMethod('updateRegionEye', {'id': id, 'state': state});
     } catch (e) {
       _log('updateRegionEye failed: $e');
     }
@@ -532,8 +548,8 @@ class WindowService {
 
   Future<void> updateDetachedEye(String state, int accent) async {
     try {
-      await _channel
-          .invokeMethod('updateDetachedEye', {'state': state, 'accent': accent});
+      await _channel.invokeMethod(
+          'updateDetachedEye', {'state': state, 'accent': accent});
     } catch (e) {
       _log('updateDetachedEye failed: $e');
     }

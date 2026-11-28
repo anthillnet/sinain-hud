@@ -12,21 +12,64 @@ const TAG = "app-sessions";
  * chatgpt:* conversations) never emit a terminal hook, so each watcher sweeps
  * its own sessions to "done" after this much silence. */
 const CLAUDE_APP_IDLE_MS = 30 * 60 * 1000;
+// Remote Cowork environments refresh their ingress token roughly every eight
+// hours, so the local-turn timeout would incorrectly retire a connected cse_*
+// session between heartbeats.
+const CLAUDE_REMOTE_IDLE_MS = 12 * 60 * 60 * 1000;
+const CLAUDE_BOOTSTRAP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const CLAUDE_BOOTSTRAP_BYTES = 2 * 1024 * 1024;
 const CHATGPT_IDLE_MS = 5 * 60 * 1000;
 
 export type ClaudeAppLogEvent =
   | { kind: "frame"; sessionId: string; event: "SessionStart" | "UserPromptSubmit" | "Stop" | "StopFailure"; message?: string }
-  | { kind: "waiting"; tool: string }
-  | { kind: "resolved"; behavior: "allow" | "deny" };
+  | { kind: "waiting"; sessionId?: string; requestId?: string; tool: string }
+  | { kind: "resolved"; sessionId?: string; requestId?: string; behavior: "allow" | "deny" };
 
 /** Recognize session-lifecycle lines from the Claude desktop app's main.log
  * ([sessions-bridge] / [sessions-api] tags). Permission lines carry no session
  * id — the caller attributes them to the most recently seen bridge session. */
 export function parseClaudeAppLine(line: string): ClaudeAppLogEvent | null {
+  // Local Cowork sessions use LocalAgentModeSessions/Lifecycle rather than the
+  // remote sessions bridge. These contain identifiers and state only; no
+  // prompt or response content is read.
+  let match = line.match(/LocalAgentModeSessions\.sendMessage: sessionId=(\S+),/);
+  if (match) return { kind: "frame", sessionId: match[1], event: "UserPromptSubmit", message: "user message received" };
+
+  match = line.match(/\[Lifecycle\] Session (\S+): (?:idle → initializing|initializing → running)/);
+  if (match) return { kind: "frame", sessionId: match[1], event: "SessionStart", message: "Cowork running" };
+
+  match = line.match(/\[Result\] Turn (succeeded|failed) for session (\S+)/);
+  if (match) {
+    return match[1] === "failed"
+      ? { kind: "frame", sessionId: match[2], event: "StopFailure", message: "Cowork turn failed" }
+      : { kind: "frame", sessionId: match[2], event: "Stop", message: "turn completed — waiting for you" };
+  }
+
+  match = line.match(/LocalAgentModeSessions\.stop: sessionId=(\S+)/);
+  if (match) return { kind: "frame", sessionId: match[1], event: "Stop", message: "Cowork stopped" };
+
+  match = line.match(/Emitted tool permission request (\S+) for (.+?) in session (\S+)/);
+  if (match) return { kind: "waiting", requestId: match[1], tool: match[2], sessionId: match[3] };
+
+  match = line.match(/Received permission response for (\S+): (\S+) \(tool: ([^)]+)\)/);
+  if (match) return { kind: "resolved", requestId: match[1], behavior: match[2] === "deny" ? "deny" : "allow" };
+
   if (!line.includes("[sessions-bridge]")) return null;
 
-  let match = line.match(/\[sessions-bridge\] Handling session work \{ sessionId: '([^']+)'/);
+  match = line.match(/\[sessions-bridge\] Handling session work \{ sessionId: '([^']+)'/);
   if (match) return { kind: "frame", sessionId: match[1], event: "SessionStart" };
+
+  // A bridge reconnect proves that a persisted remote Cowork session is still
+  // live even when its current turn began before Sinain. Token refresh lines
+  // keep that session alive without reading conversation data.
+  match = line.match(/\[sessions-bridge\] Reconnecting persisted session (\S+)/);
+  if (match) return { kind: "frame", sessionId: match[1], event: "SessionStart", message: "Cowork session connected" };
+
+  match = line.match(/\[sessions-bridge\] Session (\S+) (?:reconnected successfully|already active)/);
+  if (match) return { kind: "frame", sessionId: match[1], event: "SessionStart", message: "Cowork session connected" };
+
+  match = line.match(/\[sessions-bridge\] Scheduled session_ingress_token refresh for (\S+)/);
+  if (match) return { kind: "frame", sessionId: match[1], event: "SessionStart", message: "Cowork session connected" };
 
   match = line.match(/\[sessions-bridge\] Received user message for session (\S+)/);
   if (match) return { kind: "frame", sessionId: match[1], event: "UserPromptSubmit", message: "user message received" };
@@ -41,11 +84,11 @@ export function parseClaudeAppLine(line: string): ClaudeAppLogEvent | null {
   match = line.match(/waiting for user message via transport \{ sessionId: '([^']+)'/);
   if (match) return { kind: "frame", sessionId: match[1], event: "Stop", message: "waiting for your message" };
 
-  match = line.match(/\[sessions-bridge\] Forwarded permission request \S+ \(([^)]+)\)/);
-  if (match) return { kind: "waiting", tool: match[1] };
+  match = line.match(/\[sessions-bridge\] Forwarded permission request (\S+) \(([^)]+)\)/);
+  if (match) return { kind: "waiting", requestId: match[1], tool: match[2] };
 
-  match = line.match(/Received control_response for permission \S+: behavior=(allow|deny)/);
-  if (match) return { kind: "resolved", behavior: match[1] as "allow" | "deny" };
+  match = line.match(/Received control_response for permission (\S+): behavior=(allow|deny)/);
+  if (match) return { kind: "resolved", requestId: match[1], behavior: match[2] as "allow" | "deny" };
 
   return null;
 }
@@ -59,6 +102,7 @@ export class ClaudeAppLogWatcher {
   private remainder = "";
   private lastSessionId: string | null = null;
   private lastFrameAt = new Map<string, number>();
+  private permissionSessions = new Map<string, string>();
   private warned = false;
 
   constructor(
@@ -81,9 +125,15 @@ export class ClaudeAppLogWatcher {
   private async poll(): Promise<void> {
     try {
       const info = await stat(this.logPath);
-      if (this.offset < 0 || info.size < this.offset) {
-        // First poll (start at EOF) or the log rotated/truncated under us.
-        this.offset = this.offset < 0 ? info.size : 0;
+      if (this.offset < 0) {
+        // Recover sessions which were already active when Sinain started. A
+        // bounded, recent tail avoids replaying historical Cowork sessions.
+        await this.bootstrap(info.size);
+        this.offset = info.size;
+        this.remainder = "";
+      } else if (info.size < this.offset) {
+        // The log rotated/truncated under us.
+        this.offset = 0;
         this.remainder = "";
       }
       if (info.size > this.offset) await this.consume(info.size);
@@ -93,6 +143,29 @@ export class ClaudeAppLogWatcher {
         this.warned = true;
         warn(TAG, `claude-app log unavailable: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+  }
+
+  private async bootstrap(size: number): Promise<void> {
+    if (size <= 0) return;
+    const length = Math.min(size, CLAUDE_BOOTSTRAP_BYTES);
+    const start = size - length;
+    const handle = await open(this.logPath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      const lines = buffer.toString("utf8", 0, bytesRead).split("\n");
+      if (start > 0) lines.shift(); // discard a possibly partial first line
+      const cutoff = Date.now() - CLAUDE_BOOTSTRAP_MAX_AGE_MS;
+      let recovered = 0;
+      for (const line of lines) {
+        const ts = claudeLogTimestamp(line);
+        if (ts === null || ts < cutoff) continue;
+        if (this.handleLine(line, ts)) recovered++;
+      }
+      if (recovered > 0) log(TAG, `recovered ${recovered} recent Claude Cowork lifecycle event(s)`);
+    } finally {
+      await handle.close();
     }
   }
 
@@ -114,36 +187,46 @@ export class ClaudeAppLogWatcher {
     }
   }
 
-  private handleLine(line: string): void {
+  private handleLine(line: string, now = Date.now()): boolean {
     const event = parseClaudeAppLine(line);
-    if (!event) return;
-    const now = Date.now();
+    if (!event) return false;
     if (event.kind === "frame") {
       this.lastSessionId = event.sessionId;
       this.lastFrameAt.set(event.sessionId, now);
       const frame: AgentEventFrame = {
         session_id: event.sessionId,
         hook_event_name: event.event,
-        source: "claude-app",
+        source: "claude-cowork",
         ts: now,
         ...(event.message ? { message: event.message } : {}),
       };
       this.registry.handleEvent(frame);
-    } else if (event.kind === "waiting" && this.lastSessionId) {
-      this.lastFrameAt.set(this.lastSessionId, now);
-      this.registry.markWaiting(this.lastSessionId, event.tool, now);
-    } else if (event.kind === "resolved" && this.lastSessionId) {
-      this.lastFrameAt.set(this.lastSessionId, now);
-      this.registry.finishApproval(this.lastSessionId, event.behavior, "");
+    } else if (event.kind === "waiting") {
+      const sessionId = event.sessionId ?? this.lastSessionId;
+      if (!sessionId) return false;
+      if (event.requestId) this.permissionSessions.set(event.requestId, sessionId);
+      this.lastSessionId = sessionId;
+      this.lastFrameAt.set(sessionId, now);
+      this.registry.markWaiting(sessionId, event.tool, now);
+    } else if (event.kind === "resolved") {
+      const sessionId = event.sessionId
+        ?? (event.requestId ? this.permissionSessions.get(event.requestId) : undefined)
+        ?? this.lastSessionId;
+      if (!sessionId) return false;
+      if (event.requestId) this.permissionSessions.delete(event.requestId);
+      this.lastFrameAt.set(sessionId, now);
+      this.registry.finishApproval(sessionId, event.behavior, "");
     }
+    return true;
   }
 
   /** The bridge logs nothing mid-turn, so "working" persists between user
    * message and query completion. If completion never arrives (app quit,
    * pattern drift), assume idle after a long silence. */
   private sweepIdle(): void {
-    const cutoff = Date.now() - CLAUDE_APP_IDLE_MS;
-    const stale = [...this.lastFrameAt].filter(([, at]) => at < cutoff);
+    const now = Date.now();
+    const stale = [...this.lastFrameAt].filter(([sessionId, at]) =>
+      at < now - (sessionId.startsWith("cse_") ? CLAUDE_REMOTE_IDLE_MS : CLAUDE_APP_IDLE_MS));
     if (!stale.length) return;
     const sessions = new Map(this.registry.snapshot().map((s) => [s.sessionId, s]));
     for (const [sessionId] of stale) {
@@ -153,12 +236,19 @@ export class ClaudeAppLogWatcher {
       this.registry.handleEvent({
         session_id: sessionId,
         hook_event_name: "Stop",
-        source: "claude-app",
+        source: "claude-cowork",
         ts: Date.now(),
-        message: "assumed idle (no bridge activity 30m)",
+        message: "assumed idle (no Cowork activity)",
       });
     }
   }
+}
+
+function claudeLogTimestamp(line: string): number | null {
+  const match = line.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/);
+  if (!match) return null;
+  const value = new Date(`${match[1]}T${match[2]}`).getTime();
+  return Number.isFinite(value) ? value : null;
 }
 
 /** Watch the ChatGPT app's conversation store for mtime changes. Content is
@@ -252,18 +342,18 @@ const execFileAsync = promisify(execFile);
 /** One poll's worth of traffic that counts as user activity. Idle background
  * noise measures well under 1KB per 15s; even a short message exchange
  * (POST + SSE stream) lands in the tens of KB. */
-const CHATGPT_NET_ACTIVE_BYTES = 8 * 1024;
+const CODEX_NET_ACTIVE_BYTES = 8 * 1024;
 
 /** Transient nettop failures (timeouts under load) shouldn't kill the lane;
  * this many consecutive errors means it genuinely can't work here. */
 const NETTOP_MAX_CONSECUTIVE_ERRORS = 5;
 
-/** Detect active use of the current (Chromium-based) ChatGPT app via nettop
+/** Detect active use of the Chromium-based Codex desktop app via nettop
  * byte-counter deltas on its network-service process. The modern build keeps
  * conversation state server-side and flushes its profile lazily, so file
  * mtimes say nothing — network traffic is the only local, deterministic
  * signal. App-level granularity (one aggregate session), no content access. */
-export class ChatGptAppNetworkWatcher {
+export class CodexAppNetworkWatcher {
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
   private pid: number | null = null;
@@ -298,25 +388,25 @@ export class ChatGptAppNetworkWatcher {
       const delta = await this.readDelta();
       this.errorStreak = 0;
       const now = Date.now();
-      if (delta >= CHATGPT_NET_ACTIVE_BYTES) {
-        if (!this.sessionActive) log(TAG, `chatgpt app active (${Math.round(delta / 1024)}KB in ${Math.round(this.pollMs / 1000)}s)`);
+      if (delta >= CODEX_NET_ACTIVE_BYTES) {
+        if (!this.sessionActive) log(TAG, `codex app active (${Math.round(delta / 1024)}KB in ${Math.round(this.pollMs / 1000)}s)`);
         this.lastActiveAt = now;
         this.sessionActive = true;
         // Aggregate id: nettop can't attribute traffic to a conversation.
         this.registry.handleEvent({
           session_id: "app",
           hook_event_name: "Notification",
-          source: "chatgpt",
+          source: "codex-app",
           ts: now,
           message: "app active",
         });
       } else if (this.sessionActive && now - this.lastActiveAt > this.idleMs) {
-        log(TAG, "chatgpt app idle");
+        log(TAG, "codex app idle");
         this.sessionActive = false;
         this.registry.handleEvent({
           session_id: "app",
           hook_event_name: "SessionEnd",
-          source: "chatgpt",
+          source: "codex-app",
           ts: now,
           message: "app idle",
         });
@@ -324,7 +414,7 @@ export class ChatGptAppNetworkWatcher {
     } catch (err) {
       if (++this.errorStreak >= NETTOP_MAX_CONSECUTIVE_ERRORS) {
         this.unavailable = true;
-        warn(TAG, `chatgpt nettop lane disabled: ${err instanceof Error ? err.message : String(err)}`);
+        warn(TAG, `codex nettop lane disabled: ${err instanceof Error ? err.message : String(err)}`);
       }
     } finally {
       this.polling = false;
@@ -368,7 +458,7 @@ export class ChatGptAppNetworkWatcher {
       this.baselined = true;
       return 0;
     }
-    if (delta > 0) debug(TAG, `chatgpt net delta ${delta}B across ${next.size} connections`);
+    if (delta > 0) debug(TAG, `codex net delta ${delta}B across ${next.size} connections`);
     return delta;
   }
 
@@ -415,7 +505,7 @@ export class AppSessionWatchers {
     this.watchers = [
       new ClaudeAppLogWatcher(registry, config.claudeAppLogPath),
       new ChatGptConversationsWatcher(registry, config.chatgptDataDir),
-      new ChatGptAppNetworkWatcher(registry),
+      new CodexAppNetworkWatcher(registry),
     ];
   }
 
