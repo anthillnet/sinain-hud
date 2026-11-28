@@ -1,0 +1,60 @@
+gateway:
+  ws_url: "wss://sinain.duckdns.org"
+  token: "${OPENCLAW_TOKEN}"
+  session_key: "agent:main:sinain"
+
+camera:
+  enabled: true
+  backend: "picamera2"   # "picamera2" for Pi Camera Module, "cv2" for USB
+  device: 0              # only used with cv2 backend
+  resolution: [1280, 720]
+  fps: 10
+  jpeg_quality_text: 70
+  jpeg_quality_default: 50
+  scene_threshold: 0.80
+  stable_threshold: 0.90
+  motion_threshold: 8.0
+  text_cooldown: 5
+  motion_cooldown: 3
+  ambient_interval: 30
+  blur_threshold: 50
+
+audio:
+  enabled: true
+  device: null
+  sample_rate: 16000
+  vad_aggressiveness: 2
+  silence_timeout: 1.5
+  min_speech_duration: 0.5
+  max_chunk_duration: 30
+
+display:
+  mode: "oled"
+  oled:
+    mode: "response"     # "response" shows agent replies, "debug" shows camera stats
+    driver: "ssd1327"
+    width: 128
+    height: 128
+    spi_port: 0
+    spi_device: 0
+    gpio_dc: 25
+    gpio_rst: 27
+    contrast: 255
+    font_size: 10
+  debug_server:
+    enabled: true
+    port: 8080
+    host: "0.0.0.0"
+
+ocr:
+  enabled: true
+  api_key: "${OPENROUTER_API_KEY}"  # OpenRouter API key for vision OCR
+  model: "google/gemini-2.5-flash"  # fast vision model for text extraction
+  timeout_s: 15                     # max seconds per API call
+
+observation:
+  max_entries: 20            # rolling history buffer size
+  max_age_s: 300             # prune entries older than 5 minutes
+
+logging:
+  level: "INFO"
